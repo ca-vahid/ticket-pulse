@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight, BadgeDollarSign, Check, ChevronDown, ImagePlus, Loader2, Mail, Paperclip, Search, Send, ShieldCheck, Stamp, X,
+  ArrowRight, BadgeDollarSign, Check, ChevronDown, ImagePlus, Loader2, Mail, Paperclip, Search, Send, ShieldAlert, ShieldCheck, Stamp, X,
 } from 'lucide-react';
 import { PersonAvatar } from './ticketUi';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
@@ -24,7 +24,7 @@ const MAX_FILES = 5;
  * amount, files } and should resolve/reject; the parent closes the modal.
  */
 export default function RequestApprovalModal({
-  categories = [], technicians = [], members = [], busy = false, onSubmit, onClose, allowFiles = true,
+  categories = [], technicians = [], members = [], busy = false, onSubmit, onClose, allowFiles = true, actorEmail = null,
 }) {
   const [categoryId, setCategoryId] = useState(categories.length === 1 ? categories[0].id : null);
   const [note, setNote] = useState('');
@@ -101,7 +101,16 @@ export default function RequestApprovalModal({
     });
   };
 
-  const tierOneCount = selected ? (tiers[0]?.managerEmails || []).length : 0;
+  // Approvals v3: an approver may request on their own category — the request
+  // starts at the first tier that has someone OTHER than them (self-approval
+  // stays prohibited). Surface that before they send.
+  const me = String(actorEmail || '').trim().toLowerCase();
+  const startTierIdx = selected ? tiers.findIndex((t) => (t.managerEmails || []).some((e) => String(e).toLowerCase() !== me)) : 0;
+  const startTier = startTierIdx >= 0 ? tiers[startTierIdx] : null;
+  const selfOnEveryTier = Boolean(selected) && startTierIdx === -1;
+  const skipped = startTierIdx > 0 ? tiers.slice(0, startTierIdx) : [];
+  const startApprovers = startTier ? (startTier.managerEmails || []).filter((e) => String(e).toLowerCase() !== me) : [];
+  const tierOneCount = startApprovers.length;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="req-approval-title">
@@ -217,6 +226,22 @@ export default function RequestApprovalModal({
             )}
           </div>
 
+          {selected && skipped.length > 0 && !selfOnEveryTier && (
+            <div role="status" className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100" data-testid="auto-start-warning">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+              <p className="text-xs leading-relaxed">
+                <span className="font-semibold">You are a {skipped.map((t) => t.name).join(' / ')} approver on {selected.name}</span>, and self-approval is not allowed — so this request goes straight to{' '}
+                <span className="font-semibold">{startApprovers.map((e) => person(e).name).join(', ')}</span> ({startTier.name}). The skip is recorded on the ticket.
+              </p>
+            </div>
+          )}
+          {selected && selfOnEveryTier && (
+            <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-red-300 bg-red-50 px-3 py-2.5 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <p className="text-xs leading-relaxed">You are the only approver on every tier of {selected.name}, and self-approval is not allowed. Ask a colleague to request it, or add another approver in Settings.</p>
+            </div>
+          )}
+
           {selected && (
             <div className="space-y-2">
               <label className="flex items-start gap-2 rounded-xl bg-muted/50 border border-border/60 px-3 py-2.5 cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30">
@@ -233,9 +258,9 @@ export default function RequestApprovalModal({
                 </span>
               </label>
               <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
-                Goes to the <span className="font-medium text-muted-foreground">{tierOneCount}</span> {tiers[0]?.name || 'Tier 1'} approver{tierOneCount === 1 ? '' : 's'} of
+                Goes to the <span className="font-medium text-muted-foreground">{tierOneCount}</span> {startTier?.name || tiers[0]?.name || 'Tier 1'} approver{tierOneCount === 1 ? '' : 's'} of
                 <span className="font-medium text-muted-foreground"> {selected.name}</span>{notifyApprover ? ' in-app and by email' : ' in-app'}. The first to respond decides;
-                the rest auto-cancel.{tiers.length > 1 ? ` They can escalate to ${tiers.slice(1).map((t) => t.name).join(' then ')} or forward to anyone.` : ''}
+                the rest auto-cancel.{tiers.length > (startTierIdx + 1) ? ` They can escalate to ${tiers.slice(startTierIdx + 1).map((t) => t.name).join(' then ')} or forward to anyone.` : ''}
               </p>
             </div>
           )}
@@ -250,7 +275,7 @@ export default function RequestApprovalModal({
           <button type="button" onClick={onClose} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           <button
             type="submit"
-            disabled={!categoryId || busy || (monetary && amountTouched && !amountValid)}
+            disabled={!categoryId || busy || selfOnEveryTier || (monetary && amountTouched && !amountValid)}
             className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
@@ -325,7 +350,7 @@ function CategoryCombobox({ categories, value, onChange, person }) {
               {value.hasAmount && <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200"><BadgeDollarSign className="w-3 h-3" aria-hidden="true" /> {value.amountCurrency || 'CAD'} amount</span>}
             </div>
             {value.description && <p className="text-xs text-muted-foreground mt-0.5">{value.description}</p>}
-            <TierChain tiers={tiers} person={person} className="mt-1.5" />
+            <TierRows tiers={tiers} person={person} className="mt-2" />
           </div>
           <button type="button" onClick={() => { onChange(null); setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }} className="tp-focus-ring text-xs font-semibold text-blue-700 dark:text-blue-200 hover:underline flex-shrink-0">Change</button>
         </div>
@@ -397,6 +422,32 @@ function CategoryCombobox({ categories, value, onChange, person }) {
         </ul>
       )}
     </div>
+  );
+}
+
+/** Every tier as a row: chip, the people on it (avatar + name), and the limit. */
+function TierRows({ tiers, person, className = '' }) {
+  if (!tiers?.length) return null;
+  return (
+    <ol className={`space-y-1 ${className}`} aria-label="Approval tiers" data-testid="tier-rows">
+      {tiers.map((t, i) => {
+        const ppl = (t.managerEmails || []).map(person);
+        return (
+          <li key={t.name || i} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+            <span className="shrink-0 rounded border border-border bg-card px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t.name || `Tier ${i + 1}`}</span>
+            {ppl.length === 0 && <span className="text-muted-foreground/70">no approver yet</span>}
+            {ppl.map((m) => (
+              <span key={m.email} className="inline-flex items-center gap-1.5 text-foreground/85">
+                <PersonAvatar name={m.name} photoUrl={m.photoUrl} size="h-5 w-5" textSize="text-[8px]" />
+                <span className="font-medium">{m.name}</span>
+              </span>
+            ))}
+            {t.limit !== null && t.limit !== undefined && <span className="text-muted-foreground/70">· up to {formatMoney(t.limit)}</span>}
+            {i < tiers.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground/40" aria-hidden="true" />}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

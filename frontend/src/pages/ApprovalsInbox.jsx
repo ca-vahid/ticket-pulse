@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward } from 'lucide-react';
-import { AmountChip, HandoffPanel, TierChip } from '../components/tickets/ApprovalHandoff';
+import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
+import ApprovalComposer from '../components/tickets/ApprovalComposer';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
@@ -48,13 +49,11 @@ export default function ApprovalsInbox() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState(null);
-  const [clarifyingId, setClarifyingId] = useState(null);
-  const [clarifyNote, setClarifyNote] = useState('');
-  // Approvals v2: escalate / forward panel per row; people load lazily for the picker.
-  const [handoff, setHandoff] = useState(null); // { id, mode }
+  // Approvals v3: which row has the composer open; people load lazily for the forward picker.
+  const [openId, setOpenId] = useState(null);
   const [people, setPeople] = useState(null);
-  const openHandoff = async (a, mode) => {
-    setHandoff({ id: a.id, mode });
+  const openComposer = async (a) => {
+    setOpenId(a.id);
     if (people === null) {
       try {
         const meta = await ticketsAPI.meta();
@@ -100,12 +99,6 @@ export default function ApprovalsInbox() {
     finally { setBusyId(null); }
   };
 
-  const decide = (a, decision) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision), a.id);
-  const sendClarify = (a) => {
-    const note = clarifyNote.trim();
-    if (!note) return;
-    act(async () => { await ticketsAPI.clarifyApproval(a.ticketId, a.id, note); setClarifyingId(null); setClarifyNote(''); }, a.id);
-  };
   const resubmit = (a) => act(() => ticketsAPI.resubmitApproval(a.ticketId, a.id), a.id);
 
   return (
@@ -228,56 +221,41 @@ export default function ApprovalsInbox() {
                       </p>
                       {a.requestNote && <p className="text-xs text-muted-foreground mt-1">“{a.requestNote}”</p>}
 
-                      {handoff?.id === a.id ? (
-                        <div className="mt-2">
-                          <HandoffPanel
-                            mode={handoff.mode}
+                      {openId === a.id ? (
+                        <div className="mt-2.5">
+                          <ApprovalComposer
                             compact
-                            people={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
-                            nextTierName={a.nextTierName}
-                            onCancel={() => setHandoff(null)}
-                            onSubmit={async ({ mode, note, toEmail }) => {
-                              await act(async () => {
-                                if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
-                                else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
-                                setHandoff(null);
-                              }, a.id);
-                            }}
+                            showShortcuts={false}
+                            minHeight={180}
+                            approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
+                            participants={null}
+                            selfEmail={a.approverEmail}
+                            forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
+                            onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
+                            onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
+                            onHandoff={({ mode, note, toEmail }) => act(async () => {
+                              if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
+                              else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
+                            }, a.id)}
+                            disabled={busyId === a.id}
+                            footer={<>Decisions ask you to confirm first · <button type="button" onClick={() => setOpenId(null)} className="tp-focus-ring rounded font-medium text-muted-foreground underline hover:text-foreground">close</button></>}
                           />
-                        </div>
-                      ) : clarifyingId === a.id ? (
-                        <div className="mt-2 space-y-1.5">
-                          <textarea
-                            rows={2}
-                            autoFocus
-                            value={clarifyNote}
-                            onChange={(e) => setClarifyNote(e.target.value)}
-                            placeholder="What extra info do you need from the requester?"
-                            className="tp-focus-ring w-full text-xs bg-card border border-violet-200 dark:border-violet-500/30 rounded-lg px-2.5 py-1.5 placeholder:text-muted-foreground/75 resize-y"
-                          />
-                          <div className="flex items-center gap-1.5">
-                            <button onClick={() => sendClarify(a)} disabled={busyId === a.id || !clarifyNote.trim()} className="tp-focus-ring px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">Send to requester</button>
-                            <button onClick={() => { setClarifyingId(null); setClarifyNote(''); }} className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                          </div>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
-                          <button onClick={() => decide(a, 'approved')} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-                            {busyId === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Approve
+                          <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                            {busyId === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Decide
                           </button>
-                          <button onClick={() => decide(a, 'rejected')} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
-                            <X className="w-3 h-3" /> Reject
+                          <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50">
+                            <MessageCircleQuestion className="w-3 h-3" /> Ask a question
                           </button>
                           {a.canEscalate && (
-                            <button onClick={() => openHandoff(a, 'escalate')} disabled={busyId === a.id} title={`Escalate to ${a.nextTierName || 'the next tier'}`} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15 disabled:opacity-50">
+                            <button onClick={() => openComposer(a)} disabled={busyId === a.id} title={`Escalate to ${a.nextTierName || 'the next tier'}`} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15 disabled:opacity-50">
                               <ArrowUpRight className="w-3 h-3" /> Escalate
                             </button>
                           )}
-                          <button onClick={() => openHandoff(a, 'forward')} disabled={busyId === a.id} title="Forward to anyone in the workspace as the final approver" className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-muted-foreground border border-border hover:bg-muted disabled:opacity-50">
+                          <button onClick={() => openComposer(a)} disabled={busyId === a.id} title="Forward to anyone in the workspace as the final approver" className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-muted-foreground border border-border hover:bg-muted disabled:opacity-50">
                             <Forward className="w-3 h-3" /> Forward
-                          </button>
-                          <button onClick={() => { setClarifyingId(a.id); setClarifyNote(''); }} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50">
-                            <MessageCircleQuestion className="w-3 h-3" /> Request clarification
                           </button>
                         </div>
                       )}

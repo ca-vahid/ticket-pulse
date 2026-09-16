@@ -23,7 +23,7 @@ import analyticsRoutes from './analytics.routes.js';
 import summitRoutes, { summitPublicRouter } from './summit.routes.js';
 import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
-import ticketsRoutes, { ticketApprovalPublicRouter } from './tickets.routes.js';
+import ticketsRoutes, { ticketApprovalPublicRouter, approvalReplyPublicRouter } from './tickets.routes.js';
 import statusesRoutes from './statuses.routes.js';
 import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
@@ -60,6 +60,7 @@ router.use('/ticket-status/public', publicTicketStatusPublicRouter);
 
 // Approval magic links bypass app auth — the per-approval token is the credential.
 router.use('/ticket-approvals/public', ticketApprovalPublicRouter);
+router.use('/ticket-approvals/reply', approvalReplyPublicRouter);
 
 // Public integration API: its own key auth (Authorization: Bearer tpk_…),
 // workspace scoping comes from the key. Must stay before requireAuth.

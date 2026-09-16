@@ -835,8 +835,6 @@ export default function TicketDetail() {
   const [deleteApprovalTarget, setDeleteApprovalTarget] = useState(null); // approval group pending delete-confirm
   const [changeApprovalTarget, setChangeApprovalTarget] = useState(null); // {approvalId, from, to, categoryName, approverName}
   const [changeNote, setChangeNote] = useState('');
-  const [clarifyingId, setClarifyingId] = useState(null); // approvalId being clarified
-  const [clarifyNote, setClarifyNote] = useState('');
   const [conversationTab, setConversationTab] = useState('all');
   const [confirmPickup, setConfirmPickup] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2919,12 +2917,11 @@ export default function TicketDetail() {
                         approvals={ticket.approvals}
                         meta={meta}
                         savingField={savingField}
-                        clarifyingId={clarifyingId}
-                        setClarifyingId={setClarifyingId}
-                        clarifyNote={clarifyNote}
-                        setClarifyNote={setClarifyNote}
-                        onDecide={(apId, decision) => applyChange(`approval-${apId}`, () => ticketsAPI.decideApproval(ticketId, apId, decision))}
-                        onClarify={(apId, note) => applyChange(`approval-${apId}`, async () => { await ticketsAPI.clarifyApproval(ticketId, apId, note); setClarifyingId(null); setClarifyNote(''); })}
+                        ticketId={ticketId}
+                        requester={ticket.requester ? { name: ticket.requester.name || null, email: ticket.requester.email || null } : null}
+                        onDecide={(apId, decision, note = null, extra = {}) => applyChange(`approval-${apId}`, () => ticketsAPI.decideApproval(ticketId, apId, decision, note, extra))}
+                        onAsk={(apId, payload) => applyChange(`approval-${apId}`, () => ticketsAPI.askApproval(ticketId, apId, payload))}
+                        onAnswer={(messageId, payload) => applyChange(`approval-answer-${messageId}`, () => ticketsAPI.answerApprovalMessage(ticketId, messageId, payload))}
                         onResubmit={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.resubmitApproval(ticketId, apId, { note }))}
                         onCancel={(apId) => applyChange(`approval-${apId}`, () => ticketsAPI.cancelApproval(ticketId, apId))}
                         onEscalate={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.escalateApproval(ticketId, apId, { note }))}
@@ -3755,6 +3752,7 @@ export default function TicketDetail() {
           categories={(meta?.approvalCategories || []).filter((c) => (c.managerCount || 0) > 0)}
           technicians={meta?.technicians || []}
           members={meta?.members || []}
+          actorEmail={meta?.actor?.email || null}
           busy={savingField === 'approval-request'}
           allowFiles={ticketingOn}
           onClose={() => setRequestApprovalOpen(false)}

@@ -17,17 +17,16 @@ import {
   Sun,
   XCircle,
 } from 'lucide-react';
-import { AmountChip, TierChip, handoffSentence } from '../components/tickets/ApprovalHandoff';
+import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
+import ApprovalComposer from '../components/tickets/ApprovalComposer';
+import ApprovalThread from '../components/tickets/ApprovalThread';
 import { publicApprovalAPI } from '../services/api';
-import { PersonAvatar, SafeHtml, formatDay, formatDayTime } from '../components/tickets/ticketUi';
+import { SafeHtml, formatDay, formatDayTime } from '../components/tickets/ticketUi';
 import ApprovalRail from './publicApproval/ApprovalRail';
-import DecisionBox from './publicApproval/DecisionBox';
 import { usePublicTheme } from './publicApproval/usePublicTheme';
 import {
-  absoluteApiUrl,
   STATUS_BADGE,
   classifyLoadError,
-  firstName,
   isOpenForDecision,
   isPastDate,
 } from './publicApproval/approvalMeta';
@@ -185,13 +184,23 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     title = decidedInApp
       ? `${verb.charAt(0).toUpperCase() + verb.slice(1)} by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''} in the app`
       : `You ${verb} this${when ? ` on ${when}` : ''}`;
-    body = (approval.decisionNoteHtml || approval.decisionNote)
+    title = approval.conditionNote && status === 'approved' ? title.replace(/^You approved this/, 'You approved this with a condition').replace(/^Approved by/, 'Approved with a condition by') : title;
+    body = (approval.decisionNoteHtml || approval.decisionNote || approval.conditionNote)
       ? (
-        <div className="mt-2 rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-sm text-foreground/85">
-          {approval.decisionNoteHtml ? <SafeHtml html={approval.decisionNoteHtml} isDark={isDark} preferThemed /> : <p className="whitespace-pre-wrap">{approval.decisionNote}</p>}
+        <div className="mt-2 space-y-2">
+          {approval.conditionNote && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="decision-condition">
+              <span className="font-semibold">Condition:</span> {approval.conditionNoteHtml ? <SafeHtml html={approval.conditionNoteHtml} isDark={isDark} preferThemed /> : approval.conditionNote}
+            </div>
+          )}
+          {(approval.decisionNoteHtml || approval.decisionNote) && (
+            <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-sm text-foreground/85">
+              {approval.decisionNoteHtml ? <SafeHtml html={approval.decisionNoteHtml} isDark={isDark} preferThemed /> : <p className="whitespace-pre-wrap">{approval.decisionNote}</p>}
+            </div>
+          )}
         </div>
       )
-      : <p className="mt-1 text-sm opacity-80">The requester and the agent have been notified — you can close this page.</p>;
+      : <p className="mt-1 text-sm opacity-80">The requester, the agent and the other approvers have been notified — you can close this page.</p>;
   } else if (status === 'escalated' || status === 'forwarded') {
     // Approvals v2: this row was handed off (by you, or by another approver in the app).
     const last = [...(approval.escalationLog || [])].reverse()[0] || null;
@@ -244,9 +253,9 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     tone = 'bg-violet-50 text-violet-900 border-violet-200 dark:bg-violet-500/10 dark:text-violet-100 dark:border-violet-500/25';
     disc = 'bg-violet-200/70 text-violet-900 dark:bg-violet-500/25 dark:text-violet-100';
     Icon = MessageCircleQuestion;
-    const last = [...(approval.clarificationLog || [])].reverse().find((q) => q?.askedAt);
+    const last = [...(approval.clarificationLog || [])].reverse().find((q) => q?.askedAt) || (() => { const q = [...(approval.messages || [])].reverse().find((m) => m?.kind === 'question'); return q ? { askedAt: q.createdAt } : null; })();
     title = `You asked a question${last ? ` on ${formatDayTime(last.askedAt)}` : ''} — you can still decide now`;
-    body = <p className="mt-1 text-sm opacity-80">{`${firstName(approval.requestedByName) || 'The agent'} answers by email and the reply shows up below.`}</p>;
+    body = <p className="mt-1 text-sm opacity-80">They answer by replying to the e-mail or through their link, and the answer shows up in the conversation below.</p>;
   } else {
     return null;
   }
@@ -267,51 +276,6 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     </div>
   );
 };
-
-/** Approvals v2: how the request reached this approver (notes travel between approvers). */
-function HandoffTrail({ approval }) {
-  const log = Array.isArray(approval?.escalationLog) ? approval.escalationLog.filter(Boolean) : [];
-  if (!log.length) return null;
-  return (
-    <section aria-label="How this reached you" className="mb-4 flex flex-col gap-2">
-      {log.map((entry, idx) => {
-        const forwarded = entry.kind === 'forwarded';
-        return (
-          <div
-            key={`${entry.at || idx}`}
-            className={`rounded-r-[10px] border-l-[3px] px-3 py-2 text-[13px] ${forwarded ? 'border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-500/10' : 'border-amber-500 bg-amber-50/70 dark:border-amber-400 dark:bg-amber-500/10'}`}
-          >
-            <p className="font-semibold text-foreground">
-              {handoffSentence(entry, { withNote: false })}{entry.at ? ` (${formatDay(entry.at)})` : ''}
-            </p>
-            {entry.note && <p className="mt-0.5 text-muted-foreground">“{entry.note}”</p>}
-          </div>
-        );
-      })}
-    </section>
-  );
-}
-
-function RequestNote({ approval, workspaceName, isDark }) {
-  const hasHtml = Boolean(approval?.requestNoteHtml);
-  if (!hasHtml && !approval?.requestNote) return null;
-  return (
-    <section aria-label="Request note" className="tp-approval-note rounded-xl border border-border bg-muted/60 px-4 py-3.5">
-      <div className="mb-2 flex items-center gap-2.5 text-xs text-muted-foreground">
-        <PersonAvatar name={approval.requestedByName} photoUrl={absoluteApiUrl(approval.requestedByPhotoUrl)} size="h-8 w-8" textSize="text-xs" />
-        <p>
-          <span className="font-semibold text-foreground">{approval.requestedByName || 'The agent'}</span>
-          {workspaceName ? ` (${workspaceName})` : ''} asks for your approval
-        </p>
-      </div>
-      <div className="overflow-x-auto" data-testid="request-note-well">
-        {hasHtml
-          ? <SafeHtml html={approval.requestNoteHtml} className="text-[14px] leading-relaxed" isDark={isDark} preferThemed />
-          : <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/85">{approval.requestNote}</p>}
-      </div>
-    </section>
-  );
-}
 
 const COLLAPSED_MAX = 232; // ≈ 9 lines at 14px / 1.55 — a short pasted table fits without a clipped row
 
@@ -360,38 +324,6 @@ function TicketDescription({ ticket, isDark }) {
           <ChevronDown className={`h-3.5 w-3.5 ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
         </button>
       )}
-    </section>
-  );
-}
-
-function QuestionThread({ approval }) {
-  const log = Array.isArray(approval?.clarificationLog) ? approval.clarificationLog.filter((q) => q?.question) : [];
-  if (!log.length) return null;
-  const agent = firstName(approval.requestedByName) || 'The agent';
-  return (
-    <section aria-label="Questions and replies" className="mt-[18px] flex flex-col gap-2.5">
-      {log.map((entry, idx) => (
-        <div
-          key={`${entry.askedAt || idx}`}
-          className="rounded-r-[10px] border-l-[3px] border-violet-500 bg-violet-50/70 px-3 py-2 text-[13px] dark:border-violet-400 dark:bg-violet-500/10"
-        >
-          <p className="font-semibold text-foreground">
-            You asked{entry.askedAt ? ` (${formatDay(entry.askedAt)})` : ''}: {entry.question}
-          </p>
-          {entry.answer
-            ? (
-              <p className="mt-1 text-muted-foreground">
-                {(entry.answeredBy ? firstName(entry.answeredBy) : agent)} replied{entry.answeredAt ? ` (${formatDay(entry.answeredAt)})` : ''}: {entry.answer}
-              </p>
-            )
-            : (
-              <p className="mt-1 inline-flex items-center gap-1.5 text-muted-foreground">
-                <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-                Waiting for a reply from {agent}
-              </p>
-            )}
-        </div>
-      ))}
     </section>
   );
 }
@@ -458,26 +390,14 @@ export default function PublicApprovalDecision() {
     }
   });
 
-  const onDecide = useCallback(async (decision, note, noteHtml) => {
-    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml)) || {};
+  const onDecide = useCallback(async (decision, note, noteHtml, extra = {}) => {
+    const conditionNote = extra?.conditionNote || null;
+    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null })) || {};
     focusBannerRef.current = true;
     setDecidedByYou(true);
     setData((prev) => {
       if (!prev) return prev;
       const now = body.decidedAt || new Date().toISOString();
-      if (decision === 'clarify') {
-        return {
-          ...prev,
-          approval: {
-            ...prev.approval,
-            status: 'info_requested',
-            clarificationLog: [
-              ...(prev.approval.clarificationLog || []),
-              { question: note, askedBy: prev.approval.approverName, askedAt: now, answer: null, answeredBy: null, answeredAt: null },
-            ],
-          },
-        };
-      }
       const status = body.status || decision;
       // Approvals v2: an over-limit approval comes back as 'escalated' (auto).
       const autoEntry = status === 'escalated' && decision === 'approved' ? {
@@ -494,10 +414,37 @@ export default function PublicApprovalDecision() {
           decidedVia: 'link',
           decisionNote: note,
           decisionNoteHtml: noteHtml,
+          conditionNote,
+          conditionNoteHtml: extra?.conditionNoteHtml || null,
           approverName: body.approverName || prev.approval.approverName,
           escalationLog: autoEntry ? [...(prev.approval.escalationLog || []), autoEntry] : prev.approval.escalationLog,
         },
         approvers: (prev.approvers || []).map((a) => (a.isYou ? { ...a, status, decidedAt: now } : a)),
+      };
+    });
+  }, [token]);
+
+  // Approvals v3: a question / note with an audience. The page keeps the
+  // request open — the approver can still decide — and the new message joins
+  // the conversation; a question to the requester flips the status.
+  const onAsk = useCallback(async (payload) => {
+    const body = unwrapBody(await publicApprovalAPI.postMessage(token, payload)) || {};
+    const message = body.message || body;
+    setData((prev) => {
+      if (!prev) return prev;
+      const msg = message && message.kind ? message : {
+        id: `local-${Date.now()}`, kind: payload.kind || 'question', audience: payload.mode === 'internal' ? 'internal' : 'requester',
+        author: { email: prev.approval.approverEmail, name: prev.approval.approverName, role: 'approver' },
+        bodyText: payload.bodyText, bodyHtml: payload.bodyHtml || null, to: payload.to || [], cc: payload.cc || [], createdAt: new Date().toISOString(),
+      };
+      const toRequester = (msg.audience || 'requester') === 'requester';
+      return {
+        ...prev,
+        approval: {
+          ...prev.approval,
+          status: toRequester && prev.approval.status === 'pending' ? 'info_requested' : prev.approval.status,
+          messages: [...(prev.approval.messages || []), msg],
+        },
       };
     });
   }, [token]);
@@ -591,9 +538,9 @@ export default function PublicApprovalDecision() {
   const requesterMeta = [requester.title, requester.location].filter(Boolean).join(', ');
 
   return (
-    <Shell workspaceName={workspaceName} theme={theme} onToggleTheme={toggle} bottomPad={open}>
-      {/* No overflow-hidden here: it would turn the card into the scroll container and
-          un-stick the decision box (sticky bottom = the mobile bottom sheet). */}
+    <Shell workspaceName={workspaceName} theme={theme} onToggleTheme={toggle} bottomPad={false}>
+      {/* Layout B (mail client): the conversation on the left with the composer
+          under it, the facts in the rail on the right. */}
       <article className={`tp-card rounded-2xl border-t-4 shadow-soft motion-safe:animate-fadeIn ${(STATUS_BADGE[approval.status] || STATUS_BADGE.pending).stripe}`} aria-labelledby="approval-subject">
         <header className="grid items-start gap-4 border-b border-border px-5 py-5 min-[800px]:grid-cols-[minmax(0,1fr)_auto] min-[800px]:grid-rows-[auto_auto] min-[800px]:px-[26px]">
           {/* One badge, placed top-right on wide screens and first on a phone. */}
@@ -643,14 +590,23 @@ export default function PublicApprovalDecision() {
             <div aria-live="polite" aria-atomic="true">
               <DecisionBanner approval={approval} decidedByYou={decidedByYou} bannerRef={bannerRef} isDark={isDark} />
             </div>
-            <HandoffTrail approval={approval} />
-            <RequestNote approval={approval} workspaceName={workspaceName} isDark={isDark} />
+            <ApprovalThread
+              approval={approval}
+              messages={approval.messages || []}
+              viewerEmail={approval.approverEmail}
+              viewerRole="approver"
+              isDark={isDark}
+              title="Conversation"
+            />
             <TicketDescription ticket={ticket} isDark={isDark} />
-            <QuestionThread approval={approval} />
             {open && (
-              <DecisionBox
+              <ApprovalComposer
                 approval={{ ...approval, ticketRef: ticket.displayRef, requesterName: requester.name || null }}
+                participants={approval.participants || null}
+                selfEmail={approval.approverEmail}
+                signatureHtml={approval.signaturePreview || null}
                 onDecide={onDecide}
+                onAsk={onAsk}
                 onHandoff={onHandoff}
                 forwardCandidates={data.forwardCandidates || []}
               />

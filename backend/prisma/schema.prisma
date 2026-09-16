@@ -665,6 +665,11 @@ model TicketApproval {
   isFinal            Boolean           @default(false) @map("is_final")
   // [{ kind: 'escalated'|'forwarded'|'auto', fromTier, toTier, byEmail, byName, toEmails, note, at }]
   escalationLog      Json?             @map("escalation_log")
+  // Approvals v3 (16 Sep 2026): "approve with condition" + the approver's
+  // signature as rendered into the decision e-mail.
+  conditionNote      String?           @map("condition_note") @db.Text
+  conditionNoteHtml  String?           @map("condition_note_html") @db.Text
+  signatureHtml      String?           @map("signature_html") @db.Text
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
@@ -678,6 +683,59 @@ model TicketApproval {
 // Per-workspace approval categories (e.g. "Laptop purchase") with designated
 // approval managers. Admin-editable in Settings. managerEmails are Entra
 // addresses (any one can approve); resolved to names/photos at display time.
+// Approvals v3 — the conversation on a request: questions, answers, comments,
+// decisions and hand-offs, each with an AUDIENCE. 'requester' messages are
+// visible to everyone on the request; 'internal' ones only to approvers and
+// the agent — the requester's e-mails and pages never include them.
+model ApprovalMessage {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  ticketId       Int       @map("ticket_id")
+  approvalId     Int?      @map("approval_id")
+  requestGroupId String    @map("request_group_id") @db.VarChar(64)
+  // question | answer | comment | decision | handoff
+  kind           String    @db.VarChar(16)
+  // requester | internal
+  audience       String    @default("requester") @db.VarChar(16)
+  authorEmail    String    @map("author_email") @db.VarChar(255)
+  authorName     String?   @map("author_name") @db.VarChar(255)
+  // approver | agent | requester | system
+  authorRole     String    @default("approver") @map("author_role") @db.VarChar(16)
+  bodyText       String?   @map("body_text") @db.Text
+  bodyHtml       String?   @map("body_html") @db.Text
+  // link | app | email
+  via            String    @default("app") @db.VarChar(10)
+  toEmails       String[]  @default([]) @map("to_emails")
+  ccEmails       String[]  @default([]) @map("cc_emails")
+  emailMessageId String?   @map("email_message_id") @db.VarChar(998)
+  inReplyToId    Int?      @map("in_reply_to_id")
+  threadEntryId  Int?      @map("thread_entry_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([requestGroupId])
+  @@index([ticketId])
+  @@map("approval_messages")
+}
+
+// One per recipient per outgoing question/comment: the magic-link token AND
+// the plus-address key (`mailbox+ap<plusKey>@…`) a reply comes back on.
+model ApprovalReplyToken {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  messageId      Int       @map("message_id")
+  requestGroupId String    @map("request_group_id") @db.VarChar(64)
+  recipientEmail String    @map("recipient_email") @db.VarChar(255)
+  tokenHash      String    @unique @map("token_hash") @db.VarChar(64)
+  plusKey        String    @unique @map("plus_key") @db.VarChar(24)
+  expiresAt      DateTime? @map("expires_at")
+  usedAt         DateTime? @map("used_at")
+  useCount       Int       @default(0) @map("use_count")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([messageId])
+  @@map("approval_reply_tokens")
+}
+
 model ApprovalCategory {
   id            Int              @id @default(autoincrement())
   workspaceId   Int              @map("workspace_id")

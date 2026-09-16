@@ -65,6 +65,62 @@ export function textExcerpt(html, max = 480) {
   return { text: `${cut.slice(0, at > max * 0.6 ? at : max).trim()}…`, truncated: true };
 }
 
+/**
+ * The ticket description as mail-safe HTML: headings, lists, bold, code,
+ * links and tables survive (the note normalizer plus the description-only
+ * tags); inline styles that fight the mail client are dropped. Long
+ * descriptions are cut at `maxChars` of VISIBLE text on a block boundary and
+ * flagged `truncated` so the caller can point at the approval page.
+ */
+export function descriptionHtmlForEmail(html, { maxChars = 6000 } = {}) {
+  const raw = String(html || '').trim();
+  if (!raw) return { html: '', truncated: false };
+  const looksHtml = /<[a-z][\s\S]*>/i.test(raw);
+  const source = looksHtml ? raw : `<p>${escapeHtml(raw).replace(/\r?\n/g, '<br>')}</p>`;
+  const clean = sanitizeHtml(source, {
+    allowedTags: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li', 'a', 'span', 'div', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'pre', 'code', 'hr'],
+    allowedAttributes: { a: ['href', 'target', 'rel', 'style'], td: ['colspan', 'rowspan', 'style'], th: ['colspan', 'rowspan', 'style', 'align'], table: ['cellpadding', 'cellspacing', 'border', 'style'], p: ['style'], h1: ['style'], h2: ['style'], h3: ['style'], h4: ['style'], ul: ['style'], ol: ['style'], li: ['style'], pre: ['style'], code: ['style'], blockquote: ['style'], hr: ['style'], span: [], div: [] },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    transformTags: {
+      table: () => ({ tagName: 'table', attribs: { cellpadding: '0', cellspacing: '0', border: '0', style: 'border-collapse:collapse;margin:8px 0;' } }),
+      td: (tag, attribs) => ({ tagName: 'td', attribs: { ...pick(attribs, ['colspan', 'rowspan']), style: CELL_STYLE } }),
+      th: (tag, attribs) => ({ tagName: 'th', attribs: { ...pick(attribs, ['colspan', 'rowspan']), style: HEAD_STYLE, align: 'left' } }),
+      a: (tag, attribs) => ({ tagName: 'a', attribs: { href: attribs.href || '#', target: '_blank', rel: 'noreferrer', style: `color:${BLUE};` } }),
+      p: () => ({ tagName: 'p', attribs: { style: 'margin:0 0 10px;' } }),
+      h1: () => ({ tagName: 'h3', attribs: { style: 'margin:14px 0 6px;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;' } }),
+      h2: () => ({ tagName: 'h3', attribs: { style: 'margin:14px 0 6px;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;' } }),
+      h3: () => ({ tagName: 'h3', attribs: { style: 'margin:14px 0 6px;font-size:14px;line-height:20px;font-weight:bold;color:#0f172a;' } }),
+      h4: () => ({ tagName: 'h4', attribs: { style: 'margin:12px 0 4px;font-size:13.5px;line-height:19px;font-weight:bold;color:#0f172a;' } }),
+      ul: () => ({ tagName: 'ul', attribs: { style: 'margin:0 0 10px;padding-left:22px;' } }),
+      ol: () => ({ tagName: 'ol', attribs: { style: 'margin:0 0 10px;padding-left:22px;' } }),
+      li: () => ({ tagName: 'li', attribs: { style: 'margin:0 0 4px;' } }),
+      pre: () => ({ tagName: 'pre', attribs: { style: 'margin:0 0 10px;padding:8px 10px;background:#f1f5f9;border:1px solid #e2e8f0;font-family:Consolas,\'Courier New\',monospace;font-size:12.5px;line-height:18px;white-space:pre-wrap;word-break:break-word;color:#0f172a;' } }),
+      code: () => ({ tagName: 'code', attribs: { style: 'font-family:Consolas,\'Courier New\',monospace;font-size:12.5px;background:#f1f5f9;padding:1px 4px;' } }),
+      blockquote: () => ({ tagName: 'blockquote', attribs: { style: 'margin:0 0 10px;padding:2px 0 2px 12px;border-left:3px solid #cbd5e1;color:#475569;' } }),
+      hr: () => ({ tagName: 'hr', attribs: { style: 'border:0;border-top:1px solid #e2e8f0;margin:12px 0;' } }),
+    },
+  }).trim();
+  if (!clean) return { html: '', truncated: false };
+  const withoutEmptyCols = clean.replace(/<table\b[\s\S]*?<\/table>/gi, (t) => dropEmptyTableColumns(t));
+  // Cap on visible text, cutting after the top-level block that crosses the limit.
+  let truncated = false;
+  let out = withoutEmptyCols;
+  const visible = textExcerpt(withoutEmptyCols, Number.MAX_SAFE_INTEGER).text;
+  if (visible.length > maxChars) {
+    truncated = true;
+    const blocks = withoutEmptyCols.split(/(?<=<\/(?:p|div|ul|ol|table|h3|h4|pre|blockquote)>)/i);
+    let acc = ''; let seen = 0;
+    for (const b of blocks) {
+      acc += b;
+      seen += textExcerpt(b, Number.MAX_SAFE_INTEGER).text.length;
+      if (seen >= maxChars) break;
+    }
+    out = acc || withoutEmptyCols.slice(0, maxChars);
+  }
+  out = out.replace(/<table\b/gi, '<div style="overflow-x:auto;max-width:100%;"><table').replace(/<\/table>/gi, '</table></div>');
+  return { html: out, truncated };
+}
+
 const CELL_STYLE = 'border:1px solid #cbd5e1;padding:6px 8px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:18px;vertical-align:top;color:#0f172a;';
 const HEAD_STYLE = `${CELL_STYLE}background:#f1f5f9;font-weight:bold;`;
 
@@ -275,6 +331,7 @@ export function renderApproverRequestEmail(ctx) {
     const by = escapeHtml(h.byName || 'The previous approver');
     let lead;
     if (h.kind === 'forwarded') lead = `<b>${by}</b> forwarded this request to you as the <b>final approver</b>.`;
+    else if (h.kind === 'auto_start') lead = `This request comes to you at <b>${escapeHtml(h.toTierName || 'this tier')}</b> directly: ${escapeHtml(h.note || `${h.byName || 'the requester'} is an approver on the earlier tier and cannot approve their own request`)}.`;
     else if (h.kind === 'auto') lead = `<b>${by}</b> approved this at ${escapeHtml(h.fromTierName || 'the previous tier')}, but the amount is over that tier's limit${h.limitLabel ? ` (${escapeHtml(h.limitLabel)})` : ''} — so <b>your approval is needed</b> at ${escapeHtml(h.toTierName || 'this tier')}.`;
     else lead = `<b>${by}</b> escalated this request from ${escapeHtml(h.fromTierName || 'the previous tier')} to you (${escapeHtml(h.toTierName || 'next tier')}).`;
     const noteHtml = h.note ? `<p style="margin:8px 0 0;font-size:14px;line-height:20px;color:${INK};"><b>Their note:</b> ${escapeHtml(h.note)}</p>` : '';
@@ -303,10 +360,11 @@ export function renderApproverRequestEmail(ctx) {
     rows.push(spacer(14));
   }
 
-  // Description excerpt
-  const excerpt = textExcerpt(t.description);
-  if (excerpt.text) {
-    rows.push(`<tr><td style="font-family:${FONT};">${sectionLabel('Ticket description')}<div style="font-size:13.5px;line-height:20px;color:#334155;white-space:pre-line;">${escapeHtml(excerpt.text)}</div>${excerpt.truncated ? `<div style="font-size:12px;line-height:18px;color:${MUTED};margin-top:4px;">The full description is on the approval page.</div>` : ''}</td></tr>`);
+  // Description — formatted like the ticket (lists, bold, tables), not a
+  // flattened excerpt; long ones are cut on a block and point at the page.
+  const desc = descriptionHtmlForEmail(t.description);
+  if (desc.html) {
+    rows.push(`<tr><td style="font-family:${FONT};">${sectionLabel('Ticket description')}<div style="font-family:${FONT};font-size:14px;line-height:21px;color:#1e293b;">${desc.html}</div>${desc.truncated ? `<div style="font-size:12px;line-height:18px;color:${MUTED};margin-top:6px;">… the full description is on the approval page.</div>` : ''}</td></tr>`);
     rows.push(spacer(14));
   }
 
@@ -343,7 +401,7 @@ export function renderApproverRequestEmail(ctx) {
 export function renderRequesterDecisionEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
-  const verdict = approved ? 'Approved' : 'Rejected';
+  const verdict = approved ? (ctx.conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
   const tone = approved ? TONES.green : TONES.red;
   const who = ctx.isSelf ? 'You' : (ctx.approverName || 'The approver');
   const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
@@ -364,9 +422,17 @@ export function renderRequesterDecisionEmail(ctx) {
   rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
   rows.push(spacer(16));
   rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</td></tr>`);
+  if (ctx.conditionNote) {
+    rows.push(spacer(12));
+    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:14px;line-height:20px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74' })}</td></tr>`);
+  }
   if (ctx.note) {
     rows.push(spacer(12));
     rows.push(`<tr><td>${card(`${sectionLabel(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`)}${escapeHtml(ctx.note).replace(/\r?\n/g, '<br>')}`)}</td></tr>`);
+  }
+  if (ctx.signatureHtml) {
+    rows.push(spacer(10));
+    rows.push(`<tr><td style="font-family:${FONT};font-size:13px;line-height:18px;color:#334155;">${ctx.signatureHtml}</td></tr>`);
   }
   rows.push(spacer(18));
   if (t.appUrl) rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: approved ? '#059669' : '#334155' })}</td></tr>`);
@@ -443,7 +509,124 @@ export function renderRequesterClarificationEmail(ctx) {
   });
 }
 
+/**
+ * Approvals v3 — a question / comment / answer on the conversation, to one
+ * recipient. ctx: { kind, audience, authorName, authorRole, recipient:{email,name,role}, isCc,
+ *   categoryName, ticket:{ref,subject}, bodyHtml|bodyText, thread:[messages], replyUrl, canReplyByEmail, internalNote }
+ */
+export function renderApprovalMessageEmail(ctx) {
+  const t = ctx.ticket || {};
+  const rows = [];
+  const kicker = ctx.kind === 'answer' ? 'Answer on an approval' : ctx.kind === 'comment' ? 'Note on an approval' : 'Question on an approval';
+  const by = escapeHtml(ctx.authorName || 'An approver');
+  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(kicker)}${ctx.categoryName ? ` · ${escapeHtml(ctx.categoryName)}` : ''}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || '(no subject)')}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(spacer(16));
+  const lead = ctx.kind === 'answer'
+    ? `<b>${by}</b> answered${ctx.recipient?.name ? ` your question` : ''}:`
+    : ctx.kind === 'comment'
+      ? `<b>${by}</b> left a note${ctx.isCc ? ' (you are copied)' : ' for you'}:`
+      : `<b>${by}</b> has a question${ctx.isCc ? ' (you are copied)' : ' for you'}:`;
+  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${lead}</td></tr>`);
+  rows.push(spacer(10));
+  const body = ctx.bodyHtml ? (normalizeNoteHtmlForEmail(ctx.bodyHtml) || ctx.bodyHtml) : escapeHtml(ctx.bodyText || '').replace(/\n/g, '<br>');
+  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${body}</div>`)}</td></tr>`);
+  if (ctx.internalNote) {
+    rows.push(spacer(8));
+    rows.push(`<tr><td style="font-family:${FONT};font-size:12.5px;line-height:18px;color:#92400e;">Internal — the ticket requester is not on this message.</td></tr>`);
+  }
+  if (ctx.replyUrl || ctx.canReplyByEmail) {
+    rows.push(spacer(16));
+    if (ctx.replyUrl) rows.push(`<tr><td>${button(ctx.kind === 'question' ? 'Answer' : 'Reply', ctx.replyUrl)}</td></tr>`);
+    rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">${ctx.canReplyByEmail ? 'Or simply reply to this e-mail — your answer lands on the request and everyone on it is told.' : 'Use the button to answer — this mailbox does not read replies.'}</td></tr>`);
+  }
+  const thread = Array.isArray(ctx.thread) ? ctx.thread.filter((m) => m && (m.bodyText || m.bodyHtml)) : [];
+  if (thread.length) {
+    rows.push(spacer(18));
+    rows.push(`<tr><td style="font-family:${FONT};">${sectionLabel('Earlier on this request')}</td></tr>`);
+    for (const m of thread.slice(-8)) {
+      const who = escapeHtml(m.author?.name || m.author?.email || 'Someone');
+      const when = m.createdAt ? fmtDay(m.createdAt) : '';
+      const label = m.kind === 'question' ? 'asked' : m.kind === 'answer' ? 'answered' : m.kind === 'decision' ? 'decided' : m.kind === 'handoff' ? 'handed off' : 'wrote';
+      const mb = m.bodyHtml ? (normalizeNoteHtmlForEmail(m.bodyHtml) || m.bodyHtml) : escapeHtml(m.bodyText || '').replace(/\n/g, '<br>');
+      rows.push(`<tr><td style="padding:6px 0 0 12px;border-left:3px solid ${LINE};font-family:${FONT};font-size:13px;line-height:19px;color:#334155;"><b>${who}</b> ${label}${when ? ` · ${escapeHtml(when)}` : ''}${m.audience === 'internal' ? ' · internal' : ''}<div style="margin-top:2px;">${mb}</div></td></tr>`);
+      rows.push(spacer(6));
+    }
+  }
+  rows.push(spacer(8));
+  return emailShell({
+    workspaceName: ctx.workspaceName || null,
+    statusPill: pill(ctx.kind === 'answer' ? 'Answer' : ctx.kind === 'comment' ? 'Note' : 'Question', ctx.kind === 'answer' ? TONES.green : TONES.violet),
+    bodyRows: rows,
+    footerHtml: 'Sent by Ticket Pulse. This message is part of an approval on the ticket above.',
+    preheader: `${ctx.authorName || 'An approver'}: ${String(ctx.bodyText || '').slice(0, 120)}`,
+  });
+}
+
+/**
+ * Approvals v3 — the decision, reply-style, to the requester and the chain.
+ * ctx: { workspaceName, categoryName, ticket:{ref,subject,appUrl|null}, approved, changedFrom, approverName,
+ *   note, conditionNote, signatureHtml, recipient:{role,name}, requester:{name}, requestNote(Html), requestedByName, thread:[…] }
+ */
+export function renderDecisionThreadEmail(ctx) {
+  const t = ctx.ticket || {};
+  const approved = !!ctx.approved;
+  const verdict = approved ? (ctx.conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
+  const tone = approved ? TONES.green : TONES.red;
+  const rows = [];
+  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(ctx.categoryName ? `${ctx.categoryName} approval` : 'Approval')} · ${escapeHtml(verdict)}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || '(no subject)')}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(spacer(16));
+  const greet = ctx.recipient?.name ? `Hi ${escapeHtml(String(ctx.recipient.name).split(' ')[0])},` : 'Hello,';
+  const forWhom = ctx.requester?.name && ctx.recipient?.role !== 'requester' ? ` for ${escapeHtml(ctx.requester.name)}` : '';
+  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has <span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span> the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom)})` : ''}.</td></tr>`);
+  if (ctx.conditionNote) {
+    rows.push(spacer(12));
+    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:15px;line-height:22px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74' })}</td></tr>`);
+  }
+  if (ctx.note) {
+    rows.push(spacer(12));
+    rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${escapeHtml(ctx.note).replace(/\n/g, '<br>')}</td></tr>`);
+  }
+  if (ctx.signatureHtml) {
+    rows.push(spacer(14));
+    rows.push(`<tr><td style="font-family:${FONT};font-size:13px;line-height:18px;color:#334155;">${ctx.signatureHtml}</td></tr>`);
+  }
+  if (t.appUrl) {
+    rows.push(spacer(16));
+    rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: approved ? '#059669' : '#334155' })}</td></tr>`);
+  }
+  // History — quoted like a reply thread, newest first.
+  const history = [];
+  for (const m of (Array.isArray(ctx.thread) ? ctx.thread : []).slice().reverse()) {
+    if (!m || !(m.bodyText || m.bodyHtml)) continue;
+    const who = escapeHtml(m.author?.name || m.author?.email || 'Someone');
+    const label = m.kind === 'question' ? 'asked' : m.kind === 'answer' ? 'answered' : m.kind === 'handoff' ? 'handed off' : 'wrote';
+    const mb = m.bodyHtml ? (normalizeNoteHtmlForEmail(m.bodyHtml) || m.bodyHtml) : escapeHtml(m.bodyText || '').replace(/\n/g, '<br>');
+    history.push(`<div style="margin:0 0 10px;padding:0 0 0 12px;border-left:3px solid ${LINE};"><div style="font-size:12.5px;color:${MUTED};">On ${escapeHtml(m.createdAt ? fmtDayLong(m.createdAt) : '')}, <b>${who}</b> ${label}${m.audience === 'internal' ? ' (internal)' : ''}:</div><div style="font-size:13.5px;line-height:19px;color:#334155;margin-top:2px;">${mb}</div></div>`);
+  }
+  if (ctx.requestNoteHtml || ctx.requestNote) {
+    const rb = ctx.requestNoteHtml ? (normalizeNoteHtmlForEmail(ctx.requestNoteHtml) || ctx.requestNoteHtml) : escapeHtml(ctx.requestNote || '').replace(/\n/g, '<br>');
+    history.push(`<div style="margin:0 0 10px;padding:0 0 0 12px;border-left:3px solid ${LINE};"><div style="font-size:12.5px;color:${MUTED};"><b>${escapeHtml(ctx.requestedByName || 'The agent')}</b> asked for approval:</div><div style="font-size:13.5px;line-height:19px;color:#334155;margin-top:2px;">${rb}</div></div>`);
+  }
+  if (history.length) {
+    rows.push(spacer(20));
+    rows.push(`<tr><td style="font-family:${FONT};">${sectionLabel('History')}${history.join('')}</td></tr>`);
+  }
+  rows.push(spacer(8));
+  return emailShell({
+    workspaceName: ctx.workspaceName,
+    statusPill: pill(verdict, tone),
+    bodyRows: rows,
+    footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.${ctx.recipient?.role === 'requester' ? '' : ' The full approval trail is on the ticket.'}`,
+    preheader: `${ctx.approverName || 'The approver'} ${verdict.toLowerCase()} — ${t.subject || t.ref || ''}`,
+  });
+}
+
 export default {
   renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail,
+  renderApprovalMessageEmail, renderDecisionThreadEmail, descriptionHtmlForEmail,
   normalizeNoteHtmlForEmail, dropEmptyTableColumns, textExcerpt, escapeHtml, initialsOf, emailShell,
 };

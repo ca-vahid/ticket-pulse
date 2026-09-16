@@ -147,7 +147,7 @@ describe('POST /api/ticket-approvals/public/:token/decide', () => {
   test('returns status, decidedAt and the resolved approverName', async () => {
     approvalServiceMock.decideByToken.mockResolvedValue({ status: 'approved', decidedAt: '2026-09-02T01:00:00.000Z', approverName: 'Bob Builder', tokenHash: 'never' });
     const res = await request(buildApp()).post(`/api/ticket-approvals/public/${TOKEN}/decide`).send({ decision: 'approved' }).expect(200);
-    expect(approvalServiceMock.decideByToken).toHaveBeenCalledWith(TOKEN, 'approved', null, null);
+    expect(approvalServiceMock.decideByToken).toHaveBeenCalledWith(TOKEN, 'approved', null, null, { conditionNote: null, conditionNoteHtml: null });
     expect(res.body.data).toEqual({ status: 'approved', decidedAt: '2026-09-02T01:00:00.000Z', approverName: 'Bob Builder' });
   });
 

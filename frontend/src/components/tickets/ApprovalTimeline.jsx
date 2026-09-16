@@ -1,9 +1,42 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Send, Stamp, Trash2, XCircle,
+  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, Stamp, Trash2, XCircle,
 } from 'lucide-react';
 import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
-import { AmountChip, HandoffPanel, TierChip, handoffSentence } from './ApprovalHandoff';
+import { AmountChip, TierChip, handoffSentence } from './ApprovalHandoff';
+import ApprovalComposer from './ApprovalComposer';
+import ApprovalThread, { WaitingOnApproverChip } from './ApprovalThread';
+import RichTextEditor, { isRichContent } from './RichTextEditor';
+import { ticketsAPI } from '../../services/api';
+
+/** Approvals v3: an agent / approver answers an open question in-app. */
+function AnswerBox({ message, busy, onSend, onCancel }) {
+  const [text, setText] = useState('');
+  const [html, setHtml] = useState('');
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  return (
+    <div className="mt-2 rounded-xl border border-violet-200 bg-violet-50/40 p-2.5 dark:border-violet-500/30 dark:bg-violet-500/10" data-testid="answer-box">
+      <p className="mb-1.5 text-[12px] text-muted-foreground">
+        Answering <span className="font-semibold text-foreground">{message?.author?.name || message?.author?.email || 'the approver'}</span>
+        {message?.bodyText ? <>: “{String(message.bodyText).slice(0, 140)}{String(message.bodyText).length > 140 ? '…' : ''}”</> : null}
+        {message?.audience === 'internal' ? ' · internal, the requester is not copied' : ' · everyone on the request is told'}
+      </p>
+      <RichTextEditor ref={ref} value={html} onChange={({ html: h, text: t }) => { setHtml(h); setText(t); }} placeholder="Your answer…" ariaLabel="Your answer" minHeight={140} className="border-input bg-card" />
+      <div className="mt-2 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => { const t = text.trim(); if (t) onSend({ bodyText: t, bodyHtml: isRichContent(html) ? html : null }); }}
+          disabled={busy || !text.trim()}
+          className="tp-focus-ring inline-flex items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+        >
+          {busy ? <Activity className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Reply className="h-3 w-3" aria-hidden="true" />} Send answer
+        </button>
+        <button type="button" onClick={onCancel} className="tp-focus-ring rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted">Cancel</button>
+      </div>
+    </div>
+  );
+}
 
 // Approvals v2: the category's tier chain as the request modal sees it.
 const chainOf = (cat) => (Array.isArray(cat?.tiers) && cat.tiers.length
@@ -47,16 +80,29 @@ const rowLabel = (ap) => {
  */
 export default function ApprovalTimeline({
   approvals = [], meta, savingField,
-  clarifyingId, setClarifyingId, clarifyNote, setClarifyNote,
-  onDecide, onClarify, onResubmit, onCancel, onChangeDecision, onDeleteRequest,
+  onDecide, onResubmit, onCancel, onChangeDecision, onDeleteRequest,
   onEscalate, onForward,
+  // Approvals v3
+  ticketId = null, requester = null, onAsk, onAnswer,
 }) {
   const actorEmail = String(meta?.actor?.email || '').toLowerCase();
   const actorIsAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
   // Requester replies to a needs-info question, keyed per approval row (QA 07-14 #1).
   const [resubmitNotes, setResubmitNotes] = useState({});
-  // Approvals v2: which row has the escalate / forward panel open.
-  const [handoff, setHandoff] = useState(null); // { id, mode }
+  // Approvals v3: the conversation on every request of this ticket, and which
+  // question is being answered in-app.
+  const [messages, setMessages] = useState([]);
+  const [answering, setAnswering] = useState(null); // message
+  const [answerBusy, setAnswerBusy] = useState(false);
+  const loadMessages = useCallback(async () => {
+    if (!ticketId) return;
+    try {
+      const res = await ticketsAPI.approvalMessages(ticketId);
+      const list = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+      setMessages(list);
+    } catch { /* the thread is optional — the rows still render */ }
+  }, [ticketId]);
+  useEffect(() => { loadMessages(); }, [loadMessages, approvals]);
   const people = useMemo(() => {
     const map = new Map();
     for (const t of [...(meta?.technicians || []), ...(meta?.members || [])]) {
@@ -149,6 +195,11 @@ export default function ApprovalTimeline({
                   ) : (
                     <p className="text-sm text-muted-foreground">Cancelled · requested by {head.requestedBy}</p>
                   )}
+                  {decider?.conditionNote && verdict === 'approved' && (
+                    <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="timeline-condition">
+                      <span className="font-semibold">Condition:</span> {decider.conditionNote}
+                    </p>
+                  )}
                   {decider?.decisionNoteHtml && !/^superseded/i.test(decider.decisionNote || '') ? (
                     <div className="mt-1.5"><SafeHtml html={decider.decisionNoteHtml} className="text-xs text-muted-foreground" /></div>
                   ) : decider?.decisionNote && !/^superseded/i.test(decider.decisionNote) && (
@@ -185,9 +236,17 @@ export default function ApprovalTimeline({
               </div>
             ) : (
               <div className="px-3.5 py-3">
-                <p className="text-xs text-muted-foreground">
-                Requested by <span className="font-medium text-muted-foreground">{head.requestedBy}</span>
-                  {rows.length > 1 && <span className="text-muted-foreground/75"> · {rows.length} approvers · any one decides</span>}
+                <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>Requested by <span className="font-medium text-muted-foreground">{head.requestedBy}</span>
+                    {rows.length > 1 && <span className="text-muted-foreground/75"> · {rows.length} approvers · any one decides</span>}</span>
+                  {(() => {
+                    const groupId = head.requestGroupId || `single-${head.id}`;
+                    const gm = messages.filter((m) => m.requestGroupId === groupId);
+                    const answered = new Set(gm.filter((m) => m.kind === 'answer' && m.inReplyToId).map((m) => m.inReplyToId));
+                    const awaiting = gm.some((m) => m.kind === 'question' && m.audience === 'internal' && !answered.has(m.id));
+                    const viewerIsApprover = rows.some((r) => String(r.approverEmail).toLowerCase() === actorEmail);
+                    return awaiting && !viewerIsApprover ? <WaitingOnApproverChip /> : null;
+                  })()}
                 </p>
                 {head.requestNoteHtml ? (
                   <div className="mt-1 text-xs text-muted-foreground border-l-2 border-border pl-2">
@@ -205,6 +264,13 @@ export default function ApprovalTimeline({
                     const isRequester = meta?.actor && (meta.actor.email === ap.requestedBy || meta.actor.kind === 'admin' || meta.actor.workspaceRole === 'admin');
                     const busy = savingField === `approval-${ap.id}`;
                     const last = i === rows.length - 1;
+                    // Approvals v3: who is on this request (for the composer's audience chips).
+                    const participants = {
+                      requester: requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null, role: 'requester' } : null,
+                      agent: ap.requestedBy ? { email: String(ap.requestedBy).toLowerCase(), name: people.find((p) => p.email === String(ap.requestedBy).toLowerCase())?.name || null, role: 'agent' } : null,
+                      approvers: rows.map((r) => ({ email: String(r.approverEmail).toLowerCase(), name: r.approverName || people.find((p) => p.email === String(r.approverEmail).toLowerCase())?.name || null, role: 'approver' })),
+                    };
+                    const nextTier = tiers[ap.tier || 1] || null;
                     return (
                       <li key={ap.id} className="relative flex gap-3">
                         {/* rail: avatar + status dot + connector */}
@@ -247,103 +313,35 @@ export default function ApprovalTimeline({
                             ) : null;
                           })()}
 
-                          {/* Answered clarifications survive resubmits — show the Q&A trail. */}
-                          {Array.isArray(ap.clarificationLog) && ap.clarificationLog.some((c) => c?.answer) && (
-                            <div className="mt-1.5 space-y-1">
-                              {ap.clarificationLog.filter((c) => c?.answer).map((c, i) => (
-                                <div key={i} className="text-[11px] rounded-lg border border-violet-100 dark:border-violet-500/20 bg-violet-50/50 dark:bg-violet-500/10 px-2 py-1.5">
-                                  {c.question && <p className="text-violet-700 dark:text-violet-200">Asked: “{c.question}”</p>}
-                                  <p className="text-muted-foreground">Reply: “{c.answer}”</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Approver actions (pending) */}
-                          {ap.status === 'pending' && isApprover && handoff?.id === ap.id && (
+                          {/* Approver actions (pending / question sent): the same composer as the magic link. */}
+                          {(ap.status === 'pending' || ap.status === 'info_requested') && isApprover && (
                             <div className="mt-2">
-                              <HandoffPanel
-                                mode={handoff.mode}
+                              <ApprovalComposer
                                 compact
-                                people={people.filter((p) => p.email !== String(ap.approverEmail).toLowerCase() && p.email !== String(ap.requestedBy || '').toLowerCase())}
-                                nextTierName={(tiers[ap.tier || 1] || {}).name || null}
-                                nextTierNames={((tiers[ap.tier || 1] || {}).managerEmails || []).map((e) => (people.find((p) => p.email === e)?.name || e))}
-                                onCancel={() => setHandoff(null)}
-                                onSubmit={async ({ mode, note, toEmail }) => {
+                                showShortcuts={false}
+                                minHeight={180}
+                                approval={{
+                                  ...ap,
+                                  ticketRef: null,
+                                  requesterName: requester?.name || null,
+                                  canEscalate: Boolean(!ap.isFinal && nextTier && onEscalate),
+                                  nextTier: nextTier ? { name: nextTier.name, approverNames: (nextTier.managerEmails || []).map((e) => people.find((p) => p.email === e)?.name || e) } : null,
+                                  tierName: (tiers[(ap.tier || 1) - 1] || {}).name || null,
+                                  amountLabel: null,
+                                }}
+                                participants={participants}
+                                selfEmail={ap.approverEmail}
+                                forwardCandidates={people.filter((p) => p.email !== String(ap.approverEmail).toLowerCase() && p.email !== String(ap.requestedBy || '').toLowerCase())}
+                                onDecide={(decision, note, noteHtml, extra) => onDecide(ap.id, decision, note, { noteHtml, ...extra })}
+                                onAsk={onAsk ? async (payload) => { await onAsk(ap.id, payload); await loadMessages(); } : undefined}
+                                onHandoff={(onEscalate || onForward) ? async ({ mode, note, toEmail }) => {
                                   if (mode === 'forward') await onForward?.(ap.id, toEmail, note);
                                   else await onEscalate?.(ap.id, note);
-                                  setHandoff(null);
-                                }}
+                                } : undefined}
+                                disabled={busy}
+                                footer={ap.status === 'info_requested' ? 'A question is out — you can still decide, or wait for the answer below.' : 'Decisions ask you to confirm first.'}
                               />
                             </div>
-                          )}
-                          {ap.status === 'pending' && isApprover && handoff?.id !== ap.id && (
-                            clarifyingId === ap.id ? (
-                              <div className="mt-2 space-y-1.5">
-                                <textarea
-                                  rows={2}
-                                  autoFocus
-                                  value={clarifyNote}
-                                  onChange={(e) => setClarifyNote(e.target.value)}
-                                  placeholder="What extra info do you need from the requester?"
-                                  className="tp-focus-ring w-full text-xs bg-card border border-violet-200 dark:border-violet-500/30 rounded-lg px-2.5 py-1.5 placeholder:text-muted-foreground/75 resize-y"
-                                />
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => { const n = clarifyNote.trim(); if (n) onClarify(ap.id, n); }}
-                                    disabled={busy || !clarifyNote.trim()}
-                                    className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
-                                  >
-                                    <Send className="w-3 h-3" aria-hidden="true" /> Send to requester
-                                  </button>
-                                  <button onClick={() => { setClarifyingId(null); setClarifyNote(''); }} className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                                <button
-                                  onClick={() => onDecide(ap.id, 'approved')}
-                                  disabled={busy}
-                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                                >
-                                  <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Approve
-                                </button>
-                                <button
-                                  onClick={() => onDecide(ap.id, 'rejected')}
-                                  disabled={busy}
-                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-                                >
-                                  <XCircle className="w-3 h-3" aria-hidden="true" /> Reject
-                                </button>
-                                {!ap.isFinal && tiers[ap.tier || 1] && onEscalate && (
-                                  <button
-                                    onClick={() => setHandoff({ id: ap.id, mode: 'escalate' })}
-                                    disabled={busy}
-                                    title={`Escalate to ${(tiers[ap.tier || 1] || {}).name}`}
-                                    className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15 disabled:opacity-50"
-                                  >
-                                    <ArrowUpRight className="w-3 h-3" aria-hidden="true" /> Escalate
-                                  </button>
-                                )}
-                                {onForward && (
-                                  <button
-                                    onClick={() => setHandoff({ id: ap.id, mode: 'forward' })}
-                                    disabled={busy}
-                                    title="Forward to anyone in the workspace as the final approver"
-                                    className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-muted-foreground border border-border hover:bg-muted disabled:opacity-50"
-                                  >
-                                    <Forward className="w-3 h-3" aria-hidden="true" /> Forward
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => { setClarifyingId(ap.id); setClarifyNote(''); }}
-                                  disabled={busy}
-                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50"
-                                >
-                                  <MessageCircleQuestion className="w-3 h-3" aria-hidden="true" /> Clarify
-                                </button>
-                              </div>
-                            )
                           )}
 
                           {/* Requester actions: type the requested info right here,
@@ -374,6 +372,46 @@ export default function ApprovalTimeline({
                     );
                   })}
                 </ol>
+
+                {/* Approvals v3: the conversation on this request — request note,
+                    hand-offs, questions / answers (internal ones locked), with an
+                    in-app Answer for whoever the question was addressed to. */}
+                {(() => {
+                  const groupId = head.requestGroupId || `single-${head.id}`;
+                  const groupMessages = messages.filter((m) => m.requestGroupId === groupId || (m.approvalId && rows.some((r) => r.id === m.approvalId)));
+                  const answered = new Set(groupMessages.filter((m) => m.kind === 'answer' && m.inReplyToId).map((m) => m.inReplyToId));
+                  const awaiting = groupMessages.some((m) => m.kind === 'question' && m.audience === 'internal' && !answered.has(m.id));
+                  const viewerIsApprover = rows.some((r) => String(r.approverEmail).toLowerCase() === actorEmail);
+                  const threadApproval = { ...head, requestNote: null, requestNoteHtml: null, clarificationLog: rows.flatMap((r) => r.clarificationLog || []), escalationLog: rows.flatMap((r) => r.escalationLog || []) };
+                  if (!groupMessages.length && !threadApproval.clarificationLog.length && !threadApproval.escalationLog.length && !awaiting) return null;
+                  return (
+                    <div className="mt-3 border-t border-border/60 pt-3">
+                      <ApprovalThread
+                        compact
+                        approval={threadApproval}
+                        messages={groupMessages}
+                        people={people}
+                        viewerEmail={actorEmail}
+                        viewerRole={actorIsAdmin ? 'admin' : viewerIsApprover ? 'approver' : 'agent'}
+                        awaitingApprover={awaiting}
+                        onAnswer={onAnswer ? (m) => setAnswering(m) : null}
+                        title="Conversation"
+                      />
+                      {answering && groupMessages.some((m) => m.id === answering.id) && (
+                        <AnswerBox
+                          message={answering}
+                          busy={answerBusy}
+                          onCancel={() => setAnswering(null)}
+                          onSend={async (payload) => {
+                            setAnswerBusy(true);
+                            try { await onAnswer(answering.id, payload); setAnswering(null); await loadMessages(); }
+                            finally { setAnswerBusy(false); }
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Group-level requester actions: cancel keeps an audit record;
                     delete removes it entirely (parent shows a warning first). */}

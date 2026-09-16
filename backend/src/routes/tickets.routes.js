@@ -1856,8 +1856,45 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
     req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null },
   );
   res.json({ success: true, data: approval });
+}));
+
+// Approvals v3 — the conversation on a request.
+// All messages on this ticket's approvals (internal ones included: this is the
+// agent/approver side; the requester never sees this surface).
+router.get('/:id/approvals/messages', asyncHandler(async (req, res) => {
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const data = await conversation.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+// An approver (or admin) asks a question / leaves a comment with an audience.
+router.post('/:id/approvals/:approvalId/messages', asyncHandler(async (req, res) => {
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const approval = await prisma.ticketApproval.findFirst({ where: { id: Number(req.params.approvalId), ticketId: parseTicketId(req), workspaceId: req.workspaceId } });
+  if (!approval) throw new NotFoundError('Approval not found');
+  const a = req.ticketActor;
+  const isApprover = a?.email && approval.approverEmail === String(a.email).toLowerCase();
+  const isAdmin = a?.role === 'admin' || a?.workspaceRole === 'admin';
+  if (!isApprover && !isAdmin) throw new ValidationError('Only the requested approver (or an admin) can write on this approval');
+  const data = await conversation.postMessage(approval, {
+    kind: req.body?.kind || 'question', mode: req.body?.mode || 'requester', to: req.body?.to, cc: req.body?.cc,
+    bodyText: req.body?.bodyText || null, bodyHtml: req.body?.bodyHtml || null, via: 'app', author: { email: a?.email, name: a?.name },
+  });
+  res.status(201).json({ success: true, data });
+}));
+
+// A participant (agent, approver, or an admin) answers a question in-app.
+router.post('/:id/approvals/messages/:messageId/answer', asyncHandler(async (req, res) => {
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const a = req.ticketActor;
+  const data = await conversation.answer({
+    inReplyToId: Number(req.params.messageId), senderEmail: a?.email, senderName: a?.name,
+    bodyText: req.body?.bodyText || null, bodyHtml: req.body?.bodyHtml || null, via: 'app',
+  });
+  res.status(201).json({ success: true, data });
 }));
 
 router.post('/:id/approvals/:approvalId/clarify', asyncHandler(async (req, res) => {
@@ -2010,6 +2047,25 @@ ticketApprovalPublicRouter.get('/:token/photo', asyncHandler(async (req, res) =>
 }));
 
 // Approvals v2: escalate / forward from the magic link.
+// Approvals v3 — the requester's / agent's reply link (no login). The token
+// is personal to one recipient of one question; the thread shown is limited to
+// what that recipient may see.
+export const approvalReplyPublicRouter = express.Router();
+approvalReplyPublicRouter.use('/:token', publicApprovalRateLimit);
+approvalReplyPublicRouter.get('/:token', asyncHandler(async (req, res) => {
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const data = await conversation.viewForReplyToken(req.params.token);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, data });
+}));
+approvalReplyPublicRouter.post('/:token', asyncHandler(async (req, res) => {
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const data = await conversation.answer({
+    token: req.params.token, bodyText: req.body?.bodyText || null, bodyHtml: req.body?.bodyHtml || null, via: 'link',
+  });
+  res.status(201).json({ success: true, data });
+}));
+
 ticketApprovalPublicRouter.post('/:token/handoff', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.handoffByToken(req.params.token, {
@@ -2024,10 +2080,24 @@ ticketApprovalPublicRouter.post('/:token/handoff', asyncHandler(async (req, res)
   });
 }));
 
+// Approvals v3: the approver asks a question / leaves a note from the link page.
+ticketApprovalPublicRouter.post('/:token/messages', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const approval = await ticketApprovalService._findByToken(req.params.token);
+  const data = await conversation.postMessage(approval, {
+    kind: req.body?.kind || 'question', mode: req.body?.mode || 'requester', to: req.body?.to, cc: req.body?.cc,
+    bodyText: req.body?.bodyText || null, bodyHtml: req.body?.bodyHtml || null, via: 'link',
+    author: { email: approval.approverEmail, name: approval.approverName },
+  });
+  res.status(201).json({ success: true, data });
+}));
+
 ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideByToken(
     req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null },
   );
   res.json({
     success: true,

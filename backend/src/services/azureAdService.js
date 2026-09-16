@@ -290,7 +290,7 @@ class AzureAdService {
     try {
       const res = await axios.get(`${this.graphApiUrl}/users/${encodeURIComponent(address)}`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { $select: 'displayName,userPrincipalName,mail,jobTitle,department,accountEnabled' },
+        params: { $select: 'displayName,userPrincipalName,mail,jobTitle,department,accountEnabled,businessPhones,mobilePhone,officeLocation' },
       });
       return {
         status: 'found',
@@ -298,6 +298,10 @@ class AzureAdService {
         displayName: res.data.displayName || null,
         jobTitle: res.data.jobTitle || null,
         department: res.data.department || null,
+        // Approvals v3: feed the generated e-mail signature.
+        businessPhone: Array.isArray(res.data.businessPhones) ? (res.data.businessPhones[0] || null) : null,
+        mobilePhone: res.data.mobilePhone || null,
+        officeLocation: res.data.officeLocation || null,
       };
     } catch (error) {
       if (error.response?.status !== 404) {
