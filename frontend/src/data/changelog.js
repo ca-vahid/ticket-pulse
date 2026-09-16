@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.94-preview';
+export const APP_VERSION = '3.8.95-preview';
 
 export const changelog = [
+  {
+    version: '3.8.95-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Quieter mirror-conflict logging</strong> — a Ticket Pulse ticket whose FreshService copy has drifted was logged as a warning every three minutes (four tickets produced about fifty identical lines an hour). The warning now repeats once an hour per ticket unless the drift changes; the conflict record on the ticket is unchanged.' },
+    ],
+  },
   {
     version: '3.8.94-preview',
     date: 'September 15, 2026',
