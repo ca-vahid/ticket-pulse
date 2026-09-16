@@ -41,7 +41,7 @@ const {
   resolveSseWorkspace,
   RING_MAX_EVENTS,
   RING_MAX_AGE_MS,
-  MAX_CONNECTIONS_PER_USER, CAP_CHURN_MAX, CAP_CHURN_WINDOW_MS,
+  MAX_CONNECTIONS_PER_USER, CAP_CHURN_MAX, CAP_CHURN_WINDOW_MS, CAP_COOLOFF_MS,
   IDLE_REAP_MS,
   REAUTH_INTERVAL_MS,
 } = await import('../src/routes/sse.routes.js');
@@ -78,6 +78,7 @@ beforeEach(() => {
   sseManager.meta.clear();
   sseManager.capEvictions?.clear();
   sseManager.capWarnedAt?.clear();
+  sseManager.capRefuseUntil?.clear();
   realtimeTelemetry._reset();
 });
 
@@ -559,8 +560,10 @@ describe('connection registry — per-user cap', () => {
     expect(refused.destroy).toHaveBeenCalledTimes(1);
     for (const c of survivorsBefore) expect(c.destroy).not.toHaveBeenCalled();
     expect(sseManager.getClientCount(1)).toBe(MAX_CONNECTIONS_PER_USER);
-    // Once the window passes, evictions resume normally.
-    expect(sseManager._enforceUserCap('loop@bgc.ca', Date.now() + CAP_CHURN_WINDOW_MS + 1)).toBe(true);
+    // The refusal holds for the whole cool-off, not just the one-minute window …
+    expect(sseManager._enforceUserCap('loop@bgc.ca', Date.now() + CAP_CHURN_WINDOW_MS + 1)).toBe(false);
+    // … and evictions resume normally once it has passed.
+    expect(sseManager._enforceUserCap('loop@bgc.ca', Date.now() + CAP_COOLOFF_MS + 1)).toBe(true);
   });
 
   test('the cap is per user — another user is unaffected', () => {

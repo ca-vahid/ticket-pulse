@@ -47,6 +47,10 @@ export const MAX_CONNECTIONS_PER_USER = 8;
 // healthy tabs keep their streams and the looping client only hurts itself.
 export const CAP_CHURN_WINDOW_MS = 60 * 1000;
 export const CAP_CHURN_MAX = 6;
+// Once a user is churning, refuse newcomers for this long — a rolling
+// one-minute window alone still let the looper evict six healthy tabs every
+// minute (16 Sep 2026, 21:00 UTC: one eviction burst every ~74 s).
+export const CAP_COOLOFF_MS = 10 * 60 * 1000;
 // - Idle reap: a socket with no SUCCESSFUL write in this window is half-dead
 //   (writes buffering into a dead pipe, or errors swallowed elsewhere) —
 //   destroy it. Healthy sockets get a heartbeat write every 30s, so this is
@@ -86,6 +90,8 @@ class SSEConnectionManager {
     this.capEvictions = new Map();
     // userEmail -> last time the cap warning was logged (one line a minute per user)
     this.capWarnedAt = new Map();
+    // userEmail -> until when newcomers are refused (cap cool-off)
+    this.capRefuseUntil = new Map();
   }
 
   _key(workspaceId) {
@@ -255,6 +261,7 @@ class SSEConnectionManager {
   }
 
   removeClient(client) {
+    if (!this.meta.has(client)) return; // never registered (refused under the cap) — nothing to log
     this.meta.delete(client);
     for (const [key, clients] of this.channels) {
       if (clients.has(client)) {
@@ -315,13 +322,17 @@ class SSEConnectionManager {
     }
     if (mine.length < MAX_CONNECTIONS_PER_USER) return true;
     const recent = (this.capEvictions.get(userEmail) || []).filter((t) => now - t < CAP_CHURN_WINDOW_MS);
-    const churning = recent.length >= CAP_CHURN_MAX;
+    let churning = now < (this.capRefuseUntil.get(userEmail) || 0);
+    if (!churning && recent.length >= CAP_CHURN_MAX) {
+      churning = true;
+      this.capRefuseUntil.set(userEmail, now + CAP_COOLOFF_MS);
+    }
     recent.push(now);
     this.capEvictions.set(userEmail, recent);
     const lastWarned = this.capWarnedAt.get(userEmail) || 0;
     if (now - lastWarned >= CAP_CHURN_WINDOW_MS) {
       this.capWarnedAt.set(userEmail, now);
-      logger.warn(`SSE per-user cap: ${churning ? 'refusing new connections' : 'closing oldest connection'} for ${userEmail} (${mine.length} open, cap ${MAX_CONNECTIONS_PER_USER}, ${recent.length} cap event(s) in the last minute)`);
+      logger.warn(`SSE per-user cap: ${churning ? `refusing new connections (cool-off until ${new Date(this.capRefuseUntil.get(userEmail)).toISOString()})` : 'closing oldest connection'} for ${userEmail} (${mine.length} open, cap ${MAX_CONNECTIONS_PER_USER}, ${recent.length} cap event(s) in the last minute)`);
     }
     if (churning) return false;
     mine.sort((a, b) => a[1].connectedAt - b[1].connectedAt);

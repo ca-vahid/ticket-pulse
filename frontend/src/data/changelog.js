@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.3-preview';
+export const APP_VERSION = '3.9.4-preview';
 
 export const changelog = [
+  {
+    version: '3.9.4-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Live-update cap: a looping client is now held off for ten minutes</strong> — 3.9.3 refused the churning newcomer only inside a rolling minute, so the looping client still evicted six healthy tabs every minute in short bursts. Once an account trips the guard, newcomers are refused for ten minutes and the open tabs keep their streams; a refused connection no longer logs a phantom “disconnected” line.' },
+    ],
+  },
   {
     version: '3.9.3-preview',
     date: 'September 16, 2026',
