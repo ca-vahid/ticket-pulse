@@ -170,6 +170,8 @@ const APPROVAL_EVENT_STYLES = {
   approved: { Icon: CheckCircle2, wrap: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30', accent: 'bg-emerald-500', text: 'text-emerald-800 dark:text-emerald-200', chip: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
   rejected: { Icon: XCircle, wrap: 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30', accent: 'bg-red-500', text: 'text-red-800 dark:text-red-200', chip: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' },
   clarification: { Icon: MessageCircleQuestion, wrap: 'bg-violet-50 dark:bg-violet-500/15 border-violet-200 dark:border-violet-500/30', accent: 'bg-violet-500', text: 'text-violet-800 dark:text-violet-200', chip: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30' },
+  // The request itself (what the agent asked for) — blue like the request button.
+  requested: { Icon: Stamp, wrap: 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30', accent: 'bg-blue-500', text: 'text-blue-800 dark:text-blue-200', chip: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30' },
 };
 
 export function approvalEventMeta(entry) {
@@ -184,12 +186,14 @@ export function approvalEventMeta(entry) {
     if (event.includes('reject')) return { label: changed ? 'Rejected (changed)' : 'Rejected', ...APPROVAL_EVENT_STYLES.rejected };
     if (event.includes('clarif') || event.includes('info')) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
     if (event.includes('approv')) return { label: changed ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
+    if (event === 'requested' || event === 'auto_start') return { label: event === 'auto_start' ? 'Started' : 'Requested', ...APPROVAL_EVENT_STYLES.requested };
     // Unknown event name — fall through to the text heuristics.
   }
   const t = String(entry.bodyText || entry.content || '');
   if (/^Approval (CHANGED to )?APPROVED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
   if (/^Approval (CHANGED to )?REJECTED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Rejected (changed)' : 'Rejected', ...APPROVAL_EVENT_STYLES.rejected };
   if (/^Clarification requested/i.test(t)) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
+  if (/^Approval requested/i.test(t)) return { label: 'Requested', ...APPROVAL_EVENT_STYLES.requested };
   return null;
 }
 

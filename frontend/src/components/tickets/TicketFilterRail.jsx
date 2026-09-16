@@ -15,6 +15,15 @@ import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import 'react-day-picker/style.css';
 
+// Approval facet (16 Sep 2026): one pick, mirrors the API's `approval` param.
+const APPROVAL_FILTERS = [
+  { v: 'any', label: 'Has an approval' },
+  { v: 'pending', label: 'Waiting for approval' },
+  { v: 'approved', label: 'Approved' },
+  { v: 'rejected', label: 'Rejected' },
+  { v: 'none', label: 'No approval' },
+];
+
 const csvList = (s) => (s ? String(s).split(',').filter(Boolean) : []);
 const day = (d) => format(d, 'yyyy-MM-dd');
 
@@ -297,7 +306,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'customFields', 'created', 'due', 'origin'];
+  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'customFields', 'created', 'due', 'origin', 'approval'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
@@ -382,6 +391,8 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const noise = get('noise');
   const view = get('view');
   const aiState = get('aiState');
+  const approval = get('approval');
+  const approvalCats = csvList(get('approvalCategory'));
 
   // Custom-field filter params (Phase 2): dynamic `cf_*` family — every param
   // starting with cf_ is one active filter (capture/clear/count follow suit).
@@ -401,7 +412,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const activeTotal = [
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
     categories.length, subcategories.length, groups.length, sources.length, tags.length, impacts.length, urgencies.length, due.length,
-    origin, createdFrom || createdTo, noise, view, aiState, get('q'),
+    origin, createdFrom || createdTo, noise, view, aiState, get('q'), approval || approvalCats.length,
     ...cfActiveKeys, // each cf_ param counts like the URL param it is
   ].filter(Boolean).length;
 
@@ -519,7 +530,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view', 'aiState'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -1036,6 +1047,27 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             ))}
           </Section>
         </SortableFacet>
+
+        {/* Approvals — has one / waiting / approved / rejected, by category */}
+        <SortableFacet {...facetProps('approval')}>
+          <Section title="Approvals" activeCount={(approval ? 1 : 0) + approvalCats.length} onClear={() => setParams({ approval: null, approvalCategory: null })}>
+            {APPROVAL_FILTERS.map(({ v, label }) => (
+              <Facet key={v} checked={approval === v} onToggle={() => setParams({ approval: approval === v ? null : v })}>
+                {label}
+              </Facet>
+            ))}
+            {(meta?.approvalCategories || []).length > 0 && (
+              <div className="mt-1.5 pt-1.5 border-t border-border/60">
+                <p className="px-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Category</p>
+                {(meta?.approvalCategories || []).map((c) => (
+                  <Facet key={c.id} checked={approvalCats.includes(String(c.id))} onToggle={() => toggleCsv('approvalCategory', String(c.id))}>
+                    {c.name}
+                  </Facet>
+                ))}
+              </div>
+            )}
+          </Section>
+        </SortableFacet>
       </div>
     </>
   );
@@ -1209,6 +1241,10 @@ export function ActiveFilterBar({ meta }) {
   if (get('noise') === 'only') chips.push({ label: 'Noise & spam', onRemove: () => patch({ noise: null }) });
   if (get('view') === 'scheduled') chips.push({ label: 'Scheduled view', onRemove: () => patch({ view: null }) });
   if (get('aiState') === 'suggested') chips.push({ label: 'Awaiting AI approval', onRemove: () => patch({ aiState: null }) });
+  const approvalMode = get('approval');
+  if (approvalMode) chips.push({ label: (APPROVAL_FILTERS.find((f) => f.v === approvalMode) || {}).label || `Approval: ${approvalMode}`, onRemove: () => patch({ approval: null }) });
+  const approvalCatName = (v) => (meta?.approvalCategories || []).find((c) => String(c.id) === v)?.name || `Approval category ${v}`;
+  for (const c of csvList(get('approvalCategory'))) chips.push({ label: approvalCatName(c), onRemove: () => removeFromCsv('approvalCategory', c) });
 
   if (chips.length === 0) return null;
 

@@ -1215,6 +1215,32 @@ describe('ticketService.buildListWhere q matching', () => {
   });
 });
 
+describe('ticketService.buildListWhere approval filter (16 Sep 2026)', () => {
+  test('approval=pending → some approval still waiting (pending or info_requested)', async () => {
+    const where = await ticketService.buildListWhere(1, { approval: 'pending' });
+    expect(where.approvals).toEqual({ some: { status: { in: ['pending', 'info_requested'] } } });
+  });
+
+  test('approval=any ignores cancelled rows; approval=none means no live approval at all', async () => {
+    expect((await ticketService.buildListWhere(1, { approval: 'any' })).approvals).toEqual({ some: { status: { notIn: ['cancelled'] } } });
+    expect((await ticketService.buildListWhere(1, { approval: 'none' })).approvals).toEqual({ none: { status: { notIn: ['cancelled'] } } });
+  });
+
+  test('approvalCategory narrows to those categories, with or without a mode', async () => {
+    expect((await ticketService.buildListWhere(1, { approval: 'approved', approvalCategory: '3,9' })).approvals)
+      .toEqual({ some: { status: 'approved', approvalCategoryId: { in: [3, 9] } } });
+    expect((await ticketService.buildListWhere(1, { approvalCategory: '3' })).approvals)
+      .toEqual({ some: { status: { notIn: ['cancelled'] }, approvalCategoryId: { in: [3] } } });
+    expect((await ticketService.buildListWhere(1, { approval: 'none', approvalCategory: '3' })).approvals)
+      .toEqual({ none: { approvalCategoryId: { in: [3] }, status: { notIn: ['cancelled'] } } });
+  });
+
+  test('an unknown mode adds no approval clause', async () => {
+    expect((await ticketService.buildListWhere(1, { approval: 'sideways' })).approvals).toBeUndefined();
+    expect((await ticketService.buildListWhere(1, {})).approvals).toBeUndefined();
+  });
+});
+
 describe('ticketService custom workspace statuses (Phase 8a)', () => {
   const CUSTOM_ROWS = [
     { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },

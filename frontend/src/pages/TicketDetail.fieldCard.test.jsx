@@ -281,6 +281,13 @@ describe('TicketDetail field cards & structured approval dispatch', () => {
 });
 
 describe('approvalEventMeta discriminator', () => {
+  test('the request entry gets its own "Requested" card (16 Sep 2026)', () => {
+    expect(approvalEventMeta({ authorType: 'system', bodyText: 'x', rawPayload: { kind: 'approval_event', event: 'requested' } })?.label).toBe('Requested');
+    expect(approvalEventMeta({ authorType: 'system', bodyText: 'x', rawPayload: { kind: 'approval_event', event: 'auto_start' } })?.label).toBe('Started');
+    // Legacy rows written before the discriminator: body text fallback.
+    expect(approvalEventMeta({ authorType: 'system', bodyText: 'Approval requested · Laptop → a@x.io' })?.label).toBe('Requested');
+  });
+
   test('prefers rawPayload.kind over body text', () => {
     const meta = approvalEventMeta({
       authorType: 'system',
