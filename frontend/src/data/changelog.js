@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.97-preview';
+export const APP_VERSION = '3.8.98-preview';
 
 export const changelog = [
+  {
+    version: '3.8.98-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Forward works in every workspace, not only those with a sending mailbox</strong> — a forward used to insist on a Microsoft Graph mailbox in Send mode, so Project Accounting (whose patickets@ mailbox only reads mail) was refused every time while replies from the same screen went out normally. Forwards now leave exactly like replies: from the connected mailbox when it can send, otherwise from the e-mail service using the workspace’s own address. The 3.8.96 “forwarding is not set up” notice now appears only when neither route exists.' },
+    ],
+  },
   {
     version: '3.8.97-preview',
     date: 'September 16, 2026',

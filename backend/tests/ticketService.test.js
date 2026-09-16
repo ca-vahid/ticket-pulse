@@ -2423,3 +2423,70 @@ describe('status transitions — regression lock (Phase MB6): no transition is f
     }
   });
 });
+
+// 16 Sep 2026 (Susan / Project Accounting): forwards leave on the reply lanes.
+describe('ticketService.forwardTicket — two-lane delivery', () => {
+  const nativeTicket = {
+    id: 501, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: null,
+    subject: 'Project Setup - Compañía Minera Nevada', status: 'Open', priority: 2, descriptionText: 'Set-up for Chile',
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' }, assignedTech: null, internalCategory: null, internalSubcategory: null,
+  };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9101, ...data }));
+    prismaMock.mailboxConnection = { findFirst: jest.fn().mockResolvedValue(null) };
+    prismaMock.ticketThreadEntry.findMany = jest.fn().mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.update = jest.fn().mockResolvedValue({});
+    ticketThreadRepositoryMock.listForTicket.mockResolvedValue([]);
+    graphMailClientMock.isConfigured.mockReturnValue(false);
+    graphMailClientMock.sendMailAsMailbox.mockReset();
+    sendgridMock.sendEmail.mockReset();
+    sendgridMock.sendEmail.mockResolvedValue({ status: 'ok', messageId: '<sg-1@bgcengineering.ca>', provider: 'sendgrid' });
+  });
+  afterEach(() => {
+    delete prismaMock.mailboxConnection;
+    delete prismaMock.ticketThreadEntry.findMany;
+    delete prismaMock.ticketThreadEntry.update;
+  });
+
+  test('an ingest-only workspace (Project Accounting) forwards via SendGrid FROM its own mailbox address', async () => {
+    // pickOutboundMailbox (mode send|both) finds nothing; pickIngestMailbox finds patickets@.
+    prismaMock.mailboxConnection.findFirst.mockImplementation(async ({ where }) => (
+      where?.mode?.in?.includes('send') ? null : { id: 1, address: 'patickets@bgcengineering.ca', mode: 'ingest', isEnabled: true }
+    ));
+    const res = await ticketService.forwardTicket(501, 1, { to: ['vcontreras@bgcengineering.ca'], note: 'Would you be able to attend this set-up?' }, actor);
+    expect(graphMailClientMock.sendMailAsMailbox).not.toHaveBeenCalled();
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      to: ['vcontreras@bgcengineering.ca'],
+      from: 'patickets@bgcengineering.ca',
+      subject: expect.stringMatching(/^FW: .*\[TP-1042\]$/),
+      context: 'ticket forward',
+    }));
+    expect(res.via).toBe('sendgrid');
+    expect(res.from).toBe('patickets@bgcengineering.ca');
+    expect(res.entry.eventType).toBe('forward');
+    expect(res.entry.isPrivate).toBe(true);
+  });
+
+  test('a send-capable Graph mailbox is still preferred', async () => {
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 2, address: 'it@bgcengineering.ca', mode: 'both', isEnabled: true, isPrimary: true });
+    graphMailClientMock.isConfigured.mockReturnValue(true);
+    graphMailClientMock.sendMailAsMailbox.mockResolvedValue({ internetMessageId: '<graph-9@bgcengineering.ca>' });
+    const res = await ticketService.forwardTicket(501, 1, { to: ['someone@bgcengineering.ca'], note: null }, actor);
+    expect(graphMailClientMock.sendMailAsMailbox).toHaveBeenCalledWith('it@bgcengineering.ca', expect.objectContaining({ to: ['someone@bgcengineering.ca'] }));
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+    expect(res.via).toBe('msgraph');
+    expect(res.entry.emailMessageId).toBe('<graph-9@bgcengineering.ca>');
+  });
+
+  test('when neither lane can deliver, the error says what to fix instead of a mailbox-mode riddle', async () => {
+    sendgridMock.sendEmail.mockRejectedValue(new Error('SendGrid not configured'));
+    await expect(ticketService.forwardTicket(501, 1, { to: ['x@bgcengineering.ca'] }, actor))
+      .rejects.toThrow(/could not be sent .* Ticket Mailboxes .* SendGrid/);
+  });
+
+  test('still refuses without a valid destination', async () => {
+    await expect(ticketService.forwardTicket(501, 1, { to: ['not-an-email'] }, actor)).rejects.toThrow(/valid destination/);
+  });
+});

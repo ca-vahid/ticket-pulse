@@ -2318,16 +2318,23 @@ class TicketService {
       logger.debug?.(`Meta member name fill skipped: ${err.message}`);
     }
     members.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
-    // Forward needs a send-capable workspace mailbox on the Graph lane. Say so
-    // up front (16 Sep 2026: eight 400s on TP-1518 in PA, whose mailbox is
-    // ingest-only) instead of after the agent has composed the message.
-    let forwardAvailable = false;
+    // Forward leaves on the reply lanes: a send-capable Graph mailbox, else
+    // SendGrid from the workspace's ingest address. Only when NEITHER exists
+    // does the composer warn up front (16 Sep 2026, Project Accounting).
+    let forwardAvailable = true;
     try {
-      const [outbound, { default: graphMailClient }] = await Promise.all([
+      const [outbound, { default: graphMailClient }, { default: settingsRepository }] = await Promise.all([
         pickOutboundMailbox(workspaceId),
         import('../integrations/graphMailClient.js'),
+        import('./settingsRepository.js'),
       ]);
-      forwardAvailable = Boolean(outbound) && typeof graphMailClient?.isConfigured === 'function' && graphMailClient.isConfigured();
+      const graphOk = Boolean(outbound) && typeof graphMailClient?.isConfigured === 'function' && graphMailClient.isConfigured();
+      let sendgridOk = false;
+      try {
+        const cfg = await settingsRepository.getSendGridConfig();
+        sendgridOk = Boolean(cfg?.apiKey || cfg?.sendgridApiKey || cfg?.key || cfg?.smtpHost);
+      } catch { sendgridOk = false; }
+      forwardAvailable = graphOk || sendgridOk;
     } catch (err) {
       logger.debug?.(`Meta forwardAvailable check skipped: ${err.message}`);
     }
@@ -4298,8 +4305,12 @@ class TicketService {
   }
 
   /**
-   * Forward the ticket's public thread to any email address (T3.8). Sent from
-   * the workspace's send-capable Graph mailbox; recorded as a PRIVATE thread
+   * Forward the ticket's public thread to any email address (T3.8). Leaves on
+   * the same two-lane path as a reply: the workspace's send-capable Graph
+   * mailbox when there is one, else SendGrid FROM the workspace's ingest
+   * address (patickets@ …) — 16 Sep 2026: Project Accounting's mailbox is
+   * ingest-only, so the Graph-only gate refused every forward there while
+   * replies from the same screen went out fine. Recorded as a PRIVATE thread
    * entry (the requester isn't part of a forward).
    */
   async forwardTicket(ticketId, workspaceId, { to, note }, actor) {
@@ -4314,13 +4325,6 @@ class TicketService {
       throw new ValidationError('Forwarding needs at least one valid destination email');
     }
     const recipients = parsedTo.data;
-
-    // Centralized outbound picker (MB-1g): primary first, then oldest.
-    const connection = await pickOutboundMailbox(workspaceId);
-    const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
-    if (!connection || !graphMailClient.isConfigured()) {
-      throw new ValidationError('Forwarding needs a send-capable workspace mailbox (Settings → Ticket Mailboxes)');
-    }
 
     const entries = await ticketThreadRepository.listForTicket(ticket.id, { limit: 300 });
     const publicEntries = entries
@@ -4337,12 +4341,23 @@ class TicketService {
       ...publicEntries.map((e) => `<hr/><p><b>${esc(e.actorName || 'Unknown')}</b> · ${new Date(e.occurredAt).toLocaleString()}<br/>${esc(String(e.bodyText || e.content || '').slice(0, 4000)).replace(/\n/g, '<br/>')}</p>`),
     ].join('');
 
-    const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
-      to: recipients,
-      subject: `FW: ${ticket.subject || 'Ticket'} [${ref}]`,
-      html,
-      fromName: await resolveFromName(workspaceId),
-    });
+    let sent;
+    try {
+      const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
+      sent = await deliverTransactionalEmail({
+        workspaceId,
+        to: recipients,
+        subject: `FW: ${ticket.subject || 'Ticket'} [${ref}]`,
+        html,
+        label: 'ticket forward',
+        fromName: await resolveFromName(workspaceId),
+      });
+    } catch (err) {
+      logger.warn(`Forward of ticket ${ticket.id} could not be sent: ${err.message}`);
+      throw new ValidationError('The forward could not be sent — no mailbox or e-mail service could deliver it. '
+        + 'Check Settings → Ticket Mailboxes (a Send or Ingest + send mailbox) or the SendGrid sender.');
+    }
+    const via = sent?.from || sent?.via || 'ticket pulse';
 
     const now = new Date();
     const summary = `Forwarded to ${recipients.join(', ')}${noteText ? ` — ${noteText}` : ''}`;
@@ -4360,7 +4375,7 @@ class TicketService {
         visibility: 'private',
         content: summary,
         bodyText: summary,
-        emailMessageId: sent?.internetMessageId || null,
+        emailMessageId: sent?.messageId || null,
         occurredAt: now,
         mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
       },
@@ -4368,9 +4383,9 @@ class TicketService {
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     }
-    await this._audit(ticket.id, 'forwarded', actor, { to: recipients, via: connection.address });
+    await this._audit(ticket.id, 'forwarded', actor, { to: recipients, via, lane: sent?.via || null });
     this._broadcast(workspaceId, 'forward', ticket, { entryId: entry.id });
-    return { entry, to: recipients, from: connection.address };
+    return { entry, to: recipients, from: via, via: sent?.via || null };
   }
 
   /**
