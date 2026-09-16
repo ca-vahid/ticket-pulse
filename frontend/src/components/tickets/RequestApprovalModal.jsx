@@ -358,7 +358,7 @@ function CategoryCombobox({ categories, value, onChange, person }) {
         <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/60 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </div>
       {open && (
-        <ul role="listbox" aria-label="Approval categories" className="absolute z-40 mt-1.5 w-full tp-card rounded-xl shadow-soft p-1.5 max-h-[320px] overflow-y-auto settings-scrollbar animate-scaleIn">
+        <ul role="listbox" aria-label="Approval categories" className="mt-1.5 w-full rounded-xl border border-border bg-card shadow-subtle p-1.5 space-y-1 animate-fadeIn">
           {filtered.length === 0 && <li className="px-3 py-4 text-sm text-muted-foreground/75 text-center">No categories match “{query}”.</li>}
           {filtered.map((c, i) => {
             const tiers = chain(c);
@@ -371,7 +371,7 @@ function CategoryCombobox({ categories, value, onChange, person }) {
                   aria-selected={i === cursor}
                   onMouseEnter={() => setCursor(i)}
                   onClick={() => pick(c)}
-                  className={`tp-focus-ring w-full text-left rounded-lg px-3 py-2.5 ${i === cursor ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-muted'}`}
+                  className={`tp-focus-ring w-full text-left rounded-lg border px-3 py-2.5 ${i === cursor ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15' : 'border-border/60 dark:border-border hover:bg-muted hover:border-border'}`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">

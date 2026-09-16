@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.92-preview';
+export const APP_VERSION = '3.8.93-preview';
 
 export const changelog = [
+  {
+    version: '3.8.93-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Read-only people can be found by name</strong> — an app-only member (a read-only observer such as Neville) had no display name, so the approval-manager picker only matched the raw address and “Neville” found nothing. Names now come from the directory; the Members page shows them too.' },
+      { type: 'improved', html: '<strong>Request approval: one scrollbar, clearer dark borders</strong> — the category list now sits inside the dialog instead of floating over it (no nested scrollbar), and each row has an explicit border so the list reads in dark mode.' },
+    ],
+  },
   {
     version: '3.8.92-preview',
     date: 'September 15, 2026',
