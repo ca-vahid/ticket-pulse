@@ -10,6 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 const apiMock = vi.hoisted(() => ({
   searchAPI: { global: vi.fn() },
   uiPreferencesAPI: { get: vi.fn(), set: vi.fn() },
+  ticketsAPI: { requesterPhoto: vi.fn().mockResolvedValue({ data: { photo: null } }) },
 }));
 vi.mock('../../services/api', () => apiMock);
 

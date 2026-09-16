@@ -9,6 +9,7 @@ import { ticketsAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { PersonAvatar, StatusPill, PriorityDot, formatDayTime, timeAgo } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
+import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
 
 /**
  * Search v2 (16 Sep 2026) — the requester page (/requesters/:id): who the
@@ -72,7 +73,7 @@ export default function RequesterDetail() {
 
   useEffect(() => {
     let alive = true;
-    ticketsAPI.list({ requesterId: id, status: 'any', pageSize: 50, sort: 'createdAt', dir: 'desc' })
+    ticketsAPI.list({ requesterId: id, pageSize: 50, sort: 'createdAt', dir: 'desc' })
       .then((res) => { if (!alive) return; const body = res?.data || res || {}; setTickets(body.items || []); setTicketsTotal(body.total ?? (body.items || []).length); })
       .catch(() => { if (alive) setTickets([]); });
     return () => { alive = false; };
@@ -80,6 +81,7 @@ export default function RequesterDetail() {
 
   const r = data?.requester;
   const stats = data?.stats;
+  const photo = useRequesterPhoto(r?.email);
   const title = r?.entraJobTitle || r?.jobTitle || null;
   const department = r?.entraDepartment || r?.department || null;
   const place = useMemo(() => [...new Set([r?.entraOfficeLocation, r?.entraCity, r?.entraState, r?.entraCountry].filter(Boolean))].join(' · '), [r]);
@@ -110,7 +112,7 @@ export default function RequesterDetail() {
           <>
             <header className="tp-card rounded-2xl p-5 sm:p-6">
               <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                <PersonAvatar name={r.name} photoUrl={r.photoUrl || null} size="h-20 w-20" textSize="text-2xl" />
+                <PersonAvatar name={r.name} photoUrl={r.photoUrl || photo || null} size="h-20 w-20" textSize="text-2xl" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-2xl font-bold tracking-tight text-foreground">{r.name || r.email}</h1>
