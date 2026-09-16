@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.07-preview';
+export const APP_VERSION = '3.9.08-preview';
 
 export const changelog = [
+  {
+    version: '3.9.08-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Search box: one clear button, not two</strong> — the browser added its own × next to ours; the box is a plain text field now.' },
+      { type: 'fixed', html: '<strong>Requester photos in search results and on the requester page</strong> — both showed initials only; they now load the directory photo by e-mail address (cached per person for the session), the same way the ticket peek does.' },
+      { type: 'fixed', html: '<strong>Requester page listed no tickets</strong> — the Tickets tab asked the list for a status called “any”, which matched nothing. It now asks for every status.' },
+    ],
+  },
   {
     version: '3.9.07-preview',
     date: 'September 16, 2026',

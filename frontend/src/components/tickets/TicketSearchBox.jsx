@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { searchAPI } from '../../services/api';
 import { PersonAvatar, StatusPill, timeAgoShort } from './ticketUi';
+import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 import {
   clearRecentSearches, forgetSearch, getRecentSearches, getRecentTickets, rememberSearch, syncRecentSearches,
 } from '../../utils/recentSearches';
@@ -56,6 +57,12 @@ const SECTION_META = {
   departments: { label: 'Departments', Icon: Building2 },
   tasks: { label: 'Tasks', Icon: CheckSquare },
 };
+
+/** Requester avatar with the directory photo (cached per address). */
+function RequesterAvatar({ name, email, photoUrl = null, size = 'h-6 w-6', textSize = 'text-[9px]' }) {
+  const photo = useRequesterPhoto(photoUrl ? null : email);
+  return <PersonAvatar name={name || email} photoUrl={photoUrl || photo || null} size={size} textSize={textSize} />;
+}
 
 function SectionHeading({ icon: Icon, children, right }) {
   return (
@@ -206,7 +213,7 @@ export default function TicketSearchBox({
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
       <input
         ref={inputRef}
-        type="search"
+        type="text"
         value={value}
         onChange={(e) => { onChange?.(e.target.value); setOpen(true); }}
         onFocus={() => { setRecent(getRecentSearches()); setRecentTickets(getRecentTickets()); setOpen(true); }}
@@ -309,7 +316,7 @@ export default function TicketSearchBox({
                     )}
                     {row.kind === 'requester' && (
                       <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={() => row.run()} className={rowClass(i)}>
-                        <PersonAvatar name={row.requester.name || row.requester.email} photoUrl={row.requester.photoUrl || null} size="h-6 w-6" textSize="text-[9px]" />
+                        <RequesterAvatar name={row.requester.name} email={row.requester.email} photoUrl={row.requester.photoUrl || null} />
                         <span className="min-w-0 flex-1 truncate">
                           <span className="font-medium text-foreground"><Highlight text={row.requester.name || row.requester.email} q={q} /></span>
                           <span className="text-muted-foreground"> · <Highlight text={row.requester.email} q={q} />{row.requester.jobTitle ? ` · ${row.requester.jobTitle}` : ''}{row.requester.department ? ` · ${row.requester.department}` : ''}</span>

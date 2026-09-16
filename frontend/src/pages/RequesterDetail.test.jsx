@@ -1,12 +1,12 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // Search v2 — the requester page.
 
-const apiMock = vi.hoisted(() => ({ ticketsAPI: { requesterProfile: vi.fn(), list: vi.fn() } }));
+const apiMock = vi.hoisted(() => ({ ticketsAPI: { requesterProfile: vi.fn(), list: vi.fn(), requesterPhoto: vi.fn().mockResolvedValue({ data: { photo: 'data:image/png;base64,AAA' } }) } }));
 vi.mock('../services/api', () => apiMock);
 vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT' }, isWorkspaceSelected: true }) }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
@@ -46,8 +46,11 @@ describe('RequesterDetail', () => {
     expect(screen.getByText('Office Administrator · Colorado')).toBeInTheDocument();
     expect(screen.getByTitle('Copy e-mail address')).toHaveTextContent('sgreer@bgc.ca');
     expect(screen.getByText('Denver · CO')).toBeInTheDocument();
+    // directory photo by e-mail (cached per address)
+    await waitFor(() => expect(apiMock.ticketsAPI.requesterPhoto).toHaveBeenCalledWith('sgreer@bgc.ca'));
+    await waitFor(() => expect(document.querySelector('img[src^="data:image/png"]')).not.toBeNull());
     expect(apiMock.ticketsAPI.requesterProfile).toHaveBeenCalledWith('9');
-    expect(apiMock.ticketsAPI.list).toHaveBeenCalledWith({ requesterId: '9', status: 'any', pageSize: 50, sort: 'createdAt', dir: 'desc' });
+    expect(apiMock.ticketsAPI.list).toHaveBeenCalledWith({ requesterId: '9', pageSize: 50, sort: 'createdAt', dir: 'desc' });
 
     const stats = screen.getByRole('region', { name: 'Service history' });
     expect(within(stats).getByText('Open').previousSibling).toHaveTextContent('2');
