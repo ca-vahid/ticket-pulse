@@ -52,6 +52,8 @@ const RECONCILE_BUSY_QUEUE_DEPTH = Number(process.env.NATIVE_TICKET_RECONCILE_BU
 // workspace's last completed pass the sweep runs regardless; the 90 s queue
 // timeout still bounds the damage if the queue really is jammed.
 const RECONCILE_MAX_DEFER_MS = Number(process.env.NATIVE_TICKET_RECONCILE_MAX_DEFER_MS || 15 * 60 * 1000);
+// Repeat interval for the identical "Mirror conflict" warn line per ticket (log hygiene, 16 Sep 2026).
+const CONFLICT_WARN_INTERVAL_MS = Number(process.env.MIRROR_CONFLICT_WARN_INTERVAL_MS || 60 * 60 * 1000);
 
 function backoffMs(attempts) {
   return Math.min(BASE_BACKOFF_MS * (2 ** Math.max(0, attempts - 1)), MAX_BACKOFF_MS);
@@ -1063,7 +1065,21 @@ class MirrorService {
       if (fsResponder !== ourResponder) drift.push(`assignee (FS ${fsResponder || 'none'} vs TP ${ourResponder || 'none'})`);
       if (drift.length) {
         conflicts += 1;
-        logger.warn(`Mirror conflict on ${ticketDisplayRef(ticket)}: FS copy drifted — ${drift.join(', ')}`);
+        // The DB row is already de-duplicated per drift signature (TU-3c); the
+        // log line was not — four drifted tickets produced ~54 identical warns
+        // an hour (16 Sep 2026). Warn once per ticket+signature per hour, then
+        // go quiet at debug level until the drift changes.
+        const signature = drift.join(', ');
+        if (!this._conflictWarnedAt) this._conflictWarnedAt = new Map();
+        const prev = this._conflictWarnedAt.get(ticket.id);
+        const stale = !prev || prev.signature !== signature || Date.now() - prev.at >= CONFLICT_WARN_INTERVAL_MS;
+        if (stale) {
+          logger.warn(`Mirror conflict on ${ticketDisplayRef(ticket)}: FS copy drifted — ${signature}`);
+          this._conflictWarnedAt.set(ticket.id, { signature, at: Date.now() });
+          if (this._conflictWarnedAt.size > 2000) this._conflictWarnedAt.delete(this._conflictWarnedAt.keys().next().value);
+        } else {
+          logger.debug?.(`Mirror conflict on ${ticketDisplayRef(ticket)} unchanged (${signature})`);
+        }
         await this._recordMirrorConflict(ticket.id, { drift, fsId });
       }
     }
