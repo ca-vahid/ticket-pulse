@@ -261,6 +261,23 @@ class TicketApprovalService {
         ...(autoStart ? { startedAtTier: startTier, skippedTiers } : {}),
       },
     }).catch(() => {});
+    // The request itself lives in the ticket story from now on (16 Sep 2026):
+    // once the verdict lands, the card used to read "Approved by X" with the
+    // agent's own words nowhere on the page. Private, never mirrored.
+    {
+      const requesterLabel = actor?.name || actor?.email || 'Ticket Pulse';
+      const cleanNote = String(note || '').trim();
+      const amountLabel = amountValue !== null ? ` · ${category.amountCurrency || 'CAD'} ${amountValue}` : '';
+      const body = `Approval requested · ${category.name} → ${managers.join(', ')} by ${requesterLabel}${amountLabel}${cleanNote ? ` — "${cleanNote}"` : ''}`;
+      await prisma.ticketThreadEntry.create({
+        data: {
+          ticketId, workspaceId, source: 'ticketpulse_user', eventType: 'note',
+          actorName: requesterLabel, actorEmail: actor?.email || null, authorType: 'system',
+          incoming: false, isPrivate: true, visibility: 'private', bodyText: body, content: body, occurredAt: new Date(), mirrorState: null,
+          rawPayload: { kind: 'approval_event', v: 1, event: 'requested', requestGroupId, category: category.name, approvers: managers, note: cleanNote || null },
+        },
+      }).catch((err) => logger.warn(`Approval request note write failed (non-fatal): ${err.message}`));
+    }
     if (autoStart) {
       const body = `Approval request started at ${tiers[startTierIdx].name} (${managers.join(', ')}) — ${autoStart.reason}`;
       await prisma.ticketThreadEntry.create({
@@ -1448,9 +1465,15 @@ class TicketApprovalService {
     // is NEVER mirrored to the FreshService fallback copy (mirrorState: null).
     if (ticket) {
       const verdict = normalized === 'approved' ? (cleanCondition ? 'APPROVED WITH CONDITION ✔' : 'APPROVED ✔') : 'REJECTED ✘';
+      // The verdict card quotes what was asked for, so "Approved by X" is never
+      // read without the requester's own words (long notes are trimmed).
+      const askedFor = String(approval.requestNote || '').trim();
+      const askedForLabel = askedFor
+        ? ` · Requested by ${approval.requestedBy || 'the agent'}: "${askedFor.length > 400 ? `${askedFor.slice(0, 400).trimEnd()}…` : askedFor}"`
+        : '';
       const noteBody = (changedFrom
         ? `Approval CHANGED to ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`
-        : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`) + (cleanCondition ? ` · Condition: "${cleanCondition}"` : '');
+        : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`) + (cleanCondition ? ` · Condition: "${cleanCondition}"` : '') + askedForLabel;
       await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,

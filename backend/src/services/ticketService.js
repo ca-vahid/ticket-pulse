@@ -1042,6 +1042,21 @@ class TicketService {
     if (query.noise === 'only') where.isNoise = true;
     else if (query.excludeNoise !== 'false') where.isNoise = false;
 
+    // Approval filter (16 Sep 2026): `approval` = any | pending | approved |
+    // rejected | none, optionally narrowed to `approvalCategory` ids. "pending"
+    // includes info_requested (still waiting on someone); cancelled rows never
+    // count as "any" — they were withdrawn or superseded by a sibling verdict.
+    {
+      const mode = String(query.approval || '').toLowerCase();
+      const catIds = asList(query.approvalCategory).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+      const statusFor = { any: { notIn: ['cancelled'] }, pending: { in: ['pending', 'info_requested'] }, approved: 'approved', rejected: 'rejected' }[mode] || null;
+      if (mode === 'none') {
+        where.approvals = catIds.length ? { none: { approvalCategoryId: { in: catIds }, status: { notIn: ['cancelled'] } } } : { none: { status: { notIn: ['cancelled'] } } };
+      } else if (statusFor || catIds.length) {
+        where.approvals = { some: { status: statusFor || { notIn: ['cancelled'] }, ...(catIds.length ? { approvalCategoryId: { in: catIds } } : {}) } };
+      }
+    }
+
     // "Awaiting AI approval" worklist: unassigned tickets whose pipeline produced
     // a recommendation no human has decided yet (decision=pending_review). Same
     // signal that renders the dashed "proposed" assignee slot in the queue, so

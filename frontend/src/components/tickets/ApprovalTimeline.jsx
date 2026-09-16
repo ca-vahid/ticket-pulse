@@ -195,6 +195,15 @@ export default function ApprovalTimeline({
                   ) : (
                     <p className="text-sm text-muted-foreground">Cancelled · requested by {head.requestedBy}</p>
                   )}
+                  {/* What was asked for stays on the decided card (16 Sep 2026):
+                      the verdict alone lost the agent's own words. */}
+                  {head.requestNoteHtml ? (
+                    <div className="mt-1.5 text-xs text-muted-foreground border-l-2 border-border pl-2" data-testid="timeline-request-note">
+                      <SafeHtml html={head.requestNoteHtml} className="text-xs text-muted-foreground" />
+                    </div>
+                  ) : head.requestNote && (
+                    <p className="mt-1.5 text-xs text-muted-foreground italic border-l-2 border-border pl-2" data-testid="timeline-request-note">“{head.requestNote}”</p>
+                  )}
                   {decider?.conditionNote && verdict === 'approved' && (
                     <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="timeline-condition">
                       <span className="font-semibold">Condition:</span> {decider.conditionNote}

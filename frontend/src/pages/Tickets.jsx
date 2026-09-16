@@ -294,6 +294,8 @@ export default function Tickets() {
   const urgencyFilter = searchParams.get('urgency') || '';
   const view = searchParams.get('view') || '';
   const aiState = searchParams.get('aiState') || '';
+  const approval = searchParams.get('approval') || '';
+  const approvalCategory = searchParams.get('approvalCategory') || '';
   const requesterId = searchParams.get('requesterId') || '';
   const requesterName = searchParams.get('requesterName') || '';
   // Custom-field filters (Phase 2): the dynamic cf_* param family forwards to
@@ -445,6 +447,7 @@ export default function Tickets() {
     impact: ['impact'],
     urgency: ['urgency'],
     aiState: ['aiState'],
+    approval: ['approval', 'approvalCategory'],
     requester: ['requesterId', 'requesterName'],
     noise: ['noise'],
   };
@@ -504,12 +507,14 @@ export default function Tickets() {
     if (impactFilter) params.impact = impactFilter;
     if (urgencyFilter) params.urgency = urgencyFilter;
     if (aiState) params.aiState = aiState;
+    if (approval) params.approval = approval;
+    if (approvalCategory) params.approvalCategory = approvalCategory;
     if (requesterId) params.requesterId = requesterId;
     for (const [k, v] of JSON.parse(cfSerialized)) params[k] = v;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,

@@ -78,6 +78,23 @@ describe('ticketApprovalService.request (category fan-out)', () => {
     );
   });
 
+  test('the request itself is written to the ticket story with the agent\'s words (16 Sep 2026)', async () => {
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+
+    await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'Mehdi needs a second monitor for the survey desk' }, { email: 'mehdi@x.io', name: 'Mehdi' });
+
+    const entries = prismaMock.ticketThreadEntry.create.mock.calls.map((c) => c[0].data);
+    const requestEntry = entries.find((d) => d.rawPayload?.event === 'requested');
+    expect(requestEntry).toBeTruthy();
+    expect(requestEntry.isPrivate).toBe(true);
+    expect(requestEntry.mirrorState).toBeNull();
+    expect(requestEntry.actorName).toBe('Mehdi');
+    expect(requestEntry.bodyText).toContain('Approval requested · Laptop purchase → alice@x.io by Mehdi');
+    expect(requestEntry.bodyText).toContain('"Mehdi needs a second monitor for the survey desk"');
+    expect(requestEntry.rawPayload).toEqual(expect.objectContaining({ kind: 'approval_event', event: 'requested', category: 'Laptop purchase', note: 'Mehdi needs a second monitor for the survey desk' }));
+  });
+
   test('rejects a category with no managers', async () => {
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Empty', managerEmails: [] });
     await expect(ticketApprovalService.request(501, 1, { approvalCategoryId: 9 }, { email: 'req@x.io' }))

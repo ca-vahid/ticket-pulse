@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.10-preview';
+export const APP_VERSION = '3.9.11-preview';
 
 export const changelog = [
+  {
+    version: '3.9.11-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The approval request is back in the ticket story</strong> — what the agent wrote when asking for approval used to vanish once the verdict landed; the page only said “Approved by …”. The request now appears in the conversation as its own “Requested” card (who asked, which category, the approvers and the note), the verdict card repeats the request note, and the approvals panel keeps the note on decided requests too. Earlier decisions show their note in the panel; the story card exists for requests made from now on.' },
+      { type: 'new', html: '<strong>Find tickets by approval</strong> — a new <em>Approvals</em> section in the filter rail: <em>Has an approval</em>, <em>Waiting for approval</em>, <em>Approved</em>, <em>Rejected</em> or <em>No approval</em>, optionally narrowed to one or more approval categories. Works with every other filter, shows as chips, and can be saved in a view. (Approvals you personally have to decide also live under <em>Approvals</em> in the sidebar.)' },
+    ],
+  },
   {
     version: '3.9.10-preview',
     date: 'September 16, 2026',
