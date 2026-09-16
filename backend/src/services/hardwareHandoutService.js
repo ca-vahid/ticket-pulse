@@ -1,5 +1,27 @@
 import prisma from './prisma.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { resolvePersonName } from './personDirectoryService.js';
+
+/**
+ * "Request for Cristian Orellana : Laptop" — an IT agent filing on behalf of
+ * someone. Returns the named person (lower-cased) or null. Only a capitalised
+ * two-or-three-word name right after "for"/"to"/"on behalf of" counts; an
+ * ordinary subject never donates a name.
+ */
+export function namedRecipientFromSubject(subject) {
+  const raw = String(subject || '').trim();
+  const m = raw.match(/\b(?:for|to|on behalf of)\s+([A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+){1,2})(?=\s*(?:[:\-–—(,]|$))/);
+  return m ? m[1].replace(/\s+/g, ' ').toLowerCase() : null;
+}
+
+/** Does the subject mention this person (full display name, or the bare username as a token)? */
+export function subjectNamesPerson(subject, { name = null, username = null } = {}) {
+  const s = String(subject || '').toLowerCase();
+  if (!s) return false;
+  if (name && String(name).trim() && s.includes(String(name).trim().toLowerCase())) return true;
+  if (username && new RegExp(`(^|[^a-z0-9])${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`, 'i').test(s)) return true;
+  return false;
+}
 
 /**
  * "Is this person allowed to be handed a laptop?" — one question, one answer.
@@ -189,15 +211,56 @@ class HardwareHandoutService {
       take: 2000,
     }) : [];
 
+    // Who is an IT agent here? A ticket an agent filed is very often for
+    // SOMEONE ELSE ("Request for Cristian Orellana : Laptop", requester =
+    // Soheil). Assetron 16 Sep 2026: that ticket cleared a laptop for Soheil.
+    // So an agent-requester ticket counts as the agent's own only when its
+    // subject names nobody else; and a ticket that names the recipient in the
+    // subject counts for the recipient even though the requester is the agent.
+    let agentEmails = new Set();
+    try {
+      const techs = await prisma.technician.findMany({ where: { workspaceId, isActive: true }, select: { email: true } });
+      agentEmails = new Set((techs || []).map((x) => String(x.email || '').toLowerCase()).filter(Boolean));
+    } catch { /* no technician lane in this test → nobody is an agent */ }
+
+    // The recipient's display name, so "Request for Cristian Orellana" can be
+    // matched when Assetron sends corellana@ / corellana.
+    let personName = null;
+    try {
+      let email = parsed.email;
+      if (!email) {
+        const fromRows = candidates.find((t) => (t.requester?.email || '').toLowerCase().split('@')[0] === parsed.username)?.requester?.email;
+        if (fromRows) email = fromRows.toLowerCase();
+        else {
+          const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { internalDomains: true } }).catch(() => null);
+          const domain = ws?.internalDomains?.[0] || null;
+          if (domain) email = `${parsed.username}@${domain}`;
+        }
+      }
+      if (email) personName = await resolvePersonName(email);
+    } catch { personName = null; }
+
     const mine = [];
+    const excluded = [];
     for (const t of candidates) {
       const email = (t.requester?.email || '').toLowerCase();
+      const requesterIsMe = parsed.email ? (email && email === parsed.email) : (email && email.split('@')[0] === parsed.username);
+      const nhUsername = usernameFromSubject(t.subject);
+      const named = nhUsername ? null : namedRecipientFromSubject(t.subject);
+      const namesMe = nhUsername
+        ? nhUsername === parsed.username
+        : subjectNamesPerson(t.subject, { name: personName, username: parsed.username });
       let matchedBy = null;
-      if (parsed.email && email && email === parsed.email) matchedBy = 'requester_email';
-      else if (!parsed.email && email && email.split('@')[0] === parsed.username) matchedBy = 'requester_email';
-      else if (usernameFromSubject(t.subject) === parsed.username) matchedBy = 'ticket_subject';
+      if (nhUsername && nhUsername === parsed.username) matchedBy = 'ticket_subject';
+      else if (requesterIsMe && agentEmails.has(email) && named && !namesMe) {
+        // Filed by this agent for someone else — not the agent's laptop.
+        excluded.push({ ...t, why: `filed by ${t.requester?.name || email} (IT agent) for ${named.replace(/\b\w/g, (c) => c.toUpperCase())}, not for ${parsed.username}` });
+        continue;
+      } else if (requesterIsMe) matchedBy = 'requester_email';
+      else if (namesMe && !nhUsername) matchedBy = 'subject_name';
       if (matchedBy) mine.push({ ...t, matchedBy });
     }
+    const excludedOut = excluded.slice(0, 5).map((t) => ({ ...shapeTicket(t), why: t.why }));
 
     const checkedAt = now.toISOString();
     const scope = {
@@ -209,14 +272,16 @@ class HardwareHandoutService {
 
     if (mine.length === 0) {
       return {
-        person: { query: String(person).trim(), matchedBy: null, email: parsed.email, name: null },
+        person: { query: String(person).trim(), matchedBy: null, email: parsed.email, name: personName },
         decision: 'NO_TICKET',
         isApproved: false,
         approval: { state: 'NOT_REQUESTED', decidedAt: null, decidedBy: null, category: null },
         ticket: null,
         otherTickets: [],
+        excluded: excludedOut,
         reason: `No laptop or desktop ticket for "${String(person).trim()}" in the last ${windowDays} days. `
-          + 'Ticket Pulse has no record of this handout being asked for — raise a ticket before issuing the asset.',
+          + 'Ticket Pulse has no record of this handout being asked for — raise a ticket before issuing the asset.'
+          + (excludedOut.length ? ` (${excludedOut.length} ticket${excludedOut.length === 1 ? '' : 's'} this person filed as an IT agent for someone else were not counted.)` : ''),
         checkedAt,
         scope,
       };
@@ -250,8 +315,10 @@ class HardwareHandoutService {
       person: {
         query: String(person).trim(),
         matchedBy: decisive.matchedBy,
-        email: decisive.requester?.email || parsed.email,
-        name: decisive.requester?.name || null,
+        // For a subject match the requester is the agent who filed, not the recipient.
+        email: decisive.matchedBy === 'requester_email' ? (decisive.requester?.email || parsed.email) : parsed.email,
+        name: decisive.matchedBy === 'requester_email' ? (decisive.requester?.name || personName) : personName,
+        filedBy: decisive.matchedBy === 'requester_email' ? null : (decisive.requester?.name || decisive.requester?.email || null),
       },
       decision,
       isApproved,
@@ -263,6 +330,7 @@ class HardwareHandoutService {
       },
       ticket: shapeTicket(decisive),
       otherTickets: mine.filter((t) => t.id !== decisive.id).slice(0, 5).map(shapeTicket),
+      excluded: excludedOut,
       reason,
       checkedAt,
       scope,

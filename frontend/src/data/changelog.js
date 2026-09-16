@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.96-preview';
+export const APP_VERSION = '3.8.97-preview';
 
 export const changelog = [
+  {
+    version: '3.8.97-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Hardware hand-out check: a ticket an IT agent filed for someone else no longer clears the agent</strong> — Assetron asked whether Soheil could receive a laptop and was told yes on the strength of #219171, “Request for Cristian Orellana : Laptop”, which Soheil had filed for Cristian. The check now recognises “for &lt;Name&gt;” subjects: such a ticket clears the person named (looked up by display name), never the agent who filed it, and is listed under <em>excluded</em> with the reason so a NO_TICKET is explainable.' },
+    ],
+  },
   {
     version: '3.8.96-preview',
     date: 'September 16, 2026',

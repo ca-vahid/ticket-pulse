@@ -14,6 +14,10 @@ import { jest, describe, expect, test, beforeEach } from '@jest/globals';
  */
 
 const findMany = jest.fn();
+// Agents of ws1 (16 Sep 2026 fix): a ticket an agent filed is usually for someone else.
+const techFindMany = jest.fn(async () => ([{ email: 'snasiri@bgcengineering.ca' }]));
+const techFindFirst = jest.fn(async () => null);
+const requesterFindFirst = jest.fn(async () => null);
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: {
     competencyCategory: { findMany: jest.fn(async () => ([
@@ -21,12 +25,18 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({
       { id: 12, name: 'Laptop / Workstation Procurement', parentId: 2 },
     ])) },
     ticket: { findMany },
+    technician: { findMany: techFindMany, findFirst: techFindFirst },
+    requester: { findFirst: requesterFindFirst },
+    workspace: { findUnique: jest.fn(async () => ({ internalDomains: ['bgcengineering.ca'] })) },
   },
 }));
+jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: { isConfigured: () => false } }));
+jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
 const {
-  default: svc, parsePerson, usernameFromSubject, deriveState, rowState,
+  default: svc, parsePerson, usernameFromSubject, deriveState, rowState, namedRecipientFromSubject, subjectNamesPerson,
 } = await import('../src/services/hardwareHandoutService.js');
+const { clearPersonNameCache } = await import('../src/services/personDirectoryService.js');
 
 const ticket = (over = {}) => ({
   id: 1, subject: 'New Laptop Request', status: 'Open', createdAt: new Date('2026-09-01'),
@@ -44,7 +54,12 @@ const approval = (status, over = {}) => ({
   approvalCategory: { name: 'New Computer Upgrade' }, ...over,
 });
 
-beforeEach(() => { findMany.mockReset(); findMany.mockResolvedValue([]); });
+beforeEach(() => {
+  findMany.mockReset(); findMany.mockResolvedValue([]);
+  techFindFirst.mockReset(); techFindFirst.mockResolvedValue(null);
+  requesterFindFirst.mockReset(); requesterFindFirst.mockResolvedValue(null);
+  clearPersonNameCache();
+});
 
 describe('the person key — an asset system holds a person, not a ticket number', () => {
   test('an e-mail and a bare username both parse to the same person', () => {
@@ -218,5 +233,71 @@ describe('the answer explains itself', () => {
     const r = await svc.check(1, 'haguo@bgcengineering.ca');
     expect(r.ticket.ref).toBe('#111');
     expect(r.otherTickets.map((t) => t.ref)).toEqual(['#222']);
+  });
+});
+
+describe('an agent filing for someone else — Assetron 16 Sep 2026 (#219171)', () => {
+  // Real ws1 row: Soheil (IT agent) requested a laptop for Cristian Orellana in
+  // April; Assetron asked about Soheil and was told #219171 covers him.
+  const soheilForCristian = (over = {}) => ticket({
+    id: 21787, subject: 'Request for Cristian Orellana : Laptop', status: 'Closed', freshserviceTicketId: 219171n,
+    requester: { id: 9, name: 'Soheil Nasiri', email: 'snasiri@bgcengineering.ca' },
+    internalCategory: { name: 'Onboarding & Offboarding' }, internalSubcategory: { name: 'New Hire Workstation' },
+    ...over,
+  });
+
+  test('subject parsing: the named recipient, and whether a subject names a given person', () => {
+    expect(namedRecipientFromSubject('Request for Cristian Orellana : Laptop')).toBe('cristian orellana');
+    expect(namedRecipientFromSubject('Laptop for Ana De Souza (Calgary)')).toBe('ana de souza');
+    expect(namedRecipientFromSubject('New laptop request')).toBeNull();
+    expect(namedRecipientFromSubject('Ready for pickup tomorrow')).toBeNull();
+    expect(subjectNamesPerson('Request for Cristian Orellana : Laptop', { name: 'Cristian Orellana' })).toBe(true);
+    expect(subjectNamesPerson('Laptop - corellana - setup', { username: 'corellana' })).toBe(true);
+    expect(subjectNamesPerson('Request for Cristian Orellana : Laptop', { name: 'Soheil Nasiri', username: 'snasiri' })).toBe(false);
+  });
+
+  test('the AGENT is not cleared by a ticket he filed for somebody else — NO_TICKET, with the ticket listed as excluded', async () => {
+    findMany.mockResolvedValue([soheilForCristian()]);
+    const r = await svc.check(1, 'snasiri@bgcengineering.ca');
+    expect(r.decision).toBe('NO_TICKET');
+    expect(r.ticket).toBeNull();
+    expect(r.excluded).toHaveLength(1);
+    expect(r.excluded[0].ref).toBe('#219171');
+    expect(r.excluded[0].why).toMatch(/filed by Soheil Nasiri \(IT agent\) for Cristian Orellana, not for snasiri/);
+    expect(r.reason).toMatch(/not counted/);
+  });
+
+  test('the RECIPIENT named in the subject is cleared by that ticket (looked up by display name)', async () => {
+    findMany.mockResolvedValue([soheilForCristian()]);
+    requesterFindFirst.mockResolvedValue({ name: 'Cristian Orellana' });
+    const r = await svc.check(1, 'corellana@bgcengineering.ca');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.person.matchedBy).toBe('subject_name');
+    expect(r.person.name).toBe('Cristian Orellana');
+    expect(r.person.filedBy).toBe('Soheil Nasiri');
+    expect(r.ticket.ref).toBe('#219171');
+  });
+
+  test('a bare username still resolves the name through the workspace domain', async () => {
+    findMany.mockResolvedValue([soheilForCristian()]);
+    requesterFindFirst.mockResolvedValue({ name: 'Cristian Orellana' });
+    const r = await svc.check(1, 'corellana');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.person.matchedBy).toBe('subject_name');
+  });
+
+  test("an agent's OWN ticket (subject names nobody) still counts for the agent", async () => {
+    findMany.mockResolvedValue([soheilForCristian({ subject: 'Replacement laptop — battery swelling' })]);
+    const r = await svc.check(1, 'snasiri');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.person.matchedBy).toBe('requester_email');
+    expect(r.excluded).toEqual([]);
+  });
+
+  test('a non-agent requester whose subject mentions a colleague is still their own ticket', async () => {
+    findMany.mockResolvedValue([ticket({ subject: 'Laptop for Hao Guo like the one Dana Ruiz has' })]);
+    const r = await svc.check(1, 'haguo@bgcengineering.ca');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.person.matchedBy).toBe('requester_email');
   });
 });
