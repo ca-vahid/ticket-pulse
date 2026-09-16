@@ -41,7 +41,7 @@ const {
   resolveSseWorkspace,
   RING_MAX_EVENTS,
   RING_MAX_AGE_MS,
-  MAX_CONNECTIONS_PER_USER,
+  MAX_CONNECTIONS_PER_USER, CAP_CHURN_MAX, CAP_CHURN_WINDOW_MS,
   IDLE_REAP_MS,
   REAUTH_INTERVAL_MS,
 } = await import('../src/routes/sse.routes.js');
@@ -76,6 +76,8 @@ beforeEach(() => {
   sseManager.buffers.clear();
   sseManager.waiters.clear();
   sseManager.meta.clear();
+  sseManager.capEvictions?.clear();
+  sseManager.capWarnedAt?.clear();
   realtimeTelemetry._reset();
 });
 
@@ -528,6 +530,37 @@ describe('connection registry — per-user cap', () => {
     for (const c of mine.slice(1)) expect(c.destroy).not.toHaveBeenCalled();
     expect(ninth.destroy).not.toHaveBeenCalled();
     expect(sseManager.getClientCount(1)).toBe(MAX_CONNECTIONS_PER_USER);
+  });
+
+  test('a user thrashing the cap gets the NEWCOMER refused; healthy tabs keep their streams', () => {
+    const mine = [];
+    for (let i = 0; i < MAX_CONNECTIONS_PER_USER; i++) {
+      const c = fakeClientWithDestroy('loop@bgc.ca');
+      sseManager.addClient(c.client, 1, c.opts);
+      mine.push(c);
+    }
+    // A client that ignores the farewell reconnects CAP_CHURN_MAX times: each
+    // one evicts an oldest tab (today's behaviour) …
+    const loopers = [];
+    for (let i = 0; i < CAP_CHURN_MAX; i++) {
+      const c = fakeClientWithDestroy('loop@bgc.ca');
+      expect(sseManager.addClient(c.client, 1, c.opts)).toBe(true);
+      loopers.push(c);
+    }
+    expect(mine.filter((c) => c.destroy.mock.calls.length === 1)).toHaveLength(CAP_CHURN_MAX);
+    // … the next one is refused: it gets the farewell (refused: true) and is
+    // torn down, and nobody else is evicted.
+    const survivorsBefore = [...mine, ...loopers].filter((c) => c.destroy.mock.calls.length === 0);
+    const refused = fakeClientWithDestroy('loop@bgc.ca');
+    expect(sseManager.addClient(refused.client, 1, refused.opts)).toBe(false);
+    const raw = refused.client.write.mock.calls.at(-1)[0];
+    expect(raw).toMatch(/^event: too_many_connections\n/);
+    expect(JSON.parse(raw.match(/data: (.*)\n\n$/)[1]).refused).toBe(true);
+    expect(refused.destroy).toHaveBeenCalledTimes(1);
+    for (const c of survivorsBefore) expect(c.destroy).not.toHaveBeenCalled();
+    expect(sseManager.getClientCount(1)).toBe(MAX_CONNECTIONS_PER_USER);
+    // Once the window passes, evictions resume normally.
+    expect(sseManager._enforceUserCap('loop@bgc.ca', Date.now() + CAP_CHURN_WINDOW_MS + 1)).toBe(true);
   });
 
   test('the cap is per user — another user is unaffected', () => {
