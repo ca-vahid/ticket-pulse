@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.5-preview';
+export const APP_VERSION = '3.9.06-preview';
 
 export const changelog = [
+  {
+    version: '3.9.06-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The due countdown reads better</strong> — “42d left” with a coloured dot becomes a proper chip: a glyph that says what the colour says (check on track, clock due soon, warning overdue), a hairline ring in the same hue, aligned digits, and plain words in the roomy layout (“42 days left”, “6 hr left”, “Overdue 3 hr”). Hover shows the exact deadline (“Due Oct 28, 2:23 PM”), plus the business-hours note where that clock applies.' },
+      { type: 'new', html: '<strong>“Due date” column</strong> — under <em>Columns</em>, an opt-in column that shows the absolute deadline with the countdown beneath it, sortable by clicking its header (soonest first), for people who work the queue by date rather than by time left.' },
+      { type: 'changed', html: 'Version numbers now carry a two-digit patch (3.9.06, 3.9.07 …).' },
+    ],
+  },
   {
     version: '3.9.5-preview',
     date: 'September 16, 2026',
