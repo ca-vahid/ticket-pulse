@@ -41,20 +41,20 @@ after creation. This skill makes re-arming a one-liner from ANY session in this 
 6. **Memory format.** Re-read memory `brief-format-preference` (insight memos, never stats tables) so the prompts stay right.
 
 ## 2. Build the prompts
-Both prompts are self-contained (the cron fires in a fresh turn). Paste the FULL current contents of
-`briefs/BRIEF_THREADS.md` where `{{THREADS}}` appears, the scratchpad path where `{{SCRATCH}}` appears, and the
-recipient override (if any) as `--to …` on the send commands. Compute and fill the date placeholders:
-`{{TODAY}}` = today's date, `{{LAST_DAILY}}` = the last weekday on or before today + 7 days,
-`{{NEXT_FRIDAY}}` = the next Friday the weekly will actually fire (a Friday creation after 2 PM fires the
-following Friday). Never leave a `{{…}}` token in a created cron prompt.
+The prompts stay SMALL and topic-free: thread state is NOT pasted in. Each firing reads
+`briefs/BRIEF_THREADS.md` fresh (the file is tracked and every brief run updates it), so threads added or
+retired mid-week reach the very next brief without re-arming — and no campaign or ticket names get frozen
+into a cron prompt. Fill the scratchpad path where `{{SCRATCH}}` appears and the recipient override (if any)
+as `--to …` on the send commands. Compute and fill the date placeholders: `{{TODAY}}` = today's date,
+`{{LAST_DAILY}}` = the last weekday on or before today + 7 days, `{{NEXT_FRIDAY}}` = the next Friday the
+weekly will actually fire (a Friday creation after 2 PM fires the following Friday). Never leave a `{{…}}`
+token in a created cron prompt.
 
 ### Daily (cron `45 8 * * 1-5`, recurring)
 ```
 Daily Ticket Pulse briefs (insight format — memory: brief-format-preference). Recipient: Vahid only.
 (1) From C:/Cursor/ticket-pulse-design/backend run `DATABASE_URL="$(az webapp config appsettings list -n ticket-pulse-app -g ticket-pulse-rg --query "[?name=='DATABASE_URL'].value | [0]" -o tsv)" BRIEF_OUT_DIR="{{SCRATCH}}" node scripts/daily-brief-probe.mjs 24` (use 72 on Mondays, or after a BC statutory holiday). Never echo the URL.
-(2) Analyze as the analyst — compare against the prior briefs and the thread state below. Investigate anything broken in the sanity block before writing; fix only if certain and safe, otherwise recommend.
-THREAD STATE (from briefs/BRIEF_THREADS.md — keep the probe read rules, carry the threads, exit lines on state change):
-{{THREADS}}
+(2) Read C:/Cursor/ticket-pulse-design/briefs/BRIEF_THREADS.md NOW — it is the living thread state (probe read rules, active threads, ledger). Keep the probe read rules, carry the threads, exit lines on state change. If the file is missing or its _Last updated_ line is older than 14 days, say so in the memo footer and proceed on sanity + fresh analysis only. Analyze as the analyst — compare against the prior briefs and that state. Investigate anything broken in the sanity block before writing; fix only if certain and safe, otherwise recommend.
 (3) Write TWO self-contained HTML memos in {{SCRATCH}}: brief-global-<YYYY-MM-DD>.html (platform-health TL;DR first, every workspace, workspaces never blended) and brief-it-<YYYY-MM-DD>.html (ws1 deep dive). TL;DR → numbered findings (evidence + so-what + recommendation) → wins / watchlist. NO stats tables. Team-safe framing (balance and coaching signals, never leaderboards). Track improved/recurred; no template rot. Header bands must be solid `bgcolor` cells, never CSS gradients (Outlook drops them).
 (4) Send: `node C:/Cursor/ticket-pulse-design/qa/tools/send-brief.mjs "Ticket Pulse Daily Brief (Global) — <Mon DD>" <global.html>` then the IT one with "(IT)". Verify 202 each; retry once; report loudly on failure. If a brief for today was already sent (double fire after sleep/wake), verify health quickly and SKIP — never duplicate.
 (5) Update C:/Cursor/ticket-pulse-design/briefs/BRIEF_THREADS.md: adjust/retire threads, add new ones, bump the `_Last updated_` line. Do not commit — /arm-briefs commits it when re-arming.
@@ -65,10 +65,9 @@ THREAD STATE (from briefs/BRIEF_THREADS.md — keep the probe read rules, carry 
 ```
 Weekly Ticket Pulse Insights (Mon–Fri of the current week, sent Friday ~2 PM PT). Recipient: Vahid only.
 If a weekly memo for this week was already sent (double fire after sleep/wake, or a zombie cron), verify health quickly and SKIP — never duplicate.
-From C:/Cursor/ticket-pulse-design/backend run `DATABASE_URL="$(az webapp config appsettings list -n ticket-pulse-app -g ticket-pulse-rg --query "[?name=='DATABASE_URL'].value | [0]" -o tsv)" BRIEF_OUT_DIR="{{SCRATCH}}" node scripts/daily-brief-probe.mjs 120` plus targeted read-only prod queries (per-workspace volumes; failed/fallback runs; bounce leaders via rejected episodes in window; the storage, security, Hedberg and wanderer threads) and `git log origin/main --since=<monday>` for shipped-this-week.
+Read C:/Cursor/ticket-pulse-design/briefs/BRIEF_THREADS.md NOW — it is the living thread state, including the weekly-only carry-overs and the standing default action. If it is missing or its _Last updated_ line is older than 14 days, say so in the memo and proceed on sanity + fresh analysis only.
+From C:/Cursor/ticket-pulse-design/backend run `DATABASE_URL="$(az webapp config appsettings list -n ticket-pulse-app -g ticket-pulse-rg --query "[?name=='DATABASE_URL'].value | [0]" -o tsv)" BRIEF_OUT_DIR="{{SCRATCH}}" node scripts/daily-brief-probe.mjs 120` plus targeted read-only prod queries (per-workspace volumes; failed/fallback runs; bounce leaders via rejected episodes in window; each active thread in the file) and `git log origin/main --since=<monday>` for shipped-this-week.
 The 2 PM send means Friday-afternoon events (this repo ships heavily on Friday PM) roll into NEXT week's memo — say so rather than reporting the week as quieter than it was, and open next week's memo by picking up anything the cutoff clipped.
-THREAD STATE (from briefs/BRIEF_THREADS.md, incl. the weekly-only carry-overs and the standing default action):
-{{THREADS}}
 Write ONE self-contained HTML memo weekly-insights-<monday>.html in {{SCRATCH}} in the established style: week-in-one-paragraph → themed findings with takeaways → standing risk line → shipped-this-week → next-week priorities. Insight narrative, NO stats tables, team-safe, solid-colour header band (no gradients).
 Send via `node C:/Cursor/ticket-pulse-design/qa/tools/send-brief.mjs "Ticket Pulse Weekly Insights — <Mon DD–Fri DD>" <file>`; verify 202, retry once, report loudly on failure. Then update briefs/BRIEF_THREADS.md (weekly carry-overs, ledger exits, risk line) and bump its `_Last updated_` line.
 Expiry: this cron auto-expires 7 days after creation (created {{TODAY}}; it fires {{NEXT_FRIDAY}} and expires the Friday after). Re-arm the weekly cron right after each firing by running the /arm-briefs steps (weekly), and note the re-arm status in the memo footer.
