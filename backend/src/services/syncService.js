@@ -4220,7 +4220,7 @@ class SyncService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true, freshserviceUpdatedAt: true },
+      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true, freshserviceUpdatedAt: true, updatedAt: true },
     });
     if (!ticket || !ticket.freshserviceTicketId) {
       return { changed: false };
@@ -4258,6 +4258,21 @@ class SyncService {
       const fsStatus = Number(fsTicket.status);
       const fsTerminal = fsStatus === 4 ? 'Resolved' : fsStatus === 5 ? 'Closed' : null;
       if (!fsTerminal) return { changed: false };
+      // QA 09-15 #5 (TP-1526): Power Apps reopened the ticket, the mirror push
+      // sat 2 min in a busy FS queue, and this pull-back — seeing the FS copy
+      // still Closed — re-closed the ticket 21 s after the reopen. FS's
+      // terminal status is only truth when FS is the NEWER side: never while
+      // TP still has an outbound mirror job in flight, and never when TP's
+      // own change is more recent than the FS copy.
+      const inFlight = await Promise.resolve().then(() => prisma.mirrorJob.count({
+        where: { ticketId: ticket.id, status: { in: ['pending', 'processing'] } },
+      })).catch(() => 0);
+      const fsUpdatedAt = fsTicket.updated_at ? new Date(fsTicket.updated_at) : null;
+      const tpNewer = fsUpdatedAt && ticket.updatedAt && ticket.updatedAt > fsUpdatedAt;
+      if (inFlight > 0 || tpNewer) {
+        logger.info(`FS→TP mirror-back skipped for TP ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}): ${inFlight > 0 ? `${inFlight} mirror job(s) still in flight` : 'Ticket Pulse change is newer than the FreshService copy'}`);
+        return { changed: false, skipped: inFlight > 0 ? 'mirror_in_flight' : 'tp_newer' };
+      }
       const now = new Date();
       const patch = { status: fsTerminal, updatedAt: now };
       if (!ticket.resolvedAt) {

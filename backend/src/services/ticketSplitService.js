@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import attachmentService from './attachmentService.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
@@ -49,6 +50,9 @@ class TicketSplitService {
    *   internalCategoryId / internalSubcategoryId / groupId / internalGroupId
    *   assignedTechId  {number?}
    *   moveAttachments {boolean}  default true — attachments on the copied entries
+   *   includeDescription {boolean} default true — the parent's description (quoted
+   *                              under the agent's own text, if any) and COPIES of its
+   *                              description-level attachments go to the child (QA 09-15 #2)
    *   notifyRequester {boolean}  default false — a public reply on the child
    * @param {object} actor
    */
@@ -100,8 +104,16 @@ class TicketSplitService {
     // 1. The child is always TP-born, whatever the parent is: it owns the
     //    split-out issue going forward, so it must be fully editable here.
     const { default: ticketService } = await import('./ticketService.js');
-    const opening = String(input.description || '').trim()
-      || `<p>Split out of ${parentRef} by ${actorLabel}.</p>`;
+    const includeDescription = input.includeDescription !== false;
+    const ownText = String(input.description || '').trim();
+    const parentDescription = includeDescription ? String(parent.description || '').trim() : '';
+    const opening = [
+      ownText || (parentDescription ? '' : `<p>Split out of ${parentRef} by ${actorLabel}.</p>`),
+      parentDescription
+        ? `<p style="color:#5f6b7a;font-size:13px;margin:${ownText ? '12px' : '0'} 0 6px;">From ${parentRef} — original description:</p>`
+          + `<blockquote style="margin:0;padding-left:12px;border-left:3px solid #d0d5dd;">${parentDescription}</blockquote>`
+        : '',
+    ].filter(Boolean).join('');
 
     const child = await ticketService.createTicket(workspaceId, {
       subject,
@@ -176,6 +188,29 @@ class TicketSplitService {
       }
     }
 
+    // 3b. Description-level attachments (no thread entry — the files that came
+    //     with the original request) are COPIED, never moved: they are the
+    //     parent's evidence too (QA 09-15 #2: TP-1517's three test plans).
+    let attachmentsCopied = 0;
+    if (includeDescription) {
+      try {
+        const descAttachments = await prisma.ticketAttachment.findMany({
+          where: { ticketId: parentId, workspaceId, threadEntryId: null },
+          orderBy: { id: 'asc' },
+        });
+        for (const a of descAttachments) {
+          try {
+            await attachmentService.copyToTicket(a, { ticketId: child.id, uploadedBy: actor?.email || null });
+            attachmentsCopied += 1;
+          } catch (err) {
+            logger.warn(`Split attachment copy failed for ${a.fileName} (non-fatal): ${err.message}`);
+          }
+        }
+      } catch (err) {
+        logger.warn(`Split description-attachment lookup failed (non-fatal): ${err.message}`);
+      }
+    }
+
     // 4. Family link. setParent owns the invariants (one parent, no cycles),
     //    so go through it rather than writing the link directly.
     let linkKind = 'parent_of';
@@ -201,6 +236,7 @@ class TicketSplitService {
       `Split into ${childRef} ("${subject}") by ${actorLabel}.`,
       copied ? `${copied} message${copied === 1 ? '' : 's'} copied across.` : null,
       attachmentsMoved ? `${attachmentsMoved} attachment${attachmentsMoved === 1 ? '' : 's'} moved to ${childRef}.` : null,
+      attachmentsCopied ? `${attachmentsCopied} description attachment${attachmentsCopied === 1 ? '' : 's'} copied to ${childRef}.` : null,
       'This ticket is unchanged otherwise.',
     ].filter(Boolean);
     await ticketService.addPrivateNote(parentId, workspaceId, { bodyText: parts.join(' ') }, actor)
@@ -212,7 +248,7 @@ class TicketSplitService {
     }, actor).catch((err) => logger.warn(`Split child note failed (non-fatal): ${err.message}`));
 
     // 6. Audit on both tickets.
-    const details = { childId: child.id, childRef, parentId, parentRef, copied, attachmentsMoved, linkKind, subject };
+    const details = { childId: child.id, childRef, parentId, parentRef, copied, attachmentsMoved, attachmentsCopied, includeDescription, linkKind, subject };
     await Promise.all([
       ticketActivityRepository.create({
         ticketId: parentId,
@@ -230,13 +266,14 @@ class TicketSplitService {
       }).catch(() => {}),
     ]);
 
-    logger.info(`Ticket split: ${parentRef} -> ${childRef} (${copied} messages, ${attachmentsMoved} attachments)`);
+    logger.info(`Ticket split: ${parentRef} -> ${childRef} (${copied} messages, ${attachmentsMoved} attachments moved, ${attachmentsCopied} copied)`);
 
     return {
       parent: { id: parentId, ref: parentRef },
       child: { id: child.id, ref: childRef, subject },
       copied,
       attachmentsMoved,
+      attachmentsCopied,
       linkKind,
     };
   }

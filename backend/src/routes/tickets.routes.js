@@ -278,7 +278,7 @@ router.get('/filter-relief', asyncHandler(async (req, res) => {
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
-  const result = await ticketService.listTickets(req.workspaceId, req.query);
+  const result = await ticketService.listTickets(req.workspaceId, req.query, { actor: req.ticketActor });
   res.json({ success: true, data: result });
 }));
 

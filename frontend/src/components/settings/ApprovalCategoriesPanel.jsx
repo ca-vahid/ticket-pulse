@@ -116,8 +116,8 @@ function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, 
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           placeholder={directoryLocked
-            ? 'Add an approval manager — search members or type an email address…'
-            : 'Add an approval manager — search members or the directory…'}
+            ? 'Add an approval manager — search members and technicians, or type an email address…'
+            : 'Add an approval manager — search members, technicians or the directory…'}
           className={`w-full pl-10 py-2.5 border border-input rounded-lg text-sm tp-focus-ring ${
             directoryLocked ? 'pr-10 bg-muted/50 text-muted-foreground placeholder:text-muted-foreground/75' : 'pr-3'
           }`}
@@ -287,7 +287,16 @@ export default function ApprovalCategoriesPanel() {
     // tickets meta (chips fall back to raw emails). Never blanks the categories.
     try {
       const meta = await ticketsAPI.meta();
-      setMembers(meta.data?.technicians || []);
+      // QA 09-15 #8: read-only and reviewer members are not technicians, yet
+      // any of them can be an approval manager (they may already decide
+      // approvals addressed to them). Merge the workspace grants in, keyed by
+      // e-mail, so Neville-the-observer is one click away.
+      const techs = meta.data?.technicians || [];
+      const seen = new Set(techs.map((t) => String(t.email || '').toLowerCase()));
+      const extra = (meta.data?.members || [])
+        .filter((m) => m.email && !seen.has(m.email))
+        .map((m) => ({ id: `member:${m.email}`, name: m.name || m.email, email: m.email, photoUrl: m.photoUrl || null, role: m.role, isActive: true }));
+      setMembers([...techs, ...extra]);
       setMembersUnavailable(false);
     } catch {
       setMembers([]);

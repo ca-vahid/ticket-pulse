@@ -573,7 +573,20 @@ class AssignmentPipelineService {
     });
 
     const localBlocker = getLocalTicketQueueBlocker(ticket, await this._customTerminalNames(ticket));
-    if (localBlocker) return localBlocker;
+    if (localBlocker) {
+      // QA 09-15 #4 (TP-1516): an after-hours run queued at 15:54 was skipped at
+      // 16:00 because an agent had picked the ticket up twelve seconds after it
+      // arrived — and with the run went the categorisation, so the ticket stayed
+      // Uncategorized. Assignment is moot once someone owns the ticket, but the
+      // category, priority and type are not: downgrade to the existing
+      // classification-only mode instead of throwing the run away.
+      if (localBlocker.reason === 'Ticket already assigned to a technician'
+        && run.triggerSource !== 'classification_only'
+        && await this._autoCategorizeEnabled(ticket.workspaceId)) {
+        return { valid: true, downgradeTo: 'classification_only', reason: localBlocker.reason };
+      }
+      return localBlocker;
+    }
 
     if (options.liveCheck !== false) {
       const freshserviceBlocker = await this._validateQueuedRunAgainstFreshService(ticket, options);
@@ -595,6 +608,15 @@ class AssignmentPipelineService {
     }
 
     return { valid: true };
+  }
+
+  async _autoCategorizeEnabled(workspaceId) {
+    try {
+      const cfg = await assignmentRepository.getConfig(workspaceId);
+      return cfg?.autoCategorizeEnabled === true;
+    } catch {
+      return false;
+    }
   }
 
   async _initializeQueueValidationClient(options = {}) {
@@ -783,10 +805,16 @@ class AssignmentPipelineService {
         skipped++;
         return;
       }
+      let triggerSource = run.triggerSource;
+      if (validation.downgradeTo) {
+        triggerSource = validation.downgradeTo;
+        await prisma.assignmentPipelineRun.update({ where: { id: run.id }, data: { triggerSource } }).catch(() => {});
+        logger.info('Queue drain: run downgraded to classification-only', { runId: run.id, ticketId: run.ticketId, reason: validation.reason });
+      }
 
       try {
         logger.info('Queue drain: processing queued run', { runId: run.id, ticketId: run.ticketId, workspaceId });
-        await this._executeRun(run.id, run.ticketId, workspaceId, run.triggerSource, Date.now(), () => {}, null);
+        await this._executeRun(run.id, run.ticketId, workspaceId, triggerSource, Date.now(), () => {}, null);
         processed++;
       } catch (error) {
         logger.error('Queue drain: run failed', { runId: run.id, error: error.message });

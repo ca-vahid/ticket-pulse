@@ -5,6 +5,12 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { fsConversationEntryIdCandidates, parseFsConversationId } from '../utils/fsEntryId.js';
 
+async function streamToBuffer(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB per file
 export const MAX_ATTACHMENTS_PER_TICKET = 20;
 
@@ -104,6 +110,37 @@ class AttachmentService {
     });
     logger.info(`Attachment stored: ${safeName} (${buffer.length} bytes) → ${this.containerName()}/${blobName}`);
     return attachment;
+  }
+
+  /**
+   * Copy an attachment onto another ticket as an independent row + blob
+   * (QA 09-15 #2: a split carries the parent's description attachments to the
+   * child). Blob names are unique per row, so a copy — never a shared blob —
+   * keeps deletes local to one ticket. FS-ingested rows fetch their bytes on
+   * demand exactly as a download would.
+   */
+  async copyToTicket(attachment, { ticketId, threadEntryId = null, uploadedBy = null }) {
+    let buffer;
+    try {
+      const response = await this._container().getBlockBlobClient(attachment.blobName).download();
+      buffer = await streamToBuffer(response.readableStreamBody);
+    } catch (err) {
+      if (attachment.source === 'freshservice' && err?.statusCode === 404) {
+        buffer = await this._fetchAndCacheFsAttachment(attachment);
+      } else {
+        throw err;
+      }
+    }
+    return this.upload({
+      workspaceId: attachment.workspaceId,
+      ticketId,
+      threadEntryId,
+      fileName: attachment.fileName,
+      contentType: attachment.contentType,
+      buffer,
+      uploadedBy,
+      source: 'copy',
+    });
   }
 
   // ---- FreshService attachment ingestion (QA 07-08) ----------------------

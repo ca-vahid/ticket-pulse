@@ -940,9 +940,10 @@ function EditDetailsPopover({ row, busy, onSave, onClose }) {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={3}
-        placeholder="What belongs in this category?"
+        placeholder="What belongs in this category? Name the words requesters actually use — e.g. “A-code”, “proposal number”."
         className="mt-1 w-full resize-none rounded-lg border border-border bg-muted/50 px-2.5 py-2 text-xs outline-none focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card"
       />
+      <p className="mt-1 text-[10.5px] leading-snug text-muted-foreground/80">The AI reads this description when it categorises a ticket — it is the one place to teach it your vocabulary (QA 09-15 #4).</p>
       <label className="mt-2 block text-[11px] font-medium text-muted-foreground" htmlFor={`edit-sort-${row.id}`}>Sort order</label>
       <input
         id={`edit-sort-${row.id}`}

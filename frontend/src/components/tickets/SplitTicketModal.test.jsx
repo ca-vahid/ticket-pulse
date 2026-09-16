@@ -78,6 +78,7 @@ describe('SplitTicketModal (QA 09-08)', () => {
         entryIds: [9002],
         subject: 'VPN drops every hour',
         moveAttachments: true,
+        includeDescription: true,
         notifyRequester: false,
       });
     });
@@ -117,5 +118,21 @@ describe('SplitTicketModal (QA 09-08)', () => {
     ticketsAPI.splittable.mockRejectedValue(new Error('network down'));
     render(<SplitTicketModal ticket={ticket} onClose={() => {}} onSplit={() => {}} />);
     expect(await screen.findByText('network down')).toBeInTheDocument();
+  });
+});
+
+describe('split — the original description option (QA 09-15 #2)', () => {
+  test('is on by default and can be turned off before submitting', async () => {
+    const onSplit = vi.fn();
+    render(<SplitTicketModal ticket={ticket} onClose={() => {}} onSplit={onSplit} />);
+    await screen.findByTestId('split-entries');
+    const box = screen.getByTestId('split-include-description');
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    fireEvent.change(screen.getByLabelText('New ticket subject'), { target: { value: 'Child' } });
+    fireEvent.click(screen.getByTestId('split-submit'));
+    await waitFor(() => {
+      expect(ticketsAPI.split).toHaveBeenCalledWith(500, expect.objectContaining({ includeDescription: false }));
+    });
   });
 });

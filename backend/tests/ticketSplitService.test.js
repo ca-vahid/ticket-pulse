@@ -16,11 +16,12 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   ticket: { findFirst: jest.fn() },
   ticketThreadEntry: { findMany: jest.fn(), createMany: jest.fn() },
-  ticketAttachment: { updateMany: jest.fn() },
+  ticketAttachment: { updateMany: jest.fn(), findMany: jest.fn() },
   ticketLink: { upsert: jest.fn() },
 };
 const ticketServiceMock = { createTicket: jest.fn(), addPrivateNote: jest.fn() };
 const linkServiceMock = { setParent: jest.fn() };
+const attachmentServiceMock = { copyToTicket: jest.fn() };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
@@ -31,6 +32,7 @@ jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({
 }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
 jest.unstable_mockModule('../src/services/ticketLinkService.js', () => ({ default: linkServiceMock }));
+jest.unstable_mockModule('../src/services/attachmentService.js', () => ({ default: attachmentServiceMock }));
 
 const { default: ticketSplitService } = await import('../src/services/ticketSplitService.js');
 
@@ -61,6 +63,8 @@ beforeEach(() => {
   });
   prismaMock.ticketThreadEntry.createMany.mockImplementation(({ data }) => Promise.resolve({ count: data.length }));
   prismaMock.ticketAttachment.updateMany.mockResolvedValue({ count: 1 });
+  prismaMock.ticketAttachment.findMany.mockResolvedValue([]);
+  attachmentServiceMock.copyToTicket.mockResolvedValue({ id: 1 });
   prismaMock.ticketLink.upsert.mockResolvedValue({});
   linkServiceMock.setParent.mockResolvedValue({});
   ticketServiceMock.addPrivateNote.mockResolvedValue({});
@@ -170,5 +174,58 @@ describe('ticketSplitService.split', () => {
   test('a ticket outside the workspace is a not-found, not an empty split', async () => {
     prismaMock.ticket.findFirst.mockResolvedValue(null);
     await expect(ticketSplitService.split(500, 2, { subject: 'VPN' }, actor)).rejects.toThrow(/no longer exists/);
+  });
+});
+
+describe('ticketSplitService.split — the original description travels with the split (QA 09-15 #2)', () => {
+  // TP-1517 "App Testing Feedback": three test-plan PDFs sat on the DESCRIPTION
+  // (no thread entry) and the child opened with "Split out of TP-1517" and
+  // nothing else. Copies, never moves: the parent keeps its evidence.
+  const descParent = { ...fsParent, description: '<p>Through Company Portal, install and test the following apps:</p><ul><li>AdminHub</li></ul>' };
+  const descAttachments = [
+    { id: 67048, ticketId: 500, workspaceId: 1, threadEntryId: null, fileName: 'BGC_AdminHub_Pilot_Checks.pdf', blobName: 'b1', contentType: 'application/pdf', source: 'upload' },
+    { id: 67049, ticketId: 500, workspaceId: 1, threadEntryId: null, fileName: 'BGC-Network-Drives-Test-Plan.pdf', blobName: 'b2', contentType: 'application/pdf', source: 'upload' },
+  ];
+
+  test('by default the child quotes the parent description and gets copies of its attachments', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(descParent);
+    prismaMock.ticketAttachment.findMany.mockResolvedValue(descAttachments);
+    const out = await ticketSplitService.split(500, 1, { subject: 'Child ticket - test', entryIds: [] }, actor);
+    const [, input] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.description).toContain('original description');
+    expect(input.description).toContain('<blockquote');
+    expect(input.description).toContain('AdminHub');
+    expect(attachmentServiceMock.copyToTicket).toHaveBeenCalledTimes(2);
+    expect(attachmentServiceMock.copyToTicket.mock.calls[0][1]).toMatchObject({ ticketId: 900 });
+    // The lookup targeted description-level rows only, and nothing on the parent moved.
+    expect(prismaMock.ticketAttachment.findMany.mock.calls[0][0].where).toMatchObject({ ticketId: 500, threadEntryId: null });
+    expect(prismaMock.ticketAttachment.updateMany).not.toHaveBeenCalled();
+    expect(out.attachmentsCopied).toBe(2);
+  });
+
+  test('the agent\'s own opening text comes first, the quoted original after it', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(descParent);
+    await ticketSplitService.split(500, 1, { subject: 'Child', entryIds: [], description: '<p>Just the DriveMapping part.</p>' }, actor);
+    const [, input] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.description.indexOf('DriveMapping')).toBeLessThan(input.description.indexOf('original description'));
+  });
+
+  test('includeDescription:false keeps today\'s placeholder and copies nothing', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(descParent);
+    prismaMock.ticketAttachment.findMany.mockResolvedValue(descAttachments);
+    const out = await ticketSplitService.split(500, 1, { subject: 'Child', entryIds: [], includeDescription: false }, actor);
+    const [, input] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.description).toContain('Split out of');
+    expect(attachmentServiceMock.copyToTicket).not.toHaveBeenCalled();
+    expect(out.attachmentsCopied).toBe(0);
+  });
+
+  test('one failed copy does not abort the split', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(descParent);
+    prismaMock.ticketAttachment.findMany.mockResolvedValue(descAttachments);
+    attachmentServiceMock.copyToTicket.mockRejectedValueOnce(new Error('blob gone')).mockResolvedValueOnce({ id: 2 });
+    const out = await ticketSplitService.split(500, 1, { subject: 'Child', entryIds: [] }, actor);
+    expect(out.attachmentsCopied).toBe(1);
+    expect(out.child.ref).toBe('TP-1050');
   });
 });

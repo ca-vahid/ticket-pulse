@@ -476,6 +476,19 @@ describe('AI suggestion read/act split (QA 08-19 #2)', () => {
     expect(decideSpy).not.toHaveBeenCalled();
   });
 
+  test('workspace switch off: a viewer gets no Suggested chip at all (QA 09-15 #1)', async () => {
+    roleRef.value = 'viewer';
+    metaSpy.mockResolvedValue({
+      data: { workspaceId: 1, nativeTicketingEnabled: false, technicians: [], groups: [], categoryTree: [], sources: [], tags: [], actor: { role: 'viewer' }, aiSuggestionsForBasic: false },
+    });
+    listSpy.mockResolvedValue({ data: { items: aiRows(), total: 2 } });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    await waitFor(() => expect(metaSpy).toHaveBeenCalled());
+    expect(screen.queryByText('Suggested · 89%')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/waiting on a reviewer/i)).not.toBeInTheDocument();
+  });
+
   test('reviewer keeps the actionable chip: a real button that opens the AI modal', async () => {
     roleRef.value = 'admin';
     listSpy.mockResolvedValue({ data: { items: aiRows(), total: 2 } });
