@@ -14,6 +14,7 @@ import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
+import { rememberTicket } from '../utils/recentSearches';
 import { plainTextToHtml } from '../utils/plainTextToHtml';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
 import { buildHistoryItems, countMachine } from '../utils/ticketHistory';
@@ -996,6 +997,7 @@ export default function TicketDetail() {
       }
       ticketRef.current = res.data;
       setTicket(res.data);
+      if (!silent) rememberTicket(res.data); // Search v2: "Recently viewed"
       setLoadError(null);
     } catch (err) {
       // The API client rethrows a plain Error: the problem body rides on
@@ -2250,7 +2252,11 @@ export default function TicketDetail() {
                           <PersonAvatar name={ticket.requester.name} size="h-12 w-12" textSize="text-base" />
                         )}
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-foreground truncate">{ticket.requester.name}</p>
+                          <p className="text-sm font-bold text-foreground truncate">
+                            {ticket.requesterId
+                              ? <Link to={`/requesters/${ticket.requesterId}`} state={{ from: `${location.pathname}${location.search}` }} className="tp-focus-ring rounded hover:text-primary hover:underline" title="Open this requester's page">{ticket.requester.name}</Link>
+                              : ticket.requester.name}
+                          </p>
                           {(() => {
                             const role = [
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,

@@ -375,10 +375,16 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 // posture as an unknown route) and values are size-capped: this is a
 // preference store, not a document store.
 
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'ui.theme']);
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
-const PREFERENCE_VALIDATORS = { 'ui.theme': (v) => ['system', 'light', 'dark'].includes(v) };
+const PREFERENCE_VALIDATORS = {
+  'ui.theme': (v) => ['system', 'light', 'dark'].includes(v),
+  // Search v2: the last few queries, newest first — strings only, short, few.
+  'ui.recentSearches': (v) => Array.isArray(v) && v.length <= 12 && v.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= 120),
+  'ui.layoutWidth': (v) => ['full', 'comfortable', 'classic'].includes(v),
+  'ui.ticketDensity': (v) => ['compact', 'roomy', 'dense'].includes(v),
+};
 const PREFERENCE_VALUE_MAX_BYTES = 8 * 1024;
 
 function parsePreferenceKey(req) {
@@ -428,6 +434,13 @@ router.put('/preferences/:key', asyncHandler(async (req, res) => {
 router.get('/requester-search', asyncHandler(async (req, res) => {
   const results = await ticketService.searchRequesters(String(req.query.q || ''));
   res.json({ success: true, data: results });
+}));
+
+// Search v2: the requester page — person + service history in this workspace.
+router.get('/requesters/:id', asyncHandler(async (req, res) => {
+  const { requesterProfile } = await import('../services/requesterPageService.js');
+  const data = await requesterProfile(req.params.id, req.workspaceId);
+  res.json({ success: true, data });
 }));
 
 // Compact requester history (counts) for the peek/detail requester cards.

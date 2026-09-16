@@ -4,13 +4,14 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, Check,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
-  Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Search, Settings2, ShieldCheck, Sparkles, UserRound, X,
+  Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import TicketPreview from '../components/tickets/TicketPreview';
 import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
+import TicketSearchBox from '../components/tickets/TicketSearchBox';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
@@ -1522,26 +1523,19 @@ export default function Tickets() {
                       </span>
                     )}
                   </button>
-                  <div className="relative order-3 basis-full min-w-0 sm:order-2 sm:basis-auto sm:flex-1 sm:min-w-[200px]">
-                    <Search className="w-4 h-4 text-muted-foreground/75 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                    <input
-                      type="search"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search subject, requester, TP-1042 or #12345… · Ctrl-K for everything"
-                      aria-label="Search tickets"
-                      className="tp-focus-ring w-full pl-9 pr-8 min-h-[44px] py-2 text-sm bg-card border border-input rounded-lg placeholder:text-muted-foreground/75"
-                    />
-                    {search && (
-                      <button
-                        onClick={() => setSearch('')}
-                        aria-label="Clear search"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/75 hover:text-muted-foreground rounded"
-                      >
-                        <X className="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
-                    )}
-                  </div>
+                  {/* Search v2 (16 Sep 2026): first in the row — it is what everyone
+                      reaches for. Recents on focus, results as you type, "/" focuses. */}
+                  <TicketSearchBox
+                    className="order-3 basis-full min-w-0 sm:order-1 sm:basis-auto sm:flex-1 sm:min-w-[240px]"
+                    value={search}
+                    onChange={setSearch}
+                    onApply={(q) => { setSearch(q); setParams({ q: q || null }); }}
+                    onOpenTicket={(id, { newTab } = {}) => { if (newTab) openTicket(id); else openPreview(id); }}
+                    onOpenRequester={(r) => navigate(`/requesters/${r.id}`, { state: { from: `${location.pathname}${location.search}` } })}
+                    onOpenAgent={(a) => navigate(`/technician/${a.id}`)}
+                    onOpenTask={(task) => { if (task?.ticket?.id) openTicket(`${task.ticket.id}?tab=tasks`); }}
+                    onFilterDepartment={(name) => { setSearch(name); setParams({ q: name }); }}
+                  />
                   {/* Force refresh — belt-and-suspenders next to the live/SSE
                       machinery: refetches the list + stat cards right now. */}
                   <button
@@ -1549,11 +1543,11 @@ export default function Tickets() {
                     disabled={manualRefreshing}
                     aria-label="Refresh tickets now"
                     title="Refresh now"
-                    className="tp-focus-ring order-2 sm:order-3 inline-flex items-center justify-center bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40 disabled:opacity-60"
+                    className="tp-focus-ring order-2 sm:order-4 inline-flex items-center justify-center bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40 disabled:opacity-60"
                   >
                     <RefreshCw className={`w-4 h-4 ${manualRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
                   </button>
-                  <div ref={sortMenuRef} className="relative order-2 sm:order-3">
+                  <div ref={sortMenuRef} className="relative order-2 sm:order-4">
                     <button
                       onClick={() => setSortMenuOpen((v) => !v)}
                       aria-expanded={sortMenuOpen}
@@ -1587,9 +1581,17 @@ export default function Tickets() {
                       </div>
                     )}
                   </div>
+                  {/* Columns customizer (Phase QC) — list layouts only; the
+                      board's columns are statuses, not these. Desktop-only:
+                      custom columns apply at xl+ and mobile keeps its cards. */}
+                  {!boardMode && (
+                    <div className="hidden md:block sm:order-2">
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} />
+                    </div>
+                  )}
                   {/* View — two list densities plus the drag-drop board
                       (Open / Pending / Closed columns, QA 07-27 #3). */}
-                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
+                  <div className="hidden md:inline-flex sm:order-3 items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
                     {[
                       { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
                       { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
@@ -1607,14 +1609,6 @@ export default function Tickets() {
                       </button>
                     ))}
                   </div>
-                  {/* Columns customizer (Phase QC) — list layouts only; the
-                      board's columns are statuses, not these. Desktop-only:
-                      custom columns apply at xl+ and mobile keeps its cards. */}
-                  {!boardMode && (
-                    <div className="hidden md:block">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} />
-                    </div>
-                  )}
                 </div>
 
                 {/* Top pagination + AI-approval worklist connector — controls at both ends */}

@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.06-preview';
+export const APP_VERSION = '3.9.07-preview';
 
 export const changelog = [
+  {
+    version: '3.9.07-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Search, front and centre</strong> — the search box is now first on the tickets toolbar (then Columns, then the view switch), and <kbd>/</kbd> focuses it from anywhere on the page. Click into it and you get your <em>recent searches</em> (kept per person, across devices, with clear-all) and the tickets you <em>recently viewed</em>. Type, and after a short pause the box searches on its own: tickets (with “View all N in the list”), requesters, agents, departments and tasks, grouped, with the matched text highlighted. Arrow keys move, Enter opens, Esc closes; a ticket opens in the peek panel (Ctrl-click for the full page). Typing <code>#242054</code>, <code>242054</code> or <code>TP-1042</code> shows an “Open …” row straight away.' },
+      { type: 'new', html: '<strong>Requester pages</strong> — every requester now has a page (<code>/requesters/:id</code>): who they are from the directory (title, department, office, phones, time zone), their service history in this workspace (open, resolved, total, last ticket, median resolution, what they usually ask about), their tickets, and New ticket / E-mail / FreshService actions. Reach it from search results, the Ctrl-K palette, and the requester’s name on the ticket page and in the peek.' },
+      { type: 'improved', html: '<strong>Search results know more</strong> — requesters whose name starts with what you typed come first, each shows how many tickets they have here, and ticket results carry status, assignee and date.' },
+    ],
+  },
   {
     version: '3.9.06-preview',
     date: 'September 16, 2026',

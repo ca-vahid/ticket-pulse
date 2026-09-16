@@ -57,24 +57,39 @@ class GlobalSearchService {
       tickets: () => this._tickets(workspaceId, query),
       tasks: () => this._tasks(workspaceId, query),
       agents: () => this._agents(workspaceId, query),
-      requesters: () => this._requesters(query),
+      requesters: () => this._requesters(query, workspaceId),
       departments: () => this._departments(workspaceId, query),
     };
     const results = await Promise.all(wanted.map((section) => runners[section]()));
-    wanted.forEach((section, i) => { sections[section] = results[i]; });
-    return { query, sections };
+    const totals = {};
+    wanted.forEach((section, i) => {
+      const r = results[i];
+      // Sections may return { rows, total } (tickets) or a bare array.
+      if (r && !Array.isArray(r) && Array.isArray(r.rows)) { sections[section] = r.rows; totals[section] = r.total; }
+      else sections[section] = r;
+    });
+    return { query, sections, totals };
   }
 
-  /** Queue-identical ticket matching, slimmed down to palette-row fields. */
+  /**
+   * Queue-identical ticket matching, slimmed down to result-row fields.
+   * Search v2 (16 Sep 2026): rows carry status / priority / assignee / date
+   * for the richer dropdown, and `total` feeds "View all (N)".
+   */
   async _tickets(workspaceId, q) {
-    const { items } = await ticketService.listTickets(workspaceId, { q, pageSize: SECTION_TAKE });
-    return items.map((t) => ({
+    const { items, total } = await ticketService.listTickets(workspaceId, { q, pageSize: SECTION_TAKE });
+    const rows = items.map((t) => ({
       id: t.id,
       displayRef: t.displayRef,
       subject: t.subject,
       status: t.status,
       requesterName: t.requester?.name || null,
+      priority: t.priority ?? null,
+      assigneeName: t.assignedTech?.name || null,
+      createdAt: t.createdAt || null,
+      origin: t.origin || null,
     }));
+    return { rows, total: Number.isFinite(Number(total)) ? Number(total) : rows.length };
   }
 
   async _tasks(workspaceId, q) {
@@ -131,8 +146,13 @@ class GlobalSearchService {
     }));
   }
 
-  /** Local requesters only — the create-flow typeahead's Entra branch is skipped here. */
-  async _requesters(q) {
+  /**
+   * Local requesters only — the create-flow typeahead's Entra branch is skipped here.
+   * Search v2: a name that STARTS with the query outranks a "contains" hit, and
+   * each row carries the person's ticket count in this workspace (people with
+   * history first — that is who the agent is usually looking for).
+   */
+  async _requesters(q, workspaceId = null) {
     const rows = await prisma.requester.findMany({
       where: {
         isActive: true,
@@ -143,15 +163,38 @@ class GlobalSearchService {
       },
       select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true },
       orderBy: { name: 'asc' },
-      take: SECTION_TAKE,
+      take: SECTION_TAKE * 3,
     });
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      email: r.email,
-      department: r.department || r.entraDepartment || null,
-      jobTitle: r.jobTitle || null,
-    }));
+    let counts = new Map();
+    if (workspaceId && rows.length && typeof prisma.ticket?.groupBy === 'function') {
+      try {
+        const grouped = await prisma.ticket.groupBy({
+          by: ['requesterId'],
+          where: { workspaceId, requesterId: { in: rows.map((r) => r.id) } },
+          _count: { _all: true },
+        });
+        counts = new Map(grouped.map((g) => [g.requesterId, g._count?._all || 0]));
+      } catch { counts = new Map(); }
+    }
+    const lq = q.toLowerCase();
+    const rank = (r) => {
+      const name = String(r.name || '').toLowerCase();
+      const email = String(r.email || '').toLowerCase();
+      if (name.startsWith(lq) || email.startsWith(lq)) return 0;
+      if (name.split(/\s+/).some((w) => w.startsWith(lq))) return 1;
+      return 2;
+    };
+    return rows
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        department: r.department || r.entraDepartment || null,
+        jobTitle: r.jobTitle || null,
+        ticketCount: counts.get(r.id) || 0,
+      }))
+      .sort((a, b) => (rank(a) - rank(b)) || (b.ticketCount - a.ticketCount) || String(a.name || '').localeCompare(String(b.name || '')))
+      .slice(0, SECTION_TAKE);
   }
 
   async _departments(workspaceId, q) {

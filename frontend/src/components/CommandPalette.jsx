@@ -325,7 +325,7 @@ export default function CommandPalette() {
         // The queue has a first-class requester filter (?requesterId= +
         // ?requesterName= for the banner) — use it.
         run: () => {
-          navigate(`/tickets?requesterId=${r.id}&requesterName=${encodeURIComponent(r.name || '')}`);
+          navigate(`/requesters/${r.id}`, { state: { from } });
           close();
         },
       });
