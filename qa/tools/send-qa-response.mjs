@@ -36,11 +36,14 @@ const n = C.rows.length;
 const html = `
 <div style="margin:0;padding:24px;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a">
 <div style="max-width:720px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0">
-  <div style="background:linear-gradient(135deg,#1d4ed8 0%,#6d28d9 100%);color:#fff;padding:26px 30px">
-    <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85">Ticket Pulse &middot; QA response</div>
-    <div style="font-size:24px;font-weight:700;margin-top:6px">Your ${PKG} package &mdash; all ${n} answered</div>
-    <div style="font-size:14px;opacity:.92;margin-top:6px">${C.headline}</div>
-  </div>
+  <!-- Header band: SOLID colour via bgcolor + background-color. Outlook drops CSS gradients,
+       which left white text on a white cell (Vahid, 15 Sep 2026). Never use a gradient behind text in e-mail. -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+  <td bgcolor="#1d4ed8" style="background-color:#1d4ed8;color:#ffffff;padding:26px 30px">
+    <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#dbeafe">Ticket Pulse &middot; QA response</div>
+    <div style="font-size:24px;font-weight:700;margin-top:6px;color:#ffffff">Your ${PKG} package &mdash; all ${n} answered</div>
+    <div style="font-size:14px;margin-top:6px;color:#eff6ff">${C.headline}</div>
+  </td></tr></table>
   <div style="padding:22px 30px 8px">
     <p style="margin:0 0 14px;font-size:15px;line-height:1.55">Hi Susan,</p>
     <p style="margin:0 0 14px;font-size:15px;line-height:1.55">${C.intro || `The full response to your ${PKG} package is attached as a PDF, with screenshots and the production data behind each verdict. Here is the short version.`}</p>
