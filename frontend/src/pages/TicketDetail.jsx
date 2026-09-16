@@ -2800,8 +2800,8 @@ export default function TicketDetail() {
                               <p role="alert" className="mb-2 flex items-start gap-1.5 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
                                 <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
                                 <span>
-                                  <strong>Forwarding is not set up in this workspace.</strong> It sends from the workspace mailbox, and {currentWorkspace?.name || 'this workspace'} has no mailbox in <em>Send</em> or <em>Both</em> mode
-                                  (Settings → Ticket Mailboxes; a workspace admin can switch the mailbox mode once it has the Mail.Send grant). Until then, reply to the requester and Cc the person instead.
+                                  <strong>Forwarding is not set up in this workspace.</strong> Forwards leave from a connected workspace mailbox, or from the e-mail service when the mailbox is read-only — and {currentWorkspace?.name || 'this workspace'} has neither right now
+                                  (Settings → Ticket Mailboxes, or the global e-mail sender). Until then, reply to the requester and Cc the person instead.
                                 </span>
                               </p>
                             )}
