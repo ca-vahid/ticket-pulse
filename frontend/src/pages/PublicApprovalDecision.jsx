@@ -593,6 +593,7 @@ export default function PublicApprovalDecision() {
             <ApprovalThread
               approval={approval}
               messages={approval.messages || []}
+              people={approval.participants ? [approval.participants.requester, approval.participants.agent, ...(approval.participants.approvers || [])].filter(Boolean) : []}
               viewerEmail={approval.approverEmail}
               viewerRole="approver"
               isDark={isDark}

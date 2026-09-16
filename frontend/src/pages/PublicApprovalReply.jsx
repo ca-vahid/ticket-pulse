@@ -156,6 +156,7 @@ export default function PublicApprovalReply() {
           <ApprovalThread
             approval={approvalShim}
             messages={thread}
+            people={participants ? [participants.requester, participants.agent, ...(participants.approvers || [])].filter(Boolean) : []}
             viewerEmail={recipient.email || null}
             viewerRole={recipient.role || null}
             isDark={isDark}

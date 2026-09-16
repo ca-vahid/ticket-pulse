@@ -575,7 +575,29 @@ export function buildOpenApiSpec(baseUrl) {
         }),
       },
       '/tickets/{id}/approvals': {
-        get: op('List approvals on a ticket (raw rows — prefer /approval for a verdict)', 'approvals:read', { tag: 'approvals' }),
+        get: op('List approvals on a ticket (raw rows — prefer /approval for a verdict)', 'approvals:read', {
+          tag: 'approvals',
+          responseRef: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'integer' },
+                status: { type: 'string', enum: ['pending', 'info_requested', 'approved', 'rejected', 'cancelled', 'expired', 'escalated', 'forwarded'] },
+                approverEmail: { type: 'string' },
+                approverName: { type: 'string', nullable: true },
+                requestedBy: { type: 'string', description: 'E-mail of the agent who asked.' },
+                requestNote: { type: 'string', nullable: true },
+                decisionNote: { type: 'string', nullable: true },
+                condition: { type: 'string', nullable: true, description: 'Approvals v3: the condition attached to an approval ("approve with condition"); null when approved outright or not decided.' },
+                tier: { type: 'integer', description: 'Approval tier this row sits on (1 = first tier).' },
+                decidedAt: { type: 'string', format: 'date-time', nullable: true },
+                createdAt: { type: 'string', format: 'date-time' },
+              },
+              example: { id: 88, status: 'approved', approverEmail: 'neville@example.com', approverName: 'Neville', requestedBy: 'mehdi@example.com', requestNote: 'Please approve', decisionNote: null, condition: 'UAT only — production needs a separate review', tier: 2, decidedAt: '2026-09-16T20:10:00.000Z', createdAt: '2026-09-16T18:12:00.000Z' },
+            },
+          },
+        }),
         post: op('Request approval against a category', 'approvals:write', { tag: 'approvals', body: { type: 'object', required: ['approvalCategoryId'], properties: { approvalCategoryId: { type: 'integer' }, note: { type: 'string' } } }, status: 201 }),
       },
       '/tags': { get: op('List the workspace tag palette', 'tags:read', { tag: 'taxonomy' }) },
