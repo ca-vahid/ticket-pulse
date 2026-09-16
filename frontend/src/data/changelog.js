@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.4-preview';
+export const APP_VERSION = '3.9.5-preview';
 
 export const changelog = [
+  {
+    version: '3.9.5-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Request approval sees every tier again</strong> — the ticket page loaded approval categories without their tier chain, so a two-tier category such as Cybersecurity &amp; Risk showed only Tier 1 and told its Tier 1 approver “you are the only approver on every tier”. The chain, the amount flag and the currency now travel with the category, so the modal lists Tier 2 and lets a Tier 1 approver send the request straight to it.' },
+    ],
+  },
   {
     version: '3.9.4-preview',
     date: 'September 16, 2026',
