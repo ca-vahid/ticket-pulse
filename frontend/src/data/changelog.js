@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.89-preview';
+export const APP_VERSION = '3.8.90-preview';
 
 export const changelog = [
+  {
+    version: '3.8.90-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>3.8.89 hotfix: assignment sync restored</strong> — the 3.8.89 migration named the wrong table, so the new per-workspace AI-visibility column never reached production and every assignment fast sync failed for about eight minutes after the deploy. The column was added by hand at 6:03 PM PT and the migration file is corrected here.' },
+    ],
+  },
   {
     version: '3.8.89-preview',
     date: 'September 15, 2026',
