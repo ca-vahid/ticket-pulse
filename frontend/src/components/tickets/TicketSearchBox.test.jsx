@@ -13,6 +13,8 @@ const apiMock = vi.hoisted(() => ({
   ticketsAPI: { requesterPhoto: vi.fn().mockResolvedValue({ data: { photo: null } }) },
 }));
 vi.mock('../../services/api', () => apiMock);
+const wsMock = vi.hoisted(() => ({ switchWorkspace: vi.fn() }));
+vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT' }, availableWorkspaces: [{ id: 1, name: 'IT' }, { id: 2, name: 'Accounting' }], switchWorkspace: wsMock.switchWorkspace }) }));
 
 import TicketSearchBox, { SEARCH_IDLE_MS, directRef } from './TicketSearchBox';
 import { RECENT_SEARCHES_KEY, RECENT_TICKETS_KEY } from '../../utils/recentSearches';
@@ -85,7 +87,7 @@ describe('TicketSearchBox', () => {
     fireEvent.change(box, { target: { value: 'sabina' } });
     expect(screen.getByLabelText('Searching')).toBeInTheDocument();
     expect(apiMock.searchAPI.global).not.toHaveBeenCalled();
-    await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenCalledWith('sabina'), { timeout: SEARCH_IDLE_MS + 1500 });
+    await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenCalledWith('sabina', undefined, { scope: undefined }), { timeout: SEARCH_IDLE_MS + 1500 });
     const panel = await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 });
     expect(within(panel).getByText('Tickets')).toBeInTheDocument();
     expect(within(panel).getByText('196')).toBeInTheDocument();
@@ -161,5 +163,36 @@ describe('TicketSearchBox', () => {
     await within(panel).findByText('fresh one');
     expect(within(panel).getByText('fresh one')).toBeInTheDocument();
     expect(within(panel).queryByText('stale')).not.toBeInTheDocument();
+  });
+
+  test('Search v3: "Include conversations" adds the section, "All my workspaces" tags rows and a cross-workspace hit switches there', async () => {
+    localStorage.clear();
+    apiMock.searchAPI.global.mockResolvedValue({ data: { sections: {
+      tickets: [{ id: 5, displayRef: 'TP-5', subject: 'VPN in AP', status: 'Open', workspaceId: 2, workspaceName: 'Accounting' }],
+      conversations: [{ id: 77, entryId: 77, ticketId: 45321, displayRef: '#242758', subject: 'Kamloops headsets', status: 'Open', where: 'conversation', authorName: 'Corina Schnell', snippet: 'the [[Jabra]] speakers arrived', workspaceId: 1, workspaceName: 'IT' }],
+    }, totals: { tickets: 1, conversations: 1 } } });
+    const onOpenTicket = vi.fn();
+    render(<Harness onOpenTicket={onOpenTicket} />);
+    const box = screen.getByRole('combobox', { name: 'Search tickets' });
+    fireEvent.change(box, { target: { value: 'jabra' } });
+    await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 });
+    fireEvent.click(screen.getByLabelText('Include conversations'));
+    fireEvent.click(screen.getByLabelText('All my workspaces'));
+    await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenLastCalledWith('jabra', 'tickets,tasks,agents,requesters,departments,conversations', { scope: 'all' }), { timeout: 2000 });
+    expect(localStorage.getItem('tp_search_conversations')).toBe('1');
+    expect(localStorage.getItem('tp_search_scope')).toBe('1');
+    const panel = await screen.findByRole('listbox', { name: 'Search results' });
+    expect(within(panel).getByText('In conversations')).toBeInTheDocument();
+    expect(within(panel).getByText(/Corina Schnell:/)).toBeInTheDocument();
+    expect(within(panel).getByText('Jabra').tagName).toBe('MARK');
+    expect(within(panel).getByText('Accounting')).toBeInTheDocument(); // workspace tag on the AP ticket
+    // conversation hit in this workspace → opens here
+    fireEvent.click(within(panel).getByText(/Corina Schnell:/));
+    expect(onOpenTicket).toHaveBeenCalledWith(45321, { newTab: false });
+    // ticket in the other workspace → switch and land on it
+    fireEvent.focus(box);
+    fireEvent.click(await screen.findByText('VPN in AP'));
+    expect(wsMock.switchWorkspace).toHaveBeenCalledWith(2, { landOn: '/tickets/5' });
+    expect(onOpenTicket).toHaveBeenCalledTimes(1);
   });
 });

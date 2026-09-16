@@ -491,7 +491,16 @@ class MirrorService {
         workspaceId: ticket.workspace?.freshserviceWorkspaceId ? String(ticket.workspace.freshserviceWorkspaceId) : null,
       });
       if (!categoryDisplayId) {
-        logger.warn(`Mirror: could not resolve FS lookup id for category "${skill}" — skipping category custom fields`);
+        // Hourly review 16 Sep 2026: a category with no FS lookup value (the
+        // PA reorg names) warned on every mirror pass of every ticket in it
+        // (36 lines/day for three names). Once an hour per category is enough
+        // to keep it visible — the fix is a lookup value in FreshService.
+        if (!this._lookupWarnedAt) this._lookupWarnedAt = new Map();
+        const prev = this._lookupWarnedAt.get(skill) || 0;
+        if (Date.now() - prev >= CONFLICT_WARN_INTERVAL_MS) {
+          this._lookupWarnedAt.set(skill, Date.now());
+          logger.warn(`Mirror: could not resolve FS lookup id for category "${skill}" — skipping category custom fields (repeats are muted for an hour)`);
+        }
         return null;
       }
       const fields = { [categoryField]: categoryDisplayId };

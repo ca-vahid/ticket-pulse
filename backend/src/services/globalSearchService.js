@@ -30,7 +30,12 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
  *   departments this workspace has never seen.
  */
 
-export const SEARCH_SECTIONS = ['tickets', 'tasks', 'agents', 'requesters', 'departments'];
+export const SEARCH_SECTIONS = ['tickets', 'tasks', 'agents', 'requesters', 'departments', 'conversations'];
+// 'conversations' is opt-in: it is not part of the default section set.
+export const DEFAULT_SECTIONS = ['tickets', 'tasks', 'agents', 'requesters', 'departments'];
+// Search v3: fuzzy people matching (pg_trgm). Below this similarity a name is noise.
+const FUZZY_MIN_SIMILARITY = 0.3;
+let trigramAvailable = null; // null = unknown, false = extension missing (checked once)
 
 const SECTION_TAKE = 7;
 const MIN_QUERY_LENGTH = 2;
@@ -41,24 +46,32 @@ export function parseSearchTypes(raw) {
     .map((s) => String(s).trim().toLowerCase())
     .filter(Boolean);
   const wanted = SEARCH_SECTIONS.filter((s) => values.includes(s));
-  return wanted.length ? wanted : [...SEARCH_SECTIONS];
+  return wanted.length ? wanted : [...DEFAULT_SECTIONS];
 }
 
+
 class GlobalSearchService {
-  async search(workspaceId, { q, types } = {}) {
+  /**
+   * @param {object} opts  { q, types, workspaceIds } — `workspaceIds` (Search v3
+   *   scope switch) runs the ticket / conversation / task sections across every
+   *   workspace the caller may see, tagging rows with their workspace.
+   */
+  async search(workspaceId, { q, types, workspaceIds = null } = {}) {
     const query = String(q || '').trim();
     const wanted = parseSearchTypes(types);
-
     const sections = {};
     for (const section of wanted) sections[section] = [];
-    if (query.length < MIN_QUERY_LENGTH) return { query, sections };
+    if (query.length < MIN_QUERY_LENGTH) return { query, sections, totals: {} };
 
+    const scopes = Array.isArray(workspaceIds) && workspaceIds.length ? [...new Set(workspaceIds.map(Number).filter(Number.isFinite))] : null;
+    const across = scopes && (scopes.length > 1 || scopes[0] !== Number(workspaceId));
     const runners = {
-      tickets: () => this._tickets(workspaceId, query),
-      tasks: () => this._tasks(workspaceId, query),
+      tickets: () => (across ? this._acrossWorkspaces(scopes, (ws) => this._tickets(ws, query)) : this._tickets(workspaceId, query)),
+      tasks: () => (across ? this._acrossWorkspaces(scopes, (ws) => this._tasks(ws, query)) : this._tasks(workspaceId, query)),
       agents: () => this._agents(workspaceId, query),
       requesters: () => this._requesters(query, workspaceId),
       departments: () => this._departments(workspaceId, query),
+      conversations: () => (across ? this._acrossWorkspaces(scopes, (ws) => this._conversations(ws, query)) : this._conversations(workspaceId, query)),
     };
     const results = await Promise.all(wanted.map((section) => runners[section]()));
     const totals = {};
@@ -69,6 +82,98 @@ class GlobalSearchService {
       else sections[section] = r;
     });
     return { query, sections, totals };
+  }
+
+  /** Run a per-workspace section across several workspaces; rows carry workspaceId/workspaceName. */
+  async _acrossWorkspaces(workspaceIds, run) {
+    const names = new Map((await prisma.workspace.findMany({ where: { id: { in: workspaceIds } }, select: { id: true, name: true } }).catch(() => [])).map((w) => [w.id, w.name]));
+    const results = await Promise.all(workspaceIds.map(async (ws) => {
+      try { return [ws, await run(ws)]; } catch { return [ws, []]; }
+    }));
+    let rows = []; let total = 0; let hasTotal = false;
+    for (const [ws, r] of results) {
+      const list = Array.isArray(r) ? r : (r?.rows || []);
+      if (r && !Array.isArray(r) && Number.isFinite(r.total)) { total += r.total; hasTotal = true; }
+      rows.push(...list.map((row) => ({ ...row, workspaceId: ws, workspaceName: names.get(ws) || null })));
+    }
+    rows = rows.slice(0, SECTION_TAKE * 2);
+    return hasTotal ? { rows, total } : rows;
+  }
+
+  /**
+   * Search v3 — full-text over conversation bodies (and the ticket's own
+   * subject + description), English stemming, ranked, with a highlighted
+   * snippet. Uses the GIN indexes from 20260916230000_search_v3_fuzzy_fulltext.
+   */
+  async _conversations(workspaceId, q) {
+    if (typeof prisma.$queryRaw !== 'function') return { rows: [], total: 0 };
+    try {
+      const rows = await prisma.$queryRaw`
+        WITH hits AS (
+          SELECT e.id AS entry_id, e.ticket_id, e.actor_name, e.occurred_at, e.event_type,
+                 ts_rank(to_tsvector('english', coalesce(e.body_text, '')), plainto_tsquery('english', ${q})) AS rank,
+                 ts_headline('english', left(coalesce(e.body_text, ''), 4000), plainto_tsquery('english', ${q}),
+                             'MaxWords=18, MinWords=8, StartSel=[[, StopSel=]], MaxFragments=1') AS snippet
+          FROM ticket_thread_entries e
+          WHERE e.workspace_id = ${workspaceId}
+            AND to_tsvector('english', coalesce(e.body_text, '')) @@ plainto_tsquery('english', ${q})
+          UNION ALL
+          SELECT NULL AS entry_id, t.id AS ticket_id, NULL AS actor_name, t.created_at AS occurred_at, 'description' AS event_type,
+                 ts_rank(to_tsvector('english', coalesce(t.subject, '') || ' ' || coalesce(t.description_text, '')), plainto_tsquery('english', ${q})) AS rank,
+                 ts_headline('english', left(coalesce(t.description_text, ''), 4000), plainto_tsquery('english', ${q}),
+                             'MaxWords=18, MinWords=8, StartSel=[[, StopSel=]], MaxFragments=1') AS snippet
+          FROM tickets t
+          WHERE t.workspace_id = ${workspaceId} AND t.is_noise = false
+            AND to_tsvector('english', coalesce(t.subject, '') || ' ' || coalesce(t.description_text, '')) @@ plainto_tsquery('english', ${q})
+        )
+        SELECT h.entry_id, h.ticket_id, h.actor_name, h.occurred_at, h.event_type, h.rank, h.snippet,
+               t.subject, t.status, t.origin, t.native_number, t.freshservice_ticket_id,
+               count(*) OVER () AS total
+        FROM hits h JOIN tickets t ON t.id = h.ticket_id
+        WHERE t.is_noise = false
+        ORDER BY h.rank DESC, h.occurred_at DESC
+        LIMIT ${SECTION_TAKE}`;
+      const total = rows.length ? Number(rows[0].total) : 0;
+      return {
+        total,
+        rows: rows.map((r) => ({
+          id: r.entry_id === null ? `t-${r.ticket_id}` : Number(r.entry_id),
+          entryId: r.entry_id === null ? null : Number(r.entry_id),
+          ticketId: Number(r.ticket_id),
+          displayRef: ticketDisplayRef({ id: r.ticket_id, origin: r.origin, nativeNumber: r.native_number, freshserviceTicketId: r.freshservice_ticket_id }),
+          subject: r.subject,
+          status: r.status,
+          where: r.event_type === 'description' ? 'description' : 'conversation',
+          authorName: r.actor_name || null,
+          at: r.occurred_at,
+          snippet: r.snippet || '',
+        })),
+      };
+    } catch (err) {
+      // Index/extension not there yet, or a query the parser rejects — the
+      // section is empty rather than the whole search failing.
+      return { rows: [], total: 0, unavailable: true, reason: String(err?.message || err).slice(0, 120) };
+    }
+  }
+
+  /**
+   * Search v3 — trigram similarity fallback for people. Only runs when the
+   * exact "contains" match found nothing; a missing extension turns it off.
+   */
+  async _fuzzyPeople(table, q, extraWhere = '') {
+    if (trigramAvailable === false || typeof prisma.$queryRawUnsafe !== 'function') return [];
+    try {
+      const sql = `SELECT id, name, email, similarity(lower(name), lower($1)) AS sim FROM ${table}
+        WHERE ${extraWhere ? `${extraWhere} AND ` : ''}(lower(name) % lower($1) OR lower(coalesce(email, '')) % lower($1))
+          AND similarity(lower(name), lower($1)) >= ${FUZZY_MIN_SIMILARITY}
+        ORDER BY sim DESC LIMIT ${SECTION_TAKE}`;
+      const rows = await prisma.$queryRawUnsafe(sql, q);
+      trigramAvailable = true;
+      return rows;
+    } catch (err) {
+      if (/similarity|operator does not exist|pg_trgm/i.test(String(err?.message || ''))) trigramAvailable = false;
+      return [];
+    }
   }
 
   /**
@@ -141,6 +246,14 @@ class GlobalSearchService {
       orderBy: { name: 'asc' },
       take: SECTION_TAKE,
     });
+    if (rows.length === 0 && q.length >= 3) {
+      const fuzzy = await this._fuzzyPeople('technicians', q, `workspace_id = ${Number(workspaceId)} AND is_active = true`);
+      if (fuzzy.length) {
+        const full = await prisma.technician.findMany({ where: { id: { in: fuzzy.map((f) => Number(f.id)) } }, select: { id: true, name: true, email: true, photoUrl: true, location: true } });
+        const order = new Map(fuzzy.map((f, i) => [Number(f.id), i]));
+        return full.sort((a, b) => order.get(a.id) - order.get(b.id)).map((t) => ({ id: t.id, name: t.name, email: t.email, photoUrl: t.photoUrl || null, location: t.location || null, fuzzy: true }));
+      }
+    }
     return rows.map((t) => ({
       id: t.id, name: t.name, email: t.email, photoUrl: t.photoUrl || null, location: t.location || null,
     }));
@@ -153,7 +266,7 @@ class GlobalSearchService {
    * history first — that is who the agent is usually looking for).
    */
   async _requesters(q, workspaceId = null) {
-    const rows = await prisma.requester.findMany({
+    let rows = await prisma.requester.findMany({
       where: {
         isActive: true,
         OR: [
@@ -165,6 +278,14 @@ class GlobalSearchService {
       orderBy: { name: 'asc' },
       take: SECTION_TAKE * 3,
     });
+    let fuzzyIds = null;
+    if (rows.length === 0 && q.length >= 3) {
+      const fuzzy = await this._fuzzyPeople('requesters', q, 'is_active = true');
+      if (fuzzy.length) {
+        fuzzyIds = new Map(fuzzy.map((f, i) => [Number(f.id), i]));
+        rows = await prisma.requester.findMany({ where: { id: { in: [...fuzzyIds.keys()] } }, select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true } });
+      }
+    }
     let counts = new Map();
     if (workspaceId && rows.length && typeof prisma.ticket?.groupBy === 'function') {
       try {
@@ -178,6 +299,7 @@ class GlobalSearchService {
     }
     const lq = q.toLowerCase();
     const rank = (r) => {
+      if (fuzzyIds) return fuzzyIds.get(r.id) ?? 99; // similarity order from the database
       const name = String(r.name || '').toLowerCase();
       const email = String(r.email || '').toLowerCase();
       if (name.startsWith(lq) || email.startsWith(lq)) return 0;
@@ -192,6 +314,7 @@ class GlobalSearchService {
         department: r.department || r.entraDepartment || null,
         jobTitle: r.jobTitle || null,
         ticketCount: counts.get(r.id) || 0,
+        ...(fuzzyIds ? { fuzzy: true } : {}),
       }))
       .sort((a, b) => (rank(a) - rank(b)) || (b.ticketCount - a.ticketCount) || String(a.name || '').localeCompare(String(b.name || '')))
       .slice(0, SECTION_TAKE);

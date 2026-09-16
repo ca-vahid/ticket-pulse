@@ -1265,8 +1265,10 @@ export const uiPreferencesAPI = {
  * server-side. `types` narrows to a comma-separated subset; omit for all.
  */
 export const searchAPI = {
-  global: async (q, types) => {
-    return await api.get('/search', { params: { q, ...(types ? { types } : {}) } });
+  // Search v3: `types` may include 'conversations' (opt-in full-text over
+  // bodies); `scope: 'all'` searches every workspace the caller may see.
+  global: async (q, types, { scope } = {}) => {
+    return await api.get('/search', { params: { q, ...(types ? { types } : {}), ...(scope === 'all' ? { scope: 'all' } : {}) } });
   },
 };
 

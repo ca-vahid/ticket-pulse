@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.9.09-preview';
+export const APP_VERSION = '3.9.10-preview';
 
 export const changelog = [
+  {
+    version: '3.9.10-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Search inside conversations</strong> — tick <em>Include conversations</em> under the search box and the results gain an “In conversations” group: replies, notes and descriptions that contain your words, ranked, each with a snippet that highlights the match. Full-text search with English stemming (“printers” finds “printer”), on new indexes.' },
+      { type: 'new', html: '<strong>Fuzzy people names</strong> — when an exact match finds nobody, requesters and agents are matched by similarity, so “Nevil” finds Neville and a mistyped surname still lands. Fuzzy hits are ranked by closeness.' },
+      { type: 'new', html: '<strong>All my workspaces</strong> — a second tick under the search box searches every workspace you can see; each hit shows its workspace, and opening one switches you there and lands on the ticket.' },
+      { type: 'improved', html: '<strong>Ctrl-K knows your recents too</strong> — the command palette opens with your recent searches and recently viewed tickets above the commands.' },
+      { type: 'database', html: 'Migration <code>20260916230000_search_v3_fuzzy_fulltext</code>: enables <code>pg_trgm</code>, trigram indexes on requester and technician names, full-text indexes on tickets and conversation bodies. Applied by hand after the merge; the <code>azure.extensions</code> server parameter now lists PG_TRGM.' },
+    ],
+  },
   {
     version: '3.9.09-preview',
     date: 'September 16, 2026',

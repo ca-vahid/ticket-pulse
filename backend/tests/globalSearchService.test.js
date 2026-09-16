@@ -20,7 +20,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-const { default: globalSearchService, parseSearchTypes, SEARCH_SECTIONS } =
+const { default: globalSearchService, parseSearchTypes, SEARCH_SECTIONS, DEFAULT_SECTIONS } =
   await import('../src/services/globalSearchService.js');
 
 // A cross-workspace task fixture: the mock honours the where-clause's
@@ -57,17 +57,18 @@ beforeEach(() => {
 });
 
 describe('parseSearchTypes', () => {
-  test('defaults to every section', () => {
-    expect(parseSearchTypes(undefined)).toEqual(SEARCH_SECTIONS);
-    expect(parseSearchTypes('')).toEqual(SEARCH_SECTIONS);
+  test('defaults to every DEFAULT section (conversations stay opt-in)', () => {
+    expect(parseSearchTypes(undefined)).toEqual(DEFAULT_SECTIONS);
+    expect(parseSearchTypes('')).toEqual(DEFAULT_SECTIONS);
+    expect(parseSearchTypes('tickets,conversations')).toEqual(['tickets', 'conversations']);
   });
 
   test('keeps only known sections, case-insensitively', () => {
     expect(parseSearchTypes('Tasks, agents ,bogus')).toEqual(['tasks', 'agents']);
   });
 
-  test('all-unknown input falls back to every section', () => {
-    expect(parseSearchTypes('bogus,nope')).toEqual(SEARCH_SECTIONS);
+  test('all-unknown input falls back to the default sections', () => {
+    expect(parseSearchTypes('bogus,nope')).toEqual(DEFAULT_SECTIONS);
   });
 });
 

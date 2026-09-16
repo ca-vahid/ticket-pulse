@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Building2, CheckSquare, Clock, CornerDownLeft, History, Loader2, Search, Ticket as TicketIcon, UserRound, Users, X,
+  Building2, CheckSquare, Clock, CornerDownLeft, Globe, History, Loader2, MessageSquareText, Search, Ticket as TicketIcon, UserRound, Users, X,
 } from 'lucide-react';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { searchAPI } from '../../services/api';
 import { PersonAvatar, StatusPill, timeAgoShort } from './ticketUi';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
@@ -50,8 +51,22 @@ export function directRef(q) {
   return null;
 }
 
+const CONVERSATIONS_KEY = 'tp_search_conversations';
+const SCOPE_KEY = 'tp_search_scope';
+const readFlag = (key, fallback) => { try { const v = localStorage.getItem(key); return v === null ? fallback : v === '1'; } catch { return fallback; } };
+const writeFlag = (key, on) => { try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* no-op */ } };
+
+/** ts_headline markers → <mark>. */
+function Snippet({ text }) {
+  const parts = String(text || '').split(/(\[\[.*?\]\])/g);
+  return parts.map((p, i) => (p.startsWith('[[') && p.endsWith(']]')
+    ? <mark key={i} className="rounded-[3px] bg-amber-200/70 px-px text-inherit dark:bg-amber-400/30">{p.slice(2, -2)}</mark>
+    : <span key={i}>{p}</span>));
+}
+
 const SECTION_META = {
   tickets: { label: 'Tickets', Icon: TicketIcon },
+  conversations: { label: 'In conversations', Icon: MessageSquareText },
   requesters: { label: 'Requesters', Icon: UserRound },
   agents: { label: 'Agents', Icon: Users },
   departments: { label: 'Departments', Icon: Building2 },
@@ -98,6 +113,11 @@ export default function TicketSearchBox({
   const [results, setResults] = useState(null); // { sections, totals, query }
   const [searching, setSearching] = useState(false);
   const [active, setActive] = useState(-1);
+  // Search v3: opt-in full-text over conversation bodies, and a workspace scope.
+  const [withConversations, setWithConversations] = useState(() => readFlag(CONVERSATIONS_KEY, false));
+  const [allWorkspaces, setAllWorkspaces] = useState(() => readFlag(SCOPE_KEY, false));
+  const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
+  const canSwitchScope = (availableWorkspaces || []).length > 1;
   const timerRef = useRef(null);
   const seqRef = useRef(0);
   const q = String(value || '').trim();
@@ -138,7 +158,8 @@ export default function TicketSearchBox({
     setSearching(true);
     const seq = ++seqRef.current;
     timerRef.current = setTimeout(() => {
-      searchAPI.global(q)
+      const types = withConversations ? 'tickets,tasks,agents,requesters,departments,conversations' : undefined;
+      searchAPI.global(q, types, { scope: allWorkspaces && canSwitchScope ? 'all' : undefined })
         .then((res) => {
           if (seqRef.current !== seq) return;
           const data = res?.data || res || {};
@@ -148,7 +169,17 @@ export default function TicketSearchBox({
         .catch(() => { if (seqRef.current === seq) { setResults({ query: q, sections: {}, totals: {}, error: true }); setSearching(false); } });
     }, SEARCH_IDLE_MS);
     return () => clearTimeout(timerRef.current);
-  }, [q]);
+  }, [q, withConversations, allWorkspaces, canSwitchScope]);
+
+  // A hit in another workspace: switch there, then open. switchWorkspace()
+  // reloads the app, so the destination rides along as the path to land on.
+  const openInWorkspace = useCallback((row, open) => {
+    if (row.workspaceId && currentWorkspace?.id && Number(row.workspaceId) !== Number(currentWorkspace.id)) {
+      switchWorkspace(Number(row.workspaceId), { landOn: `/tickets/${row.ticketId || row.id}` });
+      return;
+    }
+    open();
+  }, [currentWorkspace?.id, switchWorkspace]);
 
   useEffect(() => { setActive(-1); }, [q, results, open]);
 
@@ -178,7 +209,10 @@ export default function TicketSearchBox({
       } });
     }
     for (const t of (s.tickets || []).slice(0, TICKET_ROWS)) {
-      out.push({ key: `t-${t.id}`, kind: 'ticket', ticket: t, run: (e) => { setRecent(rememberSearch(q)); onOpenTicket?.(t.id, { newTab: Boolean(e?.metaKey || e?.ctrlKey) }); setOpen(false); } });
+      out.push({ key: `t-${t.workspaceId || 'w'}-${t.id}`, kind: 'ticket', ticket: t, run: (e) => { setRecent(rememberSearch(q)); openInWorkspace(t, () => onOpenTicket?.(t.id, { newTab: Boolean(e?.metaKey || e?.ctrlKey) })); setOpen(false); } });
+    }
+    for (const c of (s.conversations || [])) {
+      out.push({ key: `c-${c.workspaceId || 'w'}-${c.id}`, kind: 'conversation', conversation: c, run: (e) => { setRecent(rememberSearch(q)); openInWorkspace(c, () => onOpenTicket?.(c.ticketId, { newTab: Boolean(e?.metaKey || e?.ctrlKey) })); setOpen(false); } });
     }
     const total = results?.totals?.tickets;
     if ((s.tickets || []).length > 0) out.push({ key: 'view-all', kind: 'view-all', total, run: () => apply(q) });
@@ -187,7 +221,7 @@ export default function TicketSearchBox({
     for (const d of (s.departments || [])) out.push({ key: `d-${d.name}`, kind: 'department', department: d, run: () => { onFilterDepartment?.(d.name); setOpen(false); } });
     for (const task of (s.tasks || [])) out.push({ key: `k-${task.id}`, kind: 'task', task, run: () => { onOpenTask?.(task); setOpen(false); } });
     return out;
-  }, [q, recent, recentTickets, results, apply, onOpenTicket, onOpenRequester, onOpenAgent, onFilterDepartment, onOpenTask]);
+  }, [q, recent, recentTickets, results, apply, onOpenTicket, onOpenRequester, onOpenAgent, onFilterDepartment, onOpenTask, openInWorkspace]);
 
   const onKeyDown = (e) => {
     if (e.key === 'Escape') { setOpen(false); inputRef.current?.blur(); return; }
@@ -291,7 +325,7 @@ export default function TicketSearchBox({
                   );
                 }
                 const first = rows.findIndex((r) => r.kind === row.kind) === i;
-                const meta = SECTION_META[row.kind === 'view-all' ? 'tickets' : row.kind === 'requester' ? 'requesters' : row.kind === 'agent' ? 'agents' : row.kind === 'department' ? 'departments' : row.kind === 'task' ? 'tasks' : 'tickets'];
+                const meta = SECTION_META[row.kind === 'view-all' ? 'tickets' : row.kind === 'requester' ? 'requesters' : row.kind === 'agent' ? 'agents' : row.kind === 'department' ? 'departments' : row.kind === 'task' ? 'tasks' : row.kind === 'conversation' ? 'conversations' : 'tickets'];
                 return (
                   <div key={row.key}>
                     {first && row.kind !== 'view-all' && (
@@ -300,6 +334,7 @@ export default function TicketSearchBox({
                     {row.kind === 'ticket' && (
                       <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={(e) => row.run(e)} className={rowClass(i)} title="Open in the peek panel · Ctrl-click for the full page">
                         <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground">{row.ticket.displayRef}</span>
+                        {row.ticket.workspaceName && <span className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] font-semibold text-muted-foreground">{row.ticket.workspaceName}</span>}
                         <span className="min-w-0 flex-1 truncate text-foreground"><Highlight text={row.ticket.subject || '(no subject)'} q={q} /></span>
                         <span className="hidden shrink-0 items-center gap-2 text-[11px] text-muted-foreground sm:inline-flex">
                           {row.ticket.requesterName && <span className="max-w-[140px] truncate"><Highlight text={row.ticket.requesterName} q={q} /></span>}
@@ -338,6 +373,21 @@ export default function TicketSearchBox({
                         <span className="shrink-0 text-[11px] text-muted-foreground">filter the list →</span>
                       </button>
                     )}
+                    {row.kind === 'conversation' && (
+                      <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={(e) => row.run(e)} className={`${rowClass(i)} !items-start`} title="Open the ticket">
+                        <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2 text-[12px]">
+                            <span className="font-mono font-bold text-muted-foreground">{row.conversation.displayRef}</span>
+                            {row.conversation.workspaceName && <span className="rounded border border-border bg-muted/60 px-1 py-px text-[10px] font-semibold text-muted-foreground">{row.conversation.workspaceName}</span>}
+                            <span className="truncate text-foreground">{row.conversation.subject || '(no subject)'}</span>
+                          </span>
+                          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                            {row.conversation.where === 'description' ? 'Description' : (row.conversation.authorName || 'Someone')}: <Snippet text={row.conversation.snippet} />
+                          </span>
+                        </span>
+                      </button>
+                    )}
                     {row.kind === 'task' && (
                       <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={() => row.run()} className={rowClass(i)}>
                         <CheckSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
@@ -354,9 +404,19 @@ export default function TicketSearchBox({
               {!results && searching && <p className="px-3 py-3 text-sm text-muted-foreground">Searching…</p>}
             </>
           )}
-          <p className="mt-1 border-t border-border/60 px-3 pt-2 pb-1 text-[11px] text-muted-foreground">
-            Try <span className="font-mono">#12345</span>, <span className="font-mono">TP-1042</span>, a name or an e-mail · ↑↓ move · Enter open · Esc close
-          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-3 pt-2 pb-1 text-[11px] text-muted-foreground">
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={withConversations} onChange={(e) => { setWithConversations(e.target.checked); writeFlag(CONVERSATIONS_KEY, e.target.checked); }} />
+              <MessageSquareText className="h-3.5 w-3.5" aria-hidden="true" /> Include conversations
+            </label>
+            {canSwitchScope && (
+              <label className="inline-flex cursor-pointer items-center gap-1.5" title="Search every workspace you can see">
+                <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={allWorkspaces} onChange={(e) => { setAllWorkspaces(e.target.checked); writeFlag(SCOPE_KEY, e.target.checked); }} />
+                <Globe className="h-3.5 w-3.5" aria-hidden="true" /> All my workspaces
+              </label>
+            )}
+            <span className="ml-auto">Try <span className="font-mono">#12345</span>, <span className="font-mono">TP-1042</span>, a name · ↑↓ · Enter · Esc</span>
+          </div>
         </div>
       )}
     </div>
