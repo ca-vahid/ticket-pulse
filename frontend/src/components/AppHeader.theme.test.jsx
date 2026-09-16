@@ -75,7 +75,8 @@ describe('AppHeader account menu — theme control', () => {
   test('renders Light / Dark / System as menuitemradio with System checked by default, plus the early-access note', () => {
     setup();
     const menu = openMenu();
-    const radios = within(menu).getAllByRole('menuitemradio');
+    // The page-width segment (full-width train) sits under the theme one — scope to the theme control.
+    const radios = within(within(menu).getByTestId('theme-control')).getAllByRole('menuitemradio');
     expect(radios.map((r) => r.textContent.trim())).toEqual(['Light', 'Dark', 'System']);
     expect(radios[2]).toHaveAttribute('aria-checked', 'true');
     expect(radios[0]).toHaveAttribute('aria-checked', 'false');

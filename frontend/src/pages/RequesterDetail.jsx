@@ -7,6 +7,7 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import { ticketsAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { PersonAvatar, StatusPill, PriorityDot, formatDayTime, timeAgo } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
@@ -49,6 +50,7 @@ export default function RequesterDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentWorkspace } = useWorkspace();
+  const { width: layoutWidth } = useLayoutWidth();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +97,7 @@ export default function RequesterDetail() {
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
       <AppHeader activePage="tickets" />
-      <main className="mx-auto w-full max-w-6xl px-4 py-6 pb-24 sm:px-6 lg:pb-6 animate-fadeIn">
+      <main className={applyWidth('max-w-6xl mx-auto px-4 py-6 pb-24 sm:px-6 lg:pb-6 animate-fadeIn', layoutWidth)}>
         <Link to={backTo} className="tp-focus-ring mb-4 inline-flex items-center gap-1.5 rounded text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back
         </Link>

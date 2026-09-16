@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requesterIntegrationIdentity } from '../../utils/integrationIdentity';
+
+const PEEK_WIDTH_KEY = 'tp_peek_width';
+const PEEK_MIN = 400;
 import { rememberTicket } from '../../utils/recentSearches';
 import { IntegrationAvatar } from './IntegrationAvatar';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -106,6 +109,20 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   // server-side / cheap counts, keyed so stepping tickets re-fetches).
   const requesterEmail = ticket?.requester?.email || null;
   const requesterId = ticket?.requester?.id || null;
+  const [peekWidth, setPeekWidth] = useState(() => { try { const v = Number(localStorage.getItem(PEEK_WIDTH_KEY)); return v >= PEEK_MIN ? v : null; } catch { return null; } });
+  const startPeekResize = useCallback((e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const max = Math.floor(window.innerWidth * 0.6);
+    const onMove = (ev) => setPeekWidth(Math.min(max, Math.max(PEEK_MIN, Math.round(window.innerWidth - ev.clientX))));
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setPeekWidth((w) => { try { if (w) localStorage.setItem(PEEK_WIDTH_KEY, String(w)); } catch { /* no-op */ } return w; });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
   const [requesterPhoto, setRequesterPhoto] = useState(null);
   const [requesterStats, setRequesterStats] = useState(null);
   useEffect(() => {
@@ -268,10 +285,21 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
 
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-40 w-[440px] max-w-[94vw] bg-card border-l border-border shadow-soft flex flex-col animate-slide-in-right"
+      className="fixed inset-y-0 right-0 z-40 max-w-[94vw] bg-card border-l border-border shadow-soft flex flex-col animate-slide-in-right"
+      style={{ width: peekWidth ? `${peekWidth}px` : 'clamp(440px, 32vw, 760px)' }}
       aria-label="Ticket preview"
       role="complementary"
     >
+      {/* Full-width train: drag the left edge to resize; the width is remembered. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the preview panel"
+        title="Drag to resize · double-click to reset"
+        onPointerDown={startPeekResize}
+        onDoubleClick={() => { setPeekWidth(null); try { localStorage.removeItem(PEEK_WIDTH_KEY); } catch { /* no-op */ } }}
+        className="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize hover:bg-primary/40 active:bg-primary/60 md:block"
+      />
       {/* Header */}
       <div className="p-3.5 border-b border-border/60 bg-muted/30">
         <div className="flex items-center gap-2 mb-1">

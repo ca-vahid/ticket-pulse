@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { analyticsAPI, syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import AppShell, { APP_BACKGROUND_CLASS, APP_BACKGROUND_STYLE } from '../components/AppShell';
 import DashboardLoadingProgress from '../components/DashboardLoadingProgress';
@@ -58,6 +59,7 @@ export default function Dashboard() {
     forceRefreshNoCache,
   } = useDashboard();
   const { currentWorkspace } = useWorkspace();
+  const { width: layoutWidth } = useLayoutWidth();
   const location = useLocation();
   const showSummitWorkshop = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
   const [categoryMetadata, setCategoryMetadata] = useState(null);
@@ -1369,7 +1371,7 @@ export default function Dashboard() {
 
       {/* Sync Status Notification */}
       {syncStatus && (
-        <div className="max-w-7xl mx-auto px-4 pt-4">
+        <div className={applyWidth('max-w-7xl mx-auto px-4 pt-4', layoutWidth)}>
           <div className={`
             rounded-lg p-4 flex items-center justify-between shadow-lg
             ${syncStatus === 'syncing' ? 'bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30' : ''}
@@ -1419,7 +1421,7 @@ export default function Dashboard() {
 
       {/* Sync Details Log Viewer */}
       {syncLogs.length > 0 && (
-        <div className="max-w-7xl mx-auto px-4 pt-2">
+        <div className={applyWidth('max-w-7xl mx-auto px-4 pt-2', layoutWidth)}>
           <div className="bg-card rounded-lg border border-input shadow-md overflow-hidden">
             {/* Header */}
             <div
@@ -1477,7 +1479,7 @@ export default function Dashboard() {
       )}
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-2 sm:px-4 py-3">
+      <main className={applyWidth('max-w-7xl mx-auto px-2 sm:px-4 py-3', layoutWidth)}>
         {/* Stats Band — one flat line on desktop; a tap-to-expand summary strip on
             phones (full breakdown lives in a bottom sheet). The day bars carry the
             week's shape, replacing the old per-day trend arrows. */}

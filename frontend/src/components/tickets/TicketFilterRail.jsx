@@ -1068,7 +1068,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
       aria-label="Ticket filters"
       data-collapsed={collapsed ? 'true' : undefined}
       className={`hidden lg:flex sticky top-4 self-start flex-col tp-card rounded-xl overflow-hidden
-        transition-[width] duration-300 ease-out motion-reduce:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[248px]'}`}
+        transition-[width] duration-300 ease-out motion-reduce:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(224px,14vw,300px)]'}`}
     >
       {/* Slim layer (collapsed) */}
       <div
