@@ -40,6 +40,13 @@ const POLL_MAX_WAIT_MS = 25000;
 //   cap closes the user's OLDEST stream, after a `too_many_connections` event
 //   so that tab shows a message instead of blind-reconnect-looping.
 export const MAX_CONNECTIONS_PER_USER = 8;
+// Cap thrash guard (16 Sep 2026): a client that ignores the too_many_connections
+// farewell and reconnects on a timer evicted one healthy tab every ~1.7 s for
+// two hours (3,400 evictions, all one account). Once a user has had this many
+// cap evictions inside the window, the NEWCOMER is refused instead — the
+// healthy tabs keep their streams and the looping client only hurts itself.
+export const CAP_CHURN_WINDOW_MS = 60 * 1000;
+export const CAP_CHURN_MAX = 6;
 // - Idle reap: a socket with no SUCCESSFUL write in this window is half-dead
 //   (writes buffering into a dead pipe, or errors swallowed elsewhere) —
 //   destroy it. Healthy sockets get a heartbeat write every 30s, so this is
@@ -75,6 +82,10 @@ class SSEConnectionManager {
     // Connection registry (Phase 3): client(res) -> { key, userEmail,
     // connectedAt, lastWriteOkAt, lastAuthCheckAt, revalidate, destroy }
     this.meta = new Map();
+    // userEmail -> [eviction timestamps inside CAP_CHURN_WINDOW_MS]
+    this.capEvictions = new Map();
+    // userEmail -> last time the cap warning was logged (one line a minute per user)
+    this.capWarnedAt = new Map();
   }
 
   _key(workspaceId) {
@@ -210,8 +221,19 @@ class SSEConnectionManager {
   addClient(client, workspaceId = null, { userEmail = null, revalidate = null, destroy = null } = {}) {
     const email = userEmail ? String(userEmail).toLowerCase() : null;
     // Enforce the per-user cap BEFORE adding, so the newest connection always
-    // survives and the user's oldest one(s) get closed.
-    this._enforceUserCap(email);
+    // survives and the user's oldest one(s) get closed — unless this user is
+    // thrashing the cap, in which case the newcomer is the one refused.
+    if (!this._enforceUserCap(email)) {
+      try {
+        client.write(`event: too_many_connections\ndata: ${JSON.stringify({
+          message: `Too many live connections for your account (limit ${MAX_CONNECTIONS_PER_USER}) — this one was refused. Close unused tabs, then use Reconnect.`,
+          limit: MAX_CONNECTIONS_PER_USER,
+          refused: true,
+        })}\n\n`);
+      } catch { /* best effort */ }
+      try { if (destroy) destroy(); else client.end?.(); } catch { /* already closed */ }
+      return false;
+    }
 
     const key = this._key(workspaceId);
     if (!this.channels.has(key)) {
@@ -229,6 +251,7 @@ class SSEConnectionManager {
       destroy,
     });
     logger.info(`SSE client connected (workspace=${workspaceId || 'global'}). Total clients: ${this._totalClients()}`);
+    return true;
   }
 
   removeClient(client) {
@@ -279,18 +302,31 @@ class SSEConnectionManager {
     this.removeClient(client);
   }
 
-  /** Close the user's oldest connection(s) so a new one stays under the cap. */
-  _enforceUserCap(userEmail) {
-    if (!userEmail) return;
+  /**
+   * Close the user's oldest connection(s) so a new one stays under the cap.
+   * @returns {boolean} true = the newcomer may be added; false = refuse it
+   *   (the user is churning the cap — see CAP_CHURN_MAX).
+   */
+  _enforceUserCap(userEmail, now = Date.now()) {
+    if (!userEmail) return true;
     const mine = [];
     for (const [client, meta] of this.meta) {
       if (meta.userEmail === userEmail) mine.push([client, meta]);
     }
-    if (mine.length < MAX_CONNECTIONS_PER_USER) return;
+    if (mine.length < MAX_CONNECTIONS_PER_USER) return true;
+    const recent = (this.capEvictions.get(userEmail) || []).filter((t) => now - t < CAP_CHURN_WINDOW_MS);
+    const churning = recent.length >= CAP_CHURN_MAX;
+    recent.push(now);
+    this.capEvictions.set(userEmail, recent);
+    const lastWarned = this.capWarnedAt.get(userEmail) || 0;
+    if (now - lastWarned >= CAP_CHURN_WINDOW_MS) {
+      this.capWarnedAt.set(userEmail, now);
+      logger.warn(`SSE per-user cap: ${churning ? 'refusing new connections' : 'closing oldest connection'} for ${userEmail} (${mine.length} open, cap ${MAX_CONNECTIONS_PER_USER}, ${recent.length} cap event(s) in the last minute)`);
+    }
+    if (churning) return false;
     mine.sort((a, b) => a[1].connectedAt - b[1].connectedAt);
     const excess = mine.length - MAX_CONNECTIONS_PER_USER + 1;
     for (let i = 0; i < excess; i++) {
-      logger.warn(`SSE per-user cap: closing oldest connection for ${userEmail} (${mine.length} open, cap ${MAX_CONNECTIONS_PER_USER})`);
       this._destroyClient(mine[i][0], {
         event: 'too_many_connections',
         data: {
@@ -299,6 +335,7 @@ class SSEConnectionManager {
         },
       });
     }
+    return true;
   }
 
   /**
@@ -578,7 +615,7 @@ router.get('/events', asyncHandler(async (req, res) => {
     }
   }
 
-  sseManager.addClient(res, workspaceId, {
+  const accepted = sseManager.addClient(res, workspaceId, {
     userEmail: (req.session?.user || req.user)?.email || null,
     revalidate: createStreamReauthCheck(req),
     destroy: () => {
@@ -587,6 +624,7 @@ router.get('/events', asyncHandler(async (req, res) => {
       try { res.socket?.destroy(); } catch { /* already gone */ }
     },
   });
+  if (!accepted) return; // refused under the cap-thrash guard; farewell already sent
 
   // Clean up on client disconnect
   req.on('close', () => {

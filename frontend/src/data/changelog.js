@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.2-preview';
+export const APP_VERSION = '3.9.3-preview';
 
 export const changelog = [
+  {
+    version: '3.9.3-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Live-update cap no longer evicts your healthy tabs in a loop</strong> — one account had a client that ignored the “too many connections” notice and reconnected every couple of seconds; each reconnect closed one of that person’s other tabs (about 3,400 evictions in two hours, and a log line for each). Once an account has had six cap evictions inside a minute, the newcomer is refused instead and the open tabs keep their streams; the warning is logged at most once a minute per account.' },
+    ],
+  },
   {
     version: '3.9.2-preview',
     date: 'September 16, 2026',
