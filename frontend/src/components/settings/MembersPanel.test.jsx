@@ -120,7 +120,7 @@ describe('MembersPanel — App access column (Mega 08-23 AC3)', () => {
     expect(gabySelect).toHaveValue('reviewer');
     await waitFor(() => expect(workspaceApiMocks.grantAccess)
       .toHaveBeenCalledWith(1, 'gtonnova@bgcengineering.ca', 'reviewer'));
-    await waitFor(() => expect(screen.getByText(/can now sign in as reviewer/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/can now sign in as Reviewer/)).toBeInTheDocument());
   });
 
   test('selecting Basic access revokes', async () => {
@@ -164,5 +164,39 @@ describe('MembersPanel — App access column (Mega 08-23 AC3)', () => {
     render(<MembersPanel />);
     await waitFor(() => expect(screen.getByText('Adrian Lo')).toBeInTheDocument());
     expect(screen.queryByText('App access')).not.toBeInTheDocument();
+  });
+});
+
+// Unified roster (v3.8.94): app-only people are rows in the same table.
+describe('MembersPanel unified roster (app-only rows)', () => {
+  afterEach(() => cleanup());
+  const WITH_APP_ONLY = [
+    ...ACCESS_MEMBERS,
+    { email: 'nvyland@bgcengineering.ca', name: 'Neville Vyland', photoUrl: null, technicianId: null, accessRole: 'readonly' },
+  ];
+
+  test('an app-only grant renders as an Active row with the App-only chip, counted in Active/All, and can be removed', async () => {
+    workspaceApiMocks.getMembers.mockResolvedValue({ data: WITH_APP_ONLY });
+    render(<MembersPanel />);
+    await waitFor(() => expect(screen.getByText('Neville Vyland')).toBeInTheDocument());
+    expect(screen.getByTitle(/Sign-in only/)).toHaveTextContent('App-only');
+    expect(screen.getByRole('button', { name: /Active 3/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /All 5/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /App-only 1/ })).toBeInTheDocument();
+    // The old separate section is gone.
+    expect(screen.queryByText('App-only people')).not.toBeInTheDocument();
+    // Their access select shows the role; the row action removes the grant.
+    expect(screen.getByLabelText('App access for Neville Vyland')).toHaveValue('readonly');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove app access for Neville Vyland' }));
+    await waitFor(() => expect(workspaceApiMocks.revokeAccess).toHaveBeenCalledWith(1, 'nvyland@bgcengineering.ca'));
+  });
+
+  test('"Add as" app-only with a typed e-mail grants access instead of creating a local member', async () => {
+    render(<MembersPanel />);
+    await waitFor(() => expect(screen.getByText('Adrian Lo')).toBeInTheDocument());
+    fireEvent.change(screen.getByRole('combobox', { name: 'Add as' }), { target: { value: 'readonly' } });
+    fireEvent.change(screen.getByPlaceholderText(/Search your company directory/), { target: { value: 'nvyland@bgcengineering.ca' } });
+    fireEvent.click(await screen.findByText('Use this email address'));
+    await waitFor(() => expect(workspaceApiMocks.grantAccess).toHaveBeenCalledWith(1, 'nvyland@bgcengineering.ca', 'readonly'));
   });
 });
