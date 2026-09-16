@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.08-preview';
+export const APP_VERSION = '3.9.09-preview';
 
 export const changelog = [
+  {
+    version: '3.9.09-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Ticket Pulse now uses the whole screen</strong> — the tickets list, the ticket page, the dashboard, analytics, assignments, the timeline, visuals, approvals and requester pages fill the viewport instead of stopping at a fixed width. Pick <em>Page width</em> in the account menu (also on the phone “More” sheet): <em>Full</em> (default), <em>Comfortable</em> (up to 1600 px) or <em>Classic</em> (the old 1280 px look). The choice follows you across devices.' },
+      { type: 'new', html: '<strong>Three columns on ultra-wide screens</strong> — on a screen 1800 px or wider in Full width, the ticket page puts links, custom fields and related tickets in a left column, the conversation in the centre and the fields on the right. The fields rail also grows with the screen at every width, and long e-mail bodies keep a readable line length.' },
+      { type: 'new', html: '<strong>Dense list density</strong> — next to Compact and Roomy: the tightest rows and smaller type, for people who used to zoom the browser to 50 % to fit more tickets on one screen.' },
+      { type: 'improved', html: '<strong>Resizable ticket preview</strong> — the peek panel now scales with the screen (440–760 px) and can be dragged wider from its left edge; double-click the edge to reset. The filter rail also widens a little on big screens.' },
+    ],
+  },
   {
     version: '3.9.08-preview',
     date: 'September 16, 2026',

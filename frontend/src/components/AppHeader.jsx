@@ -28,6 +28,7 @@ import { syncAPI } from '../services/api';
 import { NAV_DESTINATIONS, useCanAccessSettings, useWorkspaceRole } from './nav/navDestinations';
 import SideRail from './nav/SideRail';
 import ThemeControl from './nav/ThemeControl';
+import LayoutControl from './nav/LayoutControl';
 import ChangelogModal from './ChangelogModal';
 
 // Slim top bar for desktop. Primary navigation lives in the fixed left
@@ -686,6 +687,7 @@ export default function AppHeader({
             {/* Theme (Phase DM-A): applies immediately and keeps the menu open
                 so the user can compare — never routed through navigateFromMenu. */}
             <ThemeControl />
+            <LayoutControl />
 
             <div className="my-1 border-t border-border" />
 

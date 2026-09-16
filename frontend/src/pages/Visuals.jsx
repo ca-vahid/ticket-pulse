@@ -11,6 +11,7 @@ import MobileTabBar from '../components/nav/MobileTabBar';
 import SideRail from '../components/nav/SideRail';
 import 'leaflet/dist/leaflet.css';
 import { useTheme } from '../contexts/ThemeContext';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { tileLayerFor } from '../utils/mapTiles';
 
 // Office table + resolver live in utils/officeLocations.js (mirrored on the
@@ -130,6 +131,7 @@ export default function Visuals() {
   const { resolvedTheme } = useTheme();
   const tiles = tileLayerFor(resolvedTheme);
   const navigate = useNavigate();
+  const { width: layoutWidth } = useLayoutWidth();
   const [agents, setAgents] = useState([]);
   const [selectedAgents, setSelectedAgents] = useState(new Set());
   const [managerId, setManagerId] = useState(null);
@@ -423,7 +425,7 @@ export default function Visuals() {
       <div className="min-h-screen bg-muted flex flex-col pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-[58px]">
         {/* Header */}
         <header className="bg-card shadow-sm border-b border-border">
-          <div className="max-w-7xl mx-auto px-3 py-3 sm:px-4">
+          <div className={applyWidth('max-w-7xl mx-auto px-3 py-3 sm:px-4', layoutWidth)}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <button

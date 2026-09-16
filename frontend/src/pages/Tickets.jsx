@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, Check,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
-  Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
+  AlignJustify, Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -33,6 +33,7 @@ import HeldRepliesPanel from '../components/tickets/HeldRepliesPanel';
 import FilterReliefNotice from '../components/tickets/FilterReliefNotice';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useSSE } from '../hooks/useSSE';
 
@@ -193,6 +194,7 @@ export default function Tickets() {
   // so a full-page open via anchor keeps the Back control working.
   const linkState = { from: `${location.pathname}${location.search}` };
   const { user } = useAuth();
+  const { width: layoutWidth } = useLayoutWidth();
   const { currentWorkspace } = useWorkspace();
   // AI assignment/review ACTIONS are a reviewer/admin capability — decide/
   // latest-run endpoints are reviewer-gated server-side, so agents/viewers
@@ -367,7 +369,7 @@ export default function Tickets() {
   const [layout, setLayout] = useState(() => {
     try {
       const v = localStorage.getItem('tp_ticket_layout');
-      if (v === 'compact' || v === 'roomy' || v === 'board') return v;
+      if (v === 'compact' || v === 'roomy' || v === 'board' || v === 'dense') return v;
       // Migrate legacy density: comfortable → roomy, compact/dense → compact.
       return localStorage.getItem('tp_ticket_density') === 'comfortable' ? 'roomy' : 'compact';
     } catch { return 'compact'; }
@@ -686,7 +688,10 @@ export default function Tickets() {
   //               with everything else beneath (read, nothing ever clips).
   // Persisted; migrates the old 3-way density value in place.
   const roomy = layout === 'roomy';
-  const cellPad = roomy ? 'py-1.5' : 'py-2.5';
+  // Dense (full-width train, 16 Sep 2026): compact's grid with tighter rows and
+  // smaller type — for the people who zoomed the browser to 50 % to get it.
+  const dense = layout === 'dense';
+  const cellPad = roomy ? 'py-1.5' : dense ? 'py-1' : 'py-2.5';
   const [pendingCount, setPendingCount] = useState(0);
   const lastLocalMutationRef = useRef(0);
 
@@ -1360,7 +1365,7 @@ export default function Tickets() {
       <AppHeader activePage="tickets" />
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
-      <main className="max-w-[2200px] mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
+      <main className={applyWidth('max-w-[2200px] mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn', layoutWidth)}>
         {/* Page header (v3.8.31): one slim row. The artwork band spent ~94 px and
             a subtitle to repeat the page you are already on; the title, the
             workspace and both actions fit on a single 33 px line. */}
@@ -1593,6 +1598,7 @@ export default function Tickets() {
                       (Open / Pending / Closed columns, QA 07-27 #3). */}
                   <div className="hidden md:inline-flex sm:order-3 items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
                     {[
+                      { key: 'dense', Icon: AlignJustify, label: 'Dense', hint: 'The tightest rows and smaller type — the most tickets on one screen.' },
                       { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
                       { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
                       { key: 'board', Icon: Columns3, label: 'Board', hint: 'Open / Pending / Closed columns — drag a card to change its status (Ticket Pulse tickets save directly; FreshService tickets confirm first).' },
@@ -1785,7 +1791,7 @@ export default function Tickets() {
                               panels; the token (214 32% 88%) lands ≈1.25:1. Decorative
                               lines, so this is "measurably more visible", not a WCAG
                               claim. Mobile cards share these <li>s — one change, both. */}
-                          <ul className="divide-y divide-border">
+                          <ul className="divide-y divide-border" data-density={layout}>
                             {tickets.map((ticket, rowIndex) => {
                               const previewing = previewId === ticket.id;
                               // The AI assignment pipeline is deciding this ticket RIGHT NOW —
@@ -1834,7 +1840,7 @@ export default function Tickets() {
                                   state={linkState}
                                   onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
                                   onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
-                                  className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'}`}
+                                  className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : dense ? 'text-[12.5px]' : 'text-sm'}`}
                                 >
                                   {ticket.subject || '(no subject)'}
                                 </Link>

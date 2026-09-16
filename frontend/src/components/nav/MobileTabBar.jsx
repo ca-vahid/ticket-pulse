@@ -18,6 +18,7 @@ import { cn } from '../../lib/utils';
 import { APP_VERSION } from '../../data/changelog';
 import ChangelogModal from '../ChangelogModal';
 import ThemeControl from './ThemeControl';
+import LayoutControl from './LayoutControl';
 import { NAV_DESTINATIONS, useCanAccessSettings, useNavDestinations } from './navDestinations';
 
 // Short labels so the fixed tabs stay legible on narrow phones.
@@ -245,6 +246,7 @@ export default function MobileTabBar() {
               {/* Theme (Phase DM-A): applies immediately; the sheet stays open
                   (no setMoreOpen(false)) so the user can compare. */}
               <ThemeControl itemRole="radio" className="px-4 py-2.5" />
+              <LayoutControl itemRole="radio" className="px-4 py-2.5" />
 
               <div className="my-1 border-t border-border" />
 

@@ -55,6 +55,7 @@ export function newIdempotencyKey() {
 }
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { assignmentAPI, ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
@@ -703,6 +704,7 @@ export default function TicketDetail() {
   // which silently disabled the switch-bounce below AND left the SSE stream
   // un-keyed on workspace (realtime plan Phase 1).
   const { currentWorkspace, switchWorkspace } = useWorkspace();
+  const { width: layoutWidth } = useLayoutWidth();
   const workspaceId = currentWorkspace?.id;
   const openedWsRef = useRef(null);
   useEffect(() => {
@@ -1848,7 +1850,7 @@ export default function TicketDetail() {
       <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
+      <main className={applyWidth('max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn', layoutWidth)}>
         <div className="flex items-center justify-between mb-4 print-hide">
           <button
             onClick={() => {
@@ -1899,7 +1901,7 @@ export default function TicketDetail() {
           <>
             {/* Header */}
             <div className="tp-card rounded-xl p-4 sm:p-5 mb-4">
-              <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-5">
+              <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:gap-5">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
                     <span className="font-mono text-sm font-bold text-muted-foreground">{ticket.displayRef}</span>
@@ -2429,9 +2431,13 @@ export default function TicketDetail() {
               })}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-4 items-start">
+            {/* Full-width train: the rail scales with the viewport; at ≥ 1800 px
+                (full width only) the ticket context — links, custom fields,
+                related tickets — takes a third column on the LEFT, so the
+                conversation sits centre and the fields stay on the right. */}
+            <div className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] gap-4 items-start ${layoutWidth === 'full' ? 'min-[1800px]:grid-cols-[clamp(240px,16vw,320px)_minmax(0,1fr)_clamp(300px,22vw,420px)]' : ''}`}>
               {/* Main column (tabbed) */}
-              <div className="space-y-4 min-w-0">
+              <div className={`space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2 ${layoutWidth === 'full' ? 'min-[1800px]:col-start-2 min-[1800px]:row-span-1' : ''}`}>
                 {pageTab === 'conversation' && (
                   <>
                     {(ticket.descriptionText || ticket.description) && !editingDescription && (
@@ -2991,7 +2997,7 @@ export default function TicketDetail() {
               </div>
 
               {/* Sidebar */}
-              <aside className="space-y-4" aria-label="Ticket properties">
+              <aside className={`space-y-4 lg:col-start-2 lg:row-start-1 ${layoutWidth === 'full' ? 'min-[1800px]:col-start-3' : ''}`} aria-label="Ticket properties">
                 {/* Status & SLA */}
                 <div className="tp-card rounded-xl p-4 space-y-3.5">
                   <SidebarField label="Status" flash={Boolean(liveChanges.status)} onAck={() => ackChange('status')}>
@@ -3352,6 +3358,8 @@ export default function TicketDetail() {
                   )}
                 </div>
 
+              </aside>
+              <aside className={`space-y-4 lg:col-start-2 lg:row-start-2 ${layoutWidth === 'full' ? 'min-[1800px]:col-start-1 min-[1800px]:row-start-1' : ''}`} aria-label="Ticket context">
                 {/* Explicit ticket links (duplicate/related/parent) + merge */}
                 <TicketFamilyCard
                   ticketId={ticketId}

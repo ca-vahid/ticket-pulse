@@ -395,6 +395,21 @@ code {
     max-width: 100%;
     overflow-x: auto;
   }
+  /* Full-width train: long prose stays readable on a wide screen — the page
+     is not capped, the text column is (≈110 characters). Tables still scroll. */
+  html[data-layout="full"] .tp-rich-body,
+  html[data-layout="full"] .tp-approval-desc {
+    max-width: min(100%, 110ch);
+  }
+  /* Dense queue rows: smaller type and avatars inside the list only. */
+  ul[data-density="dense"] {
+    font-size: 12px;
+  }
+  ul[data-density="dense"] .rounded-full.h-7,
+  ul[data-density="dense"] .rounded-full.h-6 {
+    height: 1.25rem;
+    width: 1.25rem;
+  }
   .tp-rich-body table {
     max-width: 100%;
   }

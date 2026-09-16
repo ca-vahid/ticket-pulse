@@ -9,6 +9,7 @@ import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPa
 import { ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { formatDayTime, timeAgo } from '../components/tickets/ticketUi';
 
@@ -34,6 +35,7 @@ export default function ApprovalsInbox() {
   // Return address so /tickets/:id's Back control comes back to this inbox.
   const backState = { from: `${location.pathname}${location.search}` };
   const { currentWorkspace, isWorkspaceSelected } = useWorkspace();
+  const { width: layoutWidth } = useLayoutWidth();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
   // mine | all | categories. `categories` (v3.7.02, QA 08-24 #3) is the
@@ -104,7 +106,7 @@ export default function ApprovalsInbox() {
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
       <AppHeader activePage="approvals" />
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 lg:pb-6 animate-fadeIn">
+      <main className={applyWidth('max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 lg:pb-6 animate-fadeIn', layoutWidth)}>
         <div className="flex items-center gap-2.5 mb-5">
           <span className="h-9 w-9 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 inline-flex items-center justify-center border border-emerald-100 dark:border-emerald-500/20"><Stamp className="w-5 h-5" aria-hidden="true" /></span>
           <div>

@@ -1,4 +1,5 @@
 import AppHeader from './AppHeader';
+import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import MobileTabBar from './nav/MobileTabBar';
 
 // Ground art is class-driven (`.tp-app-backdrop` in index.css picks the light
@@ -20,13 +21,17 @@ export default function AppShell({
   headerProps = {},
   fillViewport = false,
 }) {
+  // Full-width train (16 Sep 2026): the person's page-width choice replaces a
+  // caller's `max-w-* mx-auto` cap; callers that opted out of a cap keep theirs.
+  const { width } = useLayoutWidth();
+  const widthClass = /\bmax-w-/.test(contentClassName) ? applyWidth(contentClassName, width) : contentClassName;
   return (
     <div
       className={`relative md:pl-[58px] ${fillViewport ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'} ${MOBILE_NAV_INSET} ${APP_BACKGROUND_CLASS} ${className}`}
       style={APP_BACKGROUND_STYLE}
     >
       <AppHeader activePage={activePage} {...headerProps} />
-      <main className={fillViewport ? `min-h-0 flex-1 overflow-hidden ${contentClassName}` : contentClassName}>
+      <main className={fillViewport ? `min-h-0 flex-1 overflow-hidden ${widthClass}` : widthClass}>
         {children}
       </main>
       <MobileTabBar />
