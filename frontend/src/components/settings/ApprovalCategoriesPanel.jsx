@@ -3,7 +3,7 @@ import { settingsAPI, ticketsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Stamp, Loader, Plus, Pencil, Trash2, Check, X, AlertCircle, CheckCircle2,
-  Search, UserPlus, Users, Power, PowerOff, Ban, Lock, AtSign,
+  Search, UserPlus, Users, Power, PowerOff, Ban, Lock, AtSign, BadgeDollarSign, Layers, ArrowRight,
 } from 'lucide-react';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -199,51 +199,166 @@ function ManagerChip({ email, member, onRemove }) {
   );
 }
 
-const emptyForm = { name: '', description: '', managerEmails: [] };
+const MAX_TIERS = 3;
+const emptyTier = (i) => ({ name: `Tier ${i + 1}`, managerEmails: [], limit: '' });
+const emptyForm = { name: '', description: '', hasAmount: false, amountCurrency: 'CAD', tiers: [emptyTier(0)] };
+
+/** Category row → editable form shape (pre-v2 rows become a single tier). */
+function formFromCategory(c) {
+  const tiers = Array.isArray(c.tiers) && c.tiers.length
+    ? c.tiers.map((t, i) => ({ name: t.name || `Tier ${i + 1}`, managerEmails: t.managerEmails || [], limit: t.limit === null || t.limit === undefined ? '' : String(t.limit) }))
+    : [{ name: 'Tier 1', managerEmails: c.managerEmails || [], limit: '' }];
+  return { name: c.name, description: c.description || '', hasAmount: c.hasAmount === true, amountCurrency: c.amountCurrency || 'CAD', tiers };
+}
+
+/** Form shape → API payload (tier 1 also mirrored to managerEmails for pre-v2 readers). */
+function payloadFromForm(form) {
+  const tiers = form.tiers.map((t, i) => ({
+    name: (t.name || '').trim() || `Tier ${i + 1}`,
+    managerEmails: t.managerEmails,
+    limit: form.hasAmount && i < form.tiers.length - 1 && String(t.limit).trim() !== '' ? Number(String(t.limit).replace(/[^0-9.]/g, '')) : null,
+  }));
+  return {
+    name: form.name.trim(),
+    description: form.description.trim() || null,
+    managerEmails: tiers[0].managerEmails,
+    tiers,
+    hasAmount: form.hasAmount === true,
+    amountCurrency: (form.amountCurrency || 'CAD').trim().toUpperCase(),
+  };
+}
+
+const chainOf = (c) => (Array.isArray(c.tiers) && c.tiers.length ? c.tiers : [{ name: 'Tier 1', managerEmails: c.managerEmails || [], limit: null }]);
+const money = (n, cur) => {
+  if (n === null || n === undefined || n === '') return null;
+  try { return new Intl.NumberFormat('en-CA', { style: 'currency', currency: cur || 'CAD' }).format(Number(n)); } catch { return `${cur || 'CAD'} ${n}`; }
+};
 
 function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, saving, directoryLocked, onDirectoryLocked }) {
   const [form, setForm] = useState(initial || emptyForm);
-  const addEmail = (email) => setForm((f) => (f.managerEmails.includes(email) ? f : { ...f, managerEmails: [...f.managerEmails, email] }));
-  const removeEmail = (email) => setForm((f) => ({ ...f, managerEmails: f.managerEmails.filter((x) => x !== email) }));
+  const setTier = (i, patch) => setForm((f) => ({ ...f, tiers: f.tiers.map((t, idx) => (idx === i ? { ...t, ...patch } : t)) }));
+  const addEmail = (i, email) => setTier(i, { managerEmails: form.tiers[i].managerEmails.includes(email) ? form.tiers[i].managerEmails : [...form.tiers[i].managerEmails, email] });
+  const removeEmail = (i, email) => setTier(i, { managerEmails: form.tiers[i].managerEmails.filter((x) => x !== email) });
+  const addTier = () => setForm((f) => (f.tiers.length >= MAX_TIERS ? f : { ...f, tiers: [...f.tiers, emptyTier(f.tiers.length)] }));
+  const removeTier = (i) => setForm((f) => ({ ...f, tiers: f.tiers.filter((_, idx) => idx !== i).map((t, idx) => ({ ...t, name: /^Tier \d$/.test(t.name) ? `Tier ${idx + 1}` : t.name })) }));
+
+  const tierMissing = form.tiers.some((t) => t.managerEmails.length === 0);
+  // Limits must climb tier by tier (the last tier has none).
+  const limits = form.tiers.slice(0, -1).map((t) => (String(t.limit).trim() === '' ? null : Number(String(t.limit).replace(/[^0-9.]/g, ''))));
+  const limitError = form.hasAmount && limits.some((l, i) => (l !== null && (!Number.isFinite(l) || l < 0)) || (i > 0 && l !== null && limits[i - 1] !== null && l <= limits[i - 1]));
+  const canSave = form.name.trim().length >= 2 && !tierMissing && !limitError && !saving;
 
   return (
-    <div className="tp-card p-4 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30 space-y-3">
-      <input
-        value={form.name}
-        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-        placeholder="Category name (e.g. Laptop purchase)"
-        className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
-      />
-      <input
-        value={form.description}
-        onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-        placeholder="Description (optional)"
-        className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
-      />
-      <div>
-        <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Approval managers <span className="font-normal text-muted-foreground/75">(any one can approve)</span></p>
-        {form.managerEmails.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {form.managerEmails.map((email) => (
-              <ManagerChip key={email} email={email} member={memberByEmail[email]} onRemove={() => removeEmail(email)} />
-            ))}
-          </div>
-        )}
-        <MemberPicker members={members} exclude={form.managerEmails} onPick={addEmail} directoryLocked={directoryLocked} onDirectoryLocked={onDirectoryLocked} />
+    <div className="tp-card p-4 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <input
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          placeholder="Category name (e.g. Laptop purchase)"
+          aria-label="Category name"
+          className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
+        />
+        <input
+          value={form.description}
+          onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          placeholder="Description (optional) — shown to the requester when picking"
+          aria-label="Description"
+          className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
+        />
       </div>
+
+      {/* Monetary toggle */}
+      <label className="flex items-start gap-2.5 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 cursor-pointer">
+        <input type="checkbox" checked={form.hasAmount} onChange={(e) => setForm((f) => ({ ...f, hasAmount: e.target.checked }))} className="tp-focus-ring mt-0.5" />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground/85"><BadgeDollarSign className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-300" aria-hidden="true" /> This approval has an amount</span>
+          <span className="block text-[11px] text-muted-foreground leading-relaxed mt-0.5">
+            Every request must state a total. Each tier can then carry a limit it may approve up to — an approval above the limit moves on to the next tier automatically.
+          </span>
+        </span>
+        {form.hasAmount && (
+          <span className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground" onClick={(e) => e.preventDefault()}>
+            Currency
+            <input
+              value={form.amountCurrency}
+              onChange={(e) => setForm((f) => ({ ...f, amountCurrency: e.target.value.toUpperCase().slice(0, 3) }))}
+              aria-label="Currency"
+              className="tp-focus-ring w-16 rounded-lg border border-input bg-card px-2 py-1 text-xs font-semibold uppercase text-foreground"
+            />
+          </span>
+        )}
+      </label>
+
+      {/* Tiers */}
+      <div className="space-y-2.5">
+        <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5"><Layers className="w-3.5 h-3.5" /> Approval tiers <span className="font-normal text-muted-foreground/75">— requests start at Tier 1; any approver there can decide, escalate to the next tier, or forward to anyone</span></p>
+        {form.tiers.map((t, i) => {
+          const last = i === form.tiers.length - 1;
+          return (
+            <div key={i} className="rounded-xl border border-border bg-card/60 p-3 space-y-2" aria-label={t.name || `Tier ${i + 1}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">{i + 1}</span>
+                <input
+                  value={t.name}
+                  onChange={(e) => setTier(i, { name: e.target.value })}
+                  aria-label={`Tier ${i + 1} name`}
+                  placeholder={`Tier ${i + 1}`}
+                  className="tp-focus-ring w-40 rounded-lg border border-input bg-card px-2.5 py-1.5 text-sm font-semibold text-foreground"
+                />
+                {form.hasAmount && !last && (
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                    may approve up to
+                    <input
+                      inputMode="decimal"
+                      value={t.limit}
+                      onChange={(e) => setTier(i, { limit: e.target.value })}
+                      aria-label={`Tier ${i + 1} approval limit`}
+                      placeholder="no limit"
+                      className="tp-focus-ring w-28 rounded-lg border border-input bg-card px-2.5 py-1.5 text-sm font-semibold tabular-nums text-foreground"
+                    />
+                    <span>{form.amountCurrency || 'CAD'}</span>
+                  </label>
+                )}
+                {form.hasAmount && last && form.tiers.length > 1 && <span className="text-[11px] text-muted-foreground">final say — no limit</span>}
+                {form.tiers.length > 1 && (
+                  <button type="button" onClick={() => removeTier(i)} aria-label={`Remove ${t.name || `Tier ${i + 1}`}`} className="ml-auto tp-focus-ring p-1 rounded-md text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15">
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+              {t.managerEmails.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {t.managerEmails.map((email) => (
+                    <ManagerChip key={email} email={email} member={memberByEmail[email]} onRemove={() => removeEmail(i, email)} />
+                  ))}
+                </div>
+              )}
+              <MemberPicker members={members} exclude={t.managerEmails} onPick={(email) => addEmail(i, email)} directoryLocked={directoryLocked} onDirectoryLocked={onDirectoryLocked} />
+              {t.managerEmails.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-300">Add at least one approver to this tier</span>}
+            </div>
+          );
+        })}
+        {form.tiers.length < MAX_TIERS && (
+          <button type="button" onClick={addTier} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-dashed border-input px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-blue-300">
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Add a tier {form.tiers.length === 1 ? '(e.g. Neville for what Vahid escalates)' : ''}
+          </button>
+        )}
+        {limitError && <p role="alert" className="text-[11px] text-red-700 dark:text-red-200">Limits must be positive numbers and climb from tier to tier.</p>}
+      </div>
+
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => onSave(form)}
-          disabled={saving || !form.name.trim() || form.managerEmails.length === 0}
+          onClick={() => onSave(payloadFromForm(form))}
+          disabled={!canSave}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 tp-focus-ring"
         >
           {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
         </button>
-        <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">
+        <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring">
           <X className="w-3.5 h-3.5" /> Cancel
         </button>
-        {form.managerEmails.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-300">Add at least one manager</span>}
+        {tierMissing && <span className="text-[11px] text-amber-600 dark:text-amber-300">Every tier needs at least one approver</span>}
       </div>
     </div>
   );
@@ -324,7 +439,7 @@ export default function ApprovalCategoriesPanel() {
   const create = async (form) => {
     setSaving(true); setError(null);
     try {
-      await settingsAPI.createApprovalCategory({ name: form.name.trim(), description: form.description.trim() || null, managerEmails: form.managerEmails });
+      await settingsAPI.createApprovalCategory(form);
       flash(`“${form.name.trim()}” created.`);
       setCreating(false);
       await load();
@@ -335,7 +450,7 @@ export default function ApprovalCategoriesPanel() {
   const saveEdit = async (id, form) => {
     setSaving(true); setError(null);
     try {
-      await settingsAPI.updateApprovalCategory(id, { name: form.name.trim(), description: form.description.trim() || null, managerEmails: form.managerEmails });
+      await settingsAPI.updateApprovalCategory(id, form);
       flash('Category updated.');
       setEditingId(null);
       await load();
@@ -370,8 +485,9 @@ export default function ApprovalCategoriesPanel() {
           <h3 className="text-lg font-semibold text-foreground">Approval Categories</h3>
           <p className="text-sm text-muted-foreground max-w-2xl">
             Define what needs sign-off (e.g. <strong>Laptop purchase</strong>) and which <strong>members</strong> approve it.
-            On a ticket, a member requests approval by category and every manager is notified — <strong>any one</strong> can
-            approve, reject, or ask for more info. Approvals stay inside Ticket Pulse.
+            On a ticket, a member requests approval by category and every Tier-1 manager is notified — <strong>any one</strong> can
+            approve, reject, ask for more info, <strong>escalate</strong> to the next tier, or <strong>forward</strong> to anyone as the final approver.
+            Monetary categories carry an amount; a tier limit sends bigger amounts up automatically. Approvals stay inside Ticket Pulse.
             Workspace <strong>reviewers</strong> and admins manage these here on the Approvals page — no admin needed.
           </p>
         </div>
@@ -420,7 +536,7 @@ export default function ApprovalCategoriesPanel() {
             editingId === c.id ? (
               <CategoryForm
                 key={c.id}
-                initial={{ name: c.name, description: c.description || '', managerEmails: c.managerEmails || [] }}
+                initial={formFromCategory(c)}
                 members={members}
                 memberByEmail={memberByEmail}
                 onCancel={() => setEditingId(null)}
@@ -436,18 +552,33 @@ export default function ApprovalCategoriesPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className={`text-sm font-semibold ${c.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{c.name}</span>
+                      {c.hasAmount && (
+                        <span className="inline-flex items-center gap-0.5 rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-px text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title="Requests carry an amount">
+                          <BadgeDollarSign className="w-3 h-3" aria-hidden="true" /> {c.amountCurrency || 'CAD'}
+                        </span>
+                      )}
                       {!c.isActive && (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200"><Ban className="w-3 h-3" /> Inactive</span>
                       )}
                     </div>
                     {c.description && <p className="text-xs text-muted-foreground mt-0.5">{c.description}</p>}
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {(c.managerEmails || []).length === 0
-                        ? <span className="text-[11px] text-amber-600 dark:text-amber-300">No managers — add some so this can be used</span>
-                        : (c.managerEmails || []).map((email) => (
+                    {(c.managerEmails || []).length === 0 && (
+                      <p className="text-[11px] text-amber-600 dark:text-amber-300 mt-2">No managers — add some so this can be used</p>
+                    )}
+                    {(c.managerEmails || []).length > 0 && chainOf(c).map((t, i, all) => (
+                      <div key={i} className="flex flex-wrap items-center gap-1.5 mt-2">
+                        {all.length > 1 && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
+                            {i > 0 && <ArrowRight className="w-3 h-3 text-muted-foreground/50" aria-hidden="true" />}
+                            <span className="rounded border border-border bg-muted/70 px-1 py-px">{t.name || `Tier ${i + 1}`}</span>
+                            {c.hasAmount && t.limit !== null && t.limit !== undefined ? <span className="text-muted-foreground/75">up to {money(t.limit, c.amountCurrency)}</span> : null}
+                          </span>
+                        )}
+                        {(t.managerEmails || []).map((email) => (
                           <ManagerChip key={email} email={email} member={memberByEmail[email.toLowerCase()]} />
                         ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button onClick={() => { setEditingId(c.id); setCreating(false); }} title="Edit" className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring"><Pencil className="w-4 h-4" /></button>

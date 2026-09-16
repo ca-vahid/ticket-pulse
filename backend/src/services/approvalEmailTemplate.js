@@ -269,10 +269,24 @@ export function renderApproverRequestEmail(ctx) {
   rows.push(`<tr><td>${personRow({ label: 'Asked by', name: ctx.requestedByName || 'Agent', meta: ctx.workspaceName ? `${ctx.workspaceName} workspace` : null, size: 32, photoCid: ctx.requestedByPhotoCid || null })}</td></tr>`);
   rows.push(spacer(18));
 
+  // Hand-off block (Approvals v2): why this landed with THIS approver.
+  const h = ctx.handoff;
+  if (h && h.kind) {
+    const by = escapeHtml(h.byName || 'The previous approver');
+    let lead;
+    if (h.kind === 'forwarded') lead = `<b>${by}</b> forwarded this request to you as the <b>final approver</b>.`;
+    else if (h.kind === 'auto') lead = `<b>${by}</b> approved this at ${escapeHtml(h.fromTierName || 'the previous tier')}, but the amount is over that tier's limit${h.limitLabel ? ` (${escapeHtml(h.limitLabel)})` : ''} — so <b>your approval is needed</b> at ${escapeHtml(h.toTierName || 'this tier')}.`;
+    else lead = `<b>${by}</b> escalated this request from ${escapeHtml(h.fromTierName || 'the previous tier')} to you (${escapeHtml(h.toTierName || 'next tier')}).`;
+    const noteHtml = h.note ? `<p style="margin:8px 0 0;font-size:14px;line-height:20px;color:${INK};"><b>Their note:</b> ${escapeHtml(h.note)}</p>` : '';
+    rows.push(`<tr><td>${card(`<p style="margin:0;font-family:${FONT};font-size:14px;line-height:20px;color:${INK};">${lead}</p>${noteHtml}`, { bg: '#fff7ed', border: '#fdba74' })}</td></tr>`);
+    rows.push(spacer(14));
+  }
+
   // Facts
   rows.push('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
     + `<tr>${factCell('Priority', priorityHtml(t.priorityLabel))}${factCell('Type', escapeHtml(t.typeLabel || '—'))}</tr>`
     + `<tr>${factCell('Category', escapeHtml(t.categoryPath || '—'))}${factCell('Status', escapeHtml(t.statusLabel || '—'))}</tr>`
+    + (ctx.amountLabel ? `<tr>${factCell('Amount', `<span style="font-size:15px;">${escapeHtml(ctx.amountLabel)}</span>`)}${factCell('Approval tier', escapeHtml(ctx.tierLabel || 'Tier 1'))}</tr>` : '')
     + '</table></td></tr>');
   rows.push(spacer(6));
 
@@ -368,6 +382,41 @@ export function renderRequesterDecisionEmail(ctx) {
 }
 
 /**
+ * Requester (the agent): the request moved to another approver (Approvals v2).
+ * ctx: { workspaceName, ticket:{ref, subject, appUrl}, kind:'escalated'|'forwarded'|'auto',
+ *        byName, toNames:[…], toTierName, fromTierName, requester:{name} }
+ * No note on purpose — the approver's reasoning stays between approvers.
+ */
+export function renderRequesterHandoffEmail(ctx) {
+  const t = ctx.ticket || {};
+  const names = (ctx.toNames || []).filter(Boolean);
+  const who = names.length ? names.join(', ') : (ctx.toTierName || 'the next approver');
+  const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
+  const by = escapeHtml(ctx.byName || 'The approver');
+  let sentence;
+  if (ctx.kind === 'forwarded') sentence = `<b>${by}</b> forwarded your approval request${forWhom} to <b>${escapeHtml(who)}</b>, who will make the final decision.`;
+  else if (ctx.kind === 'auto') sentence = `<b>${by}</b> approved your request${forWhom} at ${escapeHtml(ctx.fromTierName || 'Tier 1')}. The amount is above that tier's limit, so it has moved on to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}) for the final approval.`;
+  else sentence = `<b>${by}</b> escalated your approval request${forWhom} to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}).`;
+  const rows = [];
+  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">Approval ${ctx.kind === 'forwarded' ? 'forwarded' : 'escalated'}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || '(no subject)')}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(spacer(16));
+  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</td></tr>`);
+  rows.push(spacer(18));
+  if (t.appUrl) rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: '#334155' })}</td></tr>`);
+  rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">Nothing is needed from you — you will get another e-mail when the decision is made.</td></tr>`);
+  rows.push(spacer(8));
+  return emailShell({
+    workspaceName: ctx.workspaceName,
+    statusPill: pill(ctx.kind === 'forwarded' ? 'Forwarded' : 'Escalated', TONES.amber),
+    bodyRows: rows,
+    footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}. The full approval trail is on the ticket.`,
+    preheader: `${ctx.byName || 'The approver'} ${ctx.kind === 'forwarded' ? 'forwarded' : 'escalated'} your approval request on ${t.ref || 'the ticket'} to ${who}`,
+  });
+}
+
+/**
  * Requester (the agent): the approver asked a question. ctx:
  *  { workspaceName, ticket:{ref, subject, appUrl}, approverName, question, requester:{name} }
  */
@@ -395,6 +444,6 @@ export function renderRequesterClarificationEmail(ctx) {
 }
 
 export default {
-  renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail,
+  renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail,
   normalizeNoteHtmlForEmail, dropEmptyTableColumns, textExcerpt, escapeHtml, initialsOf, emailShell,
 };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags } from 'lucide-react';
+import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward } from 'lucide-react';
+import { AmountChip, HandoffPanel, TierChip } from '../components/tickets/ApprovalHandoff';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
@@ -16,6 +17,8 @@ const STATUS_META = {
   approved: { label: 'Approved', cls: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
   rejected: { label: 'Rejected', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' },
   cancelled: { label: 'Cancelled', cls: 'bg-muted text-muted-foreground border-border' },
+  escalated: { label: 'Escalated', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30' },
+  forwarded: { label: 'Forwarded', cls: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30' },
 };
 const STAT_TILES = [
   { key: 'pending', label: 'Pending', color: 'text-amber-600 dark:text-amber-300' },
@@ -47,6 +50,24 @@ export default function ApprovalsInbox() {
   const [error, setError] = useState(null);
   const [clarifyingId, setClarifyingId] = useState(null);
   const [clarifyNote, setClarifyNote] = useState('');
+  // Approvals v2: escalate / forward panel per row; people load lazily for the picker.
+  const [handoff, setHandoff] = useState(null); // { id, mode }
+  const [people, setPeople] = useState(null);
+  const openHandoff = async (a, mode) => {
+    setHandoff({ id: a.id, mode });
+    if (people === null) {
+      try {
+        const meta = await ticketsAPI.meta();
+        const map = new Map();
+        for (const t of [...(meta.data?.technicians || []), ...(meta.data?.members || [])]) {
+          if (!t?.email) continue;
+          const key = String(t.email).toLowerCase();
+          if (!map.has(key)) map.set(key, { name: t.name || t.email, email: key, photoUrl: t.photoUrl || null, role: t.role || null });
+        }
+        setPeople([...map.values()].sort((x, y) => x.name.localeCompare(y.name)));
+      } catch { setPeople([]); }
+    }
+  };
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -199,10 +220,32 @@ export default function ApprovalsInbox() {
                         <span className="text-sm text-foreground font-medium truncate max-w-full">{a.subject || '(no subject)'}</span>
                         <span className="ml-auto text-[11px] text-muted-foreground/75 whitespace-nowrap">{formatDayTime(a.createdAt)} · {timeAgo(a.createdAt)}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground/75 mt-1">Requested by {a.requestedBy}{a.requesterName ? ` · for ${a.requesterName}` : ''}</p>
+                      <p className="text-xs text-muted-foreground/75 mt-1 flex flex-wrap items-center gap-1.5">
+                        <span>Requested by {a.requestedBy}{a.requesterName ? ` · for ${a.requesterName}` : ''}</span>
+                        <AmountChip amount={a.amount} currency={a.amountCurrency} />
+                        <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} />
+                        {a.isFinal && <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground">final approver</span>}
+                      </p>
                       {a.requestNote && <p className="text-xs text-muted-foreground mt-1">“{a.requestNote}”</p>}
 
-                      {clarifyingId === a.id ? (
+                      {handoff?.id === a.id ? (
+                        <div className="mt-2">
+                          <HandoffPanel
+                            mode={handoff.mode}
+                            compact
+                            people={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
+                            nextTierName={a.nextTierName}
+                            onCancel={() => setHandoff(null)}
+                            onSubmit={async ({ mode, note, toEmail }) => {
+                              await act(async () => {
+                                if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
+                                else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
+                                setHandoff(null);
+                              }, a.id);
+                            }}
+                          />
+                        </div>
+                      ) : clarifyingId === a.id ? (
                         <div className="mt-2 space-y-1.5">
                           <textarea
                             rows={2}
@@ -224,6 +267,14 @@ export default function ApprovalsInbox() {
                           </button>
                           <button onClick={() => decide(a, 'rejected')} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
                             <X className="w-3 h-3" /> Reject
+                          </button>
+                          {a.canEscalate && (
+                            <button onClick={() => openHandoff(a, 'escalate')} disabled={busyId === a.id} title={`Escalate to ${a.nextTierName || 'the next tier'}`} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15 disabled:opacity-50">
+                              <ArrowUpRight className="w-3 h-3" /> Escalate
+                            </button>
+                          )}
+                          <button onClick={() => openHandoff(a, 'forward')} disabled={busyId === a.id} title="Forward to anyone in the workspace as the final approver" className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-muted-foreground border border-border hover:bg-muted disabled:opacity-50">
+                            <Forward className="w-3 h-3" /> Forward
                           </button>
                           <button onClick={() => { setClarifyingId(a.id); setClarifyNote(''); }} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50">
                             <MessageCircleQuestion className="w-3 h-3" /> Request clarification

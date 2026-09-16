@@ -77,7 +77,15 @@ class WorkspaceRepository {
         updateData.freshserviceWorkspaceId = BigInt(data.freshserviceWorkspaceId);
       }
       if (data.defaultTimezone !== undefined) updateData.defaultTimezone = data.defaultTimezone;
-      if (data.syncIntervalMinutes !== undefined) updateData.syncIntervalMinutes = data.syncIntervalMinutes;
+      if (data.syncIntervalMinutes !== undefined) {
+        const n = Math.trunc(Number(data.syncIntervalMinutes));
+        updateData.syncIntervalMinutes = Number.isFinite(n) && n >= 1 ? Math.min(1440, n) : 5;
+      }
+      if (data.fastSyncIntervalMinutes !== undefined) {
+        // v3.8.91: assignment fast-sync cadence, 1..30 minutes.
+        const n = Math.trunc(Number(data.fastSyncIntervalMinutes));
+        updateData.fastSyncIntervalMinutes = Number.isFinite(n) && n >= 1 ? Math.min(30, n) : 1;
+      }
       if (data.isActive !== undefined) updateData.isActive = data.isActive;
       if (data.nativeTicketingEnabled !== undefined) {
         updateData.nativeTicketingEnabled = data.nativeTicketingEnabled === true;

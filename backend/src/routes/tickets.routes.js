@@ -1869,6 +1869,25 @@ router.post('/:id/approvals/:approvalId/clarify', asyncHandler(async (req, res) 
   res.json({ success: true, data: approval });
 }));
 
+// Approvals v2: current-tier approver (or admin) escalates to the next tier.
+router.post('/:id/approvals/:approvalId/escalate', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.escalate(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId), { note: req.body?.note || null }, req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
+// Approvals v2: approver (or admin) forwards to anyone in the workspace as the final approver.
+router.post('/:id/approvals/:approvalId/forward', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.forward(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
+    { toEmail: req.body?.toEmail || null, note: req.body?.note || null }, req.ticketActor,
+  );
+  res.json({ success: true, data: approval });
+}));
+
 router.post('/:id/approvals/:approvalId/resubmit', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.resubmit(
@@ -1988,6 +2007,21 @@ ticketApprovalPublicRouter.get('/:token/photo', asyncHandler(async (req, res) =>
   res.setHeader('Cache-Control', 'private, max-age=3600');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   return res.end(decoded.buffer);
+}));
+
+// Approvals v2: escalate / forward from the magic link.
+ticketApprovalPublicRouter.post('/:token/handoff', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.handoffByToken(req.params.token, {
+    mode: req.body?.mode, note: req.body?.note || null, toEmail: req.body?.toEmail || null,
+  });
+  res.json({
+    success: true,
+    data: {
+      status: approval.status, decidedAt: approval.decidedAt || null, approverName: approval.approverName || null,
+      handoff: approval.handoff || null,
+    },
+  });
 }));
 
 ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) => {

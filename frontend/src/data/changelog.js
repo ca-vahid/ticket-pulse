@@ -1,6 +1,19 @@
-export const APP_VERSION = '3.8.90-preview';
+export const APP_VERSION = '3.8.91-preview';
 
 export const changelog = [
+  {
+    version: '3.8.91-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Tiered approvals</strong> — an approval category can now have up to three tiers (for example Vahid → Neville). Every request starts at Tier 1; a Tier-1 approver can decide it or <strong>Escalate</strong> it to the next tier with a note. Escalating hands the request off — the next tier decides, the requester is told it moved (without the note). One-tier categories work exactly as before.' },
+      { type: 'new', html: '<strong>Amounts and automatic escalation</strong> — a category can be marked as having an amount (in its currency). Every request then states a total, and each tier can carry a limit it may approve up to. Approving an amount above your tier’s limit records your approval and sends the request on to the next tier automatically; rejecting ends it at any tier.' },
+      { type: 'new', html: '<strong>Forward to anyone as the final approver</strong> — from the e-mailed link, the ticket or the Approvals inbox an approver can forward an open request to any member of the workspace with a note. That person’s decision is final, whatever the amount.' },
+      { type: 'improved', html: '<strong>Request approval, redesigned</strong> — a searchable category picker with the description, the tier chain, approver avatars and an amount badge; an amount field that tells you who will be able to finalise that total; and the same rich composer as a ticket note — paste or drag-and-drop screenshots and attach files, which land on the ticket for the approver.' },
+      { type: 'improved', html: '<strong>Approval page: confirm before you act</strong> — Approve, Reject, Escalate and Forward each open a confirmation sheet naming the ticket, the requester and the amount, so a stray click (or an “A” typed into the wrong window) cannot decide a request. The page also shows the tier, the amount and its limit, how the request reached you, and the files on the ticket.' },
+      { type: 'improved', html: '<strong>Approval categories: tiers and amounts</strong> — the category editor gains tier rows (“+ Add a tier”, each with its own approvers and limit) and an “This approval has an amount” switch with the currency. Tier chains show on the category list.' },
+      { type: 'improved', html: '<strong>Per-workspace fast-sync cadence</strong> — Settings → Workspaces lets an admin set how often each workspace runs its assignment fast sync (1–30 minutes; every minute stays the default) alongside the full-sync interval. Saving restarts that workspace’s schedules at once.' },
+    ],
+  },
   {
     version: '3.8.90-preview',
     date: 'September 15, 2026',

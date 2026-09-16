@@ -1,4 +1,5 @@
-import { PersonAvatar, PriorityDot, formatDay } from '../../components/tickets/ticketUi';
+import { Paperclip } from 'lucide-react';
+import { PersonAvatar, PriorityDot, formatBytes, formatDay } from '../../components/tickets/ticketUi';
 import { APPROVER_DOT, absoluteApiUrl, approverStatusLabel, isOpenForDecision, personMetaLines, sortApprovers } from './approvalMeta';
 
 function RailHeading({ children }) {
@@ -76,6 +77,11 @@ export default function ApprovalRail({ approval, ticket, approvers }) {
                 <li key={`${row.name}-${idx}`} className="flex items-center justify-between gap-3">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${APPROVER_DOT[row.status] || APPROVER_DOT.pending}`} />
+                    {approval?.tierCount > 1 && (
+                      <span className="shrink-0 rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground" title={`Approval tier ${row.tier || 1}`}>
+                        {row.tierName || `Tier ${row.tier || 1}`}
+                      </span>
+                    )}
                     <span className="truncate text-foreground">
                       {row.isYou ? <><span className="font-semibold">You</span>{row.name ? <span className="text-muted-foreground"> · {row.name}</span> : null}</> : row.name}
                     </span>
@@ -90,11 +96,29 @@ export default function ApprovalRail({ approval, ticket, approvers }) {
         </section>
       )}
 
+      {Array.isArray(ticket?.attachments) && ticket.attachments.length > 0 && (
+        <section aria-labelledby="rail-files">
+          <RailHeading><span id="rail-files">Files on the ticket ({ticket.attachments.length})</span></RailHeading>
+          <ul className="flex flex-col gap-1.5 text-[13px]">
+            {ticket.attachments.slice(0, 8).map((f) => (
+              <li key={f.id || f.name} className="flex min-w-0 items-center gap-1.5 text-foreground">
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="truncate">{f.name}</span>
+                {f.sizeBytes ? <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(f.sizeBytes)}</span> : null}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[11.5px] text-muted-foreground">Open the ticket to view them (sign-in required).</p>
+        </section>
+      )}
+
       <section aria-labelledby="rail-next">
         <RailHeading><span id="rail-next">What happens next</span></RailHeading>
         <p className="text-[12.5px] leading-relaxed text-muted-foreground">
           {open
-            ? 'Approving lets the team act on the request; the requester and the agent are notified either way. You can ask a question first — the agent answers by email and this page updates.'
+            ? (approval?.autoEscalates
+              ? `The amount is over your ${approval.tierName || 'tier'} limit: approving records your approval and sends the request on to ${approval.nextTier?.name || 'the next tier'} automatically. Rejecting ends it. You can also ask a question, escalate with a note, or forward to anyone in the workspace as the final approver.`
+              : `Approving lets the team act on the request; the requester and the agent are notified either way. You can ask a question first — the agent answers by email and this page updates.${approval?.canEscalate ? ` Escalate sends it to ${approval.nextTier?.name || 'the next tier'} with your note;` : ''} Forward hands it to anyone in the workspace as the final approver.`)
             : 'The requester and the agent have been notified. Nothing else is needed from you — you can close this page.'}
         </p>
       </section>

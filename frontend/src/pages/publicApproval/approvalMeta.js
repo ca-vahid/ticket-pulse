@@ -10,6 +10,8 @@ export const STATUS_CHIP = {
   rejected: { label: 'Rejected', className: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200' },
   cancelled: { label: 'Cancelled', className: 'bg-muted text-muted-foreground' },
   expired: { label: 'Expired', className: 'bg-muted text-muted-foreground' },
+  escalated: { label: 'Escalated', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' },
+  forwarded: { label: 'Forwarded', className: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200' },
 };
 
 /**
@@ -48,6 +50,16 @@ export const STATUS_BADGE = {
     badge: 'bg-secondary text-foreground border-input',
     stripe: 'border-t-muted-foreground/40',
   },
+  escalated: {
+    label: 'Escalated',
+    badge: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-500/20 dark:text-amber-100 dark:border-amber-500/40',
+    stripe: 'border-t-amber-500',
+  },
+  forwarded: {
+    label: 'Forwarded',
+    badge: 'bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-500/20 dark:text-blue-100 dark:border-blue-500/40',
+    stripe: 'border-t-blue-500',
+  },
 };
 
 export const APPROVER_DOT = {
@@ -56,6 +68,8 @@ export const APPROVER_DOT = {
   rejected: 'bg-red-500',
   cancelled: 'bg-muted-foreground/40',
   superseded: 'bg-muted-foreground/40',
+  escalated: 'bg-amber-500',
+  forwarded: 'bg-blue-500',
 };
 
 export function approverStatusLabel(approver, supersededBy) {
@@ -63,6 +77,8 @@ export function approverStatusLabel(approver, supersededBy) {
   case 'approved': return 'approved';
   case 'rejected': return 'rejected';
   case 'cancelled': return 'cancelled';
+  case 'escalated': return 'escalated';
+  case 'forwarded': return 'forwarded';
   case 'superseded': return supersededBy?.name ? `superseded by ${supersededBy.name}` : 'superseded';
   case 'pending':
   default: return 'pending';

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { Timer } from 'lucide-react';
 import { workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
@@ -25,6 +26,10 @@ export default function WorkspaceManagementPanel() {
   const [activating, setActivating] = useState(null);
   const [deactivating, setDeactivating] = useState(null);
   const [togglingTicketing, setTogglingTicketing] = useState(null);
+  // v3.8.91: per-workspace sync cadence (full sync + assignment fast sync).
+  const [cadenceFor, setCadenceFor] = useState(null); // dbWorkspace id being edited
+  const [cadence, setCadence] = useState({ syncIntervalMinutes: 5, fastSyncIntervalMinutes: 1 });
+  const [savingCadence, setSavingCadence] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
 
@@ -83,6 +88,27 @@ export default function WorkspaceManagementPanel() {
       setTogglingTicketing(null);
     }
   }, [discover, refreshWorkspaces]);
+
+  const saveCadence = useCallback(async (ws) => {
+    const dbWs = ws.dbWorkspace;
+    if (!dbWs) return;
+    setSavingCadence(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const full = Math.max(1, Math.min(1440, Math.trunc(Number(cadence.syncIntervalMinutes) || 5)));
+      const fast = Math.max(1, Math.min(30, Math.trunc(Number(cadence.fastSyncIntervalMinutes) || 1)));
+      await workspaceAPI.update(dbWs.id, { syncIntervalMinutes: full, fastSyncIntervalMinutes: fast });
+      setSuccessMsg(`"${ws.name}" now syncs every ${full}m (full) and refreshes assignments every ${fast}m — schedules restarted.`);
+      setCadenceFor(null);
+      await refreshWorkspaces();
+      await discover();
+    } catch (err) {
+      setError(err.message || 'Failed to update the sync cadence');
+    } finally {
+      setSavingCadence(false);
+    }
+  }, [cadence, discover, refreshWorkspaces]);
 
   const deactivate = useCallback(async (ws) => {
     const dbWs = ws.dbWorkspace;
@@ -191,15 +217,46 @@ export default function WorkspaceManagementPanel() {
                     <span>FS ID: {String(ws.freshserviceId)}</span>
                     {ws.dbWorkspace && (
                       <>
-                        <span className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => { setCadenceFor(ws.dbWorkspace.id); setCadence({ syncIntervalMinutes: ws.dbWorkspace.syncIntervalMinutes || 5, fastSyncIntervalMinutes: ws.dbWorkspace.fastSyncIntervalMinutes || 1 }); }}
+                          title="Change how often this workspace syncs"
+                          className="tp-focus-ring flex items-center gap-1 rounded hover:text-foreground"
+                        >
                           <Clock className="w-3 h-3" />
                           Sync every {ws.dbWorkspace.syncIntervalMinutes}m
-                        </span>
+                          <span className="text-muted-foreground/60">·</span>
+                          <Timer className="w-3 h-3" />
+                          fast sync every {ws.dbWorkspace.fastSyncIntervalMinutes || 1}m
+                        </button>
                         <span>Slug: {ws.dbWorkspace.slug}</span>
                       </>
                     )}
                     {ws.description && <span className="truncate max-w-[200px]">{ws.description}</span>}
                   </div>
+                  {ws.dbWorkspace && cadenceFor === ws.dbWorkspace.id && (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); saveCadence(ws); }}
+                      className="mt-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5"
+                      aria-label={`Sync cadence for ${ws.name}`}
+                    >
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        Full sync (min)
+                        <input type="number" min={1} max={1440} value={cadence.syncIntervalMinutes} onChange={(e) => setCadence((c) => ({ ...c, syncIntervalMinutes: e.target.value }))} className="tp-focus-ring mt-1 block w-24 rounded-lg border border-input bg-card px-2 py-1.5 text-sm font-normal text-foreground" />
+                      </label>
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        Assignment fast sync (min, 1–30)
+                        <input type="number" min={1} max={30} value={cadence.fastSyncIntervalMinutes} onChange={(e) => setCadence((c) => ({ ...c, fastSyncIntervalMinutes: e.target.value }))} className="tp-focus-ring mt-1 block w-24 rounded-lg border border-input bg-card px-2 py-1.5 text-sm font-normal text-foreground" />
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <button type="submit" disabled={savingCadence} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
+                          {savingCadence ? <Loader className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />} Save
+                        </button>
+                        <button type="button" onClick={() => setCadenceFor(null)} className="tp-focus-ring rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+                      </div>
+                      <p className="basis-full text-[11px] text-muted-foreground">Fast sync refreshes FreshService status/assignee changes and feeds the AI assignment lane. Every minute is the default; a quieter workspace can take 5–10.</p>
+                    </form>
+                  )}
                 </div>
 
                 {/* Actions */}

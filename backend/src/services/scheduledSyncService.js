@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { clampFastSyncInterval, fastSyncCronExpression } from '../utils/fastSyncCron.js';
 import syncService from './syncService.js';
 import vtService from './vacationTrackerService.js';
 import vtRepo from './vacationTrackerRepository.js';
@@ -13,6 +14,8 @@ import logger from '../utils/logger.js';
  * Multi-workspace scheduled sync service.
  * Manages one cron job per active workspace, each with its own interval.
  */
+
+
 class ScheduledSyncService {
   constructor() {
     this.cronJobs = new Map();
@@ -204,13 +207,16 @@ class ScheduledSyncService {
     const wsName = workspace.name;
     const tz = workspace.defaultTimezone || 'America/Los_Angeles';
     const secondOffset = (wsId * 13) % 60;
+    // v3.8.91: per-workspace cadence (Settings → Workspaces). 1 = every minute
+    // (the historical behaviour); N = every N minutes, N in 1..30.
+    const every = clampFastSyncInterval(workspace.fastSyncIntervalMinutes);
 
     this.stopAssignmentFastSyncForWorkspace(wsId);
 
-    logger.info(`Starting assignment fast sync for workspace "${wsName}" (id=${wsId}) every 1m at :${secondOffset.toString().padStart(2, '0')}`);
+    logger.info(`Starting assignment fast sync for workspace "${wsName}" (id=${wsId}) every ${every}m at :${secondOffset.toString().padStart(2, '0')}`);
 
     const job = cron.schedule(
-      `${secondOffset} * * * * *`,
+      fastSyncCronExpression(every, secondOffset),
       async () => {
         if (this.assignmentFastSyncInProgress.has(wsId)) {
           logger.debug(`[${wsName}] Assignment fast sync already in progress, skipping`);
@@ -396,6 +402,7 @@ class ScheduledSyncService {
 
   stopAssignmentFastSyncForWorkspace(wsId) {
     const entry = this.assignmentFastSyncCronJobs.get(wsId);
+    if (entry) this.assignmentFastSyncIntervals?.delete?.(wsId);
     if (entry) {
       logger.info(`Stopping assignment fast sync for workspace "${entry.workspaceName}"`);
       entry.job.stop();

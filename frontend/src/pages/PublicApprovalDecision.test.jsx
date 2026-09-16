@@ -12,8 +12,7 @@ import {
   invalidError,
   pendingFixture,
   rejectedFixture,
-  supersededFixture,
-} from './publicApproval/fixtures';
+  supersededFixture, tieredFixture } from './publicApproval/fixtures';
 
 // Public approval page (/approval/:token) — the redesign (design-previews/
 // approval-redesign/mock.html): token-driven surface with a page-local theme
@@ -24,6 +23,7 @@ import {
 const apiMock = vi.hoisted(() => ({
   get: vi.fn(),
   decide: vi.fn(),
+  handoff: vi.fn(),
   clarify: vi.fn(),
 }));
 vi.mock('../services/api', () => ({ publicApprovalAPI: apiMock }));
@@ -63,11 +63,14 @@ import PublicApprovalDecisionPage from './PublicApprovalDecision';
 
 const noteBox = () => screen.getByRole('textbox', { name: 'Decision note' });
 const typeNote = (text) => fireEvent.change(noteBox(), { target: { value: text } });
+// Approvals v2: every action confirms first — this finds and clicks the sheet's CTA.
+const confirmSheet = async (cta) => fireEvent.click(await screen.findByRole('button', { name: cta }));
 
 describe('PublicApprovalDecision (approval redesign)', () => {
   beforeEach(() => {
     apiMock.get.mockReset();
     apiMock.decide.mockReset();
+    apiMock.handoff.mockReset();
     apiMock.clarify.mockReset();
     localStorage.clear();
     document.documentElement.classList.remove('dark');
@@ -139,6 +142,10 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(reject).toBeEnabled();
     expect(screen.queryByText('Add a reason to reject')).not.toBeInTheDocument();
     fireEvent.click(reject);
+    // Confirmation sheet shows the ref, the note, and only then posts.
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/You are about to reject #239934 for Ingrid Berru Garcia/);
+    expect(apiMock.decide).not.toHaveBeenCalled();
+    await confirmSheet(/Yes, reject/);
 
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'Budget frozen until Q4.', null));
     expect(await screen.findByText(/You rejected this on Sep 2/)).toBeInTheDocument();
@@ -152,6 +159,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.decide.mockReturnValue(ok({ status: 'approved', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }));
+    await confirmSheet(/Yes, approve/);
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null));
     const banner = await screen.findByText(/You approved this on Sep 2/);
     expect(banner).toBeInTheDocument();
@@ -170,6 +178,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     const reject = await screen.findByRole('button', { name: /^Reject/ });
     typeNote('x');
     fireEvent.click(reject);
+    await confirmSheet(/Yes, reject/);
     expect(await screen.findByRole('alert')).toHaveTextContent('Add a reason for rejecting');
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Approve/ })).toBeEnabled();
@@ -218,9 +227,76 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     fireEvent.keyDown(noteBox(), { key: 'a' });
     expect(apiMock.decide).not.toHaveBeenCalled();
 
+    // "A" opens the confirmation; nothing is posted until it is confirmed.
     fireEvent.keyDown(document.body, { key: 'a' });
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Approve this request\?/);
+    expect(apiMock.decide).not.toHaveBeenCalled();
+    await confirmSheet(/Yes, approve/);
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null));
-    expect(screen.getByText('Approving…')).toBeInTheDocument();
+    expect(screen.getByText('Working…')).toBeInTheDocument();
+  });
+
+  test('confirmation: "Go back" (or Escape) closes the sheet without deciding', async () => {
+    apiMock.get.mockReturnValue(ok(pendingFixture));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Go back' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.keyDown(document.body, { key: 'a' });
+    await screen.findByRole('dialog');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(apiMock.decide).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /^Approve/ })).toBeEnabled();
+  });
+
+  test('tiered: escalate needs a note, confirms, posts the hand-off and shows the handed-off banner', async () => {
+    apiMock.get.mockReturnValue(ok(tieredFixture));
+    apiMock.handoff.mockReturnValue(ok({ status: 'escalated', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield', handoff: { kind: 'escalated', to: ['neville@x.io'] } }));
+    renderPage();
+    // Header shows the tier and the amount; the rail explains the auto-escalation.
+    expect(await screen.findByTitle('Approval tier 1 of 2')).toHaveTextContent('Tier 1/2');
+    expect(screen.getByTitle('Amount on this request')).toHaveTextContent('$6,000.00');
+    expect(screen.getByText(/over your Tier 1 limit \(\$5,000\.00\) — approving sends it on to Tier 2/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Escalate to Tier 2/ }));
+    const escalate = screen.getByRole('button', { name: 'Escalate' });
+    expect(escalate).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Escalate note' }), { target: { value: 'Needs CISO sign-off' } });
+    fireEvent.click(escalate);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Escalate to Tier 2\?/);
+    expect(apiMock.handoff).not.toHaveBeenCalled();
+    await confirmSheet(/Yes, escalate/);
+    await waitFor(() => expect(apiMock.handoff).toHaveBeenCalledWith('tok-1', { mode: 'escalate', note: 'Needs CISO sign-off', toEmail: null }));
+    expect(await screen.findByText(/You escalated this to Neville Howell \(Tier 2\) on Sep 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('approval-status-badge')).toHaveAttribute('data-status', 'escalated');
+    expect(screen.queryByRole('heading', { name: 'Your decision' })).not.toBeInTheDocument();
+  });
+
+  test('tiered: forward picks a person from the workspace, confirms, and posts the target', async () => {
+    apiMock.get.mockReturnValue(ok(tieredFixture));
+    apiMock.handoff.mockReturnValue(ok({ status: 'forwarded', decidedAt: '2026-09-02T16:30:00.000Z', handoff: { kind: 'forwarded', to: ['bryan@x.io'] } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /^Forward/ }));
+    const picker = screen.getByRole('combobox', { name: 'Forward to' });
+    fireEvent.change(picker, { target: { value: 'bry' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Bryan Tan/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Forward note' }), { target: { value: 'Your budget line' } });
+    fireEvent.click(screen.getByRole('button', { name: /Forward to Bryan/ }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Forward to Bryan Tan\?/);
+    await confirmSheet(/Yes, forward/);
+    await waitFor(() => expect(apiMock.handoff).toHaveBeenCalledWith('tok-1', { mode: 'forward', note: 'Your budget line', toEmail: 'bryan@x.io' }));
+    expect(await screen.findByText(/You forwarded this to Bryan Tan on Sep 2/)).toBeInTheDocument();
+  });
+
+  test('tiered: approving over the limit renders the auto-escalated banner', async () => {
+    apiMock.get.mockReturnValue(ok(tieredFixture));
+    apiMock.decide.mockReturnValue(ok({ status: 'escalated', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/moves on to Neville Howell automatically/);
+    await confirmSheet(/Yes, approve/);
+    expect(await screen.findByText(/You approved this on Sep 2/)).toHaveTextContent(/over your Tier 1 limit, so it moved on to Neville Howell \(Tier 2\)/);
   });
 
   test('keyboard: R with a reason rejects', async () => {
@@ -230,6 +306,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     await screen.findByRole('button', { name: /^Reject/ });
     typeNote('No budget.');
     fireEvent.keyDown(document.body, { key: 'R' });
+    await confirmSheet(/Yes, reject/);
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'No budget.', null));
   });
 
