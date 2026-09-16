@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.93-preview';
+export const APP_VERSION = '3.8.94-preview';
 
 export const changelog = [
+  {
+    version: '3.8.94-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Members: one roster for everyone</strong> — the separate “App-only people” box is gone. App-only people (read-only observers, execs, admin accounts) now sit in the same table as FreshService and Local members, with their directory name and photo, an <em>App-only</em> type chip, the same App access dropdown, and a Remove-access action. They are never in an assignment pool, never in stats, and invisible to the AI — Read-only means exactly that.' },
+      { type: 'improved', html: '<strong>Members: one “Add a person” box</strong> — search the directory once and choose what you are adding: a Local member (can be assigned Ticket Pulse tickets) or App-only access with a role (Read-only, Standard, Reviewer, Admin). A fully typed e-mail address works for app-only access even when the directory has no match.' },
+    ],
+  },
   {
     version: '3.8.93-preview',
     date: 'September 15, 2026',

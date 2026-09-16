@@ -27,7 +27,7 @@ function Avatar({ name, photoUrl, size = 'h-8 w-8', dim = false }) {
 }
 
 /** Entra (GAL) typeahead — search the directory, click a person to add them. */
-function DirectoryAdd({ onAdded, onError }) {
+function DirectoryAdd({ onAdded, onError, mode = 'member', onGrant }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -57,6 +57,12 @@ function DirectoryAdd({ onAdded, onError }) {
     }
   }, [onError]);
 
+  // App-only grants key on e-mail, so a fully typed address is always addable
+  // even when the directory has no match (or is locked for this caller).
+  const typedEmail = mode !== 'member' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(query.trim())
+    && !results.some((r) => String(r.email || '').toLowerCase() === query.trim().toLowerCase())
+    ? query.trim().toLowerCase() : null;
+
   const handleChange = (v) => {
     setQuery(v);
     setOpen(true);
@@ -67,17 +73,22 @@ function DirectoryAdd({ onAdded, onError }) {
   };
 
   const add = async (person) => {
-    if (person.alreadyMemberActive) return;
+    if (mode === 'member' && person.alreadyMemberActive) return;
     setAddingEmail(person.email);
     onError?.(null);
     try {
-      await settingsAPI.createLocalAgent({
-        name: person.name,
-        email: person.email,
-        photoUrl: person.photoUrl || undefined,
-      });
+      if (mode === 'member') {
+        await settingsAPI.createLocalAgent({
+          name: person.name,
+          email: person.email,
+          photoUrl: person.photoUrl || undefined,
+        });
+      } else {
+        // Unified roster (v3.8.94): app-only = sign-in with a role, never in a pool.
+        await onGrant?.(person.email, mode);
+      }
       setQuery(''); setResults([]); setOpen(false);
-      onAdded?.(person.name);
+      onAdded?.(person.name || person.email, mode);
     } catch (err) {
       onError?.(err.response?.data?.message || err.message);
     } finally {
@@ -104,12 +115,29 @@ function DirectoryAdd({ onAdded, onError }) {
           {searching && results.length === 0 && (
             <div className="px-3 py-4 text-sm text-muted-foreground/75 flex items-center gap-2"><Loader className="w-4 h-4 animate-spin" /> Searching directory…</div>
           )}
-          {!searching && results.length === 0 && (
+          {!searching && results.length === 0 && !typedEmail && (
             <div className="px-3 py-4 text-sm text-muted-foreground/75">No one in the directory matches “{query}”.</div>
+          )}
+          {typedEmail && (
+            <button
+              type="button"
+              onClick={() => add({ email: typedEmail, name: null })}
+              disabled={addingEmail === typedEmail}
+              className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left tp-focus-ring hover:bg-blue-50 dark:hover:bg-blue-500/15"
+            >
+              <span className="h-9 w-9 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center shrink-0">
+                <KeyRound className="w-4 h-4 text-blue-500" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground truncate">Use this email address</span>
+                <span className="block text-xs text-muted-foreground truncate">{typedEmail} · {ACCESS_OPTIONS.find((o) => o.value === mode)?.label || mode} access, no tickets</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
+            </button>
           )}
           {results.map((p) => {
             const busy = addingEmail === p.email;
-            const disabled = p.alreadyMemberActive || busy;
+            const disabled = (mode === 'member' && p.alreadyMemberActive) || busy;
             return (
               <button
                 key={p.email}
@@ -127,13 +155,13 @@ function DirectoryAdd({ onAdded, onError }) {
                     {p.email}{p.jobTitle ? ` · ${p.jobTitle}` : ''}
                   </div>
                 </div>
-                {p.alreadyMemberActive ? (
+                {mode === 'member' && p.alreadyMemberActive ? (
                   <span className="text-[11px] font-medium text-muted-foreground/75 shrink-0">Already added</span>
                 ) : busy ? (
                   <Loader className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
                 ) : (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300 shrink-0">
-                    {p.alreadyMember ? <><Power className="w-3.5 h-3.5" /> Re-add</> : <><UserPlus className="w-3.5 h-3.5" /> Add</>}
+                    {mode !== 'member' ? <><KeyRound className="w-3.5 h-3.5" /> Grant</> : p.alreadyMember ? <><Power className="w-3.5 h-3.5" /> Re-add</> : <><UserPlus className="w-3.5 h-3.5" /> Add</>}
                   </span>
                 )}
               </button>
@@ -163,6 +191,7 @@ const FILTERS = [
   { key: 'disabled', label: 'Disabled' },
   { key: 'local', label: 'Local' },
   { key: 'fs', label: 'FreshService' },
+  { key: 'app', label: 'App-only' },
   { key: 'all', label: 'All' },
 ];
 
@@ -203,9 +232,9 @@ export default function MembersPanel() {
   const [accessByEmail, setAccessByEmail] = useState(null);
   const [accessBusyEmail, setAccessBusyEmail] = useState(null);
   const [appOnly, setAppOnly] = useState([]);
-  const [newGrantEmail, setNewGrantEmail] = useState('');
-  const [newGrantRole, setNewGrantRole] = useState('readonly');
-  const [grantBusy, setGrantBusy] = useState(false);
+  // Unified roster (v3.8.94): the single "Add a person" box adds a local
+  // member (assignable) or grants app-only access with a role (never assignable).
+  const [addMode, setAddMode] = useState('member');
 
   const wsId = currentWorkspace?.id;
 
@@ -249,16 +278,7 @@ export default function MembersPanel() {
 
   const flash = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 4000); };
 
-  const counts = useMemo(() => {
-    const list = members || [];
-    return {
-      all: list.length,
-      active: list.filter((t) => t.isActive).length,
-      disabled: list.filter((t) => !t.isActive).length,
-      local: list.filter((t) => t.origin === 'local').length,
-      fs: list.filter((t) => t.origin !== 'local').length,
-    };
-  }, [members]);
+  // (counts are computed below, after the app-only rows are derived)
 
   // App-only people, render-time view (Sep 9 fix): a grant counts as
   // app-only only when its email has no ACTIVE technician row — disabled
@@ -272,19 +292,46 @@ export default function MembersPanel() {
     return appOnly.filter((r) => !activeEmails.has(String(r.email || '').toLowerCase()));
   }, [appOnly, members]);
 
+  // Unified roster (v3.8.94): app-only people are rows like everyone else —
+  // type "App-only", always active while the grant exists, never assignable.
+  const appRows = useMemo(() => visibleAppOnly.map((r) => ({
+    id: `app:${String(r.email).toLowerCase()}`,
+    name: r.name && String(r.name).toLowerCase() !== String(r.email).toLowerCase() ? r.name : String(r.email).toLowerCase(),
+    email: String(r.email).toLowerCase(),
+    photoUrl: r.photoUrl || null,
+    location: '',
+    isActive: true,
+    origin: 'app',
+    accessRole: r.accessRole,
+  })), [visibleAppOnly]);
+
+  const counts = useMemo(() => {
+    const list = members || [];
+    return {
+      all: list.length + appRows.length,
+      active: list.filter((t) => t.isActive).length + appRows.length,
+      disabled: list.filter((t) => !t.isActive).length,
+      local: list.filter((t) => t.origin === 'local').length,
+      fs: list.filter((t) => t.origin !== 'local').length,
+      app: appRows.length,
+    };
+  }, [members, appRows]);
+
   const rows = useMemo(() => {
     let list = members || [];
-    if (filter === 'active') list = list.filter((t) => t.isActive);
+    if (filter === 'active') list = [...list.filter((t) => t.isActive), ...appRows];
     else if (filter === 'disabled') list = list.filter((t) => !t.isActive);
     else if (filter === 'local') list = list.filter((t) => t.origin === 'local');
     else if (filter === 'fs') list = list.filter((t) => t.origin !== 'local');
+    else if (filter === 'app') list = appRows;
+    else list = [...list, ...appRows];
     const q = searchQ.trim().toLowerCase();
     if (q) {
       list = list.filter((t) => [t.name, t.email, t.location]
         .some((v) => String(v || '').toLowerCase().includes(q)));
     }
     return list;
-  }, [members, filter, searchQ]);
+  }, [members, appRows, filter, searchQ]);
 
   const saveEdit = useCallback(async (id) => {
     if (!editForm.name.trim()) { setError('Name is required.'); return; }
@@ -330,11 +377,12 @@ export default function MembersPanel() {
     try {
       if (newRole) {
         await workspaceAPI.grantAccess(wsId, email, newRole);
-        flash(`${t.name} can now sign in as ${newRole} — it applies on their next page load.`);
+        flash(`${t.name} can now sign in as ${ACCESS_OPTIONS.find((o) => o.value === newRole)?.label || newRole} — it applies on their next page load.`);
       } else {
         await workspaceAPI.revokeAccess(wsId, email);
         flash(`App access removed for ${t.name}.`);
       }
+      await loadAccess();
     } catch (err) {
       // Roll the optimistic update back and surface the refusal.
       setAccessByEmail((m) => {
@@ -347,7 +395,7 @@ export default function MembersPanel() {
     } finally {
       setAccessBusyEmail(null);
     }
-  }, [wsId, accessByEmail]);
+  }, [wsId, accessByEmail, loadAccess]);
 
   // AI routing guidance (QA 07-14): a standing instruction the assignment AI
   // reads whenever this person is a candidate — e.g. reduced capacity.
@@ -391,10 +439,14 @@ export default function MembersPanel() {
         );
       },
     }),
-    columnHelper.accessor((t) => (t.origin === 'local' ? 'Local' : 'FreshService'), {
+    columnHelper.accessor((t) => (t.origin === 'app' ? 'App-only' : t.origin === 'local' ? 'Local' : 'FreshService'), {
       id: 'type',
       header: 'Type',
-      cell: ({ getValue }) => (getValue() === 'Local' ? (
+      cell: ({ getValue }) => (getValue() === 'App-only' ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30" title="Sign-in only: not in any assignment pool, not in stats, invisible to the AI">
+          <KeyRound className="w-3 h-3" aria-hidden="true" /> App-only
+        </span>
+      ) : getValue() === 'Local' ? (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30">
           <Home className="w-3 h-3" aria-hidden="true" /> Local
         </span>
@@ -491,112 +543,30 @@ export default function MembersPanel() {
         <div>
           <h3 className="text-lg font-semibold text-foreground">Members</h3>
           <p className="text-sm text-muted-foreground max-w-2xl">
-            FreshService members sync automatically (read-only). <strong>Local members</strong> are staff without a
-            FreshService license — they can be assigned <strong>Ticket Pulse tickets only</strong> and sign in with
-            their Microsoft account.
+            Everyone who can be assigned a ticket or sign in, in one list. <strong>FreshService</strong> members sync automatically;
+            <strong> Local</strong> members are staff without a FreshService licence (Ticket Pulse tickets only);
+            <strong> App-only</strong> people can sign in — observers, execs, admin accounts — and never receive tickets.
           </p>
         </div>
       </div>
 
-      {/* What "App access" means (role ladder, Sep 2026) */}
+      {/* One roster (v3.8.94): technicians AND app-only people, each with a
+          type and an App access level. The old "App-only people" card is gone. */}
       {accessByEmail && (
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground max-w-3xl">
           <KeyRound className="w-3.5 h-3.5 mt-0.5 text-muted-foreground/75 shrink-0" aria-hidden="true" />
           <span>
-            <strong className="font-semibold text-muted-foreground">App access</strong> sets what this person can open here.
-            <strong className="font-semibold text-muted-foreground"> Read-only</strong>: observer — Dashboard, Analytics and tickets in view mode; can only decide approvals addressed to them.
-            <strong className="font-semibold text-muted-foreground"> Standard</strong> (formerly Viewer): works tickets + approvals, sees AI suggestions but can&rsquo;t approve them.
-            <strong className="font-semibold text-muted-foreground"> Reviewer</strong>: also approves AI suggestions and manages approval categories.
-            <strong className="font-semibold text-muted-foreground"> Admin</strong>: everything, including Settings.
-            Technicians without a grant can still sign in for their own queue. People who should never receive tickets belong below, not in the roster above.
+            <strong className="font-semibold text-muted-foreground">Type</strong> says where a person comes from:
+            <strong className="font-semibold text-muted-foreground"> FreshService</strong> and <strong className="font-semibold text-muted-foreground">Local</strong> members can be assigned tickets;
+            <strong className="font-semibold text-muted-foreground"> App-only</strong> people can sign in but are never in an assignment pool, never in stats, and invisible to the AI.
+            <strong className="font-semibold text-muted-foreground"> App access</strong> says what they can open:
+            <strong className="font-semibold text-muted-foreground"> Read-only</strong> — Dashboard, Analytics and tickets in view mode, and deciding approvals addressed to them;
+            <strong className="font-semibold text-muted-foreground"> Standard</strong> — works tickets and approvals, sees AI suggestions;
+            <strong className="font-semibold text-muted-foreground"> Reviewer</strong> — also approves AI suggestions and manages approval categories;
+            <strong className="font-semibold text-muted-foreground"> Admin</strong> — everything, including Settings.
+            Technicians with Basic access can still sign in for their own queue.
           </span>
         </p>
-      )}
-
-      {/* App-only people (Sep 2026): access grants with no technician row —
-          observers, execs, admin accounts. Absorbed from the retired
-          Workspace Access page so people management lives on ONE surface.
-          They can never be assigned tickets: assignment draws exclusively
-          from the technician roster. */}
-      {accessByEmail && (
-        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">App-only people</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Sign-in access without being a technician — observers and admin accounts. Not in any assignment pool, invisible to the AI.
-            </p>
-          </div>
-          {visibleAppOnly.length > 0 && (
-            <ul className="divide-y divide-border/60">
-              {visibleAppOnly.map((row) => {
-                const email = String(row.email).toLowerCase();
-                return (
-                  <li key={email} className="flex items-center gap-3 py-2">
-                    <span className="text-sm text-foreground/85 font-medium flex-1 min-w-0 truncate">{row.name && String(row.name).toLowerCase() !== email ? row.name : email}</span>
-                    {row.name && String(row.name).toLowerCase() !== email && (
-                      <span className="text-xs text-muted-foreground/75 hidden sm:block truncate max-w-[220px]">{email}</span>
-                    )}
-                    <select
-                      value={accessByEmail?.[email] || ''}
-                      onChange={(e) => changeAccess({ email, name: row.name || email }, e.target.value).then(() => loadAccess())}
-                      disabled={accessBusyEmail === email}
-                      className="tp-focus-ring rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground"
-                      aria-label={`App access for ${row.name || email}`}
-                    >
-                      {ACCESS_OPTIONS.map((o) => (
-                        <option key={o.value || 'none'} value={o.value} title={o.description}>{o.value ? o.label : 'Remove access'}</option>
-                      ))}
-                    </select>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <form
-            className="flex flex-wrap items-center gap-2"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const email = newGrantEmail.trim().toLowerCase();
-              if (!email || !wsId) return;
-              setGrantBusy(true); setError(null);
-              try {
-                await workspaceAPI.grantAccess(wsId, email, newGrantRole);
-                flash(`${email} can now sign in (${ACCESS_OPTIONS.find((o) => o.value === newGrantRole)?.label || newGrantRole}).`);
-                setNewGrantEmail('');
-                await loadAccess();
-              } catch (err) {
-                setError(err.response?.data?.message || err.message || 'Failed to grant access');
-              } finally { setGrantBusy(false); }
-            }}
-          >
-            <input
-              type="email"
-              required
-              value={newGrantEmail}
-              onChange={(e) => setNewGrantEmail(e.target.value)}
-              placeholder="person@bgcengineering.ca"
-              className="tp-focus-ring flex-1 min-w-[220px] rounded-lg border border-input bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/50"
-              aria-label="Email to grant app access"
-            />
-            <select
-              value={newGrantRole}
-              onChange={(e) => setNewGrantRole(e.target.value)}
-              className="tp-focus-ring rounded-lg border border-input bg-card px-2 py-1.5 text-sm text-foreground"
-              aria-label="Role for the new grant"
-            >
-              {ACCESS_OPTIONS.filter((o) => o.value).map((o) => (
-                <option key={o.value} value={o.value} title={o.description}>{o.label}</option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              disabled={grantBusy || !newGrantEmail.trim()}
-              className="tp-focus-ring rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-            >
-              {grantBusy ? 'Granting…' : 'Grant access'}
-            </button>
-          </form>
-        </div>
       )}
 
       {/* Alerts */}
@@ -611,13 +581,42 @@ export default function MembersPanel() {
         </div>
       )}
 
-      {/* Add via directory */}
+      {/* Add a person (v3.8.94): one box for both kinds of people. */}
       <div className="tp-card p-3.5 space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-300" /> Add a local member
+        <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+          <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-300" /> Add a person
           {currentWorkspace?.name && <span className="text-xs font-normal text-muted-foreground">to {currentWorkspace.name}</span>}
+          <label className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            Add as
+            <select
+              value={addMode}
+              onChange={(e) => setAddMode(e.target.value)}
+              aria-label="Add as"
+              className="tp-focus-ring rounded-lg border border-input bg-card px-2 py-1 text-xs font-semibold text-foreground"
+            >
+              <option value="member">Local member — can be assigned Ticket Pulse tickets</option>
+              {accessByEmail && ACCESS_OPTIONS.filter((o) => o.value).map((o) => (
+                <option key={o.value} value={o.value} disabled={o.value === 'admin' && !isGlobalAdmin} title={o.description}>
+                  App-only · {o.label}{o.value === 'admin' && !isGlobalAdmin ? ' (global admin only)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <DirectoryAdd onAdded={(name) => { flash(`${name} added from the directory.`); load(); }} onError={setError} />
+        <p className="text-[11px] text-muted-foreground">
+          {addMode === 'member'
+            ? 'Staff without a FreshService licence: they join the roster, can be assigned Ticket Pulse tickets and sign in with their Microsoft account.'
+            : `Sign-in only with ${ACCESS_OPTIONS.find((o) => o.value === addMode)?.label || addMode} access — observers, execs, admin accounts. Not in any assignment pool, not in stats, invisible to the AI. You can also type a full e-mail address.`}
+        </p>
+        <DirectoryAdd
+          mode={addMode}
+          onGrant={(email, role) => workspaceAPI.grantAccess(wsId, email, role)}
+          onAdded={(name, mode) => {
+            if (mode && mode !== 'member') { flash(`${name} can now sign in (${ACCESS_OPTIONS.find((o) => o.value === mode)?.label || mode}).`); loadAccess(); }
+            else { flash(`${name} added from the directory.`); load(); }
+          }}
+          onError={setError}
+        />
       </div>
 
       {loading ? (
@@ -715,6 +714,8 @@ export default function MembersPanel() {
                       saving={saving}
                       onToggle={() => toggleActive(t)}
                       toggling={togglingId === t.id}
+                      onRevoke={t.origin === 'app' ? () => changeAccess(t, '') : null}
+                      revoking={t.origin === 'app' && accessBusyEmail === t.email}
                       guidanceOpen={guidanceOpen}
                       guidanceDraft={guidanceDraft}
                       setGuidanceDraft={setGuidanceDraft}
@@ -737,7 +738,9 @@ export default function MembersPanel() {
 function MemberTableRow({
   row, t, colSpanAll, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, saving,
   onToggle, toggling, guidanceOpen, guidanceDraft, setGuidanceDraft, onOpenGuidance, onCloseGuidance, onSaveGuidance, guidanceSaving,
+  onRevoke = null, revoking = false,
 }) {
+  const appOnly = t.origin === 'app';
   return (
     <>
       <tr className={`transition-colors hover:bg-muted/35 ${t.isActive ? '' : 'opacity-70'}`}>
@@ -752,21 +755,27 @@ function MemberTableRow({
         })}
         <td className="px-3 py-2">
           <div className="flex items-center justify-end gap-0.5">
-            {t.isActive && !guidanceOpen && (
+            {appOnly && (
+              <button onClick={onRevoke} disabled={revoking} title="Remove app access" aria-label={`Remove app access for ${t.name}`}
+                className="p-1.5 rounded-lg tp-focus-ring text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15">
+                {revoking ? <Loader className="w-4 h-4 animate-spin" /> : <PowerOff className="w-4 h-4" />}
+              </button>
+            )}
+            {!appOnly && t.isActive && !guidanceOpen && (
               <button onClick={onOpenGuidance} title={t.routingGuidance ? 'Edit AI routing note' : 'Add AI routing note (e.g. reduced capacity)'}
                 className={`p-1.5 rounded-lg tp-focus-ring ${t.routingGuidance ? 'text-violet-600 dark:text-violet-300 hover:text-violet-800 dark:hover:text-violet-200' : 'text-muted-foreground/75 hover:text-violet-600 dark:hover:text-violet-300'}`}>
                 <Brain className="w-4 h-4" />
               </button>
             )}
-            {onStartEdit && t.isActive && !editing && (
+            {!appOnly && onStartEdit && t.isActive && !editing && (
               <button onClick={onStartEdit} title="Edit name / location / timezone" className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring">
                 <Pencil className="w-4 h-4" />
               </button>
             )}
-            <button onClick={onToggle} disabled={toggling} title={t.isActive ? 'Disable' : 'Re-enable'}
+            {!appOnly && <button onClick={onToggle} disabled={toggling} title={t.isActive ? 'Disable' : 'Re-enable'}
               className={`p-1.5 rounded-lg tp-focus-ring ${t.isActive ? 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300' : 'text-emerald-600 dark:text-emerald-300 hover:text-emerald-700 dark:hover:text-emerald-200'}`}>
               {toggling ? <Loader className="w-4 h-4 animate-spin" /> : t.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
-            </button>
+            </button>}
           </div>
         </td>
       </tr>

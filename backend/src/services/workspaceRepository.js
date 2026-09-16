@@ -329,6 +329,13 @@ class WorkspaceRepository {
       try {
         const { fillPersonNames } = await import('./personDirectoryService.js');
         await fillPersonNames(rows);
+        // Unified roster (v3.8.94): app-only people carry an Entra photo like
+        // everyone else. Few rows, 12h-cached data URIs — cheap.
+        const { getCachedUserPhoto } = await import('./userPhotoService.js');
+        for (const r of rows) {
+          if (r.technicianId || r.photoUrl) continue;
+          r.photoUrl = await getCachedUserPhoto(r.email).catch(() => null);
+        }
       } catch (err) {
         logger.debug?.(`Member name fill skipped: ${err.message}`);
       }
