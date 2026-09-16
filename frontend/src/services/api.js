@@ -1133,8 +1133,21 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/approvals`, payload);
   },
 
-  decideApproval: async (id, approvalId, decision, note = null) => {
-    return await api.post(`/tickets/${id}/approvals/${approvalId}/decide`, { decision, note });
+  decideApproval: async (id, approvalId, decision, note = null, extra = {}) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/decide`, { decision, note, ...extra });
+  },
+
+  // Approvals v3: the conversation on a request (questions / answers / comments / decisions).
+  approvalMessages: async (id) => {
+    return await api.get(`/tickets/${id}/approvals/messages`);
+  },
+
+  askApproval: async (id, approvalId, { kind = 'question', mode = 'requester', to, cc, bodyText, bodyHtml }) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
+  },
+
+  answerApprovalMessage: async (id, messageId, { bodyText, bodyHtml }) => {
+    return await api.post(`/tickets/${id}/approvals/messages/${messageId}/answer`, { bodyText, bodyHtml });
   },
 
   clarifyApproval: async (id, approvalId, note) => {
@@ -1274,8 +1287,25 @@ export const publicApprovalAPI = {
     return response;
   },
 
-  decide: async (token, decision, note = null, noteHtml = null) => {
-    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note, noteHtml });
+  decide: async (token, decision, note = null, noteHtml = null, extra = {}) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note, noteHtml, ...extra });
+    return response;
+  },
+
+  // Approvals v3: a question / note from the link page, with an audience.
+  postMessage: async (token, { kind = 'question', mode = 'requester', to, cc, bodyText, bodyHtml }) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
+    return response;
+  },
+
+  // Approvals v3: the requester's / agent's reply link (no login).
+  replyView: async (token) => {
+    const response = await api.get(`/ticket-approvals/reply/${encodeURIComponent(token)}`);
+    return response;
+  },
+
+  replySend: async (token, { bodyText, bodyHtml }) => {
+    const response = await api.post(`/ticket-approvals/reply/${encodeURIComponent(token)}`, { bodyText, bodyHtml });
     return response;
   },
 

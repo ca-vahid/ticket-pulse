@@ -83,7 +83,7 @@ for (const name of [
 }
 jest.unstable_mockModule('../src/routes/summit.routes.js', routeStub('summit', { summitPublicRouter: stubRouter('summit-public') }));
 jest.unstable_mockModule('../src/routes/publicTicketStatus.routes.js', () => ({ publicTicketStatusPublicRouter: stubRouter('ticket-status-public') }));
-jest.unstable_mockModule('../src/routes/tickets.routes.js', routeStub('tickets', { ticketApprovalPublicRouter: stubRouter('approvals-public') }));
+jest.unstable_mockModule('../src/routes/tickets.routes.js', routeStub('tickets', { ticketApprovalPublicRouter: stubRouter('approvals-public'), approvalReplyPublicRouter: stubRouter('approvals-reply') }));
 
 // ---- B. assignment.routes.js, real router ----------------------------------
 const assignmentRepositoryMock = {

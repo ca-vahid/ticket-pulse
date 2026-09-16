@@ -29,6 +29,7 @@ import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
+import PublicApprovalReply from './pages/PublicApprovalReply';
 import DemoModeBanner from './components/DemoModeBanner';
 import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
@@ -195,6 +196,11 @@ function App() {
                     <Route
                       path="/approval/:token"
                       element={<PublicApprovalDecision />}
+                    />
+
+                    <Route
+                      path="/approval-reply/:token"
+                      element={<PublicApprovalReply />}
                     />
 
                     <Route

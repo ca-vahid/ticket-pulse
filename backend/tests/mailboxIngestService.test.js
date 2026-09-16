@@ -16,6 +16,9 @@ const graphMock = {
 const ticketServiceMock = { createTicket: jest.fn() };
 const mirrorServiceMock = { enqueueThreadEntry: jest.fn(), enqueueFieldSync: jest.fn() };
 const activityMock = { create: jest.fn() };
+// Approvals v3: a reply on <mailbox>+ap<key>@… is an approval answer, not a ticket reply.
+const conversationMock = { answer: jest.fn(), plusAddressApprovalKey: jest.fn(() => null) };
+jest.unstable_mockModule('../src/services/approvalConversationService.js', () => ({ default: conversationMock, plusAddressApprovalKey: conversationMock.plusAddressApprovalKey }));
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: graphMock }));
@@ -85,6 +88,32 @@ describe('loop protection', () => {
   test('referencedMessageIds parses In-Reply-To and References', () => {
     expect(referencedMessageIds({ inReplyTo: '<a@x>', references: '<b@x> <c@x>' })).toEqual(['<a@x>', '<b@x>', '<c@x>']);
     expect(referencedMessageIds({})).toEqual([]);
+  });
+});
+
+describe('approval reply rung (Approvals v3)', () => {
+  test('a +ap<key> recipient routes the mail to the approval conversation and never touches the ticket ladder', async () => {
+    conversationMock.plusAddressApprovalKey.mockReturnValueOnce('abcdef012345');
+    conversationMock.answer.mockResolvedValueOnce({ message: { id: 5 } });
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'Re: Question on Security approval', to: ['helpdesk-pilot+apabcdef012345@example.com'], bodyText: 'DEV only\n\n> quoted',
+    });
+    expect(outcome).toBe('approval_reply');
+    expect(conversationMock.plusAddressApprovalKey).toHaveBeenCalledWith(expect.objectContaining({ subject: 'Re: Question on Security approval' }), 'helpdesk-pilot@example.com');
+    expect(conversationMock.answer).toHaveBeenCalledWith(expect.objectContaining({
+      plusKey: 'abcdef012345', senderEmail: 'rita@example.com', senderName: 'Rita Requester', via: 'email', emailMessageId: '<abc-123@example.com>', bodyText: 'DEV only\n\n> quoted',
+    }));
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+  });
+
+  test('a bad key falls through to the normal ladder so the mail is not lost', async () => {
+    conversationMock.plusAddressApprovalKey.mockReturnValueOnce('deadbeef0000');
+    conversationMock.answer.mockRejectedValueOnce(new Error('This reply link is not valid'));
+    ticketServiceMock.createTicket.mockResolvedValue({ id: 900, origin: 'ticketpulse' });
+    const outcome = await mailboxIngestService.processEmail(connection, { ...baseEmail, to: ['helpdesk-pilot+apdeadbeef0000@example.com'] });
+    expect(outcome).not.toBe('approval_reply');
+    expect(conversationMock.answer).toHaveBeenCalled();
   });
 });
 

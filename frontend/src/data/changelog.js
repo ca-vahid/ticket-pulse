@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.8.99-preview';
+export const APP_VERSION = '3.9.0-preview';
 
 export const changelog = [
+  {
+    version: '3.9.0-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Approvals v3 — the conversation loop</strong> — an approver can now talk to the people on a request instead of only deciding. From the e-mail link page, the ticket’s Approvals tab or the Approvals inbox, the composer (sized like a mail client) offers <em>Approve · Approve with condition · Ask a question · Reject · Escalate · Forward</em>. A question has an audience: <em>Ask the requester</em> (To the requester, Cc the agent and the approver chain) or <em>Ask the approvers / agent only</em> (the requester is never copied), and every recipient is a chip the approver can untick.' },
+      { type: 'new', html: '<strong>Answer by e-mail or by link — no sign-in</strong> — each question goes out with a personal reply address and an <em>Answer</em> button. Replying to the e-mail (the workspace mailbox reads the <code>+ap…</code> address) or writing on the new reply page both land the answer on the request, add a note on the ticket, un-park it and send every open approver a fresh link with the question and the answer on it. The approvals conversation shows every exchange in order; internal ones carry a lock badge, and while an internal question is open the agent and requester see <em>Waiting on approver</em>.' },
+      { type: 'new', html: '<strong>Approve with condition, decision e-mail to everyone</strong> — a condition travels with the approval: in the decision e-mail, on the ticket note, on the approvals timeline and in the API. On approve, approve-with-condition or reject, the requester, the agent and every approver on the chain get a reply-style e-mail with the verdict, the condition, the note, the approver’s signature (their saved Ticket Pulse signature, else a card generated from the directory) and the history each of them is allowed to see — the requester’s copy never includes internal exchanges.' },
+      { type: 'improved', html: '<strong>An approver can request approval on their own category</strong> — a Tier 1 approver asking for Security sign-off used to be refused (“self-approval is prohibited”). The request now starts at the first tier that has someone else on it — straight to Tier 2 — with a clear warning in the request modal, a note on the ticket and an explanation in the approver’s e-mail. The modal also lists every tier with the people on it, not only Tier 1.' },
+      { type: 'fixed', html: '<strong>The approver e-mail keeps the ticket description’s formatting</strong> — bullets, bold, headings, code and tables were flattened into a 480-character run of text with “the full description is on the approval page”. The description now renders as it does on the ticket, up to a generous length, cut on a paragraph boundary when it is very long.' },
+      { type: 'database', html: 'Migration <code>20260916120000_approvals_v3_conversation</code>: <code>ticket_approvals.condition_note / condition_note_html / signature_html</code>, new tables <code>approval_messages</code> and <code>approval_reply_tokens</code>. Additive; applied by hand after the merge.' },
+    ],
+  },
   {
     version: '3.8.99-preview',
     date: 'September 16, 2026',

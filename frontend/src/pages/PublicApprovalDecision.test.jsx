@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
   decide: vi.fn(),
   handoff: vi.fn(),
   clarify: vi.fn(),
+  postMessage: vi.fn(),
 }));
 vi.mock('../services/api', () => ({ publicApprovalAPI: apiMock }));
 
@@ -63,8 +64,12 @@ import PublicApprovalDecisionPage from './PublicApprovalDecision';
 
 const noteBox = () => screen.getByRole('textbox', { name: 'Decision note' });
 const typeNote = (text) => fireEvent.change(noteBox(), { target: { value: text } });
-// Approvals v2: every action confirms first — this finds and clicks the sheet's CTA.
+// Approvals v3: the composer has tabs; Reject / Ask / Condition each have their own editor label.
+const tab = (name) => screen.getByRole('tab', { name });
+const typeReason = (text) => { fireEvent.click(tab('Reject')); fireEvent.change(screen.getByRole('textbox', { name: 'Reason for rejecting' }), { target: { value: text } }); };
+// Every decision confirms first — this finds and clicks the sheet's CTA.
 const confirmSheet = async (cta) => fireEvent.click(await screen.findByRole('button', { name: cta }));
+const NO_CONDITION = { conditionNote: null, conditionNoteHtml: null };
 
 describe('PublicApprovalDecision (approval redesign)', () => {
   beforeEach(() => {
@@ -72,6 +77,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.decide.mockReset();
     apiMock.handoff.mockReset();
     apiMock.clarify.mockReset();
+    apiMock.postMessage.mockReset();
     localStorage.clear();
     document.documentElement.classList.remove('dark');
     window.matchMedia = vi.fn().mockImplementation((query) => ({
@@ -80,7 +86,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
   });
   afterEach(() => cleanup());
 
-  test('pending: header, agent note well (scrollable), rail facts + approvers, decision box', async () => {
+  test('pending: header, conversation (request note first), rail facts + approvers, composer tabs', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     renderPage();
 
@@ -96,15 +102,13 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(screen.getByRole('button', { name: /Copy ref/ })).toBeInTheDocument();
     expect(screen.getAllByText('IT workspace').length).toBeGreaterThan(0);
 
-    // Agent note well: avatar initials, who asks, table inside an overflow-x-auto wrapper
-    const note = screen.getByRole('region', { name: 'Request note' });
-    expect(within(note).getByText('MB')).toBeInTheDocument();
-    expect(within(note).getByText(/asks for your approval/)).toHaveTextContent('Marcus Blackstock (IT) asks for your approval');
-    const well = screen.getByTestId('request-note-well');
-    expect(well).toHaveClass('overflow-x-auto');
-    expect(note).toHaveClass('tp-approval-note');
-    expect(well.querySelector('table')).not.toBeNull();
-    expect(within(well).getByText('MP2V5N1L')).toBeInTheDocument();
+    // Layout B: the conversation opens with the agent's request (rich note, table kept)
+    const thread = screen.getByTestId('approval-thread');
+    const first = within(thread).getAllByRole('listitem')[0];
+    expect(first).toHaveAttribute('data-kind', 'request');
+    expect(first).toHaveTextContent(/Marcus Blackstock asks for approval/);
+    expect(first.querySelector('table')).not.toBeNull();
+    expect(within(first).getByText('MP2V5N1L')).toBeInTheDocument();
 
     // Description + rail
     expect(screen.getByRole('heading', { name: 'Ticket description' })).toBeInTheDocument();
@@ -115,18 +119,16 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(within(rail).getByText('Medium')).toBeInTheDocument();
     expect(within(rail).getByText('Service Request')).toBeInTheDocument();
     expect(within(rail).getByText('Devices & Hardware › Laptop procurement')).toBeInTheDocument();
-    // "You" first, even though the server listed Dana Ruiz first
     const approverRows = within(rail).getAllByRole('listitem');
     expect(approverRows[0]).toHaveTextContent(/^You/);
     expect(approverRows[1]).toHaveTextContent('Dana Ruiz (Finance)');
     expect(within(rail).getByText('What happens next')).toBeInTheDocument();
 
-    // Decision box
-    expect(screen.getByRole('heading', { name: 'Your decision' })).toBeInTheDocument();
-    expect(noteBox()).toHaveAttribute('placeholder', 'Optional note for approve · required reason for reject');
-    expect(screen.getByRole('button', { name: /^Approve/ })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /^Reject/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Ask a question/ })).toBeEnabled();
+    // Composer: tabs, mail-sized editor, approve enabled, reject behind its tab
+    expect(screen.getByTestId('approval-composer')).toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['ApproveA', 'Approve with condition', 'Ask a question', 'RejectR', 'Forward']);
+    expect(noteBox()).toHaveAttribute('placeholder', expect.stringMatching(/Optional note/));
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
     expect(screen.getByText(/Sent to ingrid\.manager@bgcengineering\.ca · link expires Oct 1/)).toBeInTheDocument();
   });
 
@@ -134,112 +136,183 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockReturnValue(ok({ status: 'rejected', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
-    const reject = await screen.findByRole('button', { name: /^Reject/ });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Reject' }));
+    const reject = screen.getByRole('button', { name: 'Reject' });
     expect(reject).toBeDisabled();
     expect(screen.getByText('Add a reason to reject')).toBeInTheDocument();
 
-    typeNote('Budget frozen until Q4.');
+    typeReason('Budget frozen until Q4.');
     expect(reject).toBeEnabled();
     expect(screen.queryByText('Add a reason to reject')).not.toBeInTheDocument();
     fireEvent.click(reject);
-    // Confirmation sheet shows the ref, the note, and only then posts.
     expect(await screen.findByRole('dialog')).toHaveTextContent(/You are about to reject #239934 for Ingrid Berru Garcia/);
     expect(apiMock.decide).not.toHaveBeenCalled();
     await confirmSheet(/Yes, reject/);
 
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'Budget frozen until Q4.', null));
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'Budget frozen until Q4.', null, NO_CONDITION));
     expect(await screen.findByText(/You rejected this on Sep 2/)).toBeInTheDocument();
     expect(screen.getByText('Budget frozen until Q4.')).toBeInTheDocument();
     expect(screen.getByText('Rejected')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Approve/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
   });
 
-  test('approve posts and swaps the box for the decided banner (focus lands on it)', async () => {
+  test('approve posts and swaps the composer for the decided banner (focus lands on it)', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockReturnValue(ok({ status: 'approved', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     await confirmSheet(/Yes, approve/);
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null));
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, NO_CONDITION));
     const banner = await screen.findByText(/You approved this on Sep 2/);
-    expect(banner).toBeInTheDocument();
     expect(screen.getByText('Approved')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Your decision' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toBe(banner.closest('[tabindex="-1"]')));
-    // The rail now shows the approver as approved
     const rail = screen.getByRole('complementary', { name: 'Request details' });
     expect(within(rail).getAllByRole('listitem')[0]).toHaveTextContent(/approved/);
+  });
+
+  test('approve with condition: the condition is required, confirmed, posted and shown on the banner', async () => {
+    apiMock.get.mockReturnValue(ok(pendingFixture));
+    apiMock.decide.mockReturnValue(ok({ status: 'approved', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Approve with condition' }));
+    const cta = screen.getByRole('button', { name: 'Approve with condition' });
+    expect(cta).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Condition' }), { target: { value: 'UAT only — production needs a second review.' } });
+    expect(cta).toBeEnabled();
+    fireEvent.click(cta);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Approve with this condition\?/);
+    expect(screen.getByRole('dialog')).toHaveTextContent(/Condition: UAT only/);
+    await confirmSheet(/Yes, approve with condition/);
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, { conditionNote: 'UAT only — production needs a second review.', conditionNoteHtml: null }));
+    expect(await screen.findByText(/You approved this with a condition on Sep 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('decision-condition')).toHaveTextContent('UAT only — production needs a second review.');
   });
 
   test('a server error stays inline — the page never blanks', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockImplementation(() => fail({ status: 400, data: { message: 'Add a reason for rejecting' } }));
     renderPage();
-    const reject = await screen.findByRole('button', { name: /^Reject/ });
-    typeNote('x');
-    fireEvent.click(reject);
+    await screen.findByRole('tab', { name: 'Reject' });
+    typeReason('x');
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
     await confirmSheet(/Yes, reject/);
     expect(await screen.findByRole('alert')).toHaveTextContent('Add a reason for rejecting');
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Approve/ })).toBeEnabled();
+    expect(screen.getByRole('tab', { name: 'Approve' })).toBeEnabled();
   });
 
-  test('ask a question requires a note, sends clarify, and keeps the decision open', async () => {
+  test('ask the requester: needs a question, posts with audience, joins the conversation, keeps the decision open', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
-    apiMock.decide.mockReturnValue(ok({ status: 'info_requested', decidedAt: null, approverName: 'Dana Whitfield' }));
+    apiMock.postMessage.mockReturnValue(ok({ message: { id: 77, kind: 'question', audience: 'requester', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Is a refurbished unit an option?', bodyHtml: null, to: ['iberrugarcia@bgcengineering.ca'], cc: ['mblackstock@bgcengineering.ca'], createdAt: '2026-09-02T16:30:00.000Z' } }));
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /Ask a question/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    expect(screen.getByRole('radio', { name: /Ask the requester/ })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /Send to the requester/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Type your question/);
-    expect(apiMock.decide).not.toHaveBeenCalled();
+    expect(apiMock.postMessage).not.toHaveBeenCalled();
 
-    typeNote('Is a refurbished unit an option?');
-    fireEvent.click(screen.getByRole('button', { name: /Ask a question/ }));
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'clarify', 'Is a refurbished unit an option?', null));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your question' }), { target: { value: 'Is a refurbished unit an option?' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send to the requester/ }));
+    await waitFor(() => expect(apiMock.postMessage).toHaveBeenCalledWith('tok-1', { kind: 'question', mode: 'requester', bodyText: 'Is a refurbished unit an option?', bodyHtml: null }));
     expect(await screen.findByText(/You asked a question on .* — you can still decide now/)).toBeInTheDocument();
     expect(screen.getByText('Question sent')).toBeInTheDocument();
-    expect(screen.getByText(/You asked \(.*\): Is a refurbished unit an option\?/)).toBeInTheDocument();
-    expect(screen.getByText(/Waiting for a reply from Marcus/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Approve/ })).toBeEnabled();
+    const thread = screen.getByTestId('approval-thread');
+    expect(within(thread).getByText('Is a refurbished unit an option?')).toBeInTheDocument();
+    expect(within(thread).getByText(/^You asked/)).toBeInTheDocument();
+    expect(within(thread).getByText(/Waiting for a reply from/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Approve' })).toBeEnabled();
   });
 
-  test('info_requested: banner + Q&A thread with answered and unanswered entries', async () => {
+  test('ask the approvers / agent only: internal audience, the request stays pending', async () => {
+    apiMock.get.mockReturnValue(ok(pendingFixture));
+    apiMock.postMessage.mockReturnValue(ok({ message: { id: 78, kind: 'question', audience: 'internal', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Did we budget this?', to: ['mblackstock@bgcengineering.ca'], cc: [], createdAt: '2026-09-02T16:30:00.000Z' } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    fireEvent.click(screen.getByRole('radio', { name: /approvers \/ agent only/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your question' }), { target: { value: 'Did we budget this?' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send to the approvers/ }));
+    await waitFor(() => expect(apiMock.postMessage).toHaveBeenCalledWith('tok-1', { kind: 'question', mode: 'internal', bodyText: 'Did we budget this?', bodyHtml: null }));
+    const item = (await screen.findByText('Did we budget this?')).closest('li');
+    expect(item).toHaveAttribute('data-audience', 'internal');
+    expect(within(item).getByText('Internal')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting your decision')).toBeInTheDocument();
+  });
+
+  test('audience chips: the requester mode lists To requester / Cc agent + chain, and a chip can be unticked', async () => {
+    const participants = {
+      requester: { email: 'iberrugarcia@bgcengineering.ca', name: 'Ingrid Berru Garcia', role: 'requester' },
+      agent: { email: 'mblackstock@bgcengineering.ca', name: 'Marcus Blackstock', role: 'agent' },
+      approvers: [{ email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, { email: 'dana.ruiz@bgcengineering.ca', name: 'Dana Ruiz', role: 'approver' }],
+    };
+    apiMock.get.mockReturnValue(ok({ ...pendingFixture, approval: { ...pendingFixture.approval, participants } }));
+    apiMock.postMessage.mockReturnValue(ok({ message: { id: 79, kind: 'question', audience: 'requester', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield' }, bodyText: 'q', to: [], cc: [], createdAt: '2026-09-02T16:30:00.000Z' } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    const chips = screen.getByTestId('audience-chips');
+    expect(within(chips).getByRole('checkbox', { name: /Ingrid Berru Garcia/ })).toHaveAttribute('aria-checked', 'true');
+    expect(within(chips).getByRole('checkbox', { name: /Marcus Blackstock/ })).toBeInTheDocument();
+    expect(within(chips).getByRole('checkbox', { name: /Dana Ruiz/ })).toBeInTheDocument();
+    expect(within(chips).queryByRole('checkbox', { name: /Dana Whitfield/ })).not.toBeInTheDocument(); // never yourself
+    fireEvent.click(within(chips).getByRole('checkbox', { name: /Dana Ruiz/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your question' }), { target: { value: 'q' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send to the requester/ }));
+    await waitFor(() => expect(apiMock.postMessage).toHaveBeenCalledWith('tok-1', { kind: 'question', mode: 'requester', bodyText: 'q', bodyHtml: null, to: ['iberrugarcia@bgcengineering.ca'], cc: ['mblackstock@bgcengineering.ca'] }));
+  });
+
+  test('info_requested: banner + legacy Q&A rendered in the conversation', async () => {
     apiMock.get.mockReturnValue(ok(infoRequestedFixture));
     renderPage();
     expect(await screen.findByText(/You asked a question on Sep 2/)).toBeInTheDocument();
-    expect(screen.getByText(/You asked \(Sep 1\): Is a refurbished unit an option\?/)).toBeInTheDocument();
-    expect(screen.getByText(/Marcus replied \(Sep 2\): No refurbished stock/)).toBeInTheDocument();
-    expect(screen.getByText(/Waiting for a reply from Marcus/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Your decision' })).toBeInTheDocument();
+    const thread = screen.getByTestId('approval-thread');
+    expect(within(thread).getByText('Is a refurbished unit an option?')).toBeInTheDocument();
+    expect(within(thread).getByText(/No refurbished stock/)).toBeInTheDocument();
+    expect(within(thread).getByText(/Marcus Blackstock answered/)).toBeInTheDocument();
+    expect(within(thread).getByText('Does the price include the docking station?')).toBeInTheDocument();
+    expect(screen.getByTestId('approval-composer')).toBeInTheDocument();
+  });
+
+  test('v3 messages from the server render with author, audience lock and the decision', async () => {
+    const messages = [
+      { id: 1, kind: 'question', audience: 'internal', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Do we have budget?', to: ['mblackstock@bgcengineering.ca'], cc: [], createdAt: '2026-09-02T10:00:00.000Z' },
+      { id: 2, kind: 'answer', audience: 'internal', author: { email: 'mblackstock@bgcengineering.ca', name: 'Marcus Blackstock', role: 'agent' }, bodyText: 'Yes, line IT-204.', inReplyToId: 1, createdAt: '2026-09-02T11:00:00.000Z' },
+    ];
+    apiMock.get.mockReturnValue(ok({ ...pendingFixture, approval: { ...pendingFixture.approval, messages } }));
+    renderPage();
+    const thread = await screen.findByTestId('approval-thread');
+    const items = within(thread).getAllByRole('listitem');
+    expect(items.map((li) => li.getAttribute('data-kind'))).toEqual(['request', 'question', 'answer']);
+    expect(items[1]).toHaveTextContent(/You asked/);
+    expect(within(items[1]).getByText('Internal')).toBeInTheDocument();
+    expect(items[2]).toHaveTextContent(/Marcus Blackstock answered/);
+    expect(within(thread).queryByText(/Waiting for/)).not.toBeInTheDocument();
   });
 
   test('keyboard: A approves, R needs a reason first, neither fires inside the editor', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockReturnValue(new Promise(() => {}));
     renderPage();
-    await screen.findByRole('button', { name: /^Approve/ });
+    await screen.findByRole('button', { name: 'Approve' });
 
-    // R without a reason → helper error, no request
     fireEvent.keyDown(document.body, { key: 'r' });
     expect(await screen.findByRole('alert')).toHaveTextContent(/Add a reason/);
     expect(apiMock.decide).not.toHaveBeenCalled();
-
-    // Typing "a" in the editor must not approve
-    fireEvent.keyDown(noteBox(), { key: 'a' });
+    // R switched to the Reject tab; typing "a" in its editor must not approve
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Reason for rejecting' }), { key: 'a' });
     expect(apiMock.decide).not.toHaveBeenCalled();
 
-    // "A" opens the confirmation; nothing is posted until it is confirmed.
     fireEvent.keyDown(document.body, { key: 'a' });
     expect(await screen.findByRole('dialog')).toHaveTextContent(/Approve this request\?/);
     expect(apiMock.decide).not.toHaveBeenCalled();
     await confirmSheet(/Yes, approve/);
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null));
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, NO_CONDITION));
     expect(screen.getByText('Working…')).toBeInTheDocument();
   });
 
   test('confirmation: "Go back" (or Escape) closes the sheet without deciding', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Go back' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     fireEvent.keyDown(document.body, { key: 'a' });
@@ -247,19 +320,17 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(apiMock.decide).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /^Approve/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 
   test('tiered: escalate needs a note, confirms, posts the hand-off and shows the handed-off banner', async () => {
     apiMock.get.mockReturnValue(ok(tieredFixture));
     apiMock.handoff.mockReturnValue(ok({ status: 'escalated', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield', handoff: { kind: 'escalated', to: ['neville@x.io'] } }));
     renderPage();
-    // Header shows the tier and the amount; the rail explains the auto-escalation.
     expect(await screen.findByTitle('Approval tier 1 of 2')).toHaveTextContent('Tier 1/2');
     expect(screen.getByTitle('Amount on this request')).toHaveTextContent('$6,000.00');
-    expect(screen.getByText(/over your Tier 1 limit \(\$5,000\.00\) — approving sends it on to Tier 2/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Escalate to Tier 2/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Escalate' }));
     const escalate = screen.getByRole('button', { name: 'Escalate' });
     expect(escalate).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: 'Escalate note' }), { target: { value: 'Needs CISO sign-off' } });
@@ -270,14 +341,14 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     await waitFor(() => expect(apiMock.handoff).toHaveBeenCalledWith('tok-1', { mode: 'escalate', note: 'Needs CISO sign-off', toEmail: null }));
     expect(await screen.findByText(/You escalated this to Neville Howell \(Tier 2\) on Sep 2/)).toBeInTheDocument();
     expect(screen.getByTestId('approval-status-badge')).toHaveAttribute('data-status', 'escalated');
-    expect(screen.queryByRole('heading', { name: 'Your decision' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
   });
 
   test('tiered: forward picks a person from the workspace, confirms, and posts the target', async () => {
     apiMock.get.mockReturnValue(ok(tieredFixture));
     apiMock.handoff.mockReturnValue(ok({ status: 'forwarded', decidedAt: '2026-09-02T16:30:00.000Z', handoff: { kind: 'forwarded', to: ['bryan@x.io'] } }));
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /^Forward/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Forward' }));
     const picker = screen.getByRole('combobox', { name: 'Forward to' });
     fireEvent.change(picker, { target: { value: 'bry' } });
     fireEvent.click(await screen.findByRole('option', { name: /Bryan Tan/ }));
@@ -293,7 +364,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(tieredFixture));
     apiMock.decide.mockReturnValue(ok({ status: 'escalated', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(await screen.findByRole('dialog')).toHaveTextContent(/moves on to Neville Howell automatically/);
     await confirmSheet(/Yes, approve/);
     expect(await screen.findByText(/You approved this on Sep 2/)).toHaveTextContent(/over your Tier 1 limit, so it moved on to Neville Howell \(Tier 2\)/);
@@ -303,11 +374,19 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockReturnValue(ok({ status: 'rejected', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
-    await screen.findByRole('button', { name: /^Reject/ });
-    typeNote('No budget.');
+    await screen.findByRole('tab', { name: 'Reject' });
+    typeReason('No budget.');
     fireEvent.keyDown(document.body, { key: 'R' });
     await confirmSheet(/Yes, reject/);
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'No budget.', null));
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'No budget.', null, NO_CONDITION));
+  });
+
+  test('signature preview: the decision tabs show the signature that goes under the decision', async () => {
+    apiMock.get.mockReturnValue(ok({ ...pendingFixture, approval: { ...pendingFixture.approval, signaturePreview: '<p><b>Dana Whitfield</b><br>IT Manager</p>' } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Your signature goes under the decision/ }));
+    expect(screen.getByTestId('signature-preview')).toHaveTextContent('Dana Whitfield');
+    expect(screen.getByTestId('signature-preview')).toHaveTextContent('IT Manager');
   });
 
   test('approved by you (link) shows your note; approved in the app names the approver', async () => {
@@ -315,7 +394,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     renderPage();
     expect(await screen.findByText(/You approved this on Sep 2/)).toBeInTheDocument();
     expect(screen.getByText('Approved — please order the 32 GB config.')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Your decision' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
     cleanup();
 
     apiMock.get.mockReturnValue(ok(approvedInAppFixture));
@@ -336,7 +415,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(await screen.findByText('This request was cancelled')).toBeInTheDocument();
     expect(screen.getByText('The requester found a spare unit in the Vancouver loaner pool.')).toBeInTheDocument();
     expect(screen.getByText('Cancelled')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Your decision' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
     cleanup();
 
     apiMock.get.mockReturnValue(ok(supersededFixture));

@@ -416,6 +416,27 @@ class MailboxIngestService {
     // Dedupe: has this exact message already been ingested (or held)?
     if (await this._alreadyIngested(connection, email.internetMessageId)) return 'skipped';
 
+    // Approvals v3 (16 Sep 2026): a reply to an approval question comes back
+    // on `<mailbox>+ap<key>@…` — it belongs to the approval conversation, not
+    // to the ticket thread. Handled before any ticket matching.
+    try {
+      const { default: approvalConversation, plusAddressApprovalKey } = await import('./approvalConversationService.js');
+      const apKey = plusAddressApprovalKey(email, connection.address);
+      if (apKey) {
+        await approvalConversation.answer({
+          plusKey: apKey, senderEmail: email.from, senderName: email.fromName || null,
+          bodyText: email.bodyText || email.bodyPreview || null, bodyHtml: email.bodyHtml || null,
+          via: 'email', emailMessageId: email.internetMessageId || null,
+        });
+        logger.info(`Mailbox ingest: approval answer from ${email.from} (+ap${apKey}) recorded`);
+        return 'approval_reply';
+      }
+    } catch (err) {
+      // A bad/expired key falls through to the normal ladder so the mail is not lost.
+      if (!/not valid|expired|not part of|Type your answer/.test(String(err?.message || ''))) logger.warn(`Approval reply rung failed (${err.message}) — continuing with the ticket ladder`);
+      else logger.info(`Approval reply rung declined "${email.subject}" from ${email.from}: ${err.message}`);
+    }
+
     // Agent sender? Parse the body ONCE (forward header block / quoted From)
     // BEFORE the ladder so rung 4 never runs against the agent (FW-2).
     const agent = await agentIntake.resolveAgentSender(connection.workspaceId, email.from);

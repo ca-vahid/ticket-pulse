@@ -1839,6 +1839,7 @@ class TicketService {
           decidedAt: true, decidedVia: true, createdAt: true,
           requestGroupId: true,
           tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
+          conditionNote: true, conditionNoteHtml: true,
           approvalCategory: { select: { id: true, name: true, tiers: true, hasAmount: true, amountCurrency: true, managerEmails: true } },
         },
       }),

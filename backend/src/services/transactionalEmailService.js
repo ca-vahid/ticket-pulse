@@ -73,6 +73,9 @@ export async function deliverTransactionalEmail({
   customArgs = null,
   ticket = null,
   threadEntryId = null,
+  // Approvals v3: an explicit Reply-To (plus-address reply key) wins over the
+  // ticket-derived one on both lanes.
+  replyTo: replyToOverride = null,
 }) {
   const recipients = normalizeList(to);
   if (recipients.length === 0) {
@@ -105,7 +108,7 @@ export async function deliverTransactionalEmail({
     if (graphMailClient.isConfigured()) {
       // Graph bypasses sendgridNotificationService, so record its health here.
       const startedAt = Date.now();
-      const replyTo = ticket ? plusAddressReplyTo(connection.address, ticket) : null;
+      const replyTo = replyToOverride || (ticket ? plusAddressReplyTo(connection.address, ticket) : null);
       try {
         const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
           to: recipients,
@@ -147,7 +150,7 @@ export async function deliverTransactionalEmail({
   // FR 09-11 #5 the mail also LEAVES from that mailbox's address when the
   // caller did not name one — a workspace's mail should carry the address
   // people write to, not the global sender's.
-  const sendgridReplyTo = ticket ? await sendgridLaneReplyTo(workspaceId, ticket) : null;
+  const sendgridReplyTo = replyToOverride || (ticket ? await sendgridLaneReplyTo(workspaceId, ticket) : null);
   const laneFrom = from || await sendgridFromAddress(workspaceId ?? ticket?.workspaceId ?? null);
   const { default: sendgrid } = await import('./sendgridNotificationService.js');
   try {

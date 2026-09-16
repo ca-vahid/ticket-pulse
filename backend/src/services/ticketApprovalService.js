@@ -149,6 +149,7 @@ class TicketApprovalService {
         requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
         decidedAt: true, decidedVia: true, expiresAt: true, createdAt: true,
         tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
+        conditionNote: true, conditionNoteHtml: true,
       },
     });
   }
@@ -191,14 +192,26 @@ class TicketApprovalService {
       amountValue = Math.round(amountValue * 100) / 100;
     }
     // Self-approval is prohibited: the requester never receives their own
-    // approval row, so the request fans out to the OTHER managers only. If
-    // they're the sole manager, fail loudly instead of creating a request
-    // nobody is allowed to decide.
+    // approval row. v3 (16 Sep 2026, Vahid): an approver MAY still request —
+    // the request simply starts at the first tier that has someone other
+    // than the requester on it (Vahid on Tier 1 asking Security → straight
+    // to Neville on Tier 2), recorded as an automatic hand-off so everyone
+    // can see why it skipped a tier.
     const requesterEmailLc = String(actor?.email || '').trim().toLowerCase();
-    const managers = allManagers.filter((m) => m !== requesterEmailLc);
-    if (managers.length === 0) {
-      throw new ValidationError(`You are the only approval manager on "${category.name}" and self-approval is prohibited — add another manager in Settings, or have someone else request this approval`);
+    let startTierIdx = tiers.findIndex((t) => t.managerEmails.some((m) => m !== requesterEmailLc));
+    if (startTierIdx === -1) {
+      throw new ValidationError(tiers.length > 1
+        ? `You are an approver on every tier of "${category.name}" and self-approval is prohibited — ask a colleague to request it, or add another approver in Settings.`
+        : `You are the only approval manager on "${category.name}" and self-approval is prohibited — add another manager in Settings, or ask a colleague to request it.`);
     }
+    const startTier = startTierIdx + 1;
+    const managers = tiers[startTierIdx].managerEmails.filter((m) => m !== requesterEmailLc);
+    const skippedTiers = tiers.slice(0, startTierIdx).map((t) => t.name);
+    const autoStart = startTierIdx > 0 ? {
+      kind: 'auto_start', fromTier: 1, toTier: startTier, byEmail: requesterEmailLc, byName: actor?.name || null,
+      toEmails: managers, note: null, at: new Date().toISOString(),
+      reason: `${actor?.name || requesterEmailLc} is an approver on ${skippedTiers.join(' and ')} and cannot approve their own request`,
+    } : null;
 
     // Don't stack a second open request for the same category on this ticket.
     const open = await prisma.ticketApproval.findFirst({
@@ -223,13 +236,16 @@ class TicketApprovalService {
           requestNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
           tokenHash: hashToken(token),
           expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
-          tier: 1,
+          tier: startTier,
+          ...(autoStart ? { escalationLog: [autoStart] } : {}),
           ...(amountValue !== null ? { amount: amountValue, amountCurrency: category.amountCurrency || 'CAD' } : {}),
         },
       });
       if (notifyApprover !== false) {
         const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
-        await this._emailApprover(ticket, approval, decisionUrl, category.name);
+        await this._emailApprover(ticket, approval, decisionUrl, category.name, null, autoStart ? {
+          handoff: { kind: 'auto_start', byName: actor?.name || requesterEmailLc, note: autoStart.reason, fromTierName: skippedTiers.join(' / '), toTierName: tiers[startTierIdx].name },
+        } : {});
       }
       created.push({ id: approval.id, approverEmail: email });
     }
@@ -242,8 +258,20 @@ class TicketApprovalService {
       details: {
         requestGroupId, category: category.name, approvers: managers, note: note || null, notified: notifyApprover !== false,
         ...(amountValue !== null ? { amount: amountValue, amountCurrency: category.amountCurrency || 'CAD' } : {}),
+        ...(autoStart ? { startedAtTier: startTier, skippedTiers } : {}),
       },
     }).catch(() => {});
+    if (autoStart) {
+      const body = `Approval request started at ${tiers[startTierIdx].name} (${managers.join(', ')}) — ${autoStart.reason}`;
+      await prisma.ticketThreadEntry.create({
+        data: {
+          ticketId, workspaceId, source: 'ticketpulse_user', eventType: 'note',
+          actorName: actor?.name || actor?.email || 'Ticket Pulse', actorEmail: actor?.email || null, authorType: 'system',
+          incoming: false, isPrivate: true, visibility: 'private', bodyText: body, content: body, occurredAt: new Date(), mirrorState: null,
+          rawPayload: { kind: 'approval_event', v: 1, event: 'auto_start' },
+        },
+      }).catch(() => {});
+    }
 
     await emitApprovalEvent('approval.requested', ticketId, {
       approvalId: requestGroupId, approverEmail: managers.join(', '), requestedBy: actor?.email || 'unknown',
@@ -256,7 +284,46 @@ class TicketApprovalService {
       category: { id: category.id, name: category.name },
       approvals: created,
       count: created.length,
+      startedAtTier: startTier,
+      startedAtTierName: tiers[startTierIdx].name,
+      skippedTiers,
     };
+  }
+
+  /**
+   * Approvals v3: after an answer arrives (link / mailbox / app) every open
+   * approver gets a fresh link with the Q&A on it. Rotates the token like
+   * resubmit; flips info_requested back to pending.
+   */
+  async reissueLinkWithAnswer(row, { question = null, answer = null, answeredBy = null } = {}) {
+    const token = newToken();
+    const updated = await prisma.ticketApproval.update({
+      where: { id: row.id },
+      data: {
+        ...(row.status === 'info_requested' ? { status: 'pending', decisionNote: null } : {}),
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+      },
+    });
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: row.ticketId },
+      include: {
+        requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, department: true, entraDepartment: true, entraOfficeLocation: true, entraCity: true } },
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+        workspace: { select: { name: true } },
+      },
+    });
+    if (!ticket) return updated;
+    let categoryName = null;
+    if (row.approvalCategoryId) {
+      const cat = await prisma.approvalCategory.findUnique({ where: { id: row.approvalCategoryId }, select: { name: true } }).catch(() => null);
+      categoryName = cat?.name || null;
+    }
+    const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
+    await this._emailApprover(ticket, row, decisionUrl, categoryName, { question, answer, answeredBy });
+    this._broadcast(ticket, 'approval');
+    return updated;
   }
 
   /**
@@ -327,6 +394,21 @@ class TicketApprovalService {
       }
       return [...seen.values()].sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
     }).catch(() => []);
+
+    // Approvals v3: the conversation (an approver sees everything), who is on
+    // the request, whether an internal question is still open, and the
+    // signature this approver's decision e-mail will carry.
+    let messages = []; let participants = null; let awaitingApprover = false; let signaturePreview = null;
+    try {
+      const { default: conversation } = await import('./approvalConversationService.js');
+      const groupId = approval.requestGroupId || `single-${approval.id}`;
+      [messages, awaitingApprover] = await Promise.all([conversation.listForGroup(groupId), conversation.awaitingApprover(groupId)]);
+      const parts = await conversation.participants(approval);
+      participants = { requester: parts.requester, agent: parts.agent, approvers: parts.approvers };
+      signaturePreview = (await conversation.signatureFor(approval.workspaceId, approval.approverEmail))?.html || null;
+    } catch (err) {
+      logger.debug?.(`Approval conversation unavailable for token page: ${err.message}`);
+    }
 
     // Files on the ticket (names + sizes) — the approver opens the ticket for the bytes.
     const attachments = await Promise.resolve().then(async () => {
@@ -507,6 +589,14 @@ class TicketApprovalService {
         amountLimitLabel: formatAmount(amountLimit, approval.amountCurrency || category?.amountCurrency || 'CAD'),
         autoEscalates,
         escalationLog,
+        // Approvals v3
+        conditionNote: approval.conditionNote || null,
+        conditionNoteHtml: approval.conditionNoteHtml || null,
+        signatureHtml: approval.signatureHtml || null,
+        signaturePreview,
+        awaitingApprover,
+        messages,
+        participants,
       },
       ticket: {
         id: ticket.id,
@@ -769,7 +859,7 @@ class TicketApprovalService {
     throw new ValidationError('who must be "requester" or "requestedBy"');
   }
 
-  async decideByToken(token, decision, note = null, noteHtml = null) {
+  async decideByToken(token, decision, note = null, noteHtml = null, extra = {}) {
     const approval = await this._findByToken(token);
     const lc = String(decision || '').toLowerCase();
     if (lc === 'escalate' || lc === 'forward') {
@@ -791,10 +881,12 @@ class TicketApprovalService {
       actorLabel: approval.approverName || approval.approverEmail,
       actorEmail: approval.approverEmail,
       noteHtml,
+      conditionNote: extra?.conditionNote || null,
+      conditionNoteHtml: extra?.conditionNoteHtml || null,
     });
   }
 
-  async decideInApp(ticketId, workspaceId, approvalId, decision, note, actor, noteHtml = null) {
+  async decideInApp(ticketId, workspaceId, approvalId, decision, note, actor, noteHtml = null, extra = {}) {
     const approval = await prisma.ticketApproval.findFirst({
       where: { id: approvalId, ticketId, workspaceId },
     });
@@ -809,6 +901,8 @@ class TicketApprovalService {
       actorLabel: actor?.name || actor?.email || 'Ticket Pulse user',
       actorEmail: actor?.email || null,
       noteHtml,
+      conditionNote: extra?.conditionNote || null,
+      conditionNoteHtml: extra?.conditionNoteHtml || null,
     });
   }
 
@@ -1065,6 +1159,7 @@ class TicketApprovalService {
       requestedBy: a.requestedBy,
       requestNote: a.requestNote,
       decisionNote: a.decisionNote,
+      conditionNote: a.conditionNote || null,
       decidedAt: a.decidedAt,
       decidedVia: a.decidedVia,
       createdAt: a.createdAt,
@@ -1245,7 +1340,7 @@ class TicketApprovalService {
     return null;
   }
 
-  async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null }) {
+  async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote = null, conditionNoteHtml = null }) {
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
       throw new ValidationError('Decision must be "approved" or "rejected"');
@@ -1293,6 +1388,16 @@ class TicketApprovalService {
       }
     }
 
+    // Approvals v3: "approve with condition" + the approver's signature as it
+    // will appear in the decision e-mail (saved signature, else Entra card).
+    const cleanCondition = normalized === 'approved' ? String(conditionNote || '').trim() || null : null;
+    const cleanConditionHtml = cleanCondition && conditionNoteHtml ? sanitizeNoteHtml(conditionNoteHtml) : null;
+    let signatureHtml = null;
+    try {
+      const { default: conversation } = await import('./approvalConversationService.js');
+      signatureHtml = (await conversation.signatureFor(approval.workspaceId, actorEmail || approval.approverEmail))?.html || null;
+    } catch { signatureHtml = null; }
+
     const updated = await prisma.ticketApproval.update({
       where: { id: approval.id },
       data: {
@@ -1302,6 +1407,9 @@ class TicketApprovalService {
         decisionNote: note?.trim() || null,
         decisionNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
         approverName: approval.approverName || actorLabel,
+        conditionNote: cleanCondition,
+        conditionNoteHtml: cleanConditionHtml,
+        signatureHtml,
       },
     });
 
@@ -1339,10 +1447,10 @@ class TicketApprovalService {
     // Audit trail on the conversation only. Approvals are TP-only, so the note
     // is NEVER mirrored to the FreshService fallback copy (mirrorState: null).
     if (ticket) {
-      const verdict = normalized === 'approved' ? 'APPROVED ✔' : 'REJECTED ✘';
-      const noteBody = changedFrom
+      const verdict = normalized === 'approved' ? (cleanCondition ? 'APPROVED WITH CONDITION ✔' : 'APPROVED ✔') : 'REJECTED ✘';
+      const noteBody = (changedFrom
         ? `Approval CHANGED to ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`
-        : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`;
+        : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`) + (cleanCondition ? ` · Condition: "${cleanCondition}"` : '');
       await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
@@ -1372,12 +1480,21 @@ class TicketApprovalService {
       });
       this._broadcast(ticket, 'approval');
 
-      // QA 08-11 #5: the requester hears about the verdict by email too.
+      // QA 08-11 #5: the agent who asked hears about the verdict by email.
       // Non-fatal — the decision is already persisted.
       try {
-        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom });
+        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml });
       } catch (err) {
         logger.warn(`Approval decision email failed (non-fatal): ${err.message}`);
+      }
+      // Approvals v3: the decision is a message on the conversation, and the
+      // ticket requester + every other approver on the chain hear it too —
+      // reply-style, with the condition, the signature and the history each
+      // of them is allowed to see.
+      try {
+        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml });
+      } catch (err) {
+        logger.warn(`Approval decision thread e-mails failed (non-fatal): ${err.message}`);
       }
     }
 
@@ -1516,7 +1633,7 @@ class TicketApprovalService {
    * `actorEmail` is the DECIDING actor, not approval.approverEmail — an admin
    * deciding on the approver's behalf must not read as a self-decision.
    */
-  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null } = {}) {
+  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] decision email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
       return { sent: false, reason: 'suppressed' };
@@ -1525,7 +1642,7 @@ class TicketApprovalService {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
     const isSelf = to.toLowerCase() === String(actorEmail || '').trim().toLowerCase();
     const approved = decision === 'approved';
-    const verdictLabel = approved ? 'Approved' : 'Rejected';
+    const verdictLabel = approved ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
     // Subject prefix stays identical for the self variant — inbox filters and
@@ -1539,10 +1656,68 @@ class TicketApprovalService {
       isSelf,
       changedFrom: changedFrom || null,
       note: note?.trim() || null,
+      conditionNote: conditionNote || null,
+      signatureHtml: signatureHtml || null,
       requester: { name: ticket.requester?.name || null },
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision' });
+  }
+
+  /**
+   * Approvals v3 — the decision goes to everyone else on the request: the
+   * ticket requester (requester-visible history only) and every other
+   * approver in the chain (full history). The agent already got theirs.
+   */
+  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null } = {}) {
+    if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return { sent: false, reason: 'suppressed' };
+    const { default: conversation } = await import('./approvalConversationService.js');
+    const { renderDecisionThreadEmail } = await import('./approvalEmailTemplate.js');
+    const parts = await conversation.participants(approval);
+    const groupId = approval.requestGroupId || `single-${approval.id}`;
+    // Record the decision on the conversation (requester-visible).
+    await prisma.approvalMessage.create({
+      data: {
+        workspaceId: approval.workspaceId, ticketId: approval.ticketId, approvalId: approval.id, requestGroupId: groupId,
+        kind: 'decision', audience: 'requester', authorEmail: String(actorEmail || approval.approverEmail || '').toLowerCase(),
+        authorName: actorLabel || approval.approverName || null, authorRole: 'approver',
+        bodyText: [decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected', conditionNote ? `Condition: ${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
+        bodyHtml: null, via: 'app', toEmails: [parts.requester?.email, parts.agent?.email, ...parts.approvers.map((a) => a.email)].filter(Boolean),
+      },
+    }).catch((err) => logger.warn(`Decision message write failed (non-fatal): ${err.message}`));
+
+    const agentEmail = String(approval.requestedBy || '').toLowerCase();
+    const deciderEmail = String(actorEmail || approval.approverEmail || '').toLowerCase();
+    const recipients = [];
+    if (parts.requester && parts.requester.email !== agentEmail && parts.requester.email !== deciderEmail) recipients.push({ ...parts.requester, audience: 'requester' });
+    for (const a of parts.approvers) {
+      if (a.email === agentEmail || a.email === deciderEmail || recipients.some((r) => r.email === a.email)) continue;
+      recipients.push({ ...a, audience: null });
+    }
+    if (recipients.length === 0) return { sent: false, reason: 'nobody_else' };
+    const ref = ticketDisplayRef(ticket);
+    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const workspaceName = await this._workspaceName(ticket);
+    const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
+    const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+    const verdictLabel = decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
+    let sent = 0;
+    for (const r of recipients) {
+      const thread = await conversation.listForGroup(groupId, { audience: r.audience });
+      const html = renderDecisionThreadEmail({
+        workspaceName, categoryName: category?.name || null,
+        ticket: { ref, subject: ticket.subject || null, appUrl: r.role === 'requester' ? null : ticketUrl },
+        approved: decision === 'approved', changedFrom: changedFrom || null,
+        approverName: actorLabel || approval.approverName || approval.approverEmail,
+        note: note?.trim() || null, conditionNote: conditionNote || null, signatureHtml: signatureHtml || null,
+        recipient: r, requester: { name: parts.requester?.name || ticket.requester?.name || null },
+        requestNoteHtml: approval.requestNoteHtml || null, requestNote: approval.requestNote || null, requestedByName: parts.agent?.name || null,
+        thread: thread.filter((m) => m.kind !== 'decision'),
+      });
+      const res = await sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: r.email, subject: `${verdictLabel}: ${ticket.subject || 'ticket'} [${ref}]`, html, label: 'approval decision' });
+      if (res?.sent !== false) sent += 1;
+    }
+    return { sent: sent > 0, count: sent };
   }
 
   /**
