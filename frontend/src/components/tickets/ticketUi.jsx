@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
-import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Globe, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -607,20 +607,30 @@ export function TagChip({ tag, size = 'sm', onRemove = null, className = '' }) {
   );
 }
 
-/** Countdown label + tone for an SLA deadline. */
+/**
+ * Countdown label + tone for an SLA deadline. Human spans ("38 min left",
+ * "6 hr left", "2 days left", "Overdue 3 hr"); `short` is the same in fewer
+ * characters for tight cells ("38m left", "6h left", "2d left"); `at` is the
+ * absolute date-time for the tooltip.
+ */
 export function dueIn(value) {
   if (!value) return null;
-  const target = new Date(value).getTime();
+  const d = new Date(value);
+  const target = d.getTime();
   if (Number.isNaN(target)) return null;
   const diffMin = Math.round((target - Date.now()) / 60000);
   const abs = Math.abs(diffMin);
-  const span = abs < 60 ? `${abs}m` : abs < 48 * 60 ? `${Math.round(abs / 60)}h` : `${Math.round(abs / 1440)}d`;
-  if (diffMin < 0) return { label: `Overdue ${span}`, state: 'over' };
-  if (diffMin < 4 * 60) return { label: `${span} left`, state: 'warn' };
-  return { label: `${span} left`, state: 'ok' };
+  let span; let short;
+  if (abs < 60) { span = `${abs} min`; short = `${abs}m`; }
+  else if (abs < 48 * 60) { const h = Math.round(abs / 60); span = `${h} hr`; short = `${h}h`; }
+  else { const days = Math.round(abs / 1440); span = `${days} day${days === 1 ? '' : 's'}`; short = `${days}d`; }
+  const at = formatDayTime(d);
+  if (diffMin < 0) return { label: `Overdue ${span}`, short: `Overdue ${short}`, state: 'over', at, title: `Overdue — was due ${at}` };
+  if (diffMin < 4 * 60) return { label: `${span} left`, short: `${short} left`, state: 'warn', at, title: `Due ${at}` };
+  return { label: `${span} left`, short: `${short} left`, state: 'ok', at, title: `Due ${at}` };
 }
 
-export function SlaChip({ value, paused = false, calendarAware = false, className = '' }) {
+export function SlaChip({ value, paused = false, calendarAware = false, className = '', compact = false }) {
   // Pending tickets pause the SLA clock: neutral "Paused" chip, no countdown,
   // no overdue red — the requester (or a third party) holds the ball.
   if (paused) {
@@ -634,22 +644,27 @@ export function SlaChip({ value, paused = false, calendarAware = false, classNam
   const info = dueIn(value);
   if (!info) return null;
   // Calendar-aware workspaces (Phase SLA): the stored due date already skips
-  // weekends/holidays, so the tooltip just explains WHICH clock stamped it.
-  const clockTitle = calendarAware
-    ? 'Business-hours clock — this due date only counts business hours (weekends and holidays don’t)'
-    : undefined;
-  // Softer, borderless urgency pills with a leading colored dot (mockup style):
-  // red overdue, amber due-soon, green plenty-of-time.
+  // weekends/holidays, so the tooltip also says WHICH clock stamped it.
+  const title = calendarAware
+    ? `${info.title} · Business-hours clock — weekends and holidays don’t count`
+    : info.title;
+  // Urgency chip: a soft tint with a hairline ring in the same hue, tabular
+  // digits so a column of them lines up, and a glyph that says what the
+  // colour says — check for on track, clock for due soon, warning for overdue.
   const tone = info.state === 'over'
-    ? 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300'
+    ? 'bg-red-50 text-red-700 ring-red-600/25 dark:bg-red-500/15 dark:text-red-200 dark:ring-red-400/30'
     : info.state === 'warn'
-      ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200'
-      : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200';
-  const dot = info.state === 'over' ? 'bg-red-500' : info.state === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
+      ? 'bg-amber-50 text-amber-800 ring-amber-600/25 dark:bg-amber-500/15 dark:text-amber-100 dark:ring-amber-400/30'
+      : 'bg-emerald-50 text-emerald-800 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-400/25';
+  const Glyph = info.state === 'over' ? AlertTriangle : info.state === 'warn' ? Clock : CheckCircle2;
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${tone} ${className}`} title={clockTitle}>
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} aria-hidden="true" />
-      {info.label}
+    <span
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-[3px] text-[11px] font-semibold leading-none tabular-nums whitespace-nowrap ring-1 ring-inset ${tone} ${className}`}
+      title={title}
+      data-due-state={info.state}
+    >
+      <Glyph className="h-3 w-3 shrink-0" strokeWidth={2.25} aria-hidden="true" />
+      {compact ? info.short : info.label}
     </span>
   );
 }

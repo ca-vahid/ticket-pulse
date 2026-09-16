@@ -7,7 +7,7 @@ import StatusPicker from './StatusPicker';
 import {
   AgentFirstName, PersonAvatar, PriorityDot, QueueStatePill, SlaChip, StatusPill, UnassignedBadge,
   PRIORITY_LABELS, QUEUE_STATE_NOTE,
-  formatDayTime, ticketCategoryLabels, ticketSourceLabel, timeAgo, timeAgoShort,
+  dueIn, formatDayTime, ticketCategoryLabels, ticketSourceLabel, timeAgo, timeAgoShort,
 } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
@@ -386,7 +386,7 @@ function renderDue(ticket, ctx) {
         : resolvedLike
           ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30">Done</span>
           : ticket.dueBy
-            ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} className="!px-1.5 !text-[10px]" />
+            ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} compact={!ctx.roomy} />
             : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
@@ -420,6 +420,36 @@ function renderLastActivity(ticket, ctx) {
 // Phase E day+time convention ("Aug 17, 9:14 AM", year spelled out off-year);
 // the secondary keeps counting ("9d ago", "3w ago") instead of collapsing
 // into a second copy of the date at the 7-day mark. Full timestamp on hover.
+/**
+ * "Due date" (opt-in column, 16 Sep 2026): the absolute deadline — the day
+ * plus the time — with the countdown underneath so the two columns can be
+ * used together or instead of each other. Sorts by dueBy like "Due".
+ */
+function renderDueDate(ticket, ctx) {
+  const { removedLike, resolvedLike, statusDefs } = ctx;
+  const d = ticket.dueBy ? new Date(ticket.dueBy) : null;
+  const valid = d && !Number.isNaN(d.getTime());
+  const info = valid && !removedLike && !resolvedLike ? dueIn(ticket.dueBy) : null;
+  const paused = valid && baseStatusOf(statusDefs, ticket.status) === 'Pending';
+  const tone = !info || paused ? 'text-muted-foreground/75' : info.state === 'over' ? 'text-red-600 dark:text-red-300' : info.state === 'warn' ? 'text-amber-700 dark:text-amber-200' : 'text-muted-foreground/75';
+  return (
+    <span
+      className={`${ctx.cell('dueDate')} ${ctx.cellPad} flex-col !items-start justify-center gap-0.5`}
+      style={ctx.cellStyle('dueDate')}
+      title={valid ? d.toLocaleString() : undefined}
+    >
+      {valid ? (
+        <>
+          <span className={`block w-full text-xs truncate tabular-nums ${removedLike ? 'text-muted-foreground/50' : 'text-foreground/85'}`}>{formatDayTime(d)}</span>
+          <span className={`block w-full text-[10px] truncate ${tone}`}>
+            {removedLike ? '—' : resolvedLike ? 'done' : paused ? 'paused' : info ? (info.state === 'over' ? info.label : `in ${info.label.replace(/ left$/, '')}`) : ''}
+          </span>
+        </>
+      ) : <span className="text-xs text-muted-foreground/50">—</span>}
+    </span>
+  );
+}
+
 function renderCreatedAt(ticket, ctx) {
   const d = ticket.createdAt ? new Date(ticket.createdAt) : null;
   const dateLabel = d && !Number.isNaN(d.getTime()) ? formatDayTime(d) : null;
@@ -647,6 +677,7 @@ export const QUEUE_COLUMNS = [
   // the dev-stack screenshots. Users can still drag it down to minPx.
   { key: 'state', label: 'State', defaultOn: false, sortField: null, headerTitle: STATE_COLUMN_TITLE, track: '148px', minPx: 96, render: renderState },
   { key: 'due', label: 'Due', defaultOn: true, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '88px', minPx: 70, mdEssential: true, render: renderDue },
+  { key: 'dueDate', label: 'Due date', defaultOn: false, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '132px', minPx: 104, render: renderDueDate },
   { key: 'lastActivity', label: 'Updated', defaultOn: true, sortField: 'updatedAt', track: '74px', minPx: 60, headerClass: 'justify-end', render: renderLastActivity },
   { key: 'createdAt', label: 'Created', defaultOn: false, sortField: 'createdAt', headerTitle: 'Sort by created date', track: '124px', minPx: 100, render: renderCreatedAt },
   { key: 'source', label: 'Source', defaultOn: false, sortField: 'source', track: '96px', minPx: 70, render: renderSource },

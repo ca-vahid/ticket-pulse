@@ -203,13 +203,16 @@ describe('ticketUi components', () => {
   });
 
   // Phase SLA (QA 08-17 #9) — calendar-aware workspaces explain the clock.
-  test('SlaChip live countdown carries the business-hours tooltip only when calendarAware', () => {
+  test('SlaChip live countdown names the deadline; the business-hours note only when calendarAware', () => {
     const futureTarget = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
     render(<SlaChip value={futureTarget} calendarAware />);
     expect(screen.getByText(/left/)).toHaveAttribute('title', expect.stringContaining('Business-hours clock'));
     cleanup();
     render(<SlaChip value={futureTarget} />);
-    expect(screen.getByText(/left/)).not.toHaveAttribute('title');
+    // The plain chip still names the deadline ("Due Sep 19, 2:32 PM") — just not the clock mode.
+    const plain = screen.getByText(/left/);
+    expect(plain).toHaveAttribute('title', expect.stringMatching(/^Due /));
+    expect(plain).not.toHaveAttribute('title', expect.stringContaining('Business-hours clock'));
     cleanup();
     // Paused keeps its own explanation regardless of the calendar flag.
     render(<SlaChip value={futureTarget} paused calendarAware />);
