@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.1-preview';
+export const APP_VERSION = '3.9.2-preview';
 
 export const changelog = [
+  {
+    version: '3.9.2-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The Approvals v3 server side is live</strong> — the 3.9.0 server deploy was stopped by two lint errors; fixed, and the conversation tables are in place, so questions with an audience, answers by e-mail or link, approve-with-condition and the decision e-mails to everyone now work end to end.' },
+      { type: 'improved', html: '<strong>API v1: approval rows carry the condition and the tier</strong> — <code>GET /api/v1/tickets/{id}/approvals</code> now returns <code>condition</code> (null when approved outright), <code>tier</code> and <code>approverName</code>, and the OpenAPI document describes the row.' },
+    ],
+  },
   {
     version: '3.9.1-preview',
     date: 'September 16, 2026',

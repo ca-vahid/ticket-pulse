@@ -524,7 +524,7 @@ export function renderApprovalMessageEmail(ctx) {
   rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
   rows.push(spacer(16));
   const lead = ctx.kind === 'answer'
-    ? `<b>${by}</b> answered${ctx.recipient?.name ? ` your question` : ''}:`
+    ? `<b>${by}</b> answered${ctx.recipient?.name ? ' your question' : ''}:`
     : ctx.kind === 'comment'
       ? `<b>${by}</b> left a note${ctx.isCc ? ' (you are copied)' : ' for you'}:`
       : `<b>${by}</b> has a question${ctx.isCc ? ' (you are copied)' : ' for you'}:`;

@@ -198,7 +198,7 @@ class TicketApprovalService {
     // to Neville on Tier 2), recorded as an automatic hand-off so everyone
     // can see why it skipped a tier.
     const requesterEmailLc = String(actor?.email || '').trim().toLowerCase();
-    let startTierIdx = tiers.findIndex((t) => t.managerEmails.some((m) => m !== requesterEmailLc));
+    const startTierIdx = tiers.findIndex((t) => t.managerEmails.some((m) => m !== requesterEmailLc));
     if (startTierIdx === -1) {
       throw new ValidationError(tiers.length > 1
         ? `You are an approver on every tier of "${category.name}" and self-approval is prohibited — ask a colleague to request it, or add another approver in Settings.`

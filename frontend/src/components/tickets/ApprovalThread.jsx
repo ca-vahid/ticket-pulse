@@ -73,7 +73,7 @@ export function buildThreadItems({ approval, messages = [], people = [] } = {}) 
     .sort((a, b) => (a.kind === 'request' ? -1 : b.kind === 'request' ? 1 : (t(a.at) - t(b.at)) || (a.idx - b.idx)));
 }
 
-function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, answeredIds, compact }) {
+function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, answeredIds, compact, nameOf = (e) => e }) {
   const meta = KIND_META[item.kind] || KIND_META.comment;
   const Icon = meta.Icon;
   const internal = item.audience === 'internal';
@@ -91,7 +91,7 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, answeredI
   const open = item.kind === 'question' && !item.legacy && item.message && !answeredIds.has(item.message.id);
   const canAnswer = open && typeof onAnswer === 'function' && (addressedToMe || viewerRole === 'admin');
   const toLine = item.kind === 'question' && (item.to?.length || item.cc?.length)
-    ? `To ${item.to.join(', ')}${item.cc?.length ? ` · Cc ${item.cc.join(', ')}` : ''}`
+    ? `To ${item.to.map(nameOf).join(', ')}${item.cc?.length ? ` · Cc ${item.cc.map(nameOf).join(', ')}` : ''}`
     : null;
 
   let sentence;
@@ -131,7 +131,7 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, answeredI
           ) : (
             <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              Waiting for {item.audience === 'internal' ? 'an answer from the approvers / agent' : `a reply from ${firstNameOf(item.to?.[0]) || 'the requester'}`}
+              Waiting for {item.audience === 'internal' ? 'an answer from the approvers / agent' : `a reply from ${firstNameOf(nameOf(item.to?.[0])) || 'the requester'}`}
             </span>
           )}
         </div>
@@ -144,6 +144,7 @@ export default function ApprovalThread({
   approval, messages = [], people = [], viewerEmail = null, viewerRole = null, isDark = false, onAnswer = null, awaitingApprover = false, compact = false, title = 'Conversation', showTitle = true, emptyText = null,
 }) {
   const items = buildThreadItems({ approval, messages, people });
+  const nameOf = (email) => people.find((p) => p?.email === String(email || '').toLowerCase())?.name || email;
   const answeredIds = new Set((messages || []).filter((m) => m?.kind === 'answer' && m.inReplyToId).map((m) => m.inReplyToId));
   const showWaiting = awaitingApprover && viewerRole !== 'approver';
   if (!items.length && !showWaiting) return emptyText ? <p className="text-[13px] text-muted-foreground">{emptyText}</p> : null;
@@ -157,7 +158,7 @@ export default function ApprovalThread({
       )}
       <ol className={`flex flex-col ${compact ? 'gap-1.5' : 'gap-2.5'}`}>
         {items.map((item) => (
-          <ThreadItem key={item.key} item={item} viewerEmail={viewerEmail} viewerRole={viewerRole} isDark={isDark} onAnswer={onAnswer} answeredIds={answeredIds} compact={compact} />
+          <ThreadItem key={item.key} item={item} viewerEmail={viewerEmail} viewerRole={viewerRole} isDark={isDark} onAnswer={onAnswer} answeredIds={answeredIds} compact={compact} nameOf={nameOf} />
         ))}
       </ol>
     </section>

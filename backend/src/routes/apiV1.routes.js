@@ -767,9 +767,12 @@ router.get('/tickets/:id/approvals', S('approvals:read'), asyncHandler(async (re
   res.json({
     success: true,
     data: approvals.map((a) => ({
-      id: a.id, status: a.status, approverEmail: a.approverEmail,
+      id: a.id, status: a.status, approverEmail: a.approverEmail, approverName: a.approverName || null,
       requestedBy: a.requestedBy, requestNote: a.requestNote,
       decisionNote: a.decisionNote, decidedAt: a.decidedAt, createdAt: a.createdAt,
+      // Approvals v3: "approve with condition" — null when approved outright.
+      condition: a.conditionNote || null,
+      tier: a.tier || 1,
     })),
   });
 }));
