@@ -11,6 +11,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from './nav/navDestinations';
 import { APP_VERSION } from '../data/changelog';
 import ChangelogModal from './ChangelogModal';
+import { getRecentSearches, getRecentTickets, rememberSearch } from '../utils/recentSearches';
 
 /**
  * Ctrl/Cmd+K command palette (gap plan 2 P4.2): jump to a page, find a ticket,
@@ -274,6 +275,17 @@ export default function CommandPalette() {
       });
     }
 
+    // Search v3: with nothing typed, the person's recent searches and the
+    // tickets they opened lately sit above the commands.
+    if (!query.trim()) {
+      for (const r of getRecentSearches().slice(0, 5)) {
+        out.push({ id: `recent-${r}`, section: 'Recent searches', label: r, Icon: Clock, run: () => { setQuery(r); } });
+      }
+      for (const t of getRecentTickets().slice(0, 5)) {
+        out.push({ id: `viewed-${t.id}`, section: 'Recently viewed', label: t.subject || '(no subject)', sub: t.displayRef || `#${t.id}`, Icon: TicketIcon, run: () => { navigate(`/tickets/${t.id}`, { state: { from } }); close(); } });
+      }
+    }
+
     for (const t of sections.tickets) {
       out.push({
         id: `ticket-${t.id}`,
@@ -283,7 +295,7 @@ export default function CommandPalette() {
         status: t.status,
         statusStyle: STATUS_STYLES[t.status],
         Icon: TicketIcon,
-        run: () => { navigate(`/tickets/${t.id}`, { state: { from } }); close(); },
+        run: () => { rememberSearch(query); navigate(`/tickets/${t.id}`, { state: { from } }); close(); },
       });
     }
 

@@ -16,6 +16,8 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMo
 jest.unstable_mockModule('../src/services/workspaceRepository.js', () => ({
   default: { getAccessRole: getAccessRoleMock },
 }));
+const resolveUserAccessMock = jest.fn(async () => ({ availableWorkspaces: [{ id: 1 }, { id: 2 }, { id: 5 }] }));
+jest.unstable_mockModule('../src/routes/auth.routes.js', () => ({ resolveUserAccess: resolveUserAccessMock }));
 jest.unstable_mockModule('../src/services/globalSearchService.js', () => ({
   default: { search: searchMock },
 }));
@@ -81,6 +83,16 @@ describe('GET /api/search', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(searchMock).toHaveBeenCalledWith(1, { q: 'printer', types: 'tickets,tasks' });
+  });
+
+  test('scope=all searches every workspace the caller may see (Search v3)', async () => {
+    getAccessRoleMock.mockResolvedValue('member');
+    const res = await request(makeApp(member))
+      .get('/api/search?q=vpn&types=tickets,conversations&scope=all')
+      .set('x-workspace-id', '1');
+    expect(res.status).toBe(200);
+    expect(resolveUserAccessMock).toHaveBeenCalledWith(member.email.toLowerCase(), member.role);
+    expect(searchMock).toHaveBeenCalledWith(1, { q: 'vpn', types: 'tickets,conversations', workspaceIds: [1, 2, 5] });
   });
 
   test('agent-role users get in via their active technician profile', async () => {

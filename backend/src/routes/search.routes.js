@@ -48,9 +48,20 @@ router.use(asyncHandler(async (req, _res, next) => {
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
+  // Search v3 scope switch: ?scope=all searches every workspace the caller
+  // may see (admins: all; others: workspace_access + technician profiles).
+  let workspaceIds = null;
+  if (String(req.query.scope || '') === 'all') {
+    const user = (req.session?.user ?? req.user);
+    const { resolveUserAccess } = await import('./auth.routes.js');
+    const resolved = await resolveUserAccess(String(user?.email || '').toLowerCase(), user?.role);
+    workspaceIds = (resolved?.availableWorkspaces || []).map((w) => Number(w.id)).filter(Number.isFinite);
+    if (!workspaceIds.includes(Number(req.workspaceId))) workspaceIds.push(Number(req.workspaceId));
+  }
   const result = await globalSearchService.search(req.workspaceId, {
     q: req.query.q,
     types: req.query.types,
+    ...(workspaceIds ? { workspaceIds } : {}),
   });
   res.json({ success: true, data: result });
 }));
