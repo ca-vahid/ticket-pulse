@@ -985,6 +985,11 @@ export const ticketsAPI = {
     return await api.get('/tickets/requester-stats', { params: { requesterId } });
   },
 
+  // Search v2: the requester page — person + service history in this workspace.
+  requesterProfile: async (requesterId) => {
+    return await api.get(`/tickets/requesters/${encodeURIComponent(requesterId)}`);
+  },
+
   /** Fire the AI assignment pipeline for this ticket (semi-manual assign). */
   triage: async (id) => {
     return await api.post(`/tickets/${id}/triage`);

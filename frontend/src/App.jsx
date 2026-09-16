@@ -30,6 +30,7 @@ import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import PublicApprovalReply from './pages/PublicApprovalReply';
+import RequesterDetail from './pages/RequesterDetail';
 import DemoModeBanner from './components/DemoModeBanner';
 import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
@@ -271,6 +272,15 @@ function App() {
                         <ViewRoute>
                           <TechnicianDetailNew />
                         </ViewRoute>
+                      }
+                    />
+
+                    <Route
+                      path="/requesters/:id"
+                      element={
+                        <TicketsRoute>
+                          <RequesterDetail />
+                        </TicketsRoute>
                       }
                     />
 

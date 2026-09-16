@@ -144,13 +144,13 @@ describe('CommandPalette', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/tickets/7?tab=tasks');
   });
 
-  test('requester and department results deep-link into the queue', async () => {
+  test('requester results open the requester page; department results deep-link into the queue', async () => {
     globalSearch.mockResolvedValue({ data: { sections: { requesters: FULL_SECTIONS.requesters } } });
     renderPalette();
     openPalette();
     typeQuery('ana');
     fireEvent.click(await screen.findByRole('option', { name: /Ana Printers/ }));
-    expect(screen.getByTestId('location')).toHaveTextContent('/tickets?requesterId=11&requesterName=Ana%20Printers');
+    expect(screen.getByTestId('location')).toHaveTextContent('/requesters/11');
 
     globalSearch.mockResolvedValue({ data: { sections: { departments: FULL_SECTIONS.departments } } });
     openPalette();

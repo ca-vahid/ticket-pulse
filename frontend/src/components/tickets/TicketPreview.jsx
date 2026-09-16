@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requesterIntegrationIdentity } from '../../utils/integrationIdentity';
+import { rememberTicket } from '../../utils/recentSearches';
 import { IntegrationAvatar } from './IntegrationAvatar';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -72,6 +73,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
       const res = await ticketsAPI.get(ticketId, { reconcile: false, signal: ctrl.signal });
       if (ctrl.signal.aborted) return;
       setTicket(res.data);
+      if (!silent) rememberTicket(res.data); // Search v2: "Recently viewed"
       setError(null);
     } catch (err) {
       if (ctrl.signal.aborted || err.code === 'ERR_CANCELED' || err.name === 'CanceledError') return;
@@ -420,7 +422,11 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <PersonAvatar name={ticket.requester?.name} size="h-11 w-11" textSize="text-sm" />
                 )}
                 <div className="min-w-0 flex-1 text-xs space-y-0.5">
-                  <p className="text-sm font-bold text-foreground truncate">{ticket.requester?.name || 'Unknown requester'}</p>
+                  <p className="text-sm font-bold text-foreground truncate">
+                    {ticket.requesterId
+                      ? <Link to={`/requesters/${ticket.requesterId}`} className="tp-focus-ring rounded hover:text-primary hover:underline" title="Open this requester's page">{ticket.requester?.name || 'Unknown requester'}</Link>
+                      : (ticket.requester?.name || 'Unknown requester')}
+                  </p>
                   {(ticket.requester?.entraJobTitle || ticket.requester?.jobTitle || ticket.requester?.entraDepartment || ticket.requester?.department) && (
                     <p className="text-muted-foreground truncate">
                       {[ticket.requester.entraJobTitle || ticket.requester.jobTitle, ticket.requester.entraDepartment || ticket.requester.department]

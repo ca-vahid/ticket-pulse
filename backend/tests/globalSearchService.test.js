@@ -90,16 +90,19 @@ describe('globalSearchService.search', () => {
 
   test('tickets section reuses listTickets q semantics and slims the rows', async () => {
     listTicketsMock.mockResolvedValue({
+      total: 42,
       items: [{
-        id: 7, displayRef: 'TP-7', subject: 'VPN broken', status: 'Open',
-        requester: { name: 'Ana', email: 'ana@x.com' }, description: 'huge body that must not leak',
+        id: 7, displayRef: 'TP-7', subject: 'VPN broken', status: 'Open', priority: 3, origin: 'ticketpulse', createdAt: '2026-09-01T00:00:00.000Z',
+        requester: { name: 'Ana', email: 'ana@x.com' }, assignedTech: { name: 'Reza' }, description: 'huge body that must not leak',
       }],
     });
     const result = await globalSearchService.search(3, { q: 'vpn', types: 'tickets' });
     expect(listTicketsMock).toHaveBeenCalledWith(3, { q: 'vpn', pageSize: 7 });
     expect(result.sections.tickets).toEqual([
-      { id: 7, displayRef: 'TP-7', subject: 'VPN broken', status: 'Open', requesterName: 'Ana' },
+      { id: 7, displayRef: 'TP-7', subject: 'VPN broken', status: 'Open', requesterName: 'Ana', priority: 3, assigneeName: 'Reza', createdAt: '2026-09-01T00:00:00.000Z', origin: 'ticketpulse' },
     ]);
+    // Search v2: the match total feeds "View all (N)".
+    expect(result.totals.tickets).toBe(42);
   });
 
   test('WORKSPACE ISOLATION: a ws2 task never appears in a ws1 search', async () => {
@@ -154,11 +157,25 @@ describe('globalSearchService.search', () => {
       { name: { contains: 'ana.ruiz@', mode: 'insensitive' } },
       { email: { contains: 'ana.ruiz@', mode: 'insensitive' } },
     ]);
-    expect(args.take).toBe(7);
+    expect(args.take).toBe(21); // over-fetch, then rank + cap at 7
     // entraDepartment backfills the department display field
     expect(result.sections.requesters).toEqual([
-      { id: 11, name: 'Ana Ruiz', email: 'ana.ruiz@bgc.ca', department: 'Geotech', jobTitle: 'Engineer' },
+      { id: 11, name: 'Ana Ruiz', email: 'ana.ruiz@bgc.ca', department: 'Geotech', jobTitle: 'Engineer', ticketCount: 0 },
     ]);
+  });
+
+  test('requesters: a name that starts with the query outranks a contains hit; ticket count breaks ties and is workspace-scoped', async () => {
+    prismaMock.requester.findMany.mockResolvedValue([
+      { id: 1, name: 'Rosabina Lee', email: 'rl@bgc.ca' },
+      { id: 2, name: 'Sabina Greer', email: 'sg@bgc.ca' },
+      { id: 3, name: 'Sabina Alvarez', email: 'sa@bgc.ca' },
+      { id: 4, name: 'Zed Sabina', email: 'zs@bgc.ca' },
+    ]);
+    prismaMock.ticket = { groupBy: jest.fn().mockResolvedValue([{ requesterId: 2, _count: { _all: 12 } }, { requesterId: 3, _count: { _all: 3 } }]) };
+    const result = await globalSearchService.search(1, { q: 'sabina', types: 'requesters' });
+    expect(prismaMock.ticket.groupBy.mock.calls[0][0].where).toEqual({ workspaceId: 1, requesterId: { in: [1, 2, 3, 4] } });
+    expect(result.sections.requesters.map((r) => r.name)).toEqual(['Sabina Greer', 'Sabina Alvarez', 'Zed Sabina', 'Rosabina Lee']);
+    expect(result.sections.requesters[0].ticketCount).toBe(12);
   });
 
   test('departments merge both columns case-insensitively, scoped to requesters with tickets here', async () => {
