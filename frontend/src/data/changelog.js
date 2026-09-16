@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.95-preview';
+export const APP_VERSION = '3.8.96-preview';
 
 export const changelog = [
+  {
+    version: '3.8.96-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Forward says up front when it cannot send</strong> — forwarding a ticket goes out from the workspace mailbox, and a workspace whose mailbox is ingest-only (Project Accounting today) refused the request only after the message was written: eight failed attempts on TP-1518 this morning. The Forward composer now shows what is missing and disables Send until a workspace admin switches the mailbox to Send or Both.' },
+      { type: 'fixed', html: '<strong>Quieter logs for closed browser tabs</strong> — a live-update connection dropped by the browser was logged as an error about a dozen times an hour; it is ordinary churn and is now a debug line.' },
+    ],
+  },
   {
     version: '3.8.95-preview',
     date: 'September 16, 2026',

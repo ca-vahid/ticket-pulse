@@ -2318,8 +2318,22 @@ class TicketService {
       logger.debug?.(`Meta member name fill skipped: ${err.message}`);
     }
     members.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    // Forward needs a send-capable workspace mailbox on the Graph lane. Say so
+    // up front (16 Sep 2026: eight 400s on TP-1518 in PA, whose mailbox is
+    // ingest-only) instead of after the agent has composed the message.
+    let forwardAvailable = false;
+    try {
+      const [outbound, { default: graphMailClient }] = await Promise.all([
+        pickOutboundMailbox(workspaceId),
+        import('../integrations/graphMailClient.js'),
+      ]);
+      forwardAvailable = Boolean(outbound) && typeof graphMailClient?.isConfigured === 'function' && graphMailClient.isConfigured();
+    } catch (err) {
+      logger.debug?.(`Meta forwardAvailable check skipped: ${err.message}`);
+    }
     return {
       nativeTicketingEnabled: workspace.nativeTicketingEnabled === true,
+      forwardAvailable,
       // QA 09-15 #8 / #1
       members,
       aiSuggestionsForBasic: aiCfg ? aiCfg.aiSuggestionsForBasic !== false : true,

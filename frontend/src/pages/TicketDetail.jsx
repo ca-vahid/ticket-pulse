@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, GitBranch, GitMerge, History, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, GitBranch, GitMerge, History, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -1071,6 +1071,10 @@ export default function TicketDetail() {
   // Per-workspace type registry: sidebar Type options ('Case' for Accounting…).
   const { activeTypes: activeTicketTypes } = useTicketTypes();
   const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
+  // Forward sends from the workspace mailbox over Graph; without a send-capable
+  // mailbox the server refuses (400). meta.forwardAvailable tells us up front;
+  // an older backend (no flag) keeps the old behaviour.
+  const forwardAvailable = meta?.forwardAvailable !== false;
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
   // Why this ticket cannot RECEIVE a merge (Phase MB1) — null when it can.
@@ -2614,6 +2618,7 @@ export default function TicketDetail() {
                           <button
                             onClick={() => switchComposerMode('forward')}
                             aria-pressed={composerMode === 'forward'}
+                            title={forwardAvailable ? 'Forward the description and the last public replies by e-mail' : 'Forwarding needs a send-capable workspace mailbox (Settings → Ticket Mailboxes, mode Send or Both)'}
                             className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                               composerMode === 'forward' ? 'bg-violet-600 text-white border-violet-600' : 'bg-card text-muted-foreground border-border hover:border-violet-300 dark:hover:border-violet-500/40'
                             }`}
@@ -2791,6 +2796,15 @@ export default function TicketDetail() {
                         )}
                         {composerMode === 'forward' && (
                           <div className="mb-2">
+                            {!forwardAvailable && (
+                              <p role="alert" className="mb-2 flex items-start gap-1.5 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
+                                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
+                                <span>
+                                  <strong>Forwarding is not set up in this workspace.</strong> It sends from the workspace mailbox, and {currentWorkspace?.name || 'this workspace'} has no mailbox in <em>Send</em> or <em>Both</em> mode
+                                  (Settings → Ticket Mailboxes; a workspace admin can switch the mailbox mode once it has the Mail.Send grant). Until then, reply to the requester and Cc the person instead.
+                                </span>
+                              </p>
+                            )}
                             <CcChips value={forwardTo} onChange={setForwardTo} placeholder="Forward to…" label="Forward recipients" />
                             <p className="mt-1 text-[10px] text-muted-foreground/75">
                           Sends the description + the last public replies from the workspace mailbox; recorded on the ticket as a private entry.
@@ -2863,7 +2877,7 @@ export default function TicketDetail() {
                           </span>
                           <button
                             onClick={sendComposer}
-                            disabled={isSending || (composerMode === 'forward' ? forwardTo.length === 0 : !composerText.trim())}
+                            disabled={isSending || (composerMode === 'forward' ? (forwardTo.length === 0 || !forwardAvailable) : !composerText.trim())}
                             className={`tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg shadow-subtle transition-colors disabled:opacity-50 ${
                               composerMode === 'reply' ? 'bg-primary text-primary-foreground hover:bg-blue-700'
                                 : composerMode === 'forward' ? 'bg-violet-600 text-white hover:bg-violet-700'

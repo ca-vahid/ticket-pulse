@@ -594,7 +594,11 @@ router.get('/events', asyncHandler(async (req, res) => {
   });
 
   req.on('error', error => {
-    logger.error('SSE request error:', error);
+    // A client that closed the tab / lost Wi-Fi shows up here as ECONNRESET
+    // "aborted" — ordinary churn (a dozen an hour), not an application error.
+    const benign = error?.code === 'ECONNRESET' || /aborted/i.test(String(error?.message || ''));
+    if (benign) logger.debug?.(`SSE client dropped: ${error?.code || error?.message}`);
+    else logger.error('SSE request error:', error);
     sseManager.removeClient(res);
   });
 }));
