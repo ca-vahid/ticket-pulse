@@ -91,6 +91,9 @@ Additive migrations run without asking; anything that drops/renames stops and as
   `Ticket Pulse - your <MM-DD> QA package: all <N> answered (PDF attached)`). `email_content.mjs` exports
   `{ headline, intro, rows:[{n, what, verdict, tone, cause}], retest:[…], questions:[…], extra?, thanks }`.
   Honour `email me only` / `let me review the email`.
+- E-mail HTML rule: never put text on a CSS gradient or `background:` shorthand — Outlook drops them and the text
+  vanishes (white on white, 15 Sep 2026). Colour bands are a `<td bgcolor="#…" style="background-color:#…">` with
+  explicit `color:` on every text element, as `approvalEmailTemplate.js` does.
 
 ## 7. Post-build watch (24 hours, PT)
 Unless the prompt says `no watch` or a review cron already exists (`CronList`): create a session cron that
