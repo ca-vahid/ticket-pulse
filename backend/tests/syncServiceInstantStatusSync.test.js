@@ -553,3 +553,42 @@ describe('webhook ingest → shared snapshot → SSE broadcast (end-to-end)', ()
     expect(workspaceWebhookServiceMock.recordAccepted).toHaveBeenCalledWith(2);
   });
 });
+
+describe('reconcileSingleTicket — a FreshService closure is not pulled back over a newer TP change (QA 09-15 #5)', () => {
+  // TP-1526: Power Apps reopened the ticket at 21:24:32; the mirror push sat
+  // in a busy FS queue until 21:27; the on-open reconcile at 21:24:53 saw the
+  // FS copy still Closed and re-closed the ticket.
+  const TP_ROW = {
+    id: 45104, origin: 'ticketpulse', freshserviceTicketId: BigInt(242541), status: 'Open', priority: 2,
+    resolvedAt: null, createdAt: new Date('2026-09-15T20:53:39Z'), freshserviceUpdatedAt: null,
+    updatedAt: new Date('2026-09-15T21:24:33Z'),
+  };
+  beforeEach(() => {
+    syncService._initializeClient = jest.fn().mockResolvedValue(clientMock);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_ROW });
+    prismaMock.mirrorJob = { count: jest.fn().mockResolvedValue(0) };
+    prismaMock.ticket.update.mockResolvedValue({ ...TP_ROW, status: 'Closed' });
+  });
+
+  test('a mirror job still in flight means TP has changes FS has not seen → untouched', async () => {
+    prismaMock.mirrorJob.count.mockResolvedValue(1);
+    clientMock.fetchTicketSafe.mockResolvedValue({ id: 242541, status: 5, updated_at: '2026-09-15T21:25:00Z' });
+    const out = await syncService.reconcileSingleTicket(45104, 5);
+    expect(out).toMatchObject({ changed: false, skipped: 'mirror_in_flight' });
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('TP newer than the FS copy → untouched even with no job in flight', async () => {
+    clientMock.fetchTicketSafe.mockResolvedValue({ id: 242541, status: 5, updated_at: '2026-09-15T21:03:27Z' });
+    const out = await syncService.reconcileSingleTicket(45104, 5);
+    expect(out).toMatchObject({ changed: false, skipped: 'tp_newer' });
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('FS genuinely newer and terminal → mirrored back as before', async () => {
+    clientMock.fetchTicketSafe.mockResolvedValue({ id: 242541, status: 5, updated_at: '2026-09-15T21:40:00Z' });
+    const out = await syncService.reconcileSingleTicket(45104, 5);
+    expect(out).toMatchObject({ changed: true, status: 'Closed' });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'Closed' }) }));
+  });
+});

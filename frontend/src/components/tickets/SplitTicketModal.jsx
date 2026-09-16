@@ -21,6 +21,10 @@ export default function SplitTicketModal({ ticket, onClose, onSplit, technicians
   const [subject, setSubject] = useState('');
   const [subjectTouched, setSubjectTouched] = useState(false);
   const [moveAttachments, setMoveAttachments] = useState(true);
+  // QA 09-15 #2: the request's own description and the files that came with it
+  // (attachments with no message) used to stay behind; the child opened with
+  // "Split out of TP-n" and nothing else.
+  const [includeDescription, setIncludeDescription] = useState(true);
   const [notifyRequester, setNotifyRequester] = useState(false);
   // QA 09-09 #3: the new ticket used to land unassigned, so every split meant
   // opening the child afterwards just to give it an owner. Picked here, applied
@@ -75,6 +79,7 @@ export default function SplitTicketModal({ ticket, onClose, onSplit, technicians
         entryIds: [...selected],
         subject: subject.trim(),
         moveAttachments,
+        includeDescription,
         notifyRequester,
         ...(assignedTechId ? { assignedTechId } : {}),
       });
@@ -182,6 +187,10 @@ export default function SplitTicketModal({ ticket, onClose, onSplit, technicians
             <label className="flex items-center gap-2 text-[11px] text-foreground/85 pt-1">
               <input type="checkbox" checked={moveAttachments} onChange={(e) => setMoveAttachments(e.target.checked)} className="h-3.5 w-3.5 rounded border-input text-violet-600" />
               Move attachments on those messages to the new ticket
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-foreground/85">
+              <input type="checkbox" checked={includeDescription} onChange={(e) => setIncludeDescription(e.target.checked)} className="h-3.5 w-3.5 rounded border-input text-violet-600" data-testid="split-include-description" />
+              Include the original description and its attachments on the new ticket (the original keeps them)
             </label>
             <label className="flex items-center gap-2 text-[11px] text-foreground/85">
               <input type="checkbox" checked={notifyRequester} onChange={(e) => setNotifyRequester(e.target.checked)} className="h-3.5 w-3.5 rounded border-input text-violet-600" />

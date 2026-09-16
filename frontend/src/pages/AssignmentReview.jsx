@@ -4680,6 +4680,13 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           color="text-sky-600 dark:text-sky-300"
         />
         <ConfigToggle
+          label="Show AI Suggestions to Basic-Access and Read-Only Members"
+          description="When off, the Suggested-assignee chip and AI runs are shown only to reviewers and admins in this workspace; basic-access technicians and read-only members see the ticket as plainly Unassigned. Reviewers and admins always see suggestions."
+          checked={config.aiSuggestionsForBasic !== false}
+          onChange={() => setConfig({ ...config, aiSuggestionsForBasic: config.aiSuggestionsForBasic === false })}
+          color="text-indigo-600 dark:text-indigo-300"
+        />
+        <ConfigToggle
           label="Learn Competencies From Assignments"
           description="Approved and reassigned tickets strengthen — or auto-create — the assigned technician's competency in the ticket's category (marked with an amber dot in the matrix). Turn off if people outside the team temporarily handle tickets here, so one reassignment can't add them to the skills matrix."
           checked={config.competencyFeedbackEnabled !== false}

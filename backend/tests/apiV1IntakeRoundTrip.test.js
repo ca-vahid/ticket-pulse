@@ -440,3 +440,64 @@ describe('POST /api/v1/tickets — group placement (QA 08-06 #1)', () => {
     expect(prismaMock.ticket.create).not.toHaveBeenCalled();
   });
 });
+
+// ── QA 09-15 #1 / #7 — ticketService unit checks that need the real module ──
+describe('ticketService — AI suggestions hidden for basic-access / read-only when the workspace says so (QA 09-15 #1)', () => {
+  beforeEach(() => {
+    prismaMock.assignmentConfig = { findUnique: jest.fn() };
+  });
+
+  test('switch off: agent-kind and read-only actors are hidden, reviewers are not', async () => {
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ aiSuggestionsForBasic: false });
+    expect(await ticketService._hideAiSuggestionsFor(5, { kind: 'agent', workspaceRole: null })).toBe(true);
+    expect(await ticketService._hideAiSuggestionsFor(5, { kind: 'member', workspaceRole: 'readonly' })).toBe(true);
+    expect(await ticketService._hideAiSuggestionsFor(5, { kind: 'member', workspaceRole: 'reviewer' })).toBe(false);
+    expect(await ticketService._hideAiSuggestionsFor(5, { kind: 'admin', workspaceRole: 'admin' })).toBe(false);
+  });
+
+  test('switch on (default) or unknown: nobody is hidden', async () => {
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ aiSuggestionsForBasic: true });
+    expect(await ticketService._hideAiSuggestionsFor(5, { kind: 'agent' })).toBe(false);
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue(null);
+    expect(await ticketService._hideAiSuggestionsFor(5, { kind: 'agent' })).toBe(false);
+    expect(await ticketService._hideAiSuggestionsFor(5, null)).toBe(false);
+  });
+});
+
+describe('ticketService — a reply quotes the ticket description when there is no inbound e-mail (QA 09-15 #7)', () => {
+  beforeEach(() => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn();
+  });
+
+  test('API-born ticket (TP-1506): the description is quoted, attributed to the requester', async () => {
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      description: '<p>The R&amp;D project has been approved.</p><p>Project title: Millions of Small Wells</p>',
+      descriptionText: 'The R&D project has been approved.\nProject title: Millions of Small Wells',
+      createdAt: new Date('2026-09-14T20:00:00Z'),
+      requester: { name: 'Susan Xu', email: 'sxu@bgcengineering.ca' },
+    });
+    const quote = await ticketService._lastInboundQuote(44880, null);
+    expect(quote).not.toBeNull();
+    expect(quote.html).toContain('Millions of Small Wells');
+    expect(quote.html).toContain('Susan Xu wrote:');
+    expect(quote.text).toContain('> The R&D project has been approved.');
+  });
+
+  test('no inbound e-mail and no description → still nothing to quote', async () => {
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.ticket.findUnique.mockResolvedValue({ description: null, descriptionText: null, createdAt: new Date(), requester: null });
+    expect(await ticketService._lastInboundQuote(1, null)).toBeNull();
+  });
+
+  test('e-mail-born ticket: the inbound message is quoted and the description is not consulted', async () => {
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([{
+      bodyHtml: '<p>Can we please have an A-code opened</p>', bodyText: 'Can we please have an A-code opened', content: null,
+      actorName: 'Remel Pineda-Manaloto', actorEmail: 'rp@bgcengineering.ca', occurredAt: new Date('2026-09-14T04:38:00Z'), isPrivate: false, eventType: 'original_email',
+    }]);
+    prismaMock.ticket.findUnique.mockClear();
+    const quote = await ticketService._lastInboundQuote(45011, null);
+    expect(quote.html).toContain('A-code opened');
+    expect(prismaMock.ticket.findUnique).not.toHaveBeenCalled();
+  });
+});

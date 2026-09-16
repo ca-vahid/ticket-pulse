@@ -1148,8 +1148,12 @@ class TicketService {
     return where;
   }
 
-  async listTickets(workspaceId, query = {}, { maxPageSize = 100 } = {}) {
+  async listTickets(workspaceId, query = {}, { maxPageSize = 100, actor = null } = {}) {
     const page = Math.max(1, Number(query.page) || 1);
+    // QA 09-15 #1: a workspace may keep AI assignment suggestions to reviewers
+    // and admins. Enforced here — the `ai` block never leaves the server for a
+    // basic-access (technician-only) or read-only actor when the switch is off.
+    const hideAi = await this._hideAiSuggestionsFor(workspaceId, actor);
     const pageSize = Math.min(maxPageSize, Math.max(1, Number(query.pageSize) || 25));
     const where = await this.buildListWhere(workspaceId, query);
     const internalDomains = await workspaceInternalDomains(workspaceId);
@@ -1264,8 +1268,8 @@ class TicketService {
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true, statusSets),
         // Queue "State" (Phase QX): FS-style "who acts next" — see deriveQueueState.
         state: deriveQueueState(t, incomingByTicket.get(t.id) === true, statusSets),
-        ai: aiByTicket.get(t.id) || null,
-        aiBypass: bypassByTicket.get(t.id) || null,
+        ai: hideAi ? null : (aiByTicket.get(t.id) || null),
+        aiBypass: hideAi ? null : (bypassByTicket.get(t.id) || null),
         // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
         // drafts sat unseen unless someone opened the ticket).
         hasProposedReply: proposedTicketIds.has(t.id),
@@ -1458,6 +1462,26 @@ class TicketService {
   }
 
   /** Last public conversation entry per ticket → was it inbound (requester)? */
+  // QA 09-15 #6: the ticket's OPENING message (event_type original_email —
+  // an inbound e-mail, or an agent's forward of one) is stored incoming:true,
+  // and both queries below used to read "latest public entry is incoming" as
+  // "the requester replied". A brand-new forwarded ticket therefore wore
+  // "Requester replied" before anyone had touched it. The opening message is
+  // excluded here and in _awaitingReplyTicketIds; a genuine later reply from
+  // the requester still counts.
+  /** True when this actor must not see AI suggestions in this workspace (QA 09-15 #1). */
+  async _hideAiSuggestionsFor(workspaceId, actor) {
+    if (!actor) return false;
+    const basic = actor.kind === 'agent' || actor.workspaceRole === 'readonly';
+    if (!basic) return false;
+    try {
+      const cfg = await prisma.assignmentConfig.findUnique({ where: { workspaceId }, select: { aiSuggestionsForBasic: true } });
+      return cfg?.aiSuggestionsForBasic === false;
+    } catch {
+      return false;
+    }
+  }
+
   async _lastPublicEntryIncoming(ticketIds) {
     const map = new Map();
     if (!ticketIds.length) return map;
@@ -1468,6 +1492,7 @@ class TicketService {
         WHERE ticket_id = ANY(${ticketIds})
           AND (is_private = false OR is_private IS NULL)
           AND (body_text IS NOT NULL OR content IS NOT NULL)
+          AND (event_type IS NULL OR event_type <> 'original_email')
         ORDER BY ticket_id, occurred_at DESC, id DESC`;
       for (const r of rows) {
         map.set(Number(r.ticket_id), r.incoming === true || r.author_type === 'requester');
@@ -1494,6 +1519,7 @@ class TicketService {
             AND t.is_noise = false
             AND (te.is_private = false OR te.is_private IS NULL)
             AND (te.body_text IS NOT NULL OR te.content IS NOT NULL)
+            AND (te.event_type IS NULL OR te.event_type <> 'original_email')
           ORDER BY te.ticket_id, te.occurred_at DESC, te.id DESC
         ) latest
         WHERE latest.incoming = true OR latest.author_type = 'requester'
@@ -2207,7 +2233,7 @@ class TicketService {
 
   /** Reference data for the ticket composer / filters. */
   async getMeta(workspaceId) {
-    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage, statusDefs, queueCards, ticketFormConfig] = await Promise.all([
+    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage, statusDefs, queueCards, ticketFormConfig, accessRows, aiCfg] = await Promise.all([
       this._getWorkspace(workspaceId),
       prisma.group.findMany({
         where: { workspaceId, isActive: true },
@@ -2252,6 +2278,11 @@ class TicketService {
       // New-ticket form config (Phase TF) — raw row; resolved below with the
       // already-fetched workspace (surfaces defaultInternalGroupId).
       ticketFormConfigService.getConfig(workspaceId),
+      // QA 09-15 #8: every workspace grant (read-only, reviewer, admin), so the
+      // approval-manager picker can offer people who are not technicians.
+      Promise.resolve().then(() => prisma.workspaceAccess.findMany({ where: { workspaceId }, select: { email: true, role: true } })).catch(() => []),
+      // QA 09-15 #1: the per-workspace "show AI suggestions to basic/read-only" switch.
+      Promise.resolve().then(() => prisma.assignmentConfig.findUnique({ where: { workspaceId }, select: { aiSuggestionsForBasic: true } })).catch(() => null),
     ]);
 
     const tops = categories.filter((c) => c.parentId === null);
@@ -2270,8 +2301,17 @@ class TicketService {
       }))
       .sort((a, b) => b.count - a.count);
 
+    const techByEmail = new Map(technicians.map((t) => [String(t.email || '').toLowerCase(), t]));
+    const members = (accessRows || []).map((a) => {
+      const email = String(a.email || '').toLowerCase();
+      const tech = techByEmail.get(email);
+      return { email, role: a.role || 'viewer', name: tech?.name || null, photoUrl: tech?.photoUrl || null, technicianId: tech?.id || null };
+    }).sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
     return {
       nativeTicketingEnabled: workspace.nativeTicketingEnabled === true,
+      // QA 09-15 #8 / #1
+      members,
+      aiSuggestionsForBasic: aiCfg ? aiCfg.aiSuggestionsForBasic !== false : true,
       // Calendar-aware SLAs (Phase SLA): lets SlaChip/SlaTargetChip explain
       // that live countdowns run on the business-hours clock.
       slaCalendarAware: workspace.slaCalendarAware === true,
@@ -4344,8 +4384,34 @@ class TicketService {
       },
     });
     // Belt and braces: never trust the query alone with this one.
-    const quotable = rows.filter((r) => r.isPrivate === false);
-    if (quotable.length === 0) return null;
+    let quotable = rows.filter((r) => r.isPrivate === false);
+    // QA 09-15 #7 (TP-1506): a ticket born from Power Apps / the API / the
+    // create form has no inbound e-mail, so the requester got the agent's one
+    // line with no context. Quote the ticket's own description as the original
+    // request instead — same sanitiser, same caps, attributed to the requester.
+    if (quotable.length === 0) {
+      let ticket = null;
+      try {
+        ticket = await prisma.ticket.findUnique({
+          where: { id: ticketId },
+          select: { description: true, descriptionText: true, createdAt: true, requester: { select: { name: true, email: true } } },
+        });
+      } catch (err) {
+        logger.debug(`Description quote lookup skipped for ticket ${ticketId}: ${err.message}`);
+        return null;
+      }
+      if (!ticket || !(ticket.description || ticket.descriptionText)) return null;
+      quotable = [{
+        bodyHtml: ticket.description || null,
+        bodyText: ticket.descriptionText || null,
+        content: null,
+        actorName: ticket.requester?.name || null,
+        actorEmail: ticket.requester?.email || null,
+        occurredAt: ticket.createdAt,
+        isPrivate: false,
+        eventType: 'original_request',
+      }];
+    }
 
     const truncated = quotable.length > MAX_QUOTED_MESSAGES;
     const messages = quotable.slice(0, MAX_QUOTED_MESSAGES);

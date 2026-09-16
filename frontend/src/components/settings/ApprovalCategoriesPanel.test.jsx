@@ -139,12 +139,33 @@ describe('ApprovalCategoriesPanel as an admin (directory available)', () => {
     expect(screen.queryByRole('button', { name: /Directory search unavailable/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /New approval category/ }));
-    const picker = screen.getByPlaceholderText(/search members or the directory/);
+    const picker = screen.getByPlaceholderText(/search members, technicians or the directory/);
     fireEvent.change(picker, { target: { value: 'dana' } });
     await waitFor(() => expect(screen.getByText('Dana Director')).toBeInTheDocument(), { timeout: 2000 });
     const directoryHeading = screen.getByText('Directory');
     expect(directoryHeading).toBeInTheDocument();
     fireEvent.click(within(directoryHeading.parentElement).getByText('Dana Director'));
     expect(screen.getByRole('button', { name: 'Remove dana@x.io' })).toBeInTheDocument();
+  });
+});
+
+describe('approval managers — read-only and reviewer members are offered too (QA 09-15 #8)', () => {
+  test('a read-only member who is not a technician appears in the picker and can be added', async () => {
+    mocks.meta.mockResolvedValue({
+      data: {
+        ...META.data,
+        members: [
+          { email: 'neville@x.io', role: 'readonly', name: 'Neville Observer', photoUrl: null, technicianId: null },
+          { email: 'alice@x.io', role: 'admin', name: 'Alice Approver', photoUrl: null, technicianId: 7 },
+        ],
+      },
+    });
+    render(<ApprovalCategoriesPanel />);
+    await screen.findByText('Laptop purchase');
+    fireEvent.click(screen.getByRole('button', { name: /New approval category/ }));
+    const picker = await screen.findByPlaceholderText(/type an email address/);
+    fireEvent.change(picker, { target: { value: 'nev' } });
+    fireEvent.click(await screen.findByText('Neville Observer'));
+    expect(screen.getByRole('button', { name: 'Remove neville@x.io' })).toBeInTheDocument();
   });
 });

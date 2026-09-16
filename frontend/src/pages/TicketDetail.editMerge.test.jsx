@@ -287,9 +287,10 @@ describe('Merge button honesty (Phase MB1)', () => {
     expect(btn).toHaveAttribute('title', 'Only Open or Pending tickets can receive a merge — reopen this ticket first');
   });
 
-  test('agents never see Merge at all', async () => {
+  test('basic-access (technician-only) members see Merge and Split too (QA 09-15 #3)', async () => {
     apiOverrides.meta = vi.fn(() => Promise.resolve({ data: { ...META, actor: { ...META.actor, kind: 'agent', technicianId: 7 } } }));
     await ready();
-    expect(screen.queryByTestId('merge-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('merge-button')).toBeInTheDocument();
+    expect(screen.getByTestId('split-button')).toBeInTheDocument();
   });
 });

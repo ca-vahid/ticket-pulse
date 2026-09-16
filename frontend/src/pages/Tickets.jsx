@@ -203,13 +203,17 @@ export default function Tickets() {
   // a routing hint, not a people metric) — but for non-reviewers the chip
   // renders read-only: a span, never a button, nothing that can fire a
   // reviewer-gated API.
-  const canSeeAi = Boolean(user);
   const [searchParams, setSearchParams] = useSearchParams();
   // FR 09-09: what the active filters are hiding, asked for only when the page
   // has something useful to offer (nothing found, or a text search running).
   const [relief, setRelief] = useState(null);
 
   const [meta, setMeta] = useState(null);
+  // QA 09-15 #1: a workspace can keep AI suggestions to reviewers/admins
+  // (meta.aiSuggestionsForBasic). The API already withholds the `ai` block for
+  // basic-access and read-only actors when the switch is off; this keeps the
+  // row on the plain "Unassigned" path even if a stale block is around.
+  const canSeeAi = Boolean(user) && (canReview || meta?.aiSuggestionsForBasic !== false);
   const [metaError, setMetaError] = useState(null);
   const [stats, setStats] = useState(null);
   // Unmatched replies (Phase RL, RL-4): held inbound mail waiting for a

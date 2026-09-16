@@ -2032,6 +2032,9 @@ model AssignmentConfig {
   // that don't use Daily Review shouldn't pay the FS API budget tax.
   dailyReviewPreheatEnabled           Boolean   @default(false) @map("daily_review_preheat_enabled")
   priorityAssessmentEnabled           Boolean   @default(true) @map("priority_assessment_enabled")
+  // QA 09-15 #1: show AI assignment suggestions to basic-access (technician-only)
+  // and read-only members. Reviewers/admins always see them. Default on = today.
+  aiSuggestionsForBasic               Boolean   @default(true) @map("ai_suggestions_for_basic")
   priorityWritebackEnabled            Boolean   @default(true) @map("priority_writeback_enabled")
   priorityAssessmentAfterHoursEnabled Boolean   @default(false) @map("priority_assessment_after_hours_enabled")
   afterHoursUrgentEscalationEnabled   Boolean   @default(false) @map("after_hours_urgent_escalation_enabled")

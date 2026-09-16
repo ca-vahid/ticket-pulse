@@ -2108,7 +2108,7 @@ export default function TicketDetail() {
                     {/* Merge (Phase MB1): always present for coordinators —
                         disabled WITH the reason instead of silently missing
                         (QA 08-27 #7). The reason mirrors the survivor rule. */}
-                    {ticketingOn && meta?.actor?.kind !== 'agent' && (
+                    {ticketingOn && (
                       <button
                         onClick={mergeBlockedReason ? undefined : () => setMergeOpen(true)}
                         disabled={Boolean(mergeBlockedReason)}
@@ -2123,8 +2123,10 @@ export default function TicketDetail() {
                     )}
                     {/* Split (QA 09-08): the inverse of merge. Unlike merge
                         this works on FS-born tickets too — the parent is never
-                        modified, only linked and noted. */}
-                    {ticketingOn && meta?.actor?.kind !== 'agent' && (
+                        modified, only linked and noted. QA 09-15 #3: basic-access
+                        (technician-only) members split and merge too — the API
+                        never gated it, only this button did. */}
+                    {ticketingOn && (
                       <button
                         onClick={() => setSplitOpen(true)}
                         title="Carve a separate issue out of this conversation into its own ticket"
@@ -3342,7 +3344,7 @@ export default function TicketDetail() {
                 <TicketLinksCard
                   ticketId={ticketId}
                   canWrite={canConverse}
-                  canMerge={meta?.actor?.kind !== 'agent'}
+                  canMerge={ticketingOn}
                   onMerged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Ticket merged — the conversation continues on the target'); }}
                   onReopened={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reopened — this ticket is back in the queue'); }}
                   refreshToken={ticket?.updatedAt}

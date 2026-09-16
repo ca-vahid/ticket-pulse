@@ -1,6 +1,20 @@
-export const APP_VERSION = '3.8.88-preview';
+export const APP_VERSION = '3.8.89-preview';
 
 export const changelog = [
+  {
+    version: '3.8.89-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Per-workspace switch: who sees AI assignment suggestions</strong> — Assignment Review → Configuration gains “Show AI suggestions to basic-access and read-only members” (on by default). Turned off, technicians without a workspace grant and read-only observers see a ticket as plainly Unassigned; the suggestion never leaves the server. Reviewers and admins always see it.' },
+      { type: 'improved', html: '<strong>Split carries the original request</strong> — a split ticket used to open with “Split out of TP-n” and nothing else, and files that came with the request (attachments with no message) stayed behind. The new ticket now quotes the original description under the agent’s own text and gets copies of those files; the original keeps everything. Option on the split dialog, on by default.' },
+      { type: 'fixed', html: '<strong>Basic-access members can Split and Merge</strong> — the two buttons were hidden for technicians without a workspace grant although the API never restricted them.' },
+      { type: 'fixed', html: '<strong>A ticket picked up before its after-hours run still gets categorised</strong> — when an agent assigned a ticket before its queued AI run could start, the run was thrown away and the ticket stayed Uncategorized (TP-1516). Where auto-categorise is on, that run now proceeds in classification-only mode: category, priority and type are assessed; the assignee is left alone.' },
+      { type: 'fixed', html: '<strong>A reopen is no longer undone by a stale FreshService copy</strong> — when Power Apps reopened TP-1526 while its mirror update was still queued, opening the ticket pulled FreshService’s old “Closed” back over it. FreshService’s closure is now only mirrored back when FreshService is the newer side and no mirror update is in flight.' },
+      { type: 'fixed', html: '<strong>Forwarded e-mails no longer arrive tagged “Requester replied”</strong> — the ticket’s own opening message counted as a reply. New tickets now read New (unassigned) or blank (assigned) until the requester actually writes back.' },
+      { type: 'fixed', html: '<strong>Replies to Power Apps and form-created tickets quote the request</strong> — a reply e-mail quotes the last inbound message; a ticket with no inbound e-mail sent the agent’s line alone (TP-1506). The ticket description is now quoted as the original request instead.' },
+      { type: 'improved', html: '<strong>Approval managers can be any member</strong> — the manager picker offers read-only and reviewer members alongside technicians, so an observer like Neville can be made an approver without typing an address. Tiered (escalating) approvals are designed in <code>plans/TIERED_APPROVALS_PLAN.md</code> for a later release.' },
+    ],
+  },
   {
     version: '3.8.88-preview',
     date: 'September 15, 2026',
