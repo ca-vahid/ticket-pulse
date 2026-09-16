@@ -322,7 +322,17 @@ class WorkspaceRepository {
         }
       }
 
-      return [...byEmail.values()].sort((a, b) =>
+      // v3.8.93: app-only grants (observers, admin accounts) get a display
+      // name from the directory so they read as people everywhere — and so
+      // the approval-manager picker can find "Neville", not just "nvyland".
+      const rows = [...byEmail.values()];
+      try {
+        const { fillPersonNames } = await import('./personDirectoryService.js');
+        await fillPersonNames(rows);
+      } catch (err) {
+        logger.debug?.(`Member name fill skipped: ${err.message}`);
+      }
+      return rows.sort((a, b) =>
         String(a.name || a.email).localeCompare(String(b.name || b.email)));
     } catch (error) {
       logger.error(`Error fetching workspace members for workspace ${workspaceId}:`, error);

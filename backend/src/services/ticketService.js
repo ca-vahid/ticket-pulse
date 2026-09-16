@@ -2308,7 +2308,16 @@ class TicketService {
       const email = String(a.email || '').toLowerCase();
       const tech = techByEmail.get(email);
       return { email, role: a.role || 'viewer', name: tech?.name || null, photoUrl: tech?.photoUrl || null, technicianId: tech?.id || null };
-    }).sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    });
+    // v3.8.93: resolve names for app-only members (read-only observers) so the
+    // approval pickers match on the person's name, not only the address.
+    try {
+      const { fillPersonNames } = await import('./personDirectoryService.js');
+      await fillPersonNames(members);
+    } catch (err) {
+      logger.debug?.(`Meta member name fill skipped: ${err.message}`);
+    }
+    members.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
     return {
       nativeTicketingEnabled: workspace.nativeTicketingEnabled === true,
       // QA 09-15 #8 / #1
