@@ -1,5 +1,5 @@
 import logger from '../utils/logger.js';
-import { formatErrorResponse, isOperationalError } from '../utils/errors.js';
+import { formatErrorResponse, isOperationalError, isDatabaseConnectivityError, DatabaseUnavailableError } from '../utils/errors.js';
 import { NotFoundError } from '../utils/errors.js';
 
 /**
@@ -7,6 +7,17 @@ import { NotFoundError } from '../utils/errors.js';
  * Must be added AFTER all routes
  */
 export function errorHandler(err, req, res, _next) {
+  // A database that cannot be reached is an outage, not a programming error
+  // and never a permission problem: answer 503 with a retry message (the
+  // frontend retries 5xx-transient codes) and log ONE warn line, not a stack
+  // plus "consider restarting" for every request (16 Sep 2026: 460 of those).
+  if (!(err instanceof DatabaseUnavailableError) && isDatabaseConnectivityError(err)) {
+    logger.warn(`Database unavailable: ${String(err?.originalError?.message || err?.message || '').split('\n').filter(Boolean).pop()}`, {
+      path: req.path, method: req.method, code: err?.originalError?.code || err?.code || null,
+    });
+    err = new DatabaseUnavailableError(err);
+  }
+
   // Determine status code
   const statusCode = err.statusCode || 500;
 
@@ -17,6 +28,8 @@ export function errorHandler(err, req, res, _next) {
     logger.info(`Not found: ${req.method} ${req.path}`, { statusCode, ip: req.ip });
   } else if (statusCode >= 400 && statusCode < 500) {
     logger.warn('Client error:', { message: err.message, statusCode, path: req.path, method: req.method, ip: req.ip });
+  } else if (err instanceof DatabaseUnavailableError) {
+    // Already logged as one warn line above (or by the thrower) — no stack per request.
   } else {
     logger.error('Error occurred:', {
       message: err.message,
