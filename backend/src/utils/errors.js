@@ -72,6 +72,35 @@ export class DatabaseError extends AppError {
 }
 
 /**
+ * 503 — the database cannot be reached right now (connection pool timeout,
+ * server unreachable, connection dropped). Distinct from a 500 so the
+ * frontend's retry lane (502/503/504) kicks in and the user sees "retry in a
+ * minute", never "you do not have access" (16 Sep 2026 outage).
+ */
+export class DatabaseUnavailableError extends AppError {
+  constructor(originalError = null) {
+    super("Ticket Pulse can't reach its database right now — please retry in a minute", 503);
+    this.code = 'database_unavailable';
+    this.originalError = originalError;
+  }
+}
+
+// Prisma connectivity codes: P1001 can't reach, P1002 timed out, P1008
+// operation timeout, P1017 server closed the connection, P2024 pool timeout.
+const DB_CONNECTIVITY_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024']);
+const DB_CONNECTIVITY_TEXT = /connection pool|Can't reach database server|server has closed the connection|ECONNREFUSED|ETIMEDOUT|ECONNRESET/i;
+
+/** Is this error (or the Prisma error it wraps) a database-connectivity failure? */
+export function isDatabaseConnectivityError(error) {
+  const candidates = [error, error?.originalError, error?.cause].filter(Boolean);
+  return candidates.some((e) => {
+    if (e?.name === 'PrismaClientInitializationError') return true;
+    if (typeof e?.code === 'string' && DB_CONNECTIVITY_CODES.has(e.code)) return true;
+    return DB_CONNECTIVITY_TEXT.test(String(e?.message || ''));
+  });
+}
+
+/**
  * Format error for API response
  */
 export function formatErrorResponse(error) {

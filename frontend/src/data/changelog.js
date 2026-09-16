@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.98-preview';
+export const APP_VERSION = '3.8.99-preview';
 
 export const changelog = [
+  {
+    version: '3.8.99-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A database outage no longer looks like “you do not have access”</strong> — for 17 minutes this morning the app could not reach its database, and because the membership lookup swallowed the error, twelve people were told they had no access to their workspace. The lookup now reports the failure, and every request that hits an unreachable database answers <em>503 — Ticket Pulse can’t reach its database right now, please retry in a minute</em>, which the app retries on its own. The log gets one warning per request instead of a stack trace and a “consider restarting” line.' },
+    ],
+  },
   {
     version: '3.8.98-preview',
     date: 'September 16, 2026',

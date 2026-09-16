@@ -209,8 +209,12 @@ class WorkspaceRepository {
       });
       return Boolean(tech);
     } catch (error) {
+      // 16 Sep 2026: a swallowed DB error read as "not a member" and 12 users
+      // saw "You do not have access" during a 17-minute database outage.
+      // Throw instead — every caller's catch already treats a DB failure as
+      // "not an access decision", and the error handler maps it to 503.
       logger.error(`Error checking technician membership for ${email}:`, error);
-      return false;
+      throw new DatabaseError('Failed to check technician membership', error);
     }
   }
 
@@ -225,8 +229,9 @@ class WorkspaceRepository {
       });
       return record?.role || null;
     } catch (error) {
+      // See hasActiveTechnician: a DB failure must never masquerade as "no access".
       logger.error(`Error checking workspace access for ${email}:`, error);
-      return null;
+      throw new DatabaseError('Failed to check workspace access', error);
     }
   }
 
