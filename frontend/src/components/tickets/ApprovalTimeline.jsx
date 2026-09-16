@@ -66,6 +66,12 @@ export default function ApprovalTimeline({
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [meta?.technicians, meta?.members]);
+  // Hand-off log entries carry e-mails; read them as names where we know the person.
+  const named = (entry) => (entry ? {
+    ...entry,
+    toNames: (entry.toNames && entry.toNames.length ? entry.toNames : (entry.toEmails || []).map((e) => people.find((p) => p.email === String(e).toLowerCase())?.name || e)),
+    byName: entry.byName || (entry.byEmail ? (people.find((p) => p.email === String(entry.byEmail).toLowerCase())?.name || entry.byEmail) : null),
+  } : entry);
   const groups = useMemo(() => {
     const map = new Map();
     for (const ap of approvals) {
@@ -231,13 +237,13 @@ export default function ApprovalTimeline({
                           {ap.status === 'info_requested'
                             ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
                             : (ap.status === 'escalated' || ap.status === 'forwarded')
-                              ? (() => { const last = [...(ap.escalationLog || [])].reverse()[0]; return last ? <p className={`text-xs mt-0.5 ${sm.text}`}>{handoffSentence({ ...last, byName: null, byEmail: null }).replace(/^An approver /, '').replace(/^\w/, (c) => c.toUpperCase())}</p> : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>; })()
+                              ? (() => { const last = named([...(ap.escalationLog || [])].reverse()[0]); return last ? <p className={`text-xs mt-0.5 ${sm.text}`}>{handoffSentence({ ...last, byName: null, byEmail: null }).replace(/^An approver /, '').replace(/^\w/, (c) => c.toUpperCase())}</p> : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>; })()
                               : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
                           {/* How this row came to exist (escalated / forwarded / auto over-limit) — only on the receiving row. */}
                           {ap.status === 'pending' && Array.isArray(ap.escalationLog) && ap.escalationLog.length > 0 && (() => {
                             const last = ap.escalationLog[ap.escalationLog.length - 1];
                             return last && last.toEmails?.includes?.(String(ap.approverEmail).toLowerCase()) ? (
-                              <p className="text-[11px] text-muted-foreground mt-0.5 border-l-2 border-amber-300 dark:border-amber-500/40 pl-2">{handoffSentence(last)}</p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5 border-l-2 border-amber-300 dark:border-amber-500/40 pl-2">{handoffSentence(named(last))}</p>
                             ) : null;
                           })()}
 
