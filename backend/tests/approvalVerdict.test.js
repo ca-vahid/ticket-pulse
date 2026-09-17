@@ -9,6 +9,9 @@ import { jest } from '@jest/globals';
  */
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: {} }));
+jest.unstable_mockModule('../src/services/fsApprovalRefreshService.js', () => ({
+  refreshFsApprovalStatus: async (t) => t, refreshFsApprovalStatuses: async (ts) => ts, resetFsApprovalRefreshCache: () => {}, default: {},
+}));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
