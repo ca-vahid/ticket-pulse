@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.23-preview';
+export const APP_VERSION = '3.9.24-preview';
 
 export const changelog = [
+  {
+    version: '3.9.24-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approval e-mails, redesigned</strong> — every approval message (decision needed, approved, approved with condition, rejected, question, answer, escalated, forwarded) opens with a pictogram that says what it is, the approval category sits in its own highlighted card with the amount and tier, and the person the request is for and the agent who asked now sit side by side at the same size, the recipient in the wider card with title and location. The “TP” box and the status tag in the header are gone; the Ticket Pulse mark takes their place. Pictures travel inside the message, so they show with images turned off.' },
+    ],
+  },
   {
     version: '3.9.23-preview',
     date: 'September 17, 2026',

@@ -2,8 +2,9 @@
  * Approval e-mails (MEGA-0901 AP-2). Table-based, inline-styled HTML that
  * survives Outlook desktop / OWA / Gmail / Apple Mail: a 640px white card on a
  * slate ground, Arial stack, no REMOTE images (Outlook blocks data URIs and
- * remote pictures by default). People photos ride along as inline (cid:)
- * attachments; initials circles (plain table cells) are the fallback.
+ * remote pictures by default). People photos and the brand pictograms ride
+ * along as inline (cid:) attachments (emailBrandAssets); initials circles
+ * (plain table cells) are the fallback for people.
  *
  * Everything user-supplied is escaped here; the request note arrives already
  * sanitized by ticketApprovalService (allow-list) and is only *normalized* for
@@ -11,6 +12,7 @@
  * and padding applied) — see normalizeNoteHtmlForEmail.
  */
 import sanitizeHtml from 'sanitize-html';
+import { brandImg, categoryArt } from './emailBrandAssets.js';
 
 const FONT = 'Arial,Helvetica,sans-serif';
 const INK = '#0f172a';
@@ -193,27 +195,36 @@ function pick(obj, keys) {
 }
 
 // ---------------------------------------------------------------- building blocks
+//
+// Redesign 17 Sep 2026 (Vahid): pictograms instead of the "TP" box and the
+// status pill; the approval category gets its own tinted card; requested-for
+// and asked-by sit side by side at the same avatar size, the recipient in the
+// bigger card. Every picture is an inline cid: attachment (emailBrandAssets).
+
+const SOFT = '#f8fafc';
+const TINT = '#eff6ff';
+const TINT_LINE = '#bfdbfe';
 
 function spacer(h = 16) {
   return `<tr><td height="${h}" style="height:${h}px;line-height:${h}px;font-size:1px;">&nbsp;</td></tr>`;
 }
 
-function pill(label, { bg, color }) {
-  return `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:${bg};color:${color};font-family:${FONT};font-size:11px;line-height:16px;font-weight:bold;letter-spacing:0.4px;text-transform:uppercase;">${escapeHtml(label)}</span>`;
-}
-
 const TONES = {
-  amber: { bg: '#fef3c7', color: '#92400e' },
-  blue: { bg: '#dbeafe', color: '#1e40af' },
-  green: { bg: '#d1fae5', color: '#065f46' },
-  red: { bg: '#fee2e2', color: '#991b1b' },
-  violet: { bg: '#ede9fe', color: '#5b21b6' },
-  slate: { bg: '#e2e8f0', color: '#334155' },
+  amber: { bg: '#fef3c7', color: '#92400e', line: '#fcd34d' },
+  blue: { bg: '#dbeafe', color: '#1e40af', line: '#93c5fd' },
+  green: { bg: '#d1fae5', color: '#065f46', line: '#6ee7b7' },
+  red: { bg: '#fee2e2', color: '#991b1b', line: '#fca5a5' },
+  violet: { bg: '#ede9fe', color: '#5b21b6', line: '#c4b5fd' },
+  slate: { bg: '#e2e8f0', color: '#334155', line: '#cbd5e1' },
 };
 
-function initialsCircle(name, size = 40) {
-  const font = size >= 40 ? 14 : 12;
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="${size}" height="${size}" align="center" valign="middle" style="width:${size}px;height:${size}px;border-radius:${size / 2}px;background:#dbeafe;color:#1d4ed8;font-family:${FONT};font-size:${font}px;font-weight:bold;line-height:${size}px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
+function chip(label, tone = TONES.slate) {
+  return `<span style="display:inline-block;padding:3px 9px;border-radius:999px;background:${tone.bg};color:${tone.color};font-family:${FONT};font-size:11px;line-height:16px;font-weight:bold;letter-spacing:0.3px;">${escapeHtml(label)}</span>`;
+}
+
+function initialsCircle(name, size = 56) {
+  const font = size >= 56 ? 19 : size >= 40 ? 14 : 12;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="${size}" height="${size}" align="center" valign="middle" bgcolor="#dbeafe" style="width:${size}px;height:${size}px;border-radius:${size / 2}px;background:#dbeafe;color:#1d4ed8;font-family:${FONT};font-size:${font}px;font-weight:bold;line-height:${size}px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
 }
 
 function photoCircle(cid, name, size) {
@@ -222,56 +233,118 @@ function photoCircle(cid, name, size) {
   return `<img src="cid:${escapeHtml(cid)}" width="${size}" height="${size}" alt="${escapeHtml(initialsOf(name))}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:0;">`;
 }
 
-function personRow({ label, name, meta, size = 40, photoCid = null }) {
+function avatar(name, size, photoCid) {
+  return photoCid ? photoCircle(photoCid, name, size) : initialsCircle(name, size);
+}
+
+/**
+ * A person card: avatar left, label / name / detail lines right. `emphasis`
+ * gives the recipient card its tint and a larger name; both cards share the
+ * same avatar size so nobody looks like an afterthought.
+ */
+function personCard({ label, name, lines = [], size = 56, photoCid = null, emphasis = false }) {
+  const bg = emphasis ? TINT : SOFT;
+  const border = emphasis ? TINT_LINE : LINE;
+  const detail = lines.filter(Boolean).map((l) => `<div style="font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(l)}</div>`).join('');
   return [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="${size + 12}" valign="middle" style="padding:0 12px 0 0;">${photoCid ? photoCircle(photoCid, name, size) : initialsCircle(name, size)}</td>`,
-    `<td valign="middle" style="font-family:${FONT};">`,
-    `<div style="font-size:11px;line-height:14px;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(label)}</div>`,
-    `<div style="font-size:15px;line-height:20px;font-weight:bold;color:${INK};">${escapeHtml(name || 'Unknown')}</div>`,
-    meta ? `<div style="font-size:12.5px;line-height:17px;color:${MUTED};">${escapeHtml(meta)}</div>` : '',
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${bg}" style="border-collapse:separate;background:${bg};border:1px solid ${border};border-radius:12px;"><tr>`,
+    `<td width="${size + 12}" valign="top" style="padding:14px 0 14px 12px;">${avatar(name, size, photoCid)}</td>`,
+    `<td valign="top" style="padding:14px 12px 14px 10px;font-family:${FONT};">`,
+    `<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${emphasis ? '#1d4ed8' : MUTED};font-weight:bold;">${escapeHtml(label)}</div>`,
+    `<div style="font-size:${emphasis ? 17 : 15}px;line-height:${emphasis ? 22 : 20}px;font-weight:bold;color:${INK};margin-top:2px;">${escapeHtml(name || 'Unknown')}</div>`,
+    detail,
     '</td></tr></table>',
   ].join('');
 }
 
+/** Two person cards side by side: the recipient wider on the left, the agent on the right. */
+function peopleRow(left, right) {
+  return [
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
+    `<td width="56%" valign="top" style="padding:0 6px 0 0;">${left}</td>`,
+    `<td width="44%" valign="top" style="padding:0 0 0 6px;">${right}</td>`,
+    '</tr></table>',
+  ].join('');
+}
+
 function factCell(label, valueHtml) {
-  return `<td width="50%" valign="top" style="padding:0 8px 10px 0;font-family:${FONT};"><div style="font-size:11px;line-height:14px;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(label)}</div><div style="font-size:14px;line-height:20px;color:${INK};font-weight:bold;">${valueHtml || '—'}</div></td>`;
+  return `<td width="50%" valign="top" style="padding:10px 8px 10px 0;border-top:1px solid ${LINE};font-family:${FONT};"><div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${MUTED};font-weight:bold;">${escapeHtml(label)}</div><div style="font-size:14px;line-height:20px;color:${INK};font-weight:bold;margin-top:2px;">${valueHtml || '—'}</div></td>`;
 }
 
 const PRIORITY_DOT = { Urgent: '#dc2626', High: '#f97316', Medium: '#10b981', Low: '#64748b' };
 function priorityHtml(label) {
   if (!label) return '—';
   const color = PRIORITY_DOT[label] || '#94a3b8';
-  return `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${color};margin:0 6px 1px 0;"></span>${escapeHtml(label)}`;
+  return `<span style="display:inline-block;width:9px;height:9px;border-radius:5px;background:${color};margin:0 6px 1px 0;"></span>${escapeHtml(label)}`;
 }
 
 function button(label, url, { bg = BLUE } = {}) {
   return [
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr>',
-    `<td align="center" bgcolor="${bg}" style="border-radius:8px;background:${bg};">`,
-    `<a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;padding:12px 26px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">${escapeHtml(label)} &rarr;</a>`,
+    `<td align="center" bgcolor="${bg}" style="border-radius:10px;background:${bg};">`,
+    `<a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;padding:13px 28px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:10px;">${escapeHtml(label)} &rarr;</a>`,
     '</td></tr></table>',
   ].join('');
 }
 
-function card(innerHtml, { bg = '#f8fafc', border = LINE } = {}) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${bg};border:1px solid ${border};border-radius:10px;"><tr><td style="padding:14px 16px;font-family:${FONT};font-size:14px;line-height:21px;color:${INK};">${innerHtml}</td></tr></table>`;
+function card(innerHtml, { bg = SOFT, border = LINE, accent = null } = {}) {
+  const accentTd = accent ? `<td width="4" bgcolor="${accent}" style="width:4px;background:${accent};border-radius:10px 0 0 10px;">&nbsp;</td>` : '';
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${bg}" style="border-collapse:separate;background:${bg};border:1px solid ${border};border-radius:10px;"><tr>${accentTd}<td style="padding:14px 16px;font-family:${FONT};font-size:14px;line-height:21px;color:${INK};">${innerHtml}</td></tr></table>`;
 }
 
 function sectionLabel(text) {
-  return `<div style="font-family:${FONT};font-size:11px;line-height:14px;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};margin:0 0 6px;">${escapeHtml(text)}</div>`;
+  return `<div style="font-family:${FONT};font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${MUTED};font-weight:bold;margin:0 0 6px;">${escapeHtml(text)}</div>`;
+}
+
+/**
+ * The opening block of every approval e-mail: pictogram on the left, then an
+ * optional tone-coloured eyebrow (the verdict), the kicker, the ticket subject
+ * and a monospace meta line. The pictogram's alt text names the message kind.
+ */
+function hero({ art, alt = '', eyebrow = null, eyebrowColor = MUTED, kicker = null, kickerColor = BLUE, title, meta = null }) {
+  const img = art ? brandImg(art, { size: 64, alt }) : '';
+  const parts = [];
+  if (eyebrow) parts.push(`<div style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.8px;text-transform:uppercase;color:${eyebrowColor};">${escapeHtml(eyebrow)}</div>`);
+  if (kicker) parts.push(`<div style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${kickerColor};${eyebrow ? 'margin-top:2px;' : ''}">${escapeHtml(kicker)}</div>`);
+  parts.push(`<div style="font-family:${FONT};font-size:23px;line-height:29px;font-weight:bold;color:${INK};margin-top:${eyebrow || kicker ? 6 : 0}px;">${escapeHtml(title || 'Ticket')}</div>`);
+  if (meta) parts.push(`<div style="font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};margin-top:4px;">${escapeHtml(meta)}</div>`);
+  if (!img) return `<tr><td>${parts.join('')}</td></tr>`;
+  return '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
+    + `<td width="80" valign="top" style="padding:2px 16px 0 0;">${img}</td>`
+    + `<td valign="top">${parts.join('')}</td></tr></table></td></tr>`;
+}
+
+/** The approval category, highlighted: pictogram, label, name; amount and tier as chips. */
+function categoryCard({ categoryName, amountLabel = null, tierLabel = null }) {
+  if (!categoryName) return '';
+  const art = brandImg(categoryArt(categoryName), { size: 40, alt: '' });
+  const chips = [amountLabel ? chip(amountLabel, TONES.green) : '', tierLabel ? chip(tierLabel, TONES.blue) : ''].filter(Boolean).join('&nbsp;');
+  return [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${TINT}" style="border-collapse:separate;background:${TINT};border:1px solid ${TINT_LINE};border-radius:12px;"><tr>`,
+    art ? `<td width="52" valign="middle" style="padding:12px 0 12px 14px;">${art}</td>` : '',
+    `<td valign="middle" style="padding:12px 14px;font-family:${FONT};">`,
+    '<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:#1d4ed8;font-weight:bold;">Approval category</div>',
+    `<div style="font-size:17px;line-height:22px;font-weight:bold;color:${INK};margin-top:2px;">${escapeHtml(categoryName)}</div>`,
+    '</td>',
+    chips ? `<td align="right" valign="middle" style="padding:12px 14px 12px 0;white-space:nowrap;">${chips}</td>` : '',
+    '</tr></table>',
+  ].join('');
 }
 
 /**
  * The shell: slate ground → 640px white card with a brand band on top and a
  * muted footer below. `bodyRows` are <tr> strings for the card body table.
+ * The band carries the Ticket Pulse mark and the workspace — no status pill;
+ * the hero block inside the body says what the message is.
  */
-export function emailShell({ workspaceName, statusPill, bodyRows, footerHtml, preheader = '' }) {
+export function emailShell({ workspaceName, bodyRows, footerHtml, preheader = '' }) {
+  const mark = brandImg('tp-mark', { size: 32, alt: 'Ticket Pulse' })
+    || `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="32" height="32" align="center" valign="middle" bgcolor="${BLUE}" style="width:32px;height:32px;border-radius:8px;background:${BLUE};color:#ffffff;font-family:${FONT};font-size:13px;font-weight:bold;line-height:32px;">TP</td></tr></table>`;
   const band = [
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="36" valign="middle" style="padding:0 10px 0 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="36" height="36" align="center" valign="middle" bgcolor="${BLUE}" style="width:36px;height:36px;border-radius:9px;background:${BLUE};color:#ffffff;font-family:${FONT};font-size:14px;font-weight:bold;line-height:36px;">TP</td></tr></table></td>`,
-    `<td valign="middle" style="font-family:${FONT};"><div style="font-size:15px;line-height:19px;font-weight:bold;color:${INK};">Ticket Pulse</div><div style="font-size:12px;line-height:16px;color:${MUTED};">${escapeHtml(workspaceName ? `${workspaceName} workspace` : 'Service desk')}</div></td>`,
-    statusPill ? `<td align="right" valign="middle">${statusPill}</td>` : '',
+    `<td width="32" valign="middle" style="padding:0 10px 0 0;">${mark}</td>`,
+    `<td valign="middle" style="font-family:${FONT};font-size:15px;line-height:19px;font-weight:bold;color:${INK};">Ticket Pulse</td>`,
+    `<td align="right" valign="middle" style="font-family:${FONT};font-size:12px;line-height:16px;color:${MUTED};">${escapeHtml(workspaceName ? `${workspaceName} workspace` : 'Service desk')}</td>`,
     '</tr></table>',
   ].join('');
   return [
@@ -280,9 +353,9 @@ export function emailShell({ workspaceName, statusPill, bodyRows, footerHtml, pr
     preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f1f5f9;">${escapeHtml(preheader)}${'&nbsp;&zwnj;'.repeat(40)}</div>` : '',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;background:#f1f5f9;"><tr><td align="center" style="padding:24px 12px;">',
     '<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->',
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;background:#ffffff;border:1px solid ${LINE};border-radius:14px;">`,
-    `<tr><td style="padding:18px 28px;border-bottom:1px solid ${LINE};">${band}</td></tr>`,
-    '<tr><td style="padding:24px 28px 8px;">',
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;background:#ffffff;border:1px solid ${LINE};border-radius:16px;">`,
+    `<tr><td style="padding:16px 28px;border-bottom:1px solid ${LINE};">${band}</td></tr>`,
+    '<tr><td style="padding:26px 28px 8px;">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
     bodyRows.join(''),
     '</table>',
@@ -294,6 +367,13 @@ export function emailShell({ workspaceName, statusPill, bodyRows, footerHtml, pr
   ].join('');
 }
 
+const VERDICT_ART = { approved: 'kind-approved', condition: 'kind-condition', rejected: 'kind-rejected' };
+function verdictOf(approved, conditionNote) {
+  if (!approved) return { word: 'Rejected', art: VERDICT_ART.rejected, tone: TONES.red };
+  if (conditionNote) return { word: 'Approved with condition', art: VERDICT_ART.condition, tone: TONES.green };
+  return { word: 'Approved', art: VERDICT_ART.approved, tone: TONES.green };
+}
+
 // ---------------------------------------------------------------- the e-mails
 
 /**
@@ -301,7 +381,7 @@ export function emailShell({ workspaceName, statusPill, bodyRows, footerHtml, pr
  *  { workspaceName, categoryName, ticket:{ref, subject, createdAt, dueBy, priorityLabel, typeLabel, categoryPath, statusLabel, description, appUrl},
  *    requester:{name,title,department,location,photoCid?}, requestedByName, requestedByPhotoCid?, approverName,
  *    noteHtml (already sanitized + placeholders substituted), clarification:{question,answer}|null,
- *    otherApprovers:[{name,status}], decisionUrl, expiresAt, reRequest:boolean }
+ *    otherApprovers:[{name,status}], decisionUrl, expiresAt, reRequest:boolean, amountLabel?, tierLabel? }
  */
 export function renderApproverRequestEmail(ctx) {
   const t = ctx.ticket || {};
@@ -311,18 +391,36 @@ export function renderApproverRequestEmail(ctx) {
   const headline = ctx.reRequest
     ? `${kicker} — re-requested with the answer you asked for`
     : `${kicker} — your decision is needed`;
-  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${BLUE};">${escapeHtml(headline)}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || 'Ticket')}</td></tr>`);
   const metaBits = [t.ref, t.createdAt ? `created ${fmtDay(t.createdAt)}` : null, t.dueBy ? `due ${fmtDay(t.dueBy)}` : null].filter(Boolean);
-  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(metaBits.join('  ·  '))}</td></tr>`);
+  rows.push(hero({
+    art: 'kind-decision',
+    alt: ctx.reRequest ? 'Re-requested' : 'Approval requested',
+    kicker: headline,
+    title: t.subject || 'Ticket',
+    meta: metaBits.length ? metaBits.join('  ·  ') : null,
+  }));
   rows.push(spacer(18));
 
-  // People
-  const requesterMeta = [requester.title, requester.location && !(requester.title || '').toLowerCase().includes(String(requester.location).toLowerCase()) ? requester.location : null,
+  // The category, front and centre — it is what the approver is deciding on.
+  const catCard = categoryCard({ categoryName: ctx.categoryName, amountLabel: ctx.amountLabel || null, tierLabel: ctx.amountLabel ? (ctx.tierLabel || 'Tier 1') : (ctx.tierLabel || null) });
+  if (catCard) {
+    rows.push(`<tr><td>${catCard}</td></tr>`); rows.push(spacer(12));
+  } else if (ctx.amountLabel || ctx.tierLabel) {
+    // No category to hang the chips on — the amount and tier stay visible as facts.
+    rows.push('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
+      + `<tr>${factCell('Amount', ctx.amountLabel ? `<span style="font-size:15px;">${escapeHtml(ctx.amountLabel)}</span>` : '—')}${factCell('Approval tier', escapeHtml(ctx.tierLabel || 'Tier 1'))}</tr>`
+      + '</table></td></tr>');
+    rows.push(spacer(12));
+  }
+
+  // People — side by side, same avatar size; the recipient gets the wider, tinted card.
+  // Title on one line, place on the next; a department that merely repeats the location is dropped.
+  const place = [requester.location && !(requester.title || '').toLowerCase().includes(String(requester.location).toLowerCase()) ? requester.location : null,
     requester.department && requester.department !== requester.location ? requester.department : null].filter(Boolean).join(' · ');
-  rows.push(`<tr><td>${personRow({ label: 'Requested for', name: requester.name || 'Unknown requester', meta: requesterMeta, photoCid: requester.photoCid || null })}</td></tr>`);
-  rows.push(spacer(12));
-  rows.push(`<tr><td>${personRow({ label: 'Asked by', name: ctx.requestedByName || 'Agent', meta: ctx.workspaceName ? `${ctx.workspaceName} workspace` : null, size: 32, photoCid: ctx.requestedByPhotoCid || null })}</td></tr>`);
+  rows.push(`<tr><td>${peopleRow(
+    personCard({ label: 'Requested for', name: requester.name || 'Unknown requester', lines: [requester.title, place], photoCid: requester.photoCid || null, emphasis: true }),
+    personCard({ label: 'Asked by', name: ctx.requestedByName || 'Agent', lines: ['Service desk agent'], photoCid: ctx.requestedByPhotoCid || null }),
+  )}</td></tr>`);
   rows.push(spacer(18));
 
   // Hand-off block (Approvals v2): why this landed with THIS approver.
@@ -334,8 +432,9 @@ export function renderApproverRequestEmail(ctx) {
     else if (h.kind === 'auto_start') lead = `This request comes to you at <b>${escapeHtml(h.toTierName || 'this tier')}</b> directly: ${escapeHtml(h.note || `${h.byName || 'the requester'} is an approver on the earlier tier and cannot approve their own request`)}.`;
     else if (h.kind === 'auto') lead = `<b>${by}</b> approved this at ${escapeHtml(h.fromTierName || 'the previous tier')}, but the amount is over that tier's limit${h.limitLabel ? ` (${escapeHtml(h.limitLabel)})` : ''} — so <b>your approval is needed</b> at ${escapeHtml(h.toTierName || 'this tier')}.`;
     else lead = `<b>${by}</b> escalated this request from ${escapeHtml(h.fromTierName || 'the previous tier')} to you (${escapeHtml(h.toTierName || 'next tier')}).`;
-    const noteHtml = h.note ? `<p style="margin:8px 0 0;font-size:14px;line-height:20px;color:${INK};"><b>Their note:</b> ${escapeHtml(h.note)}</p>` : '';
-    rows.push(`<tr><td>${card(`<p style="margin:0;font-family:${FONT};font-size:14px;line-height:20px;color:${INK};">${lead}</p>${noteHtml}`, { bg: '#fff7ed', border: '#fdba74' })}</td></tr>`);
+    // auto_start's "note" IS the reason already spoken in the lead — don't say it twice.
+    const noteHtml = h.note && h.kind !== 'auto_start' ? `<p style="margin:8px 0 0;font-size:14px;line-height:20px;color:${INK};"><b>Their note:</b> ${escapeHtml(h.note)}</p>` : '';
+    rows.push(`<tr><td>${card(`<p style="margin:0;font-family:${FONT};font-size:14px;line-height:20px;color:${INK};">${lead}</p>${noteHtml}`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
     rows.push(spacer(14));
   }
 
@@ -343,20 +442,19 @@ export function renderApproverRequestEmail(ctx) {
   rows.push('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
     + `<tr>${factCell('Priority', priorityHtml(t.priorityLabel))}${factCell('Type', escapeHtml(t.typeLabel || '—'))}</tr>`
     + `<tr>${factCell('Category', escapeHtml(t.categoryPath || '—'))}${factCell('Status', escapeHtml(t.statusLabel || '—'))}</tr>`
-    + (ctx.amountLabel ? `<tr>${factCell('Amount', `<span style="font-size:15px;">${escapeHtml(ctx.amountLabel)}</span>`)}${factCell('Approval tier', escapeHtml(ctx.tierLabel || 'Tier 1'))}</tr>` : '')
     + '</table></td></tr>');
-  rows.push(spacer(6));
+  rows.push(spacer(10));
 
   // Clarification thread (re-request)
   if (ctx.clarification?.answer) {
     const q = ctx.clarification.question ? `<p style="margin:0 0 6px;color:#5b21b6;"><b>You asked:</b> ${escapeHtml(ctx.clarification.question)}</p>` : '';
-    rows.push(`<tr><td>${card(`${q}<p style="margin:0;"><b>${escapeHtml(ctx.requestedByName || 'The agent')} replied:</b> ${escapeHtml(ctx.clarification.answer)}</p>`, { bg: '#f5f3ff', border: '#ddd6fe' })}</td></tr>`);
+    rows.push(`<tr><td>${card(`${q}<p style="margin:0;"><b>${escapeHtml(ctx.requestedByName || 'The agent')} replied:</b> ${escapeHtml(ctx.clarification.answer)}</p>`, { bg: '#f5f3ff', border: '#ddd6fe', accent: '#7c3aed' })}</td></tr>`);
     rows.push(spacer(14));
   }
 
   // Note
   if (ctx.noteHtml) {
-    rows.push(`<tr><td>${card(`${sectionLabel(`Note from ${ctx.requestedByName || 'the agent'}`)}${ctx.noteHtml}`)}</td></tr>`);
+    rows.push(`<tr><td>${card(`${sectionLabel(`Note from ${ctx.requestedByName || 'the agent'}`)}${ctx.noteHtml}`, { accent: BLUE })}</td></tr>`);
     rows.push(spacer(14));
   }
 
@@ -385,24 +483,19 @@ export function renderApproverRequestEmail(ctx) {
   const expires = fmtDayLong(ctx.expiresAt);
   const footer = `This link is personal to you — please don't forward it.${expires ? ` It expires on ${escapeHtml(expires)}.` : ''}<br>Sent by Ticket Pulse on behalf of ${escapeHtml(ctx.requestedByName || 'the service desk')}${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.`;
   const preheader = `${ctx.requestedByName || 'An agent'} needs your approval for ${requester.name || 'a request'}: ${t.subject || ''}`;
-  return emailShell({
-    workspaceName: ctx.workspaceName,
-    statusPill: pill(ctx.reRequest ? 'Re-requested' : 'Approval requested', TONES.amber),
-    bodyRows: rows,
-    footerHtml: footer,
-    preheader,
-  });
+  return emailShell({ workspaceName: ctx.workspaceName, bodyRows: rows, footerHtml: footer, preheader });
 }
 
 /**
  * Requester (the agent): the verdict. ctx:
- *  { workspaceName, ticket:{ref, subject, appUrl}, approved:boolean, approverName, isSelf, changedFrom, note, requester:{name} }
+ *  { workspaceName, ticket:{ref, subject, appUrl}, approved:boolean, approverName, isSelf, changedFrom, note, conditionNote, signatureHtml, requester:{name} }
  */
 export function renderRequesterDecisionEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
-  const verdict = approved ? (ctx.conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
-  const tone = approved ? TONES.green : TONES.red;
+  const v = verdictOf(approved, ctx.conditionNote);
+  const verdict = v.word;
+  const tone = v.tone;
   const who = ctx.isSelf ? 'You' : (ctx.approverName || 'The approver');
   const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
   const verdictWord = `<span style="color:${tone.color};font-weight:bold;">${verdict.toUpperCase()}</span>`;
@@ -417,18 +510,28 @@ export function renderRequesterDecisionEmail(ctx) {
       : `${escapeHtml(who)} decided your approval request${forWhom}: ${verdictWord}`);
   const verb = ctx.changedFrom ? `changed the decision to ${verdict.toLowerCase()} on` : (approved ? 'approved' : 'rejected');
   const rows = [];
-  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${tone.color};">${escapeHtml(`${verdict}${ctx.changedFrom ? ' (changed)' : ''}`)}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || 'Ticket')}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(hero({
+    art: v.art,
+    alt: verdict,
+    eyebrow: `${verdict}${ctx.changedFrom ? ' (changed)' : ''}`,
+    eyebrowColor: tone.color,
+    kicker: ctx.categoryName ? `${ctx.categoryName} approval` : null,
+    title: t.subject || 'Ticket',
+    meta: t.ref || null,
+  }));
   rows.push(spacer(16));
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</td></tr>`);
+  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</div>`, { bg: tone.bg, border: tone.line, accent: tone.color })}</td></tr>`);
+  if (ctx.requester?.name) {
+    rows.push(spacer(12));
+    rows.push(`<tr><td>${personCard({ label: 'Requested for', name: ctx.requester.name, lines: [ctx.requester.title, ctx.requester.location].filter(Boolean), photoCid: ctx.requester.photoCid || null, size: 40 })}</td></tr>`);
+  }
   if (ctx.conditionNote) {
     rows.push(spacer(12));
-    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:14px;line-height:20px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74' })}</td></tr>`);
+    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:14px;line-height:20px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
   }
   if (ctx.note) {
     rows.push(spacer(12));
-    rows.push(`<tr><td>${card(`${sectionLabel(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`)}${escapeHtml(ctx.note).replace(/\r?\n/g, '<br>')}`)}</td></tr>`);
+    rows.push(`<tr><td>${card(`${sectionLabel(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`)}${escapeHtml(ctx.note).replace(/\r?\n/g, '<br>')}`, { accent: BLUE })}</td></tr>`);
   }
   if (ctx.signatureHtml) {
     rows.push(spacer(10));
@@ -440,7 +543,6 @@ export function renderRequesterDecisionEmail(ctx) {
   rows.push(spacer(8));
   return emailShell({
     workspaceName: ctx.workspaceName,
-    statusPill: pill(verdict, tone),
     bodyRows: rows,
     footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}. The full approval trail is on the ticket.`,
     preheader: `${who} ${verb} your approval request on ${t.ref || 'the ticket'}`,
@@ -459,26 +561,32 @@ export function renderRequesterHandoffEmail(ctx) {
   const who = names.length ? names.join(', ') : (ctx.toTierName || 'the next approver');
   const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
   const by = escapeHtml(ctx.byName || 'The approver');
+  const forwarded = ctx.kind === 'forwarded';
   let sentence;
-  if (ctx.kind === 'forwarded') sentence = `<b>${by}</b> forwarded your approval request${forWhom} to <b>${escapeHtml(who)}</b>, who will make the final decision.`;
+  if (forwarded) sentence = `<b>${by}</b> forwarded your approval request${forWhom} to <b>${escapeHtml(who)}</b>, who will make the final decision.`;
   else if (ctx.kind === 'auto') sentence = `<b>${by}</b> approved your request${forWhom} at ${escapeHtml(ctx.fromTierName || 'Tier 1')}. The amount is above that tier's limit, so it has moved on to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}) for the final approval.`;
   else sentence = `<b>${by}</b> escalated your approval request${forWhom} to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}).`;
   const rows = [];
-  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">Approval ${ctx.kind === 'forwarded' ? 'forwarded' : 'escalated'}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || '(no subject)')}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(hero({
+    art: forwarded ? 'kind-forwarded' : 'kind-escalated',
+    alt: forwarded ? 'Forwarded' : 'Escalated',
+    eyebrow: forwarded ? 'Forwarded' : 'Escalated',
+    eyebrowColor: TONES.amber.color,
+    kicker: ctx.categoryName ? `${ctx.categoryName} approval` : `Approval ${forwarded ? 'forwarded' : 'escalated'}`,
+    title: t.subject || '(no subject)',
+    meta: t.ref || null,
+  }));
   rows.push(spacer(16));
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</td></tr>`);
+  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</div>`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
   rows.push(spacer(18));
   if (t.appUrl) rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: '#334155' })}</td></tr>`);
   rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">Nothing is needed from you — you will get another e-mail when the decision is made.</td></tr>`);
   rows.push(spacer(8));
   return emailShell({
     workspaceName: ctx.workspaceName,
-    statusPill: pill(ctx.kind === 'forwarded' ? 'Forwarded' : 'Escalated', TONES.amber),
     bodyRows: rows,
     footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}. The full approval trail is on the ticket.`,
-    preheader: `${ctx.byName || 'The approver'} ${ctx.kind === 'forwarded' ? 'forwarded' : 'escalated'} your approval request on ${t.ref || 'the ticket'} to ${who}`,
+    preheader: `${ctx.byName || 'The approver'} ${forwarded ? 'forwarded' : 'escalated'} your approval request on ${t.ref || 'the ticket'} to ${who}`,
   });
 }
 
@@ -489,20 +597,26 @@ export function renderRequesterHandoffEmail(ctx) {
 export function renderRequesterClarificationEmail(ctx) {
   const t = ctx.ticket || {};
   const rows = [];
-  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:#5b21b6;">Question from the approver</td></tr>`);
-  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || 'Ticket')}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(hero({
+    art: 'kind-question',
+    alt: 'Question from the approver',
+    eyebrow: 'Needs your answer',
+    eyebrowColor: TONES.violet.color,
+    kicker: 'Question from the approver',
+    kickerColor: '#5b21b6',
+    title: t.subject || 'Ticket',
+    meta: t.ref || null,
+  }));
   rows.push(spacer(16));
   rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};"><b>${escapeHtml(ctx.approverName || 'The approver')}</b> needs more information before deciding${ctx.requester?.name ? ` the request for <b>${escapeHtml(ctx.requester.name)}</b>` : ''}.</td></tr>`);
   rows.push(spacer(12));
-  rows.push(`<tr><td>${card(`${sectionLabel('Their question')}<div style="font-size:15px;line-height:22px;">${escapeHtml(ctx.question || '')}</div>`, { bg: '#f5f3ff', border: '#ddd6fe' })}</td></tr>`);
+  rows.push(`<tr><td>${card(`${sectionLabel('Their question')}<div style="font-size:15px;line-height:22px;">${escapeHtml(ctx.question || '')}</div>`, { bg: '#f5f3ff', border: '#ddd6fe', accent: '#7c3aed' })}</td></tr>`);
   rows.push(spacer(18));
   if (t.appUrl) rows.push(`<tr><td>${button('Answer on the ticket', t.appUrl, { bg: '#7c3aed' })}</td></tr>`);
   rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">Your answer goes back to ${escapeHtml(ctx.approverName || 'the approver')} by e-mail and the approval link re-opens for them.</td></tr>`);
   rows.push(spacer(8));
   return emailShell({
     workspaceName: ctx.workspaceName,
-    statusPill: pill('Needs your answer', TONES.violet),
     bodyRows: rows,
     footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.`,
     preheader: `${ctx.approverName || 'The approver'} asked: ${ctx.question || ''}`,
@@ -519,9 +633,19 @@ export function renderApprovalMessageEmail(ctx) {
   const rows = [];
   const kicker = ctx.kind === 'answer' ? 'Answer on an approval' : ctx.kind === 'comment' ? 'Note on an approval' : 'Question on an approval';
   const by = escapeHtml(ctx.authorName || 'An approver');
-  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(kicker)}${ctx.categoryName ? ` · ${escapeHtml(ctx.categoryName)}` : ''}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || '(no subject)')}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  const art = ctx.kind === 'answer' ? 'kind-answer' : ctx.kind === 'comment' ? 'kind-note' : 'kind-question';
+  const eyebrow = ctx.kind === 'answer' ? 'Answer' : ctx.kind === 'comment' ? 'Note' : 'Question';
+  const tone = ctx.kind === 'answer' ? TONES.green : TONES.violet;
+  rows.push(hero({
+    art,
+    alt: eyebrow,
+    eyebrow,
+    eyebrowColor: tone.color,
+    kicker: `${kicker}${ctx.categoryName ? ` · ${ctx.categoryName}` : ''}`,
+    kickerColor: MUTED,
+    title: t.subject || '(no subject)',
+    meta: t.ref || null,
+  }));
   rows.push(spacer(16));
   const lead = ctx.kind === 'answer'
     ? `<b>${by}</b> answered${ctx.recipient?.name ? ' your question' : ''}:`
@@ -531,7 +655,7 @@ export function renderApprovalMessageEmail(ctx) {
   rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${lead}</td></tr>`);
   rows.push(spacer(10));
   const body = ctx.bodyHtml ? (normalizeNoteHtmlForEmail(ctx.bodyHtml) || ctx.bodyHtml) : escapeHtml(ctx.bodyText || '').replace(/\n/g, '<br>');
-  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${body}</div>`)}</td></tr>`);
+  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${body}</div>`, { accent: tone.color })}</td></tr>`);
   if (ctx.internalNote) {
     rows.push(spacer(8));
     rows.push(`<tr><td style="font-family:${FONT};font-size:12.5px;line-height:18px;color:#92400e;">Internal — the ticket requester is not on this message.</td></tr>`);
@@ -557,7 +681,6 @@ export function renderApprovalMessageEmail(ctx) {
   rows.push(spacer(8));
   return emailShell({
     workspaceName: ctx.workspaceName || null,
-    statusPill: pill(ctx.kind === 'answer' ? 'Answer' : ctx.kind === 'comment' ? 'Note' : 'Question', ctx.kind === 'answer' ? TONES.green : TONES.violet),
     bodyRows: rows,
     footerHtml: 'Sent by Ticket Pulse. This message is part of an approval on the ticket above.',
     preheader: `${ctx.authorName || 'An approver'}: ${String(ctx.bodyText || '').slice(0, 120)}`,
@@ -572,19 +695,31 @@ export function renderApprovalMessageEmail(ctx) {
 export function renderDecisionThreadEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
-  const verdict = approved ? (ctx.conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
-  const tone = approved ? TONES.green : TONES.red;
+  const v = verdictOf(approved, ctx.conditionNote);
+  const verdict = v.word;
+  const tone = v.tone;
   const rows = [];
-  rows.push(`<tr><td style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(ctx.categoryName ? `${ctx.categoryName} approval` : 'Approval')} · ${escapeHtml(verdict)}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:6px;font-family:${FONT};font-size:22px;line-height:28px;font-weight:bold;color:${INK};">${escapeHtml(t.subject || '(no subject)')}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:4px;font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(t.ref || '')}</td></tr>`);
+  rows.push(hero({
+    art: v.art,
+    alt: verdict,
+    eyebrow: verdict,
+    eyebrowColor: tone.color,
+    kicker: ctx.categoryName ? `${ctx.categoryName} approval` : 'Approval',
+    kickerColor: MUTED,
+    title: t.subject || '(no subject)',
+    meta: t.ref || null,
+  }));
   rows.push(spacer(16));
   const greet = ctx.recipient?.name ? `Hi ${escapeHtml(String(ctx.recipient.name).split(' ')[0])},` : 'Hello,';
   const forWhom = ctx.requester?.name && ctx.recipient?.role !== 'requester' ? ` for ${escapeHtml(ctx.requester.name)}` : '';
   rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has <span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span> the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom)})` : ''}.</td></tr>`);
+  if (ctx.categoryName) {
+    rows.push(spacer(14));
+    rows.push(`<tr><td>${categoryCard({ categoryName: ctx.categoryName, amountLabel: ctx.amountLabel || null, tierLabel: ctx.tierLabel || null })}</td></tr>`);
+  }
   if (ctx.conditionNote) {
     rows.push(spacer(12));
-    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:15px;line-height:22px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74' })}</td></tr>`);
+    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:15px;line-height:22px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
   }
   if (ctx.note) {
     rows.push(spacer(12));
@@ -618,7 +753,6 @@ export function renderDecisionThreadEmail(ctx) {
   rows.push(spacer(8));
   return emailShell({
     workspaceName: ctx.workspaceName,
-    statusPill: pill(verdict, tone),
     bodyRows: rows,
     footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.${ctx.recipient?.role === 'requester' ? '' : ' The full approval trail is on the ticket.'}`,
     preheader: `${ctx.approverName || 'The approver'} ${verdict.toLowerCase()} — ${t.subject || t.ref || ''}`,

@@ -94,7 +94,9 @@ describe('renderApproverRequestEmail', () => {
     expect(html).toContain('Requested for');
     expect(html).toContain('Ingrid Berru Garcia');
     expect(html).toContain('>IG<');
-    expect(html).toContain('Engineer · Vancouver'); // department == location → printed once
+    // Title on one line, place on the next (17 Sep 2026); department == location → printed once.
+    expect(html).toContain('>Engineer<');
+    expect(html).toContain('>Vancouver<');
     expect(html).not.toContain('Vancouver · Vancouver');
     expect(html).toContain('Asked by');
     expect(html).toContain('Marcus Blackstock');
@@ -126,12 +128,14 @@ describe('renderApproverRequestEmail', () => {
     ctx.requester.photoCid = 'requester-photo';
     ctx.requestedByPhotoCid = 'requested-by-photo';
     const html = renderApproverRequestEmail(ctx);
-    expect(html).toContain('<img src="cid:requester-photo" width="40" height="40" alt="IG"');
-    expect(html).toContain('<img src="cid:requested-by-photo" width="32" height="32" alt="MB"');
+    // Same avatar size for both people (17 Sep 2026): the recipient is not bigger, just wider.
+    expect(html).toContain('<img src="cid:requester-photo" width="56" height="56" alt="IG"');
+    expect(html).toContain('<img src="cid:requested-by-photo" width="56" height="56" alt="MB"');
     expect(html).not.toContain('>IG<');
     expect(html).not.toMatch(/src="https?:/);
     const plain = renderApproverRequestEmail(baseCtx());
-    expect(plain).not.toContain('cid:');
+    expect(plain).not.toContain('cid:requester-photo');
+    expect(plain).not.toContain('cid:requested-by-photo');
     expect(plain).toContain('>IG<');
   });
   test('degrades without optional data', () => {
@@ -161,5 +165,36 @@ describe('renderRequesterDecisionEmail / renderRequesterClarificationEmail', () 
     expect(html).toContain('Vahid</b> needs more information before deciding the request for <b>Rita</b>');
     expect(html).toContain('Refurb &lt;ok&gt;?');
     expect(html).toContain('Answer on the ticket &rarr;');
+  });
+});
+
+describe('brand pictograms (17 Sep 2026 redesign)', () => {
+  test('the request e-mail carries the decision pictogram, the category card and side-by-side people', async () => {
+    const { brandAttachmentsFor, hasBrandAsset } = await import('../src/services/emailBrandAssets.js');
+    const html = renderApproverRequestEmail(baseCtx());
+    if (!hasBrandAsset('kind-decision')) return; // assets are shipped with the build; nothing to check without them
+    expect(html).toContain('cid:tp-kind-decision');
+    expect(html).toContain('cid:tp-tp-mark');
+    expect(html).toContain('Approval category');
+    expect(html).toContain('cid:tp-cat-computer'); // "New Computer Upgrade"
+    expect(html).toContain('width="56%"');
+    expect(html).toContain('Service desk agent');
+    // Every cid the HTML references resolves to a real file, exactly once.
+    const atts = brandAttachmentsFor(html);
+    const cids = [...new Set([...html.matchAll(/cid:(tp-[a-z0-9-]+)/g)].map((m) => m[1]))];
+    expect(atts.map((a) => a.contentId).sort()).toEqual(cids.sort());
+    for (const a of atts) expect(a.inline).toBe(true);
+    // No status pill any more — the hero says what the message is.
+    expect(html).not.toContain('text-transform:uppercase;">APPROVAL REQUESTED');
+  });
+
+  test('every verdict and hand-off e-mail names its pictogram', async () => {
+    const { hasBrandAsset } = await import('../src/services/emailBrandAssets.js');
+    if (!hasBrandAsset('kind-approved')) return;
+    const t = { ref: '#1', subject: 'x', appUrl: 'https://app/t/1' };
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss' })).toContain('cid:tp-kind-approved');
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss', conditionNote: 'UAT first' })).toContain('cid:tp-kind-condition');
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, approverName: 'Boss' })).toContain('cid:tp-kind-rejected');
+    expect(renderRequesterClarificationEmail({ ticket: t, approverName: 'Boss', question: 'Why?' })).toContain('cid:tp-kind-question');
   });
 });
