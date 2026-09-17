@@ -297,9 +297,24 @@ router.get(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const identity = await getSenderIdentity(req.workspaceId);
-    res.json({ success: true, data: identity });
+    res.json({ success: true, data: { ...identity, ...(await freshserviceLaneFlags(req.workspaceId)) } });
   }),
 );
+
+// FreshService lanes (17 Sep 2026), stored in app_settings beside the identity:
+// who FreshService attributes our replies/notes to, and which system mails a
+// reply on an FS-born ticket. Read together with the identity so one card shows both.
+async function freshserviceLaneFlags(workspaceId) {
+  const [{ isFsReplyAsAgentEnabled }, { isFsBornRepliesViaTicketPulseEnabled }] = await Promise.all([
+    import('../services/fsReplyAsAgentService.js'),
+    import('../services/fsBornReplyLaneService.js'),
+  ]);
+  const [fsReplyAsAgent, fsBornRepliesViaTicketPulse] = await Promise.all([
+    isFsReplyAsAgentEnabled(workspaceId),
+    isFsBornRepliesViaTicketPulseEnabled(workspaceId),
+  ]);
+  return { fsReplyAsAgent, fsBornRepliesViaTicketPulse };
+}
 
 /**
  * PUT /api/settings/sender-identity
@@ -315,13 +330,24 @@ router.put(
     if (req.body?.replyUsesAgentName !== undefined && typeof req.body.replyUsesAgentName !== 'boolean') {
       throw new ValidationError('replyUsesAgentName must be true or false');
     }
+    for (const key of ['fsReplyAsAgent', 'fsBornRepliesViaTicketPulse']) {
+      if (req.body?.[key] !== undefined && typeof req.body[key] !== 'boolean') throw new ValidationError(`${key} must be true or false`);
+    }
     // Partial patch: only the keys the client sent are touched — a toggle
     // flip must not clear the display-name override and vice versa (SN2).
     const patch = {};
     if (req.body?.fromName !== undefined) patch.fromName = req.body.fromName;
     if (typeof req.body?.replyUsesAgentName === 'boolean') patch.replyUsesAgentName = req.body.replyUsesAgentName;
     const identity = await upsertSenderIdentity(req.workspaceId, patch, requestActor(req));
-    res.json({ success: true, data: identity });
+    if (typeof req.body?.fsReplyAsAgent === 'boolean') {
+      const { setFsReplyAsAgentEnabled } = await import('../services/fsReplyAsAgentService.js');
+      await setFsReplyAsAgentEnabled(req.workspaceId, req.body.fsReplyAsAgent);
+    }
+    if (typeof req.body?.fsBornRepliesViaTicketPulse === 'boolean') {
+      const { setFsBornRepliesViaTicketPulseEnabled } = await import('../services/fsBornReplyLaneService.js');
+      await setFsBornRepliesViaTicketPulseEnabled(req.workspaceId, req.body.fsBornRepliesViaTicketPulse);
+    }
+    res.json({ success: true, data: { ...identity, ...(await freshserviceLaneFlags(req.workspaceId)) } });
   }),
 );
 

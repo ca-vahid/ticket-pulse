@@ -69,6 +69,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
 const { default: ticketService, effectiveReplySubject, replySubjectDefault, cleanReplySubject } = await import('../src/services/ticketService.js');
 const { clearSenderIdentityCache } = await import('../src/services/workspaceEmailIdentityService.js');
 const { invalidateFsReplyAsAgentCache } = await import('../src/services/fsReplyAsAgentService.js');
+const { invalidateFsBornReplyLaneCache } = await import('../src/services/fsBornReplyLaneService.js');
 const { formatSender } = await import('../src/utils/emailSender.js');
 const { ValidationError } = await import('../src/utils/errors.js');
 
@@ -98,6 +99,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   clearSenderIdentityCache();
   invalidateFsReplyAsAgentCache();
+  invalidateFsBornReplyLaneCache();
   nextEntryId = 9001;
   prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
   prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...nativeTicket, ...data }));
@@ -315,7 +317,7 @@ describe('FS reply-as-agent flag (DR4, default OFF)', () => {
   });
 
   test('flag on but the actor is a local (non-FS) agent → no user_id', async () => {
-    settingsRepositoryMock.get.mockResolvedValue('1');
+    settingsRepositoryMock.get.mockImplementation(async (key) => (key === 'fs_reply_as_agent_ws1' ? '1' : null));
     prismaMock.technician.findFirst.mockResolvedValue({ id: 7, freshserviceId: null });
     prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
     await ticketService.addReply(501, 1, { bodyText: 'hi' }, agent);
@@ -323,7 +325,7 @@ describe('FS reply-as-agent flag (DR4, default OFF)', () => {
   });
 
   test('flag on, actor without a technician mapping and unknown to FS → no user_id', async () => {
-    settingsRepositoryMock.get.mockResolvedValue('1');
+    settingsRepositoryMock.get.mockImplementation(async (key) => (key === 'fs_reply_as_agent_ws1' ? '1' : null));
     prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
     await ticketService.addReply(501, 1, { bodyText: 'hi' }, { ...agent, email: 'nobody@example.com', technicianId: null });
     expect(fsClientMock.fetchAgentByEmail).toHaveBeenCalledWith('nobody@example.com');
@@ -334,7 +336,7 @@ describe('FS reply-as-agent flag (DR4, default OFF)', () => {
     // Neville replied on #241459 from Ticket Pulse; FS attributed it to the API-key
     // owner and mailed it from it@bgcengineering.ca with no name. He has no
     // technician row here but is agent 1001910770 on the tenant.
-    settingsRepositoryMock.get.mockResolvedValue('1');
+    settingsRepositoryMock.get.mockImplementation(async (key) => (key === 'fs_reply_as_agent_ws1' ? '1' : null));
     prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
     fsClientMock.fetchAgentByEmail.mockResolvedValueOnce({ id: 1001910770, email: 'neville@example.com', active: true });
     const neville = { email: 'neville@example.com', name: 'Neville Vyland', role: 'viewer', workspaceRole: 'viewer', technicianId: null, kind: 'member' };
@@ -345,5 +347,74 @@ describe('FS reply-as-agent flag (DR4, default OFF)', () => {
     await ticketService.addPrivateNote(501, 1, { bodyText: 'note' }, neville);
     expect(fsClientMock.fetchAgentByEmail).toHaveBeenCalledTimes(1);
     expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.any(String), { isPrivate: true, attachments: [], userId: 1001910770 });
+  });
+});
+
+// --------------------------------------------------------------- FS-born lane (17 Sep 2026)
+describe('FS-born replies via the Ticket Pulse lane (per-workspace flag, default OFF)', () => {
+  const laneOn = async (key) => (key === 'fs_born_replies_via_tp_ws1' ? '1' : null);
+  const bothOn = async (key) => (['fs_born_replies_via_tp_ws1', 'fs_reply_as_agent_ws1'].includes(key) ? '1' : null);
+
+  test('flag off (default): FreshService sends the reply (createReply), Ticket Pulse mails nothing', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    await ticketService.addReply(501, 1, { bodyText: 'hi' }, agent);
+    expect(fsClientMock.createReply).toHaveBeenCalledTimes(1);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+
+  test('flag on: Ticket Pulse mails the requester as the agent, records a public note on the FS ticket, never calls createReply', async () => {
+    settingsRepositoryMock.get.mockImplementation(laneOn);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    const res = await ticketService.addReply(501, 1, { bodyText: 'We are on it!' }, agent);
+    expect(fsClientMock.createReply).not.toHaveBeenCalled();
+    expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
+    const call = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(call.to).toEqual(['rita@example.com']);
+    expect(call.fromName).toBe('Soheil Nasiri');
+    expect(call.subject).toBe('Re: Laptop will not boot [#239470]');
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.stringContaining('e-mailed by Ticket Pulse'), expect.objectContaining({ isPrivate: false }));
+    expect(fsClientMock.addNote.mock.calls[0][1]).toContain('We are on it!');
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mirrorState: 'mirrored', externalEntryId: 'fs-conversation:1042916726' }),
+    }));
+    expect(res.email.sent).toBe(true);
+  });
+
+  test('flag on + attribution on: the FS note carries the agent user_id', async () => {
+    settingsRepositoryMock.get.mockImplementation(bothOn);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await ticketService.addReply(501, 1, { bodyText: 'hi' }, agent);
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.any(String), expect.objectContaining({ isPrivate: false, userId: 1002090731 }));
+  });
+
+  test('flag on: Reply-To carries +fs<n> on the workspace mailbox so the answer threads back', async () => {
+    settingsRepositoryMock.get.mockImplementation(laneOn);
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 1, workspaceId: 1, address: 'helpdesk@bgcengineering.ca', mode: 'ingest', isEnabled: true });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await ticketService.addReply(501, 1, { bodyText: 'hi' }, agent);
+    const call = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(call.replyTo).toBe('helpdesk+fs239470@bgcengineering.ca');
+    expect(call.from).toBe('helpdesk@bgcengineering.ca');
+  });
+
+  test('flag on: internal notes still post straight to FreshService, no e-mail', async () => {
+    settingsRepositoryMock.get.mockImplementation(laneOn);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'note' }, agent);
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.any(String), expect.objectContaining({ isPrivate: true }));
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+
+  test('flag on: a failed FS record keeps the sent e-mail and marks the row failed', async () => {
+    settingsRepositoryMock.get.mockImplementation(laneOn);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    fsClientMock.addNote.mockRejectedValueOnce(new Error('FS 503'));
+    const res = await ticketService.addReply(501, 1, { bodyText: 'hi' }, agent);
+    expect(res.email.sent).toBe(true);
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({ data: { mirrorState: 'failed' } }));
   });
 });

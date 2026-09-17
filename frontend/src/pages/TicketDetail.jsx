@@ -2829,7 +2829,9 @@ export default function TicketDetail() {
                               )
                             ) : (
                               <p className="px-1 text-[11px] text-muted-foreground/75">
-                                FreshService composes the subject for replies on FreshService tickets.
+                                {ticket?.replyLane === 'ticketpulse'
+                                  ? `Sent from Ticket Pulse as you — “Re: ${ticket?.subject || 'Your ticket'} [${ticket?.displayRef || ''}]”. The reply comes back to this ticket and is recorded in FreshService.`
+                                  : 'FreshService composes the subject for replies on FreshService tickets.'}
                               </p>
                             )}
                           </div>

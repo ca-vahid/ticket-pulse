@@ -79,8 +79,13 @@ describe('emailThreadingService.plusAddressReplyTo', () => {
     expect(plusAddressReplyTo('helpdesk+intake@x.com', tpTicket)).toBe('helpdesk+tp1234@x.com');
   });
 
-  test('null for FS-born tickets, missing native number, or an unusable address', () => {
-    expect(plusAddressReplyTo('patickets@x.com', { origin: 'freshservice', freshserviceTicketId: 225001, nativeNumber: null })).toBeNull();
+  test('FS-born ticket → local+fs<FreshService number>@domain (17 Sep 2026)', () => {
+    expect(plusAddressReplyTo('patickets@x.com', { origin: 'freshservice', freshserviceTicketId: 225001, nativeNumber: null })).toBe('patickets+fs225001@x.com');
+    expect(plusAddressReplyTo('patickets@x.com', { origin: 'freshservice', freshserviceTicketId: 225001n })).toBe('patickets+fs225001@x.com');
+  });
+
+  test('null for a missing number or an unusable address', () => {
+    expect(plusAddressReplyTo('patickets@x.com', { origin: 'freshservice', freshserviceTicketId: null })).toBeNull();
     expect(plusAddressReplyTo('patickets@x.com', { origin: 'ticketpulse', nativeNumber: null })).toBeNull();
     expect(plusAddressReplyTo('patickets@x.com', null)).toBeNull();
     expect(plusAddressReplyTo('', tpTicket)).toBeNull();

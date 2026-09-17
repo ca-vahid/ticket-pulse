@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.27-preview';
+export const APP_VERSION = '3.9.28-preview';
 
 export const changelog = [
+  {
+    version: '3.9.28-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Replies on FreshService tickets can leave from Ticket Pulse</strong> — a new workspace switch (Settings → Email Branding → Sender identity). On, a reply on a FreshService-born ticket is e-mailed by Ticket Pulse from the workspace mailbox as the replying agent, with a reply key the mailbox understands, and recorded on the FreshService ticket as a note. The requester’s answer comes back to the ticket here and is written into FreshService as their reply, so both systems keep the whole conversation. Until now FreshService sent those replies from its helpdesk address with no name, and answers to them never reached Ticket Pulse.' },
+      { type: 'improved', html: '<strong>FreshService attribution switch in Settings</strong> — “FreshService attributes our replies and notes to the agent” now sits on the same card, instead of an API-only setting.' },
+    ],
+  },
   {
     version: '3.9.27-preview',
     date: 'September 17, 2026',
