@@ -1211,23 +1211,25 @@ class FreshServiceClient {
       // `incoming: true` renders the note as something the user SENT (a requester's
       // e-mailed answer that Ticket Pulse received, 17 Sep 2026) rather than an agent note.
       const incomingField = incoming === true ? { incoming: true } : {};
-      let response;
-      if (Array.isArray(attachments) && attachments.length > 0) {
-        // notify_emails rides the fields too (FR 08-07 #9) — multipart cannot
-        // express an EMPTY array (nothing is appended), so suppression there
-        // relies on the FS-side marker exclusion rule; the JSON branch below
-        // sends the explicit [] opt-out.
-        const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [], ...actorField, ...incomingField }, attachments);
-        response = await this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
-      } else {
-        response = await this._post(`/tickets/${ticketId}/notes`, {
+      const attempt = async (withActor) => {
+        const actor = withActor ? actorField : {};
+        if (Array.isArray(attachments) && attachments.length > 0) {
+          // notify_emails rides the fields too (FR 08-07 #9) — multipart cannot
+          // express an EMPTY array (nothing is appended), so suppression there
+          // relies on the FS-side marker exclusion rule; the JSON branch below
+          // sends the explicit [] opt-out.
+          const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [], ...actor, ...incomingField }, attachments);
+          return this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
+        }
+        return this._post(`/tickets/${ticketId}/notes`, {
           body,
           private: isPrivate === true,
           notify_emails: [],
-          ...actorField,
+          ...actor,
           ...incomingField,
         });
-      }
+      };
+      const response = await this._withActorFallback(attempt, actorField, `note on ticket ${ticketId}`);
       return response.data;
     } catch (error) {
       const httpStatus = getFreshServiceStatus(error);
@@ -1237,6 +1239,24 @@ class FreshServiceClient {
       }
       logger.error(`Error adding note to ticket ${ticketId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * FreshService answers 403 to a note/reply that carries a `user_id` the API
+   * key may not write as (17 Sep 2026: an agent could not post a single note for
+   * an hour after attribution was switched on). Attribution is a nicety and the
+   * write is the job: on 403 with an actor, post once more as the key owner and
+   * say so in the log. Any other failure, or a 403 without an actor, propagates.
+   */
+  async _withActorFallback(attempt, actorField, what) {
+    const hasActor = actorField && Object.keys(actorField).length > 0;
+    try {
+      return await attempt(true);
+    } catch (error) {
+      if (!hasActor || getFreshServiceStatus(error) !== 403) throw error;
+      logger.warn(`FreshService refused user_id ${actorField.user_id} on ${what} (403) — posting as the API-key owner instead`);
+      return attempt(false);
     }
   }
 
@@ -1253,18 +1273,20 @@ class FreshServiceClient {
       // (Phase DR4, per-workspace flag, default off).
       const fsUserId = userId === null || userId === undefined || userId === '' ? null : Number(userId);
       const actorField = Number.isFinite(fsUserId) && fsUserId > 0 ? { user_id: fsUserId } : {};
-      let response;
-      if (Array.isArray(attachments) && attachments.length > 0) {
-        const form = this._buildAttachmentForm(
-          { body, ...(hasCc ? { cc_emails: ccEmails } : {}), ...actorField },
-          attachments,
-        );
-        response = await this._post(`/tickets/${ticketId}/reply`, form, { headers: form.getHeaders() });
-      } else {
-        const payload = { body, ...actorField };
+      const attempt = async (withActor) => {
+        const actor = withActor ? actorField : {};
+        if (Array.isArray(attachments) && attachments.length > 0) {
+          const form = this._buildAttachmentForm(
+            { body, ...(hasCc ? { cc_emails: ccEmails } : {}), ...actor },
+            attachments,
+          );
+          return this._post(`/tickets/${ticketId}/reply`, form, { headers: form.getHeaders() });
+        }
+        const payload = { body, ...actor };
         if (hasCc) payload.cc_emails = ccEmails;
-        response = await this._post(`/tickets/${ticketId}/reply`, payload);
-      }
+        return this._post(`/tickets/${ticketId}/reply`, payload);
+      };
+      const response = await this._withActorFallback(attempt, actorField, `reply on ticket ${ticketId}`);
       return response.data;
     } catch (error) {
       const detail = getFreshServiceDetail(error);

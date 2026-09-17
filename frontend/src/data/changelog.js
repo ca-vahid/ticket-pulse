@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.28-preview';
+export const APP_VERSION = '3.9.29-preview';
 
 export const changelog = [
+  {
+    version: '3.9.29-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Notes and replies never blocked by FreshService attribution</strong> — with “FreshService attributes our replies and notes to the agent” on, FreshService refused every note and reply that carried the agent’s identity (an agent could not post a note for an hour this afternoon). Ticket Pulse now retries once as the API key’s owner when FreshService refuses the attribution, and says so in the log. The switch is off again for IT until FreshService accepts it.' },
+    ],
+  },
   {
     version: '3.9.28-preview',
     date: 'September 17, 2026',

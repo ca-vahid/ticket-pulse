@@ -393,3 +393,44 @@ describe('FreshServiceClient._put — blank-description retry (15 Sep 2026)', ()
     expect(client._throttledRequest).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('user_id attribution falls back to the API-key owner on 403 (17 Sep 2026)', () => {
+  const forbidden = () => Object.assign(new Error('Request failed with status code 403'), { response: { status: 403, data: {} } });
+
+  test('addNote: 403 with a user_id → one retry without it, same body/flags', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockRejectedValueOnce(forbidden()).mockResolvedValueOnce({ data: { conversation: { id: 9 } } });
+    const out = await client.addNote(242909, '<p>note</p>', { isPrivate: true, userId: 1002090731 });
+    expect(out).toEqual({ conversation: { id: 9 } });
+    expect(client._post).toHaveBeenCalledTimes(2);
+    expect(client._post.mock.calls[0][1]).toEqual({ body: '<p>note</p>', private: true, notify_emails: [], user_id: 1002090731 });
+    expect(client._post.mock.calls[1][1]).toEqual({ body: '<p>note</p>', private: true, notify_emails: [] });
+  });
+
+  test('createReply: same fallback, cc preserved', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockRejectedValueOnce(forbidden()).mockResolvedValueOnce({ data: { conversation: { id: 10 } } });
+    await client.createReply(51, '<p>hi</p>', { ccEmails: ['boss@example.com'], userId: 1002090731 });
+    expect(client._post).toHaveBeenCalledTimes(2);
+    expect(client._post.mock.calls[1][1]).toEqual({ body: '<p>hi</p>', cc_emails: ['boss@example.com'] });
+  });
+
+  test('a 403 WITHOUT a user_id, or any other status with one, is not retried', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockRejectedValue(forbidden());
+    await expect(client.addNote(51, '<p>note</p>', { isPrivate: true })).rejects.toThrow(/403/);
+    expect(client._post).toHaveBeenCalledTimes(1);
+    client._post = jest.fn().mockRejectedValue(Object.assign(new Error('Request failed with status code 500'), { response: { status: 500, data: {} } }));
+    await expect(client.createReply(51, '<p>hi</p>', { userId: 1002090731 })).rejects.toThrow(/500/);
+    expect(client._post).toHaveBeenCalledTimes(1);
+  });
+
+  test('the multipart branch retries with a fresh form that carries no user_id', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockRejectedValueOnce(forbidden()).mockResolvedValueOnce({ data: { conversation: { id: 11 } } });
+    await client.addNote(51, '<p>note</p>', { isPrivate: true, userId: 1002090731, attachments: [{ filename: 'a.txt', buffer: Buffer.from('x'), contentType: 'text/plain' }] });
+    expect(client._post).toHaveBeenCalledTimes(2);
+    expect(client._post.mock.calls[0][1].getBuffer().toString('utf8')).toContain('name="user_id"');
+    expect(client._post.mock.calls[1][1].getBuffer().toString('utf8')).not.toContain('name="user_id"');
+  });
+});
