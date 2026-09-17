@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.29-preview';
+export const APP_VERSION = '3.9.30-preview';
 
 export const changelog = [
+  {
+    version: '3.9.30-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Agents get a copy of requester replies</strong> — a new workspace switch (Settings → Email Branding → Sender identity). When a requester answers a reply, the assigned agent (or, if unassigned, the agent who replied last) receives the answer in their inbox with a link to the ticket, and optional team addresses can be copied too. This restores what the it@ group mailbox used to show everyone, now that replies come back to the Ticket Pulse mailbox. Off by default.' },
+    ],
+  },
   {
     version: '3.9.29-preview',
     date: 'September 17, 2026',
