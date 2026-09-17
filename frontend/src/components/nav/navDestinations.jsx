@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { writeRoleHint } from '../../utils/roleHint';
 import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
@@ -138,7 +140,11 @@ export function resolveWorkspaceRole(user, currentWorkspace, availableWorkspaces
 export function useWorkspaceRole() {
   const { user } = useAuth();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
-  return resolveWorkspaceRole(user, currentWorkspace, availableWorkspaces);
+  const role = resolveWorkspaceRole(user, currentWorkspace, availableWorkspaces);
+  // Remembered per browser so the next cold load can skip speculative fetches
+  // this role would be refused (viewers opening /dashboard, 17 Sep 2026).
+  useEffect(() => { writeRoleHint(role); }, [role]);
+  return role;
 }
 
 /** Workspace admin (or global admin) — the only tier that sees beyond tickets. */

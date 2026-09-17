@@ -48,7 +48,8 @@ const META = {
   tags: [],
   approvalCategories: [],
   statuses: [],
-  actor: { kind: 'admin', email: 'qa@example.com', workspaceRole: 'admin', technicianId: null },
+  // The strip belongs to people with a technician profile (a signature needs one) — 17 Sep 2026.
+  actor: { kind: 'admin', email: 'qa@example.com', workspaceRole: 'admin', technicianId: 7 },
 };
 
 const pending = () => new Promise(() => {});

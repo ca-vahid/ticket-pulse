@@ -2891,7 +2891,7 @@ export default function TicketDetail() {
                         {/* Phase D: read-only signature strip — the server
                             appends it to the outbound email; never seeded
                             into the editor (draft/double-append safety). */}
-                        {composerMode === 'reply' && (
+                        {composerMode === 'reply' && Boolean(meta?.actor?.technicianId) && (
                           <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
                         )}
                         {composerFiles.length > 0 && (
