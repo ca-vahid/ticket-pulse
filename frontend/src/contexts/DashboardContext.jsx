@@ -5,6 +5,7 @@ import { useWorkspaceOptional } from './WorkspaceContext';
 import { useSSE } from '../hooks/useSSE';
 import { dataCache, cacheKeys, policyForDate, TECH_POLICY, CSAT_POLICY, TTL } from '../services/dataCache';
 import { formatDateLocal } from '../utils/dateHelpers';
+import { readRoleHint, canPrefetchOps } from '../utils/roleHint';
 
 const DashboardContext = createContext(null);
 
@@ -111,6 +112,9 @@ export function DashboardProvider({ children }) {
     // (v3.7.02): /api/dashboard is admin-only now, and viewers/reviewers land
     // on /tickets — three speculative 403s per page load would be noise.
     if (!matchesRoute(window.location.pathname, DASHBOARD_REFRESH_SSE_ROUTES)) return;
+    // A browser that last resolved a viewer/reviewer/agent role would only earn
+    // three 403s here (Neville, 17 Sep 2026) — ViewRoute bounces them anyway.
+    if (!canPrefetchOps(readRoleHint())) return;
     const now = new Date();
     const dayOfWeek = (now.getDay() + 6) % 7;
     const monday = new Date(now);

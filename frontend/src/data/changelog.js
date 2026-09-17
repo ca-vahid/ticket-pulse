@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.25-preview';
+export const APP_VERSION = '3.9.26-preview';
 
 export const changelog = [
+  {
+    version: '3.9.26-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Quieter sessions for viewers and approvers</strong> — a browser that last signed in as a viewer, reviewer or agent no longer fires the dashboard warm-up requests on a cold load (they were refused anyway), and the reply composer asks for a signature only when the signed-in person has a technician profile. Fewer wasted calls, fewer warning lines in the server log.' },
+    ],
+  },
   {
     version: '3.9.25-preview',
     date: 'September 17, 2026',
