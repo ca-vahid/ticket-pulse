@@ -1115,3 +1115,20 @@ export function TicketRefLink({
     </span>
   );
 }
+
+/**
+ * Human phone formatting (16 Sep 2026): North-American numbers become
+ * "(604) 706-4989" / "+1 (604) 706-4989", an extension survives as "ext. 12",
+ * anything else is returned untouched (international, short codes).
+ */
+export function formatPhone(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const extMatch = s.match(/(?:ext\.?|x|#)\s*(\d{1,6})\s*$/i);
+  const ext = extMatch ? extMatch[1] : null;
+  const digits = (ext ? s.slice(0, extMatch.index) : s).replace(/\D/g, '');
+  const tail = ext ? ` ext. ${ext}` : '';
+  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}${tail}`;
+  if (digits.length === 11 && digits[0] === '1') return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}${tail}`;
+  return s;
+}

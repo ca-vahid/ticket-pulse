@@ -400,6 +400,18 @@ code {
     height: 1.25rem;
     width: 1.25rem;
   }
+  /* Ticket page header artwork (16 Sep 2026): generated glass-ribbon
+     backdrops, one per theme, sitting behind the card content at low
+     contrast so text stays readable. Anchored top-right like the art. */
+  .tp-ticket-header {
+    background-image: url('/brand/ticket-header-light.webp');
+    background-size: cover;
+    background-position: right top;
+    background-repeat: no-repeat;
+  }
+  .dark .tp-ticket-header {
+    background-image: url('/brand/ticket-header-dark.webp');
+  }
   /* A scroll container that keeps its scrolling but hides its own bar — the
      tickets list's sticky proxy (StickyScrollbar) is the one visible bar. */
   .tp-scrollbar-none {
@@ -817,6 +829,29 @@ code {
 .animate-scaleIn {
   animation: scaleIn 0.4s ease-out forwards;
   opacity: 0;
+}
+
+/* Menus / listboxes / flyouts (16 Sep 2026): one quick, soft pop — 180 ms,
+   a 4 px rise and a hair of scale — so nothing in the app snaps open. */
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-popIn {
+  animation: popIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-popIn,
+  .animate-scaleIn,
+  .animate-fadeIn {
+    animation-duration: 0.01ms;
+  }
 }
 
 @keyframes slideInRight {

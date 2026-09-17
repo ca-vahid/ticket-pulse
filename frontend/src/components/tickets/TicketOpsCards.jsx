@@ -454,7 +454,7 @@ export function MacroMenu({ ticketId, onApplied, disabled = false }) {
         <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-72 tp-card rounded-xl shadow-soft p-1.5">
+        <div className="absolute right-0 top-full z-40 mt-1 w-72 tp-card rounded-xl shadow-soft p-1.5 animate-popIn">
           {macros === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
           {macros?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No macros yet — admins create them in Settings.</p>}
           {(macros || []).map((macro) => (

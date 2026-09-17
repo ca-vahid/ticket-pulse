@@ -258,7 +258,7 @@ describe('TicketDetail "Also for" additional requesters (Phase MR)', () => {
     renderPage();
     const card = await alsoForCard();
     expect(within(card).getByText('cc-one@example.com')).toBeInTheDocument();
-    expect(within(card).getByText(/receive every reply to the requester/i)).toBeInTheDocument();
+    expect(within(card).getByLabelText('About additional requesters')).toHaveAttribute('title', expect.stringMatching(/receive every reply to the requester/i));
 
     addAlsoFor(card, 'New.Person@Example.com');
     await waitFor(() => expect(apiOverrides.update).toHaveBeenCalledWith(501, { ccEmails: ['cc-one@example.com', 'new.person@example.com'] }));
@@ -282,7 +282,7 @@ describe('TicketDetail "Also for" additional requesters (Phase MR)', () => {
     current = { ...TICKET, toEmails: [], replyCcEmails: [], thread: [] };
     renderPage();
     const card = await alsoForCard();
-    expect(within(card).getByText(/saved to FreshService first/i)).toBeInTheDocument();
+    expect(within(card).getByLabelText('About additional requesters')).toHaveAttribute('title', expect.stringMatching(/saved to FreshService first/i));
     addAlsoFor(card, 'extra@example.com');
     await waitFor(() => expect(apiOverrides.fsUpdate).toHaveBeenCalledWith(501, {
       ccEmails: ['cc-one@example.com', 'cc-two@example.com', 'cc-three@example.com', 'extra@example.com'],

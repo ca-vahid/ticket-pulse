@@ -180,7 +180,7 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
             </p>
           )}
           {open && results && (hasHits || typedEmailOk) && (
-            <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-xl shadow-soft py-1 max-h-80 overflow-y-auto settings-scrollbar" role="listbox">
+            <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-xl shadow-soft py-1 max-h-80 overflow-y-auto settings-scrollbar animate-popIn" role="listbox">
               {results.requesters.length > 0 && (
                 <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">Requesters</p>
               )}

@@ -135,26 +135,33 @@ describe('TicketDetail group select (fs:/int: composite)', () => {
   });
   afterEach(() => cleanup());
 
+  // 16 Sep 2026: the field is a FancySelect (animated menu) — the trigger is a
+  // combobox carrying data-value; options live in a portal listbox once open.
+  const openMenu = (select) => { fireEvent.click(select); return screen.getByRole('listbox', { name: 'Group' }); };
+
   test('a ticket in an internal group shows it selected (was "No group")', async () => {
     renderPage();
     const select = await screen.findByRole('combobox', { name: 'Group' });
-    expect(select).toHaveValue('int:3458');
-    expect(within(select).getByRole('option', { name: 'Project Accounting' }).selected).toBe(true);
+    expect(select).toHaveAttribute('data-value', 'int:3458');
+    expect(select).toHaveTextContent('Project Accounting');
+    const list = openMenu(select);
+    expect(within(list).getByRole('option', { name: 'Project Accounting' })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('options come grouped by origin: Internal groups + FreshService groups', async () => {
     renderPage();
     const select = await screen.findByRole('combobox', { name: 'Group' });
-    const optgroups = Array.from(select.querySelectorAll('optgroup')).map((g) => g.label);
-    expect(optgroups).toEqual(['Internal groups', 'FreshService groups']);
-    expect(within(select).getByRole('option', { name: 'IT Operations' })).toHaveValue('fs:1000210021');
-    expect(within(select).getByRole('option', { name: 'AR Desk' })).toHaveValue('int:3459');
+    const list = openMenu(select);
+    const headings = Array.from(list.querySelectorAll('[role="presentation"]')).map((h) => h.textContent);
+    expect(headings).toEqual(['Internal groups', 'FreshService groups']);
+    expect(within(list).getByRole('option', { name: 'IT Operations' })).toBeInTheDocument();
+    expect(within(list).getByRole('option', { name: 'AR Desk' })).toBeInTheDocument();
   });
 
   test('choosing an FS group sends {groupId, internalGroupId: null}', async () => {
     renderPage();
     const select = await screen.findByRole('combobox', { name: 'Group' });
-    fireEvent.change(select, { target: { value: 'fs:1000210021' } });
+    fireEvent.click(within(openMenu(select)).getByRole('option', { name: 'IT Operations' }));
     await waitFor(() => expect(apiOverrides.update).toHaveBeenCalledWith(501, {
       groupId: 1000210021,
       internalGroupId: null,
@@ -165,8 +172,8 @@ describe('TicketDetail group select (fs:/int: composite)', () => {
     currentTicket = { ...TICKET, internalGroupId: null, internalGroup: null, groupId: '1000210021' };
     renderPage();
     const select = await screen.findByRole('combobox', { name: 'Group' });
-    expect(select).toHaveValue('fs:1000210021');
-    fireEvent.change(select, { target: { value: 'int:3459' } });
+    expect(select).toHaveAttribute('data-value', 'fs:1000210021');
+    fireEvent.click(within(openMenu(select)).getByRole('option', { name: 'AR Desk' }));
     await waitFor(() => expect(apiOverrides.update).toHaveBeenCalledWith(501, {
       internalGroupId: 3459,
       groupId: null,
@@ -176,14 +183,14 @@ describe('TicketDetail group select (fs:/int: composite)', () => {
   test('"No group" clears both fields', async () => {
     renderPage();
     const select = await screen.findByRole('combobox', { name: 'Group' });
-    fireEvent.change(select, { target: { value: '' } });
+    fireEvent.click(within(openMenu(select)).getByRole('option', { name: 'No group' }));
     await waitFor(() => expect(apiOverrides.update).toHaveBeenCalledWith(501, {
       groupId: null,
       internalGroupId: null,
     }));
   });
 
-  test('FS-born tickets: select is read-only and internal groups are NOT offered (origin rule)', async () => {
+  test('FS-born tickets: the group field is read-only and shows the FreshService group (origin rule keeps internal groups out of the list)', async () => {
     currentTicket = {
       ...TICKET,
       origin: 'freshservice',
@@ -196,8 +203,10 @@ describe('TicketDetail group select (fs:/int: composite)', () => {
     renderPage();
     const select = await screen.findByRole('combobox', { name: 'Group' });
     expect(select).toBeDisabled();
-    expect(select).toHaveValue('fs:1000210021');
-    const optgroups = Array.from(select.querySelectorAll('optgroup')).map((g) => g.label);
-    expect(optgroups).toEqual(['FreshService groups']);
+    expect(select).toHaveAttribute('data-value', 'fs:1000210021');
+    expect(select).toHaveTextContent('IT Operations');
+    // Disabled → the menu never opens (no way to reach internal groups).
+    fireEvent.click(select);
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
