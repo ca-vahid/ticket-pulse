@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NAV_DESTINATIONS, homePathFor, useCanAccessSettings, useNavDestinations, useWorkspaceRole } from './navDestinations';
 import { useApprovalCount } from '../../hooks/useApprovalCount';
 import { useAuth } from '../../contexts/AuthContext';
 
 // Fixed left navigation rail for desktop (hidden below md — phones use
-// MobileTabBar). Collapsed it's a 58px icon strip; the chevron tab at its top
-// expands it over the content (no reflow) to reveal labels, Freshservice-style.
-// It never opens on hover (16 Sep 2026 — brushing the left edge kept flaring
-// it open); Escape, a click elsewhere or navigating closes it again.
+// MobileTabBar). Collapsed it's a 58px icon strip; the round notch on its
+// right border expands it over the content (no reflow) to reveal labels,
+// Freshservice-style. It never opens on hover (16 Sep 2026 — brushing the
+// left edge kept flaring it open); Escape, a click elsewhere or navigating
+// closes it again. On tickets pages the same notch also offers the thin-edge
+// collapse (one control, no second button at the rail foot).
 // Like MobileTabBar it self-detects the active route via useLocation, so it
 // works on every page it's mounted on, including the bespoke Visuals chrome
 // that bypasses AppShell/AppHeader.
@@ -59,7 +61,7 @@ export default function SideRail() {
   useEffect(() => {
     if (!expanded) return undefined;
     const onKey = (e) => { if (e.key === 'Escape') setExpanded(false); };
-    const onDoc = (e) => { if (!e.target.closest?.('.tp-side-rail')) setExpanded(false); };
+    const onDoc = (e) => { if (!e.target.closest?.('.tp-side-rail, .tp-rail-notch')) setExpanded(false); };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onDoc);
     return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDoc); };
@@ -117,99 +119,103 @@ export default function SideRail() {
 
   const settingsActive = activeId === 'settings';
 
+  // Current rail width (px) drives where the notch sits; the actions the notch
+  // offers depend on the state: thin edge → icons; icons → labels (+ thin edge
+  // on tickets pages); labels → icons; a temporarily pinned peek → close it.
+  const railWidth = peek ? (peekPinned ? 210 : 20) : (expanded ? 210 : 58);
+  const notchActions = peek
+    ? (peekPinned
+      ? [{ key: 'close', label: 'Collapse navigation', Icon: ChevronLeft, expanded: true, run: () => setPeekPinned(false) }]
+      : [{ key: 'icons', label: 'Show navigation', Icon: ChevronRight, expanded: false, run: () => { setPeekPinned(false); setCollapsed(false); } }])
+    : expanded
+      ? [{ key: 'collapse', label: 'Collapse navigation', Icon: ChevronLeft, expanded: true, run: () => setExpanded(false) }]
+      : [
+        { key: 'expand', label: 'Expand navigation', Icon: ChevronRight, expanded: false, run: () => setExpanded(true) },
+        ...(onTickets ? [{ key: 'thin', label: 'Collapse the navigation to a thin edge', Icon: ChevronsLeft, expanded: false, run: () => { setExpanded(false); setCollapsed(true); } }] : []),
+      ];
+
   return (
-    <nav
-      aria-label="Primary navigation"
-      onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
-      onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
-      className={cn(
-        'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out motion-reduce:transition-none md:flex print:hidden',
-        peek
-          ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
-          : (expanded ? 'tp-side-rail--open w-[210px]' : 'w-[58px]'),
-      )}
-    >
-      {peek && (
-        <span
-          aria-hidden="true"
-          className="tp-rail-peek-hint pointer-events-none absolute inset-y-0 left-0 flex w-[20px] items-center justify-center rounded-r-md text-muted-foreground"
-        >
-          <ChevronsRight className="h-4 w-4" />
-        </span>
-      )}
+    <>
+      <nav
+        aria-label="Primary navigation"
+        onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
+        onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
+        className={cn(
+          'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out motion-reduce:transition-none md:flex print:hidden',
+          peek
+            ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
+            : (expanded ? 'tp-side-rail--open w-[210px]' : 'w-[58px]'),
+        )}
+      >
+        {peek && (
+          <span
+            aria-hidden="true"
+            className="tp-rail-peek-hint pointer-events-none absolute inset-y-0 left-0 flex w-[20px] items-center justify-center rounded-r-md text-muted-foreground"
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </span>
+        )}
 
-      <div className="tp-rail-content flex min-h-0 flex-1 flex-col gap-1">
-        {/* Expand / collapse tab — the only way the rail opens (no hover). */}
-        {!peek && (
+        <div className="tp-rail-content flex min-h-0 flex-1 flex-col gap-1">
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
-            title={expanded ? 'Collapse navigation' : 'Expand navigation'}
-            className={cn(
-              'mx-[9px] mb-1 flex h-7 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-lg border px-[8px] text-left text-[11px] font-semibold transition-colors tp-focus-ring',
-              expanded
-                ? 'border-input bg-muted text-foreground'
-                : 'border-transparent text-muted-foreground hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-500/15 dark:hover:text-blue-200',
-            )}
+            onClick={() => navigate(homePath)}
+            title={homePath === '/dashboard' ? 'Ticket Pulse — Dashboard' : 'Ticket Pulse — Tickets'}
+            className="mx-[9px] mb-2 flex h-10 flex-none items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-[4px] text-left tp-focus-ring"
           >
-            <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
-              {expanded ? <ChevronsLeft className="h-4 w-4" /> : <ChevronsRight className="h-4 w-4" />}
-            </span>
-            <span className="tp-rail-label flex-1 truncate">Collapse</span>
+            <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-8 w-8 flex-none object-contain" />
+            <span className="tp-rail-label text-[15px] font-extrabold tracking-tight text-foreground">ticket pulse</span>
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => navigate(homePath)}
-          title={homePath === '/dashboard' ? 'Ticket Pulse — Dashboard' : 'Ticket Pulse — Tickets'}
-          className="mx-[9px] mb-2 flex h-10 flex-none items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-[4px] text-left tp-focus-ring"
-        >
-          <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-8 w-8 flex-none object-contain" />
-          <span className="tp-rail-label text-[15px] font-extrabold tracking-tight text-foreground">ticket pulse</span>
-        </button>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {destinations.map(renderRow)}
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {destinations.map(renderRow)}
+          </div>
+
+          {showSettings && (
+            <button
+              type="button"
+              onClick={() => { if (!settingsActive) navigate('/settings'); }}
+              aria-current={settingsActive ? 'page' : undefined}
+              title="Settings"
+              className={cn(
+                'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
+                settingsActive
+                  ? 'border-input bg-muted text-foreground cursor-default'
+                  : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+              )}
+            >
+              <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
+                <Settings className="h-5 w-5" />
+              </span>
+              <span className="tp-rail-label flex-1 truncate">Settings</span>
+            </button>
+          )}
         </div>
+      </nav>
 
-        {showSettings && (
+      {/* The notch (16 Sep 2026): a round button riding the rail's right border,
+          FreshService-style. One circle when there is one thing to do, two
+          stacked when the tickets pages also offer the thin edge. Fixed and
+          OUTSIDE the nav (which clips its overflow), so it follows the width. */}
+      <div
+        className="tp-rail-notch fixed top-[66px] z-[51] hidden flex-col items-center gap-1.5 transition-[left] duration-200 ease-out motion-reduce:transition-none md:flex print:hidden"
+        style={{ left: `${railWidth - 14}px` }}
+        data-testid="rail-notch"
+      >
+        {notchActions.map((a) => (
           <button
+            key={a.key}
             type="button"
-            onClick={() => { if (!settingsActive) navigate('/settings'); }}
-            aria-current={settingsActive ? 'page' : undefined}
-            title="Settings"
-            className={cn(
-              'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
-              settingsActive
-                ? 'border-input bg-muted text-foreground cursor-default'
-                : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
-            )}
+            onClick={(e) => { e.stopPropagation(); a.run(); }}
+            aria-label={a.label}
+            title={a.label}
+            aria-expanded={a.expanded}
+            className="tp-focus-ring group/notch inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-foreground/80 shadow-subtle transition-all duration-150 ease-out hover:scale-110 hover:border-blue-600 hover:bg-blue-600 hover:text-white dark:hover:border-blue-500 dark:hover:bg-blue-500"
           >
-            <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
-              <Settings className="h-5 w-5" />
-            </span>
-            <span className="tp-rail-label flex-1 truncate">Settings</span>
+            <a.Icon className="h-4 w-4 transition-transform duration-150 group-hover/notch:translate-x-px" aria-hidden="true" />
           </button>
-        )}
-
-        {/* Tickets pages only: collapse/expand the rail out of the way of the
-            filter rail. The preference sticks (localStorage). */}
-        {onTickets && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setPeekPinned(false); setCollapsed(!railCollapsed); }}
-            title={railCollapsed ? 'Keep the navigation expanded' : 'Collapse the navigation to a thin edge'}
-            className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[12px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground tp-focus-ring"
-          >
-            <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
-              {railCollapsed ? <ChevronsRight className="h-[18px] w-[18px]" /> : <ChevronsLeft className="h-[18px] w-[18px]" />}
-            </span>
-            <span className="tp-rail-label flex-1 truncate">{railCollapsed ? 'Keep expanded' : 'Collapse rail'}</span>
-          </button>
-        )}
+        ))}
       </div>
-    </nav>
+    </>
   );
 }
