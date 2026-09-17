@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.24-preview';
+export const APP_VERSION = '3.9.25-preview';
 
 export const changelog = [
+  {
+    version: '3.9.25-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>FreshService approvals: read at lookup time</strong> — FreshService only reports a ticket’s approval status on the single-ticket view, never in the list the sync reads, so this morning’s change could only see approvals that were backfilled. The approval verdict and the laptop hand-out check now read the FreshService view for the tickets they judge (one call each, cached five minutes, an Approved status is final) and store the answer.' },
+    ],
+  },
   {
     version: '3.9.24-preview',
     date: 'September 17, 2026',

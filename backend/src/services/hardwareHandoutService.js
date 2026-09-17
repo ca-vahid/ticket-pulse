@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolvePersonName } from './personDirectoryService.js';
 import { fsApprovalState, combineStates } from './approvalVerdictService.js';
+import { refreshFsApprovalStatuses } from './fsApprovalRefreshService.js';
 
 /**
  * "Request for Cristian Orellana : Laptop" — an IT agent filing on behalf of
@@ -198,8 +199,8 @@ class HardwareHandoutService {
     const candidates = catIds.length ? await prisma.ticket.findMany({
       where,
       select: {
-        id: true, subject: true, status: true, createdAt: true, origin: true,
-        nativeNumber: true, freshserviceTicketId: true, fsApprovalStatusName: true,
+        id: true, workspaceId: true, subject: true, status: true, createdAt: true, origin: true,
+        nativeNumber: true, freshserviceTicketId: true, fsApprovalStatus: true, fsApprovalStatusName: true,
         requester: { select: { id: true, name: true, email: true } },
         internalCategory: { select: { name: true } },
         internalSubcategory: { select: { name: true } },
@@ -287,6 +288,9 @@ class HardwareHandoutService {
         scope,
       };
     }
+
+    // FreshService list payloads carry no approval_status — refresh the matched tickets from the view (≤5 reads).
+    await refreshFsApprovalStatuses(mine);
 
     // All approval rows across every matching ticket decide the state together:
     // a person with an approved request and an older rejected one is approved.

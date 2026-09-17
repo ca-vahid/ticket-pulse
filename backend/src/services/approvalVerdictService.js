@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { refreshFsApprovalStatus } from './fsApprovalRefreshService.js';
 
 /**
  * The single approval verdict for one ticket — the shape an external system
@@ -172,13 +173,15 @@ class ApprovalVerdictService {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       select: {
-        id: true, subject: true, status: true, ticketType: true, origin: true,
+        id: true, workspaceId: true, subject: true, status: true, ticketType: true, origin: true,
         nativeNumber: true, freshserviceTicketId: true, createdAt: true, updatedAt: true,
-        fsApprovalStatusName: true,
+        fsApprovalStatus: true, fsApprovalStatusName: true,
         requester: { select: { name: true, email: true } },
       },
     });
     if (!ticket) return null;
+    // The sync cannot see FreshService approvals (list payloads lack the field) — read the ticket view now.
+    await refreshFsApprovalStatus(ticket);
 
     const rows = await prisma.ticketApproval.findMany({
       where: { ticketId, workspaceId, ...(category ? { approvalCategoryId: category.id } : {}) },
