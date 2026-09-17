@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
+  Ban,
   Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
   Search, Download, SlidersHorizontal, CalendarDays, UserRound, ChevronDown, ChevronUp,
 } from 'lucide-react';
@@ -281,7 +282,7 @@ export default function ApprovalsInbox() {
                         <div className={`text-2xl font-bold tabular-nums ${color}`}>{overview?.stats?.[key] ?? 0}</div>
                         <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
                       </div>
-                      {art ? <BrandArt name={art} className="h-8 w-8 opacity-90 transition-transform group-hover:scale-110" /> : <span className="h-8 w-8 rounded-full bg-muted" aria-hidden="true" />}
+                      {art ? <BrandArt name={art} className="h-8 w-8 opacity-90 transition-transform group-hover:scale-110" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted ring-1 ring-border transition-transform group-hover:scale-110" aria-hidden="true"><Ban className="h-4 w-4 text-muted-foreground/70" /></span>}
                     </div>
                   </button>
                 );

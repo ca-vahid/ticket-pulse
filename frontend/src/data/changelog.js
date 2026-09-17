@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.20-preview';
+export const APP_VERSION = '3.9.21-preview';
 
 export const changelog = [
+  {
+    version: '3.9.21-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approvals: the Cancelled tile has a face</strong> — the status tile that showed an empty grey circle now carries a cancel mark, so it reads as a filter like its neighbours instead of a missing picture.' },
+    ],
+  },
   {
     version: '3.9.20-preview',
     date: 'September 16, 2026',
