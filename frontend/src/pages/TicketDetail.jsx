@@ -2443,7 +2443,7 @@ export default function TicketDetail() {
                 context cards back on the right under the fields — the wide
                 screen goes to the description and the conversation instead of
                 a third column. */}
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] gap-4 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:grid-rows-[auto_1fr] gap-4 items-start">
               {/* Main column (tabbed) */}
               <div className="space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2">
                 {pageTab === 'conversation' && (

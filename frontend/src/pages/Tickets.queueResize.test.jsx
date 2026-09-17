@@ -55,7 +55,7 @@ vi.mock('../assets/tickets-hero.png', () => ({ default: 'hero.png' }));
 
 import Tickets from './Tickets';
 
-const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 150px minmax(150px,1fr) 210px 116px 88px 74px';
+const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 176px minmax(150px,1fr) 210px 116px 88px 74px';
 // Any pinned width swaps the unpinned subject's slack floor 0 → minPx (240).
 const pinnedCompact = (requesterTrack) => `6px minmax(240px,2.4fr) ${requesterTrack} minmax(150px,1fr) 210px 116px 88px 74px`;
 const MD_COMPACT_LITERAL = 'md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px]';
@@ -101,7 +101,7 @@ const pointer = (type, clientX) => new MouseEvent(type, { bubbles: true, cancela
 const findHandle = (label) => screen.findByRole('separator', { name: `Resize ${label} column` });
 
 // Header cells measure 0px wide in jsdom, so drags start from the registry
-// fallback (requester '150px' track → 150).
+// fallback (requester '176px' track → 176).
 const dragRequester = async (from, to, { release = true } = {}) => {
   const handle = await findHandle('Requester');
   fireEvent(handle, pointer('pointerdown', from));
@@ -157,31 +157,31 @@ describe('Drag resize (QR2)', () => {
     const handle = await findHandle('Requester');
     fireEvent(handle, pointer('pointerdown', 300));
     fireEvent(handle, pointer('pointermove', 340));
-    // Mid-drag: the card's var already carries the new width (150+40) …
-    expect(currentTemplate()).toBe(pinnedCompact('190px'));
+    // Mid-drag: the card's var already carries the new width (176+40) …
+    expect(currentTemplate()).toBe(pinnedCompact('216px'));
     fireEvent(handle, pointer('pointermove', 360));
-    expect(currentTemplate()).toBe(pinnedCompact('210px'));
+    expect(currentTemplate()).toBe(pinnedCompact('236px'));
     // … but nothing persisted yet.
     expect(putWidthCalls().length).toBe(0);
 
     fireEvent(handle, pointer('pointerup', 360));
     await waitFor(() => expect(putWidthCalls().length).toBe(1), { timeout: 2500 });
-    expect(putWidthCalls()[0][1]).toEqual({ compact: { requester: 210 }, roomy: {} });
+    expect(putWidthCalls()[0][1]).toEqual({ compact: { requester: 236 }, roomy: {} });
     // Optimistic localStorage mirror rides the commit.
-    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 210 }, roomy: {} });
+    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 236 }, roomy: {} });
     // Still exactly one PUT after the debounce window — one commit per drag.
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(putWidthCalls().length).toBe(1);
-    expect(currentTemplate()).toBe(pinnedCompact('210px'));
+    expect(currentTemplate()).toBe(pinnedCompact('236px'));
   });
 
   test('clamps: never below the registry minPx, never above 800px', async () => {
     await mountAndLoad();
     const handle = await findHandle('Requester');
     fireEvent(handle, pointer('pointerdown', 500));
-    fireEvent(handle, pointer('pointermove', 0)); // 150 - 500 → floor
-    expect(currentTemplate()).toBe(pinnedCompact('110px')); // requester minPx
-    fireEvent(handle, pointer('pointermove', 3000)); // 150 + 2500 → ceiling
+    fireEvent(handle, pointer('pointermove', 0)); // 176 - 500 → floor
+    expect(currentTemplate()).toBe(pinnedCompact('130px')); // requester minPx
+    fireEvent(handle, pointer('pointermove', 3000)); // 176 + 2500 → ceiling
     expect(currentTemplate()).toBe(pinnedCompact('800px'));
     fireEvent(handle, pointer('pointerup', 3000));
     await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 800 }, roomy: {} }), { timeout: 2500 });
@@ -203,10 +203,10 @@ describe('Drag resize (QR2)', () => {
     const handle = await findHandle('Requester');
     handle.focus();
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
-    await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('166px')));
+    await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('192px')));
     fireEvent.keyDown(handle, { key: 'ArrowLeft' });
-    await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('150px'))); // pinned at the default px now
-    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 150 }, roomy: {} }), { timeout: 2500 });
+    await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('176px'))); // pinned at the default px now
+    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 176 }, roomy: {} }), { timeout: 2500 });
   });
 
   test('the handle never swallows header sorting: sort button works, handle clicks do not sort', async () => {
@@ -266,7 +266,7 @@ describe('Width storage (QR1)', () => {
     await mountAndLoad();
     // Roomy: 60px type slot (never resizable — no Subject separator), the
     // compact-only 300px ignored, roomy's own status pin applied.
-    await waitFor(() => expect(currentTemplate()).toBe('6px 60px 150px minmax(150px,1fr) 210px 200px 88px 74px'));
+    await waitFor(() => expect(currentTemplate()).toBe('6px 60px 176px minmax(150px,1fr) 210px 200px 88px 74px'));
     expect(screen.queryByRole('separator', { name: 'Resize Subject column' })).not.toBeInTheDocument();
     expect(screen.queryByRole('separator', { name: 'Resize Status column' })).toBeInTheDocument();
   });
@@ -278,7 +278,7 @@ describe('Overflow + flyout reset (QR3)', () => {
     const divs = () => [...card().querySelectorAll('div')];
     expect(divs().find((d) => d.className.includes('xl:overflow-x-auto'))).toBeUndefined();
 
-    await dragRequester(300, 450); // → 300px
+    await dragRequester(300, 424); // → 300px (176 + 124)
     await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('300px')));
     const scroller = divs().find((d) => d.className.includes('xl:overflow-x-auto'));
     expect(scroller).toBeTruthy();

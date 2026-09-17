@@ -396,6 +396,11 @@ code {
     height: 1.25rem;
     width: 1.25rem;
   }
+  /* Dense = one line per ticket (16 Sep 2026): nothing inside a cell wraps;
+     the list scrolls sideways instead (Tickets.jsx sticky scrollbar). */
+  ul[data-density="dense"] li > div > .hidden.md\:flex {
+    white-space: nowrap;
+  }
   .tp-rich-body table {
     max-width: 100%;
   }

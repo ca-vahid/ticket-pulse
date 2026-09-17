@@ -11,6 +11,7 @@ import {
 } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
+import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 
 /**
  * Queue column registry (Mega 08-23 Phase QC) — the single source of truth for
@@ -104,20 +105,33 @@ function aiProgressLabel(progress) {
 
 // Requester (QA 08-07 #6): name on the primary line, Entra office/city as the
 // quiet second line when present — mirrors the category cell's shape.
+// Requester photo from the directory by e-mail (16 Sep 2026) — one cached
+// request per address for the session (hooks/useRequesterPhoto), so a page of
+// 25 rows costs a handful of calls and the second page none for repeats.
+function RequesterCellAvatar({ name, email, size, textSize }) {
+  const photo = useRequesterPhoto(email);
+  return <PersonAvatar name={name || email} photoUrl={photo || null} size={size} textSize={textSize} />;
+}
+
 function renderRequester(ticket, ctx) {
   const office = ticket.requester?.entraOfficeLocation || ticket.requester?.entraCity || null;
   return (
     <span
-      className={`${ctx.cell('requester')} ${ctx.cellPad} flex-col !items-start justify-center gap-0.5`}
+      className={`${ctx.cell('requester')} ${ctx.cellPad} gap-2 justify-start`}
       style={ctx.cellStyle('requester')}
       title={[ticket.requester?.name, office].filter(Boolean).join(' · ') || undefined}
     >
-      <span className="block w-full text-xs font-medium text-foreground/85 truncate">
-        {ticket.requester?.name || 'Unknown requester'}
+      <span className="flex-shrink-0">
+        <RequesterCellAvatar name={ticket.requester?.name} email={ticket.requester?.email} size="h-7 w-7" textSize="text-[10px]" />
       </span>
-      {office && (
-        <span className="block w-full text-[10px] text-muted-foreground/75 truncate">{office}</span>
-      )}
+      <span className="flex flex-col min-w-0 flex-1 justify-center gap-0.5">
+        <span className="block w-full text-xs font-medium text-foreground/85 truncate">
+          {ticket.requester?.name || 'Unknown requester'}
+        </span>
+        {office && (
+          <span className="block w-full text-[10px] text-muted-foreground/75 truncate">{office}</span>
+        )}
+      </span>
     </span>
   );
 }
@@ -661,7 +675,7 @@ function renderState(ticket, ctx) {
  */
 export const QUEUE_COLUMNS = [
   { key: 'subject', label: 'Subject', mandatory: true, defaultOn: true, sortField: 'subject', track: 'minmax(0,2.4fr)', minPx: 240, mdEssential: true, render: null },
-  { key: 'requester', label: 'Requester', mandatory: true, defaultOn: true, sortField: 'requester', headerTitle: 'Sort by requester name', track: '150px', minPx: 110, render: renderRequester },
+  { key: 'requester', label: 'Requester', mandatory: true, defaultOn: true, sortField: 'requester', headerTitle: 'Sort by requester name', track: '176px', minPx: 130, render: renderRequester },
   { key: 'category', label: 'Category', defaultOn: true, sortField: null, track: 'minmax(150px,1fr)', minPx: 120, mdEssential: true, render: renderCategory },
   { key: 'assignee', label: 'Assignee', defaultOn: true, sortField: null, track: '210px', minPx: 150, mdEssential: true, render: renderAssignee },
   { key: 'status', label: 'Status', defaultOn: true, sortField: 'status', headerTitle: 'Sort by status (Open first)', track: '116px', minPx: 90, mdEssential: true, render: renderStatus },
@@ -690,21 +704,23 @@ export const DEFAULT_COLUMN_KEYS = QUEUE_COLUMNS.filter((c) => c.defaultOn).map(
 
 /**
  * Normalize a stored/foreign column list into a safe ordered key list:
- * unknown keys + dupes dropped, subject pinned first, requester (mandatory)
- * inserted up front when missing, null/garbage → today's defaults.
+ * unknown keys + dupes dropped, the mandatory pair (subject, requester)
+ * inserted up front when missing, null/garbage → today's defaults. Subject is
+ * mandatory but MOVABLE (16 Sep 2026 — "some people like requester first").
  */
 export function normalizeColumnKeys(value) {
   if (!Array.isArray(value)) return [...DEFAULT_COLUMN_KEYS];
   const seen = new Set();
-  const rest = [];
+  const keys = [];
   for (const raw of value) {
     const k = String(raw);
-    if (k === 'subject' || !QUEUE_COLUMN_MAP.has(k) || seen.has(k)) continue;
+    if (!QUEUE_COLUMN_MAP.has(k) || seen.has(k)) continue;
     seen.add(k);
-    rest.push(k);
+    keys.push(k);
   }
-  if (!rest.includes('requester')) rest.unshift('requester');
-  return ['subject', ...rest];
+  if (!keys.includes('requester')) keys.splice(keys.includes('subject') ? keys.indexOf('subject') + 1 : 0, 0, 'requester');
+  if (!keys.includes('subject')) keys.unshift('subject');
+  return keys;
 }
 
 /**
@@ -720,21 +736,24 @@ export function normalizeColumnKeys(value) {
  * wrapper's floor holds — subject keeps its flexible slack until the user
  * pins it directly.
  */
-export function buildQueueGridTemplate(columnKeys, { roomy = false, widths = {} } = {}) {
-  const hasPinned = Object.keys(widths).length > 0;
+export function buildQueueGridTemplate(columnKeys, { roomy = false, widths = {}, floor = false } = {}) {
+  const hasPinned = Object.keys(widths).length > 0 || floor;
   const subjectCol = QUEUE_COLUMN_MAP.get('subject');
   const subjectTrack = widths.subject != null
     ? `${widths.subject}px`
     : hasPinned
       ? subjectCol.track.replace('minmax(0,', `minmax(${subjectCol.minPx}px,`)
       : subjectCol.track;
-  const tracks = columnKeys
-    .filter((k) => k !== 'subject' && QUEUE_COLUMN_MAP.has(k))
-    .map((k) => (widths[k] != null ? `${widths[k]}px` : QUEUE_COLUMN_MAP.get(k).track));
+  const trackOf = (k) => (k === 'subject' ? subjectTrack : widths[k] != null ? `${widths[k]}px` : QUEUE_COLUMN_MAP.get(k).track);
+  // Roomy: the subject spans row 1, column 2 is the fixed type slot, and the
+  // chosen columns follow. Compact / dense: every track — subject included —
+  // sits where the user put it (16 Sep 2026).
+  const ordered = columnKeys.filter((k) => QUEUE_COLUMN_MAP.has(k));
+  const keys = roomy ? ordered.filter((k) => k !== 'subject') : (ordered.includes('subject') ? ordered : ['subject', ...ordered]);
   return [
     '6px',
-    roomy ? '60px' : subjectTrack,
-    ...tracks,
+    ...(roomy ? ['60px'] : []),
+    ...keys.map(trackOf),
   ].join(' ');
 }
 
@@ -792,8 +811,8 @@ export function normalizeColumnWidths(value) {
  * overflow wrapper (QR3) sets this as min-width so cells never collapse below
  * their floor; returns 0 with no pinned widths (no wrapper → today's layout).
  */
-export function buildQueueGridMinWidth(columnKeys, { roomy = false, widths = {} } = {}) {
-  if (Object.keys(widths).length === 0) return 0;
+export function buildQueueGridMinWidth(columnKeys, { roomy = false, widths = {}, force = false } = {}) {
+  if (Object.keys(widths).length === 0 && !force) return 0;
   const minOf = (key) => {
     if (widths[key] != null) return widths[key];
     const col = QUEUE_COLUMN_MAP.get(key);
@@ -965,7 +984,7 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
 
 /**
  * Toolbar "Columns" flyout (QC4): checkbox list in display order with
- * drag-to-reorder (the filter rail's grip pattern), mandatory rows locked as
+ * drag-to-reorder (the filter rail's grip pattern, subject included), mandatory rows locked as
  * "Always shown", Reset-to-default footer. Same shell as FilterFlyout.
  * Hidden in board mode (the board has status columns, not these).
  */
@@ -1003,7 +1022,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
     emit(order, nextVisible);
   };
   const dropOn = (targetKey) => {
-    if (!dragKey || dragKey === targetKey || targetKey === 'subject') return;
+    if (!dragKey || dragKey === targetKey) return;
     const next = order.filter((k) => k !== dragKey);
     next.splice(next.indexOf(targetKey), 0, dragKey);
     setOrder(next);
@@ -1046,7 +1065,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               const col = QUEUE_COLUMN_MAP.get(key);
               if (!col) return null;
               const dragging = dragKey === key;
-              const pinned = key === 'subject';
+              const pinned = false; // subject moves too (16 Sep 2026); mandatory rows only lock their checkbox
               return (
                 <li
                   key={key}

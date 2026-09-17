@@ -71,8 +71,8 @@ import { DEFAULT_COLUMN_KEYS } from '../components/tickets/queueColumns';
 // header + rows through the same xl arbitrary-property class.
 const GRID_VAR_CLASS = 'xl:[grid-template-columns:var(--tp-q-grid)]';
 // Defaults must reproduce the pre-QC hardcoded xl templates exactly.
-const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 150px minmax(150px,1fr) 210px 116px 88px 74px';
-const DEFAULT_ROOMY_TEMPLATE = '6px 60px 150px minmax(150px,1fr) 210px 116px 88px 74px';
+const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 176px minmax(150px,1fr) 210px 116px 88px 74px';
+const DEFAULT_ROOMY_TEMPLATE = '6px 60px 176px minmax(150px,1fr) 210px 116px 88px 74px';
 
 const row = (id, status) => ({
   id,
@@ -279,7 +279,7 @@ describe('Columns flyout (Phase QC — QC4)', () => {
 
     // Drop the Updated column → its 74px track disappears from the template.
     fireEvent.click(screen.getByRole('checkbox', { name: 'Updated column' }));
-    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 150px minmax(150px,1fr) 210px 116px 88px'));
+    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 176px minmax(150px,1fr) 210px 116px 88px'));
     expect(screen.queryByRole('button', { name: /^Updated$/ })).not.toBeInTheDocument();
   });
 
@@ -294,7 +294,7 @@ describe('Columns flyout (Phase QC — QC4)', () => {
     fireEvent.drop(targetRow);
 
     // Status (116px) now precedes Assignee (210px) in the computed template…
-    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 150px minmax(150px,1fr) 116px 210px 88px 74px'));
+    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 176px minmax(150px,1fr) 116px 210px 88px 74px'));
     // …and the placement indexes follow (status=5, assignee=6).
     const statusHeader = screen.getByTitle('Sort by status (Open first)').closest('span');
     expect(statusHeader.style.getPropertyValue('--tp-q-col')).toBe('5');
@@ -349,7 +349,7 @@ describe('Column preference round-trip (Phase QC — QC1/QC4)', () => {
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
     // subject pinned first + requester re-inserted + dedupe + unknowns gone:
     // subject, requester, status, due → 6px subject 150px 116px 88px.
-    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 150px 116px 88px'));
+    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 176px 116px 88px'));
   });
 
   test('new-column sorts wire through the headers (source header → sort=source asc-first)', async () => {
