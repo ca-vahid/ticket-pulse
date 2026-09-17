@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Drawer } from 'vaul';
 import { DayPicker } from 'react-day-picker';
@@ -60,11 +60,19 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
   // so a collapsed section still costs nothing and nothing snaps.
   const [rendered, setRendered] = useState(open);
   const [shown, setShown] = useState(open);
+  const bodyRef = useRef(null);
   useEffect(() => {
     if (open) {
       setRendered(true);
-      const raf = requestAnimationFrame(() => setShown(true));
-      return () => cancelAnimationFrame(raf);
+      // Opening has to start from a PAINTED 0fr frame or the browser sees only
+      // the final value and snaps: force a style flush on the freshly mounted
+      // body, then flip on the next frame.
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        void bodyRef.current?.offsetHeight;
+        raf2 = requestAnimationFrame(() => setShown(true));
+      });
+      return () => { cancelAnimationFrame(raf1); if (raf2) cancelAnimationFrame(raf2); };
     }
     setShown(false);
     const t = setTimeout(() => setRendered(false), 320);
@@ -99,6 +107,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
       </div>
       {rendered && (
         <div
+          ref={bodyRef}
           className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${shown ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
           data-open={shown ? 'true' : 'false'}
         >

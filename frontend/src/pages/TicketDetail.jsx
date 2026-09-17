@@ -446,7 +446,10 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
   // TP-authored notes (assignment/system) get the brand mark, not "TP"
   // initials — keyed off authorType so renamed system actors still read as
   // "Ticket Pulse · Auto" (audit cleanup: never key off the actorName string).
-  const isTicketPulse = entry.authorType === 'system';
+  // Pipeline notes ("[Ticket Pulse] Assignment auto-assigned…") arrive with the
+  // app as actorName but not always authorType=system — they wear the logo too
+  // (16 Sep 2026: Vahid saw "TP" initials on them).
+  const isTicketPulse = entry.authorType === 'system' || /^ticket pulse(\b|$)/i.test(String(entry.actorName || '').trim());
   // Integration voices (Simorgh / Rostam): their own avatar and name instead
   // of "S·" initials over "Simorgh · Tier 2 (Rostam)".
   const integration = isTicketPulse ? null : integrationIdentity(entry);
