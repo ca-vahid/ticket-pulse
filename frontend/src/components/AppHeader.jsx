@@ -731,7 +731,7 @@ export default function AppHeader({
 
           {/* Search everywhere (16 Sep 2026): tickets, people, tasks, conversations. */}
           <div className="flex min-w-0 flex-1 justify-center px-2">
-            <HeaderSearch className="w-full max-w-2xl" />
+            <HeaderSearch className="w-full max-w-[clamp(480px,48vw,1200px)]" />
           </div>
 
           {extraActions && <div className="flex min-w-0 items-center gap-2">{extraActions}</div>}

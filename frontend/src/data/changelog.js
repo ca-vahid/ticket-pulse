@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.9.12-preview';
+export const APP_VERSION = '3.9.13-preview';
 
 export const changelog = [
+  {
+    version: '3.9.13-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Filter rail you can read</strong> — bigger type for views and facets, counts that are darker and larger, section titles a notch up, and the rail is a little wider so the numbers stop being clipped at 100 % zoom. <em>My open</em> now shows your open count too.' },
+      { type: 'new', html: '<strong>Requester photos in the list</strong> — the Requester column shows the directory photo (Entra) next to the name and office, loaded once per person and remembered for the session.' },
+      { type: 'new', html: '<strong>Put the columns in any order</strong> — Subject can now be dragged like the rest in the <em>Columns</em> menu, so Requester first (or anything else) is one drag away. Subject and Requester stay mandatory; the order applies on large screens.' },
+      { type: 'fixed', html: '<strong>Ticket page: no more gap in the right column</strong> — on tickets with a long conversation the parent/child, links and related cards sat far below the fields; they now follow the fields directly.' },
+      { type: 'improved', html: '<strong>Wider search in the top bar</strong> — the search box grows with the window (about half the width on a large screen).' },
+      { type: 'improved', html: '<strong>Dense is one line per ticket</strong> — the ticket number sits right after the subject (FreshService-style), nothing wraps, and when the columns outgrow the screen the list scrolls sideways with a scrollbar that stays at the bottom of the window, so you never have to scroll to the last row to reach it.' },
+    ],
+  },
   {
     version: '3.9.12-preview',
     date: 'September 16, 2026',

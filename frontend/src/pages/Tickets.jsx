@@ -12,6 +12,7 @@ import TicketPreview from '../components/tickets/TicketPreview';
 import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import TicketSearchBox from '../components/tickets/TicketSearchBox';
+import StickyScrollbar from '../components/tickets/StickyScrollbar';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
@@ -1278,12 +1279,27 @@ export default function Tickets() {
   // carries the matching template. Essentials (category/assignee/status/due)
   // always render for the md band — deselecting one only hides it at xl.
   const colMeta = useMemo(() => {
-    const nonSubject = columnKeys.filter((k) => k !== 'subject');
-    const start = new Map(nonSubject.map((k, i) => [k, i + 3])); // track 1 = accent, 2 = subject/type slot
+    const ordered = columnKeys.filter((k) => QUEUE_COLUMNS.some((c) => c.key === k));
+    // Roomy: track 1 = accent, 2 = the type slot, then the chosen columns
+    // (subject spans row 1). Compact / dense: track 1 = accent, then EVERY
+    // column — subject included — in the user's order (16 Sep 2026).
+    const start = roomy
+      ? new Map(ordered.filter((k) => k !== 'subject').map((k, i) => [k, i + 3]))
+      : new Map(ordered.map((k, i) => [k, i + 2]));
     const rowStart = roomy ? 'xl:row-start-2' : 'xl:row-start-1';
     const out = {};
     for (const col of QUEUE_COLUMNS) {
-      if (col.key === 'subject') continue;
+      if (col.key === 'subject') {
+        const placed = !roomy && start.has('subject');
+        out.subject = {
+          render: true,
+          cls: placed ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : 'xl:col-start-2 xl:row-start-1',
+          headerRender: true,
+          headerCls: placed ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : 'xl:col-start-2 xl:row-start-1',
+          style: placed ? { '--tp-q-col': start.get('subject') } : undefined,
+        };
+        continue;
+      }
       const visible = start.has(col.key);
       const pos = visible ? `xl:[grid-column:var(--tp-q-col)] ${rowStart}` : '';
       const headerPos = visible ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : '';
@@ -1302,8 +1318,8 @@ export default function Tickets() {
     return out;
   }, [columnKeys, roomy]);
   const gridTemplate = useMemo(
-    () => buildQueueGridTemplate(columnKeys, { roomy, widths: colWidths }),
-    [columnKeys, roomy, colWidths],
+    () => buildQueueGridTemplate(columnKeys, { roomy, widths: colWidths, floor: dense }),
+    [columnKeys, roomy, colWidths, dense],
   );
   // Overflow floor (QR3): once widths are pinned the header+rows wrapper gets
   // min-width = pinned px + every other column's own floor (+36px checkbox
@@ -1311,10 +1327,14 @@ export default function Tickets() {
   // dashboard's .tp-compact-scroll recipe (index.css:62-66) at xl. 0 (and no
   // scroll container at all) until the user actually resizes something.
   const gridMinWidth = useMemo(
-    () => buildQueueGridMinWidth(columnKeys, { roomy, widths: colWidths }),
-    [columnKeys, roomy, colWidths],
+    () => buildQueueGridMinWidth(columnKeys, { roomy, widths: colWidths, force: dense }),
+    [columnKeys, roomy, colWidths, dense],
   );
-  const widthsPinned = Object.keys(colWidths).length > 0;
+  // Dense (16 Sep 2026): one line per ticket, so the list keeps its column
+  // floors and scrolls sideways instead of wrapping — same wrapper as pinned
+  // widths, plus a scrollbar that sticks to the bottom of the viewport.
+  const widthsPinned = Object.keys(colWidths).length > 0 || dense;
+  const scrollWrapRef = useRef(null);
   // Live drag preview (QR2): write the recomputed template straight onto the
   // list card's CSS vars — zero React renders per pointermove; the commit on
   // pointerup re-renders once with the identical values.
@@ -1734,7 +1754,7 @@ export default function Tickets() {
                           Untouched users keep today's exact non-scrolling DOM
                           behavior (and the last row's inline dropdowns keep
                           their room over the pagination footer). */}
-                      <div className={widthsPinned ? 'xl:overflow-x-auto settings-scrollbar' : ''}>
+                      <div ref={scrollWrapRef} className={widthsPinned ? 'xl:overflow-x-auto settings-scrollbar' : ''}>
                         <div className={widthsPinned ? 'xl:min-w-[var(--tp-q-minw)]' : ''}>
                           {/* Header */}
                           <div className="hidden md:flex items-stretch border-b border-border bg-muted/40">
@@ -1768,7 +1788,7 @@ export default function Tickets() {
                             ) : (
                               <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
                                 <span aria-hidden="true" />
-                                <span className={`${CELL} relative ${cellPad} xl:col-start-2 xl:row-start-1`}>
+                                <span className={`${CELL} relative ${cellPad} ${colMeta.subject.headerCls}`} style={colMeta.subject.style}>
                                   <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
                                     Subject{sortIndicator('subject')}
                                   </button>
@@ -2019,21 +2039,35 @@ export default function Tickets() {
                                         <div className={`flex-1 ${GRID_COMPACT}`}>
                                           <span aria-hidden="true" className={`self-stretch ${accent}`} />
                                           {/* Compact: type folds into the title line so the subject gets the width */}
-                                          <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-1 flex-col !items-start justify-center gap-0.5`}>
+                                          <span className={`${CELL} ${cellPad} ${colMeta.subject.cls} flex-col !items-start justify-center gap-0.5`} style={colMeta.subject.style}>
                                             {/* Wrap below xl — same rationale as the roomy row: pills
                                                 wrap under the subject rather than colliding into the
                                                 category column on iPad widths (QA 08-04 #6). The
                                                 dot+type+subject group never wraps internally, so the
-                                                SR/INC pill stays glued to its subject line. */}
-                                            <span className="flex flex-wrap xl:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
+                                                SR/INC pill stays glued to its subject line.
+                                                Dense (16 Sep 2026): ONE line — the ref follows the
+                                                subject the FreshService way, nothing wraps, the list
+                                                scrolls sideways instead. */}
+                                            <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap xl:flex-nowrap'}`}>
                                               <span className="flex items-center gap-1.5 min-w-0">
                                                 {priorityEl}
                                                 <span className="shrink-0">{typePill}</span>
                                                 {subjectBtn}
+                                                {dense && (
+                                                  <Link
+                                                    to={ticketHref}
+                                                    state={linkState}
+                                                    onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                                    className="tp-focus-ring shrink-0 rounded font-mono text-[11px] text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300"
+                                                    data-testid="dense-ref"
+                                                  >
+                                                    {ticket.displayRef}
+                                                  </Link>
+                                                )}
                                               </span>
                                               {subjectChips}
                                             </span>
-                                            {subjectMeta}
+                                            {!dense && subjectMeta}
                                           </span>
                                           {columnCells}
                                         </div>
@@ -2157,6 +2191,7 @@ export default function Tickets() {
                           </ul>
                         </div>
                       </div>
+                      <StickyScrollbar targetRef={scrollWrapRef} deps={[tickets.length, gridTemplate, widthsPinned]} />
 
                       {/* Full pagination */}
                       <div className="px-4 py-3 border-t border-border/60 bg-muted/25">

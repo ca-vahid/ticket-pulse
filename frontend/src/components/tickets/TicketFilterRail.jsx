@@ -67,7 +67,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
             ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
             : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
           {Icon && <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" aria-hidden="true" />}
-          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground truncate">{title}</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">{title}</span>
           {activeCount > 0 && (
             <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold">
               {activeCount}
@@ -92,7 +92,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
 /** Checkbox facet row: label + optional adornment + optional count. */
 function Facet({ checked, onToggle, children, count }) {
   return (
-    <label className="flex items-center gap-2 px-1.5 py-[5px] rounded-md hover:bg-blue-50/70 dark:hover:bg-blue-500/10 cursor-pointer text-[13px] text-muted-foreground min-w-0">
+    <label className="flex items-center gap-2 px-1.5 py-[5px] rounded-md hover:bg-blue-50/70 dark:hover:bg-blue-500/10 cursor-pointer text-sm text-muted-foreground min-w-0">
       <input
         type="checkbox"
         checked={checked}
@@ -100,7 +100,7 @@ function Facet({ checked, onToggle, children, count }) {
         className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300 flex-shrink-0"
       />
       <span className="flex items-center gap-1.5 min-w-0 flex-1 truncate">{children}</span>
-      {count != null && <span className="text-[10px] text-muted-foreground/50 tabular-nums flex-shrink-0">{count}</span>}
+      {count != null && <span className="text-xs font-medium text-muted-foreground/80 tabular-nums flex-shrink-0 pl-1">{count}</span>}
     </label>
   );
 }
@@ -592,6 +592,8 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             {CANNED_VIEWS.map((v) => {
               const count = {
                 all: stats?.all, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
+                // "My open" = the open count the Members facet shows for me (16 Sep 2026).
+                mine: meta?.actor?.technicianId != null ? (stats?.byTechnician?.[meta.actor.technicianId] ?? (stats?.byTechnician ? 0 : undefined)) : undefined,
                 awaiting_approval: stats?.awaitingApproval,
                 noise: stats?.noise, deleted: stats?.deleted, resolved: stats?.resolved,
               }[v.key];
@@ -599,13 +601,13 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                 <button
                   key={v.key}
                   onClick={() => applyView(v)}
-                  className={`tp-focus-ring w-full flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-[13px] ${
+                  className={`tp-focus-ring w-full min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-sm ${
                     viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                   }`}
                 >
-                  {v.icon && <v.icon className="w-3 h-3 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
-                  <span className="flex-1 truncate">{v.label}</span>
-                  {count != null && <span className="text-[10px] text-muted-foreground/75 tabular-nums flex-shrink-0">{count.toLocaleString()}</span>}
+                  {v.icon && <v.icon className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
+                  <span className="flex-1 min-w-0 truncate">{v.label}</span>
+                  {count != null && <span className="text-xs font-medium text-muted-foreground/80 tabular-nums flex-shrink-0 pl-1">{count.toLocaleString()}</span>}
                 </button>
               );
             })}
@@ -618,7 +620,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                     <button
                       onClick={() => applyView(v)}
                       title={v.shared && !v.mine ? `Shared by ${v.ownerEmail}` : undefined}
-                      className={`tp-focus-ring flex-1 min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-[13px] ${
+                      className={`tp-focus-ring flex-1 min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-sm ${
                         viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                       }`}
                     >
@@ -1100,7 +1102,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
       aria-label="Ticket filters"
       data-collapsed={collapsed ? 'true' : undefined}
       className={`hidden lg:flex sticky top-4 self-start flex-col tp-card rounded-xl overflow-hidden
-        transition-[width] duration-300 ease-out motion-reduce:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(224px,14vw,300px)]'}`}
+        transition-[width] duration-300 ease-out motion-reduce:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(256px,15vw,320px)]'}`}
     >
       {/* Slim layer (collapsed) */}
       <div
@@ -1133,10 +1135,11 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
         </button>
       </div>
 
-      {/* Full layer — fixed inner width so text doesn't reflow mid-animation */}
+      {/* Full layer — a floor (not a fixed width) so the counts never clip when
+          the rail is narrower than the old 248px at 100% zoom (16 Sep 2026). */}
       <div
         aria-hidden={collapsed}
-        className={`flex flex-col w-[248px] flex-shrink-0 transition-opacity duration-150 ${
+        className={`flex flex-col w-full min-w-[256px] flex-shrink-0 transition-opacity duration-150 ${
           collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100 delay-100'
         }`}
       >
