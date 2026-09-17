@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.26-preview';
+export const APP_VERSION = '3.9.27-preview';
 
 export const changelog = [
+  {
+    version: '3.9.27-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Replies on FreshService tickets carry the replier’s name</strong> — with “post FreshService replies as the acting agent” on for a workspace, a reply from Ticket Pulse is now attributed to the person who wrote it even when they were added to the workspace by e-mail only (an app-only approver such as the CIO): Ticket Pulse looks the person up as a FreshService agent by e-mail. Until today such a reply left FreshService as the helpdesk address with no name and was recorded under “Ticket Pulse”.' },
+    ],
+  },
   {
     version: '3.9.26-preview',
     date: 'September 17, 2026',

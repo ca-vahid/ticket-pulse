@@ -22,6 +22,9 @@ import { plusAddressReplyTo, storeEntryMessageId, threadingHeadersForTicket } fr
 import { fsConversationEntryId, parseFsConversationId } from '../utils/fsEntryId.js';
 import { isFsReplyAsAgentEnabled } from './fsReplyAsAgentService.js';
 import { createHash } from 'node:crypto';
+
+// FS agent id by (workspace, e-mail) for reply attribution — see _fsAgentIdByEmail.
+const FS_AGENT_ID_CACHE = new Map();
 import mirrorService from './mirrorService.js';
 import { getFreshServiceDetail } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
@@ -3854,25 +3857,49 @@ class TicketService {
   }
 
   // The acting agent's FreshService user id for FS-side attribution (Phase
-  // DR4). Null unless the workspace flag is on AND the actor maps to a
-  // technician with an FS id (local/non-FS agents never qualify). Never
-  // throws — attribution is a nicety, the send is the job.
+  // DR4). Null unless the workspace flag is on AND the actor is a FreshService
+  // agent: a technician row with an FS id, or — for app-only members who are
+  // agents on the FS tenant but have no technician row here (Neville, 17 Sep
+  // 2026: his reply left as "it@bgcengineering.ca" with no name) — an agent
+  // found by e-mail, cached. Never throws — attribution is a nicety, the send
+  // is the job.
   async _fsActorUserId(workspaceId, actor) {
     try {
-      if (!actor?.technicianId) return null;
       if (!(await isFsReplyAsAgentEnabled(workspaceId))) return null;
-      const technician = await prisma.technician.findFirst({
-        where: { id: actor.technicianId, workspaceId },
-        select: { freshserviceId: true },
-      });
-      const fsId = technician?.freshserviceId;
-      if (fsId === null || fsId === undefined) return null;
-      const numeric = Number(fsId);
-      return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+      if (actor?.technicianId) {
+        const technician = await prisma.technician.findFirst({
+          where: { id: actor.technicianId, workspaceId },
+          select: { freshserviceId: true },
+        });
+        const fsId = technician?.freshserviceId;
+        if (fsId !== null && fsId !== undefined) {
+          const numeric = Number(fsId);
+          return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+        }
+        // A technician row without an FS id is a local (non-FS) agent — FS cannot attribute to them.
+        return null;
+      }
+      return await this._fsAgentIdByEmail(workspaceId, actor?.email);
     } catch (err) {
       logger.warn(`FS actor lookup failed for ${actor?.email || 'unknown'} (posting as API-key owner): ${err.message}`);
       return null;
     }
+  }
+
+  // FS agent id by e-mail, cached 12 h per workspace (misses 1 h) — one FS read
+  // per new person, not one per reply.
+  async _fsAgentIdByEmail(workspaceId, email) {
+    const key = String(email || '').trim().toLowerCase();
+    if (!key || !key.includes('@')) return null;
+    const cacheKey = `${workspaceId}:${key}`;
+    const hit = FS_AGENT_ID_CACHE.get(cacheKey);
+    if (hit && Date.now() < hit.until) return hit.id;
+    const client = await mirrorService.getInteractiveClient(workspaceId);
+    const agent = typeof client?.fetchAgentByEmail === 'function' ? await client.fetchAgentByEmail(key) : null;
+    const numeric = Number(agent?.id);
+    const id = agent && agent.active !== false && Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+    FS_AGENT_ID_CACHE.set(cacheKey, { id, until: Date.now() + (id ? 12 * 60 * 60 * 1000 : 60 * 60 * 1000) });
+    return id;
   }
 
   // ------------------------------------------------------------ conversation

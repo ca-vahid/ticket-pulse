@@ -34,7 +34,7 @@ const settingsRepositoryMock = {
   getSendGridConfig: jest.fn(),
 };
 const sendgridMock = { sendEmail: jest.fn() };
-const fsClientMock = { createReply: jest.fn(), addNote: jest.fn() };
+const fsClientMock = { createReply: jest.fn(), addNote: jest.fn(), fetchAgentByEmail: jest.fn(async () => null) };
 const mirrorServiceMock = {
   enqueueThreadEntry: jest.fn().mockResolvedValue({ id: 3 }),
   enqueueFieldSync: jest.fn().mockResolvedValue({ id: 2 }),
@@ -322,10 +322,28 @@ describe('FS reply-as-agent flag (DR4, default OFF)', () => {
     expect(fsClientMock.createReply).toHaveBeenCalledWith(239470, expect.any(String), { ccEmails: [], attachments: [] });
   });
 
-  test('flag on, actor without a technician mapping → no user_id', async () => {
+  test('flag on, actor without a technician mapping and unknown to FS → no user_id', async () => {
     settingsRepositoryMock.get.mockResolvedValue('1');
     prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
-    await ticketService.addReply(501, 1, { bodyText: 'hi' }, { ...agent, technicianId: null });
+    await ticketService.addReply(501, 1, { bodyText: 'hi' }, { ...agent, email: 'nobody@example.com', technicianId: null });
+    expect(fsClientMock.fetchAgentByEmail).toHaveBeenCalledWith('nobody@example.com');
     expect(fsClientMock.createReply).toHaveBeenCalledWith(239470, expect.any(String), { ccEmails: [], attachments: [] });
+  });
+
+  test('flag on, app-only member who IS a FreshService agent → their FS id rides along (Neville, 17 Sep 2026)', async () => {
+    // Neville replied on #241459 from Ticket Pulse; FS attributed it to the API-key
+    // owner and mailed it from it@bgcengineering.ca with no name. He has no
+    // technician row here but is agent 1001910770 on the tenant.
+    settingsRepositoryMock.get.mockResolvedValue('1');
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    fsClientMock.fetchAgentByEmail.mockResolvedValueOnce({ id: 1001910770, email: 'neville@example.com', active: true });
+    const neville = { email: 'neville@example.com', name: 'Neville Vyland', role: 'viewer', workspaceRole: 'viewer', technicianId: null, kind: 'member' };
+    await ticketService.addReply(501, 1, { bodyText: 'hi' }, neville);
+    expect(fsClientMock.createReply).toHaveBeenCalledWith(239470, expect.any(String), { ccEmails: [], attachments: [], userId: 1001910770 });
+    expect(prismaMock.technician.findFirst).not.toHaveBeenCalled();
+    // Second reply by the same person: served from the cache, no second FS lookup.
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'note' }, neville);
+    expect(fsClientMock.fetchAgentByEmail).toHaveBeenCalledTimes(1);
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.any(String), { isPrivate: true, attachments: [], userId: 1001910770 });
   });
 });
