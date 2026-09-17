@@ -1132,3 +1132,102 @@ export function formatPhone(raw) {
   if (digits.length === 11 && digits[0] === '1') return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}${tail}`;
   return s;
 }
+
+// ── Generated artwork + the big header badges (16 Sep 2026) ─────────────────
+/** One of the gpt-image-2 pictograms in public/brand/actions (72px, transparent). Decorative. */
+export function BrandArt({ name, className = 'h-5 w-5' }) {
+  return <img src={`/brand/actions/${name}.png`} alt="" aria-hidden="true" draggable={false} className={`flex-shrink-0 select-none ${className}`} />;
+}
+
+const PRIORITY_BADGE = {
+  1: { art: 'priority-low', cls: 'bg-muted text-muted-foreground border-border' },
+  2: { art: 'priority-medium', cls: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/30' },
+  3: { art: 'priority-high', cls: 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-100 dark:border-amber-500/40 tp-badge-pulse', ring: 'ring-amber-400/40' },
+  4: { art: 'priority-urgent', cls: 'bg-red-50 text-red-700 border-red-300 dark:bg-red-500/15 dark:text-red-100 dark:border-red-500/40 tp-badge-pulse', ring: 'ring-red-400/40' },
+};
+
+/**
+ * Header priority badge: generated art + the word, big enough to read across
+ * the room. High and Urgent carry a slow ring pulse (motion permitting).
+ */
+export function PriorityBadge({ priority, className = '' }) {
+  const def = PRIORITY_BADGE[priority] || PRIORITY_BADGE[1];
+  const label = PRIORITY_LABELS[priority] || `P${priority}`;
+  return (
+    <span
+      title={`Priority: ${label}`}
+      data-testid="priority-badge"
+      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-bold uppercase tracking-wide shadow-subtle ${def.cls} ${className}`}
+    >
+      <BrandArt name={def.art} className="h-6 w-6" />
+      {label}
+    </span>
+  );
+}
+
+const STATUS_ART = { open: 'status-open', pending: 'status-pending', resolved: 'status-resolved', closed: 'status-closed' };
+
+/** Header status badge: art by base status (custom statuses fall back to the pill's tone, no art). */
+export function StatusBadge({ status, tone = null, className = '' }) {
+  const key = String(status || '').trim().toLowerCase();
+  const art = STATUS_ART[key] || null;
+  const isRemoved = status === 'Deleted' || status === 'Spam';
+  const toneCls = tone || STATUS_COLORS[status] || 'bg-muted text-muted-foreground';
+  return (
+    <span
+      title={`Status: ${status}`}
+      data-testid="status-badge"
+      className={`inline-flex max-w-full items-center gap-2 rounded-xl border border-border/70 px-3 py-1.5 text-sm font-bold uppercase tracking-wide shadow-subtle ${toneCls} ${className}`}
+    >
+      {isRemoved ? <Ban className="h-5 w-5" aria-hidden="true" /> : art ? <BrandArt name={art} className="h-6 w-6" /> : null}
+      <span className="truncate">{status}</span>
+    </span>
+  );
+}
+
+/** Header type badge: the ticket type spelled out, with its generated art — the one chip that matters. */
+export function TypeBadge({ type, className = '' }) {
+  const { typeByName } = useTicketTypes();
+  if (!type) return null;
+  const def = typeByName(type);
+  const isIncident = def ? def.color === 'orange' || def.color === 'red' : /incident/i.test(type);
+  const tone = TYPE_COLOR_TONES[def?.color] || (isIncident ? TYPE_COLOR_TONES.orange : TYPE_COLOR_TONES.violet);
+  return (
+    <span
+      title={def?.description || type}
+      data-testid="type-badge"
+      className={`inline-flex items-center gap-2 rounded-xl px-2.5 py-1 text-sm font-semibold ${tone.tile}`}
+    >
+      <BrandArt name={isIncident ? 'type-incident' : 'type-request'} className="h-6 w-6" />
+      <span className={className}>{type}</span>
+    </span>
+  );
+}
+
+/**
+ * One chip for the FreshService fallback mirror of a TP-born ticket: synced →
+ * links to the FS copy; pending / error → the admin's retry. Replaces the three
+ * separate chips (Mirrored / Mirror now / View FS mirror) on the header.
+ */
+export function MirrorBadge({ ticket, fsUrl = null, onRetry = null, busy = false }) {
+  if (ticket?.origin !== 'ticketpulse') return null;
+  const state = ticket.mirrorState;
+  const base = 'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium';
+  if (state === 'mirrored') {
+    const inner = <><BrandArt name="mirror-synced" className="h-4 w-4" /> Mirrored{ticket.freshserviceTicketId ? <span className="font-mono text-muted-foreground/75">#{String(ticket.freshserviceTicketId)}</span> : null}</>;
+    const cls = `${base} bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/30`;
+    return fsUrl
+      ? <a href={fsUrl} target="_blank" rel="noreferrer" title={`A fallback copy exists in FreshService — open #${ticket.freshserviceTicketId}`} className={`tp-focus-ring ${cls} hover:bg-emerald-100 dark:hover:bg-emerald-500/20`} data-testid="mirror-badge">{inner}<ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
+      : <span title="A fallback copy exists in FreshService" className={cls} data-testid="mirror-badge">{inner}</span>;
+  }
+  const error = state === 'error';
+  const label = error ? 'Mirror error' : 'Mirror pending';
+  const title = error ? (ticket.mirrorError || 'Mirroring to FreshService failed') : 'Queued for the FreshService fallback mirror (auto-mirrors every ~60 s)';
+  const cls = error
+    ? `${base} bg-red-50 text-red-700 border-red-200 dark:bg-red-500/15 dark:text-red-200 dark:border-red-500/30`
+    : `${base} bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-500/15 dark:text-amber-100 dark:border-amber-500/30`;
+  const inner = <><BrandArt name={error ? 'mirror-error' : 'mirror-pending'} className="h-4 w-4" /> {label}</>;
+  return onRetry
+    ? <button type="button" onClick={onRetry} disabled={busy} title={`${title} — click to mirror now`} className={`tp-focus-ring ${cls} hover:brightness-95 disabled:opacity-60`} data-testid="mirror-badge">{inner}<span className="text-muted-foreground/75">· {busy ? 'mirroring…' : 'mirror now'}</span></button>
+    : <span title={title} className={cls} data-testid="mirror-badge">{inner}</span>;
+}

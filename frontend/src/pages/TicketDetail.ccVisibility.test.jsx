@@ -247,7 +247,12 @@ describe('TicketDetail "Also for" additional requesters (Phase MR)', () => {
     delete apiOverrides.fsUpdate;
   });
 
-  const alsoForCard = async () => screen.findByRole('group', { name: 'Also for (additional requesters)' });
+  // 16 Sep 2026: the editor lives in a popover — open it before looking inside.
+  const alsoForCard = async () => {
+    const card = await screen.findByRole('group', { name: 'Also for (additional requesters)' });
+    if (!within(card).queryByRole('dialog')) fireEvent.click(within(card).getByRole('button', { name: /Also for/ }));
+    return card;
+  };
   const addAlsoFor = (card, email) => {
     const input = within(card).getByRole('combobox', { name: 'Also for (additional requesters)' });
     fireEvent.change(input, { target: { value: email } });

@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.9.17-preview';
+export const APP_VERSION = '3.9.18-preview';
 
 export const changelog = [
+  {
+    version: '3.9.18-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Ticket header, round two</strong> — the subject is the very first thing on the page. Priority and status are big illustrated badges on the right (High and Urgent breathe gently), and the ticket type — Service Request or Incident — is a large illustrated badge that leads the identity row. The three mirror chips collapsed into one (click it to open the FreshService copy, or to mirror now when it is pending), and “Self-assigned” is an icon.' },
+      { type: 'changed', html: '<strong>Actions</strong> — Edit, <em>Close</em> (was Resolve), Delete and Mark as noise are back in the row; Print, Copy link, Clone, Merge and Split moved into <em>More</em>. <em>Pick up this ticket</em> is its own call-to-action under the badges and appears only while the ticket is unassigned.' },
+      { type: 'changed', html: '<strong>Also for is a popover</strong> — one button with a count opens the additional-requesters editor instead of a permanent input under the requester card.' },
+      { type: 'improved', html: '<strong>Your photo in the top bar</strong> — the account button shows your directory photo instead of initials when one exists.' },
+      { type: 'improved', html: '<strong>Borders you can see</strong> — table lines, dividers and card edges are a notch darker in both themes.' },
+    ],
+  },
   {
     version: '3.9.17-preview',
     date: 'September 16, 2026',

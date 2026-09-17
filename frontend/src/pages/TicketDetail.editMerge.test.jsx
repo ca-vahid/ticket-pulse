@@ -261,6 +261,7 @@ describe('Edit ticket — header button + modal (Phase ET3/ET4)', () => {
 describe('Merge button honesty (Phase MB1)', () => {
   test('TP-born Open: enabled, opens the merge dialog', async () => {
     await ready();
+    fireEvent.click(screen.getByTestId('more-actions')); // Merge lives in the More menu (16 Sep 2026)
     const btn = screen.getByTestId('merge-button');
     expect(btn).toBeEnabled();
     expect(btn).toHaveAttribute('aria-disabled', 'false');
@@ -271,6 +272,7 @@ describe('Merge button honesty (Phase MB1)', () => {
   test('FS-born: rendered but disabled with the "FreshService owns this conversation" reason', async () => {
     apiOverrides.get = vi.fn(() => Promise.resolve({ data: FS_BORN }));
     await ready();
+    fireEvent.click(screen.getByTestId('more-actions')); // Merge lives in the More menu (16 Sep 2026)
     const btn = screen.getByTestId('merge-button');
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute('aria-disabled', 'true');
@@ -282,6 +284,7 @@ describe('Merge button honesty (Phase MB1)', () => {
   test('TP-born Closed: disabled with the "reopen first" reason', async () => {
     apiOverrides.get = vi.fn(() => Promise.resolve({ data: { ...NATIVE, status: 'Closed', resolvedAt: '2026-08-29T10:00:00Z', closedAt: '2026-08-29T10:00:00Z' } }));
     await ready();
+    fireEvent.click(screen.getByTestId('more-actions')); // Merge lives in the More menu (16 Sep 2026)
     const btn = screen.getByTestId('merge-button');
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute('title', 'Only Open or Pending tickets can receive a merge — reopen this ticket first');
@@ -290,6 +293,7 @@ describe('Merge button honesty (Phase MB1)', () => {
   test('basic-access (technician-only) members see Merge and Split too (QA 09-15 #3)', async () => {
     apiOverrides.meta = vi.fn(() => Promise.resolve({ data: { ...META, actor: { ...META.actor, kind: 'agent', technicianId: 7 } } }));
     await ready();
+    fireEvent.click(screen.getByTestId('more-actions')); // Merge + Split live in the More menu (16 Sep 2026)
     expect(screen.getByTestId('merge-button')).toBeInTheDocument();
     expect(screen.getByTestId('split-button')).toBeInTheDocument();
   });
