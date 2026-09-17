@@ -1055,7 +1055,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
         <div
           role="dialog"
           aria-label="Customize columns"
-          className="absolute top-full mt-1 z-30 right-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn"
+          className="absolute top-full mt-1 z-30 left-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn"
         >
           <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
             Drag to reorder · applies on large screens (smaller screens keep the essentials)

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.13-preview';
+export const APP_VERSION = '3.9.14-preview';
 
 export const changelog = [
+  {
+    version: '3.9.14-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Navigation notch</strong> — the expand control is now a round button sitting on the rail’s right border (FreshService-style), with a blue hover. On the tickets pages the same spot also offers the thin-edge collapse, and the old “Collapse rail” button at the foot of the rail is gone — one place for both.' },
+      { type: 'fixed', html: '<strong>Columns menu no longer cut off</strong> — it opened to the left of its button and fell off the screen when the navigation rail was collapsed; it now opens to the right.' },
+    ],
+  },
   {
     version: '3.9.13-preview',
     date: 'September 16, 2026',

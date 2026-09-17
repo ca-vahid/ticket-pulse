@@ -50,8 +50,11 @@ describe('SideRail', () => {
     expect(nav.className).not.toMatch(/focus-within:w-/);
     expect(nav.className).toMatch(/w-\[58px\]/);
     const tab = screen.getByRole('button', { name: 'Expand navigation' });
+    // The notch rides the rail's right border: 58px rail → 44px.
+    expect(screen.getByTestId('rail-notch').style.left).toBe('44px');
     fireEvent.click(tab);
     expect(nav.className).toMatch(/tp-side-rail--open/);
+    expect(screen.getByTestId('rail-notch').style.left).toBe('196px');
     expect(screen.getByRole('button', { name: 'Collapse navigation' })).toHaveAttribute('aria-expanded', 'true');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(nav.className).not.toMatch(/tp-side-rail--open/);
@@ -126,15 +129,23 @@ describe('SideRail', () => {
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
-  test('tickets pages show the full rail by default with a collapse control (QA 07-13 #6)', () => {
+  test('tickets pages show the full rail by default; the notch offers the thin-edge collapse there only (QA 07-13 #6)', () => {
     localStorage.removeItem('tp_ticketsRailCollapsed');
     renderRail('/tickets/42');
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).not.toHaveClass('tp-side-rail--peek');
-    expect(screen.getByTitle(/Collapse the navigation/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Collapse the navigation to a thin edge/i)).toBeInTheDocument();
+    // No second control at the rail foot any more — the notch is the one place.
+    expect(screen.queryByText(/Collapse rail/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(/Collapse the navigation to a thin edge/i));
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveClass('tp-side-rail--peek');
+    expect(screen.getByTestId('rail-notch').style.left).toBe('6px');
+    fireEvent.click(screen.getByRole('button', { name: 'Show navigation' }));
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).not.toHaveClass('tp-side-rail--peek');
     cleanup();
+    localStorage.removeItem('tp_ticketsRailCollapsed');
     renderRail('/dashboard');
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).not.toHaveClass('tp-side-rail--peek');
-    expect(screen.queryByTitle(/Collapse the navigation/i)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/Collapse the navigation to a thin edge/i)).not.toBeInTheDocument();
   });
 
   test('a persisted collapse preference restores peek mode on tickets pages', () => {
