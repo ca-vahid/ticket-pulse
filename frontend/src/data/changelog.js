@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.18-preview';
+export const APP_VERSION = '3.9.19-preview';
 
 export const changelog = [
+  {
+    version: '3.9.19-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Filter sections stay put</strong> — collapsing a tall section such as Members used to shorten the rail and yank the heading you had just clicked hundreds of pixels away. The rail now scrolls inside its own frame and reserves the room a closing section frees, so the title stays under your cursor: click to close, click again to open.' },
+      { type: 'fixed', html: '<strong>Filtered-view bar no longer ghosts</strong> — it was translucent, so the refresh and sort buttons showed through it as you scrolled. It is solid now.' },
+    ],
+  },
   {
     version: '3.9.18-preview',
     date: 'September 16, 2026',
