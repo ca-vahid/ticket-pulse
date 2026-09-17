@@ -55,7 +55,25 @@ export default {
         subtle: '0 1px 2px rgb(15 23 42 / 0.06), 0 1px 1px rgb(15 23 42 / 0.04)',
         soft: '0 18px 45px rgb(15 23 42 / 0.10), 0 6px 18px rgb(15 23 42 / 0.06)',
       },
+      // The house easing for rails, panels and menus (16 Sep 2026). The
+      // arbitrary form ease-[cubic-bezier(0.22,1,0.36,1)] never made it into
+      // the build (commas inside the brackets), so it lives here as ease-soft.
+      transitionTimingFunction: {
+        soft: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      },
     },
   },
-  plugins: [animate],
+  plugins: [
+    animate,
+    // Motion is an APP preference, not only an OS flag (16 Sep 2026): the
+    // `motion-off:` variant keys off <html data-motion="reduce"> — stamped
+    // by utils/motionPreference.js from the user's choice (On by default,
+    // System, Off) — instead of prefers-reduced-motion directly.
+    ({ addVariant }) => {
+      // Tailwind's own motion-reduce:/motion-safe: cannot be overridden (the
+      // core variant plugins register last), so the app uses its own names.
+      addVariant('motion-off', 'html[data-motion="reduce"] &');
+      addVariant('motion-on', 'html:not([data-motion="reduce"]) &');
+    },
+  ],
 };

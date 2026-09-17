@@ -90,7 +90,7 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 min-[800px]:items-center" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div className="absolute inset-0 bg-slate-900/55 backdrop-blur-[2px]" onClick={busy ? undefined : onCancel} aria-hidden="true" />
-      <div className="relative w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-soft motion-safe:animate-scaleIn">
+      <div className="relative w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-soft motion-on:animate-scaleIn">
         <div className="flex items-start gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100">
             <ShieldAlert className="h-5 w-5" aria-hidden="true" />

@@ -5,6 +5,10 @@ import { MsalProvider } from '@azure/msal-react';
 import { msalConfig } from './config/msalConfig';
 import App from './App.jsx';
 import './index.css';
+import { installMotionPreference } from './utils/motionPreference';
+
+// Motion is decided by the app (On by default) before the first paint.
+installMotionPreference();
 
 const msalInstance = new PublicClientApplication(msalConfig);
 

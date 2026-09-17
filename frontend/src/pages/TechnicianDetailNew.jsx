@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { motionReduced } from '../utils/motionPreference';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import {
   Layers, Hand, CheckCircle2, Inbox, RotateCcw, Star, X, ArrowRight,
@@ -360,8 +361,7 @@ export default function TechnicianDetailNew() {
   const handleChipClick = (key) => {
     setActiveChip(key);
     if (key === 'satisfaction' && satisfactionRef.current) {
-      const reduce = typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const reduce = motionReduced(); // app preference (On by default), not the raw OS flag
       satisfactionRef.current.scrollIntoView?.({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
     }
   };
@@ -371,7 +371,7 @@ export default function TechnicianDetailNew() {
   if (!technician) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/50">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 motion-reduce:animate-none" />
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 motion-off:animate-none" />
       </div>
     );
   }
@@ -554,7 +554,7 @@ export default function TechnicianDetailNew() {
       {/* Thin progress bar while re-fetching (navigation between periods) */}
       {isLoading && (
         <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-blue-100 dark:bg-blue-500/20 overflow-hidden">
-          <div className="h-full bg-blue-500 animate-pulse w-full motion-reduce:animate-none" />
+          <div className="h-full bg-blue-500 animate-pulse w-full motion-off:animate-none" />
         </div>
       )}
 
@@ -690,7 +690,7 @@ export default function TechnicianDetailNew() {
               <Layers className="h-4 w-4" aria-hidden="true" />
               Open in Timeline Explorer
             </span>
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true" />
+            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 motion-off:transition-none" aria-hidden="true" />
           </Link>
         </aside>
 

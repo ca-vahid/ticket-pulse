@@ -86,7 +86,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
           aria-expanded={open}
           className="tp-focus-ring flex items-center gap-1.5 flex-1 min-w-0 text-left rounded"
         >
-          <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+          <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0 transition-transform duration-300 ease-soft motion-off:transition-none ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
           {Icon && <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" aria-hidden="true" />}
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">{title}</span>
           {activeCount > 0 && (
@@ -108,7 +108,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
       {rendered && (
         <div
           ref={bodyRef}
-          className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${shown ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+          className={`grid transition-[grid-template-rows,opacity] duration-300 ease-soft motion-off:transition-none ${shown ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
           data-open={shown ? 'true' : 'false'}
         >
           <div className="min-h-0 overflow-hidden">
@@ -1133,7 +1133,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
       aria-label="Ticket filters"
       data-collapsed={collapsed ? 'true' : undefined}
       className={`hidden lg:flex sticky top-4 self-start flex-col tp-card rounded-xl overflow-hidden
-        transition-[width] duration-300 ease-out motion-reduce:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(256px,15vw,320px)]'}`}
+        transition-[width] duration-300 ease-out motion-off:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(256px,15vw,320px)]'}`}
     >
       {/* Slim layer (collapsed) */}
       <div

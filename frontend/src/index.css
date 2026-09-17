@@ -240,11 +240,9 @@ code {
     transform: none;
     transition-delay: 0.06s;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .tp-side-rail .tp-rail-label {
-      transition: none;
-      transform: none;
-    }
+    html[data-motion="reduce"] .tp-side-rail .tp-rail-label {
+    transition: none;
+    transform: none;
   }
 
   /* Peek mode (/tickets*): the page has its own left filter rail, so the nav
@@ -266,11 +264,9 @@ code {
   .tp-side-rail--peek .tp-rail-peek-hint {
     transition: opacity 0.15s ease-out;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .tp-side-rail--peek .tp-rail-content,
-    .tp-side-rail--peek .tp-rail-peek-hint {
-      transition: none;
-    }
+    html[data-motion="reduce"] .tp-side-rail--peek .tp-rail-content,
+  html[data-motion="reduce"] .tp-side-rail--peek .tp-rail-peek-hint {
+    transition: none;
   }
 
   /* Glass, surface, card and focus ring are token-driven (Phase DM-A): the
@@ -846,12 +842,10 @@ code {
 .animate-popIn {
   animation: popIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-@media (prefers-reduced-motion: reduce) {
-  .animate-popIn,
-  .animate-scaleIn,
-  .animate-fadeIn {
-    animation-duration: 0.01ms;
-  }
+html[data-motion="reduce"] .animate-popIn,
+html[data-motion="reduce"] .animate-scaleIn,
+html[data-motion="reduce"] .animate-fadeIn {
+  animation-duration: 0.01ms;
 }
 
 @keyframes slideInRight {
@@ -972,8 +966,8 @@ code {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .tp-ai-live::before { animation: none; opacity: 0.8; }
+html[data-motion="reduce"] .tp-ai-live::before {
+  animation: none; opacity: 0.8;
 }
 
 /* "AI choosing…" shimmer slot (assignee cell) */
@@ -1071,55 +1065,55 @@ code {
   to { background-position: -100% 0; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tp-pill-enter,
-  .tp-pill-pulse,
-  .tp-pill-done,
-  .tp-count-pop,
-  .tp-fx1::after,
-  .tp-new-chip,
-  .tp-ai-live::before,
-  .tp-ai-think,
-  .tp-ai-twinkle,
-  .tp-ai-accent::before,
-  .tp-ai-chip,
-  .tp-assign-pop > *,
-  .tp-assign-pop::after,
-  .animate-fadeIn,
-  .animate-slideInLeft,
-  .animate-scaleIn,
-  .animate-slide-in-right {
-    animation: none;
-  }
-  /* slideInLeft/scaleIn start at opacity 0 and rely on the animation's
+html[data-motion="reduce"] .tp-pill-enter,
+html[data-motion="reduce"] .tp-pill-pulse,
+html[data-motion="reduce"] .tp-pill-done,
+html[data-motion="reduce"] .tp-count-pop,
+html[data-motion="reduce"] .tp-fx1::after,
+html[data-motion="reduce"] .tp-new-chip,
+html[data-motion="reduce"] .tp-ai-live::before,
+html[data-motion="reduce"] .tp-ai-think,
+html[data-motion="reduce"] .tp-ai-twinkle,
+html[data-motion="reduce"] .tp-ai-accent::before,
+html[data-motion="reduce"] .tp-ai-chip,
+html[data-motion="reduce"] .tp-assign-pop > *,
+html[data-motion="reduce"] .tp-assign-pop::after,
+html[data-motion="reduce"] .animate-fadeIn,
+html[data-motion="reduce"] .animate-slideInLeft,
+html[data-motion="reduce"] .animate-scaleIn,
+html[data-motion="reduce"] .animate-slide-in-right {
+  animation: none;
+}
+html[data-motion="reduce"] /* slideInLeft/scaleIn start at opacity 0 and rely on the animation's
      `forwards` fill to become visible — with the animation disabled the
      content stayed invisible for reduced-motion users (dashboard rows
      rendered fully transparent). Show them statically instead. */
   .animate-slideInLeft,
-  .animate-scaleIn {
-    opacity: 1;
-  }
-  /* Static fallbacks: no motion, but the moment still shows for the few
+html[data-motion="reduce"] .animate-scaleIn {
+  opacity: 1;
+}
+html[data-motion="reduce"] /* Static fallbacks: no motion,
+html[data-motion="reduce"] but the moment still shows for the few
      seconds each fx class is applied (cleared by the same JS timer). */
   .tp-assign-pop::after {
-    box-shadow: 0 0 0 3px rgb(16 185 129 / 0.45);
-  }
-  /* Just-arrived / just-updated row: a STEADY tint instead of the sweep, so
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.45);
+}
+html[data-motion="reduce"] /* Just-arrived / just-updated row: a STEADY tint instead of the sweep,
+html[data-motion="reduce"] so
      the row is still flagged without motion. This has to be stated
      explicitly — `animation: none` alone would leave the gradient parked
      across the row at full strength with nothing to carry it away. It is
      self-limiting because the class is removed when rowFx clears (3.2s). */
   .tp-fx1::after {
-    background: rgb(59 130 246 / 0.1);
-  }
-  .tp-fx1-updated::after {
-    background: rgb(14 165 233 / 0.09);
-  }
-  /* NEW chip: stay fully visible (the animation's `both` fill would otherwise
+  background: rgb(59 130 246 / 0.1);
+}
+html[data-motion="reduce"] .tp-fx1-updated::after {
+  background: rgb(14 165 233 / 0.09);
+}
+html[data-motion="reduce"] /* NEW chip: stay fully visible (the animation's `both` fill would otherwise
      end on the invisible 100% keyframe on browsers that honor fill over none). */
   .tp-new-chip {
-    opacity: 1;
-  }
+  opacity: 1;
 }
 
 /* Attachment preview modal — mammoth (Word) and SheetJS (Excel) emit bare
@@ -1147,6 +1141,6 @@ code {
   100% { background-color: transparent; }
 }
 .tp-history-new { animation: tpHistoryNew 2.4s ease-out 1; }
-@media (prefers-reduced-motion: reduce) {
-  .tp-history-new { animation: none; }
+html[data-motion="reduce"] .tp-history-new {
+  animation: none;
 }

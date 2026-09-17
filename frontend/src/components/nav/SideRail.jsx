@@ -138,7 +138,7 @@ export default function SideRail() {
         onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
         onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
         className={cn(
-          'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:flex print:hidden',
+          'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-300 ease-soft motion-off:transition-none md:flex print:hidden',
           peek
             ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
             : (expanded ? 'tp-side-rail--open w-[210px]' : 'w-[58px]'),
@@ -211,7 +211,7 @@ export default function SideRail() {
           stacked when the tickets pages also offer the thin edge. Fixed and
           OUTSIDE the nav (which clips its overflow), so it follows the width. */}
       <div
-        className="tp-rail-notch fixed top-[66px] z-[51] hidden flex-col items-center gap-1.5 transition-[left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:flex print:hidden"
+        className="tp-rail-notch fixed top-[66px] z-[51] hidden flex-col items-center gap-1.5 transition-[left] duration-300 ease-soft motion-off:transition-none md:flex print:hidden"
         style={{ left: `${railWidth - 14}px` }}
         data-testid="rail-notch"
       >
