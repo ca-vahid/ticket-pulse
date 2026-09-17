@@ -14,7 +14,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const {
-  APPROVAL_STATES, APPROVAL_REQUIREMENT, deriveState, rowState, decisiveGroup,
+  APPROVAL_STATES, APPROVAL_REQUIREMENT, deriveState, rowState, decisiveGroup, fsApprovalState, combineStates,
 } = await import('../src/services/approvalVerdictService.js');
 
 const NOW = new Date('2026-09-08T12:00:00Z');
@@ -94,5 +94,36 @@ describe('approval verdict — the state machine', () => {
     ];
     const group = decisiveGroup(rows, 'APPROVED', NOW);
     expect(group.map((r) => r.id).sort()).toEqual([8, 9]);
+  });
+});
+
+describe('FreshService approvals count too (17 Sep 2026)', () => {
+  // 95 of 625 hardware tickets carried an FS approval Ticket Pulse never saw;
+  // #219171 was "needs no approval" while approved in FreshService since April.
+  test.each([
+    ['Approved', 'APPROVED'],
+    ['Requested', 'PENDING'],
+    ['Rejected', 'REJECTED'],
+    ['Cancelled', 'CANCELLED'],
+    ['approved ', 'APPROVED'],
+  ])('FS label %s → %s', (label, state) => {
+    expect(fsApprovalState(label)).toBe(state);
+  });
+
+  test('"Not Requested", null and junk are not a state', () => {
+    for (const v of ['Not Requested', null, undefined, '', 'banana']) expect(fsApprovalState(v)).toBeNull();
+  });
+
+  test('no Ticket Pulse rows → the FreshService state decides, and says so', () => {
+    expect(combineStates('NOT_REQUESTED', 'APPROVED')).toEqual({ state: 'APPROVED', source: 'freshservice' });
+    expect(combineStates('NOT_REQUESTED', 'PENDING')).toEqual({ state: 'PENDING', source: 'freshservice' });
+    expect(combineStates('NOT_REQUESTED', null)).toEqual({ state: 'NOT_REQUESTED', source: null });
+  });
+
+  test('both systems: the more decisive state wins, ties go to Ticket Pulse', () => {
+    expect(combineStates('PENDING', 'APPROVED')).toEqual({ state: 'APPROVED', source: 'freshservice' });
+    expect(combineStates('APPROVED', 'REJECTED')).toEqual({ state: 'APPROVED', source: 'ticketpulse' });
+    expect(combineStates('APPROVED', 'APPROVED')).toEqual({ state: 'APPROVED', source: 'ticketpulse' });
+    expect(combineStates('REJECTED', null)).toEqual({ state: 'REJECTED', source: 'ticketpulse' });
   });
 });

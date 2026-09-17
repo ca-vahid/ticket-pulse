@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.22-preview';
+export const APP_VERSION = '3.9.23-preview';
 
 export const changelog = [
+  {
+    version: '3.9.23-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>FreshService approvals now count</strong> — most IT approvals were raised in FreshService, and Ticket Pulse never read them: 95 of 625 hardware tickets in the last 180 days were approved there while the API answered “needs no approval”. Every synced ticket now carries its FreshService approval status, and the approval verdict (<code>GET /api/v1/tickets/{id}/approval</code>) and the laptop hand-out check count it. Responses gain <code>approval.source</code> (<em>ticketpulse</em> or <em>freshservice</em>).' },
+    ],
+  },
   {
     version: '3.9.22-preview',
     date: 'September 17, 2026',

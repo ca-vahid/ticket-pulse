@@ -52,6 +52,37 @@ const STATE_BY_STATUS = Object.freeze({
 // siblings become when someone else decides first.
 const PRECEDENCE = Object.freeze(['APPROVED', 'PENDING', 'INFO_REQUESTED', 'EXPIRED', 'REJECTED', 'CANCELLED']);
 
+// FreshService approvals (17 Sep 2026). Most IT approvals were raised in FreshService,
+// not Ticket Pulse: 95 FS-approved vs 15 TP-approved on 625 hardware tickets in 180 days.
+// The FS ticket payload carries `approval_status_name`; it maps onto the same enum.
+// 'Not Requested' and unknown labels are not a state — they mean FS has nothing to say.
+const FS_STATE_BY_NAME = Object.freeze({
+  approved: 'APPROVED',
+  requested: 'PENDING',
+  rejected: 'REJECTED',
+  cancelled: 'CANCELLED',
+});
+
+/** FreshService `approval_status_name` → verdict state, or null when FS has no approval. */
+export function fsApprovalState(name) {
+  const key = String(name || '').trim().toLowerCase();
+  return FS_STATE_BY_NAME[key] || null;
+}
+
+/**
+ * One state from both systems. The more decisive state wins by the same precedence
+ * that orders Ticket Pulse rows; a tie goes to Ticket Pulse (it carries the approvers).
+ * `source` names the system that produced the state, null when nobody asked anywhere.
+ */
+export function combineStates(tpState, fsState) {
+  const tp = tpState || 'NOT_REQUESTED';
+  if (!fsState) return { state: tp, source: tp === 'NOT_REQUESTED' ? null : 'ticketpulse' };
+  if (tp === 'NOT_REQUESTED') return { state: fsState, source: 'freshservice' };
+  return PRECEDENCE.indexOf(fsState) < PRECEDENCE.indexOf(tp)
+    ? { state: fsState, source: 'freshservice' }
+    : { state: tp, source: 'ticketpulse' };
+}
+
 function publicBaseUrl() {
   const configured = process.env.PUBLIC_APP_URL
     || process.env.FRONTEND_PUBLIC_URL
@@ -143,6 +174,7 @@ class ApprovalVerdictService {
       select: {
         id: true, subject: true, status: true, ticketType: true, origin: true,
         nativeNumber: true, freshserviceTicketId: true, createdAt: true, updatedAt: true,
+        fsApprovalStatusName: true,
         requester: { select: { name: true, email: true } },
       },
     });
@@ -159,8 +191,10 @@ class ApprovalVerdictService {
       orderBy: { id: 'desc' },
     });
 
-    const state = deriveState(rows, now);
-    const group = decisiveGroup(rows, state, now);
+    const tpState = deriveState(rows, now);
+    const { state, source } = combineStates(tpState, fsApprovalState(ticket.fsApprovalStatusName));
+    // Approver detail exists only for Ticket Pulse rows; a FreshService verdict names the system.
+    const group = source === 'freshservice' ? [] : decisiveGroup(rows, tpState, now);
     const decided = group
       .filter((r) => r.decidedAt)
       .sort((a, b) => new Date(b.decidedAt) - new Date(a.decidedAt))[0] || null;
@@ -190,6 +224,9 @@ class ApprovalVerdictService {
       approval: {
         state,
         isApproved: state === 'APPROVED',
+        // 'ticketpulse' | 'freshservice' | null — which system holds the decisive approval.
+        source,
+        freshserviceStatus: ticket.fsApprovalStatusName || null,
         requirement: APPROVAL_REQUIREMENT,
         scope: category ? 'category' : 'ticket',
         category: category ? category.name : (group[0]?.approvalCategory?.name || null),

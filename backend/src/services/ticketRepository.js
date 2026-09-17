@@ -284,6 +284,8 @@ class TicketRepository {
         groupId: data.groupId !== undefined ? data.groupId : undefined,
         rejectionCount: data.rejectionCount !== undefined ? data.rejectionCount : undefined,
         freshserviceUpdatedAt: data.freshserviceUpdatedAt || undefined,
+        fsApprovalStatus: data.fsApprovalStatus !== undefined ? data.fsApprovalStatus : undefined,
+        fsApprovalStatusName: data.fsApprovalStatusName !== undefined ? data.fsApprovalStatusName : undefined,
         toEmails: data.toEmails !== undefined ? data.toEmails : undefined,
         ccEmails: data.ccEmails !== undefined ? data.ccEmails : undefined,
         replyCcEmails: data.replyCcEmails !== undefined ? data.replyCcEmails : undefined,
@@ -309,6 +311,8 @@ class TicketRepository {
       const createPayload = {
         freshserviceTicketId: BigInt(data.freshserviceTicketId),
         subject: data.subject,
+        fsApprovalStatus: data.fsApprovalStatus ?? null,
+        fsApprovalStatusName: data.fsApprovalStatusName ?? null,
         description: data.description,
         descriptionText: data.descriptionText,
         status: data.status,

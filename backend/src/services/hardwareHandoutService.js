@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolvePersonName } from './personDirectoryService.js';
+import { fsApprovalState, combineStates } from './approvalVerdictService.js';
 
 /**
  * "Request for Cristian Orellana : Laptop" — an IT agent filing on behalf of
@@ -198,7 +199,7 @@ class HardwareHandoutService {
       where,
       select: {
         id: true, subject: true, status: true, createdAt: true, origin: true,
-        nativeNumber: true, freshserviceTicketId: true,
+        nativeNumber: true, freshserviceTicketId: true, fsApprovalStatusName: true,
         requester: { select: { id: true, name: true, email: true } },
         internalCategory: { select: { name: true } },
         internalSubcategory: { select: { name: true } },
@@ -290,11 +291,17 @@ class HardwareHandoutService {
     // All approval rows across every matching ticket decide the state together:
     // a person with an approved request and an older rejected one is approved.
     const allRows = mine.flatMap((t) => t.approvals || []);
-    const state = deriveState(allRows, now);
+    const tpState = deriveState(allRows, now);
+    // FreshService approvals on those tickets count too (17 Sep 2026): the most decisive one.
+    const fsBest = mine.map((t) => fsApprovalState(t.fsApprovalStatusName)).filter(Boolean)
+      .sort((a, b) => PRECEDENCE.indexOf(a) - PRECEDENCE.indexOf(b))[0] || null;
+    const { state, source } = combineStates(tpState, fsBest);
 
     // The ticket we name is the one that carries the decisive state, else the
     // most recent — never an arbitrary one.
-    const decisive = mine.find((t) => (t.approvals || []).some((r) => rowState(r, now) === state)) || mine[0];
+    const decisive = mine.find((t) => (t.approvals || []).some((r) => rowState(r, now) === state))
+      || mine.find((t) => fsApprovalState(t.fsApprovalStatusName) === state)
+      || mine[0];
     const decisiveRow = (decisive.approvals || []).find((r) => rowState(r, now) === state) || null;
 
     const blocking = BLOCKING.has(state);
@@ -303,7 +310,9 @@ class HardwareHandoutService {
 
     let reason;
     if (state === 'APPROVED') {
-      reason = `Approved on ${ticketDisplayRef(decisive)}.`;
+      reason = source === 'freshservice'
+        ? `Approved in FreshService on ${ticketDisplayRef(decisive)}.`
+        : `Approved on ${ticketDisplayRef(decisive)}.`;
     } else if (blocking) {
       reason = `${ticketDisplayRef(decisive)} has an approval request that is ${state.toLowerCase().replace('_', ' ')} — do not hand over the asset until it is granted.`;
     } else {
@@ -324,8 +333,9 @@ class HardwareHandoutService {
       isApproved,
       approval: {
         state,
+        source,
         decidedAt: decisiveRow?.decidedAt || null,
-        decidedBy: decisiveRow?.approverName || decisiveRow?.approverEmail || null,
+        decidedBy: decisiveRow?.approverName || decisiveRow?.approverEmail || (source === 'freshservice' ? 'FreshService approval' : null),
         category: decisiveRow?.approvalCategory?.name || null,
       },
       ticket: shapeTicket(decisive),

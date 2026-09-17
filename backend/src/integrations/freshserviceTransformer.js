@@ -114,6 +114,10 @@ export function transformTicket(fsTicket, {
       frDueBy: fsTicket.fr_due_by ? new Date(fsTicket.fr_due_by) : null,
       updatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : new Date(),
       freshserviceUpdatedAt: fsTicket.updated_at ? new Date(fsTicket.updated_at) : null,
+      // FreshService approval status rides the ticket payload; a payload without the
+      // field (undefined) leaves the stored value alone, an explicit null clears it.
+      fsApprovalStatus: fsTicket.approval_status === undefined ? undefined : (fsTicket.approval_status ?? null),
+      fsApprovalStatusName: fsTicket.approval_status_name === undefined ? undefined : (fsTicket.approval_status_name ?? null),
       source: fsTicket.source || null,
       toEmails: normalizeEmailList(fsTicket.to_emails),
       ccEmails: normalizeEmailList(fsTicket.cc_emails),
