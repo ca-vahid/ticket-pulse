@@ -2163,6 +2163,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     // with the backend's "outside_assigned" filter (which doesn't look at
     // status either), so the "Manually in FreshService" sub-tab and the
     // per-row decision pill always agree.
+    // QA 09-16 #3: the AI called it noise but the ticket stayed a ticket —
+    // the sender is protected (HR, a person, a never-noise rule). Say so,
+    // instead of printing "Noise" over a ticket that was never noise.
+    if (run.decision === 'noise_dismissed' && run.ticket && run.ticket.isNoise === false) {
+      const why = run.ticket.noiseSuppressReason === 'person_requester' ? 'the sender is a person or a protected team'
+        : run.ticket.noiseSuppressReason ? `rule: ${String(run.ticket.noiseSuppressReason).replace(/_/g, ' ')}` : 'a never-noise rule';
+      return {
+        label: 'Noise verdict · kept',
+        pillClass: 'bg-muted text-foreground/85 ring-1 ring-emerald-300/60 dark:ring-emerald-500/30',
+        tooltip: `The AI judged this noise, but the ticket was NOT flagged — ${why}. It stays a normal ticket; anything that closed it happened outside the noise pipeline.`,
+      };
+    }
     const externallyAssigned = run.decision === 'pending_review' && run.ticket?.assignedTechId;
     if (externallyAssigned) {
       return {

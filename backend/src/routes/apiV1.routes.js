@@ -256,7 +256,29 @@ const CREATE_BODY_KEYS = new Set([
   // per-RECORD key; reopenOnResubmit/resubmitStrategy tune what happens when
   // it matches an existing ticket.
   'externalRef', 'reopenOnResubmit', 'resubmitStrategy',
+  // QA 09-16 #2: a private note riding the same call (resubmission or PATCH).
+  'addNote', 'note',
 ]);
+
+/**
+ * `addNote` (QA 09-16 #2): a private note that rides a ticket write so "the
+ * record was resubmitted" is ONE call — reopen + fields + note — instead of
+ * PATCH followed by POST /notes. Accepts a plain string or
+ * { body, bodyHtml?, stage?, agent? } (the /notes shape). Returns null when
+ * nothing was sent; 400 on garbage.
+ */
+export function normalizeAddNote(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    return text ? { bodyText: text, bodyHtml: null, stage: null, agent: null } : null;
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw problems.badRequest('addNote must be a string or an object with a body');
+  const text = String(raw.body ?? raw.bodyText ?? '').trim();
+  const html = raw.bodyHtml ? String(raw.bodyHtml) : null;
+  if (!text && !html) throw problems.badRequest('addNote.body is required');
+  return { bodyText: text || null, bodyHtml: html, stage: raw.stage ?? null, agent: raw.agent ?? null };
+}
 
 // Resubmission response (Phase PA): 200 + top-level resubmitted:true so Power
 // Automate flows can branch on it without digging into meta.
@@ -276,6 +298,9 @@ function respondResubmitted(res, result, match, extra) {
       ignoredFields: extra.ignoredFields,
       rejectedCustomFields: result.rejectedCustomFields || [],
       provisionedCustomFields: result.provisionedCustomFields || [],
+      // QA 09-16 #2: the one note this resubmission wrote (diff table + the
+      // caller's addNote text), so the flow can link to it.
+      noteId: result.noteId ?? null,
     },
   });
 }
@@ -514,8 +539,16 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     }
     await customFieldService.setValues(id, req.workspaceId, values, actor);
   }
+  // addNote (QA 09-16 #2): written LAST so it describes the state the call
+  // produced. Same request, same idempotency key — no second call to fail.
+  let note = null;
+  const noteInput = normalizeAddNote(body.addNote ?? body.note);
+  if (noteInput) {
+    const written = await ticketService.addPrivateNote(id, req.workspaceId, noteInput, actor);
+    note = { entryId: written?.entry?.id ?? written?.id ?? null };
+  }
   const ticket = await ticketService.getTicket(id, req.workspaceId);
-  res.json({ success: true, data: ticketShape(ticket) });
+  res.json({ success: true, data: ticketShape(ticket), ...(note ? { note } : {}) });
 }));
 
 router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {

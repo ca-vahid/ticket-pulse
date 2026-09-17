@@ -77,6 +77,13 @@ const T = {
       priority: { type: 'integer', enum: [1, 2, 3, 4], default: 2 },
       requesterEmail: { type: 'string', format: 'email' }, requesterName: { type: 'string' },
       runAiTriage: { type: 'boolean', default: true },
+      addNote: {
+        description: 'A private internal note written in the SAME call, after the changes. On a RESUBMISSION (same externalRef) it is appended to the diff note, so the flow gets one note and one event (QA 09-16: one call for a resubmitted record — reopen + fields + note — instead of PATCH followed by POST /notes). A plain string, or { body, bodyHtml?, stage?, agent? } like POST /tickets/{id}/notes. `note` is accepted as an alias.',
+        oneOf: [
+          { type: 'string', example: 'Power App form was resubmitted. Updated project details have been synchronized.' },
+          { type: 'object', required: ['body'], properties: { body: { type: 'string' }, bodyHtml: { type: 'string' }, stage: { type: 'string' }, agent: { type: 'string' } } },
+        ],
+      },
       category: {
         type: 'string',
         description: 'Category BY NAME, matched case-insensitively against the workspace taxonomy (GET /categories). Unknown names 400 with the allowed values listed. Omit to let AI triage classify.',
@@ -148,6 +155,13 @@ const T = {
         description: 'Category BY NAME (same resolution as create). Explicit internalCategoryId wins when both are sent; `category: null` clears the pair.',
       },
       subcategory: { type: 'string', nullable: true, description: 'Subcategory BY NAME — must be a child of the (new) category.' },
+      addNote: {
+        description: 'A private internal note written in the SAME call, after the changes (QA 09-16: one call for a resubmitted record — reopen + fields + note — instead of PATCH followed by POST /notes). A plain string, or { body, bodyHtml?, stage?, agent? } like POST /tickets/{id}/notes. `note` is accepted as an alias.',
+        oneOf: [
+          { type: 'string', example: 'Power App form was resubmitted. Updated project details have been synchronized.' },
+          { type: 'object', required: ['body'], properties: { body: { type: 'string' }, bodyHtml: { type: 'string' }, stage: { type: 'string' }, agent: { type: 'string' } } },
+        ],
+      },
       ccEmails: {
         type: 'array', items: { type: 'string', format: 'email' },
         description: 'Replace the "Also for" additional-requester list (normalized, deduped, max 10; invalid addresses 400). [] clears it. Ticket Pulse–born tickets only — on FreshService-born tickets the list is FreshService-owned (edit it there or through the app’s FS write-back).',

@@ -79,6 +79,49 @@ function templateNodes(nodes, edges) {
 }
 
 export const WORKFLOW_TEMPLATES = [
+  // QA 09-16 #3: HR's "On Leave Notification" e-mails are protected from the
+  // noise verdict (person sender) but a FreshService rule closes them within
+  // minutes. This files them instead: low priority, a tag, a note that says
+  // why the ticket stays open. Installed disabled; the admin sets the category.
+  {
+    key: 'hr_leave_notice',
+    name: 'HR leave notice — keep and file',
+    description: 'When HR sends an "On Leave Notification", keep the ticket as a real ticket: priority Low, tag leave-notice, and a note explaining what IT still has to do (accounts, licences, equipment). Set the category on the update node before enabling.',
+    triggerType: 'ticket.created',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      {
+        id: 'is_leave_notice',
+        type: 'condition',
+        data: {
+          label: 'From HR and titled “On Leave Notification”?',
+          conditionGroup: {
+            logic: 'all',
+            conditions: [
+              { field: 'requester.email', operator: 'is', value: 'humanresources@bgcengineering.ca' },
+              { field: 'ticket.subject', operator: 'contains', value: 'On Leave Notification' },
+            ],
+          },
+        },
+      },
+      {
+        id: 'file_it',
+        type: 'update_ticket',
+        data: {
+          setPriority: 1,
+          addTags: ['leave-notice'],
+          note: 'Leave notice from HR — this stays a normal ticket (HR is a protected sender, never noise). Keep it open until accounts, licences and equipment for the leave are handled; the dates and location are in the description.',
+        },
+      },
+      { id: 'done', type: 'stop', data: {} },
+      { id: 'skip', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'is_leave_notice' },
+      { id: 'e2', source: 'is_leave_notice', sourceHandle: 'true', target: 'file_it' },
+      { id: 'e3', source: 'is_leave_notice', sourceHandle: 'false', target: 'skip' },
+      { id: 'e4', source: 'file_it', target: 'done' },
+    ]),
+  },
   // Simorgh C2 (09-14): the ONLY way a security-agent ticket may be resolved
   // automatically. Not a noise guess — the agent's own structured verdict, and
   // all three parts must agree: benign/false-positive, nothing contained, and

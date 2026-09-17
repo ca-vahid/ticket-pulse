@@ -549,6 +549,23 @@ describe('update_ticket.setCustomFields Liquid rider', () => {
 // ------------------------------------------------------------------ templates
 
 describe('installable templates (Phase 1 updates)', () => {
+  test('hr_leave_notice template (QA 09-16 #3) validates: HR sender + subject condition, priority/tag/note update', () => {
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'hr_leave_notice');
+    expect(template).toBeDefined();
+    expect(template.triggerType).toBe('ticket.created');
+    const definition = template.build();
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors).toEqual([]);
+    const cond = definition.nodes.find((n) => n.type === 'condition');
+    expect(cond.data.conditionGroup.conditions).toEqual([
+      { field: 'requester.email', operator: 'is', value: 'humanresources@bgcengineering.ca' },
+      { field: 'ticket.subject', operator: 'contains', value: 'On Leave Notification' },
+    ]);
+    const upd = definition.nodes.find((n) => n.type === 'update_ticket');
+    expect(upd.data.setPriority).toBe(1);
+    expect(upd.data.addTags).toEqual(['leave-notice']);
+    expect(upd.data.note).toMatch(/protected sender/);
+  });
+
   test('api_intake_router now carries an add_note field-card step', () => {
     const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'api_intake_router');
     const definition = template.build();

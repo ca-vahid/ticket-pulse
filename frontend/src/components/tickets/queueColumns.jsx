@@ -991,6 +991,9 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
 export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths }) {
   const [open, setOpen] = useState(false);
   const [dragKey, setDragKey] = useState(null);
+  // QA 09-16 #5: where the drop WILL land — { key, before } — drawn as a blue
+  // insertion line while dragging, so nothing is a guess.
+  const [dropTarget, setDropTarget] = useState(null);
   // Display order while the menu is open: current visible order, then the
   // remaining registry columns — kept locally so a hidden column holds its
   // spot while the user rearranges (the stored value is visible-only).
@@ -1021,12 +1024,33 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
     if (nextVisible.has(key)) nextVisible.delete(key); else nextVisible.add(key);
     emit(order, nextVisible);
   };
-  const dropOn = (targetKey) => {
-    if (!dragKey || dragKey === targetKey) return;
+  // Insert before (default) or after the target row — the indicator decided
+  // which half of the row the pointer was in.
+  const dropOn = (targetKey, before = true) => {
+    const target = dropTarget && dropTarget.key === targetKey ? dropTarget : { key: targetKey, before };
+    setDropTarget(null);
+    if (!dragKey || dragKey === target.key) return;
     const next = order.filter((k) => k !== dragKey);
-    next.splice(next.indexOf(targetKey), 0, dragKey);
+    const idx = next.indexOf(target.key);
+    next.splice(target.before ? idx : idx + 1, 0, dragKey);
     setOrder(next);
     emit(next, visibleSet);
+  };
+  const moveBy = (key, delta) => {
+    const from = order.indexOf(key);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    const next = order.filter((k) => k !== key);
+    next.splice(to, 0, key);
+    setOrder(next);
+    emit(next, visibleSet);
+  };
+  const onRowDragOver = (e, key) => {
+    if (!dragKey || dragKey === key) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    if (!dropTarget || dropTarget.key !== key || dropTarget.before !== before) setDropTarget({ key, before });
   };
   const reset = () => {
     setOrder([
@@ -1060,27 +1084,43 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
             Drag to reorder · applies on large screens (smaller screens keep the essentials)
           </p>
-          <ul className="max-h-72 overflow-y-auto settings-scrollbar -mx-0.5 mt-1">
+          <ul className="max-h-72 overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
             {order.map((key) => {
               const col = QUEUE_COLUMN_MAP.get(key);
               if (!col) return null;
               const dragging = dragKey === key;
               const pinned = false; // subject moves too (16 Sep 2026); mandatory rows only lock their checkbox
+              const isTarget = dropTarget?.key === key && dragKey && dragKey !== key;
               return (
                 <li
                   key={key}
-                  onDragOver={(e) => { if (dragKey && dragKey !== key && !pinned) e.preventDefault(); }}
+                  onDragOver={(e) => onRowDragOver(e, key)}
                   onDrop={(e) => { e.preventDefault(); dropOn(key); }}
-                  className={`transition-opacity ${dragging ? 'opacity-40' : dragKey && !pinned ? 'hover:bg-blue-50/40 dark:hover:bg-blue-500/10' : ''}`}
+                  data-drop-indicator={isTarget ? (dropTarget.before ? 'before' : 'after') : undefined}
+                  className={`relative transition-[opacity,transform] duration-150 ease-soft ${
+                    dragging ? 'opacity-40 scale-[0.98]' : ''
+                  } ${isTarget && dropTarget.before ? 'translate-y-[3px]' : isTarget ? '-translate-y-[3px]' : ''}`}
                 >
-                  <label className="flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-500/15 cursor-pointer text-sm text-foreground/85">
+                  {/* Insertion line: exactly where the dragged column will land. */}
+                  {isTarget && (
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-blue-500 shadow-[0_0_0_2px_rgb(59_130_246_/_0.25)] animate-fadeIn ${dropTarget.before ? '-top-px' : '-bottom-px'}`}
+                    />
+                  )}
+                  <label className={`flex items-center gap-2 px-1.5 py-1.5 rounded-md cursor-pointer text-sm text-foreground/85 ${dragging ? 'bg-blue-50 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:ring-blue-500/30' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
                     <span
                       draggable={!pinned}
-                      onDragStart={(e) => { if (pinned) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; }}
-                      onDragEnd={() => setDragKey(null)}
-                      title={pinned ? undefined : 'Drag to reorder'}
+                      onDragStart={(e) => { if (pinned) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', key); } catch { /* jsdom */ } }}
+                      onDragEnd={() => { setDragKey(null); setDropTarget(null); }}
+                      onKeyDown={(e) => {
+                        if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveBy(key, e.key === 'ArrowUp' ? -1 : 1); }
+                      }}
+                      tabIndex={pinned ? -1 : 0}
+                      role="button"
+                      title={pinned ? undefined : 'Drag to reorder · Alt+↑/↓ moves with the keyboard'}
                       aria-label={pinned ? undefined : `Reorder ${col.label} column`}
-                      className={pinned ? 'w-3.5 flex-shrink-0' : 'cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0'}
+                      className={pinned ? 'w-3.5 flex-shrink-0' : 'tp-focus-ring rounded cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0'}
                     >
                       {!pinned && <GripVertical className="w-3.5 h-3.5" aria-hidden="true" />}
                     </span>

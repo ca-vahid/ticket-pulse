@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 // Queue UX contract tests:
 //  - FR 08-07 Phase 3 (#6/#7/#12 + the deferred non-destructive-refresh item):
@@ -49,7 +49,7 @@ vi.mock('../components/nav/navDestinations', () => ({
 vi.mock('../hooks/useSSE', () => ({ useSSE: vi.fn() }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../components/nav/MobileTabBar', () => ({ default: () => null }));
-// Observable peek: plain-click behavior must still open the preview drawer.
+// Observable peek: double-click opens the preview drawer (single click opens the page — 16 Sep 2026).
 vi.mock('../components/tickets/TicketPreview', () => ({
   default: ({ ticketId }) => <div>PEEK {ticketId}</div>,
 }));
@@ -96,6 +96,11 @@ const row = (id, status) => ({
 
 const lastListParams = () => listSpy.mock.calls.at(-1)[0];
 
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="loc">{location.pathname}{location.search}</output>;
+}
+
 function mount(initialEntry = '/tickets') {
   return render(<Tickets />, {
     wrapper: ({ children }) => <MemoryRouter initialEntries={[initialEntry]}>{children}</MemoryRouter>,
@@ -117,8 +122,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   roleRef.value = { role: 'admin', canManage: true, canReview: true };
-  // onRowClick branches on viewport width — jsdom has no matchMedia. Desktop
-  // (matches: true) → plain click peeks instead of navigating.
+  // onRowDoubleClick branches on viewport width — jsdom has no matchMedia.
+  // Desktop (matches: true) → double-click peeks instead of navigating.
   window.matchMedia = vi.fn().mockImplementation((query) => ({
     matches: true,
     media: query,
@@ -366,8 +371,10 @@ describe('Column preference round-trip (Phase QC — QC1/QC4)', () => {
 });
 
 describe('Row anchors — right-click / new-tab (QA 08-07 #7)', () => {
-  test('subject, ref and chevron are <a href> anchors; plain click peeks, Ctrl-click stays native', async () => {
-    mount();
+  test('subject, ref and chevron are <a href> anchors; plain click opens the ticket, double-click peeks, Ctrl-click stays native', async () => {
+    render(<><Tickets /><LocationProbe /></>, {
+      wrapper: ({ children }) => <MemoryRouter initialEntries={['/tickets']}>{children}</MemoryRouter>,
+    });
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
 
     // Desktop row + mobile card both render subject anchors (CSS hides one).
@@ -386,9 +393,15 @@ describe('Row anchors — right-click / new-tab (QA 08-07 #7)', () => {
     expect(fireEvent.click(ref, { metaKey: true })).toBe(true);
     expect(screen.queryByText('PEEK 1')).not.toBeInTheDocument();
 
-    // Plain left-click: preventDefault + the classic peek flow (220ms timer).
-    expect(fireEvent.click(subject)).toBe(false);
+    // Double-click: the peek drawer (no navigation).
+    fireEvent.doubleClick(subject);
     await waitFor(() => expect(screen.getByText('PEEK 1')).toBeInTheDocument());
+    expect(screen.getByTestId('loc').textContent).toBe('/tickets?peek=1');
+
+    // Plain left-click: preventDefault, then after the 220 ms window it OPENS the
+    // full ticket (Vahid, 16 Sep 2026 — single click = page, double = dock).
+    expect(fireEvent.click(subject)).toBe(false);
+    await waitFor(() => expect(screen.getByTestId('loc').textContent).toBe('/tickets/1'));
   });
 
   test('mobile card subject is an anchor with the same modifier behavior', async () => {
@@ -533,7 +546,7 @@ describe('Non-destructive refresh (deferred Phase-2 item, QA 08-07 #10)', () => 
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();
 
-    fireEvent.click(screen.getAllByRole('link', { name: 'Row 1' })[0]);
+    fireEvent.doubleClick(screen.getAllByRole('link', { name: 'Row 1' })[0]); // double-click = peek (16 Sep 2026)
     await waitFor(() => expect(screen.getByText('PEEK 1')).toBeInTheDocument());
 
     // Same query values → no refetch, no loading card, same mounted row node.

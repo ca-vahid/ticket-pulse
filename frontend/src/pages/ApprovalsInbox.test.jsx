@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { formatDayTime, timeAgo } from '../components/tickets/ticketUi';
 
@@ -82,6 +82,30 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     await screen.findByText('New laptop for Rita');
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByTestId('approval-categories-panel')).not.toBeInTheDocument();
+  });
+
+  test('All approvals (QA 09-16 #4): filter bar drives the overview query — search, status tile, sort, more filters', async () => {
+    roleState.role = 'reviewer';
+    apiOverrides.approvalsOverview = vi.fn(() => Promise.resolve({
+      stats: { pending: 1, info_requested: 0, approved: 27, rejected: 2, cancelled: 19 },
+      items: [{ id: 5, ticketId: 9, displayRef: '#228440', subject: 'New Computer/Improving Speeds', status: 'approved', categoryName: 'New Computer Upgrade', approverName: 'Reza Zaim', approverEmail: 'rzaim@x.io', requestedBy: 'mblackstock@x.io', createdAt, decidedAt: createdAt, tier: 1, tierCount: 1, decisionNote: null }],
+    }));
+    renderPage('/approvals?tab=all');
+    await screen.findByText('New Computer/Improving Speeds');
+    expect(screen.getByTestId('approvals-filters')).toBeInTheDocument();
+    // status tile = one-click filter
+    fireEvent.click(screen.getByRole('button', { name: /27\s*Approved/ }));
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'approved' })));
+    // more filters: approver + dates
+    fireEvent.click(screen.getByRole('button', { name: /More filters/ }));
+    fireEvent.change(screen.getByLabelText('Approver'), { target: { value: 'reza' } });
+    fireEvent.change(await screen.findByLabelText('Requested from'), { target: { value: '2026-09-01' } });
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'approved', approver: 'reza', from: '2026-09-01' })));
+    // export is offered for the filtered set
+    expect(screen.getByRole('button', { name: /Export CSV/ })).not.toBeDisabled();
+    // clear
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }));
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith({}));
   });
 
   test('pending rows show "absolute · relative" timestamps (QA 08-14 #3)', async () => {
