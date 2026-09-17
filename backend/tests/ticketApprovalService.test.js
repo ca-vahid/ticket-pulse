@@ -709,9 +709,14 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'nophoto.agent@x.io' });
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.attachments).toEqual([
+    // Brand pictograms (cid:tp-*) are appended by the mail lane (17 Sep 2026); people photos are unchanged.
+    const people = email.attachments.filter((a) => !String(a.contentId || '').startsWith('tp-'));
+    expect(people).toEqual([
       { name: 'requester-photo.png', contentType: 'image/png', contentBytes: PNG, contentId: 'requester-photo', inline: true },
     ]);
+    const brand = email.attachments.filter((a) => String(a.contentId || '').startsWith('tp-'));
+    expect(brand.map((a) => a.contentId)).toEqual(expect.arrayContaining(['tp-tp-mark', 'tp-kind-decision']));
+    for (const a of brand) expect(a.inline).toBe(true);
     expect(email.html).toContain('<img src="cid:requester-photo"');
     // The agent has no directory photo → initials, no dangling cid reference.
     expect(email.html).not.toContain('cid:requested-by-photo');

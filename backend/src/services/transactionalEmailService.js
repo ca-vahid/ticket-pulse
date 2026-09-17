@@ -99,6 +99,9 @@ export async function deliverTransactionalEmail({
     ? await threadingHeadersForTicket(ticket.id)
     : { inReplyTo: null, references: [] };
   const htmlBody = html || htmlFromText(text);
+  // Brand pictograms referenced as cid:tp-* travel inline with the message (17 Sep 2026).
+  const { withBrandAttachments } = await import('./emailBrandAssets.js');
+  attachments = withBrandAttachments(attachments, htmlBody);
   const allRecipients = [...recipients, ...ccRecipients, ...bccRecipients];
 
   let graphError = null;
