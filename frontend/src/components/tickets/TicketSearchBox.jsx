@@ -103,6 +103,8 @@ export default function TicketSearchBox({
   placeholder = 'Search subject, requester, TP-1042 or #12345…',
   inputRef: externalRef = null,
   className = '',
+  size = 'md',        // 'md' (44px toolbar) | 'sm' (36px, the app header)
+  shortcut = true,    // "/" focuses this box — off for a second, phone-only copy
 }) {
   const localRef = useRef(null);
   const inputRef = externalRef || localRef;
@@ -139,6 +141,7 @@ export default function TicketSearchBox({
 
   // "/" focuses the box (FreshService's key) — only outside editable targets.
   useEffect(() => {
+    if (!shortcut) return undefined;
     const onKey = (e) => {
       if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target;
@@ -149,7 +152,7 @@ export default function TicketSearchBox({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [inputRef]);
+  }, [inputRef, shortcut]);
 
   // Auto-search after the person stops typing.
   useEffect(() => {
@@ -259,7 +262,7 @@ export default function TicketSearchBox({
         aria-controls="ticket-search-panel"
         aria-autocomplete="list"
         autoComplete="off"
-        className="tp-focus-ring w-full min-h-[44px] rounded-lg border border-input bg-card py-2 pl-9 pr-16 text-sm placeholder:text-muted-foreground/75"
+        className={`tp-focus-ring w-full rounded-lg border border-input bg-card pl-9 pr-16 text-sm placeholder:text-muted-foreground/75 ${size === 'sm' ? 'h-9 py-1 bg-muted/40 focus:bg-card' : 'min-h-[44px] py-2'}`}
       />
       <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
         {searching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Searching" />}

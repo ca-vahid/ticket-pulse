@@ -2439,9 +2439,13 @@ export default function TicketDetail() {
                 (full width only) the ticket context — links, custom fields,
                 related tickets — takes a third column on the LEFT, so the
                 conversation sits centre and the fields stay on the right. */}
-            <div className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] gap-4 items-start ${layoutWidth === 'full' ? 'min-[1800px]:grid-cols-[clamp(240px,16vw,320px)_minmax(0,1fr)_clamp(300px,22vw,420px)]' : ''}`}>
+            {/* Two columns at every width (16 Sep 2026): Vahid preferred the
+                context cards back on the right under the fields — the wide
+                screen goes to the description and the conversation instead of
+                a third column. */}
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] gap-4 items-start">
               {/* Main column (tabbed) */}
-              <div className={`space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2 ${layoutWidth === 'full' ? 'min-[1800px]:col-start-2 min-[1800px]:row-span-1' : ''}`}>
+              <div className="space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2">
                 {pageTab === 'conversation' && (
                   <>
                     {(ticket.descriptionText || ticket.description) && !editingDescription && (
@@ -3001,7 +3005,7 @@ export default function TicketDetail() {
               </div>
 
               {/* Sidebar */}
-              <aside className={`space-y-4 lg:col-start-2 lg:row-start-1 ${layoutWidth === 'full' ? 'min-[1800px]:col-start-3' : ''}`} aria-label="Ticket properties">
+              <aside className="space-y-4 lg:col-start-2 lg:row-start-1" aria-label="Ticket properties">
                 {/* Status & SLA */}
                 <div className="tp-card rounded-xl p-4 space-y-3.5">
                   <SidebarField label="Status" flash={Boolean(liveChanges.status)} onAck={() => ackChange('status')}>
@@ -3363,7 +3367,7 @@ export default function TicketDetail() {
                 </div>
 
               </aside>
-              <aside className={`space-y-4 lg:col-start-2 lg:row-start-2 ${layoutWidth === 'full' ? 'min-[1800px]:col-start-1 min-[1800px]:row-start-1' : ''}`} aria-label="Ticket context">
+              <aside className="space-y-4 lg:col-start-2 lg:row-start-2" aria-label="Ticket context">
                 {/* Explicit ticket links (duplicate/related/parent) + merge */}
                 <TicketFamilyCard
                   ticketId={ticketId}

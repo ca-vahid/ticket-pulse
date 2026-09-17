@@ -29,6 +29,7 @@ import { NAV_DESTINATIONS, useCanAccessSettings, useWorkspaceRole } from './nav/
 import SideRail from './nav/SideRail';
 import ThemeControl from './nav/ThemeControl';
 import LayoutControl from './nav/LayoutControl';
+import HeaderSearch from './nav/HeaderSearch';
 import ChangelogModal from './ChangelogModal';
 
 // Slim top bar for desktop. Primary navigation lives in the fixed left
@@ -728,7 +729,10 @@ export default function AppHeader({
             )}
           </div>
 
-          <div className="min-w-0 flex-1" />
+          {/* Search everywhere (16 Sep 2026): tickets, people, tasks, conversations. */}
+          <div className="flex min-w-0 flex-1 justify-center px-2">
+            <HeaderSearch className="w-full max-w-2xl" />
+          </div>
 
           {extraActions && <div className="flex min-w-0 items-center gap-2">{extraActions}</div>}
           {renderStatusPill()}

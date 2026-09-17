@@ -225,15 +225,16 @@ code {
     background-image: url('/brand/dashboard-background-dark.webp');
   }
 
-  /* SideRail labels: hidden while the rail is a 58px icon strip, revealed as
-     the rail expands on hover/keyboard focus. Kept here (not inline Tailwind)
-     so the reveal is driven by the rail container, not each row. */
+  /* SideRail labels: hidden while the rail is a 58px icon strip, revealed
+     when the rail is opened from its chevron tab (never on hover — 16 Sep
+     2026). Kept here (not inline Tailwind) so the reveal is driven by the
+     rail container, not each row. */
   .tp-side-rail .tp-rail-label {
     opacity: 0;
     transition: opacity 0.15s ease-out;
   }
-  .tp-side-rail:hover .tp-rail-label,
-  .tp-side-rail:focus-within .tp-rail-label {
+  .tp-side-rail--open .tp-rail-label,
+  .tp-side-rail--peek-open .tp-rail-label {
     opacity: 1;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -243,16 +244,9 @@ code {
   }
 
   /* Peek mode (/tickets*): the page has its own left filter rail, so the nav
-     collapses to a 14px edge tab. Contents fade out when collapsed and the
-     chevron hint fades in; a small expand delay stops accidental flares when
-     the cursor grazes the edge on its way to the filters. Collapse is instant. */
-  .tp-side-rail--peek {
-    transition-delay: 0ms;
-  }
-  .tp-side-rail--peek:hover {
-    transition-delay: 150ms;
-  }
-  .tp-side-rail--peek:not(:hover):not(:focus-within):not(.tp-side-rail--peek-open) .tp-rail-content {
+     collapses to a 20px edge tab. Contents fade out when collapsed and the
+     chevron hint fades in; a click on the tab opens it (no hover flare). */
+  .tp-side-rail--peek:not(.tp-side-rail--peek-open) .tp-rail-content {
     opacity: 0;
     pointer-events: none;
   }
@@ -264,14 +258,6 @@ code {
   }
   .tp-side-rail--peek .tp-rail-content {
     transition: opacity 0.15s ease-out;
-  }
-  .tp-side-rail--peek:hover .tp-rail-content,
-  .tp-side-rail--peek:focus-within .tp-rail-content {
-    transition-delay: 150ms;
-  }
-  .tp-side-rail--peek:hover .tp-rail-peek-hint,
-  .tp-side-rail--peek:focus-within .tp-rail-peek-hint {
-    opacity: 0;
   }
   .tp-side-rail--peek .tp-rail-peek-hint {
     transition: opacity 0.15s ease-out;

@@ -32,6 +32,7 @@ vi.mock('../hooks/useRealtimeStatus', () => ({
 }));
 vi.mock('./nav/SideRail', () => ({ default: () => null }));
 vi.mock('./ChangelogModal', () => ({ default: () => null }));
+vi.mock('./nav/HeaderSearch', () => ({ default: () => null }));
 
 import AppHeader from './AppHeader';
 
