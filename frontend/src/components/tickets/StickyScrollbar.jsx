@@ -37,7 +37,7 @@ export default function StickyScrollbar({ targetRef, deps = [] }) {
         const el = targetRef.current;
         if (el && Math.abs(el.scrollLeft - e.currentTarget.scrollLeft) > 1) el.scrollLeft = e.currentTarget.scrollLeft;
       }}
-      className="sticky bottom-0 z-10 h-3.5 overflow-x-auto overflow-y-hidden border-t border-border/60 bg-card/95 backdrop-blur-sm settings-scrollbar"
+      className="tp-sticky-hscroll sticky bottom-0 z-10 h-3 overflow-x-auto overflow-y-hidden bg-card/95 backdrop-blur-sm"
     >
       <div style={{ width: size.scroll, height: 1 }} />
     </div>

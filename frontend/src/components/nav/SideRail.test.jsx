@@ -129,13 +129,13 @@ describe('SideRail', () => {
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
-  test('tickets pages show the full rail by default; the notch offers the thin-edge collapse there only (QA 07-13 #6)', () => {
+  test('tickets pages show the full rail by default with the thin-edge collapse at the foot; the notch stays a single circle (QA 07-13 #6)', () => {
     localStorage.removeItem('tp_ticketsRailCollapsed');
     renderRail('/tickets/42');
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).not.toHaveClass('tp-side-rail--peek');
     expect(screen.getByTitle(/Collapse the navigation to a thin edge/i)).toBeInTheDocument();
-    // No second control at the rail foot any more — the notch is the one place.
-    expect(screen.queryByText(/Collapse rail/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Collapse rail/)).toBeInTheDocument();
+    expect(screen.getByTestId('rail-notch').querySelectorAll('button')).toHaveLength(1);
     fireEvent.click(screen.getByTitle(/Collapse the navigation to a thin edge/i));
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveClass('tp-side-rail--peek');
     expect(screen.getByTestId('rail-notch').style.left).toBe('6px');
