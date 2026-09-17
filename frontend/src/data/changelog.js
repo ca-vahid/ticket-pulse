@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.21-preview';
+export const APP_VERSION = '3.9.22-preview';
 
 export const changelog = [
+  {
+    version: '3.9.22-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Only the named approver decides</strong> — an admin who is not the person a request was sent to no longer sees Approve, Reject or Ask a question on that row (the requester who is also Tier 1 saw an Approve button on the Tier-2 row). The row now says who holds it; admins can still hand it to someone else with <em>Forward</em>. The server enforces the same rule.' },
+      { type: 'fixed', html: '<strong>Approvers show as people</strong> — an approver who was added to the workspace by e-mail only (no FreshService agent record) appears with their directory name and photo on the ticket, in the Approvals inbox and in the e-mails, instead of a bare address and an initial. New rows store the name at creation.' },
+    ],
+  },
   {
     version: '3.9.21-preview',
     date: 'September 16, 2026',

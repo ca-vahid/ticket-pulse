@@ -141,7 +141,7 @@ async function emitApprovalEvent(eventType, ticketId, extra) {
  */
 class TicketApprovalService {
   async listForTicket(ticketId, workspaceId) {
-    return prisma.ticketApproval.findMany({
+    const rows = await prisma.ticketApproval.findMany({
       where: { ticketId, workspaceId },
       orderBy: { id: 'desc' },
       select: {
@@ -152,6 +152,7 @@ class TicketApprovalService {
         conditionNote: true, conditionNoteHtml: true,
       },
     });
+    return this._fillApproverNames(rows);
   }
 
   /**
@@ -231,6 +232,7 @@ class TicketApprovalService {
           approvalCategoryId: category.id,
           requestGroupId,
           approverEmail: email,
+          approverName: await this._resolvePersonName(email),
           requestedBy: actor?.email || 'unknown',
           requestNote: note?.trim() || null,
           requestNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
@@ -781,6 +783,7 @@ class TicketApprovalService {
           approvalCategoryId: approval.approvalCategoryId,
           requestGroupId,
           approverEmail: email,
+          approverName: await this._resolvePersonName(email),
           requestedBy: approval.requestedBy,
           requestNote: approval.requestNote,
           requestNoteHtml: approval.requestNoteHtml,
@@ -908,10 +911,11 @@ class TicketApprovalService {
       where: { id: approvalId, ticketId, workspaceId },
     });
     if (!approval) throw new NotFoundError('Approval not found');
+    // The decision belongs to the named approver alone (Vahid, 17 Sep 2026):
+    // an admin who is not that person forwards the request instead.
     const isApprover = actor?.email && approval.approverEmail === actor.email.toLowerCase();
-    const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
-    if (!isApprover && !isAdmin) {
-      throw new ValidationError('Only the requested approver (or an admin) can decide this approval');
+    if (!isApprover) {
+      throw new ValidationError('Only the requested approver can decide this approval — forward it if they are away');
     }
     return this._decide(approval, decision, note, {
       via: 'app',
@@ -934,9 +938,8 @@ class TicketApprovalService {
     });
     if (!approval) throw new NotFoundError('Approval not found');
     const isApprover = actor?.email && approval.approverEmail === actor.email.toLowerCase();
-    const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
-    if (!isApprover && !isAdmin) {
-      throw new ValidationError('Only the requested approver (or an admin) can request clarification');
+    if (!isApprover) {
+      throw new ValidationError('Only the requested approver can ask the requester for clarification');
     }
     if (approval.status !== 'pending') {
       throw new ValidationError(`This approval is ${approval.status}, not pending`);
@@ -1125,7 +1128,7 @@ class TicketApprovalService {
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } } },
       },
     });
-    return rows.map((a) => this._inboxRow(a));
+    return this._fillApproverNames(rows).then((list) => list.map((a) => this._inboxRow(a)));
   }
 
   async inboxCountFor(workspaceId, actor) {
@@ -1145,7 +1148,7 @@ class TicketApprovalService {
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } } },
       },
     });
-    return rows.map((a) => this._inboxRow(a));
+    return this._fillApproverNames(rows).then((list) => list.map((a) => this._inboxRow(a)));
   }
 
   _inboxRow(a) {
@@ -1334,9 +1337,8 @@ class TicketApprovalService {
       throw new ValidationError('Only a decided approval (approved or rejected) can be changed');
     }
     const isApprover = actor?.email && approval.approverEmail === actor.email.toLowerCase();
-    const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
-    if (!isApprover && !isAdmin) {
-      throw new ValidationError('Only the deciding approver (or an admin) can change this decision');
+    if (!isApprover) {
+      throw new ValidationError('Only the deciding approver can change this decision');
     }
     return this._decide(approval, decision, note, {
       via: 'app',
@@ -1381,10 +1383,30 @@ class TicketApprovalService {
         select: { name: true },
       });
       if (requester?.name?.trim() && !looksLikeEmail(requester.name)) return requester.name.trim();
+      // App-only members (a CIO added by e-mail, 17 Sep 2026) have neither row:
+      // ask the Entra directory, cached for an hour.
+      const { resolvePersonName } = await import('./personDirectoryService.js');
+      const name = await resolvePersonName(key);
+      if (name && !looksLikeEmail(name)) return String(name).trim();
     } catch (err) {
       logger.debug?.(`Person name lookup skipped for ${key}: ${err.message}`);
     }
     return null;
+  }
+
+  /**
+   * Rows created before names were stored (or for people only the directory
+   * knows) get their approver's display name at read time. Mutates and returns.
+   */
+  async _fillApproverNames(rows) {
+    const seen = new Map();
+    for (const r of rows || []) {
+      if (!r || r.approverName || !r.approverEmail) continue;
+      const key = String(r.approverEmail).toLowerCase();
+      if (!seen.has(key)) seen.set(key, await this._resolvePersonName(key));
+      r.approverName = seen.get(key) || null;
+    }
+    return rows;
   }
 
   async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote = null, conditionNoteHtml = null }) {

@@ -8,6 +8,7 @@ import ApprovalComposer from './ApprovalComposer';
 import ApprovalThread, { WaitingOnApproverChip } from './ApprovalThread';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { ticketsAPI } from '../../services/api';
+import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 
 /** Approvals v3: an agent / approver answers an open question in-app. */
 function AnswerBox({ message, busy, onSend, onCancel }) {
@@ -78,6 +79,13 @@ const rowLabel = (ap) => {
  * overall verdict and requester, then a vertical rail of approver rows with live
  * status, decision notes, and the approver/requester actions.
  */
+/** Approver avatar: roster photo when the workspace knows one, else the directory photo by e-mail (app-only members). */
+function ApproverAvatar({ email, name, photoUrl }) {
+  const fetched = useRequesterPhoto(photoUrl ? null : email);
+  const url = photoUrl || (typeof fetched === 'string' ? fetched : fetched?.photo) || null;
+  return <PersonAvatar name={name || email} photoUrl={url} size="h-8 w-8" textSize="text-[10px]" />;
+}
+
 export default function ApprovalTimeline({
   approvals = [], meta, savingField,
   onDecide, onResubmit, onCancel, onChangeDecision, onDeleteRequest,
@@ -269,7 +277,12 @@ export default function ApprovalTimeline({
                 <ol className="mt-3 space-y-3">
                   {rows.map((ap, i) => {
                     const sm = statusMeta(ap.status);
-                    const isApprover = meta?.actor && (meta.actor.email === ap.approverEmail || meta.actor.kind === 'admin' || meta.actor.workspaceRole === 'admin');
+                    const approverKey = String(ap.approverEmail || '').toLowerCase();
+                    const person = people.find((p) => p.email === approverKey) || null;
+                    const approverLabel = ap.approverName || person?.name || ap.approverEmail;
+                    // Only the named approver decides (Vahid, 17 Sep 2026). Admins see the row and can forward it.
+                    const isApprover = Boolean(actorEmail) && actorEmail === approverKey;
+                    const canForwardAsAdmin = actorIsAdmin && !isApprover && typeof onForward === 'function';
                     const isRequester = meta?.actor && (meta.actor.email === ap.requestedBy || meta.actor.kind === 'admin' || meta.actor.workspaceRole === 'admin');
                     const busy = savingField === `approval-${ap.id}`;
                     const last = i === rows.length - 1;
@@ -285,7 +298,7 @@ export default function ApprovalTimeline({
                         {/* rail: avatar + status dot + connector */}
                         <div className="relative flex flex-col items-center">
                           <div className="relative">
-                            <PersonAvatar name={ap.approverName || ap.approverEmail} size="h-8 w-8" textSize="text-[10px]" />
+                            <ApproverAvatar email={approverKey} name={approverLabel} photoUrl={person?.photoUrl || null} />
                             <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${sm.dot} flex items-center justify-center`} title={sm.label}>
                               <sm.Icon className="w-2 h-2 text-white" aria-hidden="true" />
                             </span>
@@ -295,7 +308,7 @@ export default function ApprovalTimeline({
 
                         <div className="min-w-0 flex-1 pb-0.5">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <span className="text-sm font-medium text-foreground truncate">{ap.approverName || ap.approverEmail}</span>
+                            <span className="text-sm font-medium text-foreground truncate" title={ap.approverEmail}>{approverLabel}</span>
                             {tierCount > 1 && (
                               <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground" title={`Approval tier ${ap.tier || 1} of ${tierCount}`}>
                                 {(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}
@@ -350,6 +363,35 @@ export default function ApprovalTimeline({
                                 disabled={busy}
                                 footer={ap.status === 'info_requested' ? 'A question is out — you can still decide, or wait for the answer below.' : 'Decisions ask you to confirm first.'}
                               />
+                            </div>
+                          )}
+
+                          {/* Everyone else on a pending row: who holds it. Admins may hand it on (forward-only composer). */}
+                          {ap.status === 'pending' && !isApprover && (
+                            <div className="mt-2" data-testid="approval-waiting-on">
+                              <p className="text-[11px] text-muted-foreground border-l-2 border-border pl-2">
+                                Waiting on <span className="font-medium text-foreground/85">{approverLabel}</span> — only they can decide
+                                {tierCount > 1 ? ` ${(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}` : ''}.
+                                {canForwardAsAdmin ? ' If they are away, hand it to someone else below.' : ''}
+                              </p>
+                              {canForwardAsAdmin && (
+                                <div className="mt-2">
+                                  <ApprovalComposer
+                                    compact
+                                    canDecide={false}
+                                    showShortcuts={false}
+                                    minHeight={120}
+                                    approval={{ ...ap, ticketRef: null, requesterName: requester?.name || null, canEscalate: false, nextTier: null, tierName: (tiers[(ap.tier || 1) - 1] || {}).name || null, amountLabel: null }}
+                                    participants={participants}
+                                    selfEmail={ap.approverEmail}
+                                    forwardCandidates={people.filter((p) => p.email !== approverKey && p.email !== String(ap.requestedBy || '').toLowerCase())}
+                                    onDecide={() => {}}
+                                    onHandoff={async ({ mode, note, toEmail }) => { if (mode === 'forward') await onForward(ap.id, toEmail, note); }}
+                                    disabled={busy}
+                                    footer={`Forwarding moves the request to the person you pick; ${approverLabel} is told.`}
+                                  />
+                                </div>
+                              )}
                             </div>
                           )}
 
