@@ -122,22 +122,22 @@ function LoadingCard() {
   return (
     <div className="tp-card overflow-hidden rounded-2xl shadow-soft" aria-busy="true" aria-label="Loading approval">
       <div className="border-b border-border px-6 py-5">
-        <div className="flex gap-2"><span className="h-5 w-40 rounded-full bg-muted motion-safe:animate-pulse" /><span className="h-5 w-36 rounded-full bg-muted motion-safe:animate-pulse" /></div>
-        <div className="mt-3 h-3 w-56 rounded bg-muted motion-safe:animate-pulse" />
-        <div className="mt-3 h-7 w-3/4 rounded bg-muted motion-safe:animate-pulse" />
-        <div className="mt-3 h-3 w-1/2 rounded bg-muted motion-safe:animate-pulse" />
+        <div className="flex gap-2"><span className="h-5 w-40 rounded-full bg-muted motion-on:animate-pulse" /><span className="h-5 w-36 rounded-full bg-muted motion-on:animate-pulse" /></div>
+        <div className="mt-3 h-3 w-56 rounded bg-muted motion-on:animate-pulse" />
+        <div className="mt-3 h-7 w-3/4 rounded bg-muted motion-on:animate-pulse" />
+        <div className="mt-3 h-3 w-1/2 rounded bg-muted motion-on:animate-pulse" />
       </div>
       <div className="grid min-[800px]:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-3 px-6 py-5">
-          <div className="h-28 rounded-xl bg-muted motion-safe:animate-pulse" />
-          <div className="h-3 w-full rounded bg-muted motion-safe:animate-pulse" />
-          <div className="h-3 w-11/12 rounded bg-muted motion-safe:animate-pulse" />
-          <div className="h-3 w-2/3 rounded bg-muted motion-safe:animate-pulse" />
+          <div className="h-28 rounded-xl bg-muted motion-on:animate-pulse" />
+          <div className="h-3 w-full rounded bg-muted motion-on:animate-pulse" />
+          <div className="h-3 w-11/12 rounded bg-muted motion-on:animate-pulse" />
+          <div className="h-3 w-2/3 rounded bg-muted motion-on:animate-pulse" />
         </div>
         <div className="space-y-4 px-5 py-5">
-          <div className="h-11 rounded-lg bg-muted motion-safe:animate-pulse" />
-          <div className="h-8 w-2/3 rounded-lg bg-muted motion-safe:animate-pulse" />
-          <div className="h-20 rounded-lg bg-muted motion-safe:animate-pulse" />
+          <div className="h-11 rounded-lg bg-muted motion-on:animate-pulse" />
+          <div className="h-8 w-2/3 rounded-lg bg-muted motion-on:animate-pulse" />
+          <div className="h-20 rounded-lg bg-muted motion-on:animate-pulse" />
         </div>
       </div>
     </div>
@@ -151,7 +151,7 @@ function MessageCard({ icon: Icon, tone = 'muted', title, children }) {
       ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-200'
       : 'bg-muted text-muted-foreground';
   return (
-    <div className="tp-card mx-auto max-w-lg rounded-2xl px-6 py-10 text-center shadow-soft motion-safe:animate-fadeIn" role="status">
+    <div className="tp-card mx-auto max-w-lg rounded-2xl px-6 py-10 text-center shadow-soft motion-on:animate-fadeIn" role="status">
       <span className={`mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full ${toneClass}`}>
         <Icon className="h-6 w-6" aria-hidden="true" />
       </span>
@@ -264,7 +264,7 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     <div
       ref={bannerRef}
       tabIndex={-1}
-      className={`tp-focus-ring mb-5 flex items-start gap-3.5 rounded-xl border px-4 py-4 motion-safe:animate-fadeIn ${tone}`}
+      className={`tp-focus-ring mb-5 flex items-start gap-3.5 rounded-xl border px-4 py-4 motion-on:animate-fadeIn ${tone}`}
     >
       <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${disc}`}>
         <Icon className="h-5 w-5" aria-hidden="true" />
@@ -541,7 +541,7 @@ export default function PublicApprovalDecision() {
     <Shell workspaceName={workspaceName} theme={theme} onToggleTheme={toggle} bottomPad={false}>
       {/* Layout B (mail client): the conversation on the left with the composer
           under it, the facts in the rail on the right. */}
-      <article className={`tp-card rounded-2xl border-t-4 shadow-soft motion-safe:animate-fadeIn ${(STATUS_BADGE[approval.status] || STATUS_BADGE.pending).stripe}`} aria-labelledby="approval-subject">
+      <article className={`tp-card rounded-2xl border-t-4 shadow-soft motion-on:animate-fadeIn ${(STATUS_BADGE[approval.status] || STATUS_BADGE.pending).stripe}`} aria-labelledby="approval-subject">
         <header className="grid items-start gap-4 border-b border-border px-5 py-5 min-[800px]:grid-cols-[minmax(0,1fr)_auto] min-[800px]:grid-rows-[auto_auto] min-[800px]:px-[26px]">
           {/* One badge, placed top-right on wide screens and first on a phone. */}
           <div className="min-[800px]:col-start-2 min-[800px]:row-start-1 min-[800px]:justify-self-end">

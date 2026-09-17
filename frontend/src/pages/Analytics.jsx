@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { motionReduced } from '../utils/motionPreference';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -378,7 +379,7 @@ function labelFromKey(value, labelMap = {}) {
 }
 
 function chartBase(type = 'column') {
-  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const reducedMotion = motionReduced(); // app preference (On by default), not the raw OS flag
   return {
     chart: { type, backgroundColor: 'transparent', spacing: [8, 8, 8, 8], animation: !reducedMotion },
     title: { text: null },

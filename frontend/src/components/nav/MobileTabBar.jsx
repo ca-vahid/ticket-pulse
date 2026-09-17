@@ -19,6 +19,7 @@ import { APP_VERSION } from '../../data/changelog';
 import ChangelogModal from '../ChangelogModal';
 import ThemeControl from './ThemeControl';
 import LayoutControl from './LayoutControl';
+import MotionControl from './MotionControl';
 import { NAV_DESTINATIONS, useCanAccessSettings, useNavDestinations } from './navDestinations';
 
 // Short labels so the fixed tabs stay legible on narrow phones.
@@ -113,9 +114,9 @@ export default function MobileTabBar() {
             type="button"
             aria-label="Close menu"
             onClick={() => setMoreOpen(false)}
-            className="absolute inset-0 bg-slate-900/40 dark:bg-black/60 animate-in fade-in-0 motion-reduce:animate-none"
+            className="absolute inset-0 bg-slate-900/40 dark:bg-black/60 animate-in fade-in-0 motion-off:animate-none"
           />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-reduce:animate-none">
+          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-off:animate-none">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <span className="text-sm font-bold text-foreground">Go to…</span>
               {/* Live-data status — the phone has no top bar, so this is its home. */}
@@ -247,6 +248,7 @@ export default function MobileTabBar() {
                   (no setMoreOpen(false)) so the user can compare. */}
               <ThemeControl itemRole="radio" className="px-4 py-2.5" />
               <LayoutControl itemRole="radio" className="px-4 py-2.5" />
+              <MotionControl itemRole="radio" className="px-4 py-2.5" />
 
               <div className="my-1 border-t border-border" />
 

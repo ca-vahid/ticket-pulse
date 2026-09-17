@@ -1691,9 +1691,9 @@ export default function Dashboard() {
               type="button"
               aria-label="Close statistics"
               onClick={() => setStatsSheetOpen(false)}
-              className="absolute inset-0 bg-slate-900/40 animate-in fade-in-0 motion-reduce:animate-none"
+              className="absolute inset-0 bg-slate-900/40 animate-in fade-in-0 motion-off:animate-none"
             />
-            <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-border bg-card pb-[calc(1rem+env(safe-area-inset-bottom))] text-foreground shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-reduce:animate-none">
+            <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-border bg-card pb-[calc(1rem+env(safe-area-inset-bottom))] text-foreground shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-off:animate-none">
               <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-secondary" />
               <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-2">
                 <h3 className="min-w-0 truncate text-sm font-bold">{bandRangeLabel}</h3>

@@ -29,6 +29,7 @@ import { NAV_DESTINATIONS, useCanAccessSettings, useWorkspaceRole } from './nav/
 import SideRail from './nav/SideRail';
 import ThemeControl from './nav/ThemeControl';
 import LayoutControl from './nav/LayoutControl';
+import MotionControl from './nav/MotionControl';
 import HeaderSearch from './nav/HeaderSearch';
 import ChangelogModal from './ChangelogModal';
 
@@ -689,6 +690,7 @@ export default function AppHeader({
                 so the user can compare — never routed through navigateFromMenu. */}
             <ThemeControl />
             <LayoutControl />
+            <MotionControl />
 
             <div className="my-1 border-t border-border" />
 

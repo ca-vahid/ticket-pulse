@@ -436,7 +436,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                   onClick={() => toggleType(key)}
                   aria-pressed={!off}
                   aria-label={`${s.label}: ${typeCounts[key]} event${typeCounts[key] === 1 ? '' : 's'}${off ? ' (hidden)' : ''}`}
-                  className={`tp-focus-ring inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-medium transition-colors motion-reduce:transition-none ${
+                  className={`tp-focus-ring inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-medium transition-colors motion-off:transition-none ${
                     off
                       ? 'border-transparent bg-muted/50 text-muted-foreground/50'
                       : 'border-border bg-card text-muted-foreground hover:border-input'
@@ -457,7 +457,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                 type="button"
                 onClick={() => { setView(key); setPinned(null); setHovered(null); }}
                 aria-pressed={view === key}
-                className={`tp-focus-ring rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide transition-colors motion-reduce:transition-none ${
+                className={`tp-focus-ring rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide transition-colors motion-off:transition-none ${
                   view === key ? 'bg-card text-foreground/85 shadow-subtle' : 'text-muted-foreground/75 hover:text-muted-foreground'
                 }`}
               >
@@ -518,7 +518,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                     data-evcount={1}
                     onClick={() => openTicket(e.ticket?.id)}
                     aria-label={`${style.label} ${ticketRefLabel(e.ticket)} at ${fmtTime(e.ts)}`}
-                    className={`tp-focus-ring absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm transition-transform hover:scale-150 motion-reduce:transition-none ${style.dot}`}
+                    className={`tp-focus-ring absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm transition-transform hover:scale-150 motion-off:transition-none ${style.dot}`}
                     style={{ left: `${u.x}%`, top: `${u.top}%` }}
                     {...common}
                   />
@@ -539,7 +539,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                   onClick={() => pinUnit(u)}
                   aria-label={label}
                   aria-expanded={pinned?.unit.key === u.key}
-                  className={`tp-focus-ring absolute z-10 flex h-5 min-w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow-sm transition-transform hover:scale-110 motion-reduce:transition-none ${chipStyle}`}
+                  className={`tp-focus-ring absolute z-10 flex h-5 min-w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow-sm transition-transform hover:scale-110 motion-off:transition-none ${chipStyle}`}
                   style={{ left: `${u.x}%`, top: `${u.top}%` }}
                   {...common}
                 >

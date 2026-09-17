@@ -48,7 +48,7 @@ function Shell({ subtitle, theme, onToggleTheme, children }) {
 function MessageCard({ icon: Icon, tone = 'muted', title, children }) {
   const toneClass = tone === 'danger' ? 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200' : tone === 'warn' ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-200' : tone === 'ok' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-200' : 'bg-muted text-muted-foreground';
   return (
-    <div className="tp-card mx-auto max-w-lg rounded-2xl px-6 py-10 text-center shadow-soft motion-safe:animate-fadeIn" role="status">
+    <div className="tp-card mx-auto max-w-lg rounded-2xl px-6 py-10 text-center shadow-soft motion-on:animate-fadeIn" role="status">
       <span className={`mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full ${toneClass}`}><Icon className="h-6 w-6" aria-hidden="true" /></span>
       <h1 className="text-lg font-bold text-foreground">{title}</h1>
       <div className="mt-2 text-sm text-muted-foreground">{children}</div>
@@ -99,9 +99,9 @@ export default function PublicApprovalReply() {
     return (
       <Shell theme={theme} onToggleTheme={toggle}>
         <div className="tp-card rounded-2xl p-6 shadow-soft" aria-busy="true" aria-label="Loading">
-          <div className="h-5 w-56 rounded bg-muted motion-safe:animate-pulse" />
-          <div className="mt-3 h-3 w-3/4 rounded bg-muted motion-safe:animate-pulse" />
-          <div className="mt-6 h-40 rounded-xl bg-muted motion-safe:animate-pulse" />
+          <div className="h-5 w-56 rounded bg-muted motion-on:animate-pulse" />
+          <div className="mt-3 h-3 w-3/4 rounded bg-muted motion-on:animate-pulse" />
+          <div className="mt-6 h-40 rounded-xl bg-muted motion-on:animate-pulse" />
         </div>
       </Shell>
     );
@@ -138,7 +138,7 @@ export default function PublicApprovalReply() {
 
   return (
     <Shell subtitle={subtitle} theme={theme} onToggleTheme={toggle}>
-      <article className="tp-card rounded-2xl border-t-4 border-t-violet-400 shadow-soft motion-safe:animate-fadeIn" aria-labelledby="reply-title">
+      <article className="tp-card rounded-2xl border-t-4 border-t-violet-400 shadow-soft motion-on:animate-fadeIn" aria-labelledby="reply-title">
         <header className="border-b border-border px-5 py-5 min-[800px]:px-[26px]">
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-violet-700 dark:text-violet-200">
             {question.audience === 'internal' ? 'Question to the approvers / agent' : 'Question for you'}

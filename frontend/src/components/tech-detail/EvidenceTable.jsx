@@ -324,7 +324,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                           className="tp-focus-ring rounded p-0.5 text-muted-foreground/75 hover:text-foreground/85"
                         >
                           <ChevronRight
-                            className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${row.getIsExpanded() ? 'rotate-90' : ''}`}
+                            className={`h-3.5 w-3.5 transition-transform motion-off:transition-none ${row.getIsExpanded() ? 'rotate-90' : ''}`}
                             aria-hidden="true"
                           />
                         </button>

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.16-preview';
+export const APP_VERSION = '3.9.17-preview';
 
 export const changelog = [
+  {
+    version: '3.9.17-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Motion is back on</strong> — Windows machines with “Animation effects” switched off tell the browser to reduce motion, and Ticket Pulse obeyed: every transition and menu animation vanished and looked like a bug. The app now decides for itself. A new <em>Motion</em> segment in the account menu offers <em>On</em> (default — rails, panels and menus ease open regardless of the system flag), <em>System</em> (the old behaviour) and <em>Off</em>.' },
+      { type: 'fixed', html: '<strong>Softer easing actually applied</strong> — the rail, notch, filter sections and their chevrons asked for a custom easing curve that never reached the stylesheet; it is a real utility now.' },
+    ],
+  },
   {
     version: '3.9.16-preview',
     date: 'September 16, 2026',
