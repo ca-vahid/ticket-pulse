@@ -271,7 +271,7 @@ export default function AppHeader({
         {workspaceMenuOpen && (
           <div
             role="menu"
-            className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50"
+            className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
           >
             <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Workspace</p>
             {availableWorkspaces.map((ws) => {
@@ -443,7 +443,7 @@ export default function AppHeader({
       </button>
 
       {statusOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-card p-3.5 text-xs text-foreground shadow-xl shadow-slate-900/10 dark:shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-card p-3.5 text-xs text-foreground shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn">
           <div className="flex items-center justify-between py-1">
             <span className="text-muted-foreground">Realtime feed</span>
             <span className={`inline-flex items-center gap-1.5 font-semibold ${
@@ -632,7 +632,7 @@ export default function AppHeader({
         {userMenuOpen && (
           <div
             role="menu"
-            className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50"
+            className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
           >
             <div className="border-b border-border px-3 py-2">
               <p className="truncate text-sm font-semibold text-foreground">{displayUserName}</p>

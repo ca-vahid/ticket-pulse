@@ -289,7 +289,7 @@ function FreshserviceToolsMenu({ busy, onCheckDrift, onSyncRequest }) {
         <ChevronDown className={`h-3 w-3 text-muted-foreground/75 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div role="menu" aria-label="FreshService tools" className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl border border-border bg-card p-1.5 shadow-soft">
+        <div role="menu" aria-label="FreshService tools" className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl border border-border bg-card p-1.5 shadow-soft animate-popIn">
           <button
             type="button"
             role="menuitem"

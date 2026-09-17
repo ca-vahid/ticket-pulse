@@ -173,7 +173,7 @@ export default function EmailChipsInput({
       </div>
 
       {search && open && results.length > 0 && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-lg shadow-soft py-1 max-h-64 overflow-y-auto settings-scrollbar" role="listbox">
+        <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-lg shadow-soft py-1 max-h-64 overflow-y-auto settings-scrollbar animate-popIn" role="listbox">
           {results.map((p, i) => (
             <button
               key={p.email}

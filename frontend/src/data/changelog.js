@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.15-preview';
+export const APP_VERSION = '3.9.16-preview';
 
 export const changelog = [
+  {
+    version: '3.9.16-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Ticket page header, redesigned</strong> — the action row is one line: Pick up, Edit and Resolve with words, the rest as compact icon buttons (labels return on wide screens), and Delete + Mark as noise behind one <em>More</em> menu. Every action wears a new hand-drawn-style pictogram set generated for Ticket Pulse, and the header sits on a soft glass-ribbon backdrop with light and dark variants.' },
+      { type: 'improved', html: '<strong>FreshService ownership, one quiet line</strong> — the long grey banner is now a slim strip: “FreshService owns this ticket”, an info tip with the full explanation, and the Open in FreshService link.' },
+      { type: 'improved', html: '<strong>Requester card, tidied</strong> — name, role and “N other tickets” together; e-mail, office and phones as a quiet icon list instead of pills; phone numbers formatted “(604) 706-4989”; the Also-for helper text moved into an info tip.' },
+      { type: 'improved', html: '<strong>Every dropdown eases open</strong> — Status, Priority, Type, Source, Category and Group on the ticket page are proper menus now (with status and priority colour dots, keyboard navigation and type-ahead) instead of browser selects that snapped; the sort menu, the header menus, address suggestions and filter flyouts share the same soft 180 ms pop.' },
+    ],
+  },
   {
     version: '3.9.15-preview',
     date: 'September 16, 2026',

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, GitBranch, GitMerge, History, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
+import FancySelect from '../components/common/FancySelect';
 import FieldCardNote from '../components/tickets/FieldCardNote';
 import PinnedIntakeCard from '../components/tickets/PinnedIntakeCard';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
@@ -39,7 +40,7 @@ import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
   ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusPill,
-  TypePill, PRIORITY_LABELS, SOURCE_OPTIONS, formatBytes, formatDayTime, isConversationEntry, pipelineRunLabel,
+  TypePill, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, pipelineRunLabel,
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
@@ -64,7 +65,7 @@ import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
 import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
 import EditTicketModal from '../components/tickets/EditTicketModal';
-import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from '../components/tickets/statusDefs';
+import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
 
 // Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
@@ -650,6 +651,13 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
  * Sidebar property row. `flash` marks a change someone ELSE just made — an
  * amber pulse that sticks until the user hovers/focuses it (acknowledgment).
  */
+// Generated action pictograms (gpt-image-2, 16 Sep 2026): flat duotone blue,
+// transparent, exported at 72px from public/brand/actions. Decorative — the
+// button text / aria-label carries the meaning.
+function ActionIcon({ name, className = 'h-[18px] w-[18px]' }) {
+  return <img src={`/brand/actions/${name}.png`} alt="" aria-hidden="true" draggable={false} className={`tp-action-icon flex-shrink-0 select-none ${className}`} />;
+}
+
 function SidebarField({ label, children, flash = false, onAck }) {
   return (
     <div
@@ -1811,7 +1819,8 @@ export default function TicketDetail() {
     }
   };
 
-  const fieldClass = 'tp-focus-ring w-full text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85 disabled:bg-muted/50 disabled:text-muted-foreground/75 disabled:cursor-not-allowed';
+  // Header toolbar (16 Sep 2026): quiet icon buttons whose label appears at xl.
+  const secondaryActionClass = 'tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200';
   const pipelineRuns = ticket?.pipelineRuns || [];
   const canPickUp = canWrite && meta?.actor?.technicianId && ticket?.assignedTechId !== meta.actor.technicianId;
 
@@ -1906,8 +1915,8 @@ export default function TicketDetail() {
           </div>
         ) : ticket && (
           <>
-            {/* Header */}
-            <div className="tp-card rounded-xl p-4 sm:p-5 mb-4">
+            {/* Header — subtle generated artwork behind it (light + dark variants, index.css .tp-ticket-header) */}
+            <div className="tp-card tp-ticket-header rounded-xl p-4 sm:p-5 mb-4 relative">
               <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:gap-5">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
@@ -2045,20 +2054,23 @@ export default function TicketDetail() {
                     {ticket.lastActivityAt ? <> · last activity <span title={new Date(ticket.lastActivityAt).toLocaleString()}>{formatDayTime(ticket.lastActivityAt)} · {timeAgo(ticket.lastActivityAt)}</span></> : null}
                   </p>
 
-                  {/* Quick actions */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2 print-hide">
+                  {/* Quick actions (16 Sep 2026 rework): three primaries with words,
+                      the rest as icon buttons that grow their label at xl, and the
+                      dangerous / rare ones behind one "More" menu — the row never
+                      wraps to a second line on a laptop. */}
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 print-hide" data-testid="ticket-actions">
                     {canPickUp && (
                       <button
                         onClick={pickUp}
                         onBlur={() => setConfirmPickup(false)}
                         disabled={savingField === 'pickup'}
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                        className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold shadow-subtle transition-colors ${
                           confirmPickup
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 hover:bg-blue-100 dark:hover:bg-blue-500/20'
+                            ? 'bg-blue-700 text-white ring-2 ring-blue-200 dark:ring-blue-500/30'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
                         }`}
                       >
-                        {savingField === 'pickup' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Hand className="w-3.5 h-3.5" aria-hidden="true" />}
+                        {savingField === 'pickup' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="pickup" className="h-[18px] w-[18px] brightness-0 invert" />}
                         {confirmPickup ? 'Confirm pick up?' : 'Pick up'}
                       </button>
                     )}
@@ -2066,9 +2078,9 @@ export default function TicketDetail() {
                       <button
                         onClick={() => setEditOpen(true)}
                         title={isNative ? 'Edit requester, subject and description' : 'Edit requester, subject and description — written to FreshService first'}
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-100 dark:hover:bg-blue-500/20"
+                        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/20"
                       >
-                        <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                        <ActionIcon name="edit" />
                         Edit
                       </button>
                     )}
@@ -2076,23 +2088,28 @@ export default function TicketDetail() {
                       <button
                         onClick={resolveTicket}
                         disabled={savingField === 'resolve'}
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+                        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
                       >
-                        {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Check className="w-3.5 h-3.5" aria-hidden="true" />}
-                    Resolve
+                        {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="resolve" />}
+                        Resolve
                       </button>
                     )}
+                    <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
                     <button
                       onClick={copyLink}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
+                      title="Copy link to this ticket"
+                      aria-label="Copy link"
+                      className={secondaryActionClass}
                     >
-                      <Link2 className="w-3.5 h-3.5" aria-hidden="true" /> Copy link
+                      <ActionIcon name="copylink" /> <span className="hidden xl:inline">Copy link</span>
                     </button>
                     <button
                       onClick={() => window.print()}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
+                      title="Print this ticket"
+                      aria-label="Print"
+                      className={secondaryActionClass}
                     >
-                      <Download className="w-3.5 h-3.5" aria-hidden="true" /> Print
+                      <ActionIcon name="print" /> <span className="hidden xl:inline">Print</span>
                     </button>
                     {canConverse && (
                       <MacroMenu
@@ -2111,11 +2128,12 @@ export default function TicketDetail() {
                       <button
                         onClick={() => setCloneConfirm(true)}
                         disabled={savingField === 'clone'}
-                        title="Create a new draft ticket pre-filled from this one"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
+                        title="Clone — a new draft ticket pre-filled from this one"
+                        aria-label="Clone"
+                        className={secondaryActionClass}
                       >
-                        {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <CopyPlus className="w-3.5 h-3.5" aria-hidden="true" />}
-                    Clone
+                        {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="clone" />}
+                        <span className="hidden xl:inline">Clone</span>
                       </button>
                     )}
                     {/* Merge (Phase MB1): always present for coordinators —
@@ -2127,11 +2145,12 @@ export default function TicketDetail() {
                         disabled={Boolean(mergeBlockedReason)}
                         aria-disabled={Boolean(mergeBlockedReason)}
                         title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
+                        aria-label="Merge"
                         data-testid="merge-button"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-muted-foreground"
+                        className={`${secondaryActionClass} hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-muted-foreground`}
                       >
-                        <GitMerge className="w-3.5 h-3.5" aria-hidden="true" />
-                        Merge
+                        <ActionIcon name="merge" />
+                        <span className="hidden xl:inline">Merge</span>
                       </button>
                     )}
                     {/* Split (QA 09-08): the inverse of merge. Unlike merge
@@ -2142,65 +2161,86 @@ export default function TicketDetail() {
                     {ticketingOn && (
                       <button
                         onClick={() => setSplitOpen(true)}
-                        title="Carve a separate issue out of this conversation into its own ticket"
+                        title="Split — carve a separate issue out of this conversation into its own ticket"
+                        aria-label="Split"
                         data-testid="split-button"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200"
+                        className={`${secondaryActionClass} hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200`}
                       >
-                        <GitBranch className="w-3.5 h-3.5" aria-hidden="true" />
-                        Split
+                        <ActionIcon name="split" />
+                        <span className="hidden xl:inline">Split</span>
                       </button>
                     )}
-                    {isNative && canReview && (
-                      <button
-                        onClick={deleteTicket}
-                        onBlur={() => setConfirmDelete(false)}
-                        disabled={savingField === 'delete'}
-                        title="Delete this Ticket Pulse ticket"
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                          confirmDelete
-                            ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
-                            : 'bg-card text-muted-foreground border-border hover:border-red-300 dark:hover:border-red-500/40 hover:text-red-700 dark:hover:text-red-200'
-                        }`}
-                      >
-                        {savingField === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
-                        {confirmDelete ? 'Confirm delete' : 'Delete'}
-                      </button>
-                    )}
+                    {/* More: noise + delete. One menu instead of two loose buttons. */}
                     <span ref={noiseMenuRef} className="relative">
                       <button
-                        onClick={() => (ticket.isNoise ? setNoiseFlag(false) : setNoiseMenuOpen((v) => !v))}
-                        disabled={savingField === 'noise'}
-                        aria-expanded={ticket.isNoise ? undefined : noiseMenuOpen}
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                          ticket.isNoise
-                            ? 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30 hover:bg-violet-100 dark:hover:bg-violet-500/20'
-                            : 'bg-card text-muted-foreground border-border hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200'
-                        }`}
+                        onClick={() => setNoiseMenuOpen((v) => !v)}
+                        aria-expanded={noiseMenuOpen}
+                        aria-haspopup="menu"
+                        aria-label="More actions"
+                        title="More actions"
+                        data-testid="more-actions"
+                        className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''} ${ticket.isNoise ? 'border-violet-300 text-violet-700 dark:border-violet-500/40 dark:text-violet-200' : ''}`}
                       >
-                        {savingField === 'noise' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <VolumeX className="w-3.5 h-3.5" aria-hidden="true" />}
-                        {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
+                        {savingField === 'noise' || savingField === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
+                        <span className="hidden xl:inline">More</span>
                       </button>
-                      {noiseMenuOpen && !ticket.isNoise && (
-                        <span className="absolute left-0 top-full mt-1 z-30 w-60 tp-card rounded-lg shadow-soft p-1 flex flex-col animate-scaleIn" role="menu">
-                          <button
-                            onClick={() => setNoiseFlag(true)}
-                            role="menuitem"
-                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200"
-                          >
-                        Flag as noise
-                          </button>
-                          {isNative && !ticketTerminal && (
+                      {noiseMenuOpen && (
+                        <span className="absolute left-0 top-full mt-1 z-30 w-64 tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
+                          {ticket.isNoise ? (
                             <button
-                              onClick={() => setNoiseFlag(true, true)}
+                              onClick={() => { setNoiseFlag(false); setNoiseMenuOpen(false); }}
                               role="menuitem"
-                              className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-200"
+                              disabled={savingField === 'noise'}
+                              className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200"
                             >
-                          Flag as noise & resolve
+                              <ActionIcon name="noise" className="h-5 w-5" /> Unmark noise
                             </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => { setNoiseFlag(true); setNoiseMenuOpen(false); }}
+                                role="menuitem"
+                                disabled={savingField === 'noise'}
+                                className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200"
+                              >
+                                <ActionIcon name="noise" className="h-5 w-5" />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block font-medium">Mark as noise</span>
+                                  <span className="block text-[11px] text-muted-foreground/75">Leaves the default queue · Views → Noise &amp; spam</span>
+                                </span>
+                              </button>
+                              {isNative && !ticketTerminal && (
+                                <button
+                                  onClick={() => { setNoiseFlag(true, true); setNoiseMenuOpen(false); }}
+                                  role="menuitem"
+                                  disabled={savingField === 'noise'}
+                                  className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-200"
+                                >
+                                  <ActionIcon name="resolve" className="h-5 w-5" /> Mark as noise &amp; resolve
+                                </button>
+                              )}
+                            </>
                           )}
-                          <span className="px-2.5 pt-1 pb-1.5 text-[10px] text-muted-foreground/75 border-t border-border/60 mt-1">
-                        Noise tickets leave the default queue — find them under Views → Noise & spam.
-                          </span>
+                          {isNative && canReview && (
+                            <>
+                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                              <button
+                                onClick={deleteTicket}
+                                onBlur={() => setConfirmDelete(false)}
+                                disabled={savingField === 'delete'}
+                                role="menuitem"
+                                title="Delete this Ticket Pulse ticket"
+                                className={`tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                                  confirmDelete
+                                    ? 'bg-red-600 text-white hover:bg-red-700'
+                                    : 'text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15'
+                                }`}
+                              >
+                                <ActionIcon name="delete" className={`h-5 w-5 ${confirmDelete ? 'brightness-0 invert' : ''}`} />
+                                {confirmDelete ? 'Confirm delete' : 'Delete ticket'}
+                              </button>
+                            </>
+                          )}
                         </span>
                       )}
                     </span>
@@ -2236,23 +2276,32 @@ export default function TicketDetail() {
                   )}
 
                   {!isNative && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-muted/50 border border-border rounded-lg text-xs text-muted-foreground">
-                      <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
-                  FreshService owns this ticket — edits to requester, subject, description, assignee, status, priority and category are written to FreshService first (with confirmation); replies are delivered through FreshService.
+                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground" data-testid="fs-owner-strip">
+                      <ActionIcon name="freshservice" className="h-[18px] w-[18px]" />
+                      <span className="font-medium text-foreground/80">FreshService owns this ticket</span>
+                      <span className="hidden md:inline text-muted-foreground/75">· edits confirm and write to FreshService first</span>
+                      <span
+                        className="inline-flex"
+                        title="Requester, subject, description, assignee, status, priority and category are written to FreshService first (with confirmation). Replies are delivered through FreshService."
+                      >
+                        <Info className="w-3.5 h-3.5 text-muted-foreground/60" aria-hidden="true" />
+                      </span>
                       {fsUrl && (
-                        <a href={fsUrl} target="_blank" rel="noreferrer" className="tp-focus-ring inline-flex items-center gap-1 font-semibold text-blue-700 dark:text-blue-200 hover:underline rounded ml-auto">
-                      Open in FreshService <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                        <a href={fsUrl} target="_blank" rel="noreferrer" className="tp-focus-ring ml-auto inline-flex items-center gap-1 whitespace-nowrap rounded font-semibold text-blue-700 hover:underline dark:text-blue-200">
+                          Open in FreshService <ExternalLink className="w-3 h-3" aria-hidden="true" />
                         </a>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Requester panel — compact contact card (Entra/FS enriched) */}
-                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-center">
+                {/* Requester panel (16 Sep 2026 rework): identity first, then a
+                    quiet contact list — icon + text, no pills — formatted phone
+                    numbers, and the helper copy tucked into an info tooltip. */}
+                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-center" data-testid="requester-panel">
                   {ticket.requester ? (
                     <div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-start gap-3">
                         {requesterIntegrationIdentity(ticket.requester) ? (
                           <IntegrationAvatar identity={requesterIntegrationIdentity(ticket.requester)} size="h-12 w-12" className="ring-2" />
                         ) : requesterPhoto ? (
@@ -2260,7 +2309,7 @@ export default function TicketDetail() {
                         ) : (
                           <PersonAvatar name={ticket.requester.name} size="h-12 w-12" textSize="text-base" />
                         )}
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-bold text-foreground truncate">
                             {ticket.requesterId
                               ? <Link to={`/requesters/${ticket.requesterId}`} state={{ from: `${location.pathname}${location.search}` }} className="tp-focus-ring rounded hover:text-primary hover:underline" title="Open this requester's page">{ticket.requester.name}</Link>
@@ -2273,25 +2322,59 @@ export default function TicketDetail() {
                             ].filter(Boolean).join(' · ');
                             return role ? <p className="text-xs text-muted-foreground truncate">{role}</p> : null;
                           })()}
+                          {ticket.requesterId && (related?.sameRequesterCount || 0) > 0 && (
+                            <Link
+                              to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester.name || '')}&status=any`}
+                              title={`View all tickets from ${ticket.requester.name || 'this requester'}`}
+                              className="tp-focus-ring mt-1 inline-flex items-center gap-1 rounded text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-200"
+                            >
+                              <History className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                              {related.sameRequesterCount} other ticket{related.sameRequesterCount === 1 ? '' : 's'}
+                              <ChevronRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                            </Link>
+                          )}
                         </div>
                       </div>
 
-                      {/* Contact + activity as compact chips (kills the tall list) */}
-                      <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+                      <ul className="mt-3 space-y-1 text-xs" aria-label="Requester contact">
                         {ticket.requester.email && (
-                          <button
-                            onClick={() => copyText(ticket.requester.email)}
-                            title={`Copy ${ticket.requester.email}`}
-                            className="tp-focus-ring inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
-                          >
-                            <Mail className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
-                            <span className="truncate">{ticket.requester.email}</span>
-                          </button>
+                          <li className="flex items-center gap-2 min-w-0">
+                            <Mail className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                            <button
+                              onClick={() => copyText(ticket.requester.email)}
+                              title={`Copy ${ticket.requester.email}`}
+                              className="tp-focus-ring min-w-0 truncate rounded text-left text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200"
+                            >
+                              {ticket.requester.email}
+                            </button>
+                          </li>
+                        )}
+                        {(ticket.requester.entraOfficeLocation || ticket.requester.entraCity) && (
+                          <li className="flex items-center gap-2 min-w-0">
+                            <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                            <span className="truncate text-foreground/80">
+                              {[...new Set([ticket.requester.entraOfficeLocation, ticket.requester.entraCity, ticket.requester.entraState].filter(Boolean))].join(' · ')}
+                            </span>
+                          </li>
+                        )}
+                        {ticket.requester.phone && (
+                          <li className="flex items-center gap-2 min-w-0">
+                            <Phone className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                            <a href={`tel:${ticket.requester.phone}`} className="tp-focus-ring rounded tabular-nums text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200">{formatPhone(ticket.requester.phone)}</a>
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50">work</span>
+                          </li>
+                        )}
+                        {ticket.requester.mobile && ticket.requester.mobile !== ticket.requester.phone && (
+                          <li className="flex items-center gap-2 min-w-0">
+                            <Smartphone className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                            <a href={`tel:${ticket.requester.mobile}`} className="tp-focus-ring rounded tabular-nums text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200">{formatPhone(ticket.requester.mobile)}</a>
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50">mobile</span>
+                          </li>
                         )}
                         {forwardedIntake && (
-                          <span
+                          <li
                             data-testid="requester-forwarded-chip"
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 text-violet-700 dark:text-violet-200"
+                            className="flex items-center gap-2 min-w-0 text-violet-700 dark:text-violet-200"
                             title={forwardedIntake.receivedAt
                               ? `Received by mailbox ${new Date(forwardedIntake.receivedAt).toLocaleString()}${forwardedIntake.originalSubject ? ` · original subject: ${forwardedIntake.originalSubject}` : ''}`
                               : undefined}
@@ -2300,61 +2383,35 @@ export default function TicketDetail() {
                             <span className="truncate">
                               {forwardedIntake.kind === 'agent_cc' ? 'Filed by' : 'Forwarded by'} {forwardedIntake.byName || forwardedIntake.byEmail || 'an agent'}
                             </span>
-                          </span>
+                          </li>
                         )}
-                        {(ticket.requester.entraOfficeLocation || ticket.requester.entraCity) && (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground">
-                            <MapPin className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
-                            <span className="truncate max-w-[160px]">
-                              {[...new Set([ticket.requester.entraOfficeLocation, ticket.requester.entraCity, ticket.requester.entraState].filter(Boolean))].join(' · ')}
-                            </span>
-                          </span>
-                        )}
-                        {ticket.requester.phone && (
-                          <a href={`tel:${ticket.requester.phone}`} className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200">
-                            <Phone className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
-                            <span>{ticket.requester.phone}</span>
-                          </a>
-                        )}
-                        {ticket.requester.mobile && ticket.requester.mobile !== ticket.requester.phone && (
-                          <a href={`tel:${ticket.requester.mobile}`} className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200">
-                            <Smartphone className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
-                            <span>{ticket.requester.mobile}</span>
-                          </a>
-                        )}
-                        {ticket.requesterId && (related?.sameRequesterCount || 0) > 0 && (
-                          <Link
-                            to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester.name || '')}&status=any`}
-                            title={`View all tickets from ${ticket.requester.name || 'this requester'}`}
-                            className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200 font-medium hover:bg-blue-100 dark:hover:bg-blue-500/20"
-                          >
-                            <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-                            <span>{related.sameRequesterCount} other ticket{related.sameRequesterCount === 1 ? '' : 's'}</span>
-                            <ChevronRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
-                          </Link>
-                        )}
-                      </div>
+                      </ul>
 
                       {/* "Also for" — additional requesters (Phase MR2, QA 08-26 #3):
                           the ticket's ccEmails as editable chips. Every reply to the
                           requester reaches them; the FS copy carries them as cc_emails.
                           TP-born → PATCH; FS-born → the FS write-back (FS owns the list). */}
-                      <div className="mt-3" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
-                        <CcChips
-                          value={ticket.ccEmails || []}
-                          onChange={saveAlsoFor}
-                          prefix="Also for"
-                          label="Also for (additional requesters)"
-                          placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
-                          readOnly={!canEditAlsoFor}
-                          disabled={savingField === 'alsoFor'}
-                        />
-                        <p className="mt-1 text-[11px] text-muted-foreground/75">
+                      <div className="mt-3 flex items-start gap-1.5" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
+                        <div className="min-w-0 flex-1">
+                          <CcChips
+                            value={ticket.ccEmails || []}
+                            onChange={saveAlsoFor}
+                            prefix="Also for"
+                            label="Also for (additional requesters)"
+                            placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
+                            readOnly={!canEditAlsoFor}
+                            disabled={savingField === 'alsoFor'}
+                          />
+                        </div>
+                        <span
+                          className="mt-2 inline-flex flex-shrink-0"
+                          title={`Additional requesters receive every reply to the requester.${canEditAlsoFor && !isNative ? ' Saved to FreshService first — the list lives on the FreshService ticket.' : ''}`}
+                          aria-label="About additional requesters"
+                        >
                           {savingField === 'alsoFor'
-                            ? 'Saving…'
-                            : (ticket.ccEmails?.length ? 'Additional requesters — they receive every reply to the requester' : 'Additional requesters receive every reply to the requester')}
-                          {canEditAlsoFor && !isNative && ' · saved to FreshService first (the list lives on the FreshService ticket).'}
-                        </p>
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/60" aria-hidden="true" />
+                            : <Info className="w-3.5 h-3.5 text-muted-foreground/50" aria-hidden="true" />}
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -3012,22 +3069,21 @@ export default function TicketDetail() {
                 {/* Status & SLA */}
                 <div className="tp-card rounded-xl p-4 space-y-3.5">
                   <SidebarField label="Status" flash={Boolean(liveChanges.status)} onAck={() => ackChange('status')}>
-                    <select
+                    <FancySelect
                       value={ticket.status}
                       disabled={(!canWrite && !fsEditable) || savingField === 'status'}
-                      onChange={(e) => {
-                        const next = e.target.value;
+                      onChange={(next) => {
                         const prev = ticket.status;
                         if (canWrite) {
                           changeStatusGated(next, prev, 'status');
                         } else requestFsSync([{ field: 'Status', from: ticket.status, to: next }], { status: next }).catch(() => {});
                       }}
-                      className={fieldClass}
                       aria-label="Ticket status"
-                    >
-                      {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                      {!statusOptions.includes(ticket.status) && <option value={ticket.status}>{ticket.status}</option>}
-                    </select>
+                      options={[
+                        ...statusOptions.map((st) => ({ value: st, label: st, dot: statusDotClass((statusDefs || []).find((d) => d.name === st)) })),
+                        ...(statusOptions.includes(ticket.status) ? [] : [{ value: ticket.status, label: ticket.status }]),
+                      ]}
+                    />
                     {ticket.resolutionReason && (
                       <p className="mt-1 text-[11px] text-muted-foreground" data-testid="resolution-reason">
                         <span className="font-medium text-foreground/85">{reasonLabel(ticket.resolutionReason)}</span>
@@ -3046,11 +3102,11 @@ export default function TicketDetail() {
                   </SidebarField>
 
                   <SidebarField label="Priority" flash={Boolean(liveChanges.priority)} onAck={() => ackChange('priority')}>
-                    <select
+                    <FancySelect
                       value={ticket.priority}
                       disabled={(!canWrite && !fsEditable) || savingField === 'priority'}
-                      onChange={(e) => {
-                        const next = Number(e.target.value);
+                      onChange={(raw) => {
+                        const next = Number(raw);
                         const prev = ticket.priority;
                         if (canWrite) {
                           applyChange('priority', () => ticketsAPI.update(ticketId, { priority: next }), {
@@ -3059,11 +3115,9 @@ export default function TicketDetail() {
                           });
                         } else requestFsSync([{ field: 'Priority', from: PRIORITY_LABELS[ticket.priority], to: PRIORITY_LABELS[next] }], { priority: next }).catch(() => {});
                       }}
-                      className={fieldClass}
                       aria-label="Ticket priority"
-                    >
-                      {[1, 2, 3, 4].map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
-                    </select>
+                      options={[1, 2, 3, 4].map((p) => ({ value: p, label: PRIORITY_LABELS[p], dot: PRIORITY_STRIP_COLORS[p] }))}
+                    />
                   </SidebarField>
 
                   {/* SLA clocks. TP-born (canWrite): pencil-editable — presets
@@ -3152,39 +3206,35 @@ export default function TicketDetail() {
                   </SidebarField>
 
                   <SidebarField label="Type" flash={Boolean(liveChanges.ticketType)} onAck={() => ackChange('ticketType')}>
-                    <select
+                    <FancySelect
                       value={ticket.ticketType || ''}
                       disabled={!canWrite || savingField === 'type'}
-                      onChange={(e) => applyChange('type', () => ticketsAPI.update(ticketId, { ticketType: e.target.value || null }))}
-                      className={fieldClass}
+                      onChange={(v) => applyChange('type', () => ticketsAPI.update(ticketId, { ticketType: v || null }))}
                       aria-label="Ticket type"
-                    >
-                      <option value="">—</option>
-                      {activeTicketTypes.map((t) => <option key={t.id} value={t.name} title={t.description || undefined}>{t.name}</option>)}
-                      {ticket.ticketType && !activeTicketTypes.some((t) => t.name === ticket.ticketType) && (
-                        <option value={ticket.ticketType}>{ticket.ticketType}</option>
-                      )}
-                    </select>
+                      options={[
+                        { value: '', label: '—' },
+                        ...activeTicketTypes.map((t) => ({ value: t.name, label: t.name, hint: t.description || undefined })),
+                        ...(ticket.ticketType && !activeTicketTypes.some((t) => t.name === ticket.ticketType) ? [{ value: ticket.ticketType, label: ticket.ticketType }] : []),
+                      ]}
+                    />
                   </SidebarField>
 
                   {/* Arrival channel (QA 07-10 #6): editable on TP-born tickets
                       (staff correct how a request actually reached them);
                       FS-born shows FreshService's value read-only. */}
                   <SidebarField label="Source" flash={Boolean(liveChanges.source)} onAck={() => ackChange('source')}>
-                    <select
+                    <FancySelect
                       value={ticket.source ?? ''}
                       disabled={!canWrite || savingField === 'source'}
-                      onChange={(e) => applyChange('source', () => ticketsAPI.update(ticketId, { source: Number(e.target.value) }))}
-                      className={fieldClass}
+                      onChange={(v) => applyChange('source', () => ticketsAPI.update(ticketId, { source: Number(v) }))}
                       aria-label="Ticket source"
                       title={canWrite ? 'How the request arrived' : 'Arrival channel — synced from FreshService'}
-                    >
-                      {ticket.source == null && <option value="">—</option>}
-                      {SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      {ticket.source != null && !SOURCE_OPTIONS.some((o) => o.value === Number(ticket.source)) && (
-                        <option value={ticket.source}>{ticketSourceLabel(ticket.source)}</option>
-                      )}
-                    </select>
+                      options={[
+                        ...(ticket.source == null ? [{ value: '', label: '—' }] : []),
+                        ...SOURCE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+                        ...(ticket.source != null && !SOURCE_OPTIONS.some((o) => o.value === Number(ticket.source)) ? [{ value: ticket.source, label: ticketSourceLabel(ticket.source) }] : []),
+                      ]}
+                    />
                   </SidebarField>
 
                   <SidebarField
@@ -3194,11 +3244,11 @@ export default function TicketDetail() {
                   >
                     {(canWrite || fsEditable) ? (
                       <>
-                        <select
+                        <FancySelect
                           value={effectiveCategoryId || ''}
                           disabled={savingField === 'category'}
-                          onChange={(e) => {
-                            const nextId = e.target.value ? Number(e.target.value) : null;
+                          onChange={(raw) => {
+                            const nextId = raw ? Number(raw) : null;
                             const prevCat = ticket.internalCategoryId ?? null;
                             const prevSub = ticket.internalSubcategoryId ?? null;
                             if (canWrite) {
@@ -3217,18 +3267,15 @@ export default function TicketDetail() {
                               ).catch(() => {});
                             }
                           }}
-                          className={fieldClass}
                           aria-label="Category"
-                        >
-                          <option value="">Uncategorized</option>
-                          {scopedCategoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
+                          options={[{ value: '', label: 'Uncategorized' }, ...scopedCategoryTree.map((c) => ({ value: c.id, label: c.name }))]}
+                        />
                         {subcategories.length > 0 && (
-                          <select
+                          <FancySelect
                             value={effectiveSubcategoryId || ''}
                             disabled={savingField === 'subcategory'}
-                            onChange={(e) => {
-                              const nextId = e.target.value ? Number(e.target.value) : null;
+                            onChange={(raw) => {
+                              const nextId = raw ? Number(raw) : null;
                               if (canWrite) {
                                 applyChange('subcategory', () => ticketsAPI.update(ticketId, { internalSubcategoryId: nextId }));
                               } else {
@@ -3239,12 +3286,10 @@ export default function TicketDetail() {
                                 ).catch(() => {});
                               }
                             }}
-                            className={`${fieldClass} mt-1.5`}
+                            className="mt-1.5"
                             aria-label="Subcategory"
-                          >
-                            <option value="">No subcategory</option>
-                            {subcategories.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                          </select>
+                            options={[{ value: '', label: 'No subcategory' }, ...subcategories.map((sc) => ({ value: sc.id, label: sc.name }))]}
+                          />
                         )}
                         {fsEditable && (
                           <p className="mt-1 text-[10px] text-muted-foreground/75">Edits sync to FreshService with confirmation.</p>
@@ -3271,13 +3316,12 @@ export default function TicketDetail() {
                           The old select read groupId only, so default internal
                           groups rendered as "No group". FS-born tickets keep FS
                           groups only — internal groups are TP-born-only. */}
-                      <select
+                      <FancySelect
                         value={ticket.internalGroupId
                           ? `int:${ticket.internalGroupId}`
                           : (ticket.groupId ? `fs:${ticket.groupId}` : '')}
                         disabled={!canWrite || savingField === 'group'}
-                        onChange={(e) => {
-                          const v = e.target.value;
+                        onChange={(v) => {
                           const payload = v.startsWith('int:')
                             ? { internalGroupId: Number(v.slice(4)), groupId: null }
                             : v.startsWith('fs:')
@@ -3285,25 +3329,13 @@ export default function TicketDetail() {
                               : { groupId: null, internalGroupId: null };
                           applyChange('group', () => ticketsAPI.update(ticketId, payload));
                         }}
-                        className={fieldClass}
                         aria-label="Group"
-                      >
-                        <option value="">No group</option>
-                        {(canWrite || ticket.internalGroupId) && meta.groups.some((g) => g.origin === 'local') && (
-                          <optgroup label="Internal groups">
-                            {meta.groups.filter((g) => g.origin === 'local').map((g) => (
-                              <option key={`int-${g.id}`} value={`int:${g.id}`}>{g.name}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {meta.groups.some((g) => g.origin !== 'local') && (
-                          <optgroup label="FreshService groups">
-                            {meta.groups.filter((g) => g.origin !== 'local').map((g) => (
-                              <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>{g.name}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </select>
+                        options={[
+                          { value: '', label: 'No group' },
+                          ...((canWrite || ticket.internalGroupId) ? meta.groups.filter((g) => g.origin === 'local').map((g) => ({ value: `int:${g.id}`, label: g.name, group: 'Internal groups' })) : []),
+                          ...meta.groups.filter((g) => g.origin !== 'local').map((g) => ({ value: `fs:${g.freshserviceId}`, label: g.name, group: 'FreshService groups' })),
+                        ]}
+                      />
                     </SidebarField>
                   )}
 

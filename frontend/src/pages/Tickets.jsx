@@ -1619,7 +1619,7 @@ export default function Tickets() {
                       {sortLabel}
                     </button>
                     {sortMenuOpen && (
-                      <div className="absolute right-0 top-full mt-1 z-20 w-48 tp-card rounded-lg shadow-soft p-1" role="menu">
+                      <div className="absolute right-0 top-full mt-1 z-20 w-48 tp-card rounded-lg shadow-soft p-1 animate-popIn" role="menu">
                         {SORT_OPTIONS.map((o) => (
                           <button
                             key={o.value}

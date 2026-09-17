@@ -149,7 +149,7 @@ export default function FilterDropdown({
           id={popoverId}
           role="listbox"
           aria-multiselectable={multi}
-          className={`absolute top-full z-[60] mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl ring-1 ring-slate-900/5 ${
+          className={`absolute top-full z-[60] mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl ring-1 ring-slate-900/5 animate-popIn ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
         >
