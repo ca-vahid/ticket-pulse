@@ -1253,6 +1253,10 @@ model Ticket {
   // caller's category/priority/type are authoritative and the ticket can never
   // be noise-closed. Stamped once at creation; every pipeline trigger reads it.
   triageMode                String?   @map("triage_mode") @db.VarChar(20)
+  // FreshService approval on the ticket (17 Sep 2026): 0 requested, 1 approved, 2 rejected,
+  // 3 cancelled, 4 not requested — copied from the FS payload on every sync so verdicts see both systems.
+  fsApprovalStatus          Int?      @map("fs_approval_status")
+  fsApprovalStatusName      String?   @map("fs_approval_status_name") @db.VarChar(40)
   // Resolution details (C4/D3). Vocabulary is a workspace setting; required on
   // Security-category tickets, optional elsewhere.
   resolutionReason          String?   @map("resolution_reason") @db.VarChar(40)

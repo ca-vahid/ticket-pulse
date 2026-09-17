@@ -301,3 +301,46 @@ describe('an agent filing for someone else — Assetron 16 Sep 2026 (#219171)', 
     expect(r.person.matchedBy).toBe('requester_email');
   });
 });
+
+describe('FreshService approvals on the ticket (17 Sep 2026)', () => {
+  test('an FS-approved hardware ticket ALLOWS with isApproved true and names FreshService', async () => {
+    // #219171 "Request for Cristian Orellana : Laptop": approved in FreshService on 20 Apr 2026,
+    // no Ticket Pulse rows — used to read "needs no approval".
+    findMany.mockResolvedValue([ticket({ approvals: [], fsApprovalStatusName: 'Approved' })]);
+    const r = await svc.check(1, 'haguo@bgcengineering.ca');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.isApproved).toBe(true);
+    expect(r.approval.state).toBe('APPROVED');
+    expect(r.approval.source).toBe('freshservice');
+    expect(r.approval.decidedBy).toBe('FreshService approval');
+    expect(r.reason).toMatch(/Approved in FreshService/);
+  });
+
+  test('an FS approval still Requested HOLDS', async () => {
+    findMany.mockResolvedValue([ticket({ approvals: [], fsApprovalStatusName: 'Requested' })]);
+    const r = await svc.check(1, 'haguo@bgcengineering.ca');
+    expect(r.decision).toBe('HOLD');
+    expect(r.approval.state).toBe('PENDING');
+    expect(r.approval.source).toBe('freshservice');
+  });
+
+  test('"Not Requested" in FreshService changes nothing', async () => {
+    findMany.mockResolvedValue([ticket({ approvals: [], fsApprovalStatusName: 'Not Requested' })]);
+    const r = await svc.check(1, 'haguo@bgcengineering.ca');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.isApproved).toBe(false);
+    expect(r.approval.source).toBeNull();
+  });
+
+  test('a Ticket Pulse approval beats an FS rejection on an older ticket (re-request that succeeded)', async () => {
+    findMany.mockResolvedValue([
+      ticket({ id: 2, approvals: [approval('approved')] }),
+      ticket({ id: 1, approvals: [], fsApprovalStatusName: 'Rejected' }),
+    ]);
+    const r = await svc.check(1, 'haguo@bgcengineering.ca');
+    expect(r.decision).toBe('ALLOW');
+    expect(r.approval.state).toBe('APPROVED');
+    expect(r.approval.source).toBe('ticketpulse');
+    expect(r.approval.decidedBy).toBe('A Manager');
+  });
+});
