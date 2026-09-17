@@ -73,13 +73,23 @@ export function plusAddressReplyTo(mailboxAddress, ticket) {
   const address = String(mailboxAddress || '').trim().toLowerCase();
   const at = address.indexOf('@');
   if (at <= 0 || at === address.length - 1) return null;
-  if (!ticket || ticket.origin !== TICKET_ORIGIN.TICKETPULSE) return null;
-  const n = Number(ticket.nativeNumber);
-  if (!Number.isInteger(n) || n <= 0) return null;
+  if (!ticket) return null;
+  // TP-born → +tp<native number>. FS-born → +fs<FreshService number> (17 Sep
+  // 2026: replies on FreshService tickets may leave from Ticket Pulse, and the
+  // answers must find the ticket the same way — ingest rung 1.5).
+  let tag = null;
+  if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
+    const n = Number(ticket.nativeNumber);
+    if (Number.isInteger(n) && n > 0) tag = `tp${n}`;
+  } else if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {
+    const n = Number(ticket.freshserviceTicketId);
+    if (Number.isInteger(n) && n > 0) tag = `fs${n}`;
+  }
+  if (!tag) return null;
   const local = address.slice(0, at).replace(/\+.*$/, ''); // never stack plus-tags
   const domain = address.slice(at + 1);
   if (!local) return null;
-  return `${local}+tp${n}@${domain}`;
+  return `${local}+${tag}@${domain}`;
 }
 
 /** Domain of an email address (lower-cased) or null. */

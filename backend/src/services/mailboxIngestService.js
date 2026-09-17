@@ -10,6 +10,7 @@ import { TICKET_ORIGIN, TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketO
 import { sseManager } from '../routes/sse.routes.js';
 import agentIntake from './agentIntakeService.js';
 import { PARSER_VERSION, textToHtml } from '../utils/forwardedMailParser.js';
+import { fsConversationEntryId } from '../utils/fsEntryId.js';
 
 // In-memory memory of messages handed to the hold queue (RL-4) so the delta
 // poller does not re-fetch them every catch-up round; bounded, process-local
@@ -102,7 +103,9 @@ function extractAddresses(raw) {
   return out;
 }
 
-const PLUS_TAG_RE = /^([^@\s<>+]+)\+tp(\d+)@([^@\s<>]+)$/i;
+// `+tp<n>` = TP-born native number; `+fs<n>` = FreshService ticket number (replies Ticket Pulse
+// sent on an FS-born ticket, 17 Sep 2026). Same mailbox-anchoring rules for both.
+const PLUS_TAG_RE = /^([^@\s<>+]+)\+(tp|fs)(\d+)@([^@\s<>]+)$/i;
 
 /**
  * Plus-address reply token (MB-1c, ingest rung 1.5). Outbound Graph sends
@@ -116,8 +119,9 @@ const PLUS_TAG_RE = /^([^@\s<>+]+)\+tp(\d+)@([^@\s<>]+)$/i;
  * on some other mailbox's address is not ours); returns distinct native TP
  * numbers in encounter order (To before Cc before envelope headers).
  */
-export function plusAddressTicketNumbers(email, mailboxAddress = null) {
+export function plusAddressTicketNumbers(email, mailboxAddress = null, kind = 'tp') {
   const base = String(mailboxAddress || '').trim().toLowerCase();
+  const wanted = String(kind || 'tp').toLowerCase();
   const candidates = [
     ...extractAddresses(email?.to),
     ...extractAddresses(email?.cc),
@@ -128,11 +132,17 @@ export function plusAddressTicketNumbers(email, mailboxAddress = null) {
   for (const address of candidates) {
     const m = address.match(PLUS_TAG_RE);
     if (!m) continue;
-    if (base && `${m[1]}@${m[3]}`.toLowerCase() !== base) continue;
-    const n = Number(m[2]);
+    if (m[2].toLowerCase() !== wanted) continue;
+    if (base && `${m[1]}@${m[4]}`.toLowerCase() !== base) continue;
+    const n = Number(m[3]);
     if (Number.isInteger(n) && n > 0 && !numbers.includes(n)) numbers.push(n);
   }
   return numbers;
+}
+
+/** `<mailbox>+fs<n>@` tags — FreshService ticket numbers of replies Ticket Pulse sent on FS-born tickets. */
+export function plusAddressFsTicketNumbers(email, mailboxAddress = null) {
+  return plusAddressTicketNumbers(email, mailboxAddress, 'fs');
 }
 
 // Mirrors ticketService's emailListSchema (`.max(10)`) — the "Also for" cap
@@ -602,6 +612,14 @@ class MailboxIngestService {
       });
       if (ticket) return { ticket, via: 'plus_address' };
     }
+    // 1.5b FS-born via `mailbox+fs<n>@` — the requester answered a reply Ticket Pulse
+    // mailed on a FreshService ticket (17 Sep 2026); FreshService never saw this mail.
+    for (const fsNumber of plusAddressFsTicketNumbers(email, mailboxAddress)) {
+      const ticket = await prisma.ticket.findFirst({
+        where: { workspaceId, freshserviceTicketId: BigInt(fsNumber), origin: TICKET_ORIGIN.FRESHSERVICE },
+      });
+      if (ticket) return { ticket, via: 'plus_address_fs' };
+    }
 
     const subject = String(subjectOverride !== undefined && subjectOverride !== null ? subjectOverride : (email.subject || ''));
 
@@ -774,8 +792,9 @@ class MailboxIngestService {
         content: stripQuotedText(email.bodyText || email.bodyPreview || null),
         occurredAt: email.receivedAt || now,
         emailMessageId: email.internetMessageId,
-        // Requester replies belong on the FS fallback copy too
-        mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
+        // Requester replies belong on the FreshService side too: the TP-born fallback
+        // copy via the mirror queue, an FS-born ticket via the direct write-back below.
+        mirrorState: 'pending',
         // Who else the sender addressed (QA 08-05 #3) — FS conversation shape.
         ...(Object.keys(rawPayload).length ? { rawPayload } : {}),
       },
@@ -855,6 +874,11 @@ class MailboxIngestService {
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       await mirrorService.enqueueThreadEntry(ticket.workspaceId, ticket.id, entry.id);
       if (ccAdded) await mirrorService.enqueueFieldSync?.(ticket.workspaceId, ticket.id)?.catch?.(() => {});
+    } else if (ticket.freshserviceTicketId) {
+      // FS-born (17 Sep 2026): this mail answered something Ticket Pulse sent, so
+      // FreshService has not seen it — write it onto the FS ticket as an incoming
+      // note by the requester; the later FS conversation sync lands on this row.
+      await this._writeReplyToFreshService(ticket, entry, email, { isAgentReply, agent });
     }
 
     // Workflow trigger: "Requester replied" (drives the seeded reopen
@@ -894,6 +918,51 @@ class MailboxIngestService {
 
     logger.info(`Inbound email matched ${ticketDisplayRef(ticket)} via ${via} (from ${email.from}${agent ? `, agent ${agent.id}${isForward ? ' forward' : ' reply'}` : ''})`);
     return entry;
+  }
+
+  /**
+   * FS-born write-back of an inbound reply (17 Sep 2026). Requester replies go
+   * in as `incoming` notes attributed to the requester's FreshService user (so
+   * FreshService shows "Olina replied", and its own requester-responded rules
+   * fire); an agent's Outlook reply goes in as a public note with a marker.
+   * Never throws — the reply is already on the ticket here; a failed write-back
+   * leaves the row `failed` for the next reconcile and a warning in the log.
+   */
+  async _writeReplyToFreshService(ticket, entry, email, { isAgentReply = false, agent = null } = {}) {
+    const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    try {
+      const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
+      if (typeof client?.addNote !== 'function') throw new Error('FreshService is not configured for this workspace');
+      const requesterFsId = ticket.requesterFreshserviceId === null || ticket.requesterFreshserviceId === undefined ? null : Number(ticket.requesterFreshserviceId);
+      const asRequester = !isAgentReply && Number.isFinite(requesterFsId) && requesterFsId > 0;
+      const who = agent ? `${agent.name || agent.email} <${agent.email}>` : `${email.fromName || email.from} <${email.from}>`;
+      const marker = asRequester
+        ? ''
+        : `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>[Ticket Pulse]</b> ${esc(who)} · ${isAgentReply ? 'agent reply' : 'reply'} received by e-mail</p>`;
+      const body = `${marker}${entry.bodyHtml || textToHtml(entry.bodyText || entry.content || '')}`;
+      let attachments = [];
+      try {
+        const { default: attachmentService } = await import('./attachmentService.js');
+        attachments = await attachmentService.buffersForThreadEntry(entry.id);
+      } catch { attachments = []; }
+      const result = await client.addNote(Number(ticket.freshserviceTicketId), body, {
+        isPrivate: false,
+        incoming: !isAgentReply,
+        attachments,
+        ...(asRequester ? { userId: requesterFsId } : {}),
+      });
+      const fsId = result?.conversation?.id || result?.id || null;
+      await Promise.resolve().then(() => prisma.ticketThreadEntry.update({
+        where: { id: entry.id },
+        data: { mirrorState: 'mirrored', mirroredAt: new Date(), ...(fsId ? { externalEntryId: fsConversationEntryId(fsId) } : {}) },
+      })).catch(() => {});
+      logger.info(`Inbound reply on ${ticketDisplayRef(ticket)} written back to FreshService (conversation ${fsId || 'n/a'}, ${asRequester ? 'as requester' : 'marked'})`);
+      return fsId;
+    } catch (err) {
+      logger.warn(`FreshService write-back of inbound reply failed for ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+      await Promise.resolve().then(() => prisma.ticketThreadEntry.update({ where: { id: entry.id }, data: { mirrorState: 'failed' } })).catch(() => {});
+      return null;
+    }
   }
 
   /** rawPayload.forwarded — the FW-3 data contract (no migration). */

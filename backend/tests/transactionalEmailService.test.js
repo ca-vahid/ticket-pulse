@@ -212,7 +212,7 @@ describe('transactionalEmailService (Phase MB-1 mailbox reply loop)', () => {
     });
   });
 
-  test('Graph lane: FS-born ticket gets no plus-address Reply-To (FreshService owns that thread); no ticket → no threading at all', async () => {
+  test('Graph lane: FS-born ticket gets a +fs<n> plus-address Reply-To (17 Sep 2026 — Ticket Pulse may mail FS-born replies); no ticket → no threading at all', async () => {
     prismaMock.mailboxConnection.findFirst.mockResolvedValue(connection);
     isConfiguredMock.mockReturnValue(true);
     sendMailAsMailboxMock.mockResolvedValue({ internetMessageId: '<g@x>' });
@@ -221,7 +221,7 @@ describe('transactionalEmailService (Phase MB-1 mailbox reply loop)', () => {
       workspaceId: 5, to: 'rita@example.com', subject: 'S', html: '<p>B</p>',
       ticket: { id: 77, origin: 'freshservice', freshserviceTicketId: 225001, nativeNumber: null },
     });
-    expect(sendMailAsMailboxMock).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ replyTo: null }));
+    expect(sendMailAsMailboxMock).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ replyTo: expect.stringMatching(/\+fs225001@/) }));
 
     await deliverTransactionalEmail({ workspaceId: 5, to: 'admin@example.com', subject: 'Sync health', html: '<p>B</p>' });
     expect(sendMailAsMailboxMock).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({
@@ -268,7 +268,7 @@ describe('transactionalEmailService (Phase MB-1 mailbox reply loop)', () => {
     expect(result).toEqual(expect.objectContaining({ via: 'sendgrid', replyTo: 'patickets+tp1042@bgcengineering.ca' }));
   });
 
-  test('SendGrid fallback Reply-To stays null with no ingest mailbox, for FS-born tickets, and for non-ticket mail', async () => {
+  test('SendGrid fallback Reply-To: null with no ingest mailbox and for non-ticket mail; +fs<n> on the ingest mailbox for an FS-born ticket', async () => {
     prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
     sendgridSendEmailMock.mockResolvedValue({ provider: 'sendgrid' });
     await deliverTransactionalEmail({ workspaceId: 5, to: 'rita@example.com', subject: 'S', html: '<p>B</p>', ticket: tpTicket });
@@ -281,7 +281,7 @@ describe('transactionalEmailService (Phase MB-1 mailbox reply loop)', () => {
       workspaceId: 5, to: 'rita@example.com', subject: 'S', html: '<p>B</p>',
       ticket: { id: 77, origin: 'freshservice', freshserviceTicketId: 225001, nativeNumber: null },
     });
-    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ replyTo: null }));
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ replyTo: 'patickets+fs225001@bgcengineering.ca' }));
 
     jest.clearAllMocks();
     prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);

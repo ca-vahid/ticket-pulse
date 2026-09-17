@@ -11,6 +11,35 @@ import { settingsAPI } from '../../services/api';
  * Honesty note baked into the copy: the name is guaranteed on SendGrid
  * sends; Microsoft 365 mailbox sends show the mailbox's directory name.
  */
+/** One labelled switch row (same look as the reply-name toggle). Stateless. */
+function LaneSwitch({ label, help, checked, busy, onToggle, testId }) {
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2.5" data-testid={testId}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground/85">{label}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{help}</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          aria-label={`${label} ${checked ? 'on' : 'off'}`}
+          onClick={onToggle}
+          disabled={busy}
+          className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${checked ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
+        >
+          <span
+            className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform"
+            style={{ transform: checked ? 'translateX(16px)' : 'translateX(0)' }}
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SenderIdentityCard() {
   const [identity, setIdentity] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +93,28 @@ export default function SenderIdentityCard() {
       setToggleError(error.message || 'Could not update the reply sender setting');
     } finally {
       setTogglingReplyName(false);
+    }
+  };
+
+  // FreshService lanes (17 Sep 2026): flipped on their own, like the reply-name toggle.
+  const fsReplyAsAgent = identity?.fsReplyAsAgent === true;
+  const fsBornViaTicketPulse = identity?.fsBornRepliesViaTicketPulse === true;
+  const [togglingLane, setTogglingLane] = useState(null);
+  const toggleLaneFlag = async (key, next) => {
+    if (togglingLane) return;
+    setTogglingLane(key);
+    setToggleError(null);
+    try {
+      const response = await settingsAPI.updateSenderIdentity({ [key]: next });
+      const data = response.data || null;
+      if (data) {
+        setIdentity(data);
+        setDraftName(data.fromName || '');
+      }
+    } catch (error) {
+      setToggleError(error.message || 'Could not update the FreshService reply setting');
+    } finally {
+      setTogglingLane(null);
     }
   };
 
@@ -210,6 +261,24 @@ export default function SenderIdentityCard() {
             </div>
             {toggleError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-300" role="alert">{toggleError}</p>}
           </div>
+
+          <LaneSwitch
+            testId="sender-identity-fs-born-lane"
+            label="Send replies on FreshService tickets from Ticket Pulse"
+            help="On: a reply on a FreshService-born ticket is e-mailed by Ticket Pulse — from this workspace's mailbox, as the replying agent — and recorded on the FreshService ticket as a note. The requester's answer comes back to the ticket here and is written into FreshService too. Off: FreshService sends the reply from its helpdesk address."
+            checked={fsBornViaTicketPulse}
+            busy={togglingLane === 'fsBornRepliesViaTicketPulse'}
+            onToggle={() => toggleLaneFlag('fsBornRepliesViaTicketPulse', !fsBornViaTicketPulse)}
+          />
+
+          <LaneSwitch
+            testId="sender-identity-fs-reply-as-agent"
+            label="FreshService attributes our replies and notes to the agent"
+            help="Replies and notes Ticket Pulse posts to FreshService carry the acting agent's FreshService identity, so FreshService shows their name (and, when it sends the mail, uses it) instead of the API key's owner. People added to this workspace by e-mail only are matched to their FreshService agent by address."
+            checked={fsReplyAsAgent}
+            busy={togglingLane === 'fsReplyAsAgent'}
+            onToggle={() => toggleLaneFlag('fsReplyAsAgent', !fsReplyAsAgent)}
+          />
         </div>
 
         <div>

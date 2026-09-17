@@ -21,6 +21,7 @@ import { pickIngestMailbox, pickOutboundMailbox } from './mailboxPicker.js';
 import { plusAddressReplyTo, storeEntryMessageId, threadingHeadersForTicket } from './emailThreadingService.js';
 import { fsConversationEntryId, parseFsConversationId } from '../utils/fsEntryId.js';
 import { isFsReplyAsAgentEnabled } from './fsReplyAsAgentService.js';
+import { isFsBornRepliesViaTicketPulseEnabled } from './fsBornReplyLaneService.js';
 import { createHash } from 'node:crypto';
 
 // FS agent id by (workspace, e-mail) for reply attribution — see _fsAgentIdByEmail.
@@ -1896,6 +1897,9 @@ class TicketService {
       // Default outbound reply subject (Phase SN4) — null for FS-born
       // tickets, where FreshService composes it.
       replySubjectDefault: replySubjectDefault(ticket),
+      // Which system mails requester replies on this ticket (17 Sep 2026): the
+      // composer says so instead of guessing from the origin.
+      replyLane: ticket.origin === TICKET_ORIGIN.TICKETPULSE || (await isFsBornRepliesViaTicketPulseEnabled(workspaceId)) ? 'ticketpulse' : 'freshservice',
       thread: resolvedThread,
       // Every row carries actorKind (explicit details.actorKind or the
       // read-time heuristic for legacy rows) so the History tab can chip +
@@ -3902,6 +3906,40 @@ class TicketService {
     return id;
   }
 
+  /**
+   * FS-born reply that Ticket Pulse mailed itself (17 Sep 2026): record it on the
+   * FreshService ticket as a PUBLIC note (portal-visible, no FreshService e-mail —
+   * the requester already has ours), attributed to the agent when the workspace
+   * attributes replies. The FS conversation sync then lands on this same row.
+   * Never throws: the e-mail is the job; a failed record leaves the row `failed`.
+   */
+  async _recordReplyOnFreshService(ticket, entry, actor, { attachments = [] } = {}) {
+    const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    try {
+      const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
+      if (typeof client?.addNote !== 'function') throw new Error('FreshService is not configured for this workspace');
+      const fsUserId = await this._fsActorUserId(ticket.workspaceId, actor);
+      const who = actor?.name || actor?.email || 'Ticket Pulse';
+      const marker = `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>${TP_NOTE_MARKER}</b> ${esc(who)} · reply to requester · e-mailed by Ticket Pulse</p>`;
+      const html = entry.bodyHtml || `<p>${String(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      const result = await client.addNote(Number(ticket.freshserviceTicketId), `${marker}${html}`, {
+        isPrivate: false,
+        attachments,
+        ...(fsUserId ? { userId: fsUserId } : {}),
+      });
+      const fsEntryId = result?.conversation?.id || result?.id || null;
+      await prisma.ticketThreadEntry.update({
+        where: { id: entry.id },
+        data: { mirrorState: 'mirrored', mirroredAt: new Date(), ...(fsEntryId ? { externalEntryId: fsConversationEntryId(fsEntryId) } : {}) },
+      });
+      return fsEntryId;
+    } catch (err) {
+      logger.warn(`FreshService record of a Ticket Pulse reply failed for ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+      await Promise.resolve().then(() => prisma.ticketThreadEntry.update({ where: { id: entry.id }, data: { mirrorState: 'failed' } })).catch(() => {});
+      return null;
+    }
+  }
+
   // ------------------------------------------------------------ conversation
 
   async addReply(ticketId, workspaceId, input, actor, files = []) {
@@ -4025,8 +4063,13 @@ class TicketService {
     // stored thread entry stays clean); replies only, never notes/forwards.
     const signature = isPrivate ? null : await getEnabledSignatureForSend(workspaceId, actor?.email);
 
+    // FS-born replies leave from Ticket Pulse when the workspace says so (17 Sep
+    // 2026): our mailbox, the agent's name, a reply key the ingest understands —
+    // and the reply is recorded on the FreshService ticket afterwards. Notes
+    // still post straight to FreshService.
+    const viaTicketPulse = !isNative && !isPrivate && await isFsBornRepliesViaTicketPulseEnabled(workspaceId);
     let externalEntryId = null;
-    if (!isNative) {
+    if (!isNative && !viaTicketPulse) {
       const client = await mirrorService.getInteractiveClient(workspaceId);
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
       const fsId = Number(ticket.freshserviceTicketId);
@@ -4104,9 +4147,10 @@ class TicketService {
         bodyHtml,
         bodyText,
         occurredAt: now,
-        // Native entries queue for the mirror; FS-born entries are already there.
-        mirrorState: isNative ? 'pending' : 'mirrored',
-        mirroredAt: isNative ? null : now,
+        // Native entries queue for the mirror; FS-born entries are already there —
+        // unless Ticket Pulse mailed the reply itself and records it on FS below.
+        mirrorState: isNative || viaTicketPulse ? 'pending' : 'mirrored',
+        mirroredAt: isNative || viaTicketPulse ? null : now,
         ...((recipients || stageMeta) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}) } } : {}),
       },
     });
@@ -4143,6 +4187,11 @@ class TicketService {
         email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature, subject: subjectOverride });
       }
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
+    } else if (viaTicketPulse) {
+      if (ticket.requester?.email) {
+        email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature, subject: null });
+      }
+      await this._recordReplyOnFreshService(ticket, entry, actor, { attachments: fsAttachments });
     } else if (!isPrivate) {
       email = { sent: true, via: 'freshservice' };
     }

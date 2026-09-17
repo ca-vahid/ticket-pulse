@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   mailboxConnection: { findMany: jest.fn(), update: jest.fn() },
-  ticketThreadEntry: { findFirst: jest.fn(), create: jest.fn() },
+  ticketThreadEntry: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
   ticket: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   requester: { findUnique: jest.fn() },
   technician: { findFirst: jest.fn(), findMany: jest.fn() },
@@ -14,7 +14,7 @@ const graphMock = {
   getInboxMessagesForIngest: jest.fn(),
 };
 const ticketServiceMock = { createTicket: jest.fn() };
-const mirrorServiceMock = { enqueueThreadEntry: jest.fn(), enqueueFieldSync: jest.fn() };
+const mirrorServiceMock = { enqueueThreadEntry: jest.fn(), enqueueFieldSync: jest.fn(), getInteractiveClient: jest.fn(async () => null) };
 const activityMock = { create: jest.fn() };
 // Approvals v3: a reply on <mailbox>+ap<key>@… is an approval answer, not a ticket reply.
 const conversationMock = { answer: jest.fn(), plusAddressApprovalKey: jest.fn(() => null) };
@@ -37,7 +37,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 
 const {
   default: mailboxIngestService, looksLikeLoopMail, referencedMessageIds, emailRecipients,
-  plusAddressTicketNumbers, mergeInboundCc, MAX_CC_EMAILS,
+  plusAddressTicketNumbers, plusAddressFsTicketNumbers, mergeInboundCc, MAX_CC_EMAILS,
 } = await import('../src/services/mailboxIngestService.js');
 
 const connection = { id: 1, workspaceId: 1, address: 'helpdesk-pilot@example.com' };
@@ -947,5 +947,57 @@ describe('hold-queue callbacks (RL-4 contract)', () => {
     expect(entry).toEqual(expect.objectContaining({ id: 9001, ticketId: 720, authorType: 'requester', incoming: true, emailMessageId: '<held-2@example.com>' }));
     expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'requester_reply', details: expect.objectContaining({ via: 'held_reply_attach' }) }));
     expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 720, 9001);
+  });
+});
+
+// --------------------------------------------------------------- FS-born reply loop (17 Sep 2026)
+describe('FS-born tickets on the Ticket Pulse reply lane', () => {
+  test('plusAddressFsTicketNumbers reads +fs<n>; +tp and +fs never cross', () => {
+    expect(plusAddressFsTicketNumbers({ to: ['helpdesk-pilot+fs241459@example.com'] }, connection.address)).toEqual([241459]);
+    expect(plusAddressFsTicketNumbers({ to: ['Help <Helpdesk-Pilot+FS241459@Example.com>'] }, connection.address)).toEqual([241459]);
+    expect(plusAddressFsTicketNumbers({ to: ['helpdesk-pilot+tp1042@example.com'] }, connection.address)).toEqual([]);
+    expect(plusAddressTicketNumbers({ to: ['helpdesk-pilot+fs241459@example.com'] }, connection.address)).toEqual([]);
+    expect(plusAddressFsTicketNumbers({ to: ['other+fs241459@example.com'] }, connection.address)).toEqual([]);
+  });
+
+  test('1.5b: a reply addressed to mailbox+fs<n>@ threads onto the FS-born ticket and is written back to FreshService as the requester', async () => {
+    const fsClient = { addNote: jest.fn(async () => ({ conversation: { id: 555001 } })) };
+    mirrorServiceMock.getInteractiveClient = jest.fn(async () => fsClient);
+    prismaMock.ticketThreadEntry.update = jest.fn(async () => ({}));
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ id: 44036, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 241459n, requesterFreshserviceId: 1001249103n, ccEmails: [] });
+
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'Re: Field Email Address/Account [#241459]', to: ['helpdesk-pilot+fs241459@example.com'], internetMessageId: '<fs-reply-1@example.com>',
+    });
+
+    expect(outcome).toBe('reply');
+    expect(prismaMock.ticket.findFirst).toHaveBeenCalledWith({ where: { workspaceId: 1, freshserviceTicketId: 241459n, origin: 'freshservice' } });
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'requester_reply', details: expect.objectContaining({ via: 'plus_address_fs' }) }));
+    expect(fsClient.addNote).toHaveBeenCalledWith(241459, expect.stringContaining('It is jammed again'), expect.objectContaining({ isPrivate: false, incoming: true, userId: 1001249103 }));
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 9001 }, data: expect.objectContaining({ mirrorState: 'mirrored', externalEntryId: 'fs-conversation:555001' }),
+    }));
+    expect(mirrorServiceMock.enqueueThreadEntry).not.toHaveBeenCalled();
+  });
+
+  test('a requester without a FreshService id is written back as a marked incoming note', async () => {
+    const fsClient = { addNote: jest.fn(async () => ({ conversation: { id: 555002 } })) };
+    mirrorServiceMock.getInteractiveClient = jest.fn(async () => fsClient);
+    prismaMock.ticketThreadEntry.update = jest.fn(async () => ({}));
+    const ticket = { id: 44037, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 241460n, requesterFreshserviceId: null, ccEmails: [] };
+    await mailboxIngestService.ingestReply(connection, ticket, { ...baseEmail, internetMessageId: '<fs-reply-2@example.com>' }, 'plus_address_fs');
+    const [, body, opts] = fsClient.addNote.mock.calls[0];
+    expect(body).toContain('Rita Requester &lt;rita@example.com&gt; · reply received by e-mail');
+    expect(opts).toEqual(expect.objectContaining({ isPrivate: false, incoming: true }));
+    expect(opts.userId).toBeUndefined();
+  });
+
+  test('a FreshService outage never loses the reply: the row is marked failed', async () => {
+    mirrorServiceMock.getInteractiveClient = jest.fn(async () => ({ addNote: jest.fn(async () => { throw new Error('503'); }) }));
+    prismaMock.ticketThreadEntry.update = jest.fn(async () => ({}));
+    const ticket = { id: 44038, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 241461n, requesterFreshserviceId: 1n, ccEmails: [] };
+    const entry = await mailboxIngestService.ingestReply(connection, ticket, { ...baseEmail, internetMessageId: '<fs-reply-3@example.com>' }, 'plus_address_fs');
+    expect(entry.id).toBe(9001);
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith({ where: { id: 9001 }, data: { mirrorState: 'failed' } });
   });
 });

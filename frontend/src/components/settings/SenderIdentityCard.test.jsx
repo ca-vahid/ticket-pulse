@@ -190,3 +190,23 @@ describe('the Graph lane warning (FR 09-11 #5)', () => {
     expect(screen.queryByText('These names will not reach the recipient yet.')).toBeNull();
   });
 });
+
+// 17 Sep 2026 — FreshService lane switches ride the same card.
+describe('FreshService lane switches', () => {
+  test('both default OFF and flipping the FS-born lane PUTs only that key', async () => {
+    settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: inheritedIdentity });
+    settingsAPI.updateSenderIdentity.mockResolvedValue({
+      success: true,
+      data: { ...inheritedIdentity, fsBornRepliesViaTicketPulse: true, fsReplyAsAgent: false },
+    });
+    render(<SenderIdentityCard />);
+    const lane = await screen.findByRole('switch', { name: /Send replies on FreshService tickets from Ticket Pulse/i });
+    const attrib = screen.getByRole('switch', { name: /FreshService attributes our replies and notes to the agent/i });
+    expect(lane).toHaveAttribute('aria-checked', 'false');
+    expect(attrib).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(lane);
+    await waitFor(() => expect(settingsAPI.updateSenderIdentity).toHaveBeenCalledWith({ fsBornRepliesViaTicketPulse: true }));
+    await waitFor(() => expect(screen.getByRole('switch', { name: /Send replies on FreshService tickets from Ticket Pulse/i })).toHaveAttribute('aria-checked', 'true'));
+    expect(screen.getByRole('switch', { name: /FreshService attributes our replies and notes to the agent/i })).toHaveAttribute('aria-checked', 'false');
+  });
+});

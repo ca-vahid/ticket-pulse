@@ -1202,19 +1202,22 @@ class FreshServiceClient {
    * conversation WITHOUT emailing the requester — the mirror uses them for
    * TP-authored public replies (Ticket Pulse already emailed the requester).
    */
-  async addNote(ticketId, body, { isPrivate = true, attachments = [], userId = null } = {}) {
+  async addNote(ticketId, body, { isPrivate = true, attachments = [], userId = null, incoming = false } = {}) {
     try {
       // Same documented `user_id` as createReply (Phase DR4) — attributes the
       // note to the acting agent when the workspace flag resolved one.
       const fsUserId = userId === null || userId === undefined || userId === '' ? null : Number(userId);
       const actorField = Number.isFinite(fsUserId) && fsUserId > 0 ? { user_id: fsUserId } : {};
+      // `incoming: true` renders the note as something the user SENT (a requester's
+      // e-mailed answer that Ticket Pulse received, 17 Sep 2026) rather than an agent note.
+      const incomingField = incoming === true ? { incoming: true } : {};
       let response;
       if (Array.isArray(attachments) && attachments.length > 0) {
         // notify_emails rides the fields too (FR 08-07 #9) — multipart cannot
         // express an EMPTY array (nothing is appended), so suppression there
         // relies on the FS-side marker exclusion rule; the JSON branch below
         // sends the explicit [] opt-out.
-        const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [], ...actorField }, attachments);
+        const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [], ...actorField, ...incomingField }, attachments);
         response = await this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
       } else {
         response = await this._post(`/tickets/${ticketId}/notes`, {
@@ -1222,6 +1225,7 @@ class FreshServiceClient {
           private: isPrivate === true,
           notify_emails: [],
           ...actorField,
+          ...incomingField,
         });
       }
       return response.data;

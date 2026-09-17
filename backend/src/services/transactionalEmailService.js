@@ -193,8 +193,8 @@ export async function deliverTransactionalEmail({
 
 /**
  * Plus-address Reply-To for a SendGrid-lane ticket email: the workspace's
- * ingest-capable mailbox (mode ingest|both) + `tp<n>`; null when there is
- * none or the ticket is FS-born. Never throws.
+ * ingest-capable mailbox (mode ingest|both) + `tp<n>` (TP-born) or `fs<n>`
+ * (FS-born, 17 Sep 2026); null when there is none. Never throws.
  */
 export async function sendgridLaneReplyTo(workspaceId, ticket) {
   try {
