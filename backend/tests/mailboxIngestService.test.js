@@ -23,6 +23,8 @@ jest.unstable_mockModule('../src/services/approvalConversationService.js', () =>
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: graphMock }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
+const replyCopyMock = { copyAgentsOnRequesterReply: jest.fn(async () => ({ sent: true })) };
+jest.unstable_mockModule('../src/services/requesterReplyCopyService.js', () => ({ default: replyCopyMock, copyAgentsOnRequesterReply: replyCopyMock.copyAgentsOnRequesterReply }));
 jest.unstable_mockModule('../src/services/mirrorService.js', () => ({ default: mirrorServiceMock }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: activityMock }));
 // RL-4 hold queue is built in parallel — mocked virtually against its contract.
@@ -999,5 +1001,24 @@ describe('FS-born tickets on the Ticket Pulse reply lane', () => {
     const entry = await mailboxIngestService.ingestReply(connection, ticket, { ...baseEmail, internetMessageId: '<fs-reply-3@example.com>' }, 'plus_address_fs');
     expect(entry.id).toBe(9001);
     expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith({ where: { id: 9001 }, data: { mirrorState: 'failed' } });
+  });
+});
+
+describe('requester reply copy to agents (17 Sep 2026)', () => {
+  test('a requester reply asks the copy service once, with the sender', async () => {
+    const ticket = { id: 720, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1120, ccEmails: [] };
+    await mailboxIngestService.ingestReply(connection, ticket, { ...baseEmail, internetMessageId: '<copy-1@example.com>' }, 'plus_address');
+    expect(replyCopyMock.copyAgentsOnRequesterReply).toHaveBeenCalledTimes(1);
+    const [t, entry, meta] = replyCopyMock.copyAgentsOnRequesterReply.mock.calls[0];
+    expect(t.id).toBe(720);
+    expect(entry.id).toBe(9001);
+    expect(meta).toEqual({ fromEmail: 'rita@example.com', fromName: 'Rita Requester' });
+  });
+
+  test('an agent\'s own Outlook reply is not copied', async () => {
+    const ticket = { id: 721, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1121, ccEmails: [] };
+    const agent = { id: 7, name: 'Soheil Nasiri', email: 'soheil@example.com' };
+    await mailboxIngestService.ingestReply(connection, ticket, { ...baseEmail, from: 'soheil@example.com', fromName: 'Soheil Nasiri', internetMessageId: '<copy-2@example.com>' }, 'plus_address', { agent });
+    expect(replyCopyMock.copyAgentsOnRequesterReply).not.toHaveBeenCalled();
   });
 });

@@ -902,6 +902,16 @@ class MailboxIngestService {
           entryPreview: entry.bodyText || entry.content || null,
         }).catch(() => {});
       } catch { /* non-fatal */ }
+
+      // The agent's inbox copy (17 Sep 2026): replies used to reach every
+      // agent through the it@ group mailbox; the workspace mailbox is read by
+      // Ticket Pulse alone, so the assigned agent gets the answer mailed.
+      if (!isForward) {
+        try {
+          const { copyAgentsOnRequesterReply } = await import('./requesterReplyCopyService.js');
+          await copyAgentsOnRequesterReply(ticket, entry, { fromEmail: email.from, fromName: email.fromName || null });
+        } catch { /* non-fatal */ }
+      }
     }
 
     try {

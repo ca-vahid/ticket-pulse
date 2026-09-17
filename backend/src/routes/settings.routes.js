@@ -305,15 +305,17 @@ router.get(
 // who FreshService attributes our replies/notes to, and which system mails a
 // reply on an FS-born ticket. Read together with the identity so one card shows both.
 async function freshserviceLaneFlags(workspaceId) {
-  const [{ isFsReplyAsAgentEnabled }, { isFsBornRepliesViaTicketPulseEnabled }] = await Promise.all([
+  const [{ isFsReplyAsAgentEnabled }, { isFsBornRepliesViaTicketPulseEnabled }, { getRequesterReplyCopySettings }] = await Promise.all([
     import('../services/fsReplyAsAgentService.js'),
     import('../services/fsBornReplyLaneService.js'),
+    import('../services/requesterReplyCopyService.js'),
   ]);
-  const [fsReplyAsAgent, fsBornRepliesViaTicketPulse] = await Promise.all([
+  const [fsReplyAsAgent, fsBornRepliesViaTicketPulse, copy] = await Promise.all([
     isFsReplyAsAgentEnabled(workspaceId),
     isFsBornRepliesViaTicketPulseEnabled(workspaceId),
+    getRequesterReplyCopySettings(workspaceId),
   ]);
-  return { fsReplyAsAgent, fsBornRepliesViaTicketPulse };
+  return { fsReplyAsAgent, fsBornRepliesViaTicketPulse, requesterReplyCopy: copy.enabled, requesterReplyCopyExtra: copy.extra.join(', ') };
 }
 
 /**
@@ -330,8 +332,14 @@ router.put(
     if (req.body?.replyUsesAgentName !== undefined && typeof req.body.replyUsesAgentName !== 'boolean') {
       throw new ValidationError('replyUsesAgentName must be true or false');
     }
-    for (const key of ['fsReplyAsAgent', 'fsBornRepliesViaTicketPulse']) {
+    for (const key of ['fsReplyAsAgent', 'fsBornRepliesViaTicketPulse', 'requesterReplyCopy']) {
       if (req.body?.[key] !== undefined && typeof req.body[key] !== 'boolean') throw new ValidationError(`${key} must be true or false`);
+    }
+    if (req.body?.requesterReplyCopyExtra !== undefined && typeof req.body.requesterReplyCopyExtra !== 'string') {
+      throw new ValidationError('requesterReplyCopyExtra must be a string of e-mail addresses');
+    }
+    if (typeof req.body?.requesterReplyCopyExtra === 'string' && req.body.requesterReplyCopyExtra.length > 1000) {
+      throw new ValidationError('requesterReplyCopyExtra is too long');
     }
     // Partial patch: only the keys the client sent are touched — a toggle
     // flip must not clear the display-name override and vice versa (SN2).
@@ -346,6 +354,20 @@ router.put(
     if (typeof req.body?.fsBornRepliesViaTicketPulse === 'boolean') {
       const { setFsBornRepliesViaTicketPulseEnabled } = await import('../services/fsBornReplyLaneService.js');
       await setFsBornRepliesViaTicketPulseEnabled(req.workspaceId, req.body.fsBornRepliesViaTicketPulse);
+    }
+    if (typeof req.body?.requesterReplyCopy === 'boolean' || typeof req.body?.requesterReplyCopyExtra === 'string') {
+      const { setRequesterReplyCopySettings, parseAddressList } = await import('../services/requesterReplyCopyService.js');
+      if (typeof req.body?.requesterReplyCopyExtra === 'string') {
+        // A copy to a mailbox Ticket Pulse (or FreshService) reads would come straight back in as a reply or a new ticket.
+        const { default: prismaClient } = await import('../services/prisma.js');
+        const ours = new Set((await prismaClient.mailboxConnection.findMany({ select: { address: true } }).catch(() => [])).map((m) => String(m.address || '').toLowerCase()));
+        const clash = parseAddressList(req.body.requesterReplyCopyExtra).find((a) => ours.has(a));
+        if (clash) throw new ValidationError(`${clash} is a ticket mailbox — a copy there would be filed as a reply. Use a team address that no ticketing system reads.`);
+      }
+      await setRequesterReplyCopySettings(req.workspaceId, {
+        ...(typeof req.body?.requesterReplyCopy === 'boolean' ? { enabled: req.body.requesterReplyCopy } : {}),
+        ...(typeof req.body?.requesterReplyCopyExtra === 'string' ? { extra: req.body.requesterReplyCopyExtra } : {}),
+      });
     }
     res.json({ success: true, data: { ...identity, ...(await freshserviceLaneFlags(req.workspaceId)) } });
   }),

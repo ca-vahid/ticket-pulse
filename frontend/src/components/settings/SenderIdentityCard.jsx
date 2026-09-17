@@ -99,6 +99,26 @@ export default function SenderIdentityCard() {
   // FreshService lanes (17 Sep 2026): flipped on their own, like the reply-name toggle.
   const fsReplyAsAgent = identity?.fsReplyAsAgent === true;
   const fsBornViaTicketPulse = identity?.fsBornRepliesViaTicketPulse === true;
+  // Requester-reply copy to agents (17 Sep 2026): switch + extra addresses.
+  const requesterReplyCopy = identity?.requesterReplyCopy === true;
+  const [copyExtraDraft, setCopyExtraDraft] = useState('');
+  const [savingCopyExtra, setSavingCopyExtra] = useState(false);
+  useEffect(() => { setCopyExtraDraft(identity?.requesterReplyCopyExtra || ''); }, [identity?.requesterReplyCopyExtra]);
+  const copyExtraDirty = (identity?.requesterReplyCopyExtra || '') !== copyExtraDraft.trim();
+  const saveCopyExtra = async () => {
+    if (savingCopyExtra) return;
+    setSavingCopyExtra(true);
+    setToggleError(null);
+    try {
+      const response = await settingsAPI.updateSenderIdentity({ requesterReplyCopyExtra: copyExtraDraft.trim() });
+      const data = response.data || null;
+      if (data) { setIdentity(data); setDraftName(data.fromName || ''); }
+    } catch (error) {
+      setToggleError(error.message || 'Could not save the copy addresses');
+    } finally {
+      setSavingCopyExtra(false);
+    }
+  };
   const [togglingLane, setTogglingLane] = useState(null);
   const toggleLaneFlag = async (key, next) => {
     if (togglingLane) return;
@@ -279,6 +299,54 @@ export default function SenderIdentityCard() {
             busy={togglingLane === 'fsReplyAsAgent'}
             onToggle={() => toggleLaneFlag('fsReplyAsAgent', !fsReplyAsAgent)}
           />
+
+          <div className="rounded-md border border-border bg-card px-3 py-2.5" data-testid="sender-identity-reply-copy">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground/85">E-mail agents a copy of requester replies</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  When a requester answers a reply, the assigned agent (or, if unassigned, the agent who replied last) gets the answer in
+                  their inbox with a link to the ticket — the way the it@ group mailbox used to show everyone. Add team addresses below to
+                  copy them too. Never use an address FreshService reads: it would file the copy as a ticket.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={requesterReplyCopy}
+                aria-label={`E-mail agents a copy of requester replies ${requesterReplyCopy ? 'on' : 'off'}`}
+                onClick={() => toggleLaneFlag('requesterReplyCopy', !requesterReplyCopy)}
+                disabled={togglingLane === 'requesterReplyCopy'}
+                className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${requesterReplyCopy ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
+              >
+                <span
+                  className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform"
+                  style={{ transform: requesterReplyCopy ? 'translateX(16px)' : 'translateX(0)' }}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label htmlFor="sender-identity-copy-extra" className="text-xs font-medium text-muted-foreground">Also copy</label>
+              <input
+                id="sender-identity-copy-extra"
+                type="text"
+                value={copyExtraDraft}
+                onChange={(e) => setCopyExtraDraft(e.target.value)}
+                placeholder="team@bgcengineering.ca, another@…"
+                className="tp-focus-ring min-w-0 flex-1 rounded-md border border-input bg-card px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60"
+              />
+              <button
+                type="button"
+                onClick={saveCopyExtra}
+                disabled={!copyExtraDirty || savingCopyExtra}
+                aria-label="Apply copy addresses"
+                className="tp-focus-ring inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+              >
+                {savingCopyExtra ? 'Applying…' : 'Apply'}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div>

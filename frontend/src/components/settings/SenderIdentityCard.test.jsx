@@ -2,6 +2,8 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+afterEach(cleanup);
 import SenderIdentityCard from './SenderIdentityCard';
 import { settingsAPI } from '../../services/api';
 
@@ -208,5 +210,24 @@ describe('FreshService lane switches', () => {
     await waitFor(() => expect(settingsAPI.updateSenderIdentity).toHaveBeenCalledWith({ fsBornRepliesViaTicketPulse: true }));
     await waitFor(() => expect(screen.getByRole('switch', { name: /Send replies on FreshService tickets from Ticket Pulse/i })).toHaveAttribute('aria-checked', 'true'));
     expect(screen.getByRole('switch', { name: /FreshService attributes our replies and notes to the agent/i })).toHaveAttribute('aria-checked', 'false');
+  });
+});
+
+describe('requester reply copy (17 Sep 2026)', () => {
+  test('switch PUTs requesterReplyCopy; the extra-address field saves on its own', async () => {
+    settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: { ...inheritedIdentity, requesterReplyCopy: false, requesterReplyCopyExtra: '' } });
+    settingsAPI.updateSenderIdentity
+      .mockResolvedValueOnce({ success: true, data: { ...inheritedIdentity, requesterReplyCopy: true, requesterReplyCopyExtra: '' } })
+      .mockResolvedValueOnce({ success: true, data: { ...inheritedIdentity, requesterReplyCopy: true, requesterReplyCopyExtra: 'team@bgcengineering.ca' } });
+    render(<SenderIdentityCard />);
+    const sw = await screen.findByRole('switch', { name: /E-mail agents a copy of requester replies/i });
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(sw);
+    await waitFor(() => expect(settingsAPI.updateSenderIdentity).toHaveBeenCalledWith({ requesterReplyCopy: true }));
+    const input = screen.getByLabelText('Also copy');
+    fireEvent.change(input, { target: { value: 'team@bgcengineering.ca' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply copy addresses' }));
+    await waitFor(() => expect(settingsAPI.updateSenderIdentity).toHaveBeenCalledWith({ requesterReplyCopyExtra: 'team@bgcengineering.ca' }));
+    await waitFor(() => expect(screen.getByLabelText('Also copy')).toHaveValue('team@bgcengineering.ca'));
   });
 });
