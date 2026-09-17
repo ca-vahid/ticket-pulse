@@ -1754,7 +1754,10 @@ export default function Tickets() {
                           Untouched users keep today's exact non-scrolling DOM
                           behavior (and the last row's inline dropdowns keep
                           their room over the pagination footer). */}
-                      <div ref={scrollWrapRef} className={widthsPinned ? 'xl:overflow-x-auto settings-scrollbar' : ''}>
+                      {/* The wrapper scrolls but shows NO bar of its own — the sticky
+                          proxy under the rows is the one scrollbar (a second one
+                          appeared at the foot, 16 Sep 2026). */}
+                      <div ref={scrollWrapRef} className={widthsPinned ? 'xl:overflow-x-auto tp-scrollbar-none' : ''}>
                         <div className={widthsPinned ? 'xl:min-w-[var(--tp-q-minw)]' : ''}>
                           {/* Header */}
                           <div className="hidden md:flex items-stretch border-b border-border bg-muted/40">

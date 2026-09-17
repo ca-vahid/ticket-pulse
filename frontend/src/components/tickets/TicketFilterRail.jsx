@@ -55,6 +55,21 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
   const [open, setOpen] = useState(defaultOpen || activeCount > 0);
   // A filter applied from elsewhere (URL, views) pops its section open.
   useEffect(() => { if (activeCount > 0) setOpen(true); }, [activeCount]);
+  // Smooth open/close (16 Sep 2026): the body stays mounted through a
+  // grid-rows 0fr → 1fr transition and unmounts once the close has finished,
+  // so a collapsed section still costs nothing and nothing snaps.
+  const [rendered, setRendered] = useState(open);
+  const [shown, setShown] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      const raf = requestAnimationFrame(() => setShown(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    setShown(false);
+    const t = setTimeout(() => setRendered(false), 320);
+    return () => clearTimeout(t);
+  }, [open]);
   return (
     <div className="border-b border-border/60 last:border-b-0">
       <div className="flex items-center gap-1 w-full px-3 py-2 group">
@@ -63,9 +78,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
           aria-expanded={open}
           className="tp-focus-ring flex items-center gap-1.5 flex-1 min-w-0 text-left rounded"
         >
-          {open
-            ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
-            : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
+          <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
           {Icon && <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" aria-hidden="true" />}
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">{title}</span>
           {activeCount > 0 && (
@@ -84,7 +97,16 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
           </button>
         )}
       </div>
-      {open && <div className="px-3 pb-2.5">{children}</div>}
+      {rendered && (
+        <div
+          className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${shown ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+          data-open={shown ? 'true' : 'false'}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <div className="px-3 pb-2.5">{children}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

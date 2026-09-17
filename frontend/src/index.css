@@ -231,15 +231,19 @@ code {
      rail container, not each row. */
   .tp-side-rail .tp-rail-label {
     opacity: 0;
-    transition: opacity 0.15s ease-out;
+    transform: translateX(-8px);
+    transition: opacity 0.22s ease-out, transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .tp-side-rail--open .tp-rail-label,
   .tp-side-rail--peek-open .tp-rail-label {
     opacity: 1;
+    transform: none;
+    transition-delay: 0.06s;
   }
   @media (prefers-reduced-motion: reduce) {
     .tp-side-rail .tp-rail-label {
       transition: none;
+      transform: none;
     }
   }
 
@@ -395,6 +399,39 @@ code {
   ul[data-density="dense"] .rounded-full.h-6 {
     height: 1.25rem;
     width: 1.25rem;
+  }
+  /* A scroll container that keeps its scrolling but hides its own bar — the
+     tickets list's sticky proxy (StickyScrollbar) is the one visible bar. */
+  .tp-scrollbar-none {
+    scrollbar-width: none;
+  }
+  .tp-scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  /* The proxy: a slim, rounded, always-visible thumb. */
+  .tp-sticky-hscroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.7) transparent;
+  }
+  .tp-sticky-hscroll::-webkit-scrollbar {
+    height: 12px;
+  }
+  .tp-sticky-hscroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .tp-sticky-hscroll::-webkit-scrollbar-thumb {
+    background: rgb(148 163 184 / 0.6);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+  .tp-sticky-hscroll::-webkit-scrollbar-thumb:hover {
+    background: rgb(59 130 246 / 0.8);
+    background-clip: padding-box;
+  }
+  .dark .tp-sticky-hscroll::-webkit-scrollbar-thumb {
+    background: hsl(215 16% 52% / 0.7);
+    background-clip: padding-box;
   }
   /* Dense = one line per ticket (16 Sep 2026): nothing inside a cell wraps;
      the list scrolls sideways instead (Tickets.jsx sticky scrollbar). */

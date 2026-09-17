@@ -11,8 +11,8 @@ import { useAuth } from '../../contexts/AuthContext';
 // right border expands it over the content (no reflow) to reveal labels,
 // Freshservice-style. It never opens on hover (16 Sep 2026 — brushing the
 // left edge kept flaring it open); Escape, a click elsewhere or navigating
-// closes it again. On tickets pages the same notch also offers the thin-edge
-// collapse (one control, no second button at the rail foot).
+// closes it again. On tickets pages the thin-edge collapse lives at the rail
+// foot, above Settings (two circles side by side looked bad — 16 Sep 2026).
 // Like MobileTabBar it self-detects the active route via useLocation, so it
 // works on every page it's mounted on, including the bespoke Visuals chrome
 // that bypasses AppShell/AppHeader.
@@ -129,10 +129,7 @@ export default function SideRail() {
       : [{ key: 'icons', label: 'Show navigation', Icon: ChevronRight, expanded: false, run: () => { setPeekPinned(false); setCollapsed(false); } }])
     : expanded
       ? [{ key: 'collapse', label: 'Collapse navigation', Icon: ChevronLeft, expanded: true, run: () => setExpanded(false) }]
-      : [
-        { key: 'expand', label: 'Expand navigation', Icon: ChevronRight, expanded: false, run: () => setExpanded(true) },
-        ...(onTickets ? [{ key: 'thin', label: 'Collapse the navigation to a thin edge', Icon: ChevronsLeft, expanded: false, run: () => { setExpanded(false); setCollapsed(true); } }] : []),
-      ];
+      : [{ key: 'expand', label: 'Expand navigation', Icon: ChevronRight, expanded: false, run: () => setExpanded(true) }];
 
   return (
     <>
@@ -141,7 +138,7 @@ export default function SideRail() {
         onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
         onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
         className={cn(
-          'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out motion-reduce:transition-none md:flex print:hidden',
+          'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:flex print:hidden',
           peek
             ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
             : (expanded ? 'tp-side-rail--open w-[210px]' : 'w-[58px]'),
@@ -171,6 +168,22 @@ export default function SideRail() {
             {destinations.map(renderRow)}
           </div>
 
+          {/* Tickets pages only: tuck the rail into a thin edge out of the way of
+              the filter rail (persisted). Sits above Settings. */}
+          {onTickets && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setPeekPinned(false); setExpanded(false); setCollapsed(!railCollapsed); }}
+              title={railCollapsed ? 'Keep the navigation expanded' : 'Collapse the navigation to a thin edge'}
+              className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[12px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground tp-focus-ring"
+            >
+              <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
+                {railCollapsed ? <ChevronsRight className="h-[18px] w-[18px]" /> : <ChevronsLeft className="h-[18px] w-[18px]" />}
+              </span>
+              <span className="tp-rail-label flex-1 truncate">{railCollapsed ? 'Keep expanded' : 'Collapse rail'}</span>
+            </button>
+          )}
+
           {showSettings && (
             <button
               type="button"
@@ -198,7 +211,7 @@ export default function SideRail() {
           stacked when the tickets pages also offer the thin edge. Fixed and
           OUTSIDE the nav (which clips its overflow), so it follows the width. */}
       <div
-        className="tp-rail-notch fixed top-[66px] z-[51] hidden flex-col items-center gap-1.5 transition-[left] duration-200 ease-out motion-reduce:transition-none md:flex print:hidden"
+        className="tp-rail-notch fixed top-[66px] z-[51] hidden flex-col items-center gap-1.5 transition-[left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:flex print:hidden"
         style={{ left: `${railWidth - 14}px` }}
         data-testid="rail-notch"
       >

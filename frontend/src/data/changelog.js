@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.14-preview';
+export const APP_VERSION = '3.9.15-preview';
 
 export const changelog = [
+  {
+    version: '3.9.15-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>One scrollbar, not two</strong> — the tickets list showed its own horizontal bar under the sticky one. The list now scrolls silently and the slim rounded bar under the rows is the only one; it stays in view while you scroll the page and turns blue under the cursor.' },
+      { type: 'changed', html: '<strong>Navigation rail</strong> — the border notch is a single circle again (expand / collapse the labels). On the tickets pages the thin-edge collapse is back at the foot of the rail, above Settings. Expanding and collapsing now eases over 300 ms and the labels slide in instead of popping.' },
+      { type: 'improved', html: '<strong>Filter sections glide</strong> — Views, Status, Members, Priority and the rest open and close with a smooth height transition and a turning chevron instead of snapping.' },
+    ],
+  },
   {
     version: '3.9.14-preview',
     date: 'September 16, 2026',
