@@ -33,6 +33,7 @@ vi.mock('../hooks/useRealtimeStatus', () => ({
 vi.mock('./nav/SideRail', () => ({ default: () => null }));
 vi.mock('./ChangelogModal', () => ({ default: () => null }));
 vi.mock('./nav/HeaderSearch', () => ({ default: () => null }));
+vi.mock('../hooks/useRequesterPhoto', () => ({ useRequesterPhoto: () => null, fetchRequesterPhoto: () => Promise.resolve(null) }));
 
 import AppHeader from './AppHeader';
 

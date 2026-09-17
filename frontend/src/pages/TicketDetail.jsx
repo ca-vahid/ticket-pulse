@@ -39,8 +39,8 @@ import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
-  ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusPill,
-  TypePill, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, pipelineRunLabel,
+  BrandArt, ExternalChip, MirrorBadge, OriginChip, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
+  PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, pipelineRunLabel,
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
@@ -1526,6 +1526,17 @@ export default function TicketDetail() {
 
   const [noiseMenuOpen, setNoiseMenuOpen] = useState(false);
   const noiseMenuRef = useRef(null);
+  // "Also for" lives in a popover now (16 Sep 2026) — button + count, editor inside.
+  const [alsoForOpen, setAlsoForOpen] = useState(false);
+  const alsoForRef = useRef(null);
+  useEffect(() => {
+    if (!alsoForOpen) return undefined;
+    const onDoc = (e) => { if (alsoForRef.current && !alsoForRef.current.contains(e.target)) setAlsoForOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setAlsoForOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [alsoForOpen]);
   useEffect(() => {
     if (!noiseMenuOpen) return undefined;
     const onDoc = (e) => { if (noiseMenuRef.current && !noiseMenuRef.current.contains(e.target)) setNoiseMenuOpen(false); };
@@ -1821,8 +1832,10 @@ export default function TicketDetail() {
 
   // Header toolbar (16 Sep 2026): quiet icon buttons whose label appears at xl.
   const secondaryActionClass = 'tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200';
+  const moreItemClass = 'tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200';
   const pipelineRuns = ticket?.pipelineRuns || [];
-  const canPickUp = canWrite && meta?.actor?.technicianId && ticket?.assignedTechId !== meta.actor.technicianId;
+  // Pick up = take an UNASSIGNED ticket (16 Sep 2026: never offered once someone has it).
+  const canPickUp = canWrite && meta?.actor?.technicianId && !ticket?.assignedTechId;
 
   // ---- AI assignment: pending suggestion + live-run modal ----
   const aiPendingRun = pipelineRuns.find((r) => r.status === 'completed' && r.decision === 'pending_review') || null;
@@ -1919,36 +1932,94 @@ export default function TicketDetail() {
             <div className="tp-card tp-ticket-header rounded-xl p-4 sm:p-5 mb-4 relative">
               <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:gap-5">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <span className="font-mono text-sm font-bold text-muted-foreground">{ticket.displayRef}</span>
+                  {/* Row 1 (16 Sep 2026): the subject IS the top — big priority and
+                      status badges on the right, and the Pick up call-to-action
+                      under them when nobody has the ticket yet. */}
+                  <div className="flex flex-wrap items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      {editingSubject ? (
+                        <input
+                          autoFocus
+                          value={subjectDraft}
+                          onChange={(e) => setSubjectDraft(e.target.value)}
+                          onBlur={commitSubject}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitSubject();
+                            if (e.key === 'Escape') setEditingSubject(false);
+                          }}
+                          aria-label="Edit subject"
+                          className="tp-focus-ring w-full text-lg sm:text-xl font-bold text-foreground bg-card border border-blue-300 dark:border-blue-500/40 rounded-lg px-2 py-1"
+                        />
+                      ) : (
+                        <h1
+                          onMouseEnter={liveChanges.subject ? () => ackChange('subject') : undefined}
+                          className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${
+                            liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
+                          }`}
+                        >
+                          {ticket.subject || '(no subject)'}
+                          {canConverse && ticket.status !== 'Deleted' && (
+                            <button
+                              onClick={startSubjectEdit}
+                              aria-label="Edit subject"
+                              className="tp-focus-ring ml-2 p-1 rounded text-muted-foreground/50 hover:text-blue-600 dark:hover:text-blue-300 align-middle"
+                            >
+                              <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                        </h1>
+                      )}
+                    </div>
+                    <div className="flex flex-shrink-0 flex-col items-end gap-2">
+                      <div
+                        onMouseEnter={() => { ackChange('status'); ackChange('priority'); }}
+                        className={`flex items-center gap-2 rounded-xl transition-all ${
+                          liveChanges.status || liveChanges.priority ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 p-1' : ''
+                        }`}
+                      >
+                        <PriorityBadge priority={ticket.priority} />
+                        <StatusBadge status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
+                      </div>
+                      {canPickUp && (
+                        <button
+                          onClick={pickUp}
+                          onBlur={() => setConfirmPickup(false)}
+                          disabled={savingField === 'pickup'}
+                          data-testid="pickup-button"
+                          className={`tp-focus-ring inline-flex h-9 items-center gap-2 rounded-xl px-3.5 text-sm font-semibold text-white shadow-subtle transition-colors ${
+                            confirmPickup ? 'bg-blue-700 ring-2 ring-blue-200 dark:ring-blue-500/30' : 'bg-blue-600 hover:bg-blue-700'
+                          }`}
+                        >
+                          {savingField === 'pickup' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <ActionIcon name="pickup" className="h-5 w-5 brightness-0 invert" />}
+                          {confirmPickup ? 'Confirm pick up?' : 'Pick up this ticket'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground/75 mt-1">
+                Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
+                    {ticket.requester?.name ? <> by <span className="text-muted-foreground font-medium">{ticket.requester.name}</span></> : null}
+                    {ticket.resolvedAt ? <> · resolved <span title={new Date(ticket.resolvedAt).toLocaleString()}>{timeAgo(ticket.resolvedAt)}</span></> : null}
+                    {ticket.lastActivityAt ? <> · last activity <span title={new Date(ticket.lastActivityAt).toLocaleString()}>{formatDayTime(ticket.lastActivityAt)} · {timeAgo(ticket.lastActivityAt)}</span></> : null}
+                  </p>
+
+
+                  {/* Row 2: what kind of ticket, then its identity — type first and
+                      large, the rest as quiet chips (the mirror is one chip now). */}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <TypeBadge type={ticket.ticketType} />
+                    <span className="font-mono text-xs font-bold text-muted-foreground">{ticket.displayRef}</span>
                     <OriginChip origin={ticket.origin} />
                     {ticket.isExternal && <ExternalChip />}
-                    <MirrorChip ticket={ticket} />
-                    {isNative && isAdmin && ['pending', 'error'].includes(ticket.mirrorState) && (
-                      <button
-                        onClick={retryMirror}
-                        disabled={savingField === 'mirror'}
-                        title="Mirror to FreshService now (auto-mirrors every ~60s)"
-                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-card text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-50"
-                      >
-                        {savingField === 'mirror' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3 h-3" aria-hidden="true" />}
-                        Mirror now
-                      </button>
-                    )}
-                    {isNative && ticket.freshserviceTicketId && fsUrl && (
-                      <a
-                        href={fsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={`FreshService fallback copy #${ticket.freshserviceTicketId}`}
-                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-card text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15"
-                      >
-                        <ExternalLink className="w-3 h-3" aria-hidden="true" /> View FS mirror #{String(ticket.freshserviceTicketId)}
-                      </a>
-                    )}
-                    <ProvenanceChip ticket={ticket} />
+                    <MirrorBadge
+                      ticket={ticket}
+                      fsUrl={isNative && ticket.freshserviceTicketId ? fsUrl : null}
+                      onRetry={isNative && isAdmin && ['pending', 'error'].includes(ticket.mirrorState) ? retryMirror : null}
+                      busy={savingField === 'mirror'}
+                    />
+                    <ProvenanceChip ticket={ticket} iconOnly />
                     <StateChip state={ticket.stateChip} />
-                    <TypePill type={ticket.ticketType} full />
                     {approvalSummary && (
                       <button
                         type="button"
@@ -2003,77 +2074,13 @@ export default function TicketDetail() {
                         </span>
                       </span>
                     )}
-                    <div
-                      onMouseEnter={() => { ackChange('status'); ackChange('priority'); }}
-                      className={`ml-auto flex items-center gap-2 rounded-lg transition-all ${
-                        liveChanges.status || liveChanges.priority ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5' : ''
-                      }`}
-                    >
-                      <PriorityDot priority={ticket.priority} withLabel />
-                      <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
-                    </div>
                   </div>
 
-                  {editingSubject ? (
-                    <input
-                      autoFocus
-                      value={subjectDraft}
-                      onChange={(e) => setSubjectDraft(e.target.value)}
-                      onBlur={commitSubject}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitSubject();
-                        if (e.key === 'Escape') setEditingSubject(false);
-                      }}
-                      aria-label="Edit subject"
-                      className="tp-focus-ring w-full text-lg sm:text-xl font-bold text-foreground bg-card border border-blue-300 dark:border-blue-500/40 rounded-lg px-2 py-1"
-                    />
-                  ) : (
-                    <h1
-                      onMouseEnter={liveChanges.subject ? () => ackChange('subject') : undefined}
-                      className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${
-                        liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
-                      }`}
-                    >
-                      {ticket.subject || '(no subject)'}
-                      {canConverse && ticket.status !== 'Deleted' && (
-                        <button
-                          onClick={startSubjectEdit}
-                          aria-label="Edit subject"
-                          className="tp-focus-ring ml-2 p-1 rounded text-muted-foreground/50 hover:text-blue-600 dark:hover:text-blue-300 align-middle"
-                        >
-                          <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
-                        </button>
-                      )}
-                    </h1>
-                  )}
-
-                  <p className="text-xs text-muted-foreground/75 mt-1">
-                Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
-                    {ticket.requester?.name ? <> by <span className="text-muted-foreground font-medium">{ticket.requester.name}</span></> : null}
-                    {ticket.resolvedAt ? <> · resolved <span title={new Date(ticket.resolvedAt).toLocaleString()}>{timeAgo(ticket.resolvedAt)}</span></> : null}
-                    {ticket.lastActivityAt ? <> · last activity <span title={new Date(ticket.lastActivityAt).toLocaleString()}>{formatDayTime(ticket.lastActivityAt)} · {timeAgo(ticket.lastActivityAt)}</span></> : null}
-                  </p>
-
-                  {/* Quick actions (16 Sep 2026 rework): three primaries with words,
-                      the rest as icon buttons that grow their label at xl, and the
-                      dangerous / rare ones behind one "More" menu — the row never
-                      wraps to a second line on a laptop. */}
+                  {/* Quick actions (16 Sep 2026, v2): the everyday ones stay in the
+                      row — Edit, Close, Delete, Mark as noise, Macros — and the
+                      utilities (Print, Copy link, Clone, Merge, Split) live behind
+                      More. Pick up sits under the status badges, not here. */}
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 print-hide" data-testid="ticket-actions">
-                    {canPickUp && (
-                      <button
-                        onClick={pickUp}
-                        onBlur={() => setConfirmPickup(false)}
-                        disabled={savingField === 'pickup'}
-                        className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold shadow-subtle transition-colors ${
-                          confirmPickup
-                            ? 'bg-blue-700 text-white ring-2 ring-blue-200 dark:ring-blue-500/30'
-                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }`}
-                      >
-                        {savingField === 'pickup' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="pickup" className="h-[18px] w-[18px] brightness-0 invert" />}
-                        {confirmPickup ? 'Confirm pick up?' : 'Pick up'}
-                      </button>
-                    )}
                     {canConverse && ticket.status !== 'Deleted' && (
                       <button
                         onClick={() => setEditOpen(true)}
@@ -2088,28 +2095,41 @@ export default function TicketDetail() {
                       <button
                         onClick={resolveTicket}
                         disabled={savingField === 'resolve'}
+                        title="Close this ticket (marks it resolved)"
                         className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
                       >
                         {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="resolve" />}
-                        Resolve
+                        Close
                       </button>
                     )}
-                    <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
+                    {isNative && canReview && (
+                      <button
+                        onClick={deleteTicket}
+                        onBlur={() => setConfirmDelete(false)}
+                        disabled={savingField === 'delete'}
+                        title="Delete this Ticket Pulse ticket"
+                        className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                          confirmDelete
+                            ? 'border-red-600 bg-red-600 text-white hover:bg-red-700'
+                            : 'border-border bg-card text-muted-foreground hover:border-red-300 hover:text-red-700 dark:hover:border-red-500/40 dark:hover:text-red-200'
+                        }`}
+                      >
+                        {savingField === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="delete" className={`h-[18px] w-[18px] ${confirmDelete ? 'brightness-0 invert' : ''}`} />}
+                        {confirmDelete ? 'Confirm delete' : 'Delete'}
+                      </button>
+                    )}
                     <button
-                      onClick={copyLink}
-                      title="Copy link to this ticket"
-                      aria-label="Copy link"
-                      className={secondaryActionClass}
+                      onClick={() => setNoiseFlag(!ticket.isNoise)}
+                      disabled={savingField === 'noise'}
+                      title={ticket.isNoise ? 'Put this ticket back in the default queue' : 'Flag as noise — leaves the default queue (Views → Noise & spam)'}
+                      className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                        ticket.isNoise
+                          ? 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200 dark:hover:bg-violet-500/20'
+                          : 'border-border bg-card text-muted-foreground hover:border-violet-300 hover:text-violet-700 dark:hover:border-violet-500/40 dark:hover:text-violet-200'
+                      }`}
                     >
-                      <ActionIcon name="copylink" /> <span className="hidden xl:inline">Copy link</span>
-                    </button>
-                    <button
-                      onClick={() => window.print()}
-                      title="Print this ticket"
-                      aria-label="Print"
-                      className={secondaryActionClass}
-                    >
-                      <ActionIcon name="print" /> <span className="hidden xl:inline">Print</span>
+                      {savingField === 'noise' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="noise" />}
+                      {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
                     </button>
                     {canConverse && (
                       <MacroMenu
@@ -2124,120 +2144,59 @@ export default function TicketDetail() {
                         }}
                       />
                     )}
-                    {ticketingOn && (
-                      <button
-                        onClick={() => setCloneConfirm(true)}
-                        disabled={savingField === 'clone'}
-                        title="Clone — a new draft ticket pre-filled from this one"
-                        aria-label="Clone"
-                        className={secondaryActionClass}
-                      >
-                        {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="clone" />}
-                        <span className="hidden xl:inline">Clone</span>
-                      </button>
-                    )}
-                    {/* Merge (Phase MB1): always present for coordinators —
-                        disabled WITH the reason instead of silently missing
-                        (QA 08-27 #7). The reason mirrors the survivor rule. */}
-                    {ticketingOn && (
-                      <button
-                        onClick={mergeBlockedReason ? undefined : () => setMergeOpen(true)}
-                        disabled={Boolean(mergeBlockedReason)}
-                        aria-disabled={Boolean(mergeBlockedReason)}
-                        title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
-                        aria-label="Merge"
-                        data-testid="merge-button"
-                        className={`${secondaryActionClass} hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-muted-foreground`}
-                      >
-                        <ActionIcon name="merge" />
-                        <span className="hidden xl:inline">Merge</span>
-                      </button>
-                    )}
-                    {/* Split (QA 09-08): the inverse of merge. Unlike merge
-                        this works on FS-born tickets too — the parent is never
-                        modified, only linked and noted. QA 09-15 #3: basic-access
-                        (technician-only) members split and merge too — the API
-                        never gated it, only this button did. */}
-                    {ticketingOn && (
-                      <button
-                        onClick={() => setSplitOpen(true)}
-                        title="Split — carve a separate issue out of this conversation into its own ticket"
-                        aria-label="Split"
-                        data-testid="split-button"
-                        className={`${secondaryActionClass} hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200`}
-                      >
-                        <ActionIcon name="split" />
-                        <span className="hidden xl:inline">Split</span>
-                      </button>
-                    )}
-                    {/* More: noise + delete. One menu instead of two loose buttons. */}
+                    <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
                     <span ref={noiseMenuRef} className="relative">
                       <button
                         onClick={() => setNoiseMenuOpen((v) => !v)}
                         aria-expanded={noiseMenuOpen}
                         aria-haspopup="menu"
                         aria-label="More actions"
-                        title="More actions"
+                        title="More: print, copy link, clone, merge, split"
                         data-testid="more-actions"
-                        className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''} ${ticket.isNoise ? 'border-violet-300 text-violet-700 dark:border-violet-500/40 dark:text-violet-200' : ''}`}
+                        className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''}`}
                       >
-                        {savingField === 'noise' || savingField === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
-                        <span className="hidden xl:inline">More</span>
+                        {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
+                        More
                       </button>
                       {noiseMenuOpen && (
                         <span className="absolute left-0 top-full mt-1 z-30 w-64 tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
-                          {ticket.isNoise ? (
-                            <button
-                              onClick={() => { setNoiseFlag(false); setNoiseMenuOpen(false); }}
-                              role="menuitem"
-                              disabled={savingField === 'noise'}
-                              className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200"
-                            >
-                              <ActionIcon name="noise" className="h-5 w-5" /> Unmark noise
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => { setNoiseFlag(true); setNoiseMenuOpen(false); }}
-                                role="menuitem"
-                                disabled={savingField === 'noise'}
-                                className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200"
-                              >
-                                <ActionIcon name="noise" className="h-5 w-5" />
-                                <span className="min-w-0 flex-1">
-                                  <span className="block font-medium">Mark as noise</span>
-                                  <span className="block text-[11px] text-muted-foreground/75">Leaves the default queue · Views → Noise &amp; spam</span>
-                                </span>
-                              </button>
-                              {isNative && !ticketTerminal && (
-                                <button
-                                  onClick={() => { setNoiseFlag(true, true); setNoiseMenuOpen(false); }}
-                                  role="menuitem"
-                                  disabled={savingField === 'noise'}
-                                  className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-200"
-                                >
-                                  <ActionIcon name="resolve" className="h-5 w-5" /> Mark as noise &amp; resolve
-                                </button>
-                              )}
-                            </>
-                          )}
-                          {isNative && canReview && (
+                          <button onClick={() => { window.print(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                            <ActionIcon name="print" className="h-5 w-5" /> Print
+                          </button>
+                          <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                            <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
+                          </button>
+                          {ticketingOn && (
                             <>
                               <span aria-hidden="true" className="my-1 h-px bg-border/60" />
                               <button
-                                onClick={deleteTicket}
-                                onBlur={() => setConfirmDelete(false)}
-                                disabled={savingField === 'delete'}
+                                onClick={() => { setCloneConfirm(true); setNoiseMenuOpen(false); }}
+                                disabled={savingField === 'clone'}
                                 role="menuitem"
-                                title="Delete this Ticket Pulse ticket"
-                                className={`tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-                                  confirmDelete
-                                    ? 'bg-red-600 text-white hover:bg-red-700'
-                                    : 'text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15'
-                                }`}
+                                title="Create a new draft ticket pre-filled from this one"
+                                className={moreItemClass}
                               >
-                                <ActionIcon name="delete" className={`h-5 w-5 ${confirmDelete ? 'brightness-0 invert' : ''}`} />
-                                {confirmDelete ? 'Confirm delete' : 'Delete ticket'}
+                                <ActionIcon name="clone" className="h-5 w-5" /> Clone
+                              </button>
+                              <button
+                                onClick={mergeBlockedReason ? undefined : () => { setMergeOpen(true); setNoiseMenuOpen(false); }}
+                                disabled={Boolean(mergeBlockedReason)}
+                                aria-disabled={Boolean(mergeBlockedReason)}
+                                title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
+                                role="menuitem"
+                                data-testid="merge-button"
+                                className={`${moreItemClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                              >
+                                <ActionIcon name="merge" className="h-5 w-5" /> Merge
+                              </button>
+                              <button
+                                onClick={() => { setSplitOpen(true); setNoiseMenuOpen(false); }}
+                                role="menuitem"
+                                title="Carve a separate issue out of this conversation into its own ticket"
+                                data-testid="split-button"
+                                className={moreItemClass}
+                              >
+                                <ActionIcon name="split" className="h-5 w-5" /> Split
                               </button>
                             </>
                           )}
@@ -2387,31 +2346,52 @@ export default function TicketDetail() {
                         )}
                       </ul>
 
-                      {/* "Also for" — additional requesters (Phase MR2, QA 08-26 #3):
-                          the ticket's ccEmails as editable chips. Every reply to the
-                          requester reaches them; the FS copy carries them as cc_emails.
-                          TP-born → PATCH; FS-born → the FS write-back (FS owns the list). */}
-                      <div className="mt-3 flex items-start gap-1.5" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
-                        <div className="min-w-0 flex-1">
-                          <CcChips
-                            value={ticket.ccEmails || []}
-                            onChange={saveAlsoFor}
-                            prefix="Also for"
-                            label="Also for (additional requesters)"
-                            placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
-                            readOnly={!canEditAlsoFor}
-                            disabled={savingField === 'alsoFor'}
-                          />
-                        </div>
-                        <span
-                          className="mt-2 inline-flex flex-shrink-0"
-                          title={`Additional requesters receive every reply to the requester.${canEditAlsoFor && !isNative ? ' Saved to FreshService first — the list lives on the FreshService ticket.' : ''}`}
-                          aria-label="About additional requesters"
+                      {/* "Also for" (16 Sep 2026): a popover, not a permanent input row —
+                          button + count, the chip editor and its helper copy inside.
+                          Every reply to the requester reaches these people; the FS copy
+                          carries them as cc_emails (TP-born → PATCH; FS-born → write-back). */}
+                      <div ref={alsoForRef} className="relative mt-3" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
+                        <button
+                          type="button"
+                          onClick={() => setAlsoForOpen((v) => !v)}
+                          aria-expanded={alsoForOpen}
+                          aria-haspopup="dialog"
+                          className={`tp-focus-ring inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                            alsoForOpen ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200'
+                              : (ticket.ccEmails?.length ? 'border-blue-200 bg-card text-blue-700 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-200 dark:hover:bg-blue-500/15' : 'border-border bg-card text-muted-foreground hover:border-blue-300 hover:text-blue-700 dark:hover:border-blue-500/40 dark:hover:text-blue-200')
+                          }`}
                         >
-                          {savingField === 'alsoFor'
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/60" aria-hidden="true" />
-                            : <Info className="w-3.5 h-3.5 text-muted-foreground/50" aria-hidden="true" />}
-                        </span>
+                          <BrandArt name="also-for" className="h-5 w-5" />
+                          Also for
+                          {ticket.ccEmails?.length
+                            ? <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">{ticket.ccEmails.length}</span>
+                            : <span className="font-normal text-muted-foreground/75">· nobody else yet</span>}
+                          <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground/75 transition-transform ${alsoForOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                        </button>
+                        {alsoForOpen && (
+                          <div role="dialog" aria-label="Also for — additional requesters" className="absolute right-0 top-full z-30 mt-1.5 w-[22rem] max-w-[calc(100vw-2rem)] tp-card rounded-xl p-3 shadow-soft animate-popIn">
+                            <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+                              <BrandArt name="also-for" className="h-5 w-5" /> Additional requesters
+                            </p>
+                            <CcChips
+                              value={ticket.ccEmails || []}
+                              onChange={saveAlsoFor}
+                              prefix="Also for"
+                              label="Also for (additional requesters)"
+                              placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
+                              readOnly={!canEditAlsoFor}
+                              disabled={savingField === 'alsoFor'}
+                            />
+                            <p
+                              className="mt-2 text-[11px] leading-snug text-muted-foreground"
+                              aria-label="About additional requesters"
+                              title={`Additional requesters receive every reply to the requester.${canEditAlsoFor && !isNative ? ' Saved to FreshService first — the list lives on the FreshService ticket.' : ''}`}
+                            >
+                              {savingField === 'alsoFor' ? 'Saving…' : 'They receive every reply to the requester.'}
+                              {canEditAlsoFor && !isNative && ' Saved to FreshService first — the list lives on the FreshService ticket.'}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (

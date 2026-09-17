@@ -30,6 +30,7 @@ import SideRail from './nav/SideRail';
 import ThemeControl from './nav/ThemeControl';
 import LayoutControl from './nav/LayoutControl';
 import MotionControl from './nav/MotionControl';
+import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
 import HeaderSearch from './nav/HeaderSearch';
 import ChangelogModal from './ChangelogModal';
 
@@ -174,6 +175,8 @@ export default function AppHeader({
 
   const demoMode = useDemoMode();
   const displayUserName = useDemoLabel('name', user?.name || user?.username || 'User');
+  // Directory photo for the signed-in person (16 Sep 2026) — initials only as the fallback.
+  const userPhoto = useRequesterPhoto(demoMode ? null : user?.email);
   const userInitials = String(displayUserName || 'U')
     .split(/\s+/)
     .filter(Boolean)
@@ -624,9 +627,13 @@ export default function AppHeader({
           className="inline-flex h-9 items-center gap-1 rounded-full border border-border bg-muted pl-2.5 pr-2 text-xs font-bold text-foreground transition-colors hover:border-input hover:bg-secondary touch-manipulation tp-focus-ring"
           title={displayUserName}
         >
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-card text-foreground shadow-sm">
-            {userInitials}
-          </span>
+          {userPhoto ? (
+            <img src={userPhoto} alt="" className="h-7 w-7 rounded-full object-cover shadow-sm ring-1 ring-border" data-testid="header-user-photo" />
+          ) : (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-card text-foreground shadow-sm">
+              {userInitials}
+            </span>
+          )}
           <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
         </button>
 
