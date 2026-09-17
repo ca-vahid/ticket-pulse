@@ -1426,6 +1426,9 @@ router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (
       ticket: {
         select: {
           id: true, freshserviceTicketId: true, subject: true, status: true, priority: true,
+          // QA 09-16 #3: the OUTCOME next to the AI's verdict — a "noise" run
+          // whose ticket stayed a ticket (sender veto) must not read as noise.
+          isNoise: true, noiseSuppressReason: true,
           assessedPriority: true, assessedPriorityId: true, priorityRationale: true,
           priorityConfidence: true, priorityEvidence: true, priorityAssessedAt: true,
           ticketType: true, assessedTicketType: true, ticketTypeRationale: true,

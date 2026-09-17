@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.9.19-preview';
+export const APP_VERSION = '3.9.20-preview';
 
 export const changelog = [
+  {
+    version: '3.9.20-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Approvals page, redesigned</strong> — an illustrated inbox that matches the rest of the app. Reviewers get a real filter bar on <em>All approvals</em>: search by subject, note or ticket number; one-click status tiles; category; approver; requested-by; date range; sort; and <em>Export CSV</em> of exactly what is on screen. Rows show the approver with their photo, the amount and tier, and the decision note.' },
+      { type: 'new', html: '<strong>One call for a resubmitted record (API)</strong> — <code>addNote</code> on <code>PATCH /api/v1/tickets/{id}</code> writes a private note in the same request, after the changes. And the resubmission upsert (<code>POST /api/v1/tickets</code> with the same <code>externalRef</code>) already reopens, updates fields and writes one diff note in one call; it now appends the caller’s <code>addNote</code> text to that note. Power Apps flows no longer need a second call.' },
+      { type: 'improved', html: '<strong>“Noise verdict · kept”</strong> — on the Assignment page a run the AI judged noise but whose ticket stayed a ticket (protected sender, such as HR) says so, instead of printing “Noise” over a ticket that was never flagged.' },
+      { type: 'new', html: '<strong>Workflow template: HR leave notice — keep and file</strong> — for “On Leave Notification” e-mails from HR: priority Low, a <em>leave-notice</em> tag and a note that says why the ticket stays open. Installed disabled; set the category, then enable.' },
+      { type: 'changed', html: '<strong>Click opens the ticket, double-click previews</strong> — the reverse of before. A single click on a row (or its subject) opens the full ticket page; a double-click docks the preview drawer on the right. Ctrl-click still opens a new tab; <kbd>↵</kbd> still opens the highlighted row.' },
+      { type: 'improved', html: '<strong>Column reordering you can see</strong> — dragging a column in the Columns menu shows a blue insertion line exactly where it will land, rows part to make room, the dragged row lifts, and Alt+↑/↓ moves the focused row with the keyboard.' },
+    ],
+  },
   {
     version: '3.9.19-preview',
     date: 'September 16, 2026',

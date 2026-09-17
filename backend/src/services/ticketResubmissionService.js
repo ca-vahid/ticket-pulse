@@ -15,6 +15,7 @@ import {
 // Diff-note renderers moved to the shared ticketChangeRenderer (TU-5); kept
 // re-exported here for existing importers/tests.
 import { renderDiffNoteHtml, renderDiffNoteText } from './ticketChangeRenderer.js';
+import { escapeHtml } from '../utils/htmlContent.js';
 
 export { renderDiffNoteHtml, renderDiffNoteText };
 
@@ -330,11 +331,29 @@ class TicketResubmissionService {
       }
     }
 
-    // ---- nothing changed and nothing reopened → no note, no audit (don't spam the timeline)
+    // The caller's own words (QA 09-16 #2: `addNote` / `note` on the same
+    // POST) ride the diff note — one note, one event — or stand alone when the
+    // record was identical.
+    const callerNote = callerNoteText(body);
+    const callerWho = ctx.apiKeyName || ctx.actor?.name || 'the caller';
+
+    // ---- nothing changed and nothing reopened → no diff note, no audit (don't spam the timeline)
     if (!changedFields.length) {
       logger.info(`API resubmission for ${ticketDisplayRef(ticket)} carried no changes (matchedBy=${ctx.matchedBy})`);
+      let noteId = null;
+      if (callerNote) {
+        try {
+          const note = await ticketService.addPrivateNote(ticket.id, workspaceId, {
+            bodyHtml: `<p><strong>Note from ${escapeHtml(callerWho)}:</strong> ${escapeHtml(callerNote)}</p>`,
+            bodyText: `Note from ${callerWho}: ${callerNote}`,
+          }, actor, [], { systemNote: true });
+          noteId = note?.id ?? null;
+        } catch (err) {
+          logger.warn(`Resubmission caller note failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
+        }
+      }
       const fresh = await ticketService.getTicket(ticket.id, workspaceId, { reconcile: false });
-      return { ticket: fresh, changedFields: [], reopened: false, aiRetriage: { queued: false }, noteId: null, rejectedCustomFields, provisionedCustomFields };
+      return { ticket: fresh, changedFields: [], reopened: false, aiRetriage: { queued: false }, noteId, rejectedCustomFields, provisionedCustomFields };
     }
 
     // ---- private note with the before/after table (NEVER addReply — that emails requester + cc)
@@ -344,8 +363,10 @@ class TicketResubmissionService {
       // authorType 'system' and flagged on the note_added event so the
       // default "Internal note added" workflow skips it visibly.
       const note = await ticketService.addPrivateNote(ticket.id, workspaceId, {
-        bodyHtml: renderDiffNoteHtml({ ctx, changedFields, diff, reopened }),
-        bodyText: renderDiffNoteText({ ctx, changedFields, diff, reopened }),
+        bodyHtml: renderDiffNoteHtml({ ctx, changedFields, diff, reopened })
+          + (callerNote ? `<p><strong>Note from ${escapeHtml(callerWho)}:</strong> ${escapeHtml(callerNote)}</p>` : ''),
+        bodyText: renderDiffNoteText({ ctx, changedFields, diff, reopened })
+          + (callerNote ? `\n\nNote from ${callerWho}: ${callerNote}` : ''),
       }, actor, [], { systemNote: true });
       noteId = note?.id ?? null;
     } catch (err) {
@@ -400,3 +421,12 @@ class TicketResubmissionService {
 }
 
 export default new TicketResubmissionService();
+
+/** The caller's free-text note on a resubmission body: `addNote` (string or { body }) or `note`. */
+export function callerNoteText(body) {
+  const raw = body?.addNote ?? body?.note;
+  if (raw === undefined || raw === null) return null;
+  const text = typeof raw === 'string' ? raw : String(raw.body ?? raw.bodyText ?? '');
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, 4000) : null;
+}

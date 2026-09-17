@@ -1852,6 +1852,14 @@ router.get('/approvals/all', asyncHandler(async (req, res) => {
   const data = await ticketApprovalService.overview(req.workspaceId, {
     status: req.query.status || null,
     categoryId: req.query.categoryId || null,
+    // QA 09-16 #4: people / date / text filters + sort for the redesigned page.
+    q: req.query.q || null,
+    approver: req.query.approver || null,
+    requestedBy: req.query.requestedBy || null,
+    from: req.query.from || null,
+    to: req.query.to || null,
+    sort: ['newest', 'oldest', 'status'].includes(req.query.sort) ? req.query.sort : 'newest',
+    limit: req.query.limit || 200,
   });
   res.json({ success: true, data });
 }));

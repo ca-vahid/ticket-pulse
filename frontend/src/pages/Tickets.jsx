@@ -992,7 +992,10 @@ export default function Tickets() {
   };
   const cancelFsSync = () => { fsConfirm?.reject?.(new Error('cancelled')); setFsConfirm(null); setFsError(null); };
 
-  // ---- Peek drawer: single-click peeks, double-click opens the full page ----
+  // ---- Row activation (Vahid, 16 Sep 2026): single-click opens the FULL
+  // ticket, double-click docks the peek drawer — the reverse of before ("I
+  // find myself constantly double clicking"). The first click waits 220 ms so
+  // a second one can turn it into a peek instead of navigating away.
   const clickTimerRef = useRef(null);
   const openPreview = useCallback((id) => {
     setParams({ peek: id }, { resetPage: false });
@@ -1003,14 +1006,15 @@ export default function Tickets() {
   const onRowClick = (id) => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
     clickTimerRef.current = setTimeout(() => {
-      // The drawer needs desktop room; on small screens go straight to detail.
-      if (window.matchMedia('(min-width: 1024px)').matches) openPreview(id);
-      else openTicket(id);
+      clickTimerRef.current = null;
+      openTicket(id);
     }, 220);
   };
   const onRowDoubleClick = (id) => {
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-    openTicket(id);
+    if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+    // The drawer needs desktop room; on small screens a double-click opens the page too.
+    if (window.matchMedia('(min-width: 1024px)').matches) openPreview(id);
+    else openTicket(id);
   };
   useEffect(() => () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); }, []);
 
@@ -1968,7 +1972,7 @@ export default function Tickets() {
                                 fsAssign,
                                 fsStatusChange,
                                 onManualAssigned,
-                                onOpenFull: onRowDoubleClick,
+                                onOpenFull: openTicket,
                               };
                               const columnCells = rowColumns.map((c) => (
                                 <Fragment key={c.key}>{c.render(ticket, rowCtx)}</Fragment>
@@ -1994,7 +1998,7 @@ export default function Tickets() {
                                     : undefined}
                                   onClick={() => onRowClick(ticket.id)}
                                   onDoubleClick={() => onRowDoubleClick(ticket.id)}
-                                  title="Click to preview (double-click opens)"
+                                  title="Click to open · double-click to preview"
                                 >
                                   <span
                                     className="hidden md:flex items-center justify-center w-9 flex-shrink-0"

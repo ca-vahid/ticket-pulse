@@ -1187,14 +1187,44 @@ class TicketApprovalService {
    * Admin/reviewer overview of ALL approvals in the workspace: status stats +
    * a filterable list/history. Read-only reporting.
    */
-  async overview(workspaceId, { status = null, categoryId = null, limit = 200 } = {}) {
+  async overview(workspaceId, { status = null, categoryId = null, limit = 200, q = null, approver = null, requestedBy = null, from = null, to = null, sort = 'newest' } = {}) {
     const where = { workspaceId };
     if (status) where.status = status;
     if (categoryId) where.approvalCategoryId = Number(categoryId);
+    // QA 09-16 #4: the redesigned Approvals page filters by people, dates and text.
+    const text = (v) => String(v || '').trim();
+    if (text(approver)) {
+      where.OR = [
+        { approverEmail: { contains: text(approver), mode: 'insensitive' } },
+        { approverName: { contains: text(approver), mode: 'insensitive' } },
+      ];
+    }
+    if (text(requestedBy)) where.requestedBy = { contains: text(requestedBy), mode: 'insensitive' };
+    const fromAt = from ? new Date(from) : null;
+    const toAt = to ? new Date(to) : null;
+    if ((fromAt && !Number.isNaN(fromAt.getTime())) || (toAt && !Number.isNaN(toAt.getTime()))) {
+      where.createdAt = {
+        ...(fromAt && !Number.isNaN(fromAt.getTime()) ? { gte: fromAt } : {}),
+        ...(toAt && !Number.isNaN(toAt.getTime()) ? { lte: new Date(toAt.getTime() + 24 * 60 * 60 * 1000 - 1) } : {}),
+      };
+    }
+    if (text(q)) {
+      const needle = text(q);
+      const digits = needle.replace(/^(tp-|#)/i, '');
+      const asNumber = /^\d+$/.test(digits) ? Number(digits) : null;
+      const textClauses = [
+        { ticket: { is: { subject: { contains: needle, mode: 'insensitive' } } } },
+        { requestNote: { contains: needle, mode: 'insensitive' } },
+        { decisionNote: { contains: needle, mode: 'insensitive' } },
+        ...(asNumber ? [{ ticket: { is: { nativeNumber: asNumber } } }, { ticket: { is: { freshserviceTicketId: BigInt(asNumber) } } }] : []),
+      ];
+      where.AND = [...(where.AND || []), { OR: textClauses }];
+    }
+    const orderBy = sort === 'oldest' ? { id: 'asc' } : sort === 'status' ? [{ status: 'asc' }, { id: 'desc' }] : { id: 'desc' };
     const [items, grouped] = await Promise.all([
       prisma.ticketApproval.findMany({
         where,
-        orderBy: { id: 'desc' },
+        orderBy,
         take: Math.min(Number(limit) || 200, 500),
         include: {
           approvalCategory: { select: { name: true } },
