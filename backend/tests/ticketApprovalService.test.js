@@ -345,17 +345,16 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
   });
 
-  test('admin deciding ON BEHALF where requester === approver is NOT a self-decision', async () => {
-    // Old bug: the compare used approval.approverEmail, so an admin deciding a
-    // request Alice made to herself silenced the email entirely.
+  test('an admin who is not the named approver cannot decide (17 Sep 2026) — forward instead', async () => {
+    // Vahid, Tier 1 and admin, requested a Cybersecurity approval that went to
+    // Neville (Tier 2) and still saw an Approve button. The decision belongs to
+    // the named approver alone; admins re-route with forward.
     prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow({ requestedBy: 'alice@x.io' }));
-    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'boss@x.io', name: 'Boss', role: 'admin' });
-
-    expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
-    const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.to).toEqual(['alice@x.io']);
-    expect(email.html).toContain('Boss decided your approval request');
-    expect(email.html).not.toContain('your own');
+    await expect(
+      ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'boss@x.io', name: 'Boss', role: 'admin', workspaceRole: 'admin' }),
+    ).rejects.toThrow(/only the requested approver can decide/i);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+    expect(prismaMock.ticketApproval.update).not.toHaveBeenCalled();
   });
 
   test('decideByToken (magic link) emails the requester too', async () => {

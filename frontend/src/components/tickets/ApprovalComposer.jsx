@@ -197,8 +197,11 @@ export default function ApprovalComposer({
   compact = false,
   showShortcuts = true,
   footer = null,
+  // false = the viewer may hand the request on but not decide it (an admin who
+  // is not the named approver, 17 Sep 2026): only Forward / Escalate tabs show.
+  canDecide = true,
 }) {
-  const [tab, setTab] = useState('approved');
+  const [tab, setTab] = useState(canDecide ? 'approved' : 'forward');
   const [note, setNote] = useState('');
   const [noteHtml, setNoteHtml] = useState('');
   const [submitting, setSubmitting] = useState(null);
@@ -214,13 +217,14 @@ export default function ApprovalComposer({
   const canEscalate = Boolean(approval?.canEscalate) && typeof onHandoff === 'function';
   const canForward = typeof onHandoff === 'function';
   const canAsk = typeof onAsk === 'function';
-  const tabs = useMemo(() => TABS.filter((t) => (t.key === 'escalate' ? canEscalate : t.key === 'forward' ? canForward : t.key === 'question' ? canAsk : true)), [canEscalate, canForward, canAsk]);
+  const tabs = useMemo(() => TABS.filter((t) => (t.key === 'escalate' ? canEscalate : t.key === 'forward' ? canForward : t.key === 'question' ? canAsk : canDecide)), [canEscalate, canForward, canAsk, canDecide]);
 
   const clear = () => { setNote(''); setNoteHtml(''); };
   const rich = () => (text && isRichContent(noteHtml) ? noteHtml : null);
 
   const stage = useCallback((decision) => {
     if (busy) return;
+    if (!canDecide && ['approved', 'rejected', 'condition'].includes(decision)) return;
     if (decision === 'rejected' && !text) {
       setError('Add a reason for rejecting so the requester knows what to change.');
       setTab('rejected');
@@ -238,7 +242,7 @@ export default function ApprovalComposer({
       return;
     }
     setPending({ decision, note: text || null, noteHtml: rich(), conditionNote: null, amountLabel: approval?.amountLabel || null });
-  }, [busy, text, noteHtml, approval]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [busy, text, noteHtml, approval, canDecide]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runDecision = useCallback(async (p) => {
     setSubmitting(p.decision);
