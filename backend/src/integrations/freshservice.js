@@ -598,6 +598,25 @@ class FreshServiceClient {
   }
 
   /**
+   * One agent by e-mail (FreshService filters /agents?email=). Null when the
+   * address is not an agent seat or the lookup fails — attribution is a
+   * nicety, never a reason to fail a send. (17 Sep 2026: app-only members
+   * such as the CIO have no technician row here yet are agents in FS.)
+   */
+  async fetchAgentByEmail(email) {
+    const key = String(email || '').trim().toLowerCase();
+    if (!key || !key.includes('@')) return null;
+    try {
+      const response = await this._get('/agents', { params: { email: key } });
+      const list = response.data?.agents || [];
+      return list.find((a) => String(a?.email || '').toLowerCase() === key) || list[0] || null;
+    } catch (error) {
+      logger.debug?.(`Agent lookup by e-mail skipped for ${key}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Fetch a single agent by ID
    * @param {number} agentId - Agent ID
    * @returns {Promise<Object>} Agent object
