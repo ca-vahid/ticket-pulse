@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Drawer } from 'vaul';
 import { DayPicker } from 'react-day-picker';
@@ -50,8 +50,17 @@ const DUE_OPTIONS = [
 // Legacy fallback while the per-workspace type registry loads.
 const TYPE_OPTIONS_FALLBACK = ['Incident', 'Service Request'];
 
+// Scroll anchoring for the rail (16 Sep 2026): collapsing a tall section
+// (Members) used to shorten the rail, the page/rail scroll clamped, and the
+// section's own title jumped hundreds of pixels. The rail is now its own
+// scroll container and, before a section closes, it pads its bottom by exactly
+// the room the closing body will free — so the scroll offset stays valid and
+// the header you clicked stays under your cursor (click again to reopen).
+const RailScrollContext = createContext(null);
+
 /** One collapsible facet group in the rail. */
 function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = false, children }) {
+  const reserveRoom = useContext(RailScrollContext);
   const [open, setOpen] = useState(defaultOpen || activeCount > 0);
   // A filter applied from elsewhere (URL, views) pops its section open.
   useEffect(() => { if (activeCount > 0) setOpen(true); }, [activeCount]);
@@ -82,7 +91,10 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
     <div className="border-b border-border/60 last:border-b-0">
       <div className="flex items-center gap-1 w-full px-3 py-2 group">
         <button
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            if (open) reserveRoom?.(bodyRef.current?.offsetHeight || 0);
+            setOpen((v) => !v);
+          }}
           aria-expanded={open}
           className="tp-focus-ring flex items-center gap-1.5 flex-1 min-w-0 text-left rounded"
         >
@@ -351,6 +363,17 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   });
   const [dragKey, setDragKey] = useState(null);
   useEffect(() => { try { localStorage.setItem('tp_filter_section_order', JSON.stringify(sectionOrder)); } catch { /* no-op */ } }, [sectionOrder]);
+  // Scroll anchoring (see RailScrollContext): pad = the room a closing section frees
+  // beyond what the current scroll offset can still afford.
+  const railScrollRef = useRef(null);
+  const [railPad, setRailPad] = useState(0);
+  const reserveRoom = useCallback((shrink) => {
+    const el = railScrollRef.current;
+    if (!el || !shrink) return;
+    const content = el.scrollHeight - railPad; // content height without today's pad
+    const needed = Math.max(0, el.scrollTop + el.clientHeight - (content - shrink));
+    setRailPad(needed);
+  }, [railPad]);
   const moveSection = (targetKey) => setSectionOrder((prev) => {
     if (!dragKey || dragKey === targetKey) return prev;
     const a = prev.filter((k) => k !== dragKey);
@@ -587,7 +610,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   };
 
   const body = (
-    <>
+    <RailScrollContext.Provider value={reserveRoom}>
       <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-border/60">
         <ListFilter className="w-4 h-4 text-blue-500" aria-hidden="true" />
         <span className="text-sm font-bold text-foreground">Filters</span>
@@ -615,7 +638,12 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
         )}
       </div>
 
-      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto settings-scrollbar lg:flex-none lg:min-h-0 lg:overflow-visible">
+      <div
+        ref={railScrollRef}
+        style={{ paddingBottom: railPad }}
+        className="flex flex-col flex-1 min-h-0 overflow-y-auto settings-scrollbar"
+        data-testid="rail-scroll"
+      >
         {/* Desktop: natural height, scrolls with the page (one scrollbar). Mobile
             drawer: this region scrolls inside the fixed-height slide-over. */}
         <Section title="Views" icon={LayoutList} defaultOpen>
@@ -1102,7 +1130,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           </Section>
         </SortableFacet>
       </div>
-    </>
+    </RailScrollContext.Provider>
   );
 
   // Mobile: a native-feeling bottom sheet (drag the handle down to dismiss).
@@ -1132,7 +1160,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     <aside
       aria-label="Ticket filters"
       data-collapsed={collapsed ? 'true' : undefined}
-      className={`hidden lg:flex sticky top-4 self-start flex-col tp-card rounded-xl overflow-hidden
+      className={`hidden lg:flex sticky top-4 self-start flex-col tp-card rounded-xl overflow-hidden max-h-[calc(100vh-2rem)]
         transition-[width] duration-300 ease-out motion-off:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(256px,15vw,320px)]'}`}
     >
       {/* Slim layer (collapsed) */}
@@ -1170,7 +1198,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           the rail is narrower than the old 248px at 100% zoom (16 Sep 2026). */}
       <div
         aria-hidden={collapsed}
-        className={`flex flex-col w-full min-w-[256px] flex-shrink-0 transition-opacity duration-150 ${
+        className={`flex flex-col w-full min-w-[256px] min-h-0 flex-1 transition-opacity duration-150 ${
           collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100 delay-100'
         }`}
       >
@@ -1295,7 +1323,9 @@ export function ActiveFilterBar({ meta }) {
 
   return (
     <div className="sticky top-[64px] z-30 mb-3 animate-fadeIn">
-      <div className="tp-glass rounded-xl border border-blue-200/70 dark:border-blue-500/30 shadow-subtle px-3 py-2 flex flex-wrap items-center gap-1.5">
+      {/* Opaque on purpose (16 Sep 2026): the glass version let the toolbar's
+          refresh / sort buttons ghost through when the page scrolled under it. */}
+      <div className="rounded-xl border border-blue-200/70 bg-card shadow-subtle px-3 py-2 flex flex-wrap items-center gap-1.5 dark:border-blue-500/30">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-200">
           <ListFilter className="w-3.5 h-3.5" aria-hidden="true" />
           Filtered view
