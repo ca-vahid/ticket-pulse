@@ -33,6 +33,7 @@ vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: mocks.useWorkspac
 vi.mock('../hooks/useRealtimeStatus', () => ({ useRealtimeStatus: mocks.useRealtimeStatus }));
 vi.mock('./nav/SideRail', () => ({ default: () => null }));
 vi.mock('./ChangelogModal', () => ({ default: () => null }));
+vi.mock('./nav/HeaderSearch', () => ({ default: () => null }));
 
 import AppHeader from './AppHeader';
 

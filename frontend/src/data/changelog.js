@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.11-preview';
+export const APP_VERSION = '3.9.12-preview';
 
 export const changelog = [
+  {
+    version: '3.9.12-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Search from any page</strong> — the all-in-one search box (tickets, people, tasks, conversations, recents) now sits in the top bar on every page. Press <kbd>/</kbd> anywhere to jump into it; Enter takes you to the tickets list with the text as the filter, and on the list itself it keeps your other filters. Phones keep the box above the queue.' },
+      { type: 'improved', html: '<strong>Tickets page breathes again</strong> — with the search box gone from the toolbar, the columns, density, refresh and sort controls share one row with the page count and Prev/Next, so the list starts higher. The blue dot on <em>Columns</em> is gone (the button already tints when your columns are customised).' },
+      { type: 'changed', html: '<strong>Ticket page: two columns everywhere</strong> — the ultra-wide three-column layout from 3.9.09 is withdrawn; parent/child, linked tickets, custom fields and related tickets are back on the right under the fields, and the extra width goes to the description and the conversation.' },
+      { type: 'changed', html: '<strong>Navigation rail opens on click, not hover</strong> — brushing the left edge no longer flares the rail open. A chevron tab at its top expands it (FreshService-style); Escape, a click elsewhere or navigating closes it. On the tickets pages the thin edge tab likewise opens on click only.' },
+    ],
+  },
   {
     version: '3.9.11-preview',
     date: 'September 16, 2026',

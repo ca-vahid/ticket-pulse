@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import SideRail from './SideRail';
 
@@ -41,6 +41,20 @@ describe('SideRail', () => {
     for (const label of ['Dashboard', 'Tickets', 'Timeline', 'Analytics', 'Assignment', 'Mail Workflows', 'Agent Maps', 'Approvals', 'Settings']) {
       expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
     }
+  });
+
+  test('opens only from its chevron tab, never on hover (16 Sep 2026)', () => {
+    renderRail('/dashboard');
+    const nav = screen.getByRole('navigation', { name: 'Primary navigation' });
+    expect(nav.className).not.toMatch(/hover:w-/);
+    expect(nav.className).not.toMatch(/focus-within:w-/);
+    expect(nav.className).toMatch(/w-\[58px\]/);
+    const tab = screen.getByRole('button', { name: 'Expand navigation' });
+    fireEvent.click(tab);
+    expect(nav.className).toMatch(/tp-side-rail--open/);
+    expect(screen.getByRole('button', { name: 'Collapse navigation' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(nav.className).not.toMatch(/tp-side-rail--open/);
   });
 
   test('marks the current route with aria-current', () => {

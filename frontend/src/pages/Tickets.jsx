@@ -1519,7 +1519,9 @@ export default function Tickets() {
                   </div>
                 )}
                 <ActiveFilterBar meta={meta} />
-                {/* Slim toolbar: search + sort (filters live in the rail) */}
+                {/* One toolbar row (16 Sep 2026): layout controls on the left, the
+                    AI-approval worklist and pagination on the right. On desktop the
+                    search box lives in the app header; phones keep it here. */}
                 <div className="flex flex-wrap items-center gap-2 mb-3">
                   <button
                     onClick={() => setMobileFilters(true)}
@@ -1533,10 +1535,9 @@ export default function Tickets() {
                       </span>
                     )}
                   </button>
-                  {/* Search v2 (16 Sep 2026): first in the row — it is what everyone
-                      reaches for. Recents on focus, results as you type, "/" focuses. */}
                   <TicketSearchBox
-                    className="order-3 basis-full min-w-0 sm:order-1 sm:basis-auto sm:flex-1 sm:min-w-[240px]"
+                    className="md:hidden order-3 basis-full min-w-0"
+                    shortcut={false}
                     value={search}
                     onChange={setSearch}
                     onApply={(q) => { setSearch(q); setParams({ q: q || null }); }}
@@ -1546,6 +1547,35 @@ export default function Tickets() {
                     onOpenTask={(task) => { if (task?.ticket?.id) openTicket(`${task.ticket.id}?tab=tasks`); }}
                     onFilterDepartment={(name) => { setSearch(name); setParams({ q: name }); }}
                   />
+                  {/* Columns customizer (Phase QC) — list layouts only; the
+                      board's columns are statuses, not these. Desktop-only:
+                      custom columns apply at xl+ and mobile keeps its cards. */}
+                  {!boardMode && (
+                    <div className="hidden md:block order-2">
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} />
+                    </div>
+                  )}
+                  {/* View — two list densities plus the drag-drop board
+                      (Open / Pending / Closed columns, QA 07-27 #3). */}
+                  <div className="hidden md:inline-flex order-2 items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
+                    {[
+                      { key: 'dense', Icon: AlignJustify, label: 'Dense', hint: 'The tightest rows and smaller type — the most tickets on one screen.' },
+                      { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
+                      { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
+                      { key: 'board', Icon: Columns3, label: 'Board', hint: 'Open / Pending / Closed columns — drag a card to change its status (Ticket Pulse tickets save directly; FreshService tickets confirm first).' },
+                    ].map(({ key, Icon, label, hint }) => (
+                      <button
+                        key={key}
+                        onClick={() => setLayout(key)}
+                        aria-pressed={layout === key}
+                        title={hint}
+                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300' : 'text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50'}`}
+                      >
+                        <Icon className="w-4 h-4" aria-hidden="true" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   {/* Force refresh — belt-and-suspenders next to the live/SSE
                       machinery: refetches the list + stat cards right now. */}
                   <button
@@ -1553,11 +1583,11 @@ export default function Tickets() {
                     disabled={manualRefreshing}
                     aria-label="Refresh tickets now"
                     title="Refresh now"
-                    className="tp-focus-ring order-2 sm:order-4 inline-flex items-center justify-center bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40 disabled:opacity-60"
+                    className="tp-focus-ring order-2 inline-flex items-center justify-center bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40 disabled:opacity-60"
                   >
                     <RefreshCw className={`w-4 h-4 ${manualRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
                   </button>
-                  <div ref={sortMenuRef} className="relative order-2 sm:order-4">
+                  <div ref={sortMenuRef} className="relative order-2">
                     <button
                       onClick={() => setSortMenuOpen((v) => !v)}
                       aria-expanded={sortMenuOpen}
@@ -1591,67 +1621,35 @@ export default function Tickets() {
                       </div>
                     )}
                   </div>
-                  {/* Columns customizer (Phase QC) — list layouts only; the
-                      board's columns are statuses, not these. Desktop-only:
-                      custom columns apply at xl+ and mobile keeps its cards. */}
-                  {!boardMode && (
-                    <div className="hidden md:block sm:order-2">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} />
+                  {/* Right end: AI-approval worklist connector + pagination */}
+                  {view !== 'scheduled' && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
+                    <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
+                      {(stats?.awaitingApproval || 0) > 0 && (
+                        <button
+                          onClick={() => setParams({ aiState: aiState === 'suggested' ? null : 'suggested', segment: null })}
+                          aria-pressed={aiState === 'suggested'}
+                          className={`tp-focus-ring inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border text-xs font-semibold shadow-subtle transition-colors ${
+                            aiState === 'suggested'
+                              ? 'border-indigo-400 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200'
+                              : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20'
+                          }`}
+                          title={aiState === 'suggested'
+                            ? 'Showing tickets awaiting your AI-suggestion approval — click to clear'
+                            : 'Filter to tickets whose AI recommendation is waiting for your decision'}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                          {stats.awaitingApproval} awaiting AI approval
+                          {aiState === 'suggested'
+                            ? <X className="w-3 h-3" aria-hidden="true" />
+                            : <ChevronRight className="w-3 h-3" aria-hidden="true" />}
+                        </button>
+                      )}
+                      {tickets.length > 0 && (
+                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
+                      )}
                     </div>
                   )}
-                  {/* View — two list densities plus the drag-drop board
-                      (Open / Pending / Closed columns, QA 07-27 #3). */}
-                  <div className="hidden md:inline-flex sm:order-3 items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
-                    {[
-                      { key: 'dense', Icon: AlignJustify, label: 'Dense', hint: 'The tightest rows and smaller type — the most tickets on one screen.' },
-                      { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
-                      { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
-                      { key: 'board', Icon: Columns3, label: 'Board', hint: 'Open / Pending / Closed columns — drag a card to change its status (Ticket Pulse tickets save directly; FreshService tickets confirm first).' },
-                    ].map(({ key, Icon, label, hint }) => (
-                      <button
-                        key={key}
-                        onClick={() => setLayout(key)}
-                        aria-pressed={layout === key}
-                        title={hint}
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300' : 'text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50'}`}
-                      >
-                        <Icon className="w-4 h-4" aria-hidden="true" />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
                 </div>
-
-                {/* Top pagination + AI-approval worklist connector — controls at both ends */}
-                {view !== 'scheduled' && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    {(stats?.awaitingApproval || 0) > 0 && (
-                      <button
-                        onClick={() => setParams({ aiState: aiState === 'suggested' ? null : 'suggested', segment: null })}
-                        aria-pressed={aiState === 'suggested'}
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border text-xs font-semibold shadow-subtle transition-colors ${
-                          aiState === 'suggested'
-                            ? 'border-indigo-400 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200'
-                            : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20'
-                        }`}
-                        title={aiState === 'suggested'
-                          ? 'Showing tickets awaiting your AI-suggestion approval — click to clear'
-                          : 'Filter to tickets whose AI recommendation is waiting for your decision'}
-                      >
-                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                        {stats.awaitingApproval} awaiting AI approval
-                        {aiState === 'suggested'
-                          ? <X className="w-3 h-3" aria-hidden="true" />
-                          : <ChevronRight className="w-3 h-3" aria-hidden="true" />}
-                      </button>
-                    )}
-                    {tickets.length > 0 && (
-                      <div className="ml-auto">
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Results — the peek is a fixed overlay drawer, so nothing here reflows */}
                 <div className="relative">

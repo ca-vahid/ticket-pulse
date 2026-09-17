@@ -1031,7 +1031,6 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
         <Columns3 className={`w-4 h-4 ${customized ? 'text-blue-500' : 'text-muted-foreground/75'}`} aria-hidden="true" />
         Columns
         <ChevronDown className={`w-3.5 h-3.5 ${customized ? 'text-blue-500' : 'text-muted-foreground/75'}`} aria-hidden="true" />
-        {customized && <span aria-hidden="true" className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-500" />}
       </button>
       {open && (
         <div

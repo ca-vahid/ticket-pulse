@@ -7,8 +7,10 @@ import { useApprovalCount } from '../../hooks/useApprovalCount';
 import { useAuth } from '../../contexts/AuthContext';
 
 // Fixed left navigation rail for desktop (hidden below md — phones use
-// MobileTabBar). Collapsed it's a 58px icon strip; on hover/keyboard focus it
-// expands over the content (no reflow) to reveal labels, Freshservice-style.
+// MobileTabBar). Collapsed it's a 58px icon strip; the chevron tab at its top
+// expands it over the content (no reflow) to reveal labels, Freshservice-style.
+// It never opens on hover (16 Sep 2026 — brushing the left edge kept flaring
+// it open); Escape, a click elsewhere or navigating closes it again.
 // Like MobileTabBar it self-detects the active route via useLocation, so it
 // works on every page it's mounted on, including the bespoke Visuals chrome
 // that bypasses AppShell/AppHeader.
@@ -50,6 +52,18 @@ export default function SideRail() {
     try { localStorage.setItem(RAIL_COLLAPSED_KEY, String(next)); } catch { /* no-op */ }
   };
   const peek = onTickets && railCollapsed;
+
+  // Explicit expand (the FreshService chevron). Session-only, never persisted.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { setExpanded(false); }, [location.pathname]);
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setExpanded(false); };
+    const onDoc = (e) => { if (!e.target.closest?.('.tp-side-rail')) setExpanded(false); };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDoc);
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDoc); };
+  }, [expanded]);
 
   // Tickets pages reserve the rail gutter via --tp-rail-w so collapsing the
   // rail gives the table the width back without hardcoded paddings.
@@ -109,10 +123,10 @@ export default function SideRail() {
       onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
       onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
       className={cn(
-        'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out hover:w-[210px] focus-within:w-[210px] motion-reduce:transition-none md:flex print:hidden',
+        'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out motion-reduce:transition-none md:flex print:hidden',
         peek
           ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
-          : 'w-[58px]',
+          : (expanded ? 'tp-side-rail--open w-[210px]' : 'w-[58px]'),
       )}
     >
       {peek && (
@@ -125,6 +139,27 @@ export default function SideRail() {
       )}
 
       <div className="tp-rail-content flex min-h-0 flex-1 flex-col gap-1">
+        {/* Expand / collapse tab — the only way the rail opens (no hover). */}
+        {!peek && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
+            title={expanded ? 'Collapse navigation' : 'Expand navigation'}
+            className={cn(
+              'mx-[9px] mb-1 flex h-7 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-lg border px-[8px] text-left text-[11px] font-semibold transition-colors tp-focus-ring',
+              expanded
+                ? 'border-input bg-muted text-foreground'
+                : 'border-transparent text-muted-foreground hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-500/15 dark:hover:text-blue-200',
+            )}
+          >
+            <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
+              {expanded ? <ChevronsLeft className="h-4 w-4" /> : <ChevronsRight className="h-4 w-4" />}
+            </span>
+            <span className="tp-rail-label flex-1 truncate">Collapse</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => navigate(homePath)}
