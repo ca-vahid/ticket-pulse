@@ -198,10 +198,13 @@ class AzureAdService {
         `${this.graphApiUrl}/users/${encodeURIComponent(email)}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-          params: { $select: 'officeLocation,city,department,jobTitle,state,country,usageLocation,preferredLanguage' },
+          params: { $select: 'officeLocation,city,department,jobTitle,state,country,usageLocation,preferredLanguage,businessPhones,mobilePhone' },
         },
       );
       return {
+        // Direct line + mobile (GAL) — the company e-mail signature's T: / M:.
+        businessPhone: (Array.isArray(response.data.businessPhones) ? response.data.businessPhones.find(Boolean) : null) || null,
+        mobilePhone: response.data.mobilePhone || null,
         officeLocation: response.data.officeLocation || null,
         city: response.data.city || null,
         department: response.data.department || null,

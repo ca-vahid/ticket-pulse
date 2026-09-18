@@ -123,7 +123,7 @@ function renderPage() {
   );
 }
 
-const STRIP_TEXT = /your signature will be appended/i;
+const STRIP_TEXT = /your signature is added automatically/i;
 
 describe('TicketDetail composer signature strip (Phase D)', () => {
   beforeEach(() => {
@@ -150,7 +150,7 @@ describe('TicketDetail composer signature strip (Phase D)', () => {
     // The editable area stays empty — the signature is preview-only.
     expect(screen.getByRole('textbox', { name: 'Reply body' })).toHaveValue('');
 
-    fireEvent.click(screen.getByText(STRIP_TEXT).closest('button'));
+    // Open by default (18 Sep 2026): the agent sees what goes under the reply.
     expect(screen.getByTestId('composer-signature-preview')).toBeInTheDocument();
 
     // Back to note mode: strip goes away.

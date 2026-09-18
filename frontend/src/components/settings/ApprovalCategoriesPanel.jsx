@@ -3,7 +3,7 @@ import { settingsAPI, ticketsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Stamp, Loader, Plus, Pencil, Trash2, Check, X, AlertCircle, CheckCircle2,
-  Search, UserPlus, Users, Power, PowerOff, Ban, Lock, AtSign, BadgeDollarSign, Layers, ArrowRight,
+  Search, UserPlus, Power, PowerOff, Ban, Lock, AtSign, BadgeDollarSign, Layers, ArrowRight,
 } from 'lucide-react';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
