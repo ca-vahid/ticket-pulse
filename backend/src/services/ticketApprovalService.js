@@ -10,6 +10,7 @@ import { categoryTiers } from '../utils/approvalTiers.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 const APPROVAL_EXPIRY_DAYS = 30;
 
 function newToken() {
@@ -21,13 +22,7 @@ function hashToken(token) {
 }
 
 function publicBaseUrl() {
-  const configured = process.env.PUBLIC_APP_URL
-    || process.env.FRONTEND_PUBLIC_URL
-    || process.env.FRONTEND_URL
-    || process.env.APP_URL
-    || process.env.CORS_ORIGIN?.split(',')?.[0]
-    || 'http://localhost:5173';
-  return String(configured).trim().replace(/\/+$/, '');
+  return resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
 }
 
 // Allowlist for approval notes (gap plan P2.4) — inline text formatting +

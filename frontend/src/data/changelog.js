@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.36-preview';
+export const APP_VERSION = '3.9.37-preview';
 
 export const changelog = [
+  {
+    version: '3.9.37-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>E-mail links can no longer point at a developer machine</strong> — one approval e-mail this morning carried a Reply button that opened “localhost” on the approver’s own PC. It had been sent by a maintenance script run from a development machine against the live database, where the site address was not configured. Every service that builds a link for an e-mail now shares one resolver, and that resolver refuses to produce a localhost link when it is working with live data. Mail sent by the app itself was never affected.' },
+    ],
+  },
   {
     version: '3.9.36-preview',
     date: 'September 18, 2026',

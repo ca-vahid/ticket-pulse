@@ -20,6 +20,7 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { emailShell, escapeHtml, textExcerpt } from './approvalEmailTemplate.js';
 import { brandImg } from './emailBrandAssets.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 const CACHE_TTL_MS = 30 * 1000;
 const cache = new Map(); // workspaceId -> { at, value }
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -67,9 +68,7 @@ export function invalidateRequesterReplyCopyCache(workspaceId = null) {
 }
 
 function publicBaseUrl() {
-  const configured = process.env.PUBLIC_APP_URL || process.env.FRONTEND_PUBLIC_URL || process.env.FRONTEND_URL
-    || process.env.CORS_ORIGIN?.split(',')?.[0] || 'http://localhost:5173';
-  return String(configured).trim().replace(/\/+$/, '');
+  return resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
 }
 
 /**

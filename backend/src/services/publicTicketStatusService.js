@@ -6,6 +6,7 @@ import { AuthorizationError, NotFoundError, ValidationError } from '../utils/err
 import { getTodayRange } from '../utils/timezone.js';
 import statusService, { heuristicBaseStatus } from './statusService.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 export const DEFAULT_PUBLIC_TICKET_STATUS_SETTINGS = {
   enabled: true,
   expiryDays: 60,
@@ -160,14 +161,7 @@ function computeExpiresAt(settings, now = new Date()) {
 }
 
 function publicBaseUrl(baseUrl = null) {
-  const configured = process.env.PUBLIC_APP_URL
-    || process.env.FRONTEND_PUBLIC_URL
-    || process.env.FRONTEND_URL
-    || process.env.APP_URL
-    || process.env.CORS_ORIGIN?.split(',')?.[0]
-    || baseUrl
-    || 'http://localhost:5173';
-  return String(configured).trim().replace(/\/+$/, '');
+  return resolvePublicBaseUrl({ fallback: baseUrl, warn: (m) => logger.warn(m) });
 }
 
 export function buildPublicTicketStatusUrl(token, baseUrl = null) {

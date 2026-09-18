@@ -4,6 +4,7 @@ import { resolvePersonName } from './personDirectoryService.js';
 import { fsApprovalState, combineStates } from './approvalVerdictService.js';
 import { refreshFsApprovalStatuses } from './fsApprovalRefreshService.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 /**
  * "Request for Cristian Orellana : Laptop" — an IT agent filing on behalf of
  * someone. Returns the named person (lower-cased) or null. Only a capitalised
@@ -71,13 +72,7 @@ const BLOCKING = Object.freeze(new Set(['PENDING', 'INFO_REQUESTED', 'EXPIRED', 
 export const DEFAULT_WINDOW_DAYS = 180;
 
 function publicBaseUrl() {
-  const configured = process.env.PUBLIC_APP_URL
-    || process.env.FRONTEND_PUBLIC_URL
-    || process.env.FRONTEND_URL
-    || process.env.APP_URL
-    || process.env.CORS_ORIGIN?.split(',')?.[0]
-    || 'http://localhost:5173';
-  return String(configured).trim().replace(/\/+$/, '');
+  return resolvePublicBaseUrl();
 }
 
 export function rowState(row, now = new Date()) {

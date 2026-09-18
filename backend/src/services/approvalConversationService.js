@@ -9,6 +9,7 @@ import { renderApprovalMessageEmail } from './approvalEmailTemplate.js';
 import { pickIngestMailbox } from './mailboxPicker.js';
 import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 /**
  * Approvals v3 — the conversation on a request (16 Sep 2026, Vahid).
  *
@@ -37,9 +38,7 @@ const plusKeyFor = (token) => hashToken(token).slice(0, 12); // 12 hex chars —
 export const PLUS_KEY_RE = /^([^@\s<>+]+)\+ap([a-f0-9]{8,24})@([^@\s<>]+)$/i;
 
 function publicBaseUrl() {
-  const configured = process.env.PUBLIC_APP_URL || process.env.FRONTEND_PUBLIC_URL || process.env.FRONTEND_URL
-    || process.env.APP_URL || process.env.CORS_ORIGIN?.split(',')?.[0] || 'http://localhost:5173';
-  return String(configured).trim().replace(/\/+$/, '');
+  return resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
 }
 
 function textFromHtml(html) {

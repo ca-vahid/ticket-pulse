@@ -4,6 +4,7 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sendTransactionalEmail } from './transactionalEmailService.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 // Local status <-> FreshService task status. FS: 1 Open, 2 In Progress, 3 Completed.
 const STATUSES = ['open', 'in_progress', 'done'];
 const TO_FS_STATUS = { open: 1, in_progress: 2, done: 3 };
@@ -350,7 +351,7 @@ class TicketTaskService {
    */
   _taskEmailHtml({ ticket, row, intro, dueTone = '#1f2937' }) {
     const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const publicBase = process.env.PUBLIC_APP_URL || process.env.FRONTEND_PUBLIC_URL || process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
+    const publicBase = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
     const dueLine = row.dueAt
       ? `<div style="font-size:13px;line-height:19px;color:${dueTone};margin-top:8px;font-weight:700;">Due ${new Date(row.dueAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>`
       : '';

@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import { refreshFsApprovalStatus } from './fsApprovalRefreshService.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 /**
  * The single approval verdict for one ticket — the shape an external system
  * gates on. Built for Assetron (BGC IT), which blocks the first assignment of
@@ -85,13 +86,7 @@ export function combineStates(tpState, fsState) {
 }
 
 function publicBaseUrl() {
-  const configured = process.env.PUBLIC_APP_URL
-    || process.env.FRONTEND_PUBLIC_URL
-    || process.env.FRONTEND_URL
-    || process.env.APP_URL
-    || process.env.CORS_ORIGIN?.split(',')?.[0]
-    || 'http://localhost:5173';
-  return String(configured).trim().replace(/\/+$/, '');
+  return resolvePublicBaseUrl();
 }
 
 /**
