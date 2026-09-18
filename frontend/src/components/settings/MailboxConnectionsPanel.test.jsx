@@ -134,3 +134,31 @@ describe('MailboxConnectionsPanel inbound-lane pill (Phase MB-2e)', () => {
     expect(screen.queryByTestId('mailbox-lane-2')).not.toBeInTheDocument();
   });
 });
+
+// QA 09-17 #6 — Field Equipment's fetickets@ is connected in Ingest-only mode,
+// so its replies leave through SendGrid and never appear in its Sent Items.
+// Nothing said so; the row says it now.
+describe('MailboxConnectionsPanel ingest-only note (QA 09-17 #6)', () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  test('an enabled ingest-only mailbox explains where its replies come from', async () => {
+    ticketsAPI.listMailboxes.mockResolvedValue({
+      data: [{ ...mailboxes[0], mode: 'ingest' }, mailboxes[1]],
+    });
+    render(<MailboxConnectionsPanel />);
+    const note = await screen.findByTestId('mailbox-ingest-note-1');
+    expect(note).toHaveTextContent(/no copy in this mailbox's Sent Items/);
+    expect(note).toHaveTextContent(/Ingest \+ send/);
+    // Ingest + send mailboxes say nothing extra.
+    expect(screen.queryByTestId('mailbox-ingest-note-2')).not.toBeInTheDocument();
+  });
+
+  test('a disabled ingest mailbox does not carry the note', async () => {
+    ticketsAPI.listMailboxes.mockResolvedValue({
+      data: [{ ...mailboxes[0], mode: 'ingest', isEnabled: false }],
+    });
+    render(<MailboxConnectionsPanel />);
+    await waitFor(() => expect(screen.getByText('it@example.com')).toBeInTheDocument());
+    expect(screen.queryByTestId('mailbox-ingest-note-1')).not.toBeInTheDocument();
+  });
+});

@@ -8,6 +8,9 @@ const prismaMock = {
   // Per-workspace status registry (Phase 8b): canonical 4 by default; the
   // custom-status tests below override + invalidate the statusService cache.
   ticketStatusDefinition: { findMany: jest.fn().mockResolvedValue([]) },
+  // FR 09-17 #2: the unassigned trigger groups the batch's assignment
+  // activities to find when each ticket was last left unassigned.
+  ticketActivity: { groupBy: jest.fn().mockResolvedValue([]) },
 };
 const emitMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
 const executeForEventMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
@@ -49,9 +52,19 @@ const slaWorkflow = {
   },
 };
 
+const unassignedWorkflow = {
+  id: 9,
+  workspaceId: 1,
+  triggerType: 'ticket.unassigned_for',
+  publishedDefinition: {
+    nodes: [{ id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.unassigned_for', unassignedHours: 4 } }],
+  },
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   invalidateStatusCache();
+  prismaMock.ticketActivity.groupBy.mockResolvedValue([]);
   process.env.NOTIFICATION_TIME_TRIGGERS_ENABLED = 'true';
   emitMock.mockResolvedValue({ status: 'completed', workflowCount: 1 });
   sendDueReminderMock.mockResolvedValue(true);
@@ -282,5 +295,113 @@ describe('task due reminders (QA 08-04 #8b)', () => {
     const result = await timeTriggerService.scanTaskReminders();
     expect(result).toEqual({ skipped: true });
     expect(prismaMock.ticketTask.findMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * FR 09-17 #2 — "add a trigger for ticket unassigned for N hours". Distinct
+ * from aging: it only chases tickets nobody owns, and the clock restarts when
+ * a ticket is released back to the queue.
+ */
+describe('ticket.unassigned_for trigger', () => {
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000);
+
+  test('scans only unassigned Open-base tickets past the threshold', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([unassignedWorkflow]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 601, createdAt: hoursAgo(6), dueBy: null }]);
+
+    const result = await timeTriggerService.tick();
+
+    const query = prismaMock.ticket.findMany.mock.calls[0][0];
+    expect(query.where.assignedTechId).toBeNull();
+    expect(query.where.isNoise).toBe(false);
+    expect(query.where.createdAt.lte).toBeInstanceOf(Date);
+    // Open base only — a ticket parked on the requester is not waiting to be
+    // picked up.
+    expect(query.where.status).toEqual({ in: ['Open'] });
+    expect(result.dispatched).toBe(1);
+  });
+
+  test('dispatches with the unassigned-since stamp and threshold context', async () => {
+    const createdAt = hoursAgo(6);
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([unassignedWorkflow]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 601, createdAt, dueBy: null }]);
+
+    await timeTriggerService.tick();
+
+    expect(emitMock).toHaveBeenCalledWith('ticket.unassigned_for', 601, expect.objectContaining({
+      source: 'time_trigger',
+      dedupeStamp: `unassigned:4h:${createdAt.toISOString()}`,
+      onlyWorkflowId: 9,
+      extra: expect.objectContaining({ thresholdHours: 4, unassignedSince: createdAt.toISOString() }),
+    }));
+  });
+
+  test('a ticket released back to the queue re-arms the trigger from the release', async () => {
+    const createdAt = hoursAgo(50);
+    const releasedAt = hoursAgo(9);
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([unassignedWorkflow]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 602, createdAt, dueBy: null }]);
+    prismaMock.ticketActivity.groupBy.mockResolvedValue([{ ticketId: 602, _max: { performedAt: releasedAt } }]);
+
+    await timeTriggerService.tick();
+
+    // The stamp follows the RELEASE, not the creation, so the workflow fires
+    // again after each release instead of replaying the original stamp.
+    expect(emitMock).toHaveBeenCalledWith('ticket.unassigned_for', 602, expect.objectContaining({
+      dedupeStamp: `unassigned:4h:${releasedAt.toISOString()}`,
+    }));
+  });
+
+  test('a ticket released more recently than the threshold is left alone', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([unassignedWorkflow]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 603, createdAt: hoursAgo(50), dueBy: null }]);
+    prismaMock.ticketActivity.groupBy.mockResolvedValue([{ ticketId: 603, _max: { performedAt: hoursAgo(1) } }]);
+
+    const result = await timeTriggerService.tick();
+
+    expect(emitMock).not.toHaveBeenCalled();
+    expect(result.dispatched).toBe(0);
+  });
+
+  test('one grouped activity query per tick, not one per ticket', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([unassignedWorkflow]);
+    prismaMock.ticket.findMany.mockResolvedValue([
+      { id: 604, createdAt: hoursAgo(6), dueBy: null },
+      { id: 605, createdAt: hoursAgo(7), dueBy: null },
+      { id: 606, createdAt: hoursAgo(8), dueBy: null },
+    ]);
+
+    await timeTriggerService.tick();
+
+    expect(prismaMock.ticketActivity.groupBy).toHaveBeenCalledTimes(1);
+    expect(prismaMock.ticketActivity.groupBy.mock.calls[0][0].where.ticketId).toEqual({ in: [604, 605, 606] });
+    expect(emitMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('an activity-table failure degrades to createdAt instead of silencing the trigger', async () => {
+    const createdAt = hoursAgo(6);
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([unassignedWorkflow]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 607, createdAt, dueBy: null }]);
+    prismaMock.ticketActivity.groupBy.mockRejectedValue(new Error('no such table'));
+
+    const result = await timeTriggerService.tick();
+
+    expect(result.dispatched).toBe(1);
+    expect(emitMock).toHaveBeenCalledWith('ticket.unassigned_for', 607, expect.objectContaining({
+      dedupeStamp: `unassigned:4h:${createdAt.toISOString()}`,
+    }));
+  });
+
+  test('the default threshold is 4 hours when the trigger node carries no config', async () => {
+    const createdAt = hoursAgo(6);
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([{ ...unassignedWorkflow, publishedDefinition: null }]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 608, createdAt, dueBy: null }]);
+
+    await timeTriggerService.tick();
+
+    expect(emitMock).toHaveBeenCalledWith('ticket.unassigned_for', 608, expect.objectContaining({
+      dedupeStamp: `unassigned:4h:${createdAt.toISOString()}`,
+    }));
   });
 });

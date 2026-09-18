@@ -18,6 +18,28 @@ import TicketStatusesSection from './TicketStatusesSection';
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
+// QA 09-17 #1 — the two meanings of a calendar-aware clock, spelled out with
+// the example Project Accounting asked about (a 1-business-day target taken
+// on a Friday afternoon).
+const CALENDAR_STYLE_OPTIONS = [
+  {
+    value: 'business_hours',
+    label: 'Business hours',
+    example: 'Fri 2pm + 24h → Wed',
+    hint: 'Only the hours inside the business-hours window burn SLA time.',
+  },
+  {
+    value: 'business_days',
+    label: 'Business days',
+    example: 'Fri 2pm + 24h → Mon 2pm',
+    hint: 'A 24-hour clock that skips whole non-working days.',
+  },
+];
+const CALENDAR_STYLE_HINT = {
+  business_hours: 'The clock only runs inside your business hours, so a 24-hour target spans about three working days.',
+  business_days: 'The clock runs around the clock but pauses on weekends and holidays, so a 24-hour target taken Friday 2pm is due Monday 2pm.',
+};
+
 function SectionCard({ icon: Icon, title, hint, children }) {
   return (
     <section className="tp-card rounded-xl p-4">
@@ -39,6 +61,9 @@ export function SlaSection() {
   // Calendar-aware SLAs (QA 08-17 #9): per-workspace flag — when on, the
   // clocks count business minutes only (Settings → Business Hours & Holidays).
   const [calendarAware, setCalendarAware] = useState(null); // null = loading
+  // QA 09-17 #1: what "calendar-aware" counts — business HOURS (the original
+  // meaning) or whole business DAYS on a 24-hour clock.
+  const [calendarStyle, setCalendarStyle] = useState('business_hours');
   const [calendarBusy, setCalendarBusy] = useState(false);
   const load = useCallback(() => {
     settingsAPI.getSlaPolicies().then((res) => setPolicies(res.data?.data || res.data || [])).catch(() => {});
@@ -46,18 +71,28 @@ export function SlaSection() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     settingsAPI.getSlaCalendar()
-      .then((res) => setCalendarAware((res.data?.data ?? res.data)?.slaCalendarAware === true))
+      .then((res) => {
+        const data = res.data?.data ?? res.data;
+        setCalendarAware(data?.slaCalendarAware === true);
+        if (data?.slaCalendarStyle) setCalendarStyle(data.slaCalendarStyle);
+      })
       .catch(() => setCalendarAware(false));
   }, []);
 
-  const toggleCalendar = async () => {
-    if (calendarAware === null || calendarBusy) return;
+  const saveCalendar = async (aware, style) => {
+    if (calendarBusy) return;
     setCalendarBusy(true);
     try {
-      const res = await settingsAPI.updateSlaCalendar(!calendarAware);
-      setCalendarAware((res.data?.data ?? res.data)?.slaCalendarAware === true);
+      const res = await settingsAPI.updateSlaCalendar(aware, style);
+      const data = res.data?.data ?? res.data;
+      setCalendarAware(data?.slaCalendarAware === true);
+      if (data?.slaCalendarStyle) setCalendarStyle(data.slaCalendarStyle);
     } catch { /* flag unchanged on failure */ }
     setCalendarBusy(false);
+  };
+  const toggleCalendar = () => {
+    if (calendarAware === null) return;
+    saveCalendar(!calendarAware, calendarStyle);
   };
   // SLAs are defined PER TYPE (no generic fallback) — land on the first type.
   useEffect(() => {
@@ -66,6 +101,13 @@ export function SlaSection() {
 
   const currentTypeId = typeTab === null ? null : Number(typeTab);
   const forTab = new Map(policies.filter((p) => p.ticketTypeId === currentTypeId).map((p) => [p.priority, p]));
+  // The exact state Project Accounting was in: the workspace toggle on, every
+  // row overriding it back to 24/7 (QA 09-17 #1).
+  const tabPolicies = [...forTab.values()];
+  const everyRowAlwaysOn = tabPolicies.length > 0 && tabPolicies.every((p) => p.calendarMode === 'always_on');
+  const inheritLabel = calendarAware === true
+    ? (calendarStyle === 'business_days' ? 'Business days' : 'Business hours')
+    : '24/7';
 
   const save = async (priority, fr, resolve) => {
     setBusyKey(`${priority}:${currentTypeId}`);
@@ -76,11 +118,12 @@ export function SlaSection() {
     setBusyKey(null);
   };
 
-  // 24/7 escape hatch: flips a policy row between 'inherit' (follow the
-  // workspace calendar) and 'always_on' (wall-clock around the clock — for
-  // Urgent / Major Incident clocks that must not pause over a weekend).
-  const toggleAlwaysOn = async (policy) => {
-    if (!policy) return;
+  // Per-row clock (QA 09-17 #1). The old version was a single 24/7 pill, which
+  // hid the fact that a row silently overrides the workspace calendar — four
+  // Project Accounting rows sat on 24/7 for a month while the workspace toggle
+  // was on, so every "1 business day" ticket was really 24 wall-clock hours.
+  const setCalendarMode = async (policy, calendarMode) => {
+    if (!policy || policy.calendarMode === calendarMode) return;
     setBusyKey(`mode:${policy.priority}:${currentTypeId}`);
     try {
       await settingsAPI.upsertSlaPolicy({
@@ -88,7 +131,7 @@ export function SlaSection() {
         ticketTypeId: currentTypeId,
         firstResponseMinutes: policy.firstResponseMinutes || null,
         resolveMinutes: policy.resolveMinutes || null,
-        calendarMode: policy.calendarMode === 'always_on' ? 'inherit' : 'always_on',
+        calendarMode,
       });
       load();
     } catch { /* keep simple */ }
@@ -122,11 +165,37 @@ export function SlaSection() {
           </button>
         </div>
         {calendarAware === true && (
-          <p className="text-[11px] text-blue-600/90 mt-1.5 ml-6">
-            New tickets get business-hours due dates. Mark a row <span className="font-semibold">24/7</span> to keep that clock running around the clock.
-          </p>
+          <div className="mt-2 ml-6">
+            <p className="text-[11px] font-semibold text-foreground/85">What the clock skips</p>
+            <div className="mt-1 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Calendar style">
+              {CALENDAR_STYLE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={calendarStyle === option.value}
+                  disabled={calendarBusy}
+                  onClick={() => saveCalendar(true, option.value)}
+                  title={option.hint}
+                  className={`tp-focus-ring rounded-lg border px-2.5 py-1.5 text-left disabled:opacity-60 ${calendarStyle === option.value
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/15'
+                    : 'border-border bg-card hover:border-blue-300 dark:hover:border-blue-500/40'}`}
+                >
+                  <span className={`block text-[11px] font-bold ${calendarStyle === option.value ? 'text-blue-700 dark:text-blue-200' : 'text-foreground/85'}`}>{option.label}</span>
+                  <span className="block text-[10px] text-muted-foreground/75">{option.example}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1.5">{CALENDAR_STYLE_HINT[calendarStyle]}</p>
+          </div>
         )}
       </div>
+      {calendarAware === true && everyRowAlwaysOn && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          Calendar-aware SLAs are on, but every clock below is set to <span className="font-semibold">24/7</span> — so the
+          calendar changes nothing for this ticket type. Set a row to <span className="font-semibold">Workspace default</span> to use it.
+        </p>
+      )}
       {activeTypes.length === 0 && (
         <p className="text-xs text-muted-foreground/75 italic">Configure ticket types above first — SLAs are defined per type.</p>
       )}
@@ -158,9 +227,9 @@ export function SlaSection() {
               busy={busyKey === `${priority}:${currentTypeId}`}
               onSave={save}
               onDelete={async () => { await settingsAPI.deleteSlaPolicy(priority, currentTypeId).catch(() => {}); load(); }}
-              calendarAware={calendarAware === true}
+              inheritLabel={inheritLabel}
               modeBusy={busyKey === `mode:${priority}:${currentTypeId}`}
-              onToggleAlwaysOn={() => toggleAlwaysOn(forTab.get(priority))}
+              onSetCalendarMode={(mode) => setCalendarMode(forTab.get(priority), mode)}
             />
           ))}
         </div>
@@ -169,14 +238,14 @@ export function SlaSection() {
   );
 }
 
-function SlaRow({ priority, policy, busy, onSave, onDelete, calendarAware = false, modeBusy = false, onToggleAlwaysOn }) {
+function SlaRow({ priority, policy, busy, onSave, onDelete, inheritLabel = '24/7', modeBusy = false, onSetCalendarMode }) {
   const [fr, setFr] = useState(policy?.firstResponseMinutes ?? '');
   const [resolve, setResolve] = useState(policy?.resolveMinutes ?? '');
   useEffect(() => { setFr(policy?.firstResponseMinutes ?? ''); setResolve(policy?.resolveMinutes ?? ''); }, [policy]);
   const dirty = String(fr) !== String(policy?.firstResponseMinutes ?? '') || String(resolve) !== String(policy?.resolveMinutes ?? '');
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
       <span className="w-16 font-semibold text-muted-foreground">{PRIORITY_LABELS[priority]}</span>
       <label className="flex items-center gap-1 text-muted-foreground/75">
         first response
@@ -193,22 +262,23 @@ function SlaRow({ priority, policy, busy, onSave, onDelete, calendarAware = fals
           {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save
         </button>
       )}
-      {calendarAware && policy && (
-        <button
-          type="button"
-          onClick={onToggleAlwaysOn}
-          disabled={modeBusy}
-          aria-pressed={policy.calendarMode === 'always_on'}
-          aria-label={`${PRIORITY_LABELS[priority]} SLA ${policy.calendarMode === 'always_on' ? 'runs 24/7 — switch to the business-hours calendar' : 'follows business hours — switch to 24/7'}`}
-          title={policy.calendarMode === 'always_on'
-            ? 'Runs 24/7 — this clock never pauses for weekends or holidays. Click to follow the business-hours calendar.'
-            : 'Follows the business-hours calendar. Click to run this clock 24/7 (e.g. Urgent / Major Incident).'}
-          className={`tp-focus-ring px-1.5 py-0.5 rounded-full text-[10px] font-bold border disabled:opacity-60 ${policy.calendarMode === 'always_on'
-            ? 'bg-indigo-600 text-white border-indigo-600'
-            : 'bg-card text-muted-foreground/75 border-border hover:border-indigo-300 dark:hover:border-indigo-500/40 hover:text-indigo-500'}`}
-        >
-          24/7
-        </button>
+      {policy && (
+        <label className="flex items-center gap-1 text-muted-foreground/75">
+          clock
+          <select
+            value={policy.calendarMode || 'inherit'}
+            onChange={(e) => onSetCalendarMode(e.target.value)}
+            disabled={modeBusy}
+            aria-label={`${PRIORITY_LABELS[priority]} SLA clock`}
+            title="How this clock counts down. Anything but Workspace default overrides the calendar toggle above."
+            className="tp-focus-ring rounded-md border border-border bg-card px-1.5 py-1 text-[11px] text-foreground disabled:opacity-60"
+          >
+            <option value="inherit">{`Workspace default (${inheritLabel})`}</option>
+            <option value="calendar">Business hours</option>
+            <option value="business_days">Business days</option>
+            <option value="always_on">24/7</option>
+          </select>
+        </label>
       )}
       {policy && (
         <button onClick={onDelete} aria-label={`Remove ${PRIORITY_LABELS[priority]} SLA`} className="tp-focus-ring ml-auto p-1 rounded text-muted-foreground/50 hover:text-red-500">

@@ -1082,7 +1082,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           className="absolute top-full mt-1 z-30 left-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn"
         >
           <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
-            Drag to reorder · applies on large screens (smaller screens keep the essentials)
+            Drag a row to reorder · applies on large screens (smaller screens keep the essentials)
           </p>
           <ul className="max-h-72 overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
             {order.map((key) => {
@@ -1094,10 +1094,13 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               return (
                 <li
                   key={key}
+                  draggable={!pinned}
+                  onDragStart={(e) => { if (pinned) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', key); } catch { /* jsdom */ } }}
+                  onDragEnd={() => { setDragKey(null); setDropTarget(null); }}
                   onDragOver={(e) => onRowDragOver(e, key)}
                   onDrop={(e) => { e.preventDefault(); dropOn(key); }}
                   data-drop-indicator={isTarget ? (dropTarget.before ? 'before' : 'after') : undefined}
-                  className={`relative transition-[opacity,transform] duration-150 ease-soft ${
+                  className={`relative select-none transition-[opacity,transform] duration-150 ease-soft ${
                     dragging ? 'opacity-40 scale-[0.98]' : ''
                   } ${isTarget && dropTarget.before ? 'translate-y-[3px]' : isTarget ? '-translate-y-[3px]' : ''}`}
                 >
@@ -1108,17 +1111,14 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
                       className={`pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-blue-500 shadow-[0_0_0_2px_rgb(59_130_246_/_0.25)] animate-fadeIn ${dropTarget.before ? '-top-px' : '-bottom-px'}`}
                     />
                   )}
-                  <label className={`flex items-center gap-2 px-1.5 py-1.5 rounded-md cursor-pointer text-sm text-foreground/85 ${dragging ? 'bg-blue-50 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:ring-blue-500/30' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
+                  <label className={`flex items-center gap-2 px-1.5 py-1.5 rounded-md cursor-grab active:cursor-grabbing text-sm text-foreground/85 ${dragging ? 'bg-blue-50 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:ring-blue-500/30' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
                     <span
-                      draggable={!pinned}
-                      onDragStart={(e) => { if (pinned) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', key); } catch { /* jsdom */ } }}
-                      onDragEnd={() => { setDragKey(null); setDropTarget(null); }}
                       onKeyDown={(e) => {
                         if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveBy(key, e.key === 'ArrowUp' ? -1 : 1); }
                       }}
                       tabIndex={pinned ? -1 : 0}
                       role="button"
-                      title={pinned ? undefined : 'Drag to reorder · Alt+↑/↓ moves with the keyboard'}
+                      title={pinned ? undefined : 'Drag the row to reorder · Alt+↑/↓ moves with the keyboard'}
                       aria-label={pinned ? undefined : `Reorder ${col.label} column`}
                       className={pinned ? 'w-3.5 flex-shrink-0' : 'tp-focus-ring rounded cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0'}
                     >
@@ -1126,6 +1126,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
                     </span>
                     <input
                       type="checkbox"
+                      draggable={false}
                       checked={visibleSet.has(key)}
                       disabled={Boolean(col.mandatory)}
                       onChange={() => toggle(key)}

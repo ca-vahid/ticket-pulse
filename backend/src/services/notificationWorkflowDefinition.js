@@ -44,6 +44,9 @@ export const NOTIFICATION_EVENT_TYPES = [
   // scans; threshold config lives on the trigger node, so the worker
   // dispatches with onlyWorkflowId)
   'ticket.aging',
+  // FR 09-17 #2: nobody has picked the ticket up. Distinct from aging, which
+  // counts age regardless of who owns it.
+  'ticket.unassigned_for',
   'ticket.sla_pre_breach',
   'ticket.sla_breach',
   // Scheduled (ticketless) trigger: fires once per configured slot in the
@@ -59,6 +62,7 @@ export const NOTIFICATION_EVENT_TYPES = [
 /** Trigger types fired by the time-trigger worker, not by lifecycle events. */
 export const TIME_TRIGGER_EVENT_TYPES = [
   'ticket.aging',
+  'ticket.unassigned_for',
   'ticket.sla_pre_breach',
   'ticket.sla_breach',
 ];
@@ -239,6 +243,48 @@ export const WORKFLOW_TEMPLATES = [
       { id: 'e1', source: 'trigger', target: 'recipients' },
       { id: 'e2', source: 'recipients', target: 'summary' },
       { id: 'e3', source: 'summary', target: 'template' },
+      { id: 'e4', source: 'template', target: 'send' },
+    ]),
+  },
+  // FR 09-17 #2: "we want to add a trigger for ticket unassigned for N hours…
+  // an email can be sent to the same email thread as the Ticket Received
+  // email chain". The reply keeps the ticket's subject, so it threads into
+  // that chain in the requester's mailbox.
+  {
+    key: 'unassigned_chase',
+    name: 'Nobody picked this up (unassigned for N hours)',
+    description: 'When a ticket has sat with nobody assigned for a few hours, tell the requester it is still queued and leave an internal note so the team sees it. Set the hours on the trigger node; the e-mail threads into the "Ticket received" chain because it keeps the ticket subject.',
+    triggerType: 'ticket.unassigned_for',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.unassigned_for', unassignedHours: 4 } },
+      {
+        id: 'note',
+        type: 'add_note',
+        data: {
+          label: 'Flag it internally',
+          mode: 'text',
+          placement: 'note',
+          accent: 'amber',
+          bodyTemplate: '<p>Still unassigned {{ event.extra.thresholdHours }} hours after it arrived. Nobody has picked this up yet.</p>',
+        },
+      },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: '{{ ticket.subject }}',
+          html: '<p>Your request is still in our queue and has not been picked up yet. We have not forgotten it.</p><p>Reply to this email if anything has changed or if it has become more urgent.</p>',
+          text: 'Your request is still in our queue and has not been picked up yet. We have not forgotten it.\n\nReply to this email if anything has changed or if it has become more urgent.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: true, includeHeader: false } },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'note' },
+      { id: 'e2', source: 'note', target: 'recipients' },
+      { id: 'e3', source: 'recipients', target: 'template' },
       { id: 'e4', source: 'template', target: 'send' },
     ]),
   },
@@ -1260,6 +1306,7 @@ function eventLabel(triggerType) {
     'approval.decided': 'Approval decided',
     'approval.clarification_requested': 'Approval clarification requested',
     'ticket.aging': 'Ticket unresolved for N hours',
+    'ticket.unassigned_for': 'Ticket unassigned for N hours',
     'ticket.sla_pre_breach': 'SLA about to breach',
     'ticket.sla_breach': 'SLA breached',
     'schedule.time': 'On a schedule (digest)',

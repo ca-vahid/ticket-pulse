@@ -33,6 +33,7 @@ beforeEach(() => {
 });
 
 const add = (fromIso, minutes) => businessCalendarService.addBusinessMinutes(new Date(fromIso), minutes, { workspaceId: 1 });
+const addDays = (fromIso, minutes) => businessCalendarService.addBusinessDayMinutes(new Date(fromIso), minutes, { workspaceId: 1 });
 
 describe('addBusinessMinutes — core walk', () => {
   test('stays inside the same day when the window has room', async () => {
@@ -138,5 +139,69 @@ describe('nextBusinessInstant', () => {
     const from = new Date('2026-08-19T00:30:00.000Z'); // Tue 17:30 PDT
     expect((await businessCalendarService.nextBusinessInstant(from, { workspaceId: 1 })).toISOString())
       .toBe('2026-08-19T16:00:00.000Z'); // Wed 09:00 PDT
+  });
+});
+
+/**
+ * QA 09-17 #1 — addBusinessDayMinutes: a 24-hour clock that skips whole
+ * non-working days. Project Accounting's actual ask: "a ticket that arrives
+ * 2pm Friday should be due Monday 2pm". addBusinessMinutes would answer
+ * Wednesday, because it only counts the 8 hours inside the window.
+ */
+describe('addBusinessDayMinutes — whole-day clock', () => {
+  test('the Friday-afternoon case QA asked about: Fri 2pm + 24h = Mon 2pm', async () => {
+    // Fri 2026-08-21 14:00 PDT (21:00Z) + 1440m -> Mon 2026-08-24 14:00 PDT.
+    expect((await addDays('2026-08-21T21:00:00.000Z', 1440)).toISOString()).toBe('2026-08-24T21:00:00.000Z');
+  });
+
+  test('stays inside the same day when the minutes fit', async () => {
+    // Tue 2026-08-18 10:00 PDT + 180m -> 13:00 PDT, same day.
+    expect((await addDays('2026-08-18T17:00:00.000Z', 180)).toISOString()).toBe('2026-08-18T20:00:00.000Z');
+  });
+
+  test('counts hours OUTSIDE business hours on a working day', async () => {
+    // Tue 2026-08-18 20:00 PDT (past 17:00 close) + 120m -> Tue 22:00 PDT.
+    // addBusinessMinutes would push this to Wednesday morning.
+    expect((await addDays('2026-08-19T03:00:00.000Z', 120)).toISOString()).toBe('2026-08-19T05:00:00.000Z');
+  });
+
+  test('a start on a non-working day begins at the next working midnight', async () => {
+    // Sat 2026-08-22 12:00 PDT + 60m -> Mon 2026-08-24 00:00 PDT + 60m = 01:00.
+    expect((await addDays('2026-08-22T19:00:00.000Z', 60)).toISOString()).toBe('2026-08-24T08:00:00.000Z');
+  });
+
+  test('a holiday in the middle of the run is skipped whole', async () => {
+    // Mon 2026-08-24 is a holiday: Fri 2026-08-21 14:00 + 1440m lands Tue 14:00.
+    prismaMock.holiday.findMany.mockResolvedValue([{ date: new Date('2026-08-24T00:00:00.000Z'), isRecurring: false }]);
+    expect((await addDays('2026-08-21T21:00:00.000Z', 1440)).toISOString()).toBe('2026-08-25T21:00:00.000Z');
+  });
+
+  test('multi-day targets skip every weekend on the way', async () => {
+    // Mon 2026-08-17 09:00 PDT + 7200m (5 days) -> Mon 2026-08-24 09:00 PDT.
+    expect((await addDays('2026-08-17T16:00:00.000Z', 7200)).toISOString()).toBe('2026-08-24T16:00:00.000Z');
+  });
+
+  test('zero enabled business-hour rows falls back to wall-clock', async () => {
+    prismaMock.businessHour.findMany.mockResolvedValue([]);
+    expect((await addDays('2026-08-21T21:00:00.000Z', 1440)).toISOString()).toBe('2026-08-22T21:00:00.000Z');
+  });
+
+  test('an unusual calendar is honoured, not assumed to be Mon-Fri', async () => {
+    // Sunday is the only working day: Fri 2026-08-21 14:00 + 60m waits until
+    // Sun 2026-08-23 00:00 and lands at 01:00 PDT.
+    prismaMock.businessHour.findMany.mockResolvedValue([
+      { dayOfWeek: 0, startTime: '09:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles' },
+    ]);
+    expect((await addDays('2026-08-21T21:00:00.000Z', 60)).toISOString()).toBe('2026-08-23T08:00:00.000Z');
+  });
+
+  test('a DST fall-back day is 25 hours long', async () => {
+    // 2026-11-01 is the fall-back Sunday (not a working day here), so run over
+    // it: Fri 2026-10-30 12:00 PDT + 1440m -> Mon 2026-11-02 12:00 PST.
+    expect((await addDays('2026-10-30T19:00:00.000Z', 1440)).toISOString()).toBe('2026-11-02T20:00:00.000Z');
+  });
+
+  test('MAX_WALK_DAYS is still the shared cap', () => {
+    expect(MAX_WALK_DAYS).toBe(400);
   });
 });

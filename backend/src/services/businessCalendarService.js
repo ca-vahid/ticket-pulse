@@ -37,6 +37,15 @@ const nextDateStr = (dateStr) => {
   return d.toISOString().slice(0, 10);
 };
 const dayOfWeekOf = (dateStr) => new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0=Sun
+/**
+ * Midnight of a local calendar date as a UTC instant, using the zone offset
+ * that formatInTimeZone reports at NOON of that day (the same DST-safe trick
+ * addBusinessMinutes uses for its window boundaries).
+ */
+const localMidnight = (dateStr, timezone) => {
+  const offset = formatInTimeZone(new Date(`${dateStr}T12:00:00Z`), timezone, 'XXX');
+  return new Date(`${dateStr}T00:00:00${offset}`);
+};
 
 class BusinessCalendarService {
   /**
@@ -134,6 +143,60 @@ class BusinessCalendarService {
     }
 
     logger.warn('businessCalendarService: walk exceeded cap — wall-clock fallback', {
+      workspaceId, minutes: remainingTotal, capDays: MAX_WALK_DAYS,
+    });
+    return wallClock(start, remainingTotal);
+  }
+
+  /**
+   * Add `minutes` of BUSINESS-DAY time to `from`: the clock runs 24 hours a
+   * day, but only on days the calendar marks as working. Non-working days
+   * (disabled weekdays, holidays) are skipped whole rather than shortening
+   * the day to its business-hours window.
+   *
+   * This is what "skip the weekend" means to most teams (QA 09-17 #1,
+   * Project Accounting): a 24-hour target taken at Friday 14:00 is due
+   * Monday 14:00, not Wednesday morning. `addBusinessMinutes` — which counts
+   * only the hours inside [startTime, endTime) — stays the right answer for
+   * clocks measured in working hours ("4 business hours to first response").
+   *
+   * Same fallback contract as addBusinessMinutes: never throws, wall-clocks
+   * when the workspace has no enabled business-hour rows or the walk runs
+   * past MAX_WALK_DAYS.
+   */
+  async addBusinessDayMinutes(from, minutes, { workspaceId, calendar = undefined } = {}) {
+    const start = new Date(from);
+    const remainingTotal = Number(minutes) || 0;
+    const cal = calendar !== undefined ? calendar : await this.loadCalendar(workspaceId);
+    if (!cal) return wallClock(start, remainingTotal); // zero enabled days -> wall-clock
+
+    let remaining = remainingTotal;
+    let dateStr = formatInTimeZone(start, cal.timezone, 'yyyy-MM-dd');
+
+    for (let day = 0; day < MAX_WALK_DAYS; day++) {
+      const isWorkingDay = cal.byDay.has(dayOfWeekOf(dateStr)) && !cal.isHolidayDate(dateStr);
+      if (isWorkingDay) {
+        // The whole local day counts. Each boundary takes ITS OWN day's noon
+        // offset, so a DST transition inside the day yields a 23- or 25-hour
+        // day instead of a drifting instant.
+        const dayStartUtc = localMidnight(dateStr, cal.timezone);
+        const dayEndUtc = localMidnight(nextDateStr(dateStr), cal.timezone);
+        // Only the FIRST day clamps to `from`; a `from` that lands on a
+        // non-working day means the clock simply starts at the next working
+        // midnight.
+        const cursor = day === 0 && start > dayStartUtc ? start : dayStartUtc;
+        if (dayEndUtc > cursor) {
+          const availableMinutes = (dayEndUtc.getTime() - cursor.getTime()) / 60000;
+          if (remaining <= availableMinutes) {
+            return new Date(cursor.getTime() + remaining * 60000);
+          }
+          remaining -= availableMinutes;
+        }
+      }
+      dateStr = nextDateStr(dateStr);
+    }
+
+    logger.warn('businessCalendarService: business-day walk exceeded cap - wall-clock fallback', {
       workspaceId, minutes: remainingTotal, capDays: MAX_WALK_DAYS,
     });
     return wallClock(start, remainingTotal);
