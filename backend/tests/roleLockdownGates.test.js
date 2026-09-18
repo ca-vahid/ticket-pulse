@@ -30,12 +30,17 @@ const requireAdminMock = jest.fn((req, res, next) => {
   if (roleOf(req) === 'admin') return next();
   return refuse(res, 'admin_required', 'Admin access required');
 });
+const requireAdminOrObserverMock = jest.fn((req, res, next) => {
+  const isRead = req.method === 'GET' || req.method === 'HEAD';
+  if (roleOf(req) === 'admin' || (roleOf(req) === 'readonly' && isRead)) return next();
+  return refuse(res, 'admin_required', 'Admin access required');
+});
 const requireReviewerMock = jest.fn((req, res, next) => {
   if (['admin', 'reviewer'].includes(roleOf(req))) return next();
   return refuse(res, 'reviewer_required', 'Reviewer access required');
 });
 const requireWorkspaceAccessMock = jest.fn((req, res, next) => {
-  if (['admin', 'reviewer', 'viewer'].includes(roleOf(req))) return next();
+  if (['admin', 'reviewer', 'viewer', 'readonly'].includes(roleOf(req))) return next();
   return refuse(res, 'workspace_access_denied', 'Workspace access denied');
 });
 const requireWorkspaceMemberOrAgentMock = jest.fn((req, res, next) => {
@@ -61,6 +66,7 @@ jest.unstable_mockModule('../src/middleware/errorHandler.js', () => ({
 jest.unstable_mockModule('../src/middleware/auth.js', () => ({
   requireAuth: (_req, _res, next) => next(),
   requireAdmin: requireAdminMock,
+  requireAdminOrObserver: requireAdminOrObserverMock,
   requireReviewer: requireReviewerMock,
   requireGlobalAdmin: requireAdminMock,
   requireWorkspaceAccess: requireWorkspaceAccessMock,
@@ -174,6 +180,24 @@ describe('A. index.js mounts — viewers keep the ticket surface, lose the admin
   test.each(ADMIN_ONLY)('workspace admin → 200 on %s', async (path) => {
     const res = await as('admin', request(apiApp).get(path));
     expect(res.status).toBe(200);
+  });
+
+  // The observer role (3.8.38) watches Dashboard + Analytics; the app opened the
+  // pages but the mounts stayed admin-only until 18 Sep 2026.
+  test.each(['/api/dashboard', '/api/dashboard/weekly', '/api/analytics/overview'])('readonly observer → 200 on %s', async (path) => {
+    const res = await as('readonly', request(apiApp).get(path));
+    expect(res.status).toBe(200);
+  });
+
+  test.each(['/api/visuals/agents', '/api/summit/workshop'])('readonly observer → 403 on %s (admin-only stays admin-only)', async (path) => {
+    const res = await as('readonly', request(apiApp).get(path));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('admin_required');
+  });
+
+  test('readonly observer cannot write through the view tier', async () => {
+    const res = await as('readonly', request(apiApp).post('/api/analytics/reports'));
+    expect(res.status).toBe(403);
   });
 
   test.each(MEMBER_TIER)('viewer → 200 on %s', async (path) => {

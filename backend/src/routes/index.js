@@ -29,7 +29,7 @@ import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
 import backupRoutes from './backup.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { requireAdmin, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
+import { requireAdmin, requireAdminOrObserver, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -113,7 +113,9 @@ router.use(requireWorkspaceAccess);
 // workshop are workspace-admin only, the same as "No access" for everyone
 // else. `/sse` stays ABOVE these gates on purpose — viewers need live queue
 // updates. Global admins pass requireAdmin without a DB lookup.
-router.use('/dashboard', requireAdmin, dashboardRoutes);
+// Dashboard + Analytics are the observer pages: the 'readonly' grant may READ
+// them (requireAdminOrObserver); Agent Maps and Summit stay admin-only.
+router.use('/dashboard', requireAdminOrObserver, dashboardRoutes);
 // Ticket-status registry (Phase 8a): Settings CRUD, admin-gated in the router.
 router.use('/ticket-statuses', statusesRoutes);
 router.use('/sync', syncRoutes);
@@ -128,7 +130,7 @@ router.use('/notifications', notificationsRoutes);
 router.use('/notification-workflows', notificationWorkflowRoutes);
 router.use('/ai-providers', aiProviderRoutes);
 router.use('/assignment', assignmentRoutes);
-router.use('/analytics', requireAdmin, analyticsRoutes);
+router.use('/analytics', requireAdminOrObserver, analyticsRoutes);
 router.use('/summit', requireAdmin, summitRoutes);
 router.use('/backup', backupRoutes);
 

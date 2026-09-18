@@ -227,7 +227,7 @@ describe('AF2 — intake run persistence + linking', () => {
   });
 
   test('GET /api/tickets/intake-runs is admin-gated and lists the workspace runs', async () => {
-    await request(buildApp()).get('/api/tickets/intake-runs').expect(401);
+    await request(buildApp()).get('/api/tickets/intake-runs').expect(403);
     expect(runServiceMock.listRecent).not.toHaveBeenCalled();
 
     runServiceMock.listRecent.mockResolvedValue([{ id: 77, ticketId: null }]);

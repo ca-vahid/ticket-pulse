@@ -35,6 +35,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 const {
   requireAuth,
   requireAdmin,
+  requireAdminOrObserver,
   requireReviewer,
   requireGlobalAdmin,
   requireWorkspaceAccess,
@@ -53,6 +54,7 @@ function makeApp(gate, { user = null, bearerUser = null, workspaceId = 1 } = {})
     next();
   });
   app.get('/probe', gate, (req, res) => res.json({ success: true }));
+  app.post('/probe', gate, (req, res) => res.json({ success: true }));
   app.use(errorHandler);
   return app;
 }
@@ -195,5 +197,48 @@ describe('agent-allowed tier (requireWorkspaceMemberOrAgent)', () => {
     const res = await request(makeApp(requireAdmin, { user: agent })).get('/probe');
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('admin_required');
+  });
+});
+
+describe('requireAdminOrObserver — the view tier for Dashboard and Analytics', () => {
+  const observer = { email: 'observer@bgc.ca', role: 'viewer' };
+
+  test('a readonly grant may READ', async () => {
+    getAccessRoleMock.mockResolvedValue('readonly');
+    const res = await request(makeApp(requireAdminOrObserver, { user: observer })).get('/probe');
+    expect(res.status).toBe(200);
+  });
+
+  test('a readonly grant may not write, independently of blockReadonlyWrites', async () => {
+    getAccessRoleMock.mockResolvedValue('readonly');
+    const res = await request(makeApp(requireAdminOrObserver, { user: observer })).post('/probe');
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('admin_required');
+  });
+
+  test.each(['viewer', 'reviewer', null])('%s is still refused', async (role) => {
+    getAccessRoleMock.mockResolvedValue(role);
+    const res = await request(makeApp(requireAdminOrObserver, { user: observer })).get('/probe');
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('admin_required');
+  });
+
+  test('workspace admins and global admins pass, reads and writes', async () => {
+    getAccessRoleMock.mockResolvedValue('admin');
+    expect((await request(makeApp(requireAdminOrObserver, { user: observer })).post('/probe')).status).toBe(200);
+    getAccessRoleMock.mockResolvedValue(null);
+    expect((await request(makeApp(requireAdminOrObserver, { user: { email: 'a@bgc.ca', role: 'admin' } })).get('/probe')).status).toBe(200);
+  });
+
+  test('requireAdmin itself is unchanged: a readonly grant is refused', async () => {
+    getAccessRoleMock.mockResolvedValue('readonly');
+    const res = await request(makeApp(requireAdmin, { user: observer })).get('/probe');
+    expect(res.status).toBe(403);
+  });
+
+  test('a role-lookup failure refuses rather than admits', async () => {
+    getAccessRoleMock.mockRejectedValue(new Error('db down'));
+    const res = await request(makeApp(requireAdminOrObserver, { user: observer })).get('/probe');
+    expect(res.status).toBe(403);
   });
 });

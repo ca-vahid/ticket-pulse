@@ -137,6 +137,42 @@ export function requireAdmin(req, res, next) {
 }
 
 /**
+ * View tier for the watch-don't-touch pages (Dashboard, Technician detail,
+ * Timeline, Analytics): admins, plus the 'readonly' observer grant — reads
+ * only. Mirrors the frontend's canViewOps / ViewRoute. The observer role
+ * shipped in 3.8.38 with the pages opened in the app but these mounts still on
+ * requireAdmin, so an observer saw every panel fail with 403 (18 Sep 2026).
+ * A non-GET from an observer is refused here as well as by
+ * blockReadonlyWrites — this gate must not depend on the other one.
+ */
+export function requireAdminOrObserver(req, res, next) {
+  const user = sessionUser(req);
+  if (user?.role === 'admin') {
+    return next();
+  }
+
+  const email = user?.email;
+  if (!email || !req.workspaceId) {
+    logger.warn(`Admin access refused for ${req.path} (no email or workspaceId)`);
+    return next(new AuthorizationError('Admin access required', 'admin_required'));
+  }
+
+  const isRead = req.method === 'GET' || req.method === 'HEAD';
+  getWsRepo()
+    .then(wsRepo => wsRepo.getAccessRole(email, req.workspaceId))
+    .then(wsRole => {
+      if (wsRole === 'admin') return next();
+      if (wsRole === 'readonly' && isRead) return next();
+      logger.warn(`Admin access refused for ${req.path} by ${email}`);
+      next(new AuthorizationError('Admin access required', 'admin_required'));
+    })
+    .catch(err => {
+      logger.error('Error checking workspace view role:', err.message);
+      next(new AuthorizationError('Admin access required', 'admin_required'));
+    });
+}
+
+/**
  * GLOBAL admins only ("super admins") — workspace-scoped admins do NOT pass.
  * For cross-workspace surfaces like the AI usage/cost report, which exposes
  * every workspace's data regardless of which workspace is selected.

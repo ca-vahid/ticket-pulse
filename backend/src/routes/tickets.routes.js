@@ -577,10 +577,14 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
 
 // ------------------------------------------------- mailbox connections (admin)
 
+// Role refusals below are 403 AuthorizationError, never 401: the caller IS signed
+// in, and a 401 sends the app into its credential-recovery loop (Phase A1). The
+// Tickets page asks for the held-mail count on every load, so a viewer or
+// observer hit that loop each time they opened it (18 Sep 2026).
 function requireTicketingAdmin(req, _res, next) {
   const actor = req.ticketActor;
   if (actor.role !== 'admin' && actor.workspaceRole !== 'admin') {
-    return next(new AuthenticationError('Admin access required'));
+    return next(new AuthorizationError('Admin access required', 'admin_required'));
   }
   next();
 }
@@ -642,7 +646,7 @@ router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) =>
 function requireTicketingStaff(req, _res, next) {
   const actor = req.ticketActor;
   if (actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.technicianId) return next();
-  return next(new AuthenticationError('Agent or admin access required'));
+  return next(new AuthorizationError('Agent or admin access required', 'staff_required'));
 }
 
 router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, res) => {
@@ -1847,7 +1851,7 @@ router.get('/approvals/mine', asyncHandler(async (req, res) => {
 router.get('/approvals/all', asyncHandler(async (req, res) => {
   const a = req.ticketActor;
   const canReview = a?.role === 'admin' || a?.workspaceRole === 'admin' || a?.workspaceRole === 'reviewer';
-  if (!canReview) throw new AuthenticationError('Approvals overview is for reviewers and admins');
+  if (!canReview) throw new AuthorizationError('Approvals overview is for reviewers and admins', 'reviewer_required');
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const data = await ticketApprovalService.overview(req.workspaceId, {
     status: req.query.status || null,
@@ -2133,7 +2137,7 @@ ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) 
 router.post('/mirror/reconcile', asyncHandler(async (req, res) => {
   const actor = req.ticketActor;
   if (actor.role !== 'admin' && actor.workspaceRole !== 'admin') {
-    throw new AuthenticationError('Admin access required for mirror reconciliation');
+    throw new AuthorizationError('Admin access required for mirror reconciliation', 'admin_required');
   }
   const { default: mirrorService } = await import('../services/mirrorService.js');
   const result = await mirrorService.reconcile(req.workspaceId, req.body || {});

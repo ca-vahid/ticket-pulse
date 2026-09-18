@@ -241,7 +241,7 @@ describe('PUT /api/tickets/queue-cards', () => {
     prismaMock.workspaceAccess.findUnique.mockResolvedValue({ role: 'viewer' });
     prismaMock.workspaceAccess.findFirst.mockResolvedValue({ role: 'viewer' });
     const app = buildApp({ email: 'viewer@x.io', name: 'Vera Viewer', role: 'user' });
-    const res = await request(app).put('/api/tickets/queue-cards').send({ cards: VALID }).expect(401);
+    const res = await request(app).put('/api/tickets/queue-cards').send({ cards: VALID }).expect(403);
     expect(res.body.message).toMatch(/admin/i);
     expect(prismaMock.queueCardConfig.upsert).not.toHaveBeenCalled();
   });
