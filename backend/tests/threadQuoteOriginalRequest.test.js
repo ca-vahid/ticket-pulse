@@ -95,7 +95,8 @@ describe('the original request closes every quote', () => {
     findMany.mockResolvedValue([entry({ bodyText: 'We will look at it Monday.', actorName: 'Anton Kuzmychev' })]);
     const quote = await ticketService._lastInboundQuote(1, null);
     expect(quote.html.indexOf('Monday')).toBeLessThan(quote.html.indexOf('Mirai Security'));
-    expect(quote.html).toMatch(/On .+, Vahid Haeri wrote:/);
+    expect(quote.html).toContain('>Vahid Haeri</span>');
+    expect(quote.text).toMatch(/On .+, Vahid Haeri wrote:/);
     expect(quote.text).toContain('> Source: Mirai Security');
   });
 
@@ -147,7 +148,7 @@ describe('quoted dates are in the workspace timezone, not the server\'s', () => 
   test('TP-1285: 14:38 UTC reads 7:38 a.m. in Vancouver', async () => {
     findMany.mockResolvedValue([entry({ bodyText: 'We will look at it Monday.', occurredAt: new Date('2026-09-17T14:38:03Z') })]);
     const quote = await ticketService._lastInboundQuote(1, null);
-    expect(quote.html).toContain('On Sep 17, 2026, 7:38 a.m., Someone wrote:');
+    expect(quote.html).toMatch(/Thursday, September 17, 2026.*7:38 a\.m\..*PDT/);
     expect(quote.text).toContain('On Sep 17, 2026, 7:38 a.m., Someone wrote:');
   });
 
@@ -158,3 +159,48 @@ describe('quoted dates are in the workspace timezone, not the server\'s', () => 
     expect(quote.html).toContain('still quoted');
   });
 });
+
+describe('the quoted header reads like a mail client\'s reply header', () => {
+  test('label, sender with a bare address, and the date each get their own line', async () => {
+    findMany.mockResolvedValue([entry({
+      bodyText: 'We will look at it Monday.', actorName: 'Anton Kuzmychev',
+      actorEmail: '"Anton Kuzmychev" <it@bgcengineering.ca>', occurredAt: new Date('2026-09-17T14:38:03Z'),
+    })]);
+    const quote = await ticketService._lastInboundQuote(1, null);
+    expect(quote.html).toContain('Earlier in this conversation');
+    expect(quote.html).toContain('Original request');
+    expect(quote.html).toContain('>Anton Kuzmychev</span>');
+    expect(quote.html).toContain('&lt;it@bgcengineering.ca&gt;');
+    expect(quote.html).not.toContain('&quot;Anton');
+    expect(quote.html).toContain('>AK<');
+    expect(quote.html).toContain('>VH<');
+  });
+
+  test('no gradients, and every coloured cell states bgcolor AND background-color (Outlook)', async () => {
+    findMany.mockResolvedValue([entry({ bodyText: 'hello there' })]);
+    const quote = await ticketService._lastInboundQuote(1, null);
+    expect(quote.html).not.toMatch(/gradient/i);
+    expect(quote.html).toContain('bgcolor="#e0e7ff"');
+  });
+
+  test('a sender with no name shows the address once, not twice', async () => {
+    findMany.mockResolvedValue([entry({ bodyText: 'hello there', actorName: null, actorEmail: 'someone@x.com' })]);
+    findUnique.mockResolvedValue(ticketRow({ description: null, descriptionText: null }));
+    const quote = await ticketService._lastInboundQuote(1, null);
+    expect(quote.html.match(/someone@x\.com/g)).toHaveLength(1);
+  });
+
+  test('a name is escaped in the header', async () => {
+    findMany.mockResolvedValue([entry({ bodyText: 'hello there', actorName: '<img src=x onerror=1>' })]);
+    const quote = await ticketService._lastInboundQuote(1, null);
+    expect(quote.html).not.toContain('<img src=x');
+  });
+
+  test('the plain-text twin is unchanged — the inbound stripper keys on it', async () => {
+    findMany.mockResolvedValue([entry({ bodyText: 'hello there', actorName: 'Anton Kuzmychev', occurredAt: new Date('2026-09-17T14:38:03Z') })]);
+    const quote = await ticketService._lastInboundQuote(1, null);
+    expect(quote.text).toContain('On Sep 17, 2026, 7:38 a.m., Anton Kuzmychev wrote:');
+    expect(quote.html).toContain('class="gmail_quote"');
+  });
+});
+

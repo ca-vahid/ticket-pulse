@@ -480,7 +480,9 @@ describe('ticketService — a reply quotes the ticket description when there is 
     const quote = await ticketService._lastInboundQuote(44880, null);
     expect(quote).not.toBeNull();
     expect(quote.html).toContain('Millions of Small Wells');
-    expect(quote.html).toContain('Susan Xu wrote:');
+    expect(quote.html).toContain('Original request');
+    expect(quote.html).toContain('>Susan Xu</span>');
+    expect(quote.text).toContain('Susan Xu wrote:');
     expect(quote.text).toContain('> The R&D project has been approved.');
   });
 
@@ -503,6 +505,6 @@ describe('ticketService — a reply quotes the ticket description when there is 
     const quote = await ticketService._lastInboundQuote(45011, null);
     expect(quote.html.match(/A-code opened/g)).toHaveLength(1);
     // The ticket is still read — for the workspace timezone of the quoted dates.
-    expect(quote.html).toContain('Sep 13, 2026, 9:38 p.m.');
+    expect(quote.text).toContain('Sep 13, 2026, 9:38 p.m.');
   });
 });
