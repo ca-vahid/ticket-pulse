@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.37-preview';
+export const APP_VERSION = '3.9.38-preview';
 
 export const changelog = [
+  {
+    version: '3.9.38-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>New approval icons</strong> — the hand-with-a-stamp pictures are gone. Approvals now use one matched set in a layered-glass style: the same document and ring every time, with only the symbol changing for pending, approved, approved with a condition, rejected, needs info, escalated and forwarded. They appear small on the Approvals page, on a ticket’s Approvals tab, and in approval e-mails.' },
+    ],
+  },
   {
     version: '3.9.37-preview',
     date: 'September 18, 2026',
