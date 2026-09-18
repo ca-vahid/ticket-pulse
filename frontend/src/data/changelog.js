@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.35-preview';
+export const APP_VERSION = '3.9.36-preview';
 
 export const changelog = [
+  {
+    version: '3.9.36-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approval decisions read properly in the conversation</strong> — a verdict used to be one tinted block with the decision, the condition and the original ask run together in bold. It is now a calm card: the approver’s photo, the verdict in colour, and the condition, the decision note and what was asked as separate labelled paragraphs. Older tickets get the new layout too.' },
+      { type: 'fixed', html: '<strong>Approver photos on the Approvals tab</strong> — a decided approval showed initials for approvers who were added by e-mail only, even though their photo was available. Fixed, with larger type, more spacing, and the condition no longer boxed in a full tint.' },
+      { type: 'improved', html: '<strong>All approvals, easier to scan</strong> — each row now puts what was asked on the left and the people on the right: who it is for, who decides, and who asked, each with a photo and a name. “Requested by” no longer shows a raw e-mail address, and status, category, amount and tier are plain text instead of badges.' },
+    ],
+  },
   {
     version: '3.9.35-preview',
     date: 'September 18, 2026',

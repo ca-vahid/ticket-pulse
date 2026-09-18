@@ -961,7 +961,7 @@ class TicketApprovalService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      include: { requester: { select: { name: true } } },
+      include: { requester: { select: { name: true, email: true } } },
     });
 
     await ticketActivityRepository.create({
@@ -1125,7 +1125,7 @@ class TicketApprovalService {
       orderBy: { createdAt: 'asc' },
       include: {
         approvalCategory: { select: { name: true, tiers: true, managerEmails: true, hasAmount: true, amountCurrency: true } },
-        ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } } },
+        ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
       },
     });
     return this._fillApproverNames(rows).then((list) => list.map((a) => this._inboxRow(a)));
@@ -1145,7 +1145,7 @@ class TicketApprovalService {
       orderBy: { updatedAt: 'desc' },
       include: {
         approvalCategory: { select: { name: true } },
-        ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } } },
+        ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
       },
     });
     return this._fillApproverNames(rows).then((list) => list.map((a) => this._inboxRow(a)));
@@ -1173,6 +1173,8 @@ class TicketApprovalService {
       displayRef: ticketDisplayRef(a.ticket),
       subject: a.ticket?.subject || null,
       requesterName: a.ticket?.requester?.name || null,
+      requesterEmail: a.ticket?.requester?.email || null,
+      requestedByName: a.requestedByName || null,
       categoryName: a.approvalCategory?.name || null,
       approverEmail: a.approverEmail,
       approverName: a.approverName,
@@ -1231,7 +1233,7 @@ class TicketApprovalService {
         take: Math.min(Number(limit) || 200, 500),
         include: {
           approvalCategory: { select: { name: true } },
-          ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } } },
+          ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
         },
       }),
       prisma.ticketApproval.groupBy({ by: ['status'], where: { workspaceId }, _count: { _all: true } }),
@@ -1401,10 +1403,18 @@ class TicketApprovalService {
   async _fillApproverNames(rows) {
     const seen = new Map();
     for (const r of rows || []) {
-      if (!r || r.approverName || !r.approverEmail) continue;
-      const key = String(r.approverEmail).toLowerCase();
-      if (!seen.has(key)) seen.set(key, await this._resolvePersonName(key));
-      r.approverName = seen.get(key) || null;
+      if (!r) continue;
+      if (!r.approverName && r.approverEmail) {
+        const key = String(r.approverEmail).toLowerCase();
+        if (!seen.has(key)) seen.set(key, await this._resolvePersonName(key));
+        r.approverName = seen.get(key) || null;
+      }
+      // Display-only (never persisted): who asked, as a person rather than an address.
+      if (!r.requestedByName && looksLikeEmail(r.requestedBy)) {
+        const key = String(r.requestedBy).toLowerCase();
+        if (!seen.has(key)) seen.set(key, await this._resolvePersonName(key));
+        r.requestedByName = seen.get(key) || prettifyLocalPart(key) || null;
+      }
     }
     return rows;
   }
@@ -1544,7 +1554,25 @@ class TicketApprovalService {
           mirrorState: null,
           // 'changed' = an already-decided approval was flipped; otherwise the
           // fresh decision itself ('approved' | 'rejected').
-          rawPayload: { kind: 'approval_event', v: 1, event: changedFrom ? 'changed' : normalized },
+          // `parts` (18 Sep 2026): the same facts the sentence above carries, as
+          // fields — the ticket page lays the verdict out as a card (avatar,
+          // condition, what was asked) instead of one dense paragraph. The
+          // sentence stays the source of truth for search, exports and old clients.
+          rawPayload: {
+            kind: 'approval_event', v: 2, event: changedFrom ? 'changed' : normalized,
+            parts: {
+              verdict: normalized,
+              changed: Boolean(changedFrom),
+              actorName: actorLabel,
+              note: note ? note.trim() : null,
+              condition: cleanCondition || null,
+              requestedBy: approval.requestedBy || null,
+              requestedByName: looksLikeEmail(approval.requestedBy)
+                ? ((await this._resolvePersonName(approval.requestedBy).catch(() => null)) || prettifyLocalPart(approval.requestedBy))
+                : null,
+              requestNote: askedFor ? (askedFor.length > 400 ? `${askedFor.slice(0, 400).trimEnd()}…` : askedFor) : null,
+            },
+          },
         },
       }).catch((err) => logger.warn(`Approval note write failed (non-fatal): ${err.message}`));
 
