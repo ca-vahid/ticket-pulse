@@ -202,8 +202,6 @@ function pick(obj, keys) {
 // bigger card. Every picture is an inline cid: attachment (emailBrandAssets).
 
 const SOFT = '#f8fafc';
-const TINT = '#eff6ff';
-const TINT_LINE = '#bfdbfe';
 
 function spacer(h = 16) {
   return `<tr><td height="${h}" style="height:${h}px;line-height:${h}px;font-size:1px;">&nbsp;</td></tr>`;
@@ -238,33 +236,33 @@ function avatar(name, size, photoCid) {
 }
 
 /**
- * A person card: avatar left, label / name / detail lines right. `emphasis`
- * gives the recipient card its tint and a larger name; both cards share the
- * same avatar size so nobody looks like an afterthought.
+ * One person as a panel cell (no border of its own — peopleRow draws the frame):
+ * avatar left, eyebrow / name / detail lines right. Both people share the same
+ * avatar size; `emphasis` only colours the eyebrow and enlarges the name.
  */
-function personCard({ label, name, lines = [], size = 56, photoCid = null, emphasis = false }) {
-  const bg = emphasis ? TINT : SOFT;
-  const border = emphasis ? TINT_LINE : LINE;
+function personCard({ label, name, lines = [], size = 48, photoCid = null, emphasis = false }) {
   const detail = lines.filter(Boolean).map((l) => `<div style="font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(l)}</div>`).join('');
   return [
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${bg}" style="border-collapse:separate;background:${bg};border:1px solid ${border};border-radius:12px;"><tr>`,
-    `<td width="${size + 12}" valign="top" style="padding:14px 0 14px 12px;">${avatar(name, size, photoCid)}</td>`,
-    `<td valign="top" style="padding:14px 12px 14px 10px;font-family:${FONT};">`,
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
+    `<td width="${size + 12}" valign="top" style="padding:0 12px 0 0;">${avatar(name, size, photoCid)}</td>`,
+    `<td valign="top" style="font-family:${FONT};">`,
     `<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${emphasis ? '#1d4ed8' : MUTED};font-weight:bold;">${escapeHtml(label)}</div>`,
-    `<div style="font-size:${emphasis ? 17 : 15}px;line-height:${emphasis ? 22 : 20}px;font-weight:bold;color:${INK};margin-top:2px;">${escapeHtml(name || 'Unknown')}</div>`,
+    `<div style="font-size:${emphasis ? 16 : 15}px;line-height:${emphasis ? 22 : 20}px;font-weight:bold;color:${INK};margin-top:2px;">${escapeHtml(name || 'Unknown')}</div>`,
     detail,
     '</td></tr></table>',
   ].join('');
 }
 
-/** Two person cards side by side: the recipient wider on the left, the agent on the right. */
-function peopleRow(left, right) {
-  return [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="56%" valign="top" style="padding:0 6px 0 0;">${left}</td>`,
-    `<td width="44%" valign="top" style="padding:0 0 0 6px;">${right}</td>`,
-    '</tr></table>',
-  ].join('');
+/**
+ * The people panel: one hairline frame, no fill, the two cells side by side and
+ * divided by a single rule — equal height by construction. `right` optional.
+ */
+function peopleRow(left, right = null) {
+  const cells = right
+    ? `<td width="55%" valign="top" style="padding:14px 16px 14px 16px;">${left}</td>`
+      + `<td width="45%" valign="top" style="padding:14px 16px 14px 16px;border-left:1px solid ${LINE};">${right}</td>`
+    : `<td valign="top" style="padding:14px 16px;">${left}</td>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border:1px solid ${LINE};border-radius:12px;"><tr>${cells}</tr></table>`;
 }
 
 function factCell(label, valueHtml) {
@@ -314,19 +312,19 @@ function hero({ art, alt = '', eyebrow = null, eyebrowColor = MUTED, kicker = nu
     + `<td valign="top">${parts.join('')}</td></tr></table></td></tr>`;
 }
 
-/** The approval category, highlighted: pictogram, label, name; amount and tier as chips. */
+/** The approval category as a quiet strip between two hairlines: small icon, eyebrow, name; amount and tier as chips on the right. */
 function categoryCard({ categoryName, amountLabel = null, tierLabel = null }) {
   if (!categoryName) return '';
-  const art = brandImg(categoryArt(categoryName), { size: 40, alt: '' });
+  const art = brandImg(categoryArt(categoryName), { size: 32, alt: '' });
   const chips = [amountLabel ? chip(amountLabel, TONES.green) : '', tierLabel ? chip(tierLabel, TONES.blue) : ''].filter(Boolean).join('&nbsp;');
   return [
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${TINT}" style="border-collapse:separate;background:${TINT};border:1px solid ${TINT_LINE};border-radius:12px;"><tr>`,
-    art ? `<td width="52" valign="middle" style="padding:12px 0 12px 14px;">${art}</td>` : '',
-    `<td valign="middle" style="padding:12px 14px;font-family:${FONT};">`,
-    '<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:#1d4ed8;font-weight:bold;">Approval category</div>',
-    `<div style="font-size:17px;line-height:22px;font-weight:bold;color:${INK};margin-top:2px;">${escapeHtml(categoryName)}</div>`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-top:1px solid ${LINE};border-bottom:1px solid ${LINE};"><tr>`,
+    art ? `<td width="44" valign="middle" style="padding:12px 12px 12px 0;">${art}</td>` : '',
+    `<td valign="middle" style="padding:12px 0;font-family:${FONT};">`,
+    `<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${MUTED};font-weight:bold;">Approval category</div>`,
+    `<div style="font-size:16px;line-height:22px;font-weight:bold;color:${INK};margin-top:1px;">${escapeHtml(categoryName)}</div>`,
     '</td>',
-    chips ? `<td align="right" valign="middle" style="padding:12px 14px 12px 0;white-space:nowrap;">${chips}</td>` : '',
+    chips ? `<td align="right" valign="middle" style="padding:12px 0;white-space:nowrap;">${chips}</td>` : '',
     '</tr></table>',
   ].join('');
 }
@@ -523,7 +521,7 @@ export function renderRequesterDecisionEmail(ctx) {
   rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</div>`, { bg: tone.bg, border: tone.line, accent: tone.color })}</td></tr>`);
   if (ctx.requester?.name) {
     rows.push(spacer(12));
-    rows.push(`<tr><td>${personCard({ label: 'Requested for', name: ctx.requester.name, lines: [ctx.requester.title, ctx.requester.location].filter(Boolean), photoCid: ctx.requester.photoCid || null, size: 40 })}</td></tr>`);
+    rows.push(`<tr><td>${peopleRow(personCard({ label: 'Requested for', name: ctx.requester.name, lines: [ctx.requester.title, ctx.requester.location].filter(Boolean), photoCid: ctx.requester.photoCid || null, emphasis: true }))}</td></tr>`);
   }
   if (ctx.conditionNote) {
     rows.push(spacer(12));

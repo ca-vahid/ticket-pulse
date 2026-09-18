@@ -129,8 +129,8 @@ describe('renderApproverRequestEmail', () => {
     ctx.requestedByPhotoCid = 'requested-by-photo';
     const html = renderApproverRequestEmail(ctx);
     // Same avatar size for both people (17 Sep 2026): the recipient is not bigger, just wider.
-    expect(html).toContain('<img src="cid:requester-photo" width="56" height="56" alt="IG"');
-    expect(html).toContain('<img src="cid:requested-by-photo" width="56" height="56" alt="MB"');
+    expect(html).toContain('<img src="cid:requester-photo" width="48" height="48" alt="IG"');
+    expect(html).toContain('<img src="cid:requested-by-photo" width="48" height="48" alt="MB"');
     expect(html).not.toContain('>IG<');
     expect(html).not.toMatch(/src="https?:/);
     const plain = renderApproverRequestEmail(baseCtx());
@@ -177,7 +177,9 @@ describe('brand pictograms (17 Sep 2026 redesign)', () => {
     expect(html).toContain('cid:tp-tp-mark');
     expect(html).toContain('Approval category');
     expect(html).toContain('cid:tp-cat-computer'); // "New Computer Upgrade"
-    expect(html).toContain('width="56%"');
+    // One framed panel, two cells divided by a rule (17 Sep 2026 redesign) — no stacked tinted boxes.
+    expect(html).toContain('width="55%"');
+    expect(html).toContain('border-left:1px solid #e2e8f0');
     expect(html).toContain('Service desk agent');
     // Every cid the HTML references resolves to a real file, exactly once.
     const atts = brandAttachmentsFor(html);
