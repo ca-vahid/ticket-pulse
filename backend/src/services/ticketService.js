@@ -300,8 +300,8 @@ const fsSubjectSchema = z.string().trim().min(3).max(500);
 const fsDescriptionSchema = z.string().max(100000).nullable();
 
 const threadBodySchema = z.object({
-  bodyHtml: z.string().max(200000).optional().nullable(),
-  bodyText: z.string().max(200000).optional().nullable(),
+  bodyHtml: z.string().max(200000, 'This message is too long to send. If you pasted pictures into the text, attach them as files instead.').optional().nullable(),
+  bodyText: z.string().max(200000, 'This message is too long to send.').optional().nullable(),
   cc: emailListSchema.default([]),
   // Addresses the agent explicitly took OFF this reply's Cc (QA 09-09 #6).
   // Only meaningful for a client that seeds the row from the ticket's "Also

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.38-preview';
+export const APP_VERSION = '3.9.39-preview';
 
 export const changelog = [
+  {
+    version: '3.9.39-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Pasting from an e-mail no longer breaks a note</strong> — copying text out of an Outlook message or a Word document brings its pictures along hidden inside the text. Those made a short note enormous, and saving it failed with a technical error; one agent tried twice this morning and gave up. Pictures that arrive this way now become attachments automatically, the same as a pasted screenshot, with a marker left where each one was.' },
+      { type: 'improved', html: '<strong>Clearer message when something is too big to send</strong> — an oversized note or file now says so in plain words and suggests attaching pictures as files, instead of showing a server error.' },
+    ],
+  },
   {
     version: '3.9.38-preview',
     date: 'September 18, 2026',
