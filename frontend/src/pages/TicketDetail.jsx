@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
@@ -422,27 +423,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
 
   // Approval-lifecycle events read as their own compact, color-coded card so
   // approved / rejected / needs-info is obvious at a glance vs. ordinary notes.
-  if (apEvent) {
-    const { label, Icon, wrap, accent, text, chip } = apEvent;
-    return (
-      <li className="flex justify-center">
-        <div className={`relative w-full max-w-[92%] overflow-hidden rounded-2xl border ${wrap} pl-4 pr-3.5 py-3 shadow-subtle`}>
-          <span className={`absolute inset-y-0 left-0 w-1.5 ${accent}`} aria-hidden="true" />
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Stamp className={`w-3.5 h-3.5 ${text}`} aria-hidden="true" />
-            <span className={`text-[11px] font-bold uppercase tracking-wide ${text}`}>Approval</span>
-            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${chip}`}>
-              <Icon className="w-2.5 h-2.5" aria-hidden="true" /> {label}
-            </span>
-            <span className="ml-auto text-xs text-muted-foreground/75 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
-              {timeAgo(entry.occurredAt)}
-            </span>
-          </div>
-          <p className={`mt-1 text-sm font-medium ${text} break-words`}>{body}</p>
-        </div>
-      </li>
-    );
-  }
+  if (apEvent) return <ApprovalEventCard entry={entry} meta={apEvent} body={body} />;
 
   // TP-authored notes (assignment/system) get the brand mark, not "TP"
   // initials — keyed off authorType so renamed system actors still read as

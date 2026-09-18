@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, Stamp, Trash2, XCircle,
+  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, ShieldCheck, Trash2, XCircle,
 } from 'lucide-react';
 import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 import { AmountChip, TierChip, handoffSentence } from './ApprovalHandoff';
@@ -80,10 +80,10 @@ const rowLabel = (ap) => {
  * status, decision notes, and the approver/requester actions.
  */
 /** Approver avatar: roster photo when the workspace knows one, else the directory photo by e-mail (app-only members). */
-function ApproverAvatar({ email, name, photoUrl }) {
+function ApproverAvatar({ email, name, photoUrl, size = 'h-8 w-8', textSize = 'text-[10px]' }) {
   const fetched = useRequesterPhoto(photoUrl ? null : email);
   const url = photoUrl || (typeof fetched === 'string' ? fetched : fetched?.photo) || null;
-  return <PersonAvatar name={name || email} photoUrl={url} size="h-8 w-8" textSize="text-[10px]" />;
+  return <PersonAvatar name={name || email} photoUrl={url} size={size} textSize={textSize} />;
 }
 
 export default function ApprovalTimeline({
@@ -158,15 +158,13 @@ export default function ApprovalTimeline({
         return (
           <li key={head.requestGroupId || head.id} className="rounded-xl border border-border bg-card shadow-subtle overflow-hidden animate-fadeIn">
             {/* Group header — category + overall verdict, tinted to match */}
-            <div className={`flex flex-wrap items-center gap-2 px-3.5 py-2.5 border-b ${vMeta.head}`}>
-              <span className="inline-flex items-center justify-center h-6 w-6 rounded-lg bg-card/80 border border-card text-muted-foreground">
-                <Stamp className="w-3.5 h-3.5" aria-hidden="true" />
-              </span>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5 border-b border-border/70">
+              <ShieldCheck className="w-[18px] h-[18px] text-muted-foreground" aria-hidden="true" />
               {category && (
-                <span className="text-sm font-semibold text-foreground">{category}</span>
+                <span className="text-[15px] font-semibold text-foreground">{category}</span>
               )}
-              <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5 border ${vMeta.chip}`}>
-                <vMeta.Icon className="w-3 h-3" aria-hidden="true" /> {vMeta.label}
+              <span className={`inline-flex items-center gap-1 text-[13px] font-semibold ${vMeta.text}`}>
+                <vMeta.Icon className="w-3.5 h-3.5" aria-hidden="true" /> {vMeta.label}
               </span>
               <AmountChip amount={head.amount} currency={head.amountCurrency || head.approvalCategory?.amountCurrency} />
               {!decided && <TierChip tier={liveTier} tierName={(tiers[liveTier - 1] || {}).name} tierCount={tierCount} />}
@@ -179,48 +177,49 @@ export default function ApprovalTimeline({
             {/* Decided → compact summary (who decided, when). No dated rail.
                 Actions sit on the RIGHT so they read as secondary to the verdict. */}
             {decided ? (
-              <div className="px-3.5 py-3 flex items-start gap-3">
+              <div className="px-5 py-5 flex items-start gap-4">
                 <div className="min-w-0 flex-1">
                   {decider ? (
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-3.5">
                       <div className="relative flex-shrink-0">
-                        <PersonAvatar name={decider.approverName || decider.approverEmail} size="h-8 w-8" textSize="text-[10px]" />
-                        <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${vMeta.dot} flex items-center justify-center`}>
-                          <vMeta.Icon className="w-2 h-2 text-white" aria-hidden="true" />
+                        <ApproverAvatar email={String(decider.approverEmail || '').toLowerCase()} name={decider.approverName || decider.approverEmail} size="h-11 w-11" textSize="text-xs" />
+                        <span className={`absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card ${vMeta.dot} flex items-center justify-center`}>
+                          <vMeta.Icon className="w-2.5 h-2.5 text-white" aria-hidden="true" />
                         </span>
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm text-foreground/85">
+                        <p className="text-[15px] text-foreground/85">
                           <span className={`font-semibold ${vMeta.text}`}>{vMeta.verb}</span> by <span className="font-semibold text-foreground">{decider.approverName || decider.approverEmail}</span>
                           {decider.decidedAt && <span className="text-muted-foreground/75" title={new Date(decider.decidedAt).toLocaleString()}> · {formatDayTime(decider.decidedAt)} · {timeAgo(decider.decidedAt)}</span>}
                         </p>
-                        <p className="text-[11px] text-muted-foreground/75">
-                          Requested by {head.requestedBy}
+                        <p className="text-[13px] text-muted-foreground mt-0.5">
+                          Requested by {head.requestedByName || head.requestedBy}
                           {otherCount > 0 && <> · {otherCount} other approver{otherCount === 1 ? '' : 's'} auto-cancelled</>}
                         </p>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">Cancelled · requested by {head.requestedBy}</p>
+                    <p className="text-[15px] text-muted-foreground">Cancelled · requested by {head.requestedByName || head.requestedBy}</p>
                   )}
                   {/* What was asked for stays on the decided card (16 Sep 2026):
                       the verdict alone lost the agent's own words. */}
                   {head.requestNoteHtml ? (
-                    <div className="mt-1.5 text-xs text-muted-foreground border-l-2 border-border pl-2" data-testid="timeline-request-note">
-                      <SafeHtml html={head.requestNoteHtml} className="text-xs text-muted-foreground" />
+                    <div className="mt-4 text-sm leading-relaxed text-muted-foreground border-l-2 border-border pl-3.5" data-testid="timeline-request-note">
+                      <SafeHtml html={head.requestNoteHtml} className="text-sm text-muted-foreground" />
                     </div>
                   ) : head.requestNote && (
-                    <p className="mt-1.5 text-xs text-muted-foreground italic border-l-2 border-border pl-2" data-testid="timeline-request-note">“{head.requestNote}”</p>
+                    <p className="mt-4 text-sm leading-relaxed text-muted-foreground italic border-l-2 border-border pl-3.5" data-testid="timeline-request-note">“{head.requestNote}”</p>
                   )}
                   {decider?.conditionNote && verdict === 'approved' && (
-                    <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="timeline-condition">
-                      <span className="font-semibold">Condition:</span> {decider.conditionNote}
-                    </p>
+                    <div className="mt-4 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3.5" data-testid="timeline-condition">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Condition</p>
+                      <p className="mt-1 text-[15px] leading-relaxed text-foreground/85">{decider.conditionNote}</p>
+                    </div>
                   )}
                   {decider?.decisionNoteHtml && !/^superseded/i.test(decider.decisionNote || '') ? (
-                    <div className="mt-1.5"><SafeHtml html={decider.decisionNoteHtml} className="text-xs text-muted-foreground" /></div>
+                    <div className="mt-4"><SafeHtml html={decider.decisionNoteHtml} className="text-sm leading-relaxed text-foreground/85" /></div>
                   ) : decider?.decisionNote && !/^superseded/i.test(decider.decisionNote) && (
-                    <p className="text-xs text-muted-foreground mt-1.5 italic">“{decider.decisionNote}”</p>
+                    <p className="text-sm leading-relaxed text-foreground/85 mt-4 italic">“{decider.decisionNote}”</p>
                   )}
                 </div>
                 {(canChangeVerdict || canRequesterManage) && (verdict === 'approved' || verdict === 'rejected') && (
@@ -254,7 +253,7 @@ export default function ApprovalTimeline({
             ) : (
               <div className="px-3.5 py-3">
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>Requested by <span className="font-medium text-muted-foreground">{head.requestedBy}</span>
+                  <span>Requested by <span className="font-medium text-muted-foreground">{head.requestedByName || head.requestedBy}</span>
                     {rows.length > 1 && <span className="text-muted-foreground/75"> · {rows.length} approvers · any one decides</span>}</span>
                   {(() => {
                     const groupId = head.requestGroupId || `single-${head.id}`;

@@ -238,7 +238,10 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
       id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'alice@x.io',
     });
     await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'ok', { email: 'alice@x.io', name: 'Alice' });
-    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'approved' });
+    // v2 (18 Sep 2026): the discriminator plus `parts`, the same facts as fields for the verdict card.
+    expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'approved' });
+    expect(noteRawPayload().parts).toMatchObject({ changed: false, verdict: 'approved' });
+    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'verdict']);
     expect(noteBody()).toContain('APPROVED'); // body unchanged for the regex fallback
   });
 
@@ -247,7 +250,10 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
       id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'alice@x.io',
     });
     await ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'no', { email: 'alice@x.io', name: 'Alice' });
-    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'rejected' });
+    // v2 (18 Sep 2026): the discriminator plus `parts`, the same facts as fields for the verdict card.
+    expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'rejected' });
+    expect(noteRawPayload().parts).toMatchObject({ changed: false, verdict: 'rejected' });
+    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'verdict']);
     expect(noteBody()).toContain('REJECTED');
   });
 
@@ -256,7 +262,10 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
       id: 2, ticketId: 501, workspaceId: 1, status: 'approved', approverEmail: 'alice@x.io',
     });
     await ticketApprovalService.changeDecision(501, 1, 2, 'rejected', 'reconsidered', { email: 'alice@x.io', name: 'Alice' });
-    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'changed' });
+    // v2 (18 Sep 2026): the discriminator plus `parts`, the same facts as fields for the verdict card.
+    expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'changed' });
+    expect(noteRawPayload().parts).toMatchObject({ changed: true });
+    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'verdict']);
     expect(noteBody()).toContain('CHANGED');
   });
 

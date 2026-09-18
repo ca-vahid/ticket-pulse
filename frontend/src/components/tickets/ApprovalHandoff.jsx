@@ -202,12 +202,12 @@ export function HandoffPanel({ mode, people = [], nextTierName = null, nextTierN
   );
 }
 
-/** Small chips shared by the timeline, inbox and public page. */
+/** Amount and tier, shared by the timeline, inbox and public page. Plain text on purpose — no pills (Vahid, 18 Sep 2026). */
 export function TierChip({ tier, tierName, tierCount, className = '' }) {
   if (!tierCount || tierCount < 2) return null;
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground ${className}`} title={`Approval tier ${tier} of ${tierCount}`}>
-      {tierName || `Tier ${tier}`}<span className="text-muted-foreground/60">/{tierCount}</span>
+    <span className={`text-xs font-medium text-muted-foreground ${className}`} title={`Approval tier ${tier} of ${tierCount}`}>
+      {tierName || `Tier ${tier}`}<span className="text-muted-foreground/60"> of {tierCount}</span>
     </span>
   );
 }
@@ -216,7 +216,7 @@ export function AmountChip({ amount, currency, className = '' }) {
   const label = formatMoney(amount, currency);
   if (!label) return null;
   return (
-    <span className={`inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-800 dark:text-emerald-200 ${className}`} title="Amount on this request">
+    <span className={`text-[13px] font-semibold tabular-nums text-foreground ${className}`} title="Amount on this request">
       {label}
     </span>
   );

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  Ban,
-  Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
+  Ban, CheckCircle2, Clock, XCircle,
+  Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
   Search, Download, SlidersHorizontal, CalendarDays, UserRound, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
@@ -34,6 +34,36 @@ const STATUS_META = {
   escalated: { label: 'Escalated', art: 'approval-escalate', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', dot: 'bg-amber-500' },
   forwarded: { label: 'Forwarded', art: 'approval-forward', cls: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30', dot: 'bg-blue-500' },
 };
+// Status as a glyph and coloured words — no pills, no stamp clip-art (Vahid, 18 Sep 2026).
+const STATUS_ICON = {
+  pending: { Icon: Clock, text: 'text-amber-700 dark:text-amber-300', soft: 'bg-amber-50 dark:bg-amber-500/15' },
+  info_requested: { Icon: MessageCircleQuestion, text: 'text-violet-700 dark:text-violet-300', soft: 'bg-violet-50 dark:bg-violet-500/15' },
+  approved: { Icon: CheckCircle2, text: 'text-emerald-700 dark:text-emerald-300', soft: 'bg-emerald-50 dark:bg-emerald-500/15' },
+  rejected: { Icon: XCircle, text: 'text-red-700 dark:text-red-300', soft: 'bg-red-50 dark:bg-red-500/15' },
+  cancelled: { Icon: Ban, text: 'text-muted-foreground', soft: 'bg-muted' },
+  escalated: { Icon: ArrowUpRight, text: 'text-amber-700 dark:text-amber-300', soft: 'bg-amber-50 dark:bg-amber-500/15' },
+  forwarded: { Icon: Forward, text: 'text-blue-700 dark:text-blue-300', soft: 'bg-blue-50 dark:bg-blue-500/15' },
+};
+function StatusGlyph({ status, size = 'h-10 w-10', icon = 'h-5 w-5' }) {
+  const m = STATUS_ICON[status] || STATUS_ICON.cancelled;
+  return <span className={`inline-flex ${size} flex-shrink-0 items-center justify-center rounded-full ${m.soft}`} aria-hidden="true"><m.Icon className={`${icon} ${m.text}`} /></span>;
+}
+
+/** One person in the row's side column: small label over avatar + name. Never a bare address. */
+function SidePerson({ label, name, email }) {
+  const photo = useRequesterPhoto(email);
+  const shown = name || (email ? String(email).split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
+  return (
+    <div className="flex items-center gap-2.5 min-w-0">
+      <PersonAvatar name={shown} photoUrl={photo} size="h-8 w-8" textSize="text-[10px]" />
+      <div className="min-w-0">
+        <p className="text-[11px] leading-4 text-muted-foreground/75">{label}</p>
+        <p className="truncate text-sm font-medium leading-5 text-foreground" title={email || undefined}>{shown}</p>
+      </div>
+    </div>
+  );
+}
+
 const STAT_TILES = [
   { key: 'pending', label: 'Pending', color: 'text-amber-600 dark:text-amber-300', art: 'approval-waiting' },
   { key: 'info_requested', label: 'Needs info', color: 'text-violet-600 dark:text-violet-300', art: 'approval-question' },
@@ -47,21 +77,6 @@ const SORT_OPTIONS = [
   { value: 'status', label: 'By status' },
 ];
 const EMPTY_FILTERS = { q: '', status: '', categoryId: '', approver: '', requestedBy: '', from: '', to: '', sort: 'newest' };
-
-function StatusChip({ status }) {
-  const meta = STATUS_META[status] || { label: status, cls: 'bg-muted text-muted-foreground border-border' };
-  return <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${meta.cls}`}>{meta.label}</span>;
-}
-
-function Person({ name, email, size = 'h-6 w-6' }) {
-  const photo = useRequesterPhoto(email);
-  return (
-    <span className="inline-flex items-center gap-1.5 min-w-0">
-      <PersonAvatar name={name || email} photoUrl={photo} size={size} textSize="text-[9px]" />
-      <span className="truncate">{name || email}</span>
-    </span>
-  );
-}
 
 function csvEscape(v) {
   const s = v === null || v === undefined ? '' : String(v);
@@ -268,7 +283,7 @@ export default function ApprovalsInbox() {
           <div className="space-y-4" data-testid="approvals-all">
             {/* Stats = one-click status filters */}
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-              {STAT_TILES.map(({ key, label, color, art }) => {
+              {STAT_TILES.map(({ key, label, color }) => {
                 const active = filters.status === key;
                 return (
                   <button
@@ -282,7 +297,7 @@ export default function ApprovalsInbox() {
                         <div className={`text-2xl font-bold tabular-nums ${color}`}>{overview?.stats?.[key] ?? 0}</div>
                         <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
                       </div>
-                      {art ? <BrandArt name={art} className="h-8 w-8 opacity-90 transition-transform group-hover:scale-110" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted ring-1 ring-border transition-transform group-hover:scale-110" aria-hidden="true"><Ban className="h-4 w-4 text-muted-foreground/70" /></span>}
+                      <StatusGlyph status={key} size="h-9 w-9" icon="h-[18px] w-[18px]" />
                     </div>
                   </button>
                 );
@@ -372,43 +387,41 @@ export default function ApprovalsInbox() {
                   const isOpen = expanded.has(a.id);
                   const note = a.decisionNote || a.conditionNote || a.requestNote || '';
                   return (
-                    <li key={a.id} className="tp-card group/row rounded-xl p-3.5 transition-shadow hover:shadow-subtle" data-testid="approval-row">
-                      <div className="flex items-start gap-3">
-                        <span className="mt-0.5 hidden h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-muted/50 sm:inline-flex">
-                          {meta_.art ? <BrandArt name={meta_.art} className="h-7 w-7" /> : <Stamp className="h-4 w-4 text-muted-foreground/60" aria-hidden="true" />}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <StatusChip status={a.status} />
-                            {a.categoryName && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20">{a.categoryName}</span>}
-                            <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 dark:text-blue-200 hover:underline inline-flex items-center gap-1">{a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" /></Link>
-                            <AmountChip amount={a.amount} currency={a.amountCurrency} />
-                            {a.tierCount > 1 && <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} />}
-                            <span className="ml-auto text-[11px] text-muted-foreground/75 whitespace-nowrap" title={new Date(a.decidedAt || a.createdAt).toLocaleString()}>
-                              {formatDayTime(a.decidedAt || a.createdAt)} · {timeAgo(a.decidedAt || a.createdAt)}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-sm font-medium text-foreground truncate">{a.subject || '(no subject)'}</p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                            <span className="inline-flex items-center gap-1.5 min-w-0">
-                              <span className="text-muted-foreground/60">Approver</span>
-                              <Person name={a.approverName} email={a.approverEmail} />
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 min-w-0">
-                              <span className="text-muted-foreground/60">Requested by</span>
-                              <Person name={null} email={a.requestedBy} />
-                            </span>
-                          </div>
-                          {note && (
-                            <div className="mt-1.5">
-                              <p className={`text-xs text-muted-foreground ${isOpen ? '' : 'line-clamp-2'}`}>“{note}”</p>
-                              {note.length > 140 && (
-                                <button onClick={() => toggleExpanded(a.id)} className="tp-focus-ring mt-0.5 inline-flex items-center gap-0.5 rounded text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-200">
-                                  {isOpen ? <><ChevronUp className="h-3 w-3" aria-hidden="true" /> Less</> : <><ChevronDown className="h-3 w-3" aria-hidden="true" /> More</>}
-                                </button>
-                              )}
+                    <li key={a.id} className="tp-card group/row rounded-xl px-5 py-4 transition-shadow hover:shadow-subtle" data-testid="approval-row">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-stretch md:gap-6">
+                        {/* Left: what was asked, and what happened to it */}
+                        <div className="flex min-w-0 flex-1 items-start gap-3.5">
+                          <StatusGlyph status={a.status} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 text-[13px]">
+                              <span className={`font-semibold ${(STATUS_ICON[a.status] || STATUS_ICON.cancelled).text}`}>{meta_.label || a.status}</span>
+                              {a.categoryName && <><span className="text-muted-foreground/40" aria-hidden="true">·</span><span className="text-muted-foreground">{a.categoryName}</span></>}
+                              <span className="text-muted-foreground/40" aria-hidden="true">·</span>
+                              <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring rounded font-mono text-xs font-semibold text-blue-700 dark:text-blue-200 hover:underline inline-flex items-center gap-1">{a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" /></Link>
                             </div>
-                          )}
+                            <p className="mt-1 text-[15px] font-semibold leading-snug text-foreground">{a.subject || '(no subject)'}</p>
+                            {note && (
+                              <div className="mt-2">
+                                <p className={`text-sm leading-relaxed text-muted-foreground ${isOpen ? '' : 'line-clamp-2'}`}>“{note}”</p>
+                                {note.length > 140 && (
+                                  <button onClick={() => toggleExpanded(a.id)} className="tp-focus-ring mt-1 inline-flex items-center gap-0.5 rounded text-xs font-medium text-blue-700 hover:underline dark:text-blue-200">
+                                    {isOpen ? <><ChevronUp className="h-3 w-3" aria-hidden="true" /> Less</> : <><ChevronDown className="h-3 w-3" aria-hidden="true" /> More</>}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            <p className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground/75">
+                              <span title={new Date(a.decidedAt || a.createdAt).toLocaleString()}>{formatDayTime(a.decidedAt || a.createdAt)} · {timeAgo(a.decidedAt || a.createdAt)}</span>
+                              <AmountChip amount={a.amount} currency={a.amountCurrency} />
+                              {a.tierCount > 1 && <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} />}
+                            </p>
+                          </div>
+                        </div>
+                        {/* Right: the people — who it is for, who decides, who asked */}
+                        <div className="grid flex-shrink-0 grid-cols-1 gap-3 border-t border-border/70 pt-3 sm:grid-cols-3 md:w-60 md:grid-cols-1 md:border-l md:border-t-0 md:pl-6 md:pt-0">
+                          {(a.requesterName || a.requesterEmail) && <SidePerson label="Requested for" name={a.requesterName} email={a.requesterEmail} />}
+                          <SidePerson label="Approver" name={a.approverName} email={a.approverEmail} />
+                          <SidePerson label="Requested by" name={a.requestedByName} email={a.requestedBy} />
                         </div>
                       </div>
                     </li>
@@ -444,7 +457,7 @@ export default function ApprovalsInbox() {
                             <span className="ml-auto text-[11px] text-muted-foreground/75 whitespace-nowrap">{formatDayTime(a.createdAt)} · {timeAgo(a.createdAt)}</span>
                           </div>
                           <p className="text-xs text-muted-foreground/75 mt-1 flex flex-wrap items-center gap-1.5">
-                            <span>Requested by {a.requestedBy}{a.requesterName ? ` · for ${a.requesterName}` : ''}</span>
+                            <span>Requested by {a.requestedByName || a.requestedBy}{a.requesterName ? ` · for ${a.requesterName}` : ''}</span>
                             <AmountChip amount={a.amount} currency={a.amountCurrency} />
                             <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} />
                             {a.isFinal && <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground">final approver</span>}

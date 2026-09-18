@@ -327,7 +327,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(tieredFixture));
     apiMock.handoff.mockReturnValue(ok({ status: 'escalated', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield', handoff: { kind: 'escalated', to: ['neville@x.io'] } }));
     renderPage();
-    expect(await screen.findByTitle('Approval tier 1 of 2')).toHaveTextContent('Tier 1/2');
+    expect(await screen.findByTitle('Approval tier 1 of 2')).toHaveTextContent('Tier 1 of 2');
     expect(screen.getByTitle('Amount on this request')).toHaveTextContent('$6,000.00');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Escalate' }));
