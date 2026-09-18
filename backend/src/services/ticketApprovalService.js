@@ -92,7 +92,8 @@ export function prettifyLocalPart(email) {
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
-const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|rejected|escalated|forwarded)\s+by\s+(.+)$/i;
+// 'not approved' is today's wording; 'rejected' stays for rows written before 18 Sep 2026.
+const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|not approved|rejected|escalated|forwarded)\s+by\s+(.+)$/i;
 
 // Open rows: the only ones a decision / hand-off can act on.
 const OPEN_STATUSES = ['pending', 'info_requested'];
@@ -1500,7 +1501,7 @@ class TicketApprovalService {
           status: 'cancelled',
           decidedAt: new Date(),
           decidedVia: via,
-          decisionNote: `Superseded — ${normalized} by ${actorLabel}`,
+          decisionNote: `Superseded — ${normalized === 'rejected' ? 'not approved' : normalized} by ${actorLabel}`,
         },
       });
     }
@@ -1740,7 +1741,7 @@ class TicketApprovalService {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
     const isSelf = to.toLowerCase() === String(actorEmail || '').trim().toLowerCase();
     const approved = decision === 'approved';
-    const verdictLabel = approved ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
+    const verdictLabel = approved ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved';
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
     // Subject prefix stays identical for the self variant — inbox filters and
@@ -1779,7 +1780,7 @@ class TicketApprovalService {
         workspaceId: approval.workspaceId, ticketId: approval.ticketId, approvalId: approval.id, requestGroupId: groupId,
         kind: 'decision', audience: 'requester', authorEmail: String(actorEmail || approval.approverEmail || '').toLowerCase(),
         authorName: actorLabel || approval.approverName || null, authorRole: 'approver',
-        bodyText: [decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected', conditionNote ? `Condition: ${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
+        bodyText: [decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved', conditionNote ? `Condition: ${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
         bodyHtml: null, via: 'app', toEmails: [parts.requester?.email, parts.agent?.email, ...parts.approvers.map((a) => a.email)].filter(Boolean),
       },
     }).catch((err) => logger.warn(`Decision message write failed (non-fatal): ${err.message}`));
@@ -1798,7 +1799,7 @@ class TicketApprovalService {
     const workspaceName = await this._workspaceName(ticket);
     const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    const verdictLabel = decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Rejected';
+    const verdictLabel = decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved';
     let sent = 0;
     for (const r of recipients) {
       const thread = await conversation.listForGroup(groupId, { audience: r.audience });

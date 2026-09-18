@@ -48,4 +48,22 @@ describe('ApprovalEventCard', () => {
     expect(screen.getByText('Asked by Vahid Haeri')).toBeInTheDocument();
     expect(screen.getByText('Approved')).toBeInTheDocument();
   });
+
+  // Vahid, 18 Sep 2026: soften the word a requester reads. The status VALUE stays
+  // 'rejected'; only the label changes — and it must still read red, even though
+  // "Not approved" contains "approv".
+  test('a rejection reads "Not approved", in the red tone', () => {
+    const rej = { ...entry, bodyText: 'Approval REJECTED ✘ by Reza Zaim — "Desktop is powerful enough"', rawPayload: { kind: 'approval_event', event: 'rejected' } };
+    render(<ul><ApprovalEventCard entry={rej} meta={{ label: 'Not approved' }} body="x" /></ul>);
+    const words = screen.getByText('Not approved');
+    expect(words.className).toMatch(/text-red-/);
+    expect(screen.queryByText('Rejected')).not.toBeInTheDocument();
+  });
+
+  test('an unparseable entry labelled "Not approved" still takes the red tone, not green', () => {
+    const odd = { ...entry, bodyText: 'Manager declined the hardware request', rawPayload: { kind: 'approval_event', event: 'rejected' } };
+    render(<ul><ApprovalEventCard entry={odd} meta={{ label: 'Not approved' }} body="Manager declined the hardware request" /></ul>);
+    expect(screen.getByText('Approval · Not approved').className).toMatch(/text-red-/);
+  });
 });
+

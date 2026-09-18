@@ -88,7 +88,9 @@ describe('renderApproverRequestEmail', () => {
   test('carries every fact the page shows, escapes user text, and has one primary button', () => {
     const html = renderApproverRequestEmail(baseCtx());
     expect(html).toContain('Approval requested');
-    expect(html).toContain('New Computer Upgrade approval — your decision is needed');
+    // The category has its own strip under the hero, so the kicker no longer repeats it (18 Sep 2026).
+    expect(html).toContain('Your decision is needed');
+    expect(html).not.toContain('New Computer Upgrade approval — your decision is needed');
     expect(html).toContain('Laptop &lt;b&gt;fails&lt;/b&gt;');
     expect(html).toContain('#239934  ·  created Aug 31  ·  due Sep 4');
     expect(html).toContain('Requested for');
@@ -118,7 +120,7 @@ describe('renderApproverRequestEmail', () => {
   test('re-request shows the Q&A and a different pill/button', () => {
     const html = renderApproverRequestEmail({ ...baseCtx(), reRequest: true, clarification: { question: 'Refurb ok?', answer: 'No stock.' } });
     expect(html).toContain('Re-requested');
-    expect(html).toContain('re-requested with the answer you asked for');
+    expect(html).toContain('Re-requested with the answer you asked for');
     expect(html).toContain('<b>You asked:</b> Refurb ok?');
     expect(html).toContain('<b>Marcus Blackstock replied:</b> No stock.');
     expect(html).toContain('Review the answer and decide &rarr;');
@@ -152,9 +154,9 @@ describe('renderRequesterDecisionEmail / renderRequesterClarificationEmail', () 
   const t = { ref: '#1', subject: 'S', appUrl: 'https://app/tickets/1' };
   test('sentence shapes are preserved', () => {
     expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss', requester: { name: 'Rita' } }))
-      .toContain('Boss decided your approval request for <b>Rita</b>: <span style="color:#065f46;font-weight:bold;">APPROVED</span>');
+      .toContain('Boss decided your approval request for <b>Rita</b>: <span style="color:#065f46;font-weight:bold;">approved</span>');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: false, approverName: 'Boss', changedFrom: 'approved' }))
-      .toContain('Boss changed the decision on your approval request: <span style="color:#991b1b;font-weight:bold;">REJECTED</span>');
+      .toContain('Boss changed the decision on your approval request: <span style="color:#991b1b;font-weight:bold;">not approved</span>');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: true, isSelf: true })).toContain('You approved your own approval request');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: false, isSelf: true, note: 'Too <b>pricey</b>' })).toContain('Your note');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: false, isSelf: true, note: 'Too <b>pricey</b>' })).toContain('Too &lt;b&gt;pricey&lt;/b&gt;');

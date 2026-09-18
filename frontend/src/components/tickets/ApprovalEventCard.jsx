@@ -72,7 +72,8 @@ function Block({ label, labelClass = 'text-muted-foreground/75', children }) {
 export default function ApprovalEventCard({ entry, meta, body }) {
   const structured = entry?.rawPayload?.parts || parseApprovalSentence(entry?.bodyText || entry?.content);
   const toneKey = structured?.verdict
-    || (/reject/i.test(meta?.label || '') ? 'rejected' : /clarif/i.test(meta?.label || '') ? 'clarification' : /approv/i.test(meta?.label || '') ? 'approved' : 'requested');
+    // "Not approved" contains "approv" — test the negative FIRST or it reads as approved.
+    || (/reject|not approved/i.test(meta?.label || '') ? 'rejected' : /clarif/i.test(meta?.label || '') ? 'clarification' : /approv/i.test(meta?.label || '') ? 'approved' : 'requested');
   const tone = TONES[toneKey] || TONES.requested;
   const photo = useRequesterPhoto(structured ? entry?.actorEmail : null);
   const when = (
@@ -99,7 +100,7 @@ export default function ApprovalEventCard({ entry, meta, body }) {
   }
 
   const verdictWords = structured.verdict === 'rejected'
-    ? 'Rejected'
+    ? 'Not approved'
     : structured.condition ? 'Approved with a condition' : 'Approved';
   const askedBy = structured.requestedByName || prettyFromEmail(structured.requestedBy) || 'the agent';
   return (

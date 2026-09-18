@@ -173,7 +173,9 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
   const decidedInApp = approval?.decidedVia === 'app' && !decidedByYou;
 
   if (status === 'approved' || status === 'rejected') {
-    const verb = status === 'approved' ? 'approved' : 'rejected';
+    // Active ("You did not approve this") and passive ("Not approved by …") read differently.
+    const verb = status === 'approved' ? 'approved' : 'did not approve';
+    const passive = status === 'approved' ? 'Approved' : 'Not approved';
     tone = status === 'approved'
       ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:border-emerald-500/25'
       : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-500/10 dark:text-red-100 dark:border-red-500/25';
@@ -182,7 +184,7 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
       : 'bg-red-200/70 text-red-800 dark:bg-red-500/25 dark:text-red-100';
     Icon = status === 'approved' ? CheckCircle2 : XCircle;
     title = decidedInApp
-      ? `${verb.charAt(0).toUpperCase() + verb.slice(1)} by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''} in the app`
+      ? `${passive} by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''} in the app`
       : `You ${verb} this${when ? ` on ${when}` : ''}`;
     title = approval.conditionNote && status === 'approved' ? title.replace(/^You approved this/, 'You approved this with a condition').replace(/^Approved by/, 'Approved with a condition by') : title;
     body = (approval.decisionNoteHtml || approval.decisionNote || approval.conditionNote)

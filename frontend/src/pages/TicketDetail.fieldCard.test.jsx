@@ -250,7 +250,7 @@ describe('TicketDetail field cards & structured approval dispatch', () => {
     renderPage();
     // A body that is not the verdict sentence keeps the quiet one-paragraph form.
     const rejected = (await screen.findByText('Manager declined the hardware request')).closest('li');
-    expect(within(rejected).getByText('Approval · Rejected')).toBeInTheDocument();
+    expect(within(rejected).getByText('Approval · Not approved')).toBeInTheDocument();
   });
 
   test('legacy approval notes still style through the regex fallback', async () => {
