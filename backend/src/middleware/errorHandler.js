@@ -1,6 +1,6 @@
 import logger from '../utils/logger.js';
 import { formatErrorResponse, isOperationalError, isDatabaseConnectivityError, DatabaseUnavailableError } from '../utils/errors.js';
-import { NotFoundError } from '../utils/errors.js';
+import { AppError, NotFoundError } from '../utils/errors.js';
 
 /**
  * Global error handling middleware
@@ -16,6 +16,26 @@ export function errorHandler(err, req, res, _next) {
       path: req.path, method: req.method, code: err?.originalError?.code || err?.code || null,
     });
     err = new DatabaseUnavailableError(err);
+  }
+
+  // Upload limits are the sender's problem, not a crash (18 Sep 2026: a Field
+  // Equipment agent pasted an e-mail with embedded pictures into a note, the
+  // body blew multer's 1 MB field limit, and they got a raw 500 "Field value
+  // too long" plus a "consider restarting" line in the log — twice — and gave up).
+  if (err?.name === 'MulterError') {
+    const messages = {
+      LIMIT_FIELD_VALUE: 'That message is too large to send. Pictures pasted into the text make it huge — attach them as files instead, then try again.',
+      LIMIT_FILE_SIZE: 'One of the attached files is too large.',
+      LIMIT_FILE_COUNT: 'Too many files attached at once.',
+      LIMIT_UNEXPECTED_FILE: 'Too many files attached at once.',
+    };
+    // An AppError, so isOperationalError() recognises it and nobody is told to restart the process.
+    const friendly = new AppError(
+      messages[err.code] || 'That upload could not be accepted.',
+      err.code === 'LIMIT_FIELD_VALUE' || err.code === 'LIMIT_FILE_SIZE' ? 413 : 400,
+    );
+    friendly.code = String(err.code || 'upload_rejected').toLowerCase();
+    err = friendly;
   }
 
   // Determine status code

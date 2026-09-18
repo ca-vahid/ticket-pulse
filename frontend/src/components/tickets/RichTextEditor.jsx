@@ -98,6 +98,42 @@ export function sanitizeRichHtml(html) {
  *  - every clipboard-born <table> is stamped `tp-data-table`, the tp-*
  *    class the sanitizer keeps and `.tp-rich-body` styles at render time.
  */
+/**
+ * Pictures that arrive INSIDE pasted HTML (18 Sep 2026). A screenshot on the
+ * clipboard is a file and already becomes an attachment, but copying from an
+ * Outlook e-mail or a Word document puts `<img src="data:image/…;base64,…">`
+ * in the markup instead — no file item at all. Those survived the paste as
+ * inline data and turned a two-line note into a megabyte of HTML: past the
+ * server's 200 000-character body limit, or past the 1 MB upload field limit.
+ * A Field Equipment agent hit both in one minute and gave up.
+ *
+ * Pull each embedded picture out and leave a `[[TPIMG:n]]` token where it was.
+ * The token is plain text, so it survives sanitising; the paste handler then
+ * swaps it for the staged attachment's name, exactly as a pasted file gets.
+ */
+const INLINE_IMAGE_RE = /<img\b[^>]*?\bsrc\s*=\s*(["'])(data:image\/(png|jpe?g|gif|webp|bmp);base64,([A-Za-z0-9+/=\s]+))\1[^>]*>/gi;
+// With no host to stage attachments, a small picture may stay inline; a large one is named, not kept.
+export const INLINE_IMAGE_KEEP_BYTES = 60 * 1024;
+
+export function extractInlineImages(html) {
+  const images = [];
+  const out = String(html || '').replace(INLINE_IMAGE_RE, (_m, _q, dataUri, ext, b64) => {
+    const clean = b64.replace(/\s+/g, '');
+    const type = ext.toLowerCase().startsWith('jp') ? 'jpeg' : ext.toLowerCase();
+    images.push({ mime: `image/${type}`, base64: clean, dataUri: `data:image/${type};base64,${clean}`, ext: type === 'jpeg' ? 'jpg' : type });
+    return `[[TPIMG:${images.length - 1}]]`;
+  });
+  return { html: out, images };
+}
+
+/** base64 → File, so an embedded picture stages through the same path as a pasted screenshot. */
+export function inlineImageToFile(image, index = 0) {
+  const bin = atob(image.base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], `pasted-image-${index + 1}.${image.ext}`, { type: image.mime });
+}
+
 export function cleanPastedHtml(html) {
   let out = String(html || '');
   // Excel guards its <style> content in legacy comment markers
@@ -334,7 +370,28 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             }
             // Otherwise paste as sanitized content, not raw clipboard markup.
             e.preventDefault();
-            const insert = htmlData ? sanitizeRichHtml(cleanPastedHtml(htmlData)) : textToHtml(textData);
+            let insert;
+            if (htmlData) {
+              // Embedded pictures leave the markup and become attachments.
+              const { html: withoutImages, images: embedded } = extractInlineImages(cleanPastedHtml(htmlData));
+              insert = sanitizeRichHtml(withoutImages);
+              embedded.forEach((image, i) => {
+                let replacement;
+                const label = onImagePaste ? onImagePaste(inlineImageToFile(image, i)) : null;
+                if (label) {
+                  const esc = document.createElement('div');
+                  esc.textContent = label;
+                  replacement = `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`;
+                } else if (!onImagePaste && image.base64.length * 0.75 <= INLINE_IMAGE_KEEP_BYTES) {
+                  replacement = `<img src="${image.dataUri}" alt="">`;
+                } else {
+                  replacement = onImagePaste ? '' : '&nbsp;<i>[Picture removed &mdash; attach it as a file]</i>&nbsp;';
+                }
+                insert = insert.replace(`[[TPIMG:${i}]]`, replacement);
+              });
+            } else {
+              insert = textToHtml(textData);
+            }
             document.execCommand('insertHTML', false, insert);
             emit();
           }}

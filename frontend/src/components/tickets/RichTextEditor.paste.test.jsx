@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import RichTextEditor, { cleanPastedHtml, isRichContent, sanitizeRichHtml } from './RichTextEditor';
+import RichTextEditor, { cleanPastedHtml, extractInlineImages, inlineImageToFile, isRichContent, sanitizeRichHtml } from './RichTextEditor';
 import { SafeHtml } from './ticketUi';
 
 afterEach(() => {
@@ -255,3 +255,75 @@ describe('rendered note path (SafeHtml integration)', () => {
     expect(table.querySelector('td').getAttribute('style')).toMatch(/border: ?1px solid #000/);
   });
 });
+
+/**
+ * Hourly review, 18 Sep 2026 — copying from an Outlook e-mail puts pictures INSIDE
+ * the HTML as data: URIs, with no file on the clipboard. They stayed inline and
+ * turned a short note into a megabyte of markup; a Field Equipment agent hit the
+ * server's size limits twice and gave up. Embedded pictures now leave the markup
+ * and stage as attachments, the same as a pasted screenshot.
+ */
+const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const OUTLOOK_HTML = `<p>See the damage below.</p><img width="600" src="data:image/png;base64,${PIXEL}" alt="photo"><p>Thanks</p>`;
+
+describe('extractInlineImages', () => {
+  test('pulls an embedded picture out and leaves a token where it was', () => {
+    const { html, images } = extractInlineImages(OUTLOOK_HTML);
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({ mime: 'image/png', ext: 'png', base64: PIXEL });
+    expect(html).toBe('<p>See the damage below.</p>[[TPIMG:0]]<p>Thanks</p>');
+    expect(html).not.toContain('data:image');
+  });
+
+  test('several pictures, single quotes, jpeg and wrapped base64', () => {
+    const wrapped = `${PIXEL.slice(0, 20)}
+ ${PIXEL.slice(20)}`;
+    const { html, images } = extractInlineImages(`<img src='data:image/jpeg;base64,${wrapped}'><b>x</b><img src="data:image/gif;base64,${PIXEL}">`);
+    expect(images.map((i) => i.ext)).toEqual(['jpg', 'gif']);
+    expect(images[0].base64).toBe(PIXEL); // whitespace inside the payload is removed
+    expect(html).toBe('[[TPIMG:0]]<b>x</b>[[TPIMG:1]]');
+  });
+
+  test('ordinary linked images and plain markup are left alone', () => {
+    const plain = '<p>hi</p><img src="https://example.com/a.png">';
+    expect(extractInlineImages(plain)).toEqual({ html: plain, images: [] });
+  });
+
+  test('inlineImageToFile builds a real image file', () => {
+    const { images } = extractInlineImages(OUTLOOK_HTML);
+    const file = inlineImageToFile(images[0], 0);
+    expect(file.name).toBe('pasted-image-1.png');
+    expect(file.type).toBe('image/png');
+    expect(file.size).toBeGreaterThan(0);
+  });
+});
+
+describe('pasting HTML that carries embedded pictures', () => {
+  function pasteHtml(props) {
+    const inserted = [];
+    document.execCommand = vi.fn((cmd, _ui, value) => { if (cmd === 'insertHTML') inserted.push(value); return true; });
+    render(<RichTextEditor value="" onChange={() => {}} ariaLabel="Note body" {...props} />);
+    fireEvent.paste(screen.getByLabelText('Note body'), {
+      clipboardData: { items: [], getData: (t) => (t === 'text/html' ? OUTLOOK_HTML : 'See the damage below.') },
+    });
+    return inserted.join('');
+  }
+
+  test('with a host that stages attachments: the picture becomes a file and a named marker', () => {
+    const onImagePaste = vi.fn(() => 'pasted-image-1.png');
+    const html = pasteHtml({ onImagePaste });
+    expect(onImagePaste).toHaveBeenCalledTimes(1);
+    expect(onImagePaste.mock.calls[0][0]).toBeInstanceOf(File);
+    expect(html).toContain('See the damage below.');
+    expect(html).toContain('[Image:');
+    expect(html).not.toContain('data:image');
+    expect(html).not.toContain('TPIMG');
+  });
+
+  test('with no host, a small picture may stay inline rather than vanish', () => {
+    const html = pasteHtml({});
+    expect(html).toContain('data:image/png;base64,');
+    expect(html).not.toContain('TPIMG');
+  });
+});
+
