@@ -4494,8 +4494,29 @@ class TicketService {
    * "On <date>, <name> wrote:" block for the last inbound public entry on the
    * ticket (RL-8) — sanitized HTML capped at ~20 KB, plus a `> ` quoted text
    * twin. Null when the ticket has no inbound mail yet.
+   *
+   * TP-1285 (18 Sep 2026), two rules on top of "the conversation so far":
+   *  - A quoted message that says the same thing as the reply being sent, or
+   *    as a newer quoted message, is dropped. An agent who asks a question in
+   *    FreshService and then again in Ticket Pulse must not mail the requester
+   *    the same paragraph twice, one above the other.
+   *  - The ticket's own description is ALWAYS the last block — it is what the
+   *    whole thread is about — unless the thread already opens with it (a
+   *    mail-born ticket's `original_email` entry IS the description). It used
+   *    to appear only when the thread had no public message at all, so a
+   *    single earlier reply was enough to lose it.
+   * `reply` is the message being sent: { text, authorName, authorEmail }.
    */
-  async _lastInboundQuote(ticketId, excludeEntryId = null) {
+  async _lastInboundQuote(ticketId, excludeEntryId = null, { reply = null } = {}) {
+    // An unknown zone name must cost the zone, never the e-mail.
+    const formatQuoteDate = (value, timeZone) => {
+      const options = { dateStyle: 'medium', timeStyle: 'short' };
+      try {
+        return new Date(value).toLocaleString('en-CA', timeZone ? { ...options, timeZone } : options);
+      } catch {
+        return new Date(value).toLocaleString('en-CA', options);
+      }
+    };
     const escapeHtml = (value) => String(value ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -4529,33 +4550,92 @@ class TicketService {
     });
     // Belt and braces: never trust the query alone with this one.
     let quotable = rows.filter((r) => r.isPrivate === false);
+
+    // ── Same message twice (TP-1285) ─────────────────────────────────────
+    const normText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const rowText = (row) => normText(row.bodyText || row.content || stripHtml(row.bodyHtml || ''));
+    const authorKey = (name, email) => {
+      const bare = String(email || '').match(/[^\s<>"]+@[^\s<>"]+/);
+      return { name: normText(name), email: bare ? bare[0].toLowerCase() : '' };
+    };
+    const sameAuthor = (a, b) => Boolean((a.name && a.name === b.name) || (a.email && a.email === b.email));
+    // Only a real paragraph can be a repeat: two separate "Thank you" lines are
+    // two messages. Equal text is a repeat whoever sent it; one text CONTAINING
+    // the other is a repeat only from the same author — a greeting line or a
+    // signature wrapped round the same question.
+    const REPEAT_MIN_CHARS = 40;
+    const saysTheSame = (aText, aAuthor, bText, bAuthor) => {
+      const [shorter, longer] = aText.length <= bText.length ? [aText, bText] : [bText, aText];
+      if (shorter.length < REPEAT_MIN_CHARS) return false;
+      if (shorter === longer) return true;
+      return sameAuthor(aAuthor, bAuthor) && longer.includes(shorter);
+    };
+    const kept = [];
+    const seen = reply?.text
+      ? [{ text: normText(reply.text), author: authorKey(reply.authorName, reply.authorEmail) }]
+      : [];
+    for (const row of quotable) {
+      const text = rowText(row);
+      const author = authorKey(row.actorName, row.actorEmail);
+      if (seen.some((prior) => saysTheSame(text, author, prior.text, prior.author))) continue;
+      seen.push({ text, author });
+      kept.push(row);
+    }
+    quotable = kept;
+
+    // ── The original request ─────────────────────────────────────────────
+    // Looked up for every reply now, not only when nothing else is quotable —
+    // except on a mail-born ticket, whose first entry IS the description.
+    let opensWithIt = quotable.some((r) => r.eventType === 'original_email');
+    if (!opensWithIt && quotable.length > 0) {
+      try {
+        opensWithIt = (await prisma.ticketThreadEntry.count({
+          where: { ticketId, isPrivate: false, eventType: 'original_email' },
+        })) > 0;
+      } catch (err) {
+        logger.debug(`original_email check skipped for ticket ${ticketId}: ${err.message}`);
+      }
+    }
+    let originalRequest = null;
+    // Quoted dates are read by a person in the workspace's timezone. The server
+    // runs in UTC, so TP-1285's "2:38 p.m." was really 7:38 a.m. in Vancouver.
+    let quoteTimeZone = null;
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          description: true, descriptionText: true, createdAt: true,
+          requester: { select: { name: true, email: true } },
+          workspace: { select: { defaultTimezone: true } },
+        },
+      });
+      quoteTimeZone = ticket?.workspace?.defaultTimezone || null;
+      if (!opensWithIt && ticket && (ticket.description || ticket.descriptionText)) {
+        originalRequest = {
+          bodyHtml: ticket.description || null,
+          bodyText: ticket.descriptionText || null,
+          content: null,
+          actorName: ticket.requester?.name || null,
+          actorEmail: ticket.requester?.email || null,
+          occurredAt: ticket.createdAt,
+          isPrivate: false,
+          eventType: 'original_request',
+        };
+      }
+    } catch (err) {
+      logger.debug(`Description quote lookup skipped for ticket ${ticketId}: ${err.message}`);
+    }
+    if (originalRequest) {
+      // …and never when a quoted message (or the reply itself) already says it.
+      const descText = rowText(originalRequest);
+      const descAuthor = authorKey(originalRequest.actorName, originalRequest.actorEmail);
+      if (seen.some((prior) => saysTheSame(descText, descAuthor, prior.text, prior.author))) originalRequest = null;
+    }
     // QA 09-15 #7 (TP-1506): a ticket born from Power Apps / the API / the
     // create form has no inbound e-mail, so the requester got the agent's one
     // line with no context. Quote the ticket's own description as the original
     // request instead — same sanitiser, same caps, attributed to the requester.
-    if (quotable.length === 0) {
-      let ticket = null;
-      try {
-        ticket = await prisma.ticket.findUnique({
-          where: { id: ticketId },
-          select: { description: true, descriptionText: true, createdAt: true, requester: { select: { name: true, email: true } } },
-        });
-      } catch (err) {
-        logger.debug(`Description quote lookup skipped for ticket ${ticketId}: ${err.message}`);
-        return null;
-      }
-      if (!ticket || !(ticket.description || ticket.descriptionText)) return null;
-      quotable = [{
-        bodyHtml: ticket.description || null,
-        bodyText: ticket.descriptionText || null,
-        content: null,
-        actorName: ticket.requester?.name || null,
-        actorEmail: ticket.requester?.email || null,
-        occurredAt: ticket.createdAt,
-        isPrivate: false,
-        eventType: 'original_request',
-      }];
-    }
+    if (quotable.length === 0 && !originalRequest) return null;
 
     const truncated = quotable.length > MAX_QUOTED_MESSAGES;
     const messages = quotable.slice(0, MAX_QUOTED_MESSAGES);
@@ -4563,7 +4643,9 @@ class TicketService {
     const blocks = [];
     const textBlocks = [];
     let used = 0;
-    for (const row of messages) {
+    // `capped:false` is the original request: it sits below the omitted-messages
+    // marker and is never itself crowded out by the total cap.
+    const renderRow = (row, { capped = true } = {}) => {
       // FR 09-11 #3 (review): the same double-spacing the conversation had.
       // Forwarded originals arrive text-only with a blank line after every
       // line; one <br/> per newline reproduced each blank line in the email
@@ -4571,15 +4653,15 @@ class TicketService {
       // and a single newline as a line break — mail-client behaviour.
       const rawHtml = row.bodyHtml
         || (row.bodyText || row.content ? textToHtml(row.bodyText || row.content) : '');
-      if (!rawHtml.trim()) continue;
+      if (!rawHtml.trim()) return true;
       let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
       if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
-      if (used + quotedHtml.length > TOTAL_CAP) { blocks.push(OMITTED_MARKER_HTML); textBlocks.push(OMITTED_MARKER_TEXT); break; }
+      if (capped && used + quotedHtml.length > TOTAL_CAP) { blocks.push(OMITTED_MARKER_HTML); textBlocks.push(OMITTED_MARKER_TEXT); return false; }
       used += quotedHtml.length;
 
       const who = escapeHtml(row.actorName || row.actorEmail || 'the requester');
       const when = row.occurredAt
-        ? new Date(row.occurredAt).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })
+        ? formatQuoteDate(row.occurredAt, quoteTimeZone)
         : '';
       const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
       blocks.push(
@@ -4589,12 +4671,17 @@ class TicketService {
       const plain = (row.bodyText || row.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
       textBlocks.push(`${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n`
         + plain.split(/\r?\n/).map((line) => `> ${line}`).join('\n'));
+      return true;
+    };
+    for (const row of messages) {
+      if (!renderRow(row)) break;
     }
-    if (blocks.length === 0) return null;
-    if (truncated && blocks[blocks.length - 1] !== OMITTED_MARKER_HTML) {
+    if (truncated && blocks.length > 0 && blocks[blocks.length - 1] !== OMITTED_MARKER_HTML) {
       blocks.push(OMITTED_MARKER_HTML);
       textBlocks.push(OMITTED_MARKER_TEXT);
     }
+    if (originalRequest) renderRow(originalRequest, { capped: false });
+    if (blocks.length === 0) return null;
 
     // gmail_quote gives Gmail its best chance of collapsing the history behind
     // "…"; Outlook shows it inline, which is the expected email convention.
@@ -4628,7 +4715,9 @@ class TicketService {
     // lanes — the Graph createReply draft's own quote is overwritten by our
     // PATCH, so this is the only quote either lane carries.
     try {
-      const quote = await this._lastInboundQuote(ticket.id, entry.id);
+      const quote = await this._lastInboundQuote(ticket.id, entry.id, {
+        reply: { text: entry.bodyText || stripHtml(entry.bodyHtml || ''), authorName: entry.actorName, authorEmail: entry.actorEmail },
+      });
       if (quote) {
         html = `${html}${quote.html}`;
         text = `${text}${quote.text}`;

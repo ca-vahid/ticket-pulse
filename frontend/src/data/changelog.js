@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.43-preview';
+export const APP_VERSION = '3.9.44-preview';
 
 export const changelog = [
+  {
+    version: '3.9.44-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Reply e-mails always include the ticket description</strong> — it now closes every reply e-mail as the original request. Before, a single earlier reply on the ticket was enough to leave it out.' },
+      { type: 'fixed', html: '<strong>The same message is no longer quoted twice</strong> — when someone sends the same text again (for example once from FreshService and once from Ticket Pulse), the earlier copy is left out of the quoted conversation.' },
+      { type: 'fixed', html: '<strong>Quoted dates use your workspace’s time zone</strong> — “On Sep 17, 7:38 a.m., Anton wrote” instead of the server’s clock.' },
+    ],
+  },
   {
     version: '3.9.43-preview',
     date: 'September 18, 2026',
