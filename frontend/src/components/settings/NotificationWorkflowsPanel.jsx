@@ -87,6 +87,7 @@ const EVENT_LABELS = {
   'approval.decided': 'Approval decided',
   'approval.clarification_requested': 'Approval clarification requested',
   'ticket.aging': 'Ticket unresolved for N hours',
+  'ticket.unassigned_for': 'Ticket unassigned for N hours',
   'ticket.sla_pre_breach': 'SLA about to breach',
   'ticket.sla_breach': 'SLA breached',
   'schedule.time': 'On a schedule (digest)',
@@ -129,6 +130,8 @@ export const TRIGGER_PICKER_GROUPS = [
     label: 'Time-based',
     triggers: [
       { value: 'ticket.aging', hint: 'Unresolved for N hours (threshold on the trigger node)' },
+      // FR 09-17 #2 — "nobody picked this up".
+      { value: 'ticket.unassigned_for', hint: 'Still has nobody assigned N hours after it arrived (or after it was released)' },
       { value: 'ticket.sla_pre_breach', hint: 'SLA due date approaching' },
       { value: 'ticket.sla_breach', hint: 'SLA due date passed' },
       { value: 'schedule.time', hint: 'Daily/weekly digest slot (no ticket)' },
@@ -9432,6 +9435,24 @@ export default function NotificationWorkflowsPanel({
                 />
               </label>
               <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">Open/Pending tickets older than this fire once per ticket (checked every few minutes).</p>
+            </div>
+          )}
+          {triggerType === 'ticket.unassigned_for' && (
+            <div>
+              <label className="text-xs font-medium uppercase text-muted-foreground">
+                Fire when unassigned for (hours)
+                <input
+                  type="number"
+                  min="1"
+                  value={selectedNode.data?.unassignedHours ?? 4}
+                  onChange={(event) => updateNodeData({ unassignedHours: Math.max(1, Number(event.target.value) || 4) })}
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
+                />
+              </label>
+              <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">
+                Open tickets with nobody assigned for this long fire once (checked every few minutes). The clock starts when the
+                ticket arrived, or when it was last released back to the queue. Assigning it stops the trigger.
+              </p>
             </div>
           )}
           {triggerType === 'ticket.sla_pre_breach' && (

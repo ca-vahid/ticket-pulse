@@ -14,6 +14,7 @@ import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
 import MailboxConnectionsPanel from '../components/settings/MailboxConnectionsPanel';
+import SenderIdentityCard from '../components/settings/SenderIdentityCard';
 import MembersPanel from '../components/settings/MembersPanel';
 import SignaturesPanel from '../components/settings/SignaturesPanel';
 import GroupsPanel from '../components/settings/GroupsPanel';
@@ -1288,9 +1289,15 @@ export default function Settings() {
                   </div>
                 )}
 
-                {/* Ticket Mailboxes (native ticketing email channel) */}
+                {/* Ticket Mailboxes (native ticketing email channel). The
+                    sender identity is mounted here as well as in Email
+                    Branding: QA 09-17 #7 looked for "E-mail identity" in
+                    Settings and found nothing, because the only door to it was
+                    three levels inside Notification Workflows — while the
+                    natural place to look is where you connect the mailbox. */}
                 {activeSectionId === 'ticket-mailboxes' && (
-                  <div className="p-6">
+                  <div className="p-6 space-y-5">
+                    <SenderIdentityCard />
                     <MailboxConnectionsPanel />
                   </div>
                 )}

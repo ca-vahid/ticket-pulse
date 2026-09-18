@@ -16,19 +16,29 @@ import businessCalendarService from './businessCalendarService.js';
  * (FS allows them) always use the fallback.
  *
  * Calendar-aware clocks (Phase SLA, QA 08-17 #9): when the workspace opts in
- * (Workspace.slaCalendarAware) the clocks count BUSINESS minutes — weekends,
- * disabled days and holidays don't burn SLA time. Per-policy calendarMode
- * overrides in either direction ('calendar' forces it on, 'always_on' is the
- * 24/7 escape hatch). The calendar is baked into the STORED dueBy here at
- * write time, so every downstream `dueBy < now` comparison stays unchanged.
+ * (Workspace.slaCalendarAware) weekends, disabled days and holidays don't
+ * burn SLA time. Workspace.slaCalendarStyle picks WHAT is skipped (QA 09-17
+ * #1): 'business_hours' counts only the hours inside the business-hours
+ * window, 'business_days' keeps a 24-hour clock and skips non-working days
+ * whole (Friday 2 pm + 24 h = Monday 2 pm). Per-policy calendarMode overrides
+ * in either direction ('calendar' / 'business_days' force one on, 'always_on'
+ * is the 24/7 escape hatch). The calendar is baked into the STORED dueBy here
+ * at write time, so every downstream `dueBy < now` comparison stays unchanged.
  */
-const CALENDAR_MODES = ['inherit', 'calendar', 'always_on'];
+const CALENDAR_MODES = ['inherit', 'calendar', 'business_days', 'always_on'];
+// Workspace-level meaning of "calendar-aware" (QA 09-17 #1). 'business_hours'
+// is the original behaviour (only the hours inside the business-hours window
+// burn SLA time); 'business_days' keeps a 24-hour clock but skips non-working
+// days whole, which is what teams on a "1 business day" target expect:
+// Friday 2 pm + 24 h = Monday 2 pm, not Wednesday morning.
+export const CALENDAR_STYLES = ['business_hours', 'business_days'];
+const DEFAULT_CALENDAR_STYLE = 'business_hours';
 const FLAG_CACHE_TTL_MS = 60 * 1000;
 
 class SlaPolicyService {
   constructor() {
-    // Tiny TTL cache for the per-workspace calendar flag — dueDatesFor runs
-    // on every TP-born create and the flag changes only via the Settings
+    // Tiny TTL cache for the per-workspace calendar flag + style — dueDatesFor
+    // runs on every TP-born create and both change only via the Settings
     // toggle (which clears this cache).
     this._calendarFlagCache = new Map(); // workspaceId -> { value, expiresAt }
   }
@@ -37,19 +47,29 @@ class SlaPolicyService {
     this._calendarFlagCache.clear();
   }
 
-  async _workspaceCalendarAware(workspaceId) {
+  /** { aware, style } for a workspace — one cached read for both. */
+  async _workspaceCalendarSettings(workspaceId) {
     const cached = this._calendarFlagCache.get(workspaceId);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    let value = false;
+    let value = { aware: false, style: DEFAULT_CALENDAR_STYLE };
     try {
       const ws = await prisma.workspace.findUnique({
         where: { id: workspaceId },
-        select: { slaCalendarAware: true },
+        select: { slaCalendarAware: true, slaCalendarStyle: true },
       });
-      value = ws?.slaCalendarAware === true;
+      value = {
+        aware: ws?.slaCalendarAware === true,
+        // An unmigrated column reads back undefined — keep the old meaning.
+        style: CALENDAR_STYLES.includes(ws?.slaCalendarStyle) ? ws.slaCalendarStyle : DEFAULT_CALENDAR_STYLE,
+      };
     } catch { /* missing column / transient DB hiccup → wall-clock behavior */ }
     this._calendarFlagCache.set(workspaceId, { value, expiresAt: Date.now() + FLAG_CACHE_TTL_MS });
     return value;
+  }
+
+  /** Back-compat shim — the boolean half of _workspaceCalendarSettings. */
+  async _workspaceCalendarAware(workspaceId) {
+    return (await this._workspaceCalendarSettings(workspaceId)).aware;
   }
   async list(workspaceId) {
     return prisma.slaPolicy.findMany({
@@ -137,20 +157,28 @@ class SlaPolicyService {
     const wallClockAt = (minutes) => (minutes ? new Date(from.getTime() + minutes * 60 * 1000) : null);
 
     // Effective mode: per-policy override wins; 'inherit' follows the
-    // workspace flag (cached lookup — this runs on every TP-born create).
+    // workspace flag AND its style (cached lookup — this runs on every
+    // TP-born create).
+    const workspaceCalendar = await this._workspaceCalendarSettings(workspaceId);
+    const inheritedMode = workspaceCalendar.aware
+      ? (workspaceCalendar.style === 'business_days' ? 'business_days' : 'calendar')
+      : 'always_on';
     const mode = policy.calendarMode && policy.calendarMode !== 'inherit'
       ? policy.calendarMode
-      : (await this._workspaceCalendarAware(workspaceId) ? 'calendar' : 'always_on');
-    if (mode !== 'calendar') {
+      : inheritedMode;
+    if (mode !== 'calendar' && mode !== 'business_days') {
       return { frDueBy: wallClockAt(policy.firstResponseMinutes), dueBy: wallClockAt(policy.resolveMinutes) };
     }
 
     try {
       // One calendar load covers both targets. loadCalendar returns null for
-      // workspaces with zero enabled days → addBusinessMinutes wall-clocks.
+      // workspaces with zero enabled days → the walkers wall-clock.
       const calendar = await businessCalendarService.loadCalendar(workspaceId);
+      const walk = mode === 'business_days'
+        ? businessCalendarService.addBusinessDayMinutes.bind(businessCalendarService)
+        : businessCalendarService.addBusinessMinutes.bind(businessCalendarService);
       const at = async (minutes) => (minutes
-        ? businessCalendarService.addBusinessMinutes(from, minutes, { workspaceId, calendar })
+        ? walk(from, minutes, { workspaceId, calendar })
         : null);
       return { frDueBy: await at(policy.firstResponseMinutes), dueBy: await at(policy.resolveMinutes) };
     } catch {

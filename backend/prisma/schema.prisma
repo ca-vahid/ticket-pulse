@@ -77,6 +77,14 @@ model Workspace {
   // override in either direction. Baked into the stored dueBy at write time —
   // downstream `dueBy < now` comparisons never change.
   slaCalendarAware        Boolean  @default(false) @map("sla_calendar_aware")
+  // What "calendar-aware" means for this workspace (QA 09-17 #1):
+  //  • 'business_hours' — only the hours inside the business-hours window burn
+  //    SLA time (the original behaviour).
+  //  • 'business_days'  — a 24-hour clock that skips non-working days whole,
+  //    so a 1-business-day target taken Friday 2 pm is due Monday 2 pm.
+  // Ignored while slaCalendarAware is false. Per-policy SlaPolicy.calendarMode
+  // still overrides both directions.
+  slaCalendarStyle        String   @default("business_hours") @map("sla_calendar_style") @db.VarChar(20)
   // Internal/trusted email domains (lowercase, no @). A ticket whose requester
   // email is OUTSIDE this list is flagged External in the UI (QA 07-27 #4).
   // Empty list = flagging off for this workspace.
@@ -860,9 +868,11 @@ model SlaPolicy {
   ticketType           TicketTypeDefinition? @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
   firstResponseMinutes Int?                  @map("first_response_minutes")
   resolveMinutes       Int?                  @map("resolve_minutes")
-  // 'inherit' → follow Workspace.slaCalendarAware; 'calendar' → always count
-  // business minutes; 'always_on' → always wall-clock (the 24/7 escape hatch
-  // for Urgent / Major Incident clocks that must not pause over a weekend).
+  // 'inherit' → follow Workspace.slaCalendarAware + slaCalendarStyle;
+  // 'calendar' → always count business HOURS; 'business_days' → always count
+  // whole working DAYS on a 24-hour clock; 'always_on' → always wall-clock
+  // (the 24/7 escape hatch for Urgent / Major Incident clocks that must not
+  // pause over a weekend).
   calendarMode         String                @default("inherit") @map("calendar_mode") @db.VarChar(20)
   isActive             Boolean               @default(true) @map("is_active")
   updatedBy            String?               @map("updated_by") @db.VarChar(255)

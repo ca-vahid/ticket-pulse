@@ -539,7 +539,7 @@ export const settingsAPI = {
   }),
   // Calendar-aware SLA flag (weekends + holidays pause the clocks)
   getSlaCalendar: () => api.get('/settings/sla-calendar'),
-  updateSlaCalendar: (slaCalendarAware) => api.put('/settings/sla-calendar', { slaCalendarAware }),
+  updateSlaCalendar: (slaCalendarAware, slaCalendarStyle) => api.put('/settings/sla-calendar', { slaCalendarAware, ...(slaCalendarStyle ? { slaCalendarStyle } : {}) }),
   // API resubmission matching (Phase PA): externalRef custom-field bridge key + deprecated heuristic flag
   getApiResubmission: () => api.get('/settings/api-resubmission'),
   updateApiResubmission: (data) => api.put('/settings/api-resubmission', data),

@@ -764,6 +764,9 @@ router.delete(
   }),
 );
 
+// Workspace calendar styles for the SLA routes below (QA 09-17 #1).
+const CALENDAR_STYLES = ['business_hours', 'business_days'];
+
 // Calendar-aware SLA flag (Phase SLA, QA 08-17 #9): per-workspace opt-in that
 // makes SLA clocks count business minutes only (weekends + holidays pause).
 // Kept as a dedicated settings route rather than widening the global
@@ -778,9 +781,15 @@ router.get(
     const { default: prisma } = await import('../services/prisma.js');
     const ws = await prisma.workspace.findUnique({
       where: { id: req.workspaceId },
-      select: { slaCalendarAware: true },
+      select: { slaCalendarAware: true, slaCalendarStyle: true },
     });
-    res.json({ success: true, data: { slaCalendarAware: ws?.slaCalendarAware === true } });
+    res.json({
+      success: true,
+      data: {
+        slaCalendarAware: ws?.slaCalendarAware === true,
+        slaCalendarStyle: CALENDAR_STYLES.includes(ws?.slaCalendarStyle) ? ws.slaCalendarStyle : 'business_hours',
+      },
+    });
   }),
 );
 
@@ -791,16 +800,31 @@ router.put(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const enabled = req.body?.slaCalendarAware === true;
+    // Style is optional — a client that only flips the switch keeps the
+    // workspace's current style (QA 09-17 #1).
+    const style = req.body?.slaCalendarStyle;
+    if (style !== undefined && !CALENDAR_STYLES.includes(style)) {
+      throw new ValidationError(`slaCalendarStyle must be one of ${CALENDAR_STYLES.join(', ')}`);
+    }
     const { default: prisma } = await import('../services/prisma.js');
     const ws = await prisma.workspace.update({
       where: { id: req.workspaceId },
-      data: { slaCalendarAware: enabled },
-      select: { slaCalendarAware: true },
+      data: {
+        slaCalendarAware: enabled,
+        ...(style !== undefined ? { slaCalendarStyle: style } : {}),
+      },
+      select: { slaCalendarAware: true, slaCalendarStyle: true },
     });
     // dueDatesFor caches the flag (60s) — new tickets must see the change now.
     const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
     slaPolicyService.clearCalendarFlagCache();
-    res.json({ success: true, data: { slaCalendarAware: ws.slaCalendarAware === true } });
+    res.json({
+      success: true,
+      data: {
+        slaCalendarAware: ws.slaCalendarAware === true,
+        slaCalendarStyle: CALENDAR_STYLES.includes(ws?.slaCalendarStyle) ? ws.slaCalendarStyle : 'business_hours',
+      },
+    });
   }),
 );
 

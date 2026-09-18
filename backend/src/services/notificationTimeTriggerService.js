@@ -22,9 +22,10 @@ const TASK_REMINDER_GRACE_MINUTES = 60;
 const MAX_TASK_REMINDERS_PER_TICK = 200;
 
 /**
- * Time-based workflow triggers: ticket.aging / ticket.sla_pre_breach /
- * ticket.sla_breach. Event workflows fire when something HAPPENS; these fire
- * when something DOESN'T (nobody resolved the ticket, the SLA clock ran down).
+ * Time-based workflow triggers: ticket.aging / ticket.unassigned_for /
+ * ticket.sla_pre_breach / ticket.sla_breach. Event workflows fire when
+ * something HAPPENS; these fire when something DOESN'T (nobody picked the
+ * ticket up, nobody resolved it, the SLA clock ran down).
  *
  * Same start/stop worker pattern as mirrorService. Each tick scans candidate
  * tickets per enabled time-trigger workflow and dispatches through
@@ -276,6 +277,37 @@ class NotificationTimeTriggerService {
     }
   }
 
+  /**
+   * Stamp each candidate with `unassignedSince` and drop the ones that were
+   * released more recently than the threshold. ONE grouped query for the
+   * whole batch (<= MAX_TICKETS_PER_WORKFLOW_TICK ids), not one per ticket.
+   * A partial/absent activity table degrades to createdAt rather than
+   * silencing the trigger.
+   */
+  async _withUnassignedSince(tickets, cutoff) {
+    if (tickets.length === 0) return tickets;
+    let latestByTicket = new Map();
+    try {
+      const rows = await Promise.resolve().then(() => prisma.ticketActivity.groupBy({
+        by: ['ticketId'],
+        where: { ticketId: { in: tickets.map((t) => t.id) }, activityType: 'assigned' },
+        _max: { performedAt: true },
+      }));
+      latestByTicket = new Map((rows || []).map((r) => [r.ticketId, r._max?.performedAt]).filter(([, at]) => at));
+    } catch (err) {
+      logger.warn(`Unassigned-since lookup failed, falling back to createdAt (non-fatal): ${err.message}`);
+    }
+    const out = [];
+    for (const ticket of tickets) {
+      const released = latestByTicket.get(ticket.id);
+      const since = released && new Date(released) > new Date(ticket.createdAt)
+        ? new Date(released)
+        : new Date(ticket.createdAt);
+      if (since <= cutoff) out.push({ ...ticket, unassignedSince: since });
+    }
+    return out;
+  }
+
   _triggerConfig(workflow) {
     const nodes = workflow.publishedDefinition?.nodes || [];
     const trigger = nodes.find((n) => n.type === 'trigger');
@@ -289,12 +321,30 @@ class NotificationTimeTriggerService {
     let where;
     let stampFor;
     let extraFor;
+    let unassignedCutoff = null;
     if (workflow.triggerType === 'ticket.aging') {
       const agingHours = Math.max(1, Number(config.agingHours) || 24);
       const cutoff = new Date(now.getTime() - agingHours * 3600 * 1000);
       where = { createdAt: { lte: cutoff } };
       stampFor = (t) => `aging:${agingHours}h:${t.id}`;
       extraFor = (t) => ({ thresholdHours: agingHours, ticketAgeMs: now.getTime() - new Date(t.createdAt).getTime() });
+    } else if (workflow.triggerType === 'ticket.unassigned_for') {
+      // FR 09-17 #2 — "nobody picked this up". The clock starts when the
+      // ticket was last LEFT unassigned, which is the newest 'assigned'
+      // activity (ticketService._audit writes one with toTechId null when a
+      // ticket is released) and otherwise the creation time. Releasing a
+      // ticket therefore re-arms the trigger instead of replaying the
+      // original stamp.
+      const unassignedHours = Math.max(1, Number(config.unassignedHours) || 4);
+      const cutoff = new Date(now.getTime() - unassignedHours * 3600 * 1000);
+      where = { assignedTechId: null, createdAt: { lte: cutoff } };
+      unassignedCutoff = cutoff;
+      stampFor = (t) => `unassigned:${unassignedHours}h:${new Date(t.unassignedSince).toISOString()}`;
+      extraFor = (t) => ({
+        thresholdHours: unassignedHours,
+        unassignedSince: new Date(t.unassignedSince).toISOString(),
+        unassignedForMs: now.getTime() - new Date(t.unassignedSince).getTime(),
+      });
     } else if (workflow.triggerType === 'ticket.sla_pre_breach') {
       const preBreachMinutes = Math.max(5, Number(config.preBreachMinutes) || 60);
       const horizon = new Date(now.getTime() + preBreachMinutes * 60 * 1000);
@@ -313,12 +363,14 @@ class NotificationTimeTriggerService {
     // pause the clock, so pre-breach/breach nags must not chase tickets
     // waiting on the requester. The generic aging trigger keeps Open+Pending
     // bases (workflows legitimately target "pending too long" with it).
+    // Unassigned scans Open-base only for the same reason: a ticket parked on
+    // the requester is not waiting for someone to pick it up.
     const slaTrigger = workflow.triggerType !== 'ticket.aging';
     const scanStatuses = await statusService.statusNamesForBase(
       workflow.workspaceId,
       slaTrigger ? 'Open' : ['Open', 'Pending'],
     );
-    const tickets = await prisma.ticket.findMany({
+    let tickets = await prisma.ticket.findMany({
       where: {
         workspaceId: workflow.workspaceId,
         status: { in: scanStatuses },
@@ -329,6 +381,10 @@ class NotificationTimeTriggerService {
       orderBy: { id: 'asc' },
       take: MAX_TICKETS_PER_WORKFLOW_TICK,
     });
+
+    if (unassignedCutoff) {
+      tickets = await this._withUnassignedSince(tickets, unassignedCutoff);
+    }
 
     let dispatched = 0;
     for (const ticket of tickets) {

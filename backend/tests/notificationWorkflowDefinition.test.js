@@ -690,3 +690,39 @@ describe('ticket.fields_updated registry + defaults (TU-6)', () => {
     }
   });
 });
+
+/**
+ * FR 09-17 #2 — the unassigned trigger and its installable template. The
+ * template guard is deliberately over the WHOLE catalogue: the first draft of
+ * this one ran an edge out of send_email, which is terminal, and nothing
+ * would have caught it until an admin clicked Install.
+ */
+describe('ticket.unassigned_for registry (FR 09-17 #2)', () => {
+  test('is a registered event type AND a time-trigger type', async () => {
+    const m = await import('../src/services/notificationWorkflowDefinition.js');
+    expect(m.NOTIFICATION_EVENT_TYPES).toContain('ticket.unassigned_for');
+    expect(m.TIME_TRIGGER_EVENT_TYPES).toContain('ticket.unassigned_for');
+  });
+
+  test('ships an installable template on the new trigger', async () => {
+    const m = await import('../src/services/notificationWorkflowDefinition.js');
+    const template = m.WORKFLOW_TEMPLATES.find((t) => t.key === 'unassigned_chase');
+    expect(template).toBeDefined();
+    expect(template.triggerType).toBe('ticket.unassigned_for');
+    const nodes = template.build().nodes;
+    // The trigger carries a default threshold, and the e-mail keeps the
+    // ticket subject so it threads into the "Ticket received" chain.
+    expect(nodes.find((n) => n.type === 'trigger').data.unassignedHours).toBe(4);
+    expect(nodes.find((n) => n.type === 'template_render').data.subject).toBe('{{ ticket.subject }}');
+  });
+
+  test('every shipped template validates against its own trigger', async () => {
+    const m = await import('../src/services/notificationWorkflowDefinition.js');
+    const failures = [];
+    for (const template of m.WORKFLOW_TEMPLATES) {
+      const result = m.validateWorkflowDefinition(template.build(), { triggerType: template.triggerType });
+      if (result?.success === false) failures.push(`${template.key}: ${(result.errors || []).join('; ')}`);
+    }
+    expect(failures).toEqual([]);
+  });
+});

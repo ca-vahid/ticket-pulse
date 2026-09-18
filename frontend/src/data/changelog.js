@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.9.31-preview';
+export const APP_VERSION = '3.9.32-preview';
 
 export const changelog = [
+  {
+    version: '3.9.32-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>SLA clocks can skip whole weekends</strong> — “calendar-aware SLAs” used to mean one thing only: count business hours, so a one-day target taken Friday afternoon landed on Wednesday. Calendar-aware workspaces now choose between <strong>Business hours</strong> and <strong>Business days</strong>, where business days run a 24-hour clock that pauses over weekends and holidays — a ticket that arrives 2pm Friday is due 2pm Monday. Project Accounting asked for exactly this.' },
+      { type: 'improved', html: '<strong>SLA rows say which clock they use</strong> — the per-priority 24/7 badge is now a clock picker (Workspace default · Business hours · Business days · 24/7) that names what the workspace default resolves to, and the card warns when every row is set to 24/7 while the calendar toggle is on. A row set to 24/7 silently beat the workspace calendar before, which is how Project Accounting ran a month of weekend due dates.' },
+      { type: 'new', html: '<strong>Workflow trigger: ticket unassigned for N hours</strong> — fires once when an open ticket has had nobody assigned for the hours you set, and again if it is assigned and then released back to the queue. A ready-made “Nobody picked this up” workflow ships with it: an internal note plus a note to the requester that threads into their “Ticket received” e-mail chain.' },
+      { type: 'improved', html: '<strong>Columns drag by the whole row</strong> — in the Columns menu, drag anywhere on a row instead of hitting the six dots. The grip keeps its Alt+↑/↓ keyboard handle.' },
+      { type: 'improved', html: '<strong>Sender identity is where you set up mail</strong> — the card that sets the workspace From-name now also sits in Settings → Ticket Mailboxes, not only three levels inside Notification Workflows.' },
+      { type: 'improved', html: '<strong>Receive-only mailboxes say what that costs</strong> — a mailbox connected in Ingest-only mode now explains that replies still go out from its address but through SendGrid, so nothing lands in its Sent Items.' },
+    ],
+  },
   {
     version: '3.9.31-preview',
     date: 'September 17, 2026',

@@ -433,6 +433,12 @@ export default function MailboxConnectionsPanel() {
                     {ingestLane(mb).label}
                   </span>
                 )}
+                {mb.isEnabled && mb.mode === 'ingest' && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-300 mt-0.5" data-testid={`mailbox-ingest-note-${mb.id}`}>
+                    Receive only. Replies still leave from this address, but through SendGrid — so there is no copy in this
+                    mailbox&apos;s Sent Items. Switch to <span className="font-semibold">Ingest + send</span> to send through the mailbox itself.
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground/75">
                   {MODE_LABEL[mb.mode] || mb.mode}
                   {routeLabel(mb) ? <span className="text-sky-600 dark:text-sky-300"> · routes to {routeLabel(mb)}</span> : null}

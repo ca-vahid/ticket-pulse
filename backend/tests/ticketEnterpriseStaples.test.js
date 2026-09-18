@@ -80,6 +80,9 @@ describe('SLA policies', () => {
   test('upsert rejects unknown calendarMode values', async () => {
     await expect(slaPolicyService.upsert(1, { priority: 2, resolveMinutes: 60, calendarMode: '24-7' }))
       .rejects.toThrow(/calendarMode/);
+    // …and names business_days among the accepted ones (QA 09-17 #1).
+    await expect(slaPolicyService.upsert(1, { priority: 2, resolveMinutes: 60, calendarMode: '24-7' }))
+      .rejects.toThrow(/business_days/);
   });
 });
 
@@ -125,6 +128,46 @@ describe('SLA policies — calendar-aware mode matrix', () => {
     prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('inherit'));
     // businessHour.findMany stays [] from beforeEach.
     expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(WALL);
+  });
+
+  // QA 09-17 #1: the workspace's calendar STYLE. Friday 16:00 PDT + 120m on a
+  // business-DAY clock stays on Friday (18:00 PDT) because evenings count;
+  // the same 120m on the business-HOURS clock spills to Monday.
+  test('inherit + workspace ON + business_days style → whole-day clock', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true, slaCalendarStyle: 'business_days' });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('inherit'));
+    withCalendarRows();
+    expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(WALL);
+  });
+
+  test('business_days across a weekend: Friday 2pm + 24h lands Monday 2pm', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true, slaCalendarStyle: 'business_days' });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue({ firstResponseMinutes: null, resolveMinutes: 1440, calendarMode: 'inherit' });
+    withCalendarRows();
+    const from = new Date('2026-08-21T21:00:00.000Z'); // Fri 14:00 PDT
+    expect((await slaPolicyService.dueDatesFor(1, 3, from)).dueBy.toISOString()).toBe('2026-08-24T21:00:00.000Z');
+  });
+
+  test('per-policy business_days wins even while the workspace flag is off', async () => {
+    prismaMock.slaPolicy.findFirst.mockResolvedValue({ firstResponseMinutes: null, resolveMinutes: 1440, calendarMode: 'business_days' });
+    withCalendarRows();
+    const from = new Date('2026-08-21T21:00:00.000Z');
+    expect((await slaPolicyService.dueDatesFor(1, 3, from)).dueBy.toISOString()).toBe('2026-08-24T21:00:00.000Z');
+  });
+
+  test('always_on still beats a business_days workspace (the 24/7 hatch)', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true, slaCalendarStyle: 'business_days' });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue({ firstResponseMinutes: null, resolveMinutes: 1440, calendarMode: 'always_on' });
+    withCalendarRows();
+    const from = new Date('2026-08-21T21:00:00.000Z');
+    expect((await slaPolicyService.dueDatesFor(1, 3, from)).dueBy.toISOString()).toBe('2026-08-22T21:00:00.000Z');
+  });
+
+  test('an unmigrated slaCalendarStyle column keeps the old business-hours meaning', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true }); // no style field
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('inherit'));
+    withCalendarRows();
+    expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(CAL);
   });
 
   test('both clocks share one calendar and both skip the weekend', async () => {
