@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.41-preview';
+export const APP_VERSION = '3.9.42-preview';
 
 export const changelog = [
+  {
+    version: '3.9.42-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Read-only members can see Dashboard and Analytics</strong> — the read-only role is meant to watch these pages, and the app opened them, but the server refused every panel. They load now. Read-only still cannot change anything, and Agent Maps stay admin-only.' },
+      { type: 'fixed', html: '<strong>No more sign-in hiccup on the Tickets page for viewers</strong> — a background request answered “not signed in” when it meant “not permitted”, which made the app re-check the session every time a viewer opened Tickets.' },
+    ],
+  },
   {
     version: '3.9.41-preview',
     date: 'September 18, 2026',

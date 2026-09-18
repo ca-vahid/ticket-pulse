@@ -101,8 +101,11 @@ describe('GET /api/tickets/mailboxes/held', () => {
   });
 
   test('a workspace viewer (no technician profile, non-admin) is refused', async () => {
-    const res = await request(asViewer()).get('/api/tickets/mailboxes/held').expect(401);
+    // 403, never 401: the Tickets page asks for this on every load, and a 401
+    // would push a signed-in viewer into the credential-recovery loop.
+    const res = await request(asViewer()).get('/api/tickets/mailboxes/held').expect(403);
     expect(res.body.message).toMatch(/Agent or admin access required/);
+    expect(res.body.code).toBe('staff_required');
     expect(holdMock.list).not.toHaveBeenCalled();
   });
 
@@ -142,7 +145,7 @@ describe('POST /api/tickets/mailboxes/held/:id/{attach,create,discard}', () => {
   });
 
   test('viewers cannot mutate the queue', async () => {
-    await request(asViewer()).post('/api/tickets/mailboxes/held/501/discard').expect(401);
+    await request(asViewer()).post('/api/tickets/mailboxes/held/501/discard').expect(403);
     expect(holdMock.discard).not.toHaveBeenCalled();
   });
 });
