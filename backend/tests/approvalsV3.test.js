@@ -339,7 +339,7 @@ describe('decide with a condition', () => {
     expect(prismaMock.ticketApproval.update.mock.calls[0][0].data.conditionNote).toBeNull();
     const sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
     expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'rita@x.io', 'vahid@x.io']);
-    expect(sends.find((s) => s.to === 'rita@x.io').subject).toBe('Rejected: New laptop [TP-1234]');
+    expect(sends.find((s) => s.to === 'rita@x.io').subject).toBe('Not approved: New laptop [TP-1234]');
   });
 });
 
@@ -408,7 +408,7 @@ describe('e-mail templates (v3)', () => {
     expect(html).toContain('asked for approval:');
     expect(html).not.toContain('Open the ticket');
     const rejected = renderDecisionThreadEmail({ ticket: { ref: 'TP-1', subject: 'x', appUrl: 'https://app/t/1' }, approved: false, approverName: 'N', recipient: { role: 'approver', name: 'Vahid' }, thread: [] });
-    expect(rejected).toContain('rejected</span> the request');
+    expect(rejected).toContain('not approved</span> the request'); // reads "N has not approved the request"
     expect(rejected).toContain('Open the ticket');
   });
 

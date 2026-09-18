@@ -150,9 +150,9 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     await confirmSheet(/Yes, reject/);
 
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'Budget frozen until Q4.', null, NO_CONDITION));
-    expect(await screen.findByText(/You rejected this on Sep 2/)).toBeInTheDocument();
+    expect(await screen.findByText(/You did not approve this on Sep 2/)).toBeInTheDocument();
     expect(screen.getByText('Budget frozen until Q4.')).toBeInTheDocument();
-    expect(screen.getByText('Rejected')).toBeInTheDocument();
+    expect(screen.getByText('Not approved')).toBeInTheDocument();
     expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
   });
 
@@ -405,7 +405,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
   test('rejected (already decided) renders the banner and reason', async () => {
     apiMock.get.mockReturnValue(ok(rejectedFixture));
     renderPage();
-    expect(await screen.findByText(/You rejected this on Sep 2/)).toBeInTheDocument();
+    expect(await screen.findByText(/You did not approve this on Sep 2/)).toBeInTheDocument();
     expect(screen.getByText('Budget is frozen until Q4 — please re-submit in October.')).toBeInTheDocument();
   });
 

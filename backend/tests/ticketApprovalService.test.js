@@ -308,7 +308,7 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.to).toEqual(['req@x.io']);
     expect(email.subject).toMatch(/^Approved:/);
-    expect(email.html).toContain('APPROVED');
+    expect(email.html).toContain('approved</span>'); // sentence case in the sentence; the eyebrow carries the capitals
     expect(email.html).toContain('go ahead');
     expect(email.html).toContain('/tickets/501');
   });
@@ -319,8 +319,8 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.to).toEqual(['req@x.io']);
-    expect(email.subject).toMatch(/^Rejected:/);
-    expect(email.html).toContain('REJECTED');
+    expect(email.subject).toMatch(/^Not approved:/);
+    expect(email.html).toContain('not approved</span>');
     expect(email.html).toContain('no budget');
   });
 
@@ -394,7 +394,7 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.to).toEqual(['req@x.io']);
-    expect(email.subject).toMatch(/^Rejected:/);
+    expect(email.subject).toMatch(/^Not approved:/);
     expect(email.html).toContain('changed the decision on your approval request');
   });
 
@@ -697,7 +697,9 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     expect(email.html).toContain('Note from Jane Doe');
     expect(email.html).not.toContain('Note from jane.doe@x.io');
     expect(email.subject).toBe('Approval needed: Laptop purchase for Rita — New laptop [TP-ID-501]');
-    expect(email.html).toContain('Laptop purchase approval');
+    // category lives in its own strip now, not in the kicker
+    expect(email.html).toContain('Laptop purchase');
+    expect(email.html).toContain('Your decision is needed');
     expect(email.html).toContain('Requested for');
     expect(email.html).toContain('>Rita<');
     expect(email.html).toContain('Analyst');

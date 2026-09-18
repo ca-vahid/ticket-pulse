@@ -20,7 +20,7 @@ const APPROVAL_FILTERS = [
   { v: 'any', label: 'Has an approval' },
   { v: 'pending', label: 'Waiting for approval' },
   { v: 'approved', label: 'Approved' },
-  { v: 'rejected', label: 'Rejected' },
+  { v: 'rejected', label: 'Not approved' },
   { v: 'none', label: 'No approval' },
 ];
 

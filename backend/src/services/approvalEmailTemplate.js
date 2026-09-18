@@ -316,7 +316,10 @@ function hero({ art, alt = '', eyebrow = null, eyebrowColor = MUTED, kicker = nu
 function categoryCard({ categoryName, amountLabel = null, tierLabel = null }) {
   if (!categoryName) return '';
   const art = brandImg(categoryArt(categoryName), { size: 32, alt: '' });
-  const chips = [amountLabel ? chip(amountLabel, TONES.green) : '', tierLabel ? chip(tierLabel, TONES.blue) : ''].filter(Boolean).join('&nbsp;');
+  const chips = [
+    amountLabel ? `<span style="font-family:${FONT};font-size:14px;line-height:18px;font-weight:bold;color:${INK};">${escapeHtml(amountLabel)}</span>` : '',
+    tierLabel ? `<span style="font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};">${escapeHtml(tierLabel)}</span>` : '',
+  ].filter(Boolean).join('<span style="color:#cbd5e1;">&nbsp;&nbsp;·&nbsp;&nbsp;</span>');
   return [
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-top:1px solid ${LINE};border-bottom:1px solid ${LINE};"><tr>`,
     art ? `<td width="44" valign="middle" style="padding:12px 12px 12px 0;">${art}</td>` : '',
@@ -367,7 +370,7 @@ export function emailShell({ workspaceName, bodyRows, footerHtml, preheader = ''
 
 const VERDICT_ART = { approved: 'kind-approved', condition: 'kind-condition', rejected: 'kind-rejected' };
 function verdictOf(approved, conditionNote) {
-  if (!approved) return { word: 'Rejected', art: VERDICT_ART.rejected, tone: TONES.red };
+  if (!approved) return { word: 'Not approved', art: VERDICT_ART.rejected, tone: TONES.red };
   if (conditionNote) return { word: 'Approved with condition', art: VERDICT_ART.condition, tone: TONES.green };
   return { word: 'Approved', art: VERDICT_ART.approved, tone: TONES.green };
 }
@@ -385,10 +388,11 @@ export function renderApproverRequestEmail(ctx) {
   const t = ctx.ticket || {};
   const requester = ctx.requester || {};
   const rows = [];
-  const kicker = ctx.categoryName ? `${ctx.categoryName} approval` : 'Approval';
-  const headline = ctx.reRequest
-    ? `${kicker} — re-requested with the answer you asked for`
-    : `${kicker} — your decision is needed`;
+  // The category has its own strip directly below the hero; naming it in the
+  // kicker as well read as a stutter. Without a category the kicker says "Approval".
+  const headline = ctx.categoryName
+    ? (ctx.reRequest ? 'Re-requested with the answer you asked for' : 'Your decision is needed')
+    : (ctx.reRequest ? 'Approval — re-requested with the answer you asked for' : 'Approval — your decision is needed');
   const metaBits = [t.ref, t.createdAt ? `created ${fmtDay(t.createdAt)}` : null, t.dueBy ? `due ${fmtDay(t.dueBy)}` : null].filter(Boolean);
   rows.push(hero({
     art: 'kind-decision',
@@ -496,17 +500,19 @@ export function renderRequesterDecisionEmail(ctx) {
   const tone = v.tone;
   const who = ctx.isSelf ? 'You' : (ctx.approverName || 'The approver');
   const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
-  const verdictWord = `<span style="color:${tone.color};font-weight:bold;">${verdict.toUpperCase()}</span>`;
+  // Sentence case: the eyebrow above already carries the verdict in capitals; repeating it in
+  // capitals inside the sentence shouted it twice (Vahid, 18 Sep 2026).
+  const verdictWord = `<span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span>`;
   // Sentence shapes are load-bearing (inbox filters + tests): "<actor> decided your approval request",
   // "changed the decision on your approval request", "You approved your own approval request".
   const sentence = ctx.isSelf
     ? (ctx.changedFrom
       ? `You changed the decision on your own approval request${forWhom}: ${verdictWord}`
-      : `You ${approved ? 'approved' : 'rejected'} your own approval request${forWhom}.`)
+      : `You ${approved ? 'approved' : 'did not approve'} your own approval request${forWhom}.`)
     : (ctx.changedFrom
       ? `${escapeHtml(who)} changed the decision on your approval request${forWhom}: ${verdictWord}`
       : `${escapeHtml(who)} decided your approval request${forWhom}: ${verdictWord}`);
-  const verb = ctx.changedFrom ? `changed the decision to ${verdict.toLowerCase()} on` : (approved ? 'approved' : 'rejected');
+  const verb = ctx.changedFrom ? `changed the decision to ${verdict.toLowerCase()} on` : (approved ? 'approved' : 'did not approve');
   const rows = [];
   rows.push(hero({
     art: v.art,
@@ -710,7 +716,7 @@ export function renderDecisionThreadEmail(ctx) {
   rows.push(spacer(16));
   const greet = ctx.recipient?.name ? `Hi ${escapeHtml(String(ctx.recipient.name).split(' ')[0])},` : 'Hello,';
   const forWhom = ctx.requester?.name && ctx.recipient?.role !== 'requester' ? ` for ${escapeHtml(ctx.requester.name)}` : '';
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has <span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span> the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom)})` : ''}.</td></tr>`);
+  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has <span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span> the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom === 'rejected' ? 'not approved' : ctx.changedFrom)})` : ''}.</td></tr>`);
   if (ctx.categoryName) {
     rows.push(spacer(14));
     rows.push(`<tr><td>${categoryCard({ categoryName: ctx.categoryName, amountLabel: ctx.amountLabel || null, tierLabel: ctx.tierLabel || null })}</td></tr>`);

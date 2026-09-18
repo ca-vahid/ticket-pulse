@@ -29,7 +29,7 @@ const STATUS_META = {
   pending: { label: 'Pending', art: 'approval-waiting', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', dot: 'bg-amber-500' },
   info_requested: { label: 'Needs info', art: 'approval-question', cls: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30', dot: 'bg-violet-500' },
   approved: { label: 'Approved', art: 'approval-stamp', cls: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30', dot: 'bg-emerald-500' },
-  rejected: { label: 'Rejected', art: 'approval-rejected', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', dot: 'bg-red-500' },
+  rejected: { label: 'Not approved', art: 'approval-rejected', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', dot: 'bg-red-500' },
   cancelled: { label: 'Cancelled', art: null, cls: 'bg-muted text-muted-foreground border-border', dot: 'bg-muted-foreground/50' },
   escalated: { label: 'Escalated', art: 'approval-escalate', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', dot: 'bg-amber-500' },
   forwarded: { label: 'Forwarded', art: 'approval-forward', cls: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30', dot: 'bg-blue-500' },
@@ -72,7 +72,7 @@ const STAT_TILES = [
   { key: 'pending', label: 'Pending', color: 'text-amber-600 dark:text-amber-300', art: 'approval-waiting' },
   { key: 'info_requested', label: 'Needs info', color: 'text-violet-600 dark:text-violet-300', art: 'approval-question' },
   { key: 'approved', label: 'Approved', color: 'text-emerald-600 dark:text-emerald-300', art: 'approval-stamp' },
-  { key: 'rejected', label: 'Rejected', color: 'text-red-600 dark:text-red-300', art: 'approval-rejected' },
+  { key: 'rejected', label: 'Not approved', color: 'text-red-600 dark:text-red-300', art: 'approval-rejected' },
   { key: 'cancelled', label: 'Cancelled', color: 'text-muted-foreground', art: null },
 ];
 const SORT_OPTIONS = [

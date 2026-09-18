@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.39-preview';
+export const APP_VERSION = '3.9.40-preview';
 
 export const changelog = [
+  {
+    version: '3.9.40-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>“Not approved” instead of “Rejected”</strong> — when a request is turned down, the requester now reads <em>Not approved</em> in the e-mail, on the ticket, on the Approvals page and on the public approval page. It means the same thing and lands more gently. Approvers still press <em>Reject</em> and still have to give a reason; filters and reports are unchanged.' },
+      { type: 'improved', html: '<strong>Approval e-mails stop repeating themselves</strong> — the request e-mail named the approval category twice, once in the blue line above the subject and again in the strip below it; the top line now just says <em>Your decision is needed</em>. The amount and tier are plain text rather than badges, and the verdict e-mail no longer repeats the verdict in capitals.' },
+    ],
+  },
   {
     version: '3.9.39-preview',
     date: 'September 18, 2026',

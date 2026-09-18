@@ -81,7 +81,8 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, answeredI
   const isMine = viewerEmail && item.author?.email && String(item.author.email).toLowerCase() === String(viewerEmail).toLowerCase();
   const who = isMine ? 'You' : (item.author?.name || item.author?.email || 'Someone');
   const decided = item.kind === 'decision';
-  const rejected = decided && /^rejected/i.test(item.bodyText || '');
+  // 'Not approved' since 18 Sep 2026; 'Rejected' on messages written before.
+  const rejected = decided && /^(rejected|not approved)/i.test(item.bodyText || '');
   const railClass = decided ? (rejected ? 'border-red-500' : 'border-emerald-500') : meta.rail;
   const bg = decided
     ? (rejected ? 'bg-red-50/60 dark:bg-red-500/10' : 'bg-emerald-50/60 dark:bg-emerald-500/10')
@@ -97,7 +98,7 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, answeredI
   let sentence;
   if (item.kind === 'handoff') sentence = handoffSentence(item.entry, { withNote: false }).replace(/^An approver /, `${item.author?.name || 'An approver'} `);
   else if (item.kind === 'request') sentence = `${who} ${meta.label}`;
-  else if (decided) sentence = `${who} ${rejected ? 'rejected' : 'approved'}${/with condition/i.test(item.bodyText || '') ? ' with a condition' : ''}`;
+  else if (decided) sentence = `${who} ${rejected ? 'did not approve' : 'approved'}${/with condition/i.test(item.bodyText || '') ? ' with a condition' : ''}`;
   else sentence = `${who} ${meta.label}`;
 
   return (

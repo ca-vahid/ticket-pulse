@@ -7,7 +7,7 @@ export const STATUS_CHIP = {
   pending: { label: 'Awaiting your decision', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' },
   info_requested: { label: 'Question sent', className: 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200' },
   approved: { label: 'Approved', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200' },
-  rejected: { label: 'Rejected', className: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200' },
+  rejected: { label: 'Not approved', className: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200' },
   cancelled: { label: 'Cancelled', className: 'bg-muted text-muted-foreground' },
   expired: { label: 'Expired', className: 'bg-muted text-muted-foreground' },
   escalated: { label: 'Escalated', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' },
@@ -36,7 +36,7 @@ export const STATUS_BADGE = {
     stripe: 'border-t-emerald-500',
   },
   rejected: {
-    label: 'Rejected',
+    label: 'Not approved',
     badge: 'bg-red-100 text-red-900 border-red-300 dark:bg-red-500/20 dark:text-red-100 dark:border-red-500/40',
     stripe: 'border-t-red-500',
   },

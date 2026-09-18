@@ -185,7 +185,7 @@ export function approvalEventMeta(entry) {
   if (entry.rawPayload?.kind === 'approval_event') {
     const event = String(entry.rawPayload.event || '').toLowerCase();
     const changed = entry.rawPayload.changed === true || event.includes('changed');
-    if (event.includes('reject')) return { label: changed ? 'Rejected (changed)' : 'Rejected', ...APPROVAL_EVENT_STYLES.rejected };
+    if (event.includes('reject')) return { label: changed ? 'Not approved (changed)' : 'Not approved', ...APPROVAL_EVENT_STYLES.rejected };
     if (event.includes('clarif') || event.includes('info')) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
     if (event.includes('approv')) return { label: changed ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
     if (event === 'requested' || event === 'auto_start') return { label: event === 'auto_start' ? 'Started' : 'Requested', ...APPROVAL_EVENT_STYLES.requested };
@@ -193,7 +193,7 @@ export function approvalEventMeta(entry) {
   }
   const t = String(entry.bodyText || entry.content || '');
   if (/^Approval (CHANGED to )?APPROVED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
-  if (/^Approval (CHANGED to )?REJECTED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Rejected (changed)' : 'Rejected', ...APPROVAL_EVENT_STYLES.rejected };
+  if (/^Approval (CHANGED to )?REJECTED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Not approved (changed)' : 'Not approved', ...APPROVAL_EVENT_STYLES.rejected };
   if (/^Clarification requested/i.test(t)) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
   if (/^Approval requested/i.test(t)) return { label: 'Requested', ...APPROVAL_EVENT_STYLES.requested };
   return null;

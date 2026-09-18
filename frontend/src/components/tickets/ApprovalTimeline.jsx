@@ -47,7 +47,7 @@ const chainOf = (cat) => (Array.isArray(cat?.tiers) && cat.tiers.length
 // Per-approver / verdict status → color-coded look (dot, chip, text, header tint).
 const STATUS = {
   approved: { label: 'Approved', verb: 'Approved', Icon: CheckCircle2, dot: 'bg-emerald-500', chip: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30', text: 'text-emerald-700 dark:text-emerald-200', head: 'bg-emerald-50/70 dark:bg-emerald-500/10 border-emerald-100 dark:border-emerald-500/20' },
-  rejected: { label: 'Rejected', verb: 'Rejected', Icon: XCircle, dot: 'bg-red-500', chip: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', text: 'text-red-700 dark:text-red-200', head: 'bg-red-50/70 dark:bg-red-500/10 border-red-100 dark:border-red-500/20' },
+  rejected: { label: 'Not approved', verb: 'Not approved', Icon: XCircle, dot: 'bg-red-500', chip: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', text: 'text-red-700 dark:text-red-200', head: 'bg-red-50/70 dark:bg-red-500/10 border-red-100 dark:border-red-500/20' },
   info_requested: { label: 'Needs info', verb: 'Clarification requested', Icon: MessageCircleQuestion, dot: 'bg-violet-500', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30', text: 'text-violet-700 dark:text-violet-200', head: 'bg-violet-50/70 dark:bg-violet-500/10 border-violet-100 dark:border-violet-500/20' },
   cancelled: { label: 'Cancelled', verb: 'Cancelled', Icon: Ban, dot: 'bg-muted-foreground/40', chip: 'bg-muted text-muted-foreground border-border', text: 'text-muted-foreground', head: 'bg-muted/50 border-border/60' },
   escalated: { label: 'Escalated', verb: 'Escalated', Icon: ArrowUpRight, dot: 'bg-amber-500', chip: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', text: 'text-amber-700 dark:text-amber-200', head: 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-100 dark:border-amber-500/20' },
@@ -231,14 +231,14 @@ export default function ApprovalTimeline({
                       <button
                         onClick={() => onChangeDecision?.({ approvalId: decider.id, from: verdict, to: flipTo, categoryName: category, approverName: decider.approverName || decider.approverEmail })}
                         disabled={groupBusy || savingField === `approval-${decider.id}`}
-                        title={`Change this decision to ${flipTo}`}
+                        title={`Change this decision to ${flipTo === 'rejected' ? 'not approved' : flipTo}`}
                         className={`tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border disabled:opacity-50 ${
                           flipTo === 'approved'
                             ? 'bg-card text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-500/15'
                             : 'bg-card text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/15'
                         }`}
                       >
-                        <RefreshCw className="w-3 h-3" aria-hidden="true" /> Change to {flipTo}
+                        <RefreshCw className="w-3 h-3" aria-hidden="true" /> Change to {flipTo === 'rejected' ? 'not approved' : flipTo}
                       </button>
                     )}
                     {canRequesterManage && (
