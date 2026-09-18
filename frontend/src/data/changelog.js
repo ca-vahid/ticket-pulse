@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.33-preview';
+export const APP_VERSION = '3.9.34-preview';
 
 export const changelog = [
+  {
+    version: '3.9.34-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A backlog of queued AI runs no longer starves the database</strong> — the assignment queue-drain worker processed ten queued tickets at once, one more than the whole database connection pool holds. When Accounting built up a 25-ticket backlog this morning, draining it briefly took every connection: a ticket update failed, a sync write was dropped and one request errored, all inside two seconds. The drain now runs four at a time. It gets through the same amount of work per cycle, without crowding out everything else.' },
+    ],
+  },
   {
     version: '3.9.33-preview',
     date: 'September 18, 2026',

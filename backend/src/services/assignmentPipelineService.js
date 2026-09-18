@@ -9,6 +9,7 @@ import competencyFeedbackService from './competencyFeedbackService.js';
 import noiseRuleService from './noiseRuleService.js';
 import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationService.js';
 import { formatDateInTimezone } from '../utils/timezone.js';
+import { QUEUE_DRAIN_CONCURRENCY, QUEUE_DRAIN_MAX_PER_TICK } from '../utils/queueDrainLimits.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
@@ -759,7 +760,7 @@ class AssignmentPipelineService {
    * Process queued runs for a workspace. Called by the scheduler during business hours.
    * Returns count of processed/skipped runs.
    */
-  async drainQueuedRuns(workspaceId, maxPerTick = 10, concurrency = 10) {
+  async drainQueuedRuns(workspaceId, maxPerTick = QUEUE_DRAIN_MAX_PER_TICK, concurrency = QUEUE_DRAIN_CONCURRENCY) {
     const queued = await assignmentRepository.listQueuedRuns(workspaceId, maxPerTick);
     if (queued.length === 0) return { processed: 0, skipped: 0 };
 
@@ -1893,7 +1894,7 @@ class AssignmentPipelineService {
             const bh = await availabilityService.isBusinessHours(new Date(), tz, ws.id);
             if (!bh.isBusinessHours) continue;
             logger.info(`[queue-drain] Draining ${queuedCount} queued run(s) for workspace ${ws.id} (${ws.name})`);
-            await this.drainQueuedRuns(ws.id, 10, 10);
+            await this.drainQueuedRuns(ws.id, QUEUE_DRAIN_MAX_PER_TICK, QUEUE_DRAIN_CONCURRENCY);
           } catch (err) {
             logger.error(`[queue-drain] workspace ${ws.id} failed: ${err.message}`);
           }
