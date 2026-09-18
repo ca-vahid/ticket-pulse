@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.45-preview';
+export const APP_VERSION = '3.9.46-preview';
 
 export const changelog = [
+  {
+    version: '3.9.46-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The BGC company signature</strong> — Settings → Signatures now offers the same signature Outlook gives everyone: navy name, title, company, then T / M / E and the website. Each person’s direct line and mobile come from the company directory, so every office gets its own numbers.' },
+      { type: 'improved', html: '<strong>You can see your signature while you write</strong> — the reply box shows the signature that will be added under your message, and tells you when it has no sign-off so you can end with your own “Thanks,”.' },
+      { type: 'fixed', html: '<strong>Less empty space above the signature</strong> — one blank line between your message and your signature, instead of three or four.' },
+    ],
+  },
   {
     version: '3.9.45-preview',
     date: 'September 18, 2026',

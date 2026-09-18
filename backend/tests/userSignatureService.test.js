@@ -140,7 +140,7 @@ describe('appendSignatureToEmail', () => {
     );
     // QA 09-08: the signature's <p> carries the chosen line spacing inline
     // (mail clients strip <style>). The REPLY body above it is untouched.
-    expect(out.html).toBe('<p>Fixed it!</p><br><br><p style="margin: 0"><strong>Ana</strong></p>');
+    expect(out.html).toBe('<p style="margin-bottom:0">Fixed it!</p><br><p style="margin: 0"><strong>Ana</strong></p>');
     expect(out.text).toBe('Fixed it!\n\n-- \nAna');
   });
 

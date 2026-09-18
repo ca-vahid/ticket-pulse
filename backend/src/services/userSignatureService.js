@@ -22,7 +22,54 @@ import logger from '../utils/logger.js';
  * signature survives intact.
  */
 
-const TEMPLATE_VARIABLE_PATTERN = /\{\{\s*(name|title|email)\s*\}\}/gi;
+const TEMPLATE_VARIABLE_PATTERN = /\{\{\s*(name|title|email|phone|mobile)\s*\}\}/gi;
+// {{#phone}}…{{/phone}} — the span is kept only when that person HAS the value.
+// Not everyone in the GAL has a direct line; "T:" with nothing after it is worse
+// than no "T:" at all.
+const TEMPLATE_SECTION_PATTERN = /\{\{\s*#\s*(name|title|email|phone|mobile)\s*\}\}([\s\S]*?)\{\{\s*\/\s*\1\s*\}\}/gi;
+
+/**
+ * The BGC company signature (Vahid, 18 Sep 2026 — transcribed from the Outlook
+ * "ReplySignature" file every employee gets): Calibri; the name 12pt bold navy
+ * #0c1975; title and company 10pt; a blank line; then T: / M: / E: with navy
+ * bold labels and the address as a #0563c1 underlined link; the website under
+ * it. Zero paragraph margins (spacing "tight"). No sign-off line — people end
+ * their own message.
+ *
+ * Colour is stated on EVERY span rather than inherited: mail clients restyle
+ * bare text, and the first thing Vahid noticed was the colour scheme.
+ */
+const SIG_P = 'margin-top:0pt; margin-bottom:0pt; font-family:Calibri,Arial,sans-serif;';
+const SIG_INK = 'color:#000000;';
+const SIG_NAVY = 'color:#0c1975;';
+const SIG_LINK = 'color:#0563c1;';
+export const COMPANY_SIGNATURE_TEMPLATE = [
+  `<p style="${SIG_P} font-size:12pt;"><strong><span style="${SIG_NAVY}">{{name}}</span></strong></p>`,
+  `{{#title}}<p style="${SIG_P} font-size:10pt; ${SIG_INK}">{{title}}</p>{{/title}}`,
+  `<p style="${SIG_P} font-size:10pt; ${SIG_INK}">BGC Engineering</p>`,
+  `<p style="${SIG_P} font-size:10pt;">&nbsp;</p>`,
+  `<p style="${SIG_P} font-size:10pt; ${SIG_INK}">`
+    + `{{#phone}}<strong><span style="${SIG_NAVY}">T:</span></strong>&nbsp;{{phone}}&nbsp;&nbsp;{{/phone}}`
+    + `{{#mobile}}<strong><span style="${SIG_NAVY}">M:</span></strong>&nbsp;{{mobile}}&nbsp;&nbsp;{{/mobile}}`
+    + `<strong><span style="${SIG_NAVY}">E:</span></strong>&nbsp;<a href="mailto:{{email}}" style="text-decoration:none;"><u><span style="${SIG_LINK}">{{email}}</span></u></a></p>`,
+  `<p style="${SIG_P} font-size:10pt;"><a href="https://www.bgcengineering.ca" style="text-decoration:none;"><u><span style="${SIG_LINK}">www.bgcengineering.ca</span></u></a></p>`,
+].join('');
+
+/**
+ * GAL phone numbers arrive as "1-604-256-1414", "+1 6048308980", "6042567718"
+ * and "+15873235325". The signature prints NANP numbers one way: 604-256-1414.
+ * Anything that is not a 10-digit NANP number (extensions, other countries) is
+ * left exactly as the directory has it.
+ */
+export function formatSignaturePhone(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/[a-z]/i.test(raw)) return raw; // "x123", "ext. 4"
+  let digits = raw.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+  if (digits.length !== 10 || raw.startsWith('+') && !raw.startsWith('+1')) return raw;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
 
 /**
  * Line spacing (QA 09-08). A signature pasted from Outlook arrives as bare
@@ -241,6 +288,42 @@ export async function getEnabledSignatureForSend(workspaceId, ownerEmail) {
  * gets a blank-line separator; the text variant uses the classic "-- "
  * signature delimiter. No-op when the signature is empty.
  */
+const TRAILING_BLANK_RE = /(?:\s|&nbsp;|\u00a0|<br\s*\/?>|<(p|div)\b[^>]*>(?:\s|&nbsp;|\u00a0|<br\s*\/?>)*<\/\1>)+$/i;
+const TRAILING_BLANK_IN_BLOCK_RE = /(?:\s|&nbsp;|\u00a0|<br\s*\/?>)+(<\/(?:p|div)>)$/i;
+
+/** Drop blank lines from the END of a message: empty blocks, <br>s, and <br>s just inside the last block. */
+export function trimTrailingBlankHtml(html) {
+  let out = String(html || '');
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = out.replace(TRAILING_BLANK_RE, '').replace(TRAILING_BLANK_IN_BLOCK_RE, '$1');
+    if (next === out) break;
+    out = next;
+  }
+  // Never trim a message down to nothing.
+  return out.trim() ? out : String(html || '');
+}
+
+/**
+ * A message that ends with a <p> carries that paragraph's bottom margin — about
+ * a line in browsers, nothing in Outlook desktop — on top of our own <br>. Zero
+ * it on the LAST paragraph only, so the gap is exactly one line everywhere.
+ */
+export function closeLastParagraphTight(html) {
+  const out = String(html || '');
+  if (!/<\/p>\s*$/i.test(out)) return out;
+  const matches = [...out.matchAll(/<p(?=[\s>])([^>]*)>/gi)];
+  const last = matches[matches.length - 1];
+  if (!last) return out;
+  const attrs = last[1] || '';
+  const styleMatch = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+  const existing = styleMatch ? (styleMatch[1] ?? styleMatch[2] ?? '') : '';
+  const kept = existing.split(';').map((d) => d.trim()).filter((d) => d && !/^margin-bottom\s*:/i.test(d));
+  const style = [...kept, 'margin-bottom:0'].join('; ');
+  const rest = styleMatch ? attrs.replace(styleMatch[0], '') : attrs;
+  const tag = `<p${rest.trimEnd()} style="${style}">`;
+  return `${out.slice(0, last.index)}${tag}${out.slice(last.index + last[0].length)}`;
+}
+
 export function appendSignatureToEmail(email = {}, signature = null) {
   // Spacing is applied here, not at save time: the stored HTML stays exactly
   // what the author pasted, so changing the preference re-renders rather than
@@ -249,10 +332,14 @@ export function appendSignatureToEmail(email = {}, signature = null) {
   const signatureText = String(signature?.text || stripHtml(signatureHtml)).trim();
   if (!signatureHtml && !signatureText) return { ...email };
 
-  const baseHtml = String(email.html || '').trim();
+  // ONE blank line between the message and the signature (Vahid, 18 Sep 2026).
+  // It used to be `<br><br>` after whatever the body ended with — and a body
+  // usually ends with a paragraph margin plus the blank line people leave under
+  // "Thank you," — which stacked to three or four lines of air.
+  const baseHtml = closeLastParagraphTight(trimTrailingBlankHtml(String(email.html || '').trim()));
   const baseText = String(email.text || stripHtml(email.html)).trim();
   const html = baseHtml
-    ? `${baseHtml}<br><br>${signatureHtml || signatureText}`
+    ? `${baseHtml}<br>${signatureHtml || signatureText}`
     : (signatureHtml || signatureText);
   const text = baseText
     ? `${baseText}\n\n-- \n${signatureText}`
@@ -310,15 +397,25 @@ export async function listWorkspaceSignatures(workspaceId) {
     signature: serializeSignature(row),
   }));
 
-  return { members: [...members, ...others], maxHtmlBytes: MAX_SIGNATURE_HTML_BYTES };
+  return { members: [...members, ...others], maxHtmlBytes: MAX_SIGNATURE_HTML_BYTES, companyTemplate: COMPANY_SIGNATURE_TEMPLATE };
 }
 
-/** Substitute {{name}} / {{title}} / {{email}} tokens (whitespace-tolerant). */
+const escapeTemplateValue = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * Substitute {{name}} / {{title}} / {{email}} / {{phone}} / {{mobile}} tokens
+ * (whitespace-tolerant), after resolving {{#key}}…{{/key}} sections. Values are
+ * directory data, not markup — they are escaped on the way in.
+ */
 export function applySignatureTemplate(template, fields = {}) {
-  return String(template || '').replace(TEMPLATE_VARIABLE_PATTERN, (match, key) => {
+  const valueOf = (key) => {
     const value = fields[String(key).toLowerCase()];
-    return value === undefined || value === null ? '' : String(value);
-  });
+    return value === undefined || value === null ? '' : String(value).trim();
+  };
+  return String(template || '')
+    .replace(TEMPLATE_SECTION_PATTERN, (match, key, inner) => (valueOf(key) ? inner : ''))
+    .replace(TEMPLATE_VARIABLE_PATTERN, (match, key) => escapeTemplateValue(valueOf(key)));
 }
 
 async function resolveTemplateTargets(workspaceId, technicianIds = []) {
@@ -335,14 +432,20 @@ async function resolveTemplateTargets(workspaceId, technicianIds = []) {
 async function buildTemplateFields(technician) {
   const email = String(technician.email || '').trim();
   let title = null;
+  let phone = '';
+  let mobile = '';
   if (email && azureAdService.isConfigured?.()) {
     const profile = await azureAdService.getUserProfile(email).catch(() => null);
     title = profile?.jobTitle || null;
+    phone = formatSignaturePhone(profile?.businessPhone);
+    mobile = formatSignaturePhone(profile?.mobilePhone);
   }
   return {
     name: technician.name || email || '',
     title: title || '',
     email,
+    phone,
+    mobile,
   };
 }
 
@@ -351,9 +454,13 @@ async function buildTemplateFields(technician) {
  * `preview: true` renders per-member substituted signatures WITHOUT writing —
  * the admin sees exactly what each person gets before committing.
  */
-export async function massApplySignatureTemplate(workspaceId, { template, technicianIds, preview = false } = {}, actor = null) {
+export async function massApplySignatureTemplate(workspaceId, { template, technicianIds, preview = false, useCompanyTemplate = false } = {}, actor = null) {
   const wsId = normalizeWorkspaceId(workspaceId);
-  const rawTemplate = String(template || '').trim();
+  // The company signature never round-trips through the browser's rich-text
+  // editor, which drops font-family/size and would flatten it to default text.
+  const rawTemplate = useCompanyTemplate === true
+    ? COMPANY_SIGNATURE_TEMPLATE
+    : String(template || '').trim();
   if (!rawTemplate) throw new ValidationError('A signature template is required');
   // Sanitize the template once up front so a bad paste fails before any write.
   sanitizeSignatureHtml(rawTemplate);
@@ -374,7 +481,7 @@ export async function massApplySignatureTemplate(workspaceId, { template, techni
       results.push({ technicianId: technician.id, name: technician.name, email: fields.email, html, text });
       continue;
     }
-    const saved = await saveSignature(wsId, technician.email, { html, text, enabled: true }, actor);
+    const saved = await saveSignature(wsId, technician.email, { html, text, enabled: true, ...(useCompanyTemplate === true ? { spacing: 'tight' } : {}) }, actor);
     results.push({ technicianId: technician.id, name: technician.name, email: fields.email, html: saved.html, text: saved.text });
   }
 

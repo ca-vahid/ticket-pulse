@@ -85,8 +85,9 @@ describe('signature line spacing', () => {
     const out = appendSignatureToEmail(email, { html: REPORTED_SIGNATURE, text: 'Marcus', spacing: 'tight' });
     expect(out.html).toContain('margin: 0');
     expect(out.html).toContain('Junior IT Technician');
-    // The reply body itself is untouched — only the signature is respaced.
-    expect(out.html.startsWith('<p>Thanks for the update.</p>')).toBe(true);
+    // The reply body keeps its words; its LAST paragraph only gives up its bottom
+    // margin, so the gap to the signature is one line in every client (18 Sep 2026).
+    expect(out.html.startsWith('<p style="margin-bottom:0">Thanks for the update.</p><br>')).toBe(true);
     // Plain-text variant keeps the classic delimiter.
     expect(out.text).toContain('\n\n-- \n');
   });

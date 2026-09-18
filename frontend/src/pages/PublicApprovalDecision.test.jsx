@@ -63,7 +63,6 @@ const renderPage = (token = 'tok-1') => render(
 import PublicApprovalDecisionPage from './PublicApprovalDecision';
 
 const noteBox = () => screen.getByRole('textbox', { name: 'Decision note' });
-const typeNote = (text) => fireEvent.change(noteBox(), { target: { value: text } });
 // Approvals v3: the composer has tabs; Reject / Ask / Condition each have their own editor label.
 const tab = (name) => screen.getByRole('tab', { name });
 const typeReason = (text) => { fireEvent.click(tab('Reject')); fireEvent.change(screen.getByRole('textbox', { name: 'Reason for rejecting' }), { target: { value: text } }); };

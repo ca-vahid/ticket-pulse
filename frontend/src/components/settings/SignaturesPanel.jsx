@@ -15,13 +15,25 @@ import { SafeHtml } from '../tickets/ticketUi';
  * management side: every workspace member joined with their signature, a
  * per-row enable/disable toggle, inline editing via modal, and a mass-apply
  * template with {{name}} / {{title}} / {{email}} substitution — previewed
- * per member before anything is written.
+ * per member before anything is written. The default template is the BGC
+ * company signature (18 Sep 2026): it lives on the server and is applied
+ * verbatim, because the rich-text editor would strip its fonts and sizes.
  *
  * Self-service lives on the Notifications page (account menu), backed by the
  * same storage.
  */
 
 const TEMPLATE_STARTER = '<p>Kind regards,</p><p><strong>{{name}}</strong><br>{{title}}<br>{{email}}</p>';
+
+const SAMPLE_FIELDS = { name: 'Alex Example', title: 'Job title from Entra', email: 'aexample@bgcengineering.ca', phone: '604-555-0100', mobile: '604-555-0199' };
+
+/** Client-side twin of the server's token substitution — for the sample only. */
+export function renderSignatureSample(template, fields = SAMPLE_FIELDS) {
+  const valueOf = (key) => String(fields[String(key).toLowerCase()] ?? '').trim();
+  return String(template || '')
+    .replace(/\{\{\s*#\s*(\w+)\s*\}\}([\s\S]*?)\{\{\s*\/\s*\1\s*\}\}/g, (m, key, inner) => (valueOf(key) ? inner : ''))
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, (m, key) => valueOf(key));
+}
 
 function Avatar({ name, photoUrl, dim = false }) {
   return (
@@ -67,6 +79,8 @@ export default function SignaturesPanel() {
 
   // Mass-apply template
   const [template, setTemplate] = useState(TEMPLATE_STARTER);
+  const [companyTemplate, setCompanyTemplate] = useState('');
+  const [templateKind, setTemplateKind] = useState('company'); // 'company' | 'custom'
   const [previews, setPreviews] = useState(null); // results from preview call
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -78,6 +92,7 @@ export default function SignaturesPanel() {
     try {
       const res = await settingsAPI.getSignatures();
       setMembers(res.data?.members || []);
+      setCompanyTemplate(res.data?.companyTemplate || '');
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to load signatures');
     } finally {
@@ -163,11 +178,14 @@ export default function SignaturesPanel() {
     }
   };
 
+  // Older servers send no company template — fall back to the editor.
+  const useCompany = templateKind === 'company' && Boolean(companyTemplate);
+
   const runPreview = async () => {
     setPreviewing(true); setError(null);
     try {
       const res = await settingsAPI.massApplySignatures({
-        template,
+        ...(useCompany ? { useCompanyTemplate: true } : { template }),
         technicianIds: [...selected],
         preview: true,
       });
@@ -183,7 +201,7 @@ export default function SignaturesPanel() {
     setApplying(true); setError(null);
     try {
       const res = await settingsAPI.massApplySignatures({
-        template,
+        ...(useCompany ? { useCompanyTemplate: true } : { template }),
         technicianIds: [...selected],
         preview: false,
       });
@@ -235,24 +253,58 @@ export default function SignaturesPanel() {
             to {selected.size} selected member{selected.size === 1 ? '' : 's'}
           </span>
         </div>
-        <RichTextEditor
-          value={template}
-          onChange={({ html }) => { setTemplate(html); setPreviews(null); }}
-          placeholder="Signature template…"
-          ariaLabel="Signature template"
-          minHeight={110}
-        />
-        <p className="text-[11px] text-muted-foreground">
-          Variables: <code className="rounded bg-muted px-1">{'{{name}}'}</code>{' '}
-          <code className="rounded bg-muted px-1">{'{{title}}'}</code>{' '}
-          <code className="rounded bg-muted px-1">{'{{email}}'}</code> — filled from each member&rsquo;s
-          profile (title comes from Entra when available).
-        </p>
+        {companyTemplate && (
+          <div role="radiogroup" aria-label="Which template" className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+            {[['company', 'BGC company signature'], ['custom', 'Custom template']].map(([kind, label]) => (
+              <label key={kind} className="inline-flex cursor-pointer items-center gap-1.5 text-foreground/85">
+                <input
+                  type="radio"
+                  name="signature-template-kind"
+                  value={kind}
+                  checked={templateKind === kind}
+                  onChange={() => { setTemplateKind(kind); setPreviews(null); }}
+                  className="tp-focus-ring h-3.5 w-3.5 accent-blue-600"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        )}
+        {useCompany ? (
+          <div data-testid="company-signature-sample">
+            <div className="tp-light rounded-lg border border-border bg-card px-4 py-3">
+              <SafeHtml html={renderSignatureSample(companyTemplate)} />
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+              The same signature Outlook gives everyone at BGC. Name, title, direct line (T) and mobile (M) come from
+              each person&rsquo;s Entra profile; a number the directory doesn&rsquo;t have is left out. It has no sign-off
+              line, so people end their own message (&ldquo;Thanks,&rdquo; &ldquo;Kind regards,&rdquo;).
+            </p>
+          </div>
+        ) : (
+          <>
+            <RichTextEditor
+              value={template}
+              onChange={({ html }) => { setTemplate(html); setPreviews(null); }}
+              placeholder="Signature template…"
+              ariaLabel="Signature template"
+              minHeight={110}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Variables: <code className="rounded bg-muted px-1">{'{{name}}'}</code>{' '}
+              <code className="rounded bg-muted px-1">{'{{title}}'}</code>{' '}
+              <code className="rounded bg-muted px-1">{'{{email}}'}</code>{' '}
+              <code className="rounded bg-muted px-1">{'{{phone}}'}</code>{' '}
+              <code className="rounded bg-muted px-1">{'{{mobile}}'}</code> — filled from each member&rsquo;s
+              profile (title and numbers come from Entra when available).
+            </p>
+          </>
+        )}
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={runPreview}
-            disabled={previewing || selected.size === 0 || !template.trim()}
+            disabled={previewing || selected.size === 0 || (!useCompany && !template.trim())}
             className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border bg-card text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             {previewing ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}

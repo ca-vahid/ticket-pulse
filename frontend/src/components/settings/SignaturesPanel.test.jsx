@@ -155,3 +155,39 @@ describe('SignaturesPanel (Settings → Signatures)', () => {
     expect(screen.getByLabelText('Select Cleo Closed')).toBeDisabled();
   });
 });
+
+describe('SignaturesPanel — the BGC company signature is the default template', () => {
+  const COMPANY = '<p><strong>{{name}}</strong></p>{{#title}}<p>{{title}}</p>{{/title}}<p>{{#phone}}T: {{phone}} {{/phone}}E: {{email}}</p>';
+
+  afterEach(() => cleanup());
+
+  test('with a company template from the server: a sample is shown and preview sends useCompanyTemplate, not editor HTML', async () => {
+    vi.clearAllMocks();
+    settingsAPI.getSignatures.mockResolvedValue({
+      success: true,
+      data: { members: [{ technicianId: 11, name: 'Ana Agent', email: 'ana@bgc.ca', isActive: true, signature: null }], companyTemplate: COMPANY },
+    });
+    settingsAPI.massApplySignatures.mockResolvedValue({ success: true, data: { preview: true, applied: 0, results: [], skipped: [] } });
+    render(<SignaturesPanel />);
+
+    const sample = await screen.findByTestId('company-signature-sample');
+    expect(within(sample).getByText('Alex Example')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Signature template' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Select Ana Agent'));
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }));
+    await waitFor(() => expect(settingsAPI.massApplySignatures).toHaveBeenCalledWith({
+      useCompanyTemplate: true, technicianIds: [11], preview: true,
+    }));
+
+    // Custom is one click away and brings the editor back.
+    fireEvent.click(screen.getByLabelText('Custom template'));
+    expect(screen.getByRole('textbox', { name: 'Signature template' })).toBeInTheDocument();
+  });
+
+  test('renderSignatureSample: sections drop out when the value is missing', async () => {
+    const { renderSignatureSample } = await import('./SignaturesPanel');
+    expect(renderSignatureSample(COMPANY, { name: 'A', title: '', email: 'a@x', phone: '' })).toBe('<p><strong>A</strong></p><p>E: a@x</p>');
+    expect(renderSignatureSample(COMPANY, { name: 'A', title: 'T', email: 'a@x', phone: '604-555-0100' })).toContain('T: 604-555-0100');
+  });
+});
