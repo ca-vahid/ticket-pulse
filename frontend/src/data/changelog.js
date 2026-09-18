@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.32-preview';
+export const APP_VERSION = '3.9.33-preview';
 
 export const changelog = [
+  {
+    version: '3.9.33-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Ticket mailboxes say what each mode costs</strong> — the note added yesterday told admins to switch a receive-only mailbox to “Ingest + send”, naming only the upside. It left out the price: a mailbox that sends its own mail has Microsoft 365 replace the From name with the mailbox’s own name, so requesters stop seeing which agent replied. Both modes now state the trade, the mode list names which way each one goes, and nothing nudges you toward losing agent names. IT, Project Accounting and Field Equipment are all on the mode that keeps them.' },
+    ],
+  },
   {
     version: '3.9.32-preview',
     date: 'September 17, 2026',

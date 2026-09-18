@@ -45,6 +45,17 @@ const MODE_LABEL = {
   both: 'Ingest + send',
 };
 
+// The mode picks the sending LANE, and the lane decides whether a reply can
+// carry the replying agent's name (QA 09-17 #6 follow-up, 18 Sep 2026):
+//  • ingest only    -> SendGrid sends. Any From name sticks, so replies read
+//                      "Soheil Nasiri" over the team address. No Sent Items copy.
+//  • send / both    -> Microsoft Graph sends as the mailbox, and Exchange
+//                      rewrites the From name to the mailbox's directory name.
+//                      Every reply reads as the team. Sent Items gets a copy.
+// There is no configuration that gives both; Exchange owns the display name on
+// a shared-mailbox send. The Sender identity card above says the same thing.
+const MODE_TRADEOFF_HINT = 'Ingest only: replies are sent by SendGrid and show the replying agent\u2019s name, with no copy in Sent Items. Ingest + send / Send only: replies are sent by the mailbox and land in its Sent Items, but Microsoft 365 replaces the From name with the mailbox\u2019s own name.';
+
 /** "12s ago" / "3m ago" / "2h ago" for the last-notification age. */
 export function relativeAge(iso, now = Date.now()) {
   if (!iso) return null;
@@ -434,9 +445,15 @@ export default function MailboxConnectionsPanel() {
                   </span>
                 )}
                 {mb.isEnabled && mb.mode === 'ingest' && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-300 mt-0.5" data-testid={`mailbox-ingest-note-${mb.id}`}>
-                    Receive only. Replies still leave from this address, but through SendGrid — so there is no copy in this
-                    mailbox&apos;s Sent Items. Switch to <span className="font-semibold">Ingest + send</span> to send through the mailbox itself.
+                  <p className="text-[11px] text-muted-foreground mt-0.5" data-testid={`mailbox-ingest-note-${mb.id}`}>
+                    Receive only. Replies still leave from this address, but through SendGrid, so they can carry the
+                    <span className="font-semibold"> replying agent&apos;s name</span> — and nothing is copied to this mailbox&apos;s Sent Items.
+                  </p>
+                )}
+                {mb.isEnabled && ['send', 'both'].includes(mb.mode) && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-300 mt-0.5" data-testid={`mailbox-send-note-${mb.id}`}>
+                    Sends through the mailbox, so replies are copied to its Sent Items — but Microsoft 365 replaces the
+                    From name with this mailbox&apos;s own name, so requesters <span className="font-semibold">never see the individual agent</span>.
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground/75">
@@ -451,11 +468,12 @@ export default function MailboxConnectionsPanel() {
                 value={mb.mode}
                 onChange={(e) => changeMode(mb, e.target.value)}
                 aria-label={`Mode for ${mb.address}`}
+                title={MODE_TRADEOFF_HINT}
                 className="text-xs border border-border rounded-lg px-2 py-1.5"
               >
-                <option value="both">Ingest + send</option>
-                <option value="ingest">Ingest only</option>
-                <option value="send">Send only</option>
+                <option value="both">Ingest + send (team name on replies)</option>
+                <option value="ingest">Ingest only (agent name on replies)</option>
+                <option value="send">Send only (team name on replies)</option>
               </select>
               {groups.length > 0 && (
                 <select
