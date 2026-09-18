@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.47-preview';
+export const APP_VERSION = '3.9.48-preview';
 
 export const changelog = [
+  {
+    version: '3.9.48-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A ticket that fails to save is no longer lost</strong> — if Ticket Pulse cannot save a FreshService ticket, it now remembers it and tries again on every sync until it succeeds. Before, the ticket quietly dropped out of the sync window and never appeared. Two Accounting tickets affected today have been brought in.' },
+    ],
+  },
   {
     version: '3.9.47-preview',
     date: 'September 18, 2026',
