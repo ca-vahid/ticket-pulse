@@ -81,7 +81,10 @@ describe('the whole conversation, newest first', () => {
   test('each block is attributed and dated', async () => {
     findMany.mockResolvedValue([entry({ actorName: 'Alvina Chen' })]);
     const quote = await ticketService._lastInboundQuote(1);
-    expect(quote.html).toMatch(/On .+, Alvina Chen wrote:/);
+    // HTML: a mail-client style header — name on its own line, full date under it.
+    expect(quote.html).toContain('>Alvina Chen</span>');
+    expect(quote.html).toMatch(/September 10, 2026/);
+    // Plain text keeps the line replyQuoteStripper keys on.
     expect(quote.text).toMatch(/On .+, Alvina Chen wrote:/);
   });
 

@@ -4508,6 +4508,45 @@ class TicketService {
    * `reply` is the message being sent: { text, authorName, authorEmail }.
    */
   async _lastInboundQuote(ticketId, excludeEntryId = null, { reply = null } = {}) {
+    // The HTML header of a quoted message reads like a mail client's own reply
+    // header (Vahid, 18 Sep 2026): who, on its own line with the address, then
+    // the full date on the next — not one grey sentence. The PLAIN-TEXT twin
+    // keeps "On <date>, <name> wrote:", which replyQuoteStripper keys on.
+    const formatQuoteDateLong = (value, timeZone) => {
+      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+      try {
+        return new Date(value).toLocaleString('en-CA', timeZone ? { ...options, timeZone, timeZoneName: 'short' } : options);
+      } catch {
+        return new Date(value).toLocaleString('en-CA', options);
+      }
+    };
+    const initialsOf = (name) => {
+      const parts = String(name || '').replace(/[^\p{L}\p{N}\s.'-]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) return '';
+      const first = parts[0][0] || '';
+      const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+      return `${first}${last}`.toUpperCase();
+    };
+    const FONT = '\'Segoe UI\',Arial,sans-serif';
+    const quoteHeaderHtml = ({ label, name, email, whenLong }) => {
+      const initials = initialsOf(name || email);
+      const who = name
+        ? `<span style="font-size:15px;font-weight:600;color:#0f172a;">${escapeHtml(name)}</span>`
+          + (email ? ` <span style="font-size:13px;color:#64748b;">&lt;${escapeHtml(email)}&gt;</span>` : '')
+        : `<span style="font-size:15px;font-weight:600;color:#0f172a;">${escapeHtml(email || 'The requester')}</span>`;
+      const avatar = initials
+        ? '<td width="40" valign="top" style="padding:2px 12px 0 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
+          + `<td width="40" height="40" align="center" valign="middle" bgcolor="#e0e7ff" style="background-color:#e0e7ff;border-radius:20px;font-family:${FONT};font-size:14px;font-weight:600;color:#3730a3;">${escapeHtml(initials)}</td>`
+          + '</tr></table></td>'
+        : '';
+      return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 12px;"><tr>'
+        + avatar
+        + `<td valign="top" style="font-family:${FONT};line-height:1.45;">`
+        + `<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;margin:0 0 3px;">${escapeHtml(label)}</div>`
+        + `<div style="margin:0 0 2px;">${who}</div>`
+        + (whenLong ? `<div style="font-size:13px;color:#64748b;">${escapeHtml(whenLong)}</div>` : '')
+        + '</td></tr></table>';
+    };
     // An unknown zone name must cost the zone, never the e-mail.
     const formatQuoteDate = (value, timeZone) => {
       const options = { dateStyle: 'medium', timeStyle: 'short' };
@@ -4664,9 +4703,16 @@ class TicketService {
         ? formatQuoteDate(row.occurredAt, quoteTimeZone)
         : '';
       const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
+      const bareEmail = String(row.actorEmail || '').match(/[^\s<>"]+@[^\s<>"]+/);
+      const headerHtml = quoteHeaderHtml({
+        label: row.eventType === 'original_request' ? 'Original request' : 'Earlier in this conversation',
+        name: row.actorName || null,
+        email: bareEmail ? bareEmail[0] : null,
+        whenLong: row.occurredAt ? formatQuoteDateLong(row.occurredAt, quoteTimeZone) : '',
+      });
       blocks.push(
-        `<div class="tp-quoted"><p style="color:#5f6b7a;font-size:13px;margin:0 0 8px;">${header}</p>`
-        + `<blockquote style="margin:0 0 14px;padding-left:12px;border-left:3px solid #d0d5dd;color:#374151;">${quotedHtml}</blockquote></div>`,
+        `<div class="tp-quoted" style="margin:0 0 26px;">${headerHtml}`
+        + `<blockquote style="margin:0;padding:2px 0 2px 16px;border-left:3px solid #c7d2fe;color:#374151;">${quotedHtml}</blockquote></div>`,
       );
       const plain = (row.bodyText || row.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
       textBlocks.push(`${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n`
@@ -4685,7 +4731,7 @@ class TicketService {
 
     // gmail_quote gives Gmail its best chance of collapsing the history behind
     // "…"; Outlook shows it inline, which is the expected email convention.
-    const html = '<hr style="border:none;border-top:1px solid #d0d5dd;margin:20px 0 12px;" />'
+    const html = '<hr style="border:none;border-top:1px solid #d0d5dd;margin:28px 0 22px;" />'
       + `<div class="gmail_quote">${blocks.join('')}</div>`;
     const text = `\n\n${textBlocks.join('\n\n')}`;
     return { html, text };

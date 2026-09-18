@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.44-preview';
+export const APP_VERSION = '3.9.45-preview';
 
 export const changelog = [
+  {
+    version: '3.9.45-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Quoted messages in reply e-mails are easier to read</strong> — each one now opens like a mail client’s reply header: a label (Original request, or Earlier in this conversation), the sender’s name and address, and the full date on its own line, with more room around it.' },
+    ],
+  },
   {
     version: '3.9.44-preview',
     date: 'September 18, 2026',
