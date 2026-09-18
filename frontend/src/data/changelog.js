@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.42-preview';
+export const APP_VERSION = '3.9.43-preview';
 
 export const changelog = [
+  {
+    version: '3.9.43-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Tickets with an invisible broken character now arrive</strong> — two Accounting tickets carried a hidden character the database refuses, so they never appeared in Ticket Pulse even though FreshService had them. The character is removed on the way in.' },
+    ],
+  },
   {
     version: '3.9.42-preview',
     date: 'September 18, 2026',

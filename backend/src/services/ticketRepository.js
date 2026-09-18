@@ -2,6 +2,7 @@ import logger from '../utils/logger.js';
 import { getTodayRange } from '../utils/timezone.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
+import { stripNulDeep } from '../utils/textEncoding.js';
 import prisma from './prisma.js';
 
 /**
@@ -245,8 +246,11 @@ class TicketRepository {
    * @param {Object} data - Ticket data
    * @returns {Promise<Object>} Created or updated ticket
    */
-  async upsert(data) {
+  async upsert(rawData) {
     try {
+      // A NUL anywhere in FreshService's text fails the whole row in Postgres
+      // (22021) — and a ticket that cannot be inserted silently never exists.
+      const data = stripNulDeep(rawData);
       const updatePayload = {
         subject: data.subject,
         description: data.description,
