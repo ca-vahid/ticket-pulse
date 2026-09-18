@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.30-preview';
+export const APP_VERSION = '3.9.31-preview';
 
 export const changelog = [
+  {
+    version: '3.9.31-preview',
+    date: 'September 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approval e-mails, quieter cards</strong> — the category sits in a slim strip between two hairlines instead of a tinted box, and the two people share one framed panel divided by a rule, so the cards line up and the page breathes. Same content, less chrome.' },
+      { type: 'fixed', html: '<strong>Deploy-time database wedge</strong> — when a new backend booted on a sync tick while the old one was still syncing, the connection pool jammed for six minutes this afternoon. Schedulers now wait 45 seconds after boot for the reconnect storm to pass, and a watchdog restarts the service if the pool stays jammed for a minute.' },
+    ],
+  },
   {
     version: '3.9.30-preview',
     date: 'September 17, 2026',

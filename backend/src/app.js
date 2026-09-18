@@ -250,8 +250,30 @@ async function initialize() {
         enableScheduledSync: config.sync.enableScheduledSync,
       });
     } else if (isConfigured) {
-      logger.info('FreshService is configured, starting scheduled sync for all workspaces');
-      await scheduledSyncService.start();
+      // Boot grace (17 Sep 2026): a container that starts on a sync tick while the
+      // previous container is still syncing, with every open tab reconnecting at
+      // once, wedged the 9-connection pool for six minutes. Let the reconnect
+      // storm pass before the schedulers add their own load.
+      const bootDelayMs = Math.max(0, Number(process.env.SYNC_BOOT_DELAY_MS ?? 45_000) || 0);
+      if (bootDelayMs > 0) {
+        logger.info(`FreshService is configured — scheduled sync starts in ${Math.round(bootDelayMs / 1000)} s (boot grace)`);
+        const t = setTimeout(() => {
+          scheduledSyncService.start().catch((err) => logger.error('Scheduled sync start failed after boot grace:', err));
+        }, bootDelayMs);
+        t.unref?.();
+      } else {
+        logger.info('FreshService is configured, starting scheduled sync for all workspaces');
+        await scheduledSyncService.start();
+      }
+
+      // If the pool wedges anyway, do not sit behind a red /health for ever:
+      // the watchdog exits after a minute of pool timeouts and the platform restarts us.
+      try {
+        const { DbPoolWatchdog } = await import('./services/dbPoolWatchdog.js');
+        new DbPoolWatchdog({ prisma }).start();
+      } catch (err) {
+        logger.warn(`DB pool watchdog not started: ${err.message}`);
+      }
 
       // Sync liveness self-monitoring (realtime plan Phase 3): alerts admins
       // once per incident when a workspace hasn't completed a sync in >3× its
