@@ -1237,6 +1237,11 @@ class TicketApprovalService {
     const stats = { pending: 0, info_requested: 0, approved: 0, rejected: 0, cancelled: 0, escalated: 0, forwarded: 0 };
     for (const g of grouped) stats[g.status] = g._count._all;
     stats.total = Object.values(stats).reduce((a, b) => a + b, 0);
+    // Same name pass as the inbox lists. Without it "Requested by" reached the
+    // Approvals page with no name and the page prettified the mailbox instead —
+    // "Snasiri" for Soheil Nasiri (Vahid, 18 Sep 2026). One lookup per distinct
+    // person per call.
+    await this._fillApproverNames(items);
     return { stats, items: items.map((a) => this._inboxRow(a)) };
   }
 

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.48-preview';
+export const APP_VERSION = '3.9.49-preview';
 
 export const changelog = [
+  {
+    version: '3.9.49-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approvals page: “Requested by” shows the person’s full name</strong> — it was showing the first part of their e-mail address (“Snasiri”) instead of “Soheil Nasiri”.' },
+    ],
+  },
   {
     version: '3.9.48-preview',
     date: 'September 18, 2026',

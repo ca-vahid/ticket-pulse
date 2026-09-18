@@ -47,3 +47,40 @@ describe('ticketApprovalService.overview filters (QA 09-16 #4)', () => {
     expect(args.orderBy).toEqual([{ status: 'asc' }, { id: 'desc' }]);
   });
 });
+
+describe('overview rows carry people’s NAMES (18 Sep 2026)', () => {
+  // The Approvals page showed "Snasiri" under "Requested by": overview() skipped
+  // the name pass the inbox lists run, so the page prettified the mailbox.
+  const row = (over = {}) => ({
+    id: 77, workspaceId: 1, ticketId: 9, status: 'approved', approverEmail: 'vhaeri@bgcengineering.ca', approverName: 'Vahid Haeri',
+    requestedBy: 'snasiri@bgcengineering.ca', createdAt: new Date('2026-09-18T22:59:00Z'), decidedAt: null,
+    approvalCategory: { name: 'Entra PIM Permission Request' },
+    ticket: { id: 9, subject: 'Permission for signature app', origin: 'ticketpulse', nativeNumber: 1569, freshserviceTicketId: null, requester: { name: 'Soheil Nasiri', email: 'snasiri@bgcengineering.ca' } },
+    ...over,
+  });
+
+  beforeEach(() => {
+    prismaMock.technician = { findFirst: jest.fn(async ({ where }) => (where.email.equals === 'snasiri@bgcengineering.ca' ? { name: 'Soheil Nasiri' } : null)) };
+    prismaMock.requester = { findFirst: jest.fn().mockResolvedValue(null) };
+  });
+
+  test('requestedByName is the person, not the mailbox', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValueOnce([row()]);
+    const { items } = await ticketApprovalService.overview(1, {});
+    expect(items[0].requestedByName).toBe('Soheil Nasiri');
+    expect(items[0].requestedBy).toBe('snasiri@bgcengineering.ca');
+  });
+
+  test('one lookup per distinct person, however many rows', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValueOnce([row({ id: 1 }), row({ id: 2 }), row({ id: 3 })]);
+    await ticketApprovalService.overview(1, {});
+    expect(prismaMock.technician.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  test('a missing approver name is filled the same way', async () => {
+    prismaMock.technician.findFirst.mockImplementation(async ({ where }) => ({ 'snasiri@bgcengineering.ca': { name: 'Soheil Nasiri' }, 'vhaeri@bgcengineering.ca': { name: 'Vahid Haeri' } }[where.email.equals] || null));
+    prismaMock.ticketApproval.findMany.mockResolvedValueOnce([row({ approverName: null })]);
+    const { items } = await ticketApprovalService.overview(1, {});
+    expect(items[0].approverName).toBe('Vahid Haeri');
+  });
+});
