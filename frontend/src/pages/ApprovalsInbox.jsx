@@ -45,6 +45,10 @@ const STATUS_ICON = {
   forwarded: { Icon: Forward, text: 'text-blue-700 dark:text-blue-300', soft: 'bg-blue-50 dark:bg-blue-500/15' },
 };
 function StatusGlyph({ status, size = 'h-10 w-10', icon = 'h-5 w-5' }) {
+  // The layered-glass set (Vahid's pick, 18 Sep 2026), kept small. Statuses without
+  // artwork (cancelled) fall back to a quiet glyph in a soft circle.
+  const art = STATUS_META[status]?.art;
+  if (art) return <BrandArt name={art} className={`${size} flex-shrink-0`} />;
   const m = STATUS_ICON[status] || STATUS_ICON.cancelled;
   return <span className={`inline-flex ${size} flex-shrink-0 items-center justify-center rounded-full ${m.soft}`} aria-hidden="true"><m.Icon className={`${icon} ${m.text}`} /></span>;
 }

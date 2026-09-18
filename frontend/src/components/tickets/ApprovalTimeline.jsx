@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, ShieldCheck, Trash2, XCircle,
+  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, Trash2, XCircle,
 } from 'lucide-react';
-import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
+import { BrandArt, PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 import { AmountChip, TierChip, handoffSentence } from './ApprovalHandoff';
 import ApprovalComposer from './ApprovalComposer';
 import ApprovalThread, { WaitingOnApproverChip } from './ApprovalThread';
@@ -80,6 +80,9 @@ const rowLabel = (ap) => {
  * status, decision notes, and the approver/requester actions.
  */
 /** Approver avatar: roster photo when the workspace knows one, else the directory photo by e-mail (app-only members). */
+// Layered-glass status art for the card header, by overall verdict.
+const VERDICT_ART = { approved: 'approval-stamp', rejected: 'approval-rejected', pending: 'approval-waiting', info_requested: 'approval-question', escalated: 'approval-escalate', forwarded: 'approval-forward' };
+
 function ApproverAvatar({ email, name, photoUrl, size = 'h-8 w-8', textSize = 'text-[10px]' }) {
   const fetched = useRequesterPhoto(photoUrl ? null : email);
   const url = photoUrl || (typeof fetched === 'string' ? fetched : fetched?.photo) || null;
@@ -159,7 +162,7 @@ export default function ApprovalTimeline({
           <li key={head.requestGroupId || head.id} className="rounded-xl border border-border bg-card shadow-subtle overflow-hidden animate-fadeIn">
             {/* Group header — category + overall verdict, tinted to match */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5 border-b border-border/70">
-              <ShieldCheck className="w-[18px] h-[18px] text-muted-foreground" aria-hidden="true" />
+              <BrandArt name={VERDICT_ART[verdict] || 'approval-waiting'} className="h-7 w-7" />
               {category && (
                 <span className="text-[15px] font-semibold text-foreground">{category}</span>
               )}
