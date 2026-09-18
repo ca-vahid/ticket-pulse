@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.40-preview';
+export const APP_VERSION = '3.9.41-preview';
 
 export const changelog = [
+  {
+    version: '3.9.41-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Finishes the 3.9.40 release</strong> — the server half of 3.9.40 did not deploy because a leftover, unused piece of code failed an automated check. It is removed; the “Not approved” wording and the tidier approval e-mails are now live on the server as well as in the app.' },
+    ],
+  },
   {
     version: '3.9.40-preview',
     date: 'September 18, 2026',
