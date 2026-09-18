@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.46-preview';
+export const APP_VERSION = '3.9.47-preview';
 
 export const changelog = [
+  {
+    version: '3.9.47-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Quoted messages show who was Cc’d</strong> — in reply e-mails, the original request and each earlier message now carry a Cc line with the people who were copied, by name where we know it. System addresses are left out.' },
+    ],
+  },
   {
     version: '3.9.46-preview',
     date: 'September 18, 2026',

@@ -4528,7 +4528,7 @@ class TicketService {
       return `${first}${last}`.toUpperCase();
     };
     const FONT = '\'Segoe UI\',Arial,sans-serif';
-    const quoteHeaderHtml = ({ label, name, email, whenLong }) => {
+    const quoteHeaderHtml = ({ label, name, email, whenLong, cc = [] }) => {
       const initials = initialsOf(name || email);
       const who = name
         ? `<span style="font-size:15px;font-weight:600;color:#0f172a;">${escapeHtml(name)}</span>`
@@ -4545,6 +4545,9 @@ class TicketService {
         + `<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;margin:0 0 3px;">${escapeHtml(label)}</div>`
         + `<div style="margin:0 0 2px;">${who}</div>`
         + (whenLong ? `<div style="font-size:13px;color:#64748b;">${escapeHtml(whenLong)}</div>` : '')
+        + (cc.length ? `<div style="font-size:13px;color:#64748b;margin:3px 0 0;"><span style="font-weight:600;color:#475569;">Cc:</span> ${cc.map((person) => (person.name
+          ? `<span style="color:#0f172a;">${escapeHtml(person.name)}</span> &lt;${escapeHtml(person.email)}&gt;`
+          : escapeHtml(person.email))).join('; ')}${cc.more ? ` and ${cc.more} more` : ''}</div>` : '')
         + '</td></tr></table>';
     };
     // An unknown zone name must cost the zone, never the e-mail.
@@ -4584,7 +4587,7 @@ class TicketService {
       take: MAX_QUOTED_MESSAGES + 1,
       select: {
         bodyHtml: true, bodyText: true, content: true, actorName: true,
-        actorEmail: true, occurredAt: true, isPrivate: true, eventType: true,
+        actorEmail: true, occurredAt: true, isPrivate: true, eventType: true, rawPayload: true,
       },
     });
     // Belt and braces: never trust the query alone with this one.
@@ -4639,16 +4642,20 @@ class TicketService {
     // Quoted dates are read by a person in the workspace's timezone. The server
     // runs in UTC, so TP-1285's "2:38 p.m." was really 7:38 a.m. in Vancouver.
     let quoteTimeZone = null;
+    let ticketCc = [];
+    let quoteWorkspaceId = null;
     try {
       const ticket = await prisma.ticket.findUnique({
         where: { id: ticketId },
         select: {
-          description: true, descriptionText: true, createdAt: true,
+          description: true, descriptionText: true, createdAt: true, ccEmails: true, workspaceId: true,
           requester: { select: { name: true, email: true } },
           workspace: { select: { defaultTimezone: true } },
         },
       });
       quoteTimeZone = ticket?.workspace?.defaultTimezone || null;
+      ticketCc = Array.isArray(ticket?.ccEmails) ? ticket.ccEmails : [];
+      quoteWorkspaceId = ticket?.workspaceId || null;
       if (!opensWithIt && ticket && (ticket.description || ticket.descriptionText)) {
         originalRequest = {
           bodyHtml: ticket.description || null,
@@ -4659,11 +4666,71 @@ class TicketService {
           occurredAt: ticket.createdAt,
           isPrivate: false,
           eventType: 'original_request',
+          rawPayload: { cc_emails: ticketCc },
         };
       }
     } catch (err) {
       logger.debug(`Description quote lookup skipped for ticket ${ticketId}: ${err.message}`);
     }
+
+    // ── Who else was on it (Vahid, 18 Sep 2026) ──────────────────────────
+    // A "Cc:" line under each quoted header, like a mail client's reply header.
+    // People only: the sender, our own mailboxes (and their +tags) and the
+    // FreshService relay address are plumbing, not recipients. Names come from
+    // one lookup; every failure here costs the Cc line, never the quote.
+    const bareAddress = (value) => {
+      const m = String(value || '').match(/[^\s<>"',;]+@[^\s<>"',;]+/);
+      return m ? m[0].toLowerCase() : '';
+    };
+    const MAX_CC_SHOWN = 8;
+    let ownMailboxes = [];
+    const ccNames = new Map();
+    const ccOf = (row) => (Array.isArray(row?.rawPayload?.cc_emails) ? row.rawPayload.cc_emails : []);
+    try {
+      const wanted = new Set();
+      for (const row of [...quotable, ...(originalRequest ? [originalRequest] : [])]) {
+        for (const raw of ccOf(row)) { const a = bareAddress(raw); if (a) wanted.add(a); }
+      }
+      if (wanted.size > 0) {
+        if (quoteWorkspaceId && prisma.mailboxConnection?.findMany) {
+          const boxes = await prisma.mailboxConnection.findMany({ where: { workspaceId: quoteWorkspaceId }, select: { address: true } });
+          ownMailboxes = boxes.map((b) => String(b.address || '').trim().toLowerCase()).filter(Boolean);
+        }
+        if (prisma.requester?.findMany) {
+          const people = await prisma.requester.findMany({ where: { email: { in: [...wanted] } }, select: { name: true, email: true } });
+          for (const person of people) {
+            const key = String(person.email || '').toLowerCase();
+            if (key && person.name && !ccNames.has(key)) ccNames.set(key, person.name);
+          }
+        }
+      }
+    } catch (err) {
+      logger.debug(`Cc lookup skipped for ticket ${ticketId}: ${err.message}`);
+    }
+    const isPlumbing = (address) => {
+      if (/@[^@]*\bfreshservice\.com$/i.test(address) || address.startsWith('ticketpulse@')) return true;
+      return ownMailboxes.some((box) => {
+        if (address === box) return true;
+        const [local, domain] = box.split('@');
+        return address.startsWith(`${local}+`) && address.endsWith(`@${domain}`);
+      });
+    };
+    const ccPeople = (row) => {
+      const sender = bareAddress(row.actorEmail);
+      const seenCc = new Set();
+      const people = [];
+      for (const raw of ccOf(row)) {
+        const address = bareAddress(raw);
+        if (!address || address === sender || seenCc.has(address) || isPlumbing(address)) continue;
+        seenCc.add(address);
+        // "Name <addr>" in the stored value wins over the directory lookup.
+        const inline = String(raw).match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/);
+        people.push({ name: (inline && inline[1].trim()) || ccNames.get(address) || null, email: address });
+      }
+      const shown = people.slice(0, MAX_CC_SHOWN);
+      if (people.length > MAX_CC_SHOWN) shown.more = people.length - MAX_CC_SHOWN;
+      return shown;
+    };
     if (originalRequest) {
       // …and never when a quoted message (or the reply itself) already says it.
       const descText = rowText(originalRequest);
@@ -4704,18 +4771,23 @@ class TicketService {
         : '';
       const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
       const bareEmail = String(row.actorEmail || '').match(/[^\s<>"]+@[^\s<>"]+/);
+      const cc = ccPeople(row);
       const headerHtml = quoteHeaderHtml({
         label: row.eventType === 'original_request' ? 'Original request' : 'Earlier in this conversation',
         name: row.actorName || null,
         email: bareEmail ? bareEmail[0] : null,
         whenLong: row.occurredAt ? formatQuoteDateLong(row.occurredAt, quoteTimeZone) : '',
+        cc,
       });
       blocks.push(
         `<div class="tp-quoted" style="margin:0 0 26px;">${headerHtml}`
         + `<blockquote style="margin:0;padding:2px 0 2px 16px;border-left:3px solid #c7d2fe;color:#374151;">${quotedHtml}</blockquote></div>`,
       );
       const plain = (row.bodyText || row.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
-      textBlocks.push(`${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n`
+      const ccText = cc.length
+        ? `> Cc: ${cc.map((person) => (person.name ? `${person.name} <${person.email}>` : person.email)).join('; ')}${cc.more ? ` and ${cc.more} more` : ''}\n>\n`
+        : '';
+      textBlocks.push(`${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n${ccText}`
         + plain.split(/\r?\n/).map((line) => `> ${line}`).join('\n'));
       return true;
     };
