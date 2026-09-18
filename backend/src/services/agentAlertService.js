@@ -4,6 +4,7 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolveAgentTechnician } from './agentCompetencyService.js';
 
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 const TRIGGERS = ['created', 'priority_raised', 'recategorized'];
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
@@ -337,7 +338,7 @@ class AgentAlertService {
 
     const refs = tickets.map((t) => ticketDisplayRef(t));
     const listed = refs.slice(0, MAX_LISTED).join(', ') + (refs.length > MAX_LISTED ? ` …and ${refs.length - MAX_LISTED} more` : '');
-    const publicBase = process.env.PUBLIC_APP_URL || process.env.FRONTEND_PUBLIC_URL || process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
+    const publicBase = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
 
     const out = { channels: {} };
 
