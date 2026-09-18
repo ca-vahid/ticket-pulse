@@ -1,5 +1,6 @@
 import winston from 'winston';
 import config from '../config/index.js';
+import { foldPrimitiveMeta } from './logArgs.js';
 
 // Define log levels
 const levels = {
@@ -74,6 +75,14 @@ const logger = winston.createLogger({
   transports,
   exitOnError: false,
 });
+
+// A bare string after the message (`logger.error('…failed:', err.message)`) is
+// read by winston as a metadata OBJECT and spread one character per key. Fold
+// such primitives into the message before winston sees them — see logArgs.js.
+for (const level of Object.keys(levels)) {
+  const original = logger[level].bind(logger);
+  logger[level] = (message, ...rest) => original(...foldPrimitiveMeta(message, rest));
+}
 
 // Create stream for morgan (HTTP logging)
 logger.stream = {
