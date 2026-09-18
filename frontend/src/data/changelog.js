@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.34-preview';
+export const APP_VERSION = '3.9.35-preview';
 
 export const changelog = [
+  {
+    version: '3.9.35-preview',
+    date: 'September 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Error reasons readable in the server log</strong> — thirteen places logged a failure as “something failed:” followed by the reason, and the logging library printed that reason one character per line instead of as a sentence. The logger now folds such text into the message itself, so the next incident can be read at a glance. No change to how the app behaves.' },
+    ],
+  },
   {
     version: '3.9.34-preview',
     date: 'September 18, 2026',
