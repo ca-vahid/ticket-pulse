@@ -18,6 +18,7 @@ import requesterRepository from './requesterRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import settingsRepository from './settingsRepository.js';
 import syncLogRepository from './syncLogRepository.js';
+import { recordFailedUpsert, retryFailedUpserts } from './syncFailedUpsertRegistry.js';
 import csatService from './csatService.js';
 import noiseRuleService from './noiseRuleService.js';
 import assignmentRepository from './assignmentRepository.js';
@@ -1520,6 +1521,41 @@ class SyncService {
   }
 
   /**
+   * Re-fetch and re-save the tickets a previous sync could not save. Never
+   * throws: a retry problem must not fail the sync that hosts it.
+   */
+  async _retryFailedUpserts(workspaceId) {
+    if (!workspaceId) return null;
+    try {
+      let client = null;
+      const summary = await retryFailedUpserts(workspaceId, async (freshserviceTicketId) => {
+        if (!client) {
+          const wsConfig = await this._getWorkspaceConfig(workspaceId);
+          client = createFreshServiceClient(wsConfig.domain, wsConfig.apiKey, { priority: 'low', source: 'failed-upsert-retry' });
+        }
+        let fsTicket;
+        try {
+          fsTicket = await client.fetchTicketSnapshot(freshserviceTicketId);
+        } catch (error) {
+          const status = error?.response?.status || error?.status;
+          if (status === 404 || status === 403 || error === FORBIDDEN_TICKET) return 'gone';
+          throw error;
+        }
+        if (!fsTicket || fsTicket.deleted === true) return 'gone';
+        await this.syncFreshServiceTicketSnapshot(workspaceId, fsTicket, { client, source: 'failed_upsert_retry', clearReadCache: true });
+        return 'saved';
+      });
+      if (summary.tried > 0 || summary.givenUp > 0) {
+        logger.info('Sync: retried tickets that previously failed to save', { workspaceId, ...summary });
+      }
+      return summary;
+    } catch (error) {
+      logger.warn(`Sync: failed-upsert retry skipped for workspace ${workspaceId}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Batch upsert tickets to database
    *
    * @param {Array} tickets - Prepared tickets (with assignedTechId)
@@ -1554,6 +1590,11 @@ class SyncService {
       } catch (error) {
         const ticketId = ticket.freshserviceTicketId || ticket.id;
         logger.warn(`Failed to upsert ticket ${ticketId}: ${error.message || error}`);
+        // The sync window moves on whether or not this ticket was saved — without
+        // this it is never fetched again (18 Sep 2026, see the registry).
+        if (ticket.workspaceId && ticket.freshserviceTicketId) {
+          await recordFailedUpsert(ticket.workspaceId, ticket.freshserviceTicketId, error);
+        }
       }
     }
 
@@ -2476,6 +2517,7 @@ class SyncService {
           freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
           error: error.message,
         });
+        if (ticket.freshserviceTicketId) await recordFailedUpsert(workspaceId, ticket.freshserviceTicketId, error);
       }
     }
 
@@ -3423,6 +3465,9 @@ class SyncService {
       this.progress.percentage = 30;
       const ticketsSynced = await this._upsertTickets(preparedTickets);
       const ticketsSkipped = tickets.length - ticketsSynced;
+      // Tickets an earlier sync could not save are outside this run's window by
+      // now; fetch them by id and try again.
+      await this._retryFailedUpserts(workspaceId);
 
       // Step 4: Analyze activities using core method
       this.progress.currentStep = `Analyzing ticket activities (0/${tickets.length})`;
