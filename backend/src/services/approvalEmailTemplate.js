@@ -216,10 +216,6 @@ const TONES = {
   slate: { bg: '#e2e8f0', color: '#334155', line: '#cbd5e1' },
 };
 
-function chip(label, tone = TONES.slate) {
-  return `<span style="display:inline-block;padding:3px 9px;border-radius:999px;background:${tone.bg};color:${tone.color};font-family:${FONT};font-size:11px;line-height:16px;font-weight:bold;letter-spacing:0.3px;">${escapeHtml(label)}</span>`;
-}
-
 function initialsCircle(name, size = 56) {
   const font = size >= 56 ? 19 : size >= 40 ? 14 : 12;
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="${size}" height="${size}" align="center" valign="middle" bgcolor="#dbeafe" style="width:${size}px;height:${size}px;border-radius:${size / 2}px;background:#dbeafe;color:#1d4ed8;font-family:${FONT};font-size:${font}px;font-weight:bold;line-height:${size}px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
