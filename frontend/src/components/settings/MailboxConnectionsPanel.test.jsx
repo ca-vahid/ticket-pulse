@@ -135,30 +135,51 @@ describe('MailboxConnectionsPanel inbound-lane pill (Phase MB-2e)', () => {
   });
 });
 
-// QA 09-17 #6 — Field Equipment's fetickets@ is connected in Ingest-only mode,
-// so its replies leave through SendGrid and never appear in its Sent Items.
-// Nothing said so; the row says it now.
-describe('MailboxConnectionsPanel ingest-only note (QA 09-17 #6)', () => {
+// QA 09-17 #6 + the 18 Sep follow-up. The mailbox mode picks the sending LANE,
+// and the lane decides whether a reply can carry the replying agent's name:
+// SendGrid (ingest only) keeps it, Microsoft Graph (send/both) has Exchange
+// overwrite it with the mailbox's own name. The first version of this note only
+// named the Sent Items upside and told admins to switch — which would have cost
+// Field Equipment its per-agent names. Both notes now state the trade.
+describe('MailboxConnectionsPanel mode trade-off notes (QA 09-17 #6)', () => {
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-  test('an enabled ingest-only mailbox explains where its replies come from', async () => {
+  test('an ingest-only mailbox names the agent-name upside and the Sent Items cost', async () => {
     ticketsAPI.listMailboxes.mockResolvedValue({
       data: [{ ...mailboxes[0], mode: 'ingest' }, mailboxes[1]],
     });
     render(<MailboxConnectionsPanel />);
     const note = await screen.findByTestId('mailbox-ingest-note-1');
-    expect(note).toHaveTextContent(/no copy in this mailbox's Sent Items/);
-    expect(note).toHaveTextContent(/Ingest \+ send/);
-    // Ingest + send mailboxes say nothing extra.
-    expect(screen.queryByTestId('mailbox-ingest-note-2')).not.toBeInTheDocument();
+    expect(note).toHaveTextContent(/replying agent's name/);
+    expect(note).toHaveTextContent(/nothing is copied to this mailbox's Sent Items/);
+    // It must NOT push the admin toward the lane that loses the agent name.
+    expect(note.textContent).not.toMatch(/Switch to/i);
   });
 
-  test('a disabled ingest mailbox does not carry the note', async () => {
+  test('a send-capable mailbox warns that requesters never see the individual agent', async () => {
+    ticketsAPI.listMailboxes.mockResolvedValue({ data: [mailboxes[0]] }); // mode 'both'
+    render(<MailboxConnectionsPanel />);
+    const note = await screen.findByTestId('mailbox-send-note-1');
+    expect(note).toHaveTextContent(/Microsoft 365 replaces the/);
+    expect(note).toHaveTextContent(/never see the individual agent/);
+    expect(screen.queryByTestId('mailbox-ingest-note-1')).not.toBeInTheDocument();
+  });
+
+  test('the mode options name which way each one goes', async () => {
+    ticketsAPI.listMailboxes.mockResolvedValue({ data: [mailboxes[0]] });
+    render(<MailboxConnectionsPanel />);
+    await waitFor(() => expect(screen.getByText('it@example.com')).toBeInTheDocument());
+    expect(screen.getByRole('option', { name: 'Ingest only (agent name on replies)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Ingest + send (team name on replies)' })).toBeInTheDocument();
+  });
+
+  test('a disabled mailbox carries neither note', async () => {
     ticketsAPI.listMailboxes.mockResolvedValue({
       data: [{ ...mailboxes[0], mode: 'ingest', isEnabled: false }],
     });
     render(<MailboxConnectionsPanel />);
     await waitFor(() => expect(screen.getByText('it@example.com')).toBeInTheDocument());
     expect(screen.queryByTestId('mailbox-ingest-note-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mailbox-send-note-1')).not.toBeInTheDocument();
   });
 });
