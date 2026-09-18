@@ -334,3 +334,48 @@ export function cleanDisplayName(value) {
   if (typeof value !== 'string' || !value) return value;
   return repairMojibake(decodeRfc2047(value));
 }
+
+// ---------------------------------------------------------------------------
+// NUL bytes. PostgreSQL text and jsonb cannot hold U+0000 ("invalid byte
+// sequence for encoding UTF8: 0x00", SQLSTATE 22021), and one in ANY field
+// fails the whole row. 18 Sep 2026: two Accounting tickets whose FreshService
+// text carried a NUL failed to insert on every sync pass for half an hour, then
+// aged out of the fast-sync window — FreshService had them, Ticket Pulse never
+// did. Strip it at the door; it never carries meaning in ticket text.
+// ---------------------------------------------------------------------------
+
+const NUL = String.fromCharCode(0);
+
+/**
+ * Remove U+0000 from every string inside a value. Walks arrays and PLAIN
+ * objects only — Date, Buffer, BigInt, Prisma Decimal and other class
+ * instances pass through untouched. Returns the same reference when nothing
+ * needed changing.
+ */
+export function stripNulDeep(value) {
+  if (typeof value === 'string') {
+    return value.includes(NUL) ? value.split(NUL).join('') : value;
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const out = value.map((item) => {
+      const next = stripNulDeep(item);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? out : value;
+  }
+  if (value && typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+    let changed = false;
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      const next = stripNulDeep(item);
+      if (next !== item) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : value;
+  }
+  return value;
+}
