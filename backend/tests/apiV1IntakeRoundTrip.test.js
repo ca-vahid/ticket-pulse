@@ -490,14 +490,19 @@ describe('ticketService — a reply quotes the ticket description when there is 
     expect(await ticketService._lastInboundQuote(1, null)).toBeNull();
   });
 
-  test('e-mail-born ticket: the inbound message is quoted and the description is not consulted', async () => {
+  test('e-mail-born ticket: the inbound message is quoted and the description is not quoted a second time', async () => {
     prismaMock.ticketThreadEntry.findMany.mockResolvedValue([{
       bodyHtml: '<p>Can we please have an A-code opened</p>', bodyText: 'Can we please have an A-code opened', content: null,
       actorName: 'Remel Pineda-Manaloto', actorEmail: 'rp@bgcengineering.ca', occurredAt: new Date('2026-09-14T04:38:00Z'), isPrivate: false, eventType: 'original_email',
     }]);
-    prismaMock.ticket.findUnique.mockClear();
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      description: '<p>Can we please have an A-code opened</p>', descriptionText: 'Can we please have an A-code opened',
+      createdAt: new Date('2026-09-14T04:38:00Z'), requester: { name: 'Remel Pineda-Manaloto', email: 'rp@bgcengineering.ca' },
+      workspace: { defaultTimezone: 'America/Vancouver' },
+    });
     const quote = await ticketService._lastInboundQuote(45011, null);
-    expect(quote.html).toContain('A-code opened');
-    expect(prismaMock.ticket.findUnique).not.toHaveBeenCalled();
+    expect(quote.html.match(/A-code opened/g)).toHaveLength(1);
+    // The ticket is still read — for the workspace timezone of the quoted dates.
+    expect(quote.html).toContain('Sep 13, 2026, 9:38 p.m.');
   });
 });
