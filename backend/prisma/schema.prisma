@@ -323,6 +323,9 @@ model OAuthClient {
   // Simorgh (09-14): tickets from a trusted-intake credential are never
   // re-classified, re-typed, re-prioritised or noise-closed by the pipeline.
   trustedIntake    Boolean   @default(false) @map("trusted_intake")
+  // Simorgh B6 (19 Sep 2026): may only merge / split / re-parent / link
+  // tickets this client created. Enforced by ticketStructureGuard.
+  structureOwnTicketsOnly Boolean @default(false) @map("structure_own_tickets_only")
   ipAllowlist      String[]  @default([]) @map("ip_allowlist")
   defaultSource    Int?      @map("default_source")
   isEnabled        Boolean   @default(true) @map("is_enabled")
@@ -842,6 +845,9 @@ model TicketTask {
   origin         String      @default("ticketpulse") @db.VarChar(20)
   fsTaskId       BigInt?     @map("fs_task_id") // FreshService task id once mirrored/synced
   sortOrder      Int         @default(0) @map("sort_order")
+  // Caller's own key (Simorgh B4): create-or-return per ticket. Partial unique
+  // index in SQL (WHERE external_ref IS NOT NULL).
+  externalRef    String?     @map("external_ref") @db.VarChar(200)
   createdBy      String?     @map("created_by") @db.VarChar(255)
   createdByName  String?     @map("created_by_name") @db.VarChar(255)
   completedAt    DateTime?   @map("completed_at")
@@ -1446,6 +1452,9 @@ model Ticket {
   // POST /api/v1/tickets with a ref that already exists in the workspace
   // UPDATES that ticket (resubmission) instead of creating a duplicate.
   // Opaque, ≤200 chars, unique per workspace (NULLs don't collide).
+  // Roll-up (Simorgh B8): every child is done and this parent is not — a
+  // person closes it. Cleared when a child reopens or the parent closes.
+  readyToCloseAt DateTime? @map("ready_to_close_at")
   externalRef String? @map("external_ref") @db.VarChar(200)
 
   // Partial unique index in SQL (WHERE external_ref IS NOT NULL) — one

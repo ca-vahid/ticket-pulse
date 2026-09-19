@@ -29,6 +29,7 @@ const WEBHOOK_EVENTS = [
   ['ticket.custom_fields_changed', 'Custom fields changed'],
   ['approval.requested', 'Approval requested'],
   ['approval.decided', 'Approval decided'],
+  ['ticket.ready_to_close', 'Parent ready to close (all children done)'],
 ];
 
 const fmtDate = (d) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -247,6 +248,9 @@ function OAuthClientsSection() {
             {c.trustedIntake && (
               <span title="Trusted intake: this client's category, priority and type are final; its tickets are never noise-closed" className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 text-[10px] font-semibold">trusted intake</span>
             )}
+            {c.structureOwnTicketsOnly && (
+              <span title="This client may only merge, split, re-parent or link tickets it created" className="text-[10px] font-medium text-muted-foreground">own tickets only</span>
+            )}
             {Array.isArray(c.ipAllowlist) && c.ipAllowlist.length > 0 && (
               <span title={c.ipAllowlist.join(', ')} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">{c.ipAllowlist.length} IP{c.ipAllowlist.length === 1 ? '' : 's'}</span>
             )}
@@ -305,6 +309,21 @@ function OAuthClientsSection() {
                 <span className="font-medium text-foreground">Trusted intake</span>
                 <span className="block text-[10px] text-muted-foreground/75">
                   Tickets this client creates keep the category, priority and type it sends. The AI may still pick an assignee, but never re-classifies, re-prioritises or closes them as noise. For systems that have already investigated what they file.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-foreground/85">
+              <input
+                type="checkbox"
+                checked={draft.structureOwnTicketsOnly === true}
+                onChange={(e) => setDraft({ ...draft, structureOwnTicketsOnly: e.target.checked })}
+                aria-label="Only structure its own tickets"
+                className="tp-focus-ring mt-0.5 h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+              />
+              <span>
+                <span className="font-medium text-foreground">Only structure its own tickets</span>
+                <span className="block text-[10px] text-muted-foreground/75">
+                  Merge, split, parent/child and links are refused on any ticket this client did not create. For an integration that promises to leave people’s tickets alone — Ticket Pulse then keeps the promise too.
                 </span>
               </span>
             </label>

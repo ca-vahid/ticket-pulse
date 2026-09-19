@@ -18,7 +18,7 @@ const TASK_SELECT = {
   id: true, ticketId: true, title: true, description: true, status: true,
   assignedTechId: true, dueAt: true, notifyAgent: true, notifiedAt: true,
   remindBeforeMinutes: true, reminderSentAt: true,
-  origin: true, fsTaskId: true, sortOrder: true, createdByName: true,
+  origin: true, fsTaskId: true, sortOrder: true, createdByName: true, externalRef: true,
   completedAt: true, createdAt: true, updatedAt: true,
   assignedTech: { select: { id: true, name: true, photoUrl: true, email: true, freshserviceId: true } },
 };
@@ -82,7 +82,7 @@ class TicketTaskService {
   async _ticket(ticketId, workspaceId) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, nativeNumber: true, subject: true },
+      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, nativeNumber: true, subject: true, assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } } },
     });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
     return ticket;
@@ -118,11 +118,24 @@ class TicketTaskService {
     const remindBeforeMinutes = parseRemindBefore(input?.remindBeforeMinutes);
     const notifyAgent = input?.notifyAgent !== false;
 
+    // Create-or-return (Simorgh B4): a caller's own key for the task. A retry a
+    // day later — outside the idempotency window — returns the existing task
+    // instead of making a twin.
+    const externalRef = input?.externalRef !== undefined && input?.externalRef !== null && String(input.externalRef).trim() !== ''
+      ? String(input.externalRef).trim().slice(0, 200)
+      : null;
+    if (externalRef) {
+      const existing = await Promise.resolve()
+        .then(() => prisma.ticketTask.findFirst({ where: { ticketId, workspaceId, externalRef }, select: TASK_SELECT }))
+        .catch(() => null);
+      if (existing) return { ...shape(existing), existing: true };
+    }
+
     const maxOrder = await prisma.ticketTask.aggregate({ where: { ticketId, workspaceId }, _max: { sortOrder: true } });
     const base = {
       workspaceId, ticketId, title,
       description: input?.description ? String(input.description) : null,
-      status, assignedTechId: assignee?.id ?? null, dueAt, notifyAgent,
+      status, assignedTechId: assignee?.id ?? null, dueAt, notifyAgent, externalRef,
       remindBeforeMinutes: dueAt ? remindBeforeMinutes : null,
       sortOrder: (maxOrder._max.sortOrder ?? 0) + 1,
       createdBy: actor?.email || null, createdByName: actor?.name || actor?.email || null,
@@ -143,7 +156,11 @@ class TicketTaskService {
     // mirrored and the assignee has an FS agent id; notify the assignee ourselves.
     const row = await prisma.ticketTask.create({ data: { ...base, origin: TICKET_ORIGIN.TICKETPULSE }, select: TASK_SELECT });
     await this._writeBackToFs(ticket, row).catch((err) => logger.warn(`Task FS write-back failed (non-fatal): ${err.message}`));
-    const updated = await this._maybeNotify(ticket, row, assignee);
+    // A task with nobody named belongs to the ticket owner (Simorgh B7 — Vahid,
+    // 19 Sep 2026): the owner is told, not nobody.
+    const updated = assignee
+      ? await this._maybeNotify(ticket, row, assignee)
+      : await this._maybeNotify(ticket, row, ticket.assignedTech, { asOwner: true });
     return shape(updated || row);
   }
 
@@ -371,11 +388,13 @@ class TicketTaskService {
   }
 
   /** Email a TP-born task's assignee (idempotent via notifiedAt). */
-  async _maybeNotify(ticket, row, assignee) {
+  async _maybeNotify(ticket, row, assignee, { asOwner = false } = {}) {
     if (!row.notifyAgent || row.notifiedAt || !assignee?.email) return null;
     const ref = ticketDisplayRef(ticket);
     const esc = (s) => String(s || '').replace(/</g, '&lt;');
-    const intro = `You’ve been assigned a task on ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''}.`;
+    const intro = asOwner
+      ? `A task was added to your ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''}. Nobody is named on it, so it is yours as the ticket owner.`
+      : `You’ve been assigned a task on ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''}.`;
     const result = await sendTransactionalEmail({
       workspaceId: ticket.workspaceId, to: assignee.email, label: 'task assignment',
       subject: `New task on ${ref}: ${row.title}`,
@@ -406,7 +425,8 @@ class TicketTaskService {
    */
   async sendDueReminder(row) {
     const ticket = row.ticket;
-    const assignee = row.assignedTech;
+    // An unassigned task belongs to the ticket owner (Simorgh B7).
+    const assignee = row.assignedTech || ticket?.assignedTech || null;
     if (!ticket || !assignee?.email || row.origin !== TICKET_ORIGIN.TICKETPULSE) return false;
     if (row.status === 'done' || !row.dueAt || row.reminderSentAt) return false;
     const ref = ticketDisplayRef(ticket);
@@ -428,6 +448,44 @@ class TicketTaskService {
     // double-stamping (and re-sends stay impossible once stamped).
     await prisma.ticketTask.updateMany({ where: { id: row.id, reminderSentAt: null }, data: { reminderSentAt: new Date() } });
     return true;
+  }
+
+  /**
+   * The ticket changed hands (Simorgh B7): tell the new owner about the open
+   * tasks that have nobody named — they are theirs now. One e-mail, never
+   * fatal. Called from ticketService.assignTicket.
+   */
+  async notifyOwnerOfOpenTasks(ticketId, workspaceId, owner) {
+    if (!owner?.email) return false;
+    try {
+      const ticket = await this._ticket(ticketId, workspaceId);
+      const open = await prisma.ticketTask.findMany({
+        where: { ticketId, workspaceId, origin: TICKET_ORIGIN.TICKETPULSE, status: { not: 'done' }, assignedTechId: null },
+        select: TASK_SELECT, orderBy: [{ dueAt: 'asc' }, { sortOrder: 'asc' }],
+      });
+      if (!open.length) return false;
+      const ref = ticketDisplayRef(ticket);
+      const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const publicBase = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
+      const items = open.map((t) => `<li style="margin:0 0 6px;"><b>${esc(t.title)}</b>${t.dueAt ? ` <span style="color:#b45309;">— due ${new Date(t.dueAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>` : ''}</li>`).join('');
+      const html = [
+        '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;color:#1f2937;max-width:640px;">',
+        `<p style="margin:0 0 12px;">Ticket <b>${esc(ref)}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''} is now yours, and it has ${open.length === 1 ? 'an open task' : `${open.length} open tasks`} with nobody named — ${open.length === 1 ? 'it is' : 'they are'} yours as the ticket owner:</p>`,
+        `<ul style="margin:0 0 12px;padding-left:20px;">${items}</ul>`,
+        `<p style="margin:16px 0 0;"><a href="${publicBase}/tickets/${ticket.id}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,
+        '<p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:18px;">Sent by Ticket Pulse.</p>',
+        '</div>',
+      ].join('');
+      const result = await sendTransactionalEmail({
+        workspaceId, to: owner.email, label: 'open tasks handed over',
+        subject: `${ref}: ${open.length === 1 ? '1 open task is' : `${open.length} open tasks are`} now yours`,
+        html,
+      });
+      return result?.sent === true;
+    } catch (err) {
+      logger.warn(`Open-task handover e-mail failed for ticket ${ticketId} (non-fatal): ${err.message}`);
+      return false;
+    }
   }
 
   /** TP-born mirrored ticket: pull status-only changes back from the FS copy.

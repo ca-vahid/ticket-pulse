@@ -31,6 +31,9 @@ export const WEBHOOK_EVENTS = [
   'ticket.fields_updated',
   'approval.requested',
   'approval.decided',
+  // Roll-up (Simorgh B8): every child of a parent is done; the parent is NOT
+  // closed automatically — this is the nudge.
+  'ticket.ready_to_close',
 ];
 
 // Backoff per attempt index (seconds): immediate, 15s, 1m, 5m, 30m, 2h, 6h, 12h.

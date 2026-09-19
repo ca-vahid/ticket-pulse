@@ -248,7 +248,11 @@ describe('task due reminders (QA 08-04 #8b)', () => {
     const { where, take } = prismaMock.ticketTask.findMany.mock.calls[0][0];
     expect(where.origin).toBe('ticketpulse'); // FS-born/shadow rows are FS's job
     expect(where.status).toEqual({ not: 'done' });
-    expect(where.assignedTechId).toEqual({ not: null });
+    // An unassigned task belongs to the ticket owner (Simorgh B7, 19 Sep 2026):
+    // the scan no longer requires an assignee; sendDueReminder picks the owner.
+    expect(where.assignedTechId).toBeUndefined();
+    const { select } = prismaMock.ticketTask.findMany.mock.calls[0][0];
+    expect(select.ticket.select.assignedTech).toEqual({ select: { id: true, name: true, email: true } });
     expect(where.remindBeforeMinutes).toEqual({ not: null });
     expect(where.reminderSentAt).toBeNull();
     // Window: 60-min grace behind now, longest preset (120 min) ahead.

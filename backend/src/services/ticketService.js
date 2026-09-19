@@ -14,6 +14,7 @@ import statusService, { heuristicBaseStatus } from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
+import ticketRollUpService from './ticketRollUpService.js';
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
 import { resolveFromName, resolveReplyFromName } from './workspaceEmailIdentityService.js';
@@ -3701,6 +3702,12 @@ class TicketService {
     const wasTerminal = TERMINAL_STATUSES.includes(oldBase);
     const isTerminal = TERMINAL_STATUSES.includes(newBase);
 
+    // Roll-up (Simorgh B8 — Vahid, 19 Sep 2026): a parent cannot close while a
+    // child ticket is still open. 409 open_children, for people and the API.
+    if (isTerminal && !wasTerminal) await ticketRollUpService.assertNoOpenChildren(ticket.id, workspaceId);
+    // A closing parent is no longer "ready to close" — it is closed.
+    if (isTerminal) patch.readyToCloseAt = null;
+
     // Resolution reason (Simorgh C4): demanded on Security-category tickets,
     // accepted on any. Validated BEFORE anything is written so a missing
     // reason is a clean 400, not a half-applied status change.
@@ -3774,6 +3781,10 @@ class TicketService {
     await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    // Roll-up: this ticket may be somebody's child (its parent may now be ready
+    // to close, or no longer be), and may itself be a parent that just reopened.
+    await ticketRollUpService.afterChildStatusChange(ticket.id, workspaceId, { actor });
+    if (wasTerminal && !isTerminal) await ticketRollUpService.recomputeReadiness(ticket.id, workspaceId, { actor });
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
@@ -3833,6 +3844,12 @@ class TicketService {
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    // The new owner inherits the ticket's unassigned open tasks (Simorgh B7).
+    if (targetId !== null && updated.assignedTech?.email) {
+      import('./ticketTaskService.js')
+        .then(({ default: ticketTaskService }) => ticketTaskService.notifyOwnerOfOpenTasks(ticket.id, workspaceId, updated.assignedTech))
+        .catch((err) => logger.warn(`Open-task handover skipped for ticket ${ticket.id}: ${err.message}`));
+    }
     const aiOverride = targetId === null ? false : await this._isAiOverride(ticket.id, workspaceId, targetId);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true, aiOverride };
   }

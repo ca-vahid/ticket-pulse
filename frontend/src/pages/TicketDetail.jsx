@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCheck, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -3047,6 +3047,12 @@ export default function TicketDetail() {
                         ...(statusOptions.includes(ticket.status) ? [] : [{ value: ticket.status, label: ticket.status }]),
                       ]}
                     />
+                    {ticket.readyToCloseAt && !isTerminalStatus(statusDefs, ticket.status) && (
+                      <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-4 text-emerald-700 dark:text-emerald-200" data-testid="ready-to-close">
+                        <CheckCheck className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                        <span>Every child ticket is done — this one is ready to close.</span>
+                      </p>
+                    )}
                     {ticket.resolutionReason && (
                       <p className="mt-1 text-[11px] text-muted-foreground" data-testid="resolution-reason">
                         <span className="font-medium text-foreground/85">{reasonLabel(ticket.resolutionReason)}</span>

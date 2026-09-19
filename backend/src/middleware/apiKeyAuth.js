@@ -127,6 +127,7 @@ async function resolvePrincipal(raw) {
     ipAllowlist: Array.isArray(client.ipAllowlist) ? client.ipAllowlist : [],
     rateLimitPerMin: null, keyId: null, oauthClientId: client.id, bucket: `oauth:${client.clientId}`,
     trustedIntake: client.trustedIntake === true, defaultSource: client.defaultSource ?? null,
+    structureOwnTicketsOnly: client.structureOwnTicketsOnly === true,
   };
 }
 
@@ -174,6 +175,7 @@ export const requireApiKey = (scope) => async (req, res, next) => {
       id: principal.keyId, keyPrefix: principal.prefix, name: principal.name, scopes: principal.scopes, mode: principal.mode,
       oauthClientId: principal.oauthClientId || null,
       trustedIntake: principal.trustedIntake === true, defaultSource: principal.defaultSource ?? null,
+      structureOwnTicketsOnly: principal.structureOwnTicketsOnly === true,
     };
     req.workspaceId = principal.workspaceId;
     req.apiMode = principal.mode;

@@ -27,7 +27,7 @@ The feature table was checked against `origin/main` on 19 Sep 2026. It is accura
 | R12 | Roll-up (ask 8) is a product rule that would bind humans too. | Not built. Simorgh enforces it on its side for T1; revisit with data. |
 | R13 | `task.updated` can storm (Simorgh edits descriptions). | B2 coalesces like `ticket.fields_updated`: one delivery per task per 60 s, `task.completed` always immediate. |
 
-**No blocking questions.** Two decisions are needed later and do not block Phase A or B: R11 (group task notifications) and R8 (turn the server-side guard on for Simorgh's clients).
+**Decisions (Vahid, 19 Sep 2026):** sandbox skipped — test in IT on Simorgh's own tickets, merge/split held until the guard (B6) is live; group tasks dropped for "unassigned task belongs to the ticket owner" (B7); guard: yes (B6); roll-up: block, never auto-close, ready-to-close marker + owner alert (B8). Reply sent to Simorgh: artifact `39ff97d1-5a03-42f8-8aaf-d5b0791ca53d`.
 
 ---
 
@@ -36,28 +36,30 @@ The feature table was checked against `origin/main` on 19 Sep 2026. It is accura
 ### Phase A — unblocks Simorgh T1 (no schema change)
 | | Task | Ask |
 |---|---|---|
-| ☐ A1 | Mirror-back close emits the lifecycle event (`ticket.status_changed`, workflows, SSE) and stamps `resolvedByKind = 'freshservice'`. Test pins "a close that came from FreshService is delivered". | 7, 6 |
-| ☐ A2 | History rows for every relation change: `parent_set`, `parent_removed`, `linked`, `unlinked`, `marked_duplicate`, `unmarked_duplicate` — on **both** tickets, with actor kind. | 4 |
-| ☐ A3 | Read shape: `mergedInto {id, ref}`, `parent {id, ref}`, `childCount` on `GET /tickets/{id}`. Bodies accept a display ref wherever they take a ticket id (`target`, `parent`). A merged ticket's GET keeps working (no redirect — the reference resolves and says where it went). | 6, 2 |
-| ☐ A4 | Grant `tasks:read`, `tasks:write` to clients #10 (IT) and #9 (sandbox). Confirm `tickets:write` covers merge/split/parent (it does). Re-enable subscription #4 with Vahid's OK. | 1 |
-| ☐ A5 | Integration guide: relations section + the **activity type vocabulary**. OpenAPI updated (`apiV1OpenApiSpec.test.js` must stay green). | 4 |
+| ☑ A1 (3.9.50) | Mirror-back close emits the lifecycle event (`ticket.status_changed`, workflows, SSE) and stamps `resolvedByKind = 'freshservice'`. Test pins "a close that came from FreshService is delivered". | 7, 6 |
+| ☑ A2 (3.9.50) | History rows for every relation change: `parent_set`, `parent_removed`, `linked`, `unlinked`, `marked_duplicate`, `unmarked_duplicate` — on **both** tickets, with actor kind. | 4 |
+| ☑ A3 (3.9.50) | Read shape: `mergedInto {id, ref}`, `parent {id, ref}`, `childCount` on `GET /tickets/{id}`. Bodies accept a display ref wherever they take a ticket id (`target`, `parent`). A merged ticket's GET keeps working (no redirect — the reference resolves and says where it went). | 6, 2 |
+| ◐ A4 | Grant `tasks:read`, `tasks:write` to clients #10 (IT) and #9 (sandbox) — **done 19 Sep 2026**. `tickets:write` covers merge/split/parent. **Open:** re-enable sandbox subscription #4 (Vahid). | 1 |
+| ☑ A5 (3.9.50) | Integration guide: relations section + the **activity type vocabulary**. OpenAPI updated (`apiV1OpenApiSpec.test.js` must stay green). | 4 |
 
 ### Phase B — unblocks Simorgh T2
 | | Task | Ask |
 |---|---|---|
-| ☐ B1 | v1 `GET/POST/DELETE /tickets/{id}/links` (`related_to`, `duplicate_of`), `POST /tickets/{id}/children`, `POST /tickets/{id}/merge-many` (≤ 20 sources, sequential, per-source result, idempotent). New scopes not needed: `tickets:write`. | 2 |
+| ☑ B1 (3.9.51) | v1 `GET/POST/DELETE /tickets/{id}/links` (`related_to`, `duplicate_of`), `POST /tickets/{id}/children`, `POST /tickets/{id}/merge-many` (≤ 20 sources, sequential, per-source result, idempotent). New scopes not needed: `tickets:write`. | 2 |
 | ☐ B2 | Webhooks: `ticket.linked`, `ticket.parent_changed`, `ticket.merged`, `ticket.split`, `task.created`, `task.updated` (coalesced), `task.completed`. Task payload: ticket `{id, ref}`, task `{id, title, status, assignee{id,name,email}, dueAt, externalRef}`, actor. | 3 |
 | ☐ B3 | Subscription #5 / #4 opt in to the new events (Settings UI lists them automatically from `WEBHOOK_EVENTS`). | 3 |
-| ☐ B4 | Task `externalRef` (migration, additive): create-or-return per ticket. | R9 |
-| ☐ B5 | Pull task status back from FreshService for TP-born mirrored tickets during mirror reconciliation. | R5 |
-| ☐ B6 | Optional per-client `structureOwnTicketsOnly`: merge / split / parent / links refused (403 `not_client_ticket`) unless the ticket was created by that client. | R8 |
+| ☑ B4 (3.9.51) | Task `externalRef` (migration, additive): create-or-return per ticket. | R9 |
+| ☐ B5 | R5 corrected: `_syncMirroredStatusFromFs` already pulls task status back when the tasks are LISTED. Remaining: run it in the mirror reconciliation sweep too, so a completion is seen without a list call. | R5 |
+| ☑ B6 (3.9.51) | **First in B (Vahid: yes).** Per-client `structureOwnTicketsOnly`: merge / split / parent / links refused (403 `not_client_ticket`) unless the ticket was created by that client. | R8 |
+| ☑ B7 (3.9.51) | **Unassigned task = the ticket owner's** (Vahid, 19 Sep): the owner is alerted on creation, gets the due reminder, and a new owner is told about open tasks when the ticket changes hands. | 5 |
+| ☑ B8 (3.9.51) | **Roll-up (Vahid, 19 Sep):** a parent cannot close while a child is open (`409 open_children`, people and API alike); never auto-closed; when the last child closes the parent gets a quiet *ready to close* marker, its owner is alerted, and `ticket.ready_to_close` is emitted. | 8 |
 
 ### Phase C — unblocks Simorgh T3
 | | Task | Ask |
 |---|---|---|
-| ☐ C1 | Group-assigned tasks (`assignedGroupId`, UI, e-mail rule per the decision in R11). | 5 |
+| ✕ C1 | Group-assigned tasks — **dropped (Vahid, 19 Sep)**: a task belongs to a ticket, and the ticket has an owner. Replaced by B7. | 5 |
 | ☐ C2 | `duePreset: 'p1' \| 'p2' \| 'p3'` on task create, from the workspace business calendar (1 h, 4 h, next business day by default; configurable in Ticket Ops). | 5 |
-| ☐ C3 | Roll-up rule — only if Vahid asks after T1 data. | 8 |
+| → C3 | Roll-up rule — **decided (Vahid, 19 Sep)**, moved to B8. | 8 |
 
 ---
 
