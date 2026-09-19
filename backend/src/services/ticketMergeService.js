@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { actorKindOf } from '../utils/actorKind.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
@@ -221,7 +222,7 @@ class TicketMergeService {
     }
 
     // 7. Audit both sides.
-    const details = { sourceId, targetId, srcRef, tgtRef, copied, requesterNotified, swept };
+    const details = { sourceId, targetId, srcRef, tgtRef, copied, requesterNotified, swept, actorKind: actorKindOf(actor), actorEmail: actor?.email || null };
     await Promise.all([
       ticketActivityRepository.create({ ticketId: sourceId, activityType: 'merged_into', performedBy: actor?.email || 'system', details }),
       ticketActivityRepository.create({ ticketId: targetId, activityType: 'merged_from', performedBy: actor?.email || 'system', details }),
