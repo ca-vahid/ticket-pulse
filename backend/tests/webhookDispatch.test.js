@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 /** Outbound webhooks v2: Standard-Webhooks signing, durable enqueue, worker. */
 
 const prismaMock = {
+  ticket: { findUnique: jest.fn().mockResolvedValue(null) },
   webhookSubscription: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
@@ -166,5 +167,43 @@ describe('test-ping + safety', () => {
     expect(WEBHOOK_EVENTS).toContain('ticket.ready_to_close'); // Simorgh B8 (09-19)
     for (const e of ['ticket.linked', 'ticket.parent_changed', 'ticket.merged', 'ticket.split', 'task.created', 'task.updated', 'task.completed']) expect(WEBHOOK_EVENTS).toContain(e); // Simorgh B-2
     expect(WEBHOOK_EVENTS).toHaveLength(19);
+  });
+});
+
+describe('externalRefPrefix filter (ContinuIT D2)', () => {
+  const PLAIN = { ...SUB, id: 1 };
+  const MINE = { ...SUB, id: 2, externalRefPrefix: 'continuit:', events: ['ticket.created', 'ticket.parent_changed'] };
+
+  test('a filtered subscription receives only tickets whose externalRef starts with its prefix; an unfiltered one gets everything', async () => {
+    prismaMock.webhookSubscription.findMany.mockResolvedValue([PLAIN, MINE]);
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 5, externalRef: 'simorgh:abc' } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.webhookDelivery.createMany.mock.calls[0][0].data.map((d) => d.subscriptionId)).toEqual([1]);
+
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 6, externalRef: 'continuit:checkin:1' } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany.mock.calls[1][0].data.map((d) => d.subscriptionId)).toEqual([1, 2]);
+  });
+
+  test('a payload without externalRef consults the ticket row once; no match → not delivered to the filtered subscription', async () => {
+    prismaMock.webhookSubscription.findMany.mockResolvedValue([MINE]);
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ externalRef: 'continuit:x' });
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 7, subject: 'slim payload' } });
+    await flush();
+    expect(prismaMock.ticket.findUnique).toHaveBeenCalledWith({ where: { id: 7 }, select: { externalRef: true } });
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ externalRef: null });
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 8, subject: 'not mine' } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  test('relation payloads are matched on parent/child too', async () => {
+    prismaMock.webhookSubscription.findMany.mockResolvedValue([MINE]);
+    dispatchWebhookEvent(1, 'ticket.parent_changed', { parent: { id: 1, externalRef: 'continuit:p' }, child: { id: 2, externalRef: null } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
   });
 });

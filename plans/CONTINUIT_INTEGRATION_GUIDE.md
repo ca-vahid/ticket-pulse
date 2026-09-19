@@ -1,126 +1,180 @@
-# ContinuIT × Ticket Pulse — integration guide
+# ContinuIT × Ticket Pulse — integration guide (go-live edition)
 
-**For:** the ContinuIT team (business continuity / office check-ins), moving from FreshService to Ticket Pulse.
-**Answers:** "ContinuIT integration request", rev. 2, 15 Sep 2026 — section numbers below follow that document (they line up with Simorgh's, so `plans/SIMORGH_INTEGRATION_GUIDE.md` is the long-form reference for anything not repeated here).
-**Ticket Pulse version:** 3.9.53 (19 Sep 2026). **Status:** sandbox provisioning ready; IT client issued after your sandbox acceptance.
+**For:** the ContinuIT team (office check-ins / business continuity), moving from FreshService to Ticket Pulse.
+**Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
+**Ticket Pulse version:** 3.9.54 (19 Sep 2026). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
 ---
 
 ## 1. In one page
 
-- **One credential**, OAuth2 client-credentials, **trusted intake ON**. What you file is final: Ticket Pulse never re-categorises, re-types, re-prioritises or noise-closes a ticket you created (§3a, R1–R5). It picks an assignee **only when you leave `assignedTechId` out**.
-- **Due dates are yours** (§B1). Send `dueBy` on `POST /tickets` and `PATCH /tickets/{id}`; it is stored as a manual date and the SLA clock never overwrites it. Reserved for trusted-intake credentials.
-- **People sync** (§4a): `GET /agents` (id, name, email, isActive, freshserviceId, location, photoUrl) and `GET /contacts?location=…` / `?email=…`. E-mail is the join key on both.
-- **Requester** `continuit@bgcengineering.ca` is *unattended*: Ticket Pulse never e-mails it. Put the person who should hear back in `ccEmails`, or set them as the requester when the ticket is really theirs.
-- **Webhooks** to `https://continuit-api.azurewebsites.net/api/webhooks/ticketpulse`, Standard-Webhooks signed. Events listed in §6.
-- **Migration** (§7): nothing to do. FreshService tickets stay in FreshService and run their course; Ticket Pulse ingests them read-mostly and **does** fire webhooks for FreshService-side changes (§F2/F3 below).
+- **One credential** in the IT workspace, OAuth2 client-credentials, **trusted intake ON**, your 32-address allowlist applied, default source **105 "Office Check-in"**. What you file is final: Ticket Pulse never re-categorises, re-types, re-prioritises, review-flags or noise-closes a ticket you created. It assigns **only when you leave the assignee out**.
+- **Everything on your list is built.** Due date on create and update (B1). Assignee on create, by e-mail (B4). Agents with origin, groups and FreshService id (C1). Contacts by office with department and title (C3). Categories with description and active flag (B6). Batch read by ids (C2). A per-subscription `externalRefPrefix` filter on webhooks (D2).
+- **Requester** `continuit@bgcengineering.ca` is *unattended*: Ticket Pulse never e-mails it. Real requesters (the office contact, B3) get the normal acknowledgement and status mail and are enriched from Entra.
+- **Webhooks** to `https://continuit-api.azurewebsites.net/api/webhooks/ticketpulse`, Standard-Webhooks signed, limited to tickets whose `externalRef` starts with `continuit:`.
+- **Migration:** nothing to do. Legacy FreshService tickets run their course; you can read them through Ticket Pulse and their changes fire your webhooks (F2/F3).
+- **New since you reviewed 3.8.66:** ticket relations (parent/child, links, merge, split), ticket tasks with your own keys, the ready-to-close roll-up, and eight more webhook events. Section 9 explains them; they were built for Simorgh and are yours to use.
 
-## 2. Identity
+## 2. Identity (A1–A6)
 
-| | Sandbox | IT |
+| | IT (live) | Sandbox (optional scratch space) |
 |---|---|---|
-| Workspace | *ContinuIT Sandbox* (native only, no FreshService mirror, inactive so no scheduler touches it) | IT (workspace 1) |
-| Token | `POST /api/v1/oauth/token` `grant_type=client_credentials` — Bearer JWT, carries the scopes; fetch a new one after any scope change | same |
-| Scopes | `tickets:*`, `conversations:*`, `customfields:*`, `tags:*`, `search:read`, `agents:read`, `groups:read`, `categories:read`, `types:read`, `contacts:read`, `webhooks:read`, `tasks:*` | same |
-| Trusted intake | on | on |
-| IP allowlist | none | your 32 outbound addresses (your §2) |
+| Workspace | IT, workspace **1** | *ContinuIT Sandbox*, workspace **8** (native only, no FreshService mirror, no schedulers) |
+| Client | **`tpc_1fb963c93a147540fa5bb2f9`** "ContinuIT", issued 19 Sep 2026 | `tpc_ca78630f5da17ec40a30c34a` |
+| Token | `POST /api/v1/oauth/token`, `grant_type=client_credentials` → Bearer JWT carrying the scopes (fetch a new one after any scope change) | same |
+| Scopes (A1) | `tickets:*`, `conversations:*`, `customfields:*`, `tags:*`, `search:read`, `agents:read`, `groups:read`, `categories:read`, `types:read`, `contacts:read`, `webhooks:read`, `tasks:*` | same |
+| Trusted intake (A2) | on | on |
+| Own-tickets-only guard | on — structural moves (merge, parent/child, links, split) are limited to tickets your credential created; a 403 `not_client_ticket` names the offender | on |
+| Default source (A5) | **105 "Office Check-in"** — new code, shows in the queue's Source column and filter | 105 |
+| IP allowlist (A4) | your 32 addresses from §2 of your document | none |
+| Webhook subscription (D1/D2) | **#7** → `https://continuit-api.azurewebsites.net/api/webhooks/ticketpulse`, 12 events, `externalRefPrefix = continuit:` | #6, same URL, no prefix |
+| Tags (B9) | `continuit` = **15**, `office-check-in` = **16** | 13 / 14 |
+| Requester (A6) | `continuit@bgcengineering.ca`, id **3847**, unattended (shared across workspaces) | same |
 | Base URL | `https://ticket-pulse-app.azurewebsites.net/api/v1` | same |
+| Rate limit | 120 requests/min per credential (`X-RateLimit-*` headers; 429 carries `Retry-After`) | same |
 
-Secrets (client secret, webhook signing secret) are printed once by the provisioning script and handed over out of band — never in this document.
+Secrets (client secret, webhook signing secret) were printed once by the provisioning script and are handed over out of band — never in this document.
 
-## 3. Creating a ticket
+## 3. Creating a ticket — your shape works as written
 
 ```http
 POST /api/v1/tickets
-Idempotency-Key: <uuid>
+Idempotency-Key: continuit-task-6d129c88-v1
 
-{ "subject": "Office check-in — Calgary — 26 Sep",
-  "description": "…",
-  "requesterEmail": "continuit@bgcengineering.ca",
-  "ccEmails": ["site.lead@bgcengineering.ca"],
-  "category": "…", "subcategory": "…",
+{ "subject": "Replace boardroom TV cable (Halifax)",
+  "description": "<p>…</p><p>From the Halifax IT check-in on 9 Sep 2026.</p>",
   "priority": 2,
+  "requesterEmail": "jordan.blake@bgcengineering.ca", "requesterName": "Jordan Blake",
+  "ccEmails": ["priya.nair@bgcengineering.ca"],
+  "category": "Audio Visual", "subcategory": "Meeting Room Equipment",
   "ticketType": "Service Request",
-  "dueBy": "2026-09-26T17:00:00-07:00",
-  "assignedTechId": 56,
-  "externalRef": "continuit:checkin:2026-09-26:calgary",
-  "customFields": { "continuit_task_id": "…", "continuit_office": "Calgary" } }
+  "assignedTechEmail": "snasiri@bgcengineering.ca",
+  "dueBy": "2026-12-09T17:00:00-08:00",
+  "runAiTriage": false,
+  "externalRef": "continuit:task:6d129c88-9438-4bef-b648-32718017422f",
+  "customFields": { "continuitOffice": "Halifax", "continuitOfficeCode": "HFX",
+                    "continuitMeetingId": "…", "continuitMeetingDate": "2026-09-09",
+                    "continuitSeries": "IT Check-In & Support - Halifax",
+                    "continuitTaskUrl": "https://continuit.bgcsaas.com/tasks/6d129c88-…" } }
 ```
 
 | Field | Notes |
 |---|---|
-| `dueBy` | **§B1.** ISO datetime with offset. Stored with `dueBySetBy: "manual"` — the workspace SLA policy never recomputes it. Trusted-intake only; otherwise `403 due_by_requires_trusted_intake`. `null` on PATCH clears it (the SLA clock may then own it again). |
-| `assignedTechId` | The owner you agreed in the meeting (`GET /agents`). **Leave it out** to let the assignment pipeline pick — that is the only automation that runs on your tickets. |
-| `externalRef` | Your per-record key. A second POST with the same ref **updates** the ticket (200, `resubmitted: true`) instead of creating a twin. A resubmission never touches status, assignee or due date — they belong to the people working the ticket — and reports them in `meta.ignoredFields`. |
-| `customFields` | Unknown keys auto-provision a definition. Prefix yours `continuit_`. |
-| `category` / `subcategory` | By name, resolved against the IT taxonomy (`GET /categories`). Unknown names 400 with the allowed values. |
-| Tags | `PUT /tickets/{id}/tags { "tagIds": [...] }` — `continuit` and `office-check-in` exist in both workspaces (`GET /tags` for ids). |
+| `dueBy` (B1) | ISO datetime with offset. Stored with `dueBySetBy: "manual"`; the workspace SLA policy never recomputes it. Trusted-intake credentials only (403 `due_by_requires_trusted_intake` otherwise). `dueBy: null` on PATCH clears it and the SLA clock may own it again. |
+| `assignedTechEmail` (B4) | The owner by e-mail, resolved to the active agent with that address in IT; unknown address → 400 `unknown_agent_email` before anything is written. `assignedTechId` still works and wins when both are sent. On PATCH, `""` unassigns. **An assignee on create means the assignment pipeline does not run.** |
+| `externalRef` | Your per-record key. A second POST with the same ref **updates** the ticket (200, `resubmitted: true`) instead of creating a twin. A resubmission never touches status, assignee or due date — they belong to the people working the ticket — and lists them in `meta.ignoredFields` when you sent them. |
+| `customFields` (B2/B10) | Keys are normalised to snake_case on first use, so `continuitOffice` and `continuit_office` are the same field, filtered as `cf_continuit_office`. Unknown keys auto-provision a definition; the type is inferred from the first value (`2026-09-09` → `date`, so `cf_continuit_meeting_date_gte` works). Your six keys are fine. |
+| `category` / `subcategory` (B6) | By name against the **full IT taxonomy** (not only the Security branch). Unknown names 400 with the allowed values. |
+| `internalGroupId` | Optional. Leave it out and the IT default internal group applies. |
+| `source` | Optional; your credential's default (105) applies when omitted. |
+| `Idempotency-Key` | Same key + same body → the same response replayed; same key + different body → 422 `idempotency_key_reused`. |
 
-Response: `201` with the ticket (`ref` like `TP-1601`, `id`, `dueBy`, `assignee`, …). The URL segment on every later call accepts `TP-1601` as well as the id.
+Response: `201` with the ticket (`ref` like `TP-1601`, `id`, `dueBy`, `assignee`, `source`, …). Every later URL accepts `TP-1601`, the id, or `#<freshservice id>`.
 
-## 3a. Automation rules on your tickets (R1–R5)
+### 3a. Your automation rules (R1–R5) — all honoured
 
-| Rule | Ticket Pulse behaviour |
+| Rule | How Ticket Pulse enforces it |
 |---|---|
-| R1 never re-categorise | Trusted intake: the pipeline's persist step refuses to write category for a trusted ticket. |
-| R2 never re-type | Same guard on ticket type. |
-| R3 never re-prioritise | Same guard on priority; the after-hours priority pass skips trusted tickets entirely. |
-| R4 never re-assign | Assignment runs once, on creation, and only when `assignedTechId` was left out. Nothing re-assigns a ticket that has an owner. |
-| R5 no noise / auto-resolve | Trusted intake is a veto in its own right: no noise rule may close your tickets; no auto-resolve workflow is installed for you. |
+| R1 never re-categorise / re-type / re-prioritise | Trusted intake: the pipeline's persist step refuses to write category, subcategory, ticket type or priority for a trusted ticket, on every trigger. `impact`/`urgency` are never written by the pipeline for any ticket. |
+| R2 ours wins when we send an assignee | Assignment runs once, on creation, and only when the ticket is unassigned. An assignee on POST (id or e-mail) means it never runs. Nothing re-assigns a ticket that has an owner. |
+| R3 no `categoryReviewNeeded` | Nothing in Ticket Pulse sets that flag any more; it is a read-only analytics field. Your tickets never enter a review queue. |
+| R4 no noise, no auto-resolve | Trusted intake is a veto in its own right: no noise rule may close your tickets. No auto-resolve workflow is installed for you. |
+| R5 rebounds and manual re-runs | The guard sits in the persist step, so every trigger (rebound, manual re-run, priority pass, sync) obeys R1 and R2. |
 
-## 4. Updating, resolving, reading
+## 4. Updating, reading, reconciling
 
-- `PATCH /tickets/{id}` — `subject`, `priority`, `category`/`subcategory`, `groupId`/`internalGroupId`, `ccEmails`, **`dueBy`**, `status` (+ `resolutionReason`/`resolutionNote`), `assignedTechId`, `customFields`, `addNote`. One call, several changes.
-- `GET /tickets/{id}` — the read shape (see the Simorgh guide §4) plus `dueBy`, `relations`, `readyToCloseAt`.
-- `GET /tickets/{id}/activities` — the audit feed (`due_changed` rows carry `changes.dueBy.from/to`).
-- Notes and replies: `POST /tickets/{id}/notes` (private), `POST /tickets/{id}/replies` (e-mails the requester — not `continuit@`, it is unattended; the Cc list still receives it).
+- `PATCH /tickets/{id}` — `subject`, `priority`, `category`/`subcategory`, `internalGroupId`, `ccEmails`, **`dueBy`**, `status` (+ optional `resolutionReason`/`resolutionNote`), `assignedTechId` / **`assignedTechEmail`**, `customFields` (merge), `addNote`. One call, several changes. B8: a resolution reason is required only for Security tickets; yours resolve without one.
+- B7: IT has five labels — **Open, Pending, Pending Response, Resolved, Closed** — over the four bases Open / Pending / Resolved / Closed. Key on `GET /meta → statusDetails[].baseStatus`, as you planned; "Pending Response" then folds into Pending.
+- `GET /tickets/{id}` — read shape with `dueBy`, `source`, `relations`, `readyToCloseAt`, `externalRef`, `customFields`.
+- **C2** `GET /tickets?ids=1601,TP-1602,1603&limit=100` — ids or TP-refs, mixed, up to 200 per request; pages are 100 at most, so follow `next_cursor` past that.
+- Sweep: `GET /tickets?externalRefPrefix=continuit:&updatedFrom=<watermark>` (cursor pagination; `limit` up to 100). `GET /tickets/{id}/activities` for who did what (`due_changed` rows carry `changes.dueBy.from/to`).
+- Notes (E1): `POST /tickets/{id}/notes { "body": "…", "agent": "ContinuIT · Halifax check-in (9 Sep)" }` — `agent` (≤ 60 chars) is accepted without `stage` and becomes the author line. E2 attachments: not on v1 yet; keep the link in the description.
 
-## 4a. People (C1, C3, C4)
+## 4a. People sync (C1, C3, C4, C5)
 
 ```http
 GET /api/v1/agents?active=true
 → [{ "id": 56, "name": "Soheil Nasiri", "email": "snasiri@bgcengineering.ca", "isActive": true,
-     "freshserviceId": "1002090111", "location": "Vancouver", "photoUrl": null }]
+     "origin": "freshservice", "freshserviceId": "1002090111", "location": "Vancouver", "photoUrl": null,
+     "groups": [{ "id": 12, "name": "IT Operations", "origin": "freshservice", "freshserviceId": "1000210021" }] }]
 
-GET /api/v1/contacts?location=Calgary&limit=500
-GET /api/v1/contacts?email=drichard@bgcengineering.ca
-→ [{ "id": 3, "name": "Dana Richard", "email": "…", "phone": null, "department": "…", "location": "Calgary", "unattended": false }]
+GET /api/v1/contacts?location=Halifax&limit=500
+GET /api/v1/contacts?email=jordan.blake@bgcengineering.ca
+→ [{ "id": 3, "name": "Jordan Blake", "email": "…", "phone": null, "department": "Geotechnical",
+     "jobTitle": "Office Manager", "location": "Halifax", "unattended": false }]
 ```
 
-`location` on a contact is the Entra office; on an agent it is the FreshService location. Both are `contains`, case-insensitive. `freshserviceId` is a string (it is a 64-bit id). Join on e-mail.
+- C1: `origin` is `freshservice` or `local`; `freshserviceId` is a string (64-bit); `groups[]` covers internal and FreshService groups. `?includeInactive=false` (or `?active=true`) narrows to active agents; the default returns everyone with `isActive`. No pagination — IT has a few dozen agents, the list is one page. Ticket Pulse does not store the Entra object id of technicians; join on e-mail.
+- C3: `location` is the Entra office (contains, case-insensitive). `department` and `jobTitle` come from FreshService or Entra, whichever is filled.
+- C4: a requester created implicitly from `requesterEmail` is enriched from Entra (display name, title, department, office) exactly like one who e-mails the help desk, and gets the normal acknowledgement and status e-mails (B3). The unattended `continuit@` requester is the only exception.
+- C5: agreed — no people webhooks; a nightly pull is fine.
 
-## 5. Reconciliation
+## 5. Webhooks (D1, D2, D3)
 
-Poll `GET /tickets?updatedFrom=<iso>&externalRefPrefix=continuit:` (cursor pagination) to catch anything a webhook missed; `GET /tickets/{id}/activities` for who did what. Same pattern Simorgh's reconciler uses.
-
-## 6. Webhooks (Ticket Pulse → ContinuIT)
-
-Subscription on `https://continuit-api.azurewebsites.net/api/webhooks/ticketpulse`, events:
+Subscription **#7** on `https://continuit-api.azurewebsites.net/api/webhooks/ticketpulse`, events:
 `ticket.created`, `ticket.status_changed`, `ticket.assigned`, `ticket.reply_received`, `ticket.public_reply_added`, `ticket.fields_updated`, `ticket.custom_fields_changed`, `ticket.tags_changed`, `ticket.note_added`, `task.created`, `task.updated`, `task.completed`.
 
-Envelope `{ type, event, timestamp, workspaceId, data }`; Standard Webhooks headers (`webhook-id`, `webhook-timestamp`, `webhook-signature` over `id.timestamp.body`); retries with backoff for 8 attempts; a subscription that fails 20 times in a row is disabled. `data.ticket` carries `externalRef`, `dueBy`, `status`, `resolutionReason`, `assignedAgent`, `actor`. Due-date edits arrive as `ticket.fields_updated` with `changedFields` containing `dueBy`.
+- **D2 built:** the subscription carries `externalRefPrefix = continuit:`. You receive only events whose ticket's `externalRef` starts with it — never the rest of IT. Keep your own check as belt and braces if you like; it is no longer needed.
+- D3: the envelope is the Simorgh one — `{ type, event, timestamp, workspaceId, data }`, with `data.ticket` (id, ref, externalRef, status, priority, dueBy, resolutionReason, `externalReferences`), `data.extra.from/to` on status and assignment changes, `data.actor`, `data.assignedAgent { name, email, technicianId }`. Due-date edits arrive as `ticket.fields_updated` with `changedFields` containing `dueBy`.
+- Standard Webhooks headers (`webhook-id`, `webhook-timestamp`, `webhook-signature` over `id.timestamp.body`), retries with backoff for 8 attempts, auto-disable after 20 consecutive failures (re-enable in Settings → API keys & webhooks). Dedupe on `webhook-id`.
+- Want more? Any of the 19 events in §9.4 can be added to the subscription by an admin.
 
-### F2 / F3 — FreshService-side changes
+## 6. Migration (F2, F3, F4)
 
-FreshService → Ticket Pulse ingest covers tickets (every 5 min, plus a 1-minute fast lane for unassigned ones and the FreshService webhook for IT), conversations, tasks and approval status. Changes ingested from FreshService **do** emit lifecycle webhooks (`ticket.status_changed`, `ticket.assigned`, `ticket.fields_updated` with the FreshService-side field diff, `ticket.reply_received`), with `actorKind: "freshservice"`. So the FreshService tickets that keep running to their end will report their closes to you.
+- **F2:** the IT workspace ingests every FreshService ticket — a 5-minute sync, a 1-minute fast lane for unassigned tickets, and the FreshService webhook for immediate changes — so `GET /tickets/#<fs id>` finds each legacy ticket.
+- **F3:** a status or assignee change that reaches Ticket Pulse through the FreshService ingest **does** fire `ticket.status_changed` / `ticket.assigned` (and `ticket.fields_updated` with the FreshService-side diff), with `actorKind: "freshservice"` and `data.ticket.externalReferences: [{ "system": "FRESHSERVICE", "id": "<fs id>" }]`. Note the D2 prefix filter: legacy tickets have no `continuit:` externalRef, so they are **not** delivered to your filtered subscription. If you want the legacy lane over webhooks, tell us and we add a second, unfiltered subscription for the status/assignment events only (you then filter on `externalReferences`), or you keep the read-through poll for those ~58 tickets until the lane empties.
+- **F4:** send the 220 FreshService ids and we bulk-tag them `continuit-legacy` on our side.
 
-## 7. Migration
+## 7. What is different from your document
 
-Nothing on our side. Existing FreshService tickets stay where they are; you file new work into Ticket Pulse. If you later want the old ones referenced from the new, `POST /tickets/{id}/links { "related": "#241155", "kind": "related_to" }` accepts a FreshService number.
+| Yours | Ours |
+|---|---|
+| A3 sandbox first, then IT | Straight to IT (Vahid's call). Sandbox ws 8 exists; use it if you want. |
+| B2 first-class location field? | No. The custom field is the intended pattern; `cf_continuit_office` filters the queue and the API alike. A grouped-by-office queue view is a UI item we can add later if the office managers ask. |
+| B6 `sortOrder` | Not stored; rows come in name order. |
+| C1 pagination, Entra object id | Neither: the agent list is one page, and technicians carry no Entra id. Join on e-mail. |
+| D2 "ignore events whose externalRef ≠ continuit:" | Done server-side by the subscription filter; legacy FreshService tickets therefore do not reach this subscription (see F3). |
 
-## 8. Sandbox acceptance — suggested run
+## 8. Go-live acceptance (your §8, run in IT)
 
-1. Token → `GET /agents?active=true` → `GET /contacts?location=Calgary`.
-2. `POST /tickets` with `dueBy`, `assignedTechId`, `externalRef`, `customFields`, tags. Read it back: `dueBy` equals what you sent; `assignee` is yours.
-3. `POST` again with the same `externalRef` and a new description → 200, `resubmitted: true`, `meta.ignoredFields` lists nothing you care about.
-4. `PATCH` a new `dueBy` → `GET` shows it; `GET …/activities` has a `due_changed` row.
-5. `PATCH { "status": "Resolved" }` → your webhook receives `ticket.status_changed`.
-6. Create without `assignedTechId` → within a minute the assignment pipeline picks someone and `ticket.assigned` arrives. Confirm category/priority/type were left exactly as sent.
+1. Token → `GET /me` shows workspace 1 and the scopes → `/meta` (statuses, `sources` includes 105), `/categories`, `/agents?active=true`, `/groups`, `/tags`, `/custom-fields`.
+2. `POST /tickets` with `externalRef`, six custom fields, real requester, `assignedTechEmail`, `dueBy` → 201; read back identical; `source` = 105; the requester receives the acknowledgement. Idempotency replay → same ticket; replay with a different body → 422.
+3. `PATCH` status Open → Pending → Resolved (no reason) → Closed; `priority`; `assignedTechEmail`; `dueBy`; custom-field merge. `GET …/activities` shows `due_changed`.
+4. Private note with `agent` → author "ContinuIT · …".
+5. Re-POST the same `externalRef` with an edited description → 200 `resubmitted: true`, status untouched.
+6. `GET /tickets?ids=…`, `externalRefPrefix=continuit:&updatedFrom=…`, `tag=continuit`, cursor paging.
+7. Webhooks: create, status change, assignment, note, custom-field change arrive signed; a ticket without `continuit:` is not delivered.
+8. Create without an assignee → within a minute `ticket.assigned` arrives; category, type and priority are exactly as sent.
+9. Read a legacy ticket by `#<fs id>`.
+10. 40 creates in a minute stay under the limit.
 
-## 9. Go-live
+## 9. New since 3.8.66 — features you may want
 
-Once the sandbox run passes: the IT client is issued with your 32-address allowlist, the IT webhook subscription is created, and the `continuit` / `office-check-in` tags and the unattended requester already exist in IT. Joint acceptance in IT as with Simorgh (one ticket end to end), then you switch the endpoint.
+Built for Simorgh in September; every one is in your scopes.
+
+### 9.1 Parent / child tickets
+A check-in that produces several tasks can be **one parent with children**. `POST /tickets/{parent}/children { "child": "TP-1602" }` or `PUT /tickets/{child}/parent { "parent": "TP-1600" }`; `DELETE /tickets/{child}/parent` detaches. `GET /tickets/{id}` → `relations { parent, children[], mergedInto, links[] }`.
+**Roll-up rule:** a parent **cannot be closed while any child is open** (409 `open_children` lists them). When the last child closes, the parent is **not** auto-closed: it gets a "ready to close" mark (`readyToCloseAt`), its owner is e-mailed, a `ready_to_close` activity is written and `ticket.ready_to_close` fires. A person (or your app) then closes it.
+
+### 9.2 Links
+`POST /tickets/{id}/links { "related": "TP-1580", "kind": "related_to" | "duplicate_of" }` — `related` also takes a FreshService number (`"#241155"`). `GET …/links`, `DELETE …/links/{linkId}`. Fires `ticket.linked`.
+
+### 9.3 Merge and split
+- `POST /tickets/{source}/merge { "target": "TP-1580", "notifyRequester": false }` closes the source (the ticket in the URL) as `duplicate` — reason stamped automatically — copies its thread into the target and fires `ticket.merged`. `POST /tickets/{target}/merge-many { "sources": ["TP-1603", "TP-1604"] }` for clean-up, one result per source.
+- `POST /tickets/{id}/split { "subject": "…", "entryIds": [...] }` carves a new ticket out of a conversation; fires `ticket.split`.
+- Your credential has the **own-tickets-only guard**: merge/parent/link/split are limited to tickets ContinuIT created (403 `not_client_ticket` otherwise), so a bug in your app can never restructure someone else's IT ticket.
+
+### 9.4 Tasks on a ticket
+`POST /tickets/{id}/tasks { "title", "description", "dueAt", "assignedTechId" | none, "externalRef": "continuit:step:…", "remindBeforeMinutes" }`. Leave the assignee out and the task **belongs to the ticket owner** (they are alerted, get the due reminder, and inherit open tasks on hand-over). `externalRef` is create-or-return: a repeat returns the existing task (200, `existing: true`). `PATCH …/tasks/{taskId}` (`status: open | in_progress | done`), `DELETE`. Events `task.created`, `task.updated` (coalesced 60 s), `task.completed` — already on your subscription. Use tasks for the checklist inside one ticket; use children (9.1) when each step needs its own owner, due date and status.
+
+### 9.5 All webhook events (19)
+`ticket.created`, `ticket.status_changed`, `ticket.assigned`, `ticket.reply_received`, `ticket.public_reply_added`, `ticket.note_added`, `ticket.tags_changed`, `ticket.custom_fields_changed`, `ticket.fields_updated`, `ticket.ready_to_close`, `ticket.linked`, `ticket.parent_changed`, `ticket.merged`, `ticket.split`, `task.created`, `task.updated`, `task.completed`, `approval.requested`, `approval.decided`. Relation payloads carry `parent` / `child` / `target` / `source` ticket refs (`id, ref, subject, status, externalRef`) and an `actor`.
+
+### 9.6 Also useful
+- `GET /tickets/{id}/activities` is the full audit feed (status, assignment, due, relations, tasks, notes).
+- `GET /meta` lists `resolutionReasons` and `sources` so nothing is hard-coded.
+- Resolution `resolutionReason` / `resolutionNote` on a resolving PATCH, optional for you.
 
 ## 10. Hand-over (out of band)
 
-client_id, client_secret, webhook signing secret, sandbox workspace id, tag ids.
+IT `client_id` + `client_secret`, webhook signing secret. Sandbox pair from 19 Sep still valid if wanted.

@@ -159,7 +159,9 @@ function threadEntryShape(e) {
 function contactShape(r) {
   return {
     id: r.id, name: r.name, email: r.email || null, phone: r.phone || null,
-    department: r.department || null, location: r.entraOfficeLocation || null,
+    department: r.department || r.entraDepartment || null, location: r.entraOfficeLocation || null,
+    // ContinuIT C3: the title, from FreshService or Entra — whichever is filled.
+    jobTitle: r.jobTitle || r.entraJobTitle || null,
     // Simorgh A4: an unattended mailbox never receives requester-facing mail.
     unattended: r.unattended === true,
   };
@@ -248,6 +250,9 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
   // The reply's pagination block says `limit`; accept it on the request too
   // (Simorgh reconciled at 25/page because only pageSize was honoured).
   if (q.pageSize === undefined && q.limit !== undefined) q.pageSize = q.limit;
+  // ContinuIT C2: `ids=1,2,3` (ticket ids or TP-refs, ≤ 200) for a batch
+  // read; the service turns it into an id filter.
+  if (q.ids !== undefined) q.ids = String(Array.isArray(q.ids) ? q.ids.join(',') : q.ids).split(',').map((s) => s.trim().replace(/^TP-/i, '')).filter((s) => /^\d+$/.test(s)).slice(0, 200).map(Number);
   const result = await ticketService.listTickets(req.workspaceId, q);
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize, total: result.total }
@@ -282,7 +287,27 @@ const CREATE_BODY_KEYS = new Set([
   // ContinuIT B1 (19 Sep 2026): a due date agreed with the requester, and the
   // person the caller already picked. Both trusted-intake only for dueBy.
   'dueBy', 'assignedTechId',
+  // ContinuIT B4: the owner by e-mail (their join key) — resolved to
+  // assignedTechId by resolveAssigneeEmail before anything else runs.
+  'assignedTechEmail',
 ]);
+
+// `assignedTechEmail` → `assignedTechId` (ContinuIT B4, 19 Sep 2026). E-mail
+// is the key a people sync holds; an unknown or inactive address is a 400
+// `unknown_agent_email` before any write. An explicit assignedTechId wins.
+async function resolveAssigneeEmail(req, body) {
+  if (body.assignedTechEmail === undefined) return;
+  if (body.assignedTechId !== undefined) { delete body.assignedTechEmail; return; }
+  const email = String(body.assignedTechEmail || '').trim().toLowerCase();
+  delete body.assignedTechEmail;
+  if (!email) { body.assignedTechId = null; return; }
+  const tech = await prisma.technician.findFirst({
+    where: { workspaceId: req.workspaceId, isActive: true, email: { equals: email, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  if (!tech) throw new ApiProblem({ status: 400, code: 'unknown_agent_email', title: 'Invalid request', detail: `No active agent with e-mail ${email} in this workspace (GET /agents lists them)` });
+  body.assignedTechId = tech.id;
+}
 
 /**
  * A due date from the outside is an SLA override, so it is reserved for
@@ -355,6 +380,7 @@ function assertCustomFieldsWriteScope(req) {
 router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const body = req.body || {};
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
+  await resolveAssigneeEmail(req, body);
   const ignoredFields = Object.keys(body).filter((k) => !CREATE_BODY_KEYS.has(k));
   // A RESUBMISSION never touches status, assignee or due date (those belong to
   // the people working the ticket), so on that path they are reported as
@@ -511,6 +537,7 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   const body = req.body || {};
   const actor = apiActor(req);
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
+  await resolveAssigneeEmail(req, body);
   if (body.status !== undefined) {
     // Simorgh C4/D3: a reason (+ note) may ride with a resolving status change.
     await ticketService.changeStatus(id, req.workspaceId, body.status, actor, {
@@ -991,7 +1018,25 @@ router.get('/agents', S('agents:read'), asyncHandler(async (req, res) => {
   // ContinuIT C1 (19 Sep 2026): the FreshService id (string — it is a bigint)
   // and the office, so a people sync can join on e-mail and map back to
   // FreshService while both systems run. `?active=true` narrows to active.
-  const activeOnly = String(req.query.active || '').toLowerCase() === 'true';
+  // `?includeInactive=false` is the ContinuIT C1 spelling of the same narrowing.
+  const activeOnly = String(req.query.active || '').toLowerCase() === 'true'
+    || String(req.query.includeInactive || '').toLowerCase() === 'false';
+  // C1: group memberships (internal groups and FreshService groups alike)
+  // and the origin, so a people sync can see teams. Degrades to [] when
+  // the membership table is unavailable.
+  const memberships = await Promise.resolve()
+    .then(() => prisma.groupMember.findMany({
+      where: { workspaceId: req.workspaceId },
+      select: { technicianId: true, group: { select: { id: true, name: true, origin: true, freshserviceId: true } } },
+    }))
+    .catch(() => []);
+  const groupsByTech = new Map();
+  for (const m of memberships || []) {
+    if (!m?.group) continue;
+    const list = groupsByTech.get(m.technicianId) || [];
+    list.push({ id: m.group.id, name: m.group.name, origin: m.group.origin, freshserviceId: m.group.freshserviceId ? String(m.group.freshserviceId) : null });
+    groupsByTech.set(m.technicianId, list);
+  }
   res.json({
     success: true,
     data: techs
@@ -1001,6 +1046,8 @@ router.get('/agents', S('agents:read'), asyncHandler(async (req, res) => {
         freshserviceId: t.freshserviceId !== null && t.freshserviceId !== undefined ? String(t.freshserviceId) : null,
         location: t.location || null,
         photoUrl: t.photoUrl || null,
+        origin: t.origin || 'freshservice',
+        groups: groupsByTech.get(t.id) || [],
       })),
   });
 }));
@@ -1023,9 +1070,12 @@ router.get('/groups', S('groups:read'), asyncHandler(async (req, res) => {
 }));
 
 router.get('/categories', S('categories:read'), asyncHandler(async (req, res) => {
+  // ContinuIT B6: description + isActive on every row; `?includeInactive=true`
+  // adds retired categories so an old ticket's name can still be resolved.
+  const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
   const cats = await prisma.competencyCategory.findMany({
-    where: { workspaceId: req.workspaceId, isActive: true },
-    select: { id: true, name: true, parentId: true }, orderBy: { name: 'asc' },
+    where: { workspaceId: req.workspaceId, ...(includeInactive ? {} : { isActive: true }) },
+    select: { id: true, name: true, parentId: true, description: true, isActive: true }, orderBy: { name: 'asc' },
   });
   res.json({ success: true, data: cats });
 }));

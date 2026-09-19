@@ -9,10 +9,12 @@ import { readFileSync } from 'node:fs';
  *      credentials, stored as a manual due date.
  *  C1  GET /agents with e-mail, active flag, FreshService id and office.
  *  C3/C4  GET /contacts filterable by location; e-mail is the join key.
+ *  Go-live round (19 Sep, 3.9.54): B4 assignedTechEmail, C1 origin + groups[],
+ *  C3 jobTitle, B6 categories description/isActive, C2 ids= batch read.
  */
-const ticketServiceMock = { getTicket: jest.fn(), createTicket: jest.fn(), updateTicketFields: jest.fn(), changeStatus: jest.fn(), assignTicket: jest.fn() };
+const ticketServiceMock = { getTicket: jest.fn(), createTicket: jest.fn(), updateTicketFields: jest.fn(), changeStatus: jest.fn(), assignTicket: jest.fn(), listTickets: jest.fn() };
 const technicianRepositoryMock = { getAll: jest.fn() };
-const prismaMock = { requester: { findMany: jest.fn() }, workspace: { findUnique: jest.fn().mockResolvedValue({ externalRefCustomFieldKey: null, apiResubmissionMatchEnabled: false, apiResubmissionMatchWindowDays: 30 }) } };
+const prismaMock = { requester: { findMany: jest.fn() }, technician: { findFirst: jest.fn() }, groupMember: { findMany: jest.fn().mockResolvedValue([]) }, competencyCategory: { findMany: jest.fn().mockResolvedValue([]) }, workspace: { findUnique: jest.fn().mockResolvedValue({ externalRefCustomFieldKey: null, apiResubmissionMatchEnabled: false, apiResubmissionMatchWindowDays: 30 }) } };
 let apiKey;
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -94,30 +96,43 @@ describe('B1 — dueBy', () => {
 });
 
 describe('C1 — GET /agents', () => {
+  test('a membership lookup failure degrades to groups: [] instead of failing the call', async () => {
+    technicianRepositoryMock.getAll.mockResolvedValue([{ id: 56, name: 'S', email: 's@bgc.ca', isActive: true, freshserviceId: null, location: null, photoUrl: null }]);
+    prismaMock.groupMember.findMany.mockRejectedValue(new Error('relation missing'));
+    const res = await request(app()).get('/api/v1/agents').expect(200);
+    expect(res.body.data[0].groups).toEqual([]);
+  });
+
   test('carries e-mail, active flag, FreshService id as a string, and the office; ?active=true narrows', async () => {
     technicianRepositoryMock.getAll.mockResolvedValue([
       { id: 56, name: 'Soheil Nasiri', email: 'snasiri@bgc.ca', isActive: true, freshserviceId: 1002090111n, location: 'Vancouver', photoUrl: null },
-      { id: 57, name: 'Old Agent', email: 'old@bgc.ca', isActive: false, freshserviceId: null, location: null, photoUrl: null },
+      { id: 57, name: 'Old Agent', email: 'old@bgc.ca', isActive: false, freshserviceId: null, location: null, photoUrl: null, origin: 'local' },
+    ]);
+    prismaMock.groupMember.findMany.mockResolvedValue([
+      { technicianId: 56, group: { id: 12, name: 'IT Operations', origin: 'freshservice', freshserviceId: 1000210021n } },
+      { technicianId: 56, group: { id: 3458, name: 'Field IT', origin: 'local', freshserviceId: null } },
     ]);
     const all = await request(app()).get('/api/v1/agents').expect(200);
     expect(all.body.data).toEqual([
-      { id: 56, name: 'Soheil Nasiri', email: 'snasiri@bgc.ca', isActive: true, freshserviceId: '1002090111', location: 'Vancouver', photoUrl: null },
-      { id: 57, name: 'Old Agent', email: 'old@bgc.ca', isActive: false, freshserviceId: null, location: null, photoUrl: null },
+      { id: 56, name: 'Soheil Nasiri', email: 'snasiri@bgc.ca', isActive: true, freshserviceId: '1002090111', location: 'Vancouver', photoUrl: null, origin: 'freshservice', groups: [{ id: 12, name: 'IT Operations', origin: 'freshservice', freshserviceId: '1000210021' }, { id: 3458, name: 'Field IT', origin: 'local', freshserviceId: null }] },
+      { id: 57, name: 'Old Agent', email: 'old@bgc.ca', isActive: false, freshserviceId: null, location: null, photoUrl: null, origin: 'local', groups: [] },
     ]);
     const active = await request(app()).get('/api/v1/agents?active=true').expect(200);
     expect(active.body.data.map((a) => a.id)).toEqual([56]);
+    const alias = await request(app()).get('/api/v1/agents?includeInactive=false').expect(200);
+    expect(alias.body.data.map((a) => a.id)).toEqual([56]);
   });
 });
 
 describe('C3 / C4 — GET /contacts', () => {
-  beforeEach(() => prismaMock.requester.findMany.mockResolvedValue([{ id: 3, name: 'Dana Richard', email: 'drichard@bgc.ca', phone: null, department: 'Geo', entraOfficeLocation: 'Calgary', unattended: false }]));
+  beforeEach(() => prismaMock.requester.findMany.mockResolvedValue([{ id: 3, name: 'Dana Richard', email: 'drichard@bgc.ca', phone: null, department: null, entraDepartment: 'Geo', jobTitle: null, entraJobTitle: 'Site Lead', entraOfficeLocation: 'Calgary', unattended: false }]));
 
   test('location filters on the Entra office, case-insensitively; e-mail is an exact lookup', async () => {
     const res = await request(app()).get('/api/v1/contacts?location=calgary&email=DRichard@bgc.ca&limit=1000').expect(200);
     const args = prismaMock.requester.findMany.mock.calls[0][0];
     expect(args.where).toMatchObject({ workspaceId: 8, entraOfficeLocation: { contains: 'calgary', mode: 'insensitive' }, email: { equals: 'drichard@bgc.ca', mode: 'insensitive' } });
     expect(args.take).toBe(500); // capped
-    expect(res.body.data[0]).toMatchObject({ email: 'drichard@bgc.ca', location: 'Calgary' });
+    expect(res.body.data[0]).toMatchObject({ email: 'drichard@bgc.ca', location: 'Calgary', department: 'Geo', jobTitle: 'Site Lead' });
   });
 
   test('no filters → the old behaviour (100 rows, name order)', async () => {
@@ -125,5 +140,55 @@ describe('C3 / C4 — GET /contacts', () => {
     const args = prismaMock.requester.findMany.mock.calls[0][0];
     expect(args.where).toEqual({ workspaceId: 8 });
     expect(args.take).toBe(100);
+  });
+});
+
+describe('B4 — assignedTechEmail', () => {
+  test('POST: the owner by e-mail is resolved to assignedTechId (case-insensitive, active only) and is not reported as ignored', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue({ id: 56 });
+    const res = await request(app()).post('/api/v1/tickets').send({ subject: 'x', requesterEmail: 'continuit@bgc.ca', assignedTechEmail: 'SNasiri@bgc.ca' }).expect(201);
+    expect(prismaMock.technician.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: 8, isActive: true, email: { equals: 'snasiri@bgc.ca', mode: 'insensitive' } } }));
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(8, expect.objectContaining({ assignedTechId: 56 }), expect.any(Object), expect.any(Object));
+    expect(res.body.meta?.ignoredFields || []).not.toContain('assignedTechEmail');
+  });
+
+  test('POST: an unknown e-mail is 400 unknown_agent_email and nothing is created', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue(null);
+    const res = await request(app()).post('/api/v1/tickets').send({ subject: 'x', requesterEmail: 'continuit@bgc.ca', assignedTechEmail: 'nobody@bgc.ca' }).expect(400);
+    expect(res.body.code).toBe('unknown_agent_email');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+  });
+
+  test('POST: assignedTechId wins when both are sent — no lookup', async () => {
+    await request(app()).post('/api/v1/tickets').send({ subject: 'x', requesterEmail: 'continuit@bgc.ca', assignedTechId: 9, assignedTechEmail: 'other@bgc.ca' }).expect(201);
+    expect(prismaMock.technician.findFirst).not.toHaveBeenCalled();
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(8, expect.objectContaining({ assignedTechId: 9 }), expect.any(Object), expect.any(Object));
+  });
+
+  test('PATCH: reassign by e-mail reaches assignTicket with the resolved id; "" unassigns', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue({ id: 56 });
+    await request(app()).patch('/api/v1/tickets/901').send({ assignedTechEmail: 'snasiri@bgc.ca' }).expect(200);
+    expect(ticketServiceMock.assignTicket).toHaveBeenCalledWith(901, 8, 56, expect.any(Object));
+    await request(app()).patch('/api/v1/tickets/901').send({ assignedTechEmail: '' }).expect(200);
+    expect(ticketServiceMock.assignTicket).toHaveBeenLastCalledWith(901, 8, null, expect.any(Object));
+  });
+});
+
+describe('B6 — GET /categories', () => {
+  test('rows carry description + isActive; inactive rows only with ?includeInactive=true', async () => {
+    prismaMock.competencyCategory.findMany.mockResolvedValue([{ id: 1, name: 'Hardware', parentId: null, description: 'Laptops, docks, peripherals', isActive: true }]);
+    const res = await request(app()).get('/api/v1/categories').expect(200);
+    expect(res.body.data[0]).toEqual({ id: 1, name: 'Hardware', parentId: null, description: 'Laptops, docks, peripherals', isActive: true });
+    expect(prismaMock.competencyCategory.findMany.mock.calls[0][0].where).toEqual({ workspaceId: 8, isActive: true });
+    await request(app()).get('/api/v1/categories?includeInactive=true').expect(200);
+    expect(prismaMock.competencyCategory.findMany.mock.calls[1][0].where).toEqual({ workspaceId: 8 });
+  });
+});
+
+describe('C2 — GET /tickets?ids=', () => {
+  test('ids (numbers or TP-refs, comma-separated) become an integer list for the service', async () => {
+    ticketServiceMock.listTickets.mockResolvedValue({ items: [], total: 0, pageSize: 25, nextCursor: null });
+    await request(app()).get('/api/v1/tickets?ids=1601,TP-1602,junk,%201603').expect(200);
+    expect(ticketServiceMock.listTickets).toHaveBeenCalledWith(8, expect.objectContaining({ ids: [1601, 1602, 1603] }));
   });
 });

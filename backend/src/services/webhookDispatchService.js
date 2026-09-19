@@ -99,11 +99,44 @@ export function invalidateWebhookCache(workspaceId) {
 }
 
 /** Enqueue an event to every matching subscription (durable). Fire-and-forget. */
+// A subscription may be limited to the caller's own tickets (ContinuIT D2):
+// `externalRefPrefix` set → only events whose ticket's externalRef starts
+// with it are delivered. Relation events name the ticket under parent/
+// child/target too; when the payload carries no externalRef at all the
+// ticket row is consulted once, so a filtered subscription never sees a
+// stranger's ticket because a payload was slim.
+function payloadTicketRef(payload) {
+  if (!payload || typeof payload !== 'object') return { externalRef: undefined, ticketId: null };
+  for (const k of ['ticket', 'parent', 'child', 'target', 'source']) {
+    const t = payload[k];
+    if (t && typeof t === 'object' && 'externalRef' in t) return { externalRef: t.externalRef ?? null, ticketId: t.id ?? null };
+  }
+  if ('externalRef' in payload) return { externalRef: payload.externalRef ?? null, ticketId: payload.ticketId ?? null };
+  const t = payload.ticket || payload.parent || payload.child || payload.target || null;
+  return { externalRef: undefined, ticketId: t?.id ?? payload.ticketId ?? null };
+}
+
+async function subscriptionAcceptsPayload(sub, payload) {
+  const prefix = typeof sub.externalRefPrefix === 'string' ? sub.externalRefPrefix.trim() : '';
+  if (!prefix) return true;
+  const ref = payloadTicketRef(payload);
+  let { externalRef } = ref;
+  const { ticketId } = ref;
+  if (externalRef === undefined && ticketId) {
+    const row = await prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { externalRef: true } }).catch(() => null);
+    externalRef = row?.externalRef ?? null;
+  }
+  return typeof externalRef === 'string' && externalRef.startsWith(prefix);
+}
+
 export function dispatchWebhookEvent(workspaceId, eventType, payload) {
   if (!WEBHOOK_EVENTS.includes(eventType)) return;
   enabledSubscriptions(workspaceId)
     .then(async (subs) => {
-      const matching = subs.filter((s) => s.events.includes(eventType));
+      const candidates = subs.filter((s) => s.events.includes(eventType));
+      if (!candidates.length) return;
+      const accepted = await Promise.all(candidates.map((s) => subscriptionAcceptsPayload(s, payload)));
+      const matching = candidates.filter((_, i) => accepted[i]);
       if (!matching.length) return;
       const occurredAt = new Date().toISOString();
       await prisma.webhookDelivery.createMany({

@@ -78,6 +78,7 @@ const T = {
       requesterEmail: { type: 'string', format: 'email' }, requesterName: { type: 'string' },
       dueBy: { type: 'string', format: 'date-time', nullable: true, description: 'A due date already agreed with the requester. Trusted-intake credentials only (403 due_by_requires_trusted_intake otherwise). Stored as a manual due date — the SLA clock never overwrites it.' },
       assignedTechId: { type: 'integer', nullable: true, description: 'The agent who owns this ticket. When given, the assignment pipeline does not run.' },
+      assignedTechEmail: { type: 'string', format: 'email', description: 'The owner by e-mail (the key a people sync holds); resolved to assignedTechId. An unknown or inactive address is 400 unknown_agent_email. assignedTechId wins when both are sent.' },
       runAiTriage: { type: 'boolean', default: true },
       addNote: {
         description: 'A private internal note written in the SAME call, after the changes. On a RESUBMISSION (same externalRef) it is appended to the diff note, so the flow gets one note and one event (QA 09-16: one call for a resubmitted record — reopen + fields + note — instead of PATCH followed by POST /notes). A plain string, or { body, bodyHtml?, stage?, agent? } like POST /tickets/{id}/notes. `note` is accepted as an alias.',
@@ -149,6 +150,7 @@ const T = {
     properties: {
       status: { type: 'string', example: 'Pending' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       subject: { type: 'string' }, assignedTechId: { type: 'integer', nullable: true },
+      assignedTechEmail: { type: 'string', format: 'email', description: 'Reassign by e-mail (resolved to assignedTechId; 400 unknown_agent_email when no active agent has it). "" unassigns.' },
       internalCategoryId: { type: 'integer' }, internalSubcategoryId: { type: 'integer' },
       groupId: { type: 'integer', nullable: true, description: 'Move to a FreshService group: the `freshserviceId` of an origin:\'freshservice\' group (GET /groups). null clears it.' },
       internalGroupId: { type: 'integer', nullable: true, description: 'Move to an internal (TP-native) group: the `id` of an origin:\'local\' group (GET /groups). null clears it. Send the other field as null when switching between group kinds.' },
@@ -198,7 +200,7 @@ const T = {
       agent: { type: 'string', maxLength: 60, nullable: true, description: 'Display name of the sub-agent for that stage, e.g. "Rostam". Notes only.' },
     },
   },
-  Contact: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, department: { type: 'string', nullable: true }, location: { type: 'string', nullable: true } } },
+  Contact: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, department: { type: 'string', nullable: true }, jobTitle: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, unattended: { type: 'boolean' } } },
   Task: { type: 'object', properties: { id: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string', nullable: true }, status: { type: 'string', enum: ['open', 'in_progress', 'done'] }, assignee: { type: 'object', nullable: true }, dueAt: { type: 'string', format: 'date-time', nullable: true } } },
   ApprovalVerdict: {
     type: 'object',
@@ -291,6 +293,7 @@ function op(summary, scope, { tag, body, responseRef, status = 200, list = false
 // (`cf_client_name`, `cf_amount_gte`, …). Unknown keys are ignored silently.
 const CF_FILTER_PARAMETERS = [
   // Reconciliation filters (Simorgh E2).
+  { name: 'ids', in: 'query', required: false, schema: { type: 'string' }, description: 'Batch read: comma-separated ticket ids or TP-refs (≤ 200), e.g. ids=1601,1602 or ids=TP-1601,TP-1602.' },
   { name: 'externalRef', in: 'query', required: false, schema: { type: 'string' }, description: 'Exact match on the caller’s own key (set at create). Wins over externalRefPrefix.' },
   { name: 'externalRefPrefix', in: 'query', required: false, schema: { type: 'string' }, description: 'Prefix match, e.g. simorgh: for “everything of mine”.' },
   { name: 'updatedFrom', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Only tickets changed at or after this instant — a watermark for reconciliation.' },
@@ -627,9 +630,9 @@ export function buildOpenApiSpec(baseUrl) {
       },
       '/tags': { get: op('List the workspace tag palette', 'tags:read', { tag: 'taxonomy' }) },
       '/tickets/{id}/tags': { put: op('Replace a ticket’s tag set', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagIds: { type: 'array', items: { type: 'integer' } } } } }) },
-      '/contacts': { get: op('List/search requesters — `q` (name/e-mail contains), `location` (Entra office, contains), `email` (exact), `limit` (≤ 500)', 'contacts:read', { tag: 'directory', parameters: [{ name: 'q', in: 'query', required: false, schema: { type: 'string' } }, { name: 'location', in: 'query', required: false, schema: { type: 'string' } }, { name: 'email', in: 'query', required: false, schema: { type: 'string', format: 'email' } }, { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 100, maximum: 500 } }], responseRef: ref('Contact') }) },
+      '/contacts': { get: op('List/search requesters — `q` (name/e-mail contains), `location` (Entra office, contains), `email` (exact), `limit` (≤ 500). Rows carry department and jobTitle (FreshService or Entra, whichever is filled).', 'contacts:read', { tag: 'directory', parameters: [{ name: 'q', in: 'query', required: false, schema: { type: 'string' } }, { name: 'location', in: 'query', required: false, schema: { type: 'string' } }, { name: 'email', in: 'query', required: false, schema: { type: 'string', format: 'email' } }, { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 100, maximum: 500 } }], responseRef: ref('Contact') }) },
       '/contacts/{id}': { get: op('Get a requester', 'contacts:read', { tag: 'directory', responseRef: ref('Contact') }) },
-      '/agents': { get: op('List agents/technicians: id, name, email, isActive, freshserviceId (string), location (office), photoUrl. `?active=true` narrows to active.', 'agents:read', { tag: 'directory', parameters: [{ name: 'active', in: 'query', required: false, schema: { type: 'boolean' } }], responseRef: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, isActive: { type: 'boolean' }, freshserviceId: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, photoUrl: { type: 'string', nullable: true } } } } }) },
+      '/agents': { get: op('List agents/technicians: id, name, email, isActive, freshserviceId (string), location (office), photoUrl, origin (freshservice|local), groups[] (id, name, origin, freshserviceId). `?active=true` (or `?includeInactive=false`) narrows to active.', 'agents:read', { tag: 'directory', parameters: [{ name: 'active', in: 'query', required: false, schema: { type: 'boolean' } }, { name: 'includeInactive', in: 'query', required: false, schema: { type: 'boolean', default: true } }], responseRef: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, isActive: { type: 'boolean' }, freshserviceId: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, photoUrl: { type: 'string', nullable: true }, origin: { type: 'string', enum: ['freshservice', 'local'] }, groups: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, origin: { type: 'string' }, freshserviceId: { type: 'string', nullable: true } } } } } } } }) },
       '/groups': {
         get: op('List groups — both kinds: origin:\'freshservice\' rows are addressed on tickets via groupId = their freshserviceId; origin:\'local\' rows via internalGroupId = their id', 'groups:read', {
           tag: 'directory',
@@ -649,7 +652,7 @@ export function buildOpenApiSpec(baseUrl) {
           },
         }),
       },
-      '/categories': { get: op('List categories & subcategories', 'categories:read', { tag: 'taxonomy' }) },
+      '/categories': { get: op('List categories & subcategories: id, name, parentId, description, isActive. Active only unless `?includeInactive=true`.', 'categories:read', { tag: 'taxonomy', parameters: [{ name: 'includeInactive', in: 'query', required: false, schema: { type: 'boolean', default: false } }] }) },
       '/types': { get: op('List ticket types', 'types:read', { tag: 'taxonomy' }) },
       '/custom-fields': { get: op('List active custom-field definitions (incl. API-provisioned)', 'customfields:read', { tag: 'taxonomy', responseRef: { type: 'array', items: ref('CustomFieldDefinition') } }) },
       '/search/tickets': { get: op('Search tickets (?query=…)', 'search:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true }) },
