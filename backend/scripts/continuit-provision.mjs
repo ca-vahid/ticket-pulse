@@ -7,7 +7,7 @@
  *   node scripts/continuit-provision.mjs --sandbox                       # "ContinuIT Sandbox" ws + tags + requester + ticket types
  *   node scripts/continuit-provision.mjs --it                            # IT workspace: tags + requester only (no taxonomy change)
  *   node scripts/continuit-provision.mjs --client --workspace <id> [--allowlist <file>] [--default-source <n>]
- *   node scripts/continuit-provision.mjs --webhook --workspace <id> [--url <https://…>]
+ *   node scripts/continuit-provision.mjs --webhook --workspace <id> [--url <https://…>] [--ref-prefix continuit:]
  *   add --apply to any of the above to write. Secrets print ONCE.
  *
  * Decisions encoded here (Vahid's forwarding note, 19 Sep 2026):
@@ -42,6 +42,9 @@ const CLIENT = {
     'tasks:read', 'tasks:write',
   ],
   trustedIntake: true,
+  // Structural moves (merge, parent/child, links, split) limited to tickets this
+  // credential created — a bug in their app can never restructure another IT ticket.
+  structureOwnTicketsOnly: true,
 };
 const WEBHOOK_URL = 'https://continuit-api.azurewebsites.net/api/webhooks/ticketpulse';
 const WEBHOOK_EVENTS = [
@@ -99,10 +102,10 @@ async function ensureTicketTypes(workspaceId) {
 
 async function ensureTags(workspaceId) {
   for (const [name, color] of TAGS) {
-    const found = await prisma.tag.findFirst({ where: { workspaceId, name } });
+    const found = await prisma.ticketTag.findFirst({ where: { workspaceId, name } });
     if (found) { log(`tag "${name}" #${found.id} (exists)`); continue; }
     plan(`create tag "${name}" (${color}) in ws ${workspaceId}`);
-    if (APPLY) await prisma.tag.create({ data: { workspaceId, name, color } });
+    if (APPLY) await prisma.ticketTag.create({ data: { workspaceId, name, color, isActive: true, createdBy: 'continuit-provision' } });
   }
 }
 
@@ -122,13 +125,23 @@ async function issueClient(workspaceId) {
 }
 
 async function subscribeWebhook(workspaceId, url) {
+  // ContinuIT D2 (3.9.54): --ref-prefix limits delivery to tickets whose
+  // externalRef starts with it — the IT subscription never sees the rest of IT.
+  const refPrefix = after('--ref-prefix') || null;
   const existing = await prisma.webhookSubscription.findFirst({ where: { workspaceId, url } });
-  if (existing) { log(`webhook subscription #${existing.id} for ${url} exists (events: ${existing.events.length})`); return; }
-  plan(`create webhook subscription ws ${workspaceId} -> ${url} for ${WEBHOOK_EVENTS.length} events`);
+  if (existing) {
+    log(`webhook subscription #${existing.id} for ${url} exists (events: ${existing.events.length}, prefix: ${existing.externalRefPrefix || 'none'})`);
+    if (refPrefix && existing.externalRefPrefix !== refPrefix) {
+      plan(`set externalRefPrefix ${JSON.stringify(refPrefix)} on subscription #${existing.id}`);
+      if (APPLY) await prisma.webhookSubscription.update({ where: { id: existing.id }, data: { externalRefPrefix: refPrefix } });
+    }
+    return;
+  }
+  plan(`create webhook subscription ws ${workspaceId} -> ${url} for ${WEBHOOK_EVENTS.length} events${refPrefix ? `, only externalRef ${refPrefix}*` : ''}`);
   if (!APPLY) return;
   const secret = `whsec_${crypto.randomBytes(24).toString('base64')}`;
   const sub = await prisma.webhookSubscription.create({
-    data: { workspaceId, url, secret, events: WEBHOOK_EVENTS, createdBy: 'continuit-provision' },
+    data: { workspaceId, url, secret, events: WEBHOOK_EVENTS, createdBy: 'continuit-provision', ...(refPrefix ? { externalRefPrefix: refPrefix } : {}) },
   });
   console.log(`  subscription #${sub.id}\n  signing secret: ${secret}\n  (shown once — hand it over out of band)`);
 }

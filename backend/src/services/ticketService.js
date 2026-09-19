@@ -963,6 +963,11 @@ class TicketService {
       const codes = asList(query.source).map(Number).filter(Number.isFinite);
       if (codes.length) where.source = { in: codes };
     }
+    // Batch read by id (ContinuIT C2): `ids` = array of ticket ids, ≤ 200.
+    if (Array.isArray(query.ids)) {
+      const ids = query.ids.map(Number).filter(Number.isInteger).slice(0, 200);
+      where.id = { in: ids.length ? ids : [-1] };
+    }
     // Reconciliation filters (Simorgh E2): find by the caller's own key, by a
     // key prefix ("everything of mine"), by last change, and by tag name.
     if (query.externalRef) {

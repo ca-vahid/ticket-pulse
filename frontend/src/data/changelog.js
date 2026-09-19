@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.53-preview';
+export const APP_VERSION = '3.9.54-preview';
 
 export const changelog = [
+  {
+    version: '3.9.54-preview',
+    date: 'September 19, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Public API: ContinuIT go-live</strong> — a new arrival channel <em>Office Check-in</em> (source 105), the ticket owner can be named by e-mail on create and update, agents list their origin and groups, contacts carry department and job title, categories carry description and active flag, and a batch read by ticket ids.' },
+      { type: 'added', html: '<strong>Webhooks: only my tickets</strong> — a subscription can be limited to tickets whose external reference starts with a prefix, so an integration is never sent the rest of the workspace. Set it when creating the webhook in Settings → API keys & webhooks.' },
+    ],
+  },
   {
     version: '3.9.53-preview',
     date: 'September 19, 2026',

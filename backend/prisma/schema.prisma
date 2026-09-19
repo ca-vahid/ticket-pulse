@@ -514,6 +514,8 @@ model WebhookSubscription {
   secretPrevious   String?   @map("secret_previous") @db.VarChar(64)
   secretRotatedAt  DateTime? @map("secret_rotated_at")
   events           String[]  @default([])
+  // ContinuIT D2: deliver only events whose ticket externalRef starts with this.
+  externalRefPrefix String?  @map("external_ref_prefix") @db.VarChar(100)
   isEnabled        Boolean   @default(true) @map("is_enabled")
   disabledReason   String?   @map("disabled_reason") @db.VarChar(200)
   failureCount     Int       @default(0) @map("failure_count")
