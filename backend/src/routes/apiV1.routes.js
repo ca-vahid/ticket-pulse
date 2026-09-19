@@ -605,6 +605,8 @@ router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHand
   const result = await ticketMergeService.merge((await tid(req)), req.workspaceId, {
     targetTicketId,
     notifyRequester: req.body?.notifyRequester === true,
+    resolutionReason: req.body?.resolutionReason || null,
+    resolutionNote: req.body?.resolutionNote || null,
   }, apiActor(req));
   res.json({ success: true, data: result });
 }));
@@ -623,6 +625,8 @@ router.post('/tickets/:id/merge-many', S('tickets:write'), withIdempotency, asyn
   const result = await ticketMergeService.mergeMany(primaryId, req.workspaceId, {
     ticketIds,
     notifyRequester: req.body?.notifyRequester === true,
+    resolutionReason: req.body?.resolutionReason || null,
+    resolutionNote: req.body?.resolutionNote || null,
   }, apiActor(req));
   res.json({ success: true, data: result });
 }));
@@ -743,7 +747,8 @@ router.get('/tickets/:id/tasks', S('tasks:read'), asyncHandler(async (req, res) 
 router.post('/tickets/:id/tasks', S('tasks:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
   const task = await ticketTaskService.create((await tid(req)), req.workspaceId, req.body || {}, apiActor(req));
-  res.status(201).json({ success: true, data: task });
+  // Create-or-return (Simorgh B4): an existing task by externalRef is 200, not 201.
+  res.status(task?.existing ? 200 : 201).json({ success: true, data: task });
 }));
 
 router.patch('/tickets/:id/tasks/:taskId', S('tasks:write'), asyncHandler(async (req, res) => {

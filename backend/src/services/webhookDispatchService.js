@@ -34,6 +34,15 @@ export const WEBHOOK_EVENTS = [
   // Roll-up (Simorgh B8): every child of a parent is done; the parent is NOT
   // closed automatically — this is the nudge.
   'ticket.ready_to_close',
+  // Relations + tasks (Simorgh ask 3, Phase B-2). task.updated is coalesced
+  // per task (one delivery per minute); task.completed is always immediate.
+  'ticket.linked',
+  'ticket.parent_changed',
+  'ticket.merged',
+  'ticket.split',
+  'task.created',
+  'task.updated',
+  'task.completed',
 ];
 
 // Backoff per attempt index (seconds): immediate, 15s, 1m, 5m, 30m, 2h, 6h, 12h.

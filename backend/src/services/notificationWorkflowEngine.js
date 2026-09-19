@@ -3625,12 +3625,40 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   const now = new Date();
   const patch = {};
   const changes = {};
+  let rollUpSkip = null;
+
+  if (setStatus && setStatus !== ticket.status) {
+    // Base-status lifecycle (Phase 8a): custom labels stamp/clear resolution
+    // fields per the base they map to, identically to ticketService.changeStatus.
+    const { default: statusService } = await import('./statusService.js');
+    const oldBase = await statusService.baseStatusOf(ticket.workspaceId, ticket.status);
+    const newBase = await statusService.baseStatusOf(ticket.workspaceId, setStatus);
+    const wasTerminal = ['Resolved', 'Closed'].includes(oldBase);
+    const isTerminal = ['Resolved', 'Closed'].includes(newBase);
+    // Roll-up (Simorgh B8, their Phase-B request 4): a workflow that resolves a
+    // PARENT while a child is still open leaves the parent open — the status
+    // part is skipped and the step says so; the node's other changes still
+    // apply. Same rule people and the API get, without failing the run.
+    if (isTerminal && !wasTerminal) {
+      try {
+        const { default: ticketRollUpService } = await import('./ticketRollUpService.js');
+        const open = await ticketRollUpService.openChildrenOf(ticket.id, ticket.workspaceId);
+        if (open.length) {
+          const { ticketDisplayRef: refOf } = await import('../utils/ticketOrigin.js');
+          rollUpSkip = { status: setStatus, reason: `left open — ${open.length} child ticket(s) still open: ${open.map((c) => refOf(c)).join(', ')}`, openChildren: open.map((c) => ({ id: c.id, ref: refOf(c), status: c.status })) };
+        }
+      } catch (error) {
+        logger.warn(`update_ticket roll-up check skipped for ticket ${ticket.id} (non-fatal): ${error.message}`);
+      }
+    }
+  }
+  if (rollUpSkip) {
+    setStatus = null;
+  }
 
   if (setStatus && setStatus !== ticket.status) {
     patch.status = setStatus;
     changes.status = { from: ticket.status, to: setStatus };
-    // Base-status lifecycle (Phase 8a): custom labels stamp/clear resolution
-    // fields per the base they map to, identically to ticketService.changeStatus.
     const { default: statusService } = await import('./statusService.js');
     const oldBase = await statusService.baseStatusOf(ticket.workspaceId, ticket.status);
     const newBase = await statusService.baseStatusOf(ticket.workspaceId, setStatus);
@@ -3817,6 +3845,7 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   // (actorKind 'workflow', loop-guarded by workflowId); status excluded.
   await emitWorkflowFieldsUpdated({ ticket, changes, customFieldResult, workflowId, eventContext });
   return {
+    ...(rollUpSkip ? { rollUpSkip } : {}),
     updated: changes,
     ...(assignment ? { assignment } : {}),
     ...(customFieldResult ? { customFields: customFieldResult } : {}),

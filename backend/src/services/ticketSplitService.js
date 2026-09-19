@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { ticketRef, actorRef } from './relationWebhookPayload.js';
 import logger from '../utils/logger.js';
 import attachmentService from './attachmentService.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -267,6 +268,11 @@ class TicketSplitService {
     ]);
 
     logger.info(`Ticket split: ${parentRef} -> ${childRef} (${copied} messages, ${attachmentsMoved} attachments moved, ${attachmentsCopied} copied)`);
+    import('./webhookDispatchService.js')
+      .then(({ dispatchWebhookEvent }) => dispatchWebhookEvent(workspaceId, 'ticket.split', {
+        workspaceId, ticket: ticketRef(parent), child: ticketRef({ ...child, subject }), copied, attachmentsMoved, attachmentsCopied, linkKind, actor: actorRef(actor),
+      }))
+      .catch((err) => logger.warn(`ticket.split webhook skipped (non-fatal): ${err.message}`));
 
     return {
       parent: { id: parentId, ref: parentRef },

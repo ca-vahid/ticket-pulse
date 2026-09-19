@@ -25,7 +25,7 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
  */
 export const OPEN_CHILDREN = 'open_children';
 
-const CHILD_SELECT = { id: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true };
+const CHILD_SELECT = { id: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, externalRef: true };
 
 async function isTerminal(workspaceId, status) {
   const base = await statusService.baseStatusOf(workspaceId, status);
@@ -161,8 +161,9 @@ async function notifyOwnerReady(parent, children) {
 async function emitReady(parent, children) {
   const { dispatchWebhookEvent } = await import('./webhookDispatchService.js');
   dispatchWebhookEvent(parent.workspaceId, 'ticket.ready_to_close', {
-    ticket: { id: parent.id, ref: ticketDisplayRef(parent), subject: parent.subject, status: parent.status },
-    children: children.map((c) => ({ id: c.id, ref: ticketDisplayRef(c), status: c.status })),
+    workspaceId: parent.workspaceId,
+    ticket: { id: parent.id, ref: ticketDisplayRef(parent), subject: parent.subject, status: parent.status, externalRef: parent.externalRef || null, readyToCloseAt: new Date().toISOString() },
+    children: children.map((c) => ({ id: c.id, ref: ticketDisplayRef(c), status: c.status, externalRef: c.externalRef || null })),
     assignedAgent: parent.assignedTech ? { technicianId: parent.assignedTech.id, name: parent.assignedTech.name, email: parent.assignedTech.email || null } : null,
   });
 }
