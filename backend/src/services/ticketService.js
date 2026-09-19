@@ -236,6 +236,10 @@ const createTicketSchema = z.object({
   groupId: z.union([z.number().int(), z.string().regex(/^\d+$/)]).optional().nullable(),
   internalGroupId: z.number().int().positive().optional().nullable(),
   assignedTechId: z.number().int().positive().optional().nullable(),
+  // A due date the caller already agreed with the requester (ContinuIT B1,
+  // 19 Sep 2026): stored as dueBySetBy='manual', so the SLA clock never
+  // overwrites it. ISO datetime with offset.
+  dueBy: z.string().datetime({ offset: true }).optional().nullable(),
   impact: z.number().int().min(1).max(3).optional().nullable(),
   urgency: z.number().int().min(1).max(3).optional().nullable(),
   // Tags applied at creation (gap plan 2 P1.3); validated in setTags semantics.
@@ -2831,7 +2835,12 @@ class TicketService {
         // priority/type change, flagged in plans/TICKET_TYPES_PLAN.md), it
         // MUST skip tickets where dueBySetBy === 'manual'.
         ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
-        ...(slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy, dueBySetBy: 'sla' } : {}),
+        // A date the caller agreed with the requester beats the policy clock
+        // (ContinuIT B1): 'manual' from the first write, so no SLA recompute
+        // may touch it. Otherwise the SLA clock, as before.
+        ...(data.dueBy
+          ? { dueBy: new Date(data.dueBy), dueBySetBy: 'manual' }
+          : (slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy, dueBySetBy: 'sla' } : {})),
         ...(assignee ? {
           assignedTechId: assignee.id,
           assignedAt: now,
