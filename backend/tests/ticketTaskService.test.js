@@ -210,3 +210,93 @@ describe('notify-before reminders (QA 08-04 #8b)', () => {
     expect(payload).not.toHaveProperty('notify_before');
   });
 });
+
+describe('a task with nobody named belongs to the ticket owner (Simorgh B7, 19 Sep 2026)', () => {
+  const OWNER = { id: 7, name: 'Anton Kuzmychev', email: 'akuzmychev@x.io' };
+  const OWNED = { ...TP_TICKET, assignedTechId: 7, assignedTech: OWNER };
+
+  test('no assignee → the ticket owner is e-mailed, as the owner', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(OWNED);
+    prismaMock.ticketTask.findFirst.mockResolvedValue(null);
+    await ticketTaskService.create(1, 1, { title: 'Isolate LAPTOP-4471' }, { email: 'apikey:tpc_890e', name: 'Simorgh', role: 'api' });
+    expect(emailMock.sendTransactionalEmail).toHaveBeenCalledTimes(1);
+    const mail = emailMock.sendTransactionalEmail.mock.calls[0][0];
+    expect(mail.to).toBe('akuzmychev@x.io');
+    expect(mail.html).toMatch(/A task was added to your ticket .*TP-42/);
+    expect(mail.html).toMatch(/yours as the ticket owner/);
+  });
+
+  test('no assignee and no owner → nobody to tell, task still created', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, assignedTechId: null, assignedTech: null });
+    prismaMock.ticketTask.findFirst.mockResolvedValue(null);
+    const task = await ticketTaskService.create(1, 1, { title: 'Orphan' }, { email: 'c@x.io' });
+    expect(task.title).toBe('Orphan');
+    expect(emailMock.sendTransactionalEmail).not.toHaveBeenCalled();
+  });
+
+  test('a named assignee is still the one e-mailed, not the owner', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(OWNED);
+    prismaMock.technician.findFirst.mockResolvedValue(AGENT_FS);
+    prismaMock.ticketTask.findFirst.mockResolvedValue(null);
+    await ticketTaskService.create(1, 1, { title: 'Named', assignedTechId: 10 }, { email: 'c@x.io' });
+    expect(emailMock.sendTransactionalEmail.mock.calls[0][0].to).toBe('alice@x.io');
+  });
+
+  test('the due reminder falls back to the ticket owner', async () => {
+    const row = { id: 5, title: 'Reset password', status: 'open', origin: 'ticketpulse', dueAt: new Date(Date.now() + 10 * 60000), remindBeforeMinutes: 15, reminderSentAt: null, assignedTech: null, ticket: { ...TP_TICKET, assignedTech: OWNER } };
+    expect(await ticketTaskService.sendDueReminder(row)).toBe(true);
+    expect(emailMock.sendTransactionalEmail.mock.calls[0][0].to).toBe('akuzmychev@x.io');
+  });
+
+  test('…and stays silent when the task has no assignee and the ticket no owner', async () => {
+    const row = { id: 5, title: 'x', status: 'open', origin: 'ticketpulse', dueAt: new Date(), remindBeforeMinutes: 15, reminderSentAt: null, assignedTech: null, ticket: { ...TP_TICKET, assignedTech: null } };
+    expect(await ticketTaskService.sendDueReminder(row)).toBe(false);
+  });
+
+  test('a new owner is told about the open unassigned tasks, in one e-mail', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(OWNED);
+    prismaMock.ticketTask.findMany.mockResolvedValue([
+      { id: 1, title: 'Isolate LAPTOP-4471', dueAt: new Date('2026-09-19T21:00:00Z'), status: 'open' },
+      { id: 2, title: 'Revoke sessions', dueAt: null, status: 'in_progress' },
+    ]);
+    expect(await ticketTaskService.notifyOwnerOfOpenTasks(1, 1, OWNER)).toBe(true);
+    const mail = emailMock.sendTransactionalEmail.mock.calls[0][0];
+    expect(mail.subject).toBe('TP-42: 2 open tasks are now yours');
+    expect(mail.html).toMatch(/Isolate LAPTOP-4471/);
+    expect(mail.html).toMatch(/Revoke sessions/);
+    expect(prismaMock.ticketTask.findMany.mock.calls[0][0].where).toMatchObject({ status: { not: 'done' }, assignedTechId: null });
+  });
+
+  test('no open unassigned tasks → no handover e-mail', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(OWNED);
+    prismaMock.ticketTask.findMany.mockResolvedValue([]);
+    expect(await ticketTaskService.notifyOwnerOfOpenTasks(1, 1, OWNER)).toBe(false);
+    expect(emailMock.sendTransactionalEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('externalRef — create-or-return (Simorgh B4)', () => {
+  test('a repeat with the same externalRef returns the existing task and creates nothing', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(TP_TICKET);
+    prismaMock.ticketTask.findFirst.mockResolvedValue({ id: 77, title: 'Isolate', status: 'open', externalRef: 'simorgh:action:9f2c', assignedTech: null });
+    const task = await ticketTaskService.create(1, 1, { title: 'Isolate (retry)', externalRef: 'simorgh:action:9f2c' }, { email: 'c@x.io' });
+    expect(task).toMatchObject({ id: 77, existing: true, externalRef: 'simorgh:action:9f2c' });
+    expect(prismaMock.ticketTask.create).not.toHaveBeenCalled();
+    expect(prismaMock.ticketTask.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { ticketId: 1, workspaceId: 1, externalRef: 'simorgh:action:9f2c' } }));
+  });
+
+  test('a new externalRef is stored on the task', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(TP_TICKET);
+    prismaMock.ticketTask.findFirst.mockResolvedValue(null);
+    await ticketTaskService.create(1, 1, { title: 'Isolate', externalRef: '  simorgh:action:9f2c ' }, { email: 'c@x.io' });
+    expect(prismaMock.ticketTask.create.mock.calls[0][0].data.externalRef).toBe('simorgh:action:9f2c');
+  });
+
+  test('no externalRef → no lookup, plain create', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(TP_TICKET);
+    await ticketTaskService.create(1, 1, { title: 'Plain' }, { email: 'c@x.io' });
+    expect(prismaMock.ticketTask.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.ticketTask.create.mock.calls[0][0].data.externalRef).toBeNull();
+  });
+});
+

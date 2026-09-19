@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.50-preview';
+export const APP_VERSION = '3.9.51-preview';
 
 export const changelog = [
+  {
+    version: '3.9.51-preview',
+    date: 'September 19, 2026',
+    entries: [
+      { type: 'added', html: '<strong>A parent ticket can’t be closed while a child is still open</strong> — you’ll be told which children are open. Nothing closes on its own: when the last child is done, the parent shows “ready to close” under its status and the owner gets an e-mail.' },
+      { type: 'added', html: '<strong>Tasks with nobody named belong to the ticket owner</strong> — the owner is told when one is added, gets the due reminder, and a new owner hears about open tasks when a ticket changes hands.' },
+      { type: 'added', html: '<strong>API clients can be limited to their own tickets</strong> — a new option in Settings → API clients refuses merge, split, parent/child and link changes on tickets the client did not create. On for Simorgh.' },
+      { type: 'added', html: '<strong>Public API: links, children and merge-many</strong> — plus an <code>externalRef</code> on tasks so a retried request returns the existing task instead of a duplicate.' },
+    ],
+  },
   {
     version: '3.9.50-preview',
     date: 'September 19, 2026',

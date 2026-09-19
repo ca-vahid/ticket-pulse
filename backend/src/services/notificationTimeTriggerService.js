@@ -229,7 +229,8 @@ class NotificationTimeTriggerService {
       where: {
         origin: 'ticketpulse',
         status: { not: 'done' },
-        assignedTechId: { not: null },
+        // An unassigned task belongs to the ticket owner (Simorgh B7) — the
+        // owner lookup happens in sendDueReminder.
         remindBeforeMinutes: { not: null },
         reminderSentAt: null,
         // Widest possible window: earliest interesting dueAt is grace-minutes
@@ -244,7 +245,7 @@ class NotificationTimeTriggerService {
         id: true, title: true, description: true, status: true, origin: true,
         dueAt: true, remindBeforeMinutes: true, reminderSentAt: true,
         assignedTech: { select: { id: true, name: true, email: true } },
-        ticket: { select: { id: true, workspaceId: true, origin: true, subject: true, nativeNumber: true, freshserviceTicketId: true } },
+        ticket: { select: { id: true, workspaceId: true, origin: true, subject: true, nativeNumber: true, freshserviceTicketId: true, assignedTech: { select: { id: true, name: true, email: true } } } },
       },
       orderBy: { dueAt: 'asc' },
       take: MAX_TASK_REMINDERS_PER_TICK,

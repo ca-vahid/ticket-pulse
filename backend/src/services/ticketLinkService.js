@@ -302,6 +302,9 @@ class TicketLinkService {
     await this._fsPointerNote(child, workspaceId, `Linked as a child of ${ticketDisplayRef(parent)} in Ticket Pulse by ${who}.`);
     await this._fsPointerNote(parent, workspaceId, `${ticketDisplayRef(child)} was linked as a child ticket in Ticket Pulse by ${who}.`);
     logger.info(`Parent/child: ${ticketDisplayRef(child)} is now a child of ${ticketDisplayRef(parent)}`);
+    // Roll-up: a new child changes whether the parent (and the previous parent)
+    // is ready to close.
+    await this._recomputeRollUp(workspaceId, [parentId, existing && existing.ticketId !== parentId ? existing.ticketId : null], actor);
     return this.family(childId, workspaceId);
   }
 
@@ -329,7 +332,18 @@ class TicketLinkService {
       await this._fsPointerNote(child, workspaceId, `Unlinked from parent ${ticketDisplayRef(parent)} in Ticket Pulse by ${who}.`);
       await this._fsPointerNote(parent, workspaceId, `${ticketDisplayRef(child)} was unlinked as a child in Ticket Pulse by ${who}.`);
     }
+    await this._recomputeRollUp(workspaceId, [link.ticketId], actor);
     return { removed: true };
+  }
+
+  /** Best-effort roll-up recompute for the given parents (nulls skipped). */
+  async _recomputeRollUp(workspaceId, parentIds, actor) {
+    try {
+      const { default: ticketRollUpService } = await import('./ticketRollUpService.js');
+      for (const id of parentIds.filter(Boolean)) await ticketRollUpService.recomputeReadiness(id, workspaceId, { actor });
+    } catch (err) {
+      logger.warn(`Roll-up recompute after a parent change failed (non-fatal): ${err.message}`);
+    }
   }
 
   /** True if `candidateId` sits anywhere under `rootId` in the parent tree. */

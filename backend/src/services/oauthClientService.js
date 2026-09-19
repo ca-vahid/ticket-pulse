@@ -79,6 +79,7 @@ function shape(client, secret = null) {
     id: client.id, name: client.name, clientId: client.clientId, secretPrefix: client.secretPrefix,
     scopes: client.scopes, isEnabled: client.isEnabled, revokedAt: client.revokedAt || null,
     trustedIntake: client.trustedIntake === true,
+    structureOwnTicketsOnly: client.structureOwnTicketsOnly === true,
     ipAllowlist: Array.isArray(client.ipAllowlist) ? client.ipAllowlist : [],
     defaultSource: client.defaultSource ?? null,
     expiresAt: client.expiresAt, lastUsedAt: client.lastUsedAt, tokenCount: client.tokenCount,
@@ -120,7 +121,7 @@ class OAuthClientService {
   }
 
   async create(workspaceId, {
-    name, scopes, expiresInDays = null, trustedIntake = false, ipAllowlist = [], defaultSource = null,
+    name, scopes, expiresInDays = null, trustedIntake = false, structureOwnTicketsOnly = false, ipAllowlist = [], defaultSource = null,
   }, actor) {
     const trimmed = String(name || '').trim();
     if (trimmed.length < 3) throw new ValidationError('Client name must be at least 3 characters');
@@ -132,7 +133,7 @@ class OAuthClientService {
     const client = await prisma.oAuthClient.create({
       data: {
         workspaceId, name: trimmed, clientId, clientSecretHash: secretHash, secretPrefix,
-        trustedIntake: trustedIntake === true, ipAllowlist: cleanAllowlist, defaultSource: cleanSource,
+        trustedIntake: trustedIntake === true, structureOwnTicketsOnly: structureOwnTicketsOnly === true, ipAllowlist: cleanAllowlist, defaultSource: cleanSource,
         scopes: cleanScopes,
         expiresAt: expiresInDays ? new Date(Date.now() + Number(expiresInDays) * 86400000) : null,
         createdBy: actor?.email || null,
@@ -149,6 +150,7 @@ class OAuthClientService {
     if (patch.isEnabled !== undefined) data.isEnabled = patch.isEnabled !== false;
     if (patch.scopes !== undefined) data.scopes = validateScopes(patch.scopes);
     if (patch.trustedIntake !== undefined) data.trustedIntake = patch.trustedIntake === true;
+    if (patch.structureOwnTicketsOnly !== undefined) data.structureOwnTicketsOnly = patch.structureOwnTicketsOnly === true;
     if (patch.ipAllowlist !== undefined) data.ipAllowlist = validateAllowlist(patch.ipAllowlist);
     if (patch.defaultSource !== undefined) data.defaultSource = validateDefaultSource(patch.defaultSource);
     const updated = await prisma.oAuthClient.update({ where: { id: client.id }, data });

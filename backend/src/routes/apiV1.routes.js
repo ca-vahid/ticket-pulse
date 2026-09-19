@@ -75,6 +75,12 @@ async function bodyTicketId(req, ...candidates) {
   return (await resolveTicketRefOrThrow(String(raw), req.workspaceId)).id;
 }
 
+/** "Own tickets only" (Simorgh B6): every ticket the call would CHANGE. */
+async function guardStructure(req, ticketIds, action) {
+  const { assertClientMayStructure } = await import('../services/ticketStructureGuard.js');
+  await assertClientMayStructure(req.apiKey, ticketIds, action);
+}
+
 // ---------------------------------------------------------------- shapers
 
 function ticketShape(t) {
@@ -130,6 +136,8 @@ function ticketShape(t) {
     resolutionReason: t.resolutionReason || null,
     resolutionNote: t.resolutionNote || null,
     resolvedByKind: t.resolvedByKind || null,
+    // Roll-up (Simorgh B8): every child is done; a person closes the parent.
+    readyToCloseAt: t.readyToCloseAt || null,
   };
 }
 
@@ -573,6 +581,7 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
 
 router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketSplitService } = await import('../services/ticketSplitService.js');
+  await guardStructure(req, [await tid(req)], 'split');
   const result = await ticketSplitService.split((await tid(req)), req.workspaceId, {
     entryIds: req.body?.entryIds,
     subject: req.body?.subject,
@@ -590,8 +599,29 @@ router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHand
 
 router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
+  const targetTicketId = await bodyTicketId(req, req.body?.target, req.body?.targetTicketId);
+  // Both sides change: the source is closed, the survivor gains the thread.
+  await guardStructure(req, [await tid(req), targetTicketId], 'merge');
   const result = await ticketMergeService.merge((await tid(req)), req.workspaceId, {
-    targetTicketId: await bodyTicketId(req, req.body?.target, req.body?.targetTicketId),
+    targetTicketId,
+    notifyRequester: req.body?.notifyRequester === true,
+  }, apiActor(req));
+  res.json({ success: true, data: result });
+}));
+
+// Many sources into this ticket (Simorgh ask 2 — storm clean-up). Sequential,
+// one result per source; a failure on one source does not stop the rest.
+router.post('/tickets/:id/merge-many', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+  const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
+  const primaryId = await tid(req);
+  const raw = Array.isArray(req.body?.sources) ? req.body.sources : Array.isArray(req.body?.ticketIds) ? req.body.ticketIds : [];
+  if (!raw.length) throw problems.badRequest('Name the tickets to merge in `sources` (ids or references)');
+  if (raw.length > 20) throw problems.badRequest('Merge at most 20 tickets at once');
+  const ticketIds = [];
+  for (const value of raw) ticketIds.push(await bodyTicketId(req, value));
+  await guardStructure(req, [primaryId, ...ticketIds], 'merge');
+  const result = await ticketMergeService.mergeMany(primaryId, req.workspaceId, {
+    ticketIds,
     notifyRequester: req.body?.notifyRequester === true,
   }, apiActor(req));
   res.json({ success: true, data: result });
@@ -604,15 +634,58 @@ router.get('/tickets/:id/family', S('tickets:read'), asyncHandler(async (req, re
 
 router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
-  const result = await ticketLinkService.setParent((await tid(req)), req.workspaceId, {
-    parentTicketId: await bodyTicketId(req, req.body?.parent, req.body?.parentTicketId),
-  }, apiActor(req));
+  const parentTicketId = await bodyTicketId(req, req.body?.parent, req.body?.parentTicketId);
+  await guardStructure(req, [await tid(req), parentTicketId], 're-parent');
+  const result = await ticketLinkService.setParent((await tid(req)), req.workspaceId, { parentTicketId }, apiActor(req));
   res.json({ success: true, data: result });
 }));
 
 router.delete('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  await guardStructure(req, [await tid(req)], 're-parent');
   res.json({ success: true, data: await ticketLinkService.removeParent((await tid(req)), req.workspaceId, apiActor(req)) });
+}));
+
+// The parent's side of the same relation (Simorgh ask 2): add a child.
+router.post('/tickets/:id/children', S('tickets:write'), asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const parentId = await tid(req);
+  const childTicketId = await bodyTicketId(req, req.body?.child, req.body?.childTicketId);
+  if (!Number.isFinite(childTicketId)) throw problems.badRequest('Name the child ticket in `child` (id or reference)');
+  await guardStructure(req, [parentId, childTicketId], 're-parent');
+  res.status(201).json({ success: true, data: await ticketLinkService.addChild(parentId, req.workspaceId, { childTicketId }, apiActor(req)) });
+}));
+
+// ------------------------------------------------------------------- links
+// related_to / duplicate_of (Simorgh ask 2). The ticket in the URL changes; the
+// ticket at the far end is only pointed at, so the guard checks the URL side.
+
+const linkShape = (l) => ({
+  id: l.id, kind: l.kind, direction: l.direction, label: l.label || null,
+  other: l.other ? { id: l.other.id, ref: l.other.displayRef, subject: l.other.subject, status: l.other.status } : null,
+});
+
+router.get('/tickets/:id/links', S('tickets:read'), asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const rows = await ticketLinkService.listForTicket((await tid(req)), req.workspaceId);
+  res.json({ success: true, data: rows.map(linkShape) });
+}));
+
+router.post('/tickets/:id/links', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const ticketId = await tid(req);
+  const relatedTicketId = await bodyTicketId(req, req.body?.related, req.body?.relatedTicketId);
+  if (!Number.isFinite(relatedTicketId)) throw problems.badRequest('Name the other ticket in `related` (id or reference)');
+  await guardStructure(req, [ticketId], 'link');
+  const link = await ticketLinkService.link(ticketId, req.workspaceId, { relatedTicketId, kind: req.body?.kind }, apiActor(req));
+  res.status(201).json({ success: true, data: { id: link.id, kind: link.kind, ticketId: link.ticketId, relatedTicketId: link.relatedTicketId } });
+}));
+
+router.delete('/tickets/:id/links/:linkId', S('tickets:write'), asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const ticketId = await tid(req);
+  await guardStructure(req, [ticketId], 'unlink');
+  res.json({ success: true, data: await ticketLinkService.unlink(ticketId, req.workspaceId, req.params.linkId, apiActor(req)) });
 }));
 
 // -------------------------------------------------------- conversations
