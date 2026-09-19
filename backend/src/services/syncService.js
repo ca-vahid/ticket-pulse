@@ -4323,9 +4323,17 @@ class SyncService {
       if (!ticket.resolvedAt) {
         patch.resolvedAt = now;
         patch.resolutionTimeSeconds = Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000));
+        // Who resolved it: somebody, in FreshService. Without this the read
+        // shape said nothing at all (TP-1504, 14 Sep 2026).
+        patch.resolvedByKind = 'freshservice';
       }
       if (fsTerminal === 'Closed') patch.closedAt = now;
-      await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
+      // Full rows on both sides of the write: the lifecycle emitter diffs them.
+      const lifecycleInclude = { assignedTech: true, requester: true };
+      const beforeRow = await Promise.resolve()
+        .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, include: lifecycleInclude }))
+        .catch(() => null);
+      const afterRow = await prisma.ticket.update({ where: { id: ticket.id }, data: patch, include: lifecycleInclude });
       await ticketActivityRepository.create({
         ticketId: ticket.id,
         activityType: 'status_changed',
@@ -4344,6 +4352,21 @@ class SyncService {
       }).catch(() => {});
       logger.info(`FS→TP mirror-back: TP ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}) → ${fsTerminal}`);
       await this._broadcastReconcile(workspaceId, ticket, fsTerminal);
+      // A close is a close wherever it was clicked. This path wrote the row and
+      // a history line and told nobody: no ticket.status_changed webhook, no
+      // workflow run. Simorgh's TP-1504 closed on 14 Sep and only its reconciler
+      // noticed. Mirror-driven assignments already emit; closes do now too.
+      if (beforeRow && afterRow) {
+        await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
+          existingTicket: beforeRow,
+          upsertedTicket: afterRow,
+          source: 'freshservice_mirror_back',
+          allowNotificationWorkflows: true,
+          actorKind: 'freshservice',
+        }).catch((err) => {
+          logger.warn('Mirror-back lifecycle notification dispatch failed (non-fatal)', { ticketId: ticket.id, error: err.message });
+        });
+      }
       return { changed: true, status: fsTerminal };
     }
 

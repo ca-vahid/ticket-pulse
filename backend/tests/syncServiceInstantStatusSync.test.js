@@ -592,3 +592,58 @@ describe('reconcileSingleTicket — a FreshService closure is not pulled back ov
     expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'Closed' }) }));
   });
 });
+
+describe('reconcileSingleTicket — a close that came from FreshService is still a close (Simorgh TP-1504)', () => {
+  // 14 Sep 2026: an agent closed the FreshService copy of Simorgh's TP-1504.
+  // The mirror-back wrote the row and a history line and told nobody — no
+  // ticket.status_changed webhook, no workflow run, no resolvedByKind. Only
+  // Simorgh's reconciler noticed.
+  const TP_ROW = {
+    id: 44797, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: BigInt(242218), status: 'Pending', priority: 2,
+    resolvedAt: null, createdAt: new Date('2026-09-14T16:05:45Z'), freshserviceUpdatedAt: null,
+    updatedAt: new Date('2026-09-14T16:46:22Z'),
+  };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    syncService._initializeClient = jest.fn().mockResolvedValue(clientMock);
+    prismaMock.mirrorJob = { count: jest.fn().mockResolvedValue(0) };
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_ROW });
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...TP_ROW, requester: { id: 1974 }, assignedTech: null });
+    prismaMock.ticket.update.mockImplementation(async ({ data }) => ({ ...TP_ROW, ...data, requester: { id: 1974 }, assignedTech: null }));
+    prismaMock.assignmentPipelineRun.updateMany.mockResolvedValue({ count: 0 });
+    ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'ok' });
+    clientMock.fetchTicketSafe.mockResolvedValue({ id: 242218, status: 5, updated_at: '2026-09-14T20:01:00Z' });
+  });
+
+  test('the lifecycle emitter gets the row before and after, with workflows ALLOWED and the FreshService actor kind', async () => {
+    const out = await syncService.reconcileSingleTicket(44797, 1);
+    expect(out).toMatchObject({ changed: true, status: 'Closed' });
+    expect(ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications).toHaveBeenCalledTimes(1);
+    const args = ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications.mock.calls[0][0];
+    expect(args.existingTicket.status).toBe('Pending');
+    expect(args.upsertedTicket.status).toBe('Closed');
+    expect(args).toMatchObject({ source: 'freshservice_mirror_back', allowNotificationWorkflows: true, actorKind: 'freshservice' });
+  });
+
+  test('resolvedByKind says it was resolved in FreshService', async () => {
+    await syncService.reconcileSingleTicket(44797, 1);
+    expect(prismaMock.ticket.update.mock.calls[0][0].data).toMatchObject({ status: 'Closed', resolvedByKind: 'freshservice' });
+  });
+
+  test('a ticket that was already resolved keeps who resolved it', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_ROW, status: 'Pending', resolvedAt: new Date('2026-09-14T17:00:00Z') });
+    await syncService.reconcileSingleTicket(44797, 1);
+    expect(prismaMock.ticket.update.mock.calls[0][0].data.resolvedByKind).toBeUndefined();
+  });
+
+  test('nothing is emitted when nothing changed (guards still win)', async () => {
+    prismaMock.mirrorJob.count.mockResolvedValue(1);
+    await syncService.reconcileSingleTicket(44797, 1);
+    expect(ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications).not.toHaveBeenCalled();
+  });
+
+  test('an emitter failure never fails the reconcile', async () => {
+    ticketLifecycleNotificationServiceMock.emitTicketLifecycleNotifications.mockRejectedValue(new Error('engine down'));
+    await expect(syncService.reconcileSingleTicket(44797, 1)).resolves.toMatchObject({ changed: true });
+  });
+});

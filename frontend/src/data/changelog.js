@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.49-preview';
+export const APP_VERSION = '3.9.50-preview';
 
 export const changelog = [
+  {
+    version: '3.9.50-preview',
+    date: 'September 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Closing the FreshService copy now counts as a close</strong> — when someone closed the FreshService fallback copy of a Ticket Pulse ticket, the close was mirrored back silently: no workflow ran and connected systems such as Simorgh were never told. It now behaves like any other close, and the ticket records that it was resolved in FreshService.' },
+      { type: 'improved', html: '<strong>History shows parent, child and link changes</strong> — setting or removing a parent, and linking or unlinking tickets, now appears in the History tab of both tickets, with who did it.' },
+      { type: 'added', html: '<strong>Public API: relations</strong> — a ticket now reports where it was merged, its parent and how many children it has; merge and parent calls accept a ticket reference such as <code>TP-1504</code> as well as an id.' },
+    ],
+  },
   {
     version: '3.9.49-preview',
     date: 'September 18, 2026',

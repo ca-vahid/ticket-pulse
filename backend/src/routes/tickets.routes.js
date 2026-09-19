@@ -1516,7 +1516,7 @@ router.post('/:id/links', asyncHandler(async (req, res) => {
 
 router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
-  const result = await ticketLinkService.unlink(parseTicketId(req), req.workspaceId, req.params.linkId);
+  const result = await ticketLinkService.unlink(parseTicketId(req), req.workspaceId, req.params.linkId, req.ticketActor);
   res.json({ success: true, data: result });
 }));
 

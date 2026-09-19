@@ -2,6 +2,8 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { actorKindOf } from '../utils/actorKind.js';
+import ticketActivityRepository from './ticketActivityRepository.js';
 
 // User-linkable kinds via the generic link() path. parent_of is deliberately
 // EXCLUDED: it carries invariants (single parent, no cycles, coordinator-only)
@@ -20,7 +22,46 @@ const INVERSE_LABEL = { duplicate_of: 'has duplicate', related_to: 'related to',
  * "Mark as duplicate" also resolves the source ticket with an audit note —
  * an honest lightweight merge (the conversation stays on the target).
  */
+/**
+ * History vocabulary for relations (Simorgh ask 4, 19 Sep 2026). Link and parent
+ * changes used to write NOTHING, so `GET /api/v1/tickets/{id}/activities` was
+ * not a complete audit and an integration could not tell who re-parented a
+ * ticket. Each change writes one row on EACH ticket, from that ticket's side:
+ *
+ *   parent_set / parent_removed      on the child   (other = the parent)
+ *   child_added / child_removed      on the parent  (other = the child)
+ *   linked / unlinked                on both        (kind, direction out|in)
+ *
+ * details: { kind, direction, otherTicketId, otherRef, actorKind, actorEmail }.
+ * Merge and split write their own rows (merged_into / merged_from, split_*).
+ */
+export const RELATION_ACTIVITY_TYPES = Object.freeze([
+  'parent_set', 'parent_removed', 'child_added', 'child_removed', 'linked', 'unlinked',
+]);
+
 class TicketLinkService {
+  /** Best-effort: a history write must never undo or fail the relation itself. */
+  async _recordRelation(pairs, actor, extra = {}) {
+    const now = new Date();
+    await Promise.all(pairs.map(([activityType, ticket, other, direction]) => Promise.resolve()
+      .then(() => ticketActivityRepository.create({
+        ticketId: ticket.id,
+        activityType,
+        performedBy: actor?.name || actor?.email || 'Ticket Pulse',
+        performedAt: now,
+        details: {
+          source: 'ticketpulse_native',
+          actorEmail: actor?.email || null,
+          actorKind: actorKindOf(actor),
+          otherTicketId: other.id,
+          otherRef: ticketDisplayRef(other),
+          ...(direction ? { direction } : {}),
+          ...extra,
+        },
+      }))
+      .catch((err) => logger.warn(`Relation history write failed for ticket ${ticket.id} (non-fatal): ${err.message}`))));
+  }
+
   async listForTicket(ticketId, workspaceId) {
     const [from, to] = await Promise.all([
       prisma.ticketLink.findMany({
@@ -55,16 +96,21 @@ class TicketLinkService {
     if (!ticket) throw new NotFoundError('This ticket no longer exists in the workspace');
     if (!related) throw new NotFoundError(`Ticket ${relatedId} was not found in this workspace — link by its TP-#### or #FS number`);
 
+    const already = await Promise.resolve()
+      .then(() => prisma.ticketLink.findUnique({ where: { ticketId_relatedTicketId_kind: { ticketId, relatedTicketId: relatedId, kind } } }))
+      .catch(() => null);
     const linkRow = await prisma.ticketLink.upsert({
       where: { ticketId_relatedTicketId_kind: { ticketId, relatedTicketId: relatedId, kind } },
       update: {},
       create: { workspaceId, ticketId, relatedTicketId: relatedId, kind, createdBy: actor?.email || null },
     });
     logger.info(`Ticket link: ${ticketDisplayRef(ticket)} ${kind} ${ticketDisplayRef(related)}`);
+    // An upsert that found the link already there changed nothing — no row.
+    if (!already) await this._recordRelation([['linked', ticket, related, 'out'], ['linked', related, ticket, 'in']], actor, { kind, linkId: linkRow.id });
     return linkRow;
   }
 
-  async unlink(ticketId, workspaceId, linkId) {
+  async unlink(ticketId, workspaceId, linkId, actor = null) {
     const link = await prisma.ticketLink.findFirst({
       where: { id: Number(linkId), workspaceId, OR: [{ ticketId }, { relatedTicketId: ticketId }] },
     });
@@ -80,6 +126,15 @@ class TicketLinkService {
       );
     }
     await prisma.ticketLink.delete({ where: { id: link.id } });
+    const sides = (await Promise.resolve()
+      .then(() => prisma.ticket.findMany({
+        where: { workspaceId, id: { in: [link.ticketId, link.relatedTicketId] } },
+        select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+      }))
+      .catch(() => [])) || [];
+    const from = sides.find((t) => t.id === link.ticketId);
+    const to = sides.find((t) => t.id === link.relatedTicketId);
+    if (from && to) await this._recordRelation([['unlinked', from, to, 'out'], ['unlinked', to, from, 'in']], actor, { kind: link.kind, linkId: link.id });
     return { deleted: true };
   }
 
@@ -161,6 +216,22 @@ class TicketLinkService {
   // tickets; the relationship is Ticket-Pulse-authoritative and mirrored to
   // FreshService as a cosmetic pointer note (FS has no writable parent field).
 
+  /**
+   * The three facts an integration needs to keep a stored reference resolvable
+   * (Simorgh ask 6): where this ticket was MERGED, what its parent is, and how
+   * many children it has. Cheap — three indexed lookups, no thread.
+   */
+  async relationsSummary(ticketId, workspaceId) {
+    const pick = { id: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true };
+    const [mergedLink, parentLink, childCount] = await Promise.all([
+      prisma.ticketLink.findFirst({ where: { workspaceId, ticketId, kind: 'merged_into' }, orderBy: { id: 'desc' }, include: { relatedTicket: { select: pick } } }),
+      prisma.ticketLink.findFirst({ where: { workspaceId, relatedTicketId: ticketId, kind: 'parent_of' }, include: { ticket: { select: pick } } }),
+      prisma.ticketLink.count({ where: { workspaceId, ticketId, kind: 'parent_of' } }),
+    ]);
+    const asRef = (t) => (t ? { id: t.id, ref: ticketDisplayRef(t), status: t.status } : null);
+    return { mergedInto: asRef(mergedLink?.relatedTicket), parent: asRef(parentLink?.ticket), childCount };
+  }
+
   /** { parent: {…}|null, children: [{…}] } for the family cards. */
   async family(ticketId, workspaceId) {
     const [parentLink, childLinks] = await Promise.all([
@@ -209,12 +280,23 @@ class TicketLinkService {
     const existing = await prisma.ticketLink.findFirst({ where: { workspaceId, relatedTicketId: childId, kind: 'parent_of' } });
     if (existing && existing.ticketId !== parentId) {
       await prisma.ticketLink.delete({ where: { id: existing.id } });
+      const previousParent = await Promise.resolve()
+        .then(() => prisma.ticket.findFirst({ where: { id: existing.ticketId, workspaceId } }))
+        .catch(() => null);
+      if (previousParent) {
+        await this._recordRelation([['parent_removed', child, previousParent], ['child_removed', previousParent, child]], actor, { kind: 'parent_of', replacedBy: ticketDisplayRef(parent) });
+      }
     }
     await prisma.ticketLink.upsert({
       where: { ticketId_relatedTicketId_kind: { ticketId: parentId, relatedTicketId: childId, kind: 'parent_of' } },
       update: {},
       create: { workspaceId, ticketId: parentId, relatedTicketId: childId, kind: 'parent_of', createdBy: actor?.email || null },
     });
+
+    // Setting the same parent again is a no-op and leaves no row.
+    if (!existing || existing.ticketId !== parentId) {
+      await this._recordRelation([['parent_set', child, parent], ['child_added', parent, child]], actor, { kind: 'parent_of' });
+    }
 
     const who = actor?.name || actor?.email || 'an agent';
     await this._fsPointerNote(child, workspaceId, `Linked as a child of ${ticketDisplayRef(parent)} in Ticket Pulse by ${who}.`);
@@ -243,6 +325,7 @@ class TicketLinkService {
     await prisma.ticketLink.delete({ where: { id: link.id } });
     const who = actor?.name || actor?.email || 'an agent';
     if (child && parent) {
+      await this._recordRelation([['parent_removed', child, parent], ['child_removed', parent, child]], actor, { kind: 'parent_of' });
       await this._fsPointerNote(child, workspaceId, `Unlinked from parent ${ticketDisplayRef(parent)} in Ticket Pulse by ${who}.`);
       await this._fsPointerNote(parent, workspaceId, `${ticketDisplayRef(child)} was unlinked as a child in Ticket Pulse by ${who}.`);
     }

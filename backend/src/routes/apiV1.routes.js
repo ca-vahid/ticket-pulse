@@ -62,6 +62,19 @@ async function tid(req) {
   return id;
 }
 
+/**
+ * A ticket named in a request BODY: a numeric id, or any display reference the
+ * URL already accepts ("TP-1504", "SR-242218", "#242218"). An integration holds
+ * references, not our row ids (Simorgh ask 2).
+ */
+async function bodyTicketId(req, ...candidates) {
+  const raw = candidates.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+  if (raw === undefined) return NaN;
+  if (typeof raw === 'number' || /^\d+$/.test(String(raw).trim())) return Number(raw);
+  const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+  return (await resolveTicketRefOrThrow(String(raw), req.workspaceId)).id;
+}
+
 // ---------------------------------------------------------------- shapers
 
 function ticketShape(t) {
@@ -442,10 +455,17 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
 
 router.get('/tickets/:id', S('tickets:read'), asyncHandler(async (req, res) => {
   const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId);
+  // Where it was merged, its parent, how many children. A merged ticket still
+  // answers here — the reference stays resolvable and says where the work went.
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const relations = await Promise.resolve()
+    .then(() => ticketLinkService.relationsSummary(ticket.id, req.workspaceId))
+    .catch(() => ({ mergedInto: null, parent: null, childCount: 0 }));
   res.json({
     success: true,
     data: {
       ...ticketShape(ticket),
+      relations,
       description: ticket.descriptionText || null,
       conversations: (ticket.thread || []).filter((e) => (e.bodyText || e.content) && e.isPrivate !== true).map(threadEntryShape),
     },
@@ -571,7 +591,7 @@ router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHand
 router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
   const result = await ticketMergeService.merge((await tid(req)), req.workspaceId, {
-    targetTicketId: Number(req.body?.targetTicketId),
+    targetTicketId: await bodyTicketId(req, req.body?.target, req.body?.targetTicketId),
     notifyRequester: req.body?.notifyRequester === true,
   }, apiActor(req));
   res.json({ success: true, data: result });
@@ -585,7 +605,7 @@ router.get('/tickets/:id/family', S('tickets:read'), asyncHandler(async (req, re
 router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   const result = await ticketLinkService.setParent((await tid(req)), req.workspaceId, {
-    parentTicketId: Number(req.body?.parentTicketId),
+    parentTicketId: await bodyTicketId(req, req.body?.parent, req.body?.parentTicketId),
   }, apiActor(req));
   res.json({ success: true, data: result });
 }));
