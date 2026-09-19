@@ -76,6 +76,8 @@ const T = {
       subject: { type: 'string' }, description: { type: 'string' },
       priority: { type: 'integer', enum: [1, 2, 3, 4], default: 2 },
       requesterEmail: { type: 'string', format: 'email' }, requesterName: { type: 'string' },
+      dueBy: { type: 'string', format: 'date-time', nullable: true, description: 'A due date already agreed with the requester. Trusted-intake credentials only (403 due_by_requires_trusted_intake otherwise). Stored as a manual due date — the SLA clock never overwrites it.' },
+      assignedTechId: { type: 'integer', nullable: true, description: 'The agent who owns this ticket. When given, the assignment pipeline does not run.' },
       runAiTriage: { type: 'boolean', default: true },
       addNote: {
         description: 'A private internal note written in the SAME call, after the changes. On a RESUBMISSION (same externalRef) it is appended to the diff note, so the flow gets one note and one event (QA 09-16: one call for a resubmitted record — reopen + fields + note — instead of PATCH followed by POST /notes). A plain string, or { body, bodyHtml?, stage?, agent? } like POST /tickets/{id}/notes. `note` is accepted as an alias.',
@@ -625,9 +627,9 @@ export function buildOpenApiSpec(baseUrl) {
       },
       '/tags': { get: op('List the workspace tag palette', 'tags:read', { tag: 'taxonomy' }) },
       '/tickets/{id}/tags': { put: op('Replace a ticket’s tag set', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagIds: { type: 'array', items: { type: 'integer' } } } } }) },
-      '/contacts': { get: op('List/search requesters', 'contacts:read', { tag: 'directory', responseRef: ref('Contact') }) },
+      '/contacts': { get: op('List/search requesters — `q` (name/e-mail contains), `location` (Entra office, contains), `email` (exact), `limit` (≤ 500)', 'contacts:read', { tag: 'directory', parameters: [{ name: 'q', in: 'query', required: false, schema: { type: 'string' } }, { name: 'location', in: 'query', required: false, schema: { type: 'string' } }, { name: 'email', in: 'query', required: false, schema: { type: 'string', format: 'email' } }, { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 100, maximum: 500 } }], responseRef: ref('Contact') }) },
       '/contacts/{id}': { get: op('Get a requester', 'contacts:read', { tag: 'directory', responseRef: ref('Contact') }) },
-      '/agents': { get: op('List agents/technicians', 'agents:read', { tag: 'directory' }) },
+      '/agents': { get: op('List agents/technicians: id, name, email, isActive, freshserviceId (string), location (office), photoUrl. `?active=true` narrows to active.', 'agents:read', { tag: 'directory', parameters: [{ name: 'active', in: 'query', required: false, schema: { type: 'boolean' } }], responseRef: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, isActive: { type: 'boolean' }, freshserviceId: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, photoUrl: { type: 'string', nullable: true } } } } }) },
       '/groups': {
         get: op('List groups — both kinds: origin:\'freshservice\' rows are addressed on tickets via groupId = their freshserviceId; origin:\'local\' rows via internalGroupId = their id', 'groups:read', {
           tag: 'directory',

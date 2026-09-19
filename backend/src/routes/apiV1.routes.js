@@ -279,7 +279,22 @@ const CREATE_BODY_KEYS = new Set([
   'externalRef', 'reopenOnResubmit', 'resubmitStrategy',
   // QA 09-16 #2: a private note riding the same call (resubmission or PATCH).
   'addNote', 'note',
+  // ContinuIT B1 (19 Sep 2026): a due date agreed with the requester, and the
+  // person the caller already picked. Both trusted-intake only for dueBy.
+  'dueBy', 'assignedTechId',
 ]);
+
+/**
+ * A due date from the outside is an SLA override, so it is reserved for
+ * trusted-intake credentials — the systems that already agreed the date with
+ * the requester (ContinuIT: every task carries the date from the meeting).
+ * 403 `due_by_requires_trusted_intake` otherwise.
+ */
+function assertDueByAllowed(req, body) {
+  if (body?.dueBy === undefined) return;
+  if (req.apiKey?.trustedIntake === true) return;
+  throw problems.forbidden('dueBy is accepted from trusted-intake credentials only — ask the Ticket Pulse team to mark this client as trusted intake', 'due_by_requires_trusted_intake');
+}
 
 /**
  * `addNote` (QA 09-16 #2): a private note that rides a ticket write so "the
@@ -341,8 +356,14 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
   const body = req.body || {};
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   const ignoredFields = Object.keys(body).filter((k) => !CREATE_BODY_KEYS.has(k));
+  // A RESUBMISSION never touches status, assignee or due date (those belong to
+  // the people working the ticket), so on that path they are reported as
+  // ignored even though a fresh create accepts them.
+  const RESUBMIT_UNTOUCHED = ['assignedTechId', 'dueBy'];
+  const resubmitIgnored = [...new Set([...ignoredFields, ...RESUBMIT_UNTOUCHED.filter((k) => body[k] !== undefined)])];
   const ticketType = body.ticketType ?? body.type;
   const actor = apiActor(req);
+  assertDueByAllowed(req, body);
 
   // Resubmission upsert (Mega 08-31 Phase PA, QA #4): a re-POST for a record
   // we already have UPDATES that ticket (200 + resubmitted:true) instead of
@@ -362,7 +383,7 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
     const result = await ticketResubmissionService.applyResubmission(match.ticket, body, { ...resubmitCtx, matchedBy: match.matchedBy });
     if (!result.createNew) {
       logger.info(`API v1: ticket ${result.ticket.displayRef} resubmitted via key "${req.apiKey.name}" (matchedBy=${match.matchedBy}, changed=${result.changedFields.join(',') || 'none'})`);
-      return respondResubmitted(res, result, match, { ignoredFields });
+      return respondResubmitted(res, result, match, { ignoredFields: resubmitIgnored });
     }
     // Closed (or reopenOnResubmit:false): never silently reopen — a NEW
     // ticket is created below and linked related_to the prior one; the
@@ -398,6 +419,11 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
     // default internal group applies automatically.
     ...(body.groupId !== undefined ? { groupId: body.groupId } : {}),
     ...(body.internalGroupId !== undefined ? { internalGroupId: body.internalGroupId } : {}),
+    // ContinuIT B1: the agreed due date (trusted intake only, checked above)
+    // and, when the caller already knows who owns it, the assignee. An
+    // assignee here means "do not run the assignment pipeline".
+    ...(body.dueBy !== undefined ? { dueBy: body.dueBy } : {}),
+    ...(body.assignedTechId !== undefined && body.assignedTechId !== null ? { assignedTechId: Number(body.assignedTechId) } : {}),
     // externalRef persists on a fresh create (explicit or bridge-derived).
     // When a prior ticket owns it (Closed successor case) it is moved below.
     ...(match.ref && !priorTicket ? { externalRef: match.ref } : {}),
@@ -416,7 +442,7 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
       const winner = await ticketResubmissionService.findByExternalRef(req.workspaceId, match.ref);
       if (winner) {
         const result = await ticketResubmissionService.applyResubmission(winner, body, { ...resubmitCtx, matchedBy: 'external_ref' });
-        if (!result.createNew) return respondResubmitted(res, result, { matchedBy: 'external_ref' }, { ignoredFields });
+        if (!result.createNew) return respondResubmitted(res, result, { matchedBy: 'external_ref' }, { ignoredFields: resubmitIgnored });
       }
       throw problems.conflict(err.message);
     }
@@ -500,7 +526,9 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   // both identifiers). updateTicketFields clears whichever one is sent null.
   // ccEmails = the "Also for" additional-requester list (Phase MR7): replaces
   // the whole list (normalized, deduped, ≤10); [] clears it.
-  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'ccEmails'];
+  assertDueByAllowed(req, body);
+  // dueBy (ContinuIT B1): updateTicketFields stamps dueBySetBy='manual'.
+  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'ccEmails', 'dueBy'];
   const fields = Object.fromEntries(fieldKeys.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
   // Category/subcategory BY NAME (FR 08-05 #1) — explicit IDs win when both
   // spellings are sent; `category: null` clears the pair.
@@ -936,8 +964,19 @@ router.put('/tickets/:id/tags', S('tags:write'), asyncHandler(async (req, res) =
 
 router.get('/contacts', S('contacts:read'), asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
-  const where = { workspaceId: req.workspaceId, ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { email: { contains: q, mode: 'insensitive' } }] } : {}) };
-  const rows = await prisma.requester.findMany({ where, orderBy: { name: 'asc' }, take: 100 });
+  // ContinuIT C3/C4 (19 Sep 2026): people by office, and an exact e-mail
+  // lookup — e-mail is their join key. `location` matches the Entra office
+  // (contains, case-insensitive); `limit` up to 500 for a directory pull.
+  const location = String(req.query.location || '').trim();
+  const email = String(req.query.email || '').trim().toLowerCase();
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
+  const where = {
+    workspaceId: req.workspaceId,
+    ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { email: { contains: q, mode: 'insensitive' } }] } : {}),
+    ...(location ? { entraOfficeLocation: { contains: location, mode: 'insensitive' } } : {}),
+    ...(email ? { email: { equals: email, mode: 'insensitive' } } : {}),
+  };
+  const rows = await prisma.requester.findMany({ where, orderBy: { name: 'asc' }, take: limit });
   res.json({ success: true, data: rows.map(contactShape) });
 }));
 
@@ -949,7 +988,21 @@ router.get('/contacts/:id', S('contacts:read'), asyncHandler(async (req, res) =>
 
 router.get('/agents', S('agents:read'), asyncHandler(async (req, res) => {
   const techs = await technicianRepository.getAll(req.workspaceId, { lite: true });
-  res.json({ success: true, data: techs.map((t) => ({ id: t.id, name: t.name, email: t.email || null, isActive: t.isActive !== false })) });
+  // ContinuIT C1 (19 Sep 2026): the FreshService id (string — it is a bigint)
+  // and the office, so a people sync can join on e-mail and map back to
+  // FreshService while both systems run. `?active=true` narrows to active.
+  const activeOnly = String(req.query.active || '').toLowerCase() === 'true';
+  res.json({
+    success: true,
+    data: techs
+      .filter((t) => !activeOnly || t.isActive !== false)
+      .map((t) => ({
+        id: t.id, name: t.name, email: t.email || null, isActive: t.isActive !== false,
+        freshserviceId: t.freshserviceId !== null && t.freshserviceId !== undefined ? String(t.freshserviceId) : null,
+        location: t.location || null,
+        photoUrl: t.photoUrl || null,
+      })),
+  });
 }));
 
 router.get('/groups', S('groups:read'), asyncHandler(async (req, res) => {

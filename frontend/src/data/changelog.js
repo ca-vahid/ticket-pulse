@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.52-preview';
+export const APP_VERSION = '3.9.53-preview';
 
 export const changelog = [
+  {
+    version: '3.9.53-preview',
+    date: 'September 19, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Public API: due dates and owners on create</strong> — trusted systems such as ContinuIT can send the due date they agreed with the requester (kept as a manual date, never overwritten by the SLA clock) and the agent who owns the ticket. Agent and contact lookups now include the FreshService id, office and an office filter.' },
+    ],
+  },
   {
     version: '3.9.52-preview',
     date: 'September 19, 2026',
