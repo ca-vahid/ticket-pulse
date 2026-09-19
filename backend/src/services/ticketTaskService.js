@@ -5,6 +5,7 @@ import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sendTransactionalEmail } from './transactionalEmailService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { taskEventPayload } from './relationWebhookPayload.js';
 // Local status <-> FreshService task status. FS: 1 Open, 2 In Progress, 3 Completed.
 const STATUSES = ['open', 'in_progress', 'done'];
 const TO_FS_STATUS = { open: 1, in_progress: 2, done: 3 };
@@ -13,6 +14,12 @@ const FROM_FS_STATUS = { 1: 'open', 2: 'in_progress', 3: 'done' };
 // "Notify before" choices (QA 08-04 #8b) — mirrors the FreshService modal:
 // Never / 15 / 30 / 45 minutes / 1 hour / 2 hours.
 const REMINDER_MINUTES = [15, 30, 45, 60, 120];
+
+// task.updated is coalesced per task (Simorgh, R13): an integration that
+// touches a task's description three times in a minute gets ONE delivery, the
+// latest row. task.created and task.completed are immediate.
+export const TASK_UPDATED_COALESCE_MS = 60 * 1000;
+const pendingTaskUpdates = new Map(); // taskId -> { timer, ticket, actor }
 
 const TASK_SELECT = {
   id: true, ticketId: true, title: true, description: true, status: true,
@@ -74,7 +81,7 @@ function shape(task) {
   return {
     ...rest,
     fsTaskId: fsTaskId !== null && fsTaskId !== undefined ? String(fsTaskId) : null,
-    assignee: assignedTech ? { id: assignedTech.id, name: assignedTech.name, photoUrl: assignedTech.photoUrl } : null,
+    assignee: assignedTech ? { id: assignedTech.id, name: assignedTech.name, photoUrl: assignedTech.photoUrl, email: assignedTech.email || null } : null,
   };
 }
 
@@ -82,7 +89,7 @@ class TicketTaskService {
   async _ticket(ticketId, workspaceId) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, nativeNumber: true, subject: true, assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } } },
+      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, nativeNumber: true, subject: true, status: true, externalRef: true, assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } } },
     });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
     return ticket;
@@ -161,6 +168,7 @@ class TicketTaskService {
     const updated = assignee
       ? await this._maybeNotify(ticket, row, assignee)
       : await this._maybeNotify(ticket, row, ticket.assignedTech, { asOwner: true });
+    this._emitTaskEvent('task.created', ticket, updated || row, actor);
     return shape(updated || row);
   }
 
@@ -217,7 +225,49 @@ class TicketTaskService {
     if (reassignedTo && ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       row = (await this._maybeNotify(ticket, row, reassignedTo)) || row;
     }
+    if (data.status === 'done' && task.status !== 'done') {
+      this._emitTaskEvent('task.completed', ticket, row, actor);
+    } else {
+      this._scheduleTaskUpdated(ticket, row, actor);
+    }
     return shape(row);
+  }
+
+  /** Fire a task webhook now (never throws — integrations never break a save). */
+  _emitTaskEvent(eventType, ticket, row, actor, extra = {}) {
+    if (!ticket?.workspaceId || !row) return;
+    import('./webhookDispatchService.js')
+      .then(({ dispatchWebhookEvent }) => dispatchWebhookEvent(ticket.workspaceId, eventType, taskEventPayload(ticket, row, actor, extra)))
+      .catch((err) => logger.warn(`Task webhook ${eventType} skipped for task ${row.id} (non-fatal): ${err.message}`));
+  }
+
+  /** task.updated, coalesced per task: the LAST row within the window wins. */
+  _scheduleTaskUpdated(ticket, row, actor) {
+    if (!ticket?.workspaceId || !row) return;
+    const pending = pendingTaskUpdates.get(row.id);
+    if (pending) clearTimeout(pending.timer);
+    const timer = setTimeout(() => {
+      pendingTaskUpdates.delete(row.id);
+      // Re-read so the delivery carries what the task looks like NOW.
+      Promise.resolve()
+        .then(() => prisma.ticketTask.findFirst({ where: { id: row.id }, select: TASK_SELECT }))
+        .then((fresh) => this._emitTaskEvent('task.updated', ticket, fresh || row, actor))
+        .catch(() => this._emitTaskEvent('task.updated', ticket, row, actor));
+    }, TASK_UPDATED_COALESCE_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    pendingTaskUpdates.set(row.id, { timer, ticket, actor });
+  }
+
+  /** Tests + shutdown: deliver every pending task.updated now. */
+  async flushTaskUpdates() {
+    const entries = [...pendingTaskUpdates.entries()];
+    pendingTaskUpdates.clear();
+    for (const [taskId, { timer, ticket, actor }] of entries) {
+      clearTimeout(timer);
+      const fresh = await Promise.resolve().then(() => prisma.ticketTask.findFirst({ where: { id: taskId }, select: TASK_SELECT })).catch(() => null);
+      if (fresh) this._emitTaskEvent('task.updated', ticket, fresh, actor);
+    }
+    return entries.length;
   }
 
   /** Record a task status change on the ticket's Activity timeline. */
@@ -503,11 +553,14 @@ class TicketTaskService {
     for (const local of mirrored) {
       const fsStatus = statusByFsId.get(String(local.fsTaskId));
       if (!fsStatus || fsStatus === local.status) continue;
-      await prisma.ticketTask.update({
+      const row = await prisma.ticketTask.update({
         where: { id: local.id },
         data: { status: fsStatus, completedAt: fsStatus === 'done' ? new Date() : null },
+        select: TASK_SELECT,
       });
       await this._logStatusChange(ticket, local, local.status, fsStatus, { name: 'FreshService' });
+      if (fsStatus === 'done') this._emitTaskEvent('task.completed', ticket, row, { name: 'FreshService', role: 'system' }, { via: 'freshservice' });
+      else this._scheduleTaskUpdated(ticket, row, { name: 'FreshService', role: 'system' });
     }
   }
 

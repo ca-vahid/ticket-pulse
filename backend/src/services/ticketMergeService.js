@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import { actorKindOf } from '../utils/actorKind.js';
+import { ticketRef, actorRef } from './relationWebhookPayload.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
@@ -24,7 +25,7 @@ import ticketActivityRepository from './ticketActivityRepository.js';
  *    through the normal reply path, so it emails via the usual machinery.
  */
 class TicketMergeService {
-  async merge(sourceId, workspaceId, { targetTicketId, notifyRequester = false }, actor) {
+  async merge(sourceId, workspaceId, { targetTicketId, notifyRequester = false, resolutionReason = null, resolutionNote = null }, actor) {
     const targetId = Number(targetTicketId);
     if (!Number.isFinite(targetId) || targetId <= 0) throw new ValidationError('targetTicketId is required');
     if (targetId === sourceId) throw new ValidationError('A ticket cannot be merged into itself');
@@ -207,7 +208,14 @@ class TicketMergeService {
     let sourceClosed = false;
     if (!['Resolved', 'Closed'].includes(source.status)) {
       if (source.origin === 'ticketpulse') {
-        await ticketService.changeStatus(sourceId, workspaceId, 'Closed', actor);
+        // A merged ticket IS a duplicate: say so, so a Security-category source
+        // (which demands a reason) closes instead of failing the merge with
+        // 400 resolution_reason_required after the thread was already copied
+        // (Simorgh smoke test, 19 Sep 2026). The caller may override.
+        await ticketService.changeStatus(sourceId, workspaceId, 'Closed', actor, {
+          resolutionReason: resolutionReason || 'duplicate',
+          resolutionNote: resolutionNote || `Merged into ${tgtRef}`,
+        });
         sourceClosed = true;
       } else {
         // FS-born source (QA 07-16 #5): close it in FreshService via the
@@ -229,6 +237,11 @@ class TicketMergeService {
     ]).catch(() => null);
 
     logger.info(`Merged ticket ${srcRef} -> ${tgtRef} (${copied} entries copied)`);
+    import('./webhookDispatchService.js')
+      .then(({ dispatchWebhookEvent }) => dispatchWebhookEvent(workspaceId, 'ticket.merged', {
+        workspaceId, ticket: ticketRef({ ...source, status: sourceClosed ? 'Closed' : source.status }), mergedInto: ticketRef(target), copied, swept, actor: actorRef(actor),
+      }))
+      .catch((err) => logger.warn(`ticket.merged webhook skipped (non-fatal): ${err.message}`));
     return { merged: true, sourceId, targetId, copied, sourceClosed, requesterNotified, swept, targetRef: tgtRef };
   }
 
@@ -239,7 +252,7 @@ class TicketMergeService {
    * make a retry after a mid-batch failure safe). The primary must be an
    * open/pending TP-born ticket — it's about to carry the live conversation.
    */
-  async mergeMany(primaryId, workspaceId, { ticketIds, notifyRequester = false }, actor) {
+  async mergeMany(primaryId, workspaceId, { ticketIds, notifyRequester = false, resolutionReason = null, resolutionNote = null }, actor) {
     const primary = await prisma.ticket.findFirst({ where: { id: Number(primaryId), workspaceId } });
     if (!primary) throw new NotFoundError('Primary ticket not found');
     if (primary.origin !== 'ticketpulse') {
@@ -266,7 +279,7 @@ class TicketMergeService {
     sources.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     for (const s of sources) {
       try {
-        const result = await this.merge(s.id, workspaceId, { targetTicketId: primary.id, notifyRequester }, actor);
+        const result = await this.merge(s.id, workspaceId, { targetTicketId: primary.id, notifyRequester, resolutionReason, resolutionNote }, actor);
         merged.push({ id: s.id, ref: ticketDisplayRef(s), copied: result.copied });
       } catch (err) {
         failed.push({ id: s.id, ref: ticketDisplayRef(s), error: err.message });

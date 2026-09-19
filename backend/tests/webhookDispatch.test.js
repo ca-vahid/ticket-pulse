@@ -164,6 +164,7 @@ describe('test-ping + safety', () => {
     expect(WEBHOOK_EVENTS).toContain('ticket.fields_updated'); // Phase TU (TU-11)
     expect(WEBHOOK_EVENTS).toContain('ticket.note_added'); // Simorgh D2 (09-14)
     expect(WEBHOOK_EVENTS).toContain('ticket.ready_to_close'); // Simorgh B8 (09-19)
-    expect(WEBHOOK_EVENTS).toHaveLength(12);
+    for (const e of ['ticket.linked', 'ticket.parent_changed', 'ticket.merged', 'ticket.split', 'task.created', 'task.updated', 'task.completed']) expect(WEBHOOK_EVENTS).toContain(e); // Simorgh B-2
+    expect(WEBHOOK_EVENTS).toHaveLength(19);
   });
 });

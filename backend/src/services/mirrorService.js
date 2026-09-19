@@ -1064,6 +1064,16 @@ class MirrorService {
       this._broadcast(ticket, 'reply');
     }
 
+    // Tasks ticked off on the FreshService copy (Simorgh B5): pull their status
+    // back here too, not only when someone lists the ticket's tasks. Cheap when
+    // the ticket has no mirrored tasks (one indexed query, no FS call).
+    try {
+      const { default: ticketTaskService } = await import('./ticketTaskService.js');
+      await ticketTaskService._syncMirroredStatusFromFs(ticket);
+    } catch (err) {
+      logger.debug?.(`Mirror task status pull-back skipped for ${ticketDisplayRef(ticket)}: ${err.message}`);
+    }
+
     if (fsTicket && typeof fsTicket === 'object' && fsTicket.id) {
       const fsStatusCode = Number(fsTicket.status);
       const ourStatusCode = await this._fsStatusCode(ticket);

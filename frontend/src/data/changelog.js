@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.51-preview';
+export const APP_VERSION = '3.9.52-preview';
 
 export const changelog = [
+  {
+    version: '3.9.52-preview',
+    date: 'September 19, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Webhooks for links, parents, merges, splits and tasks</strong> — connected systems can now be told when a ticket is linked or re-parented, merged or split, and when a task is created, updated or completed. Task updates are grouped so a burst of edits is one delivery.' },
+      { type: 'improved', html: '<strong>Tasks ticked off in FreshService come back sooner</strong> — the mirror check now picks them up, instead of waiting for someone to open the task list.' },
+      { type: 'improved', html: '<strong>Workflows respect the parent/child rule</strong> — a workflow that would resolve a parent while a child is still open now leaves it open and says so in the run detail; its other changes still apply.' },
+    ],
+  },
   {
     version: '3.9.51-preview',
     date: 'September 19, 2026',

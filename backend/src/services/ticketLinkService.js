@@ -4,6 +4,7 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { actorKindOf } from '../utils/actorKind.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
+import { ticketRef, actorRef } from './relationWebhookPayload.js';
 
 // User-linkable kinds via the generic link() path. parent_of is deliberately
 // EXCLUDED: it carries invariants (single parent, no cycles, coordinator-only)
@@ -62,6 +63,13 @@ class TicketLinkService {
       .catch((err) => logger.warn(`Relation history write failed for ticket ${ticket.id} (non-fatal): ${err.message}`))));
   }
 
+  /** Relation webhooks (Simorgh ask 3). Never throws. */
+  _emitRelation(workspaceId, eventType, payload) {
+    import('./webhookDispatchService.js')
+      .then(({ dispatchWebhookEvent }) => dispatchWebhookEvent(workspaceId, eventType, { workspaceId, ...payload }))
+      .catch((err) => logger.warn(`Relation webhook ${eventType} skipped (non-fatal): ${err.message}`));
+  }
+
   async listForTicket(ticketId, workspaceId) {
     const [from, to] = await Promise.all([
       prisma.ticketLink.findMany({
@@ -106,7 +114,10 @@ class TicketLinkService {
     });
     logger.info(`Ticket link: ${ticketDisplayRef(ticket)} ${kind} ${ticketDisplayRef(related)}`);
     // An upsert that found the link already there changed nothing — no row.
-    if (!already) await this._recordRelation([['linked', ticket, related, 'out'], ['linked', related, ticket, 'in']], actor, { kind, linkId: linkRow.id });
+    if (!already) {
+      await this._recordRelation([['linked', ticket, related, 'out'], ['linked', related, ticket, 'in']], actor, { kind, linkId: linkRow.id });
+      this._emitRelation(workspaceId, 'ticket.linked', { action: 'linked', kind, linkId: linkRow.id, ticket: ticketRef(ticket), related: ticketRef(related), actor: actorRef(actor) });
+    }
     return linkRow;
   }
 
@@ -134,7 +145,10 @@ class TicketLinkService {
       .catch(() => [])) || [];
     const from = sides.find((t) => t.id === link.ticketId);
     const to = sides.find((t) => t.id === link.relatedTicketId);
-    if (from && to) await this._recordRelation([['unlinked', from, to, 'out'], ['unlinked', to, from, 'in']], actor, { kind: link.kind, linkId: link.id });
+    if (from && to) {
+      await this._recordRelation([['unlinked', from, to, 'out'], ['unlinked', to, from, 'in']], actor, { kind: link.kind, linkId: link.id });
+      this._emitRelation(workspaceId, 'ticket.linked', { action: 'unlinked', kind: link.kind, linkId: link.id, ticket: ticketRef(from), related: ticketRef(to), actor: actorRef(actor) });
+    }
     return { deleted: true };
   }
 
@@ -155,7 +169,7 @@ class TicketLinkService {
       await ticketService.addPrivateNote(ticketId, workspaceId, {
         bodyText: `Marked as a duplicate of ${ticketDisplayRef(target)} by ${actor?.name || actor?.email || 'an agent'}. The conversation continues there.`,
       }, actor);
-      await ticketService.changeStatus(ticketId, workspaceId, 'Resolved', actor);
+      await ticketService.changeStatus(ticketId, workspaceId, 'Resolved', actor, { resolutionReason: 'duplicate', resolutionNote: `Duplicate of ${ticketDisplayRef(target)}` });
       resolved = true;
     }
     return { link, resolved };
@@ -296,6 +310,7 @@ class TicketLinkService {
     // Setting the same parent again is a no-op and leaves no row.
     if (!existing || existing.ticketId !== parentId) {
       await this._recordRelation([['parent_set', child, parent], ['child_added', parent, child]], actor, { kind: 'parent_of' });
+      this._emitRelation(workspaceId, 'ticket.parent_changed', { action: 'parent_set', ticket: ticketRef(child), parent: ticketRef(parent), previousParentId: existing?.ticketId ?? null, actor: actorRef(actor) });
     }
 
     const who = actor?.name || actor?.email || 'an agent';
@@ -329,6 +344,7 @@ class TicketLinkService {
     const who = actor?.name || actor?.email || 'an agent';
     if (child && parent) {
       await this._recordRelation([['parent_removed', child, parent], ['child_removed', parent, child]], actor, { kind: 'parent_of' });
+      this._emitRelation(workspaceId, 'ticket.parent_changed', { action: 'parent_removed', ticket: ticketRef(child), parent: null, previousParentId: parent.id, actor: actorRef(actor) });
       await this._fsPointerNote(child, workspaceId, `Unlinked from parent ${ticketDisplayRef(parent)} in Ticket Pulse by ${who}.`);
       await this._fsPointerNote(parent, workspaceId, `${ticketDisplayRef(child)} was unlinked as a child in Ticket Pulse by ${who}.`);
     }

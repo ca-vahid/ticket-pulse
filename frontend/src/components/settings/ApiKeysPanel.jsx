@@ -30,6 +30,13 @@ const WEBHOOK_EVENTS = [
   ['approval.requested', 'Approval requested'],
   ['approval.decided', 'Approval decided'],
   ['ticket.ready_to_close', 'Parent ready to close (all children done)'],
+  ['ticket.linked', 'Ticket linked / unlinked'],
+  ['ticket.parent_changed', 'Parent set or removed'],
+  ['ticket.merged', 'Ticket merged'],
+  ['ticket.split', 'Ticket split'],
+  ['task.created', 'Task created'],
+  ['task.updated', 'Task updated (coalesced)'],
+  ['task.completed', 'Task completed'],
 ];
 
 const fmtDate = (d) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
