@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.54-preview';
+export const APP_VERSION = '3.9.55-preview';
 
 export const changelog = [
+  {
+    version: '3.9.55-preview',
+    date: 'September 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Public API: due date read-back</strong> — a ticket read, the create response and every webhook now echo the due date and who set it (a person/integration or the SLA clock), plus the arrival channel and the assignee e-mail. ContinuIT found the stored date was never returned.' },
+    ],
+  },
   {
     version: '3.9.54-preview',
     date: 'September 19, 2026',

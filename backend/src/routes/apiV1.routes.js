@@ -101,7 +101,9 @@ function ticketShape(t) {
     priority: t.priority,
     type: t.ticketType || null,
     requester: t.requester ? { id: t.requester.id, name: t.requester.name, email: t.requester.email } : null,
-    assignee: t.assignedTech ? { id: t.assignedTech.id, name: t.assignedTech.name } : null,
+    assignee: t.assignedTech ? { id: t.assignedTech.id, name: t.assignedTech.name, email: t.assignedTech.email || null } : null,
+    // Arrival channel code (GET /meta lists the labels) — 105 = Office Check-in.
+    source: t.source ?? null,
     group: t.group ? { id: t.group.id, name: t.group.name } : null,
     // Internal (TP-native) group placement — distinct from `group` (the
     // FreshService group). id here matches GET /groups `id` for
@@ -138,6 +140,11 @@ function ticketShape(t) {
     resolvedByKind: t.resolvedByKind || null,
     // Roll-up (Simorgh B8): every child is done; a person closes the parent.
     readyToCloseAt: t.readyToCloseAt || null,
+    // Due date + who set it (ContinuIT B1; their acceptance run 19 Sep found
+    // the date was stored but never echoed). 'manual' = a person or a
+    // trusted integration; 'sla' = the workspace SLA clock.
+    dueBy: t.dueBy || null,
+    dueBySetBy: t.dueBySetBy || null,
   };
 }
 

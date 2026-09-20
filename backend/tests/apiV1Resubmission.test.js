@@ -313,7 +313,7 @@ describe('POST /api/v1/tickets — externalRef resubmission upsert', () => {
     expect(row.status).toBe('Pending');
     expect(row.assignedTechId).toBe(7);
     expect(res.body.meta.ignoredFields).toEqual(expect.arrayContaining(['status', 'assignedTechId']));
-    expect(res.body.data.assignee).toEqual({ id: 7, name: 'Tech Seven' });
+    expect(res.body.data.assignee).toEqual({ id: 7, name: 'Tech Seven', email: 't7@x' });
   });
 
   test('Resolved ticket + default reopen → reopened, resolvedAt cleared, status Open, then updated', async () => {

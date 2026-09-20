@@ -477,6 +477,8 @@ export function webhookPayloadFromContext(eventContext) {
       // Simorgh D3/E2: correlation keys and resolution details on every event.
       externalRef: t.externalRef || null,
       externalReferences: Array.isArray(t.externalReferences) ? t.externalReferences : [],
+      // ContinuIT B1: the agreed due date rides every lifecycle event.
+      dueBy: t.dueBy ? new Date(t.dueBy).toISOString() : null,
       resolvedAt: t.resolvedAt ? new Date(t.resolvedAt).toISOString() : null,
       closedAt: t.closedAt ? new Date(t.closedAt).toISOString() : null,
       firstAssignedAt: t.firstAssignedAt ? new Date(t.firstAssignedAt).toISOString() : null,

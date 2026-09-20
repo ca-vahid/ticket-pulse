@@ -46,7 +46,7 @@ function app() {
 
 const TRUSTED = { name: 'ContinuIT', keyPrefix: 'tpc_cont', mode: 'live', scopes: ['*'], oauthClientId: 12, trustedIntake: true };
 const PLAIN = { ...TRUSTED, name: 'Some app', trustedIntake: false };
-const TICKET = { id: 901, workspaceId: 8, origin: 'ticketpulse', nativeNumber: 12, subject: 'Office check-in — Calgary', status: 'Open', priority: 2, requester: { name: 'ContinuIT', email: 'continuit@bgc.ca' }, ccEmails: [], customFields: {}, displayRef: 'TP-12', dueBy: new Date('2026-09-26T17:00:00Z') };
+const TICKET = { id: 901, workspaceId: 8, origin: 'ticketpulse', nativeNumber: 12, subject: 'Office check-in — Calgary', status: 'Open', priority: 2, requester: { name: 'ContinuIT', email: 'continuit@bgc.ca' }, ccEmails: [], customFields: {}, displayRef: 'TP-12', dueBy: new Date('2026-09-26T17:00:00Z'), dueBySetBy: 'manual', source: 105, assignedTech: { id: 56, name: 'Soheil Nasiri', email: 'snasiri@bgc.ca' } };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -190,5 +190,25 @@ describe('C2 — GET /tickets?ids=', () => {
     ticketServiceMock.listTickets.mockResolvedValue({ items: [], total: 0, pageSize: 25, nextCursor: null });
     await request(app()).get('/api/v1/tickets?ids=1601,TP-1602,junk,%201603').expect(200);
     expect(ticketServiceMock.listTickets).toHaveBeenCalledWith(8, expect.objectContaining({ ids: [1601, 1602, 1603] }));
+  });
+});
+
+describe('B1 read-back — the stored due date is echoed (their acceptance run, 19 Sep)', () => {
+  test('GET /tickets/{id} carries dueBy (ISO), dueBySetBy, source and the assignee e-mail', async () => {
+    const res = await request(app()).get('/api/v1/tickets/901').expect(200);
+    expect(res.body.data).toMatchObject({ dueBy: '2026-09-26T17:00:00.000Z', dueBySetBy: 'manual', source: 105, assignee: { id: 56, name: 'Soheil Nasiri', email: 'snasiri@bgc.ca' } });
+  });
+
+  test('POST /tickets 201 echoes the same keys', async () => {
+    const res = await request(app()).post('/api/v1/tickets').send({ subject: 'x', requesterEmail: 'continuit@bgc.ca', dueBy: '2026-09-26T17:00:00Z' }).expect(201);
+    expect(res.body.data.dueBy).toBe('2026-09-26T17:00:00.000Z');
+    expect(res.body.data.dueBySetBy).toBe('manual');
+  });
+
+  test('a ticket without a due date says null, not "key missing"', async () => {
+    ticketServiceMock.getTicket.mockResolvedValue({ ...TICKET, dueBy: null, dueBySetBy: null });
+    const res = await request(app()).get('/api/v1/tickets/901').expect(200);
+    expect(res.body.data).toHaveProperty('dueBy', null);
+    expect(res.body.data).toHaveProperty('dueBySetBy', null);
   });
 });
