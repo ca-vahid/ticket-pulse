@@ -8,7 +8,7 @@ import { StatusPill, formatDay } from './ticketUi';
  * bar uses. Actions stay on the bar underneath — this is the selection's
  * inspector, not a second toolbar.
  */
-export default function BulkSelectionPanel({ tickets = [], onRemove, onClose, onMerge, mergeBlockedReason = null, }) {
+export default function BulkSelectionPanel({ tickets = [], onRemove, onClose, onMerge, mergeBlockedReason = null }) {
   const ref = useRef(null);
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };

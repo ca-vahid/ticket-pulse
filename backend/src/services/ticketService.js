@@ -932,7 +932,9 @@ class TicketService {
     const wanted = String(query.facets || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!wanted.includes('source')) return null;
     try {
-      const { source: _omit, facets: _f, ...rest } = query;
+      const rest = { ...query };
+      delete rest.source;
+      delete rest.facets;
       const where = await this.buildListWhere(workspaceId, rest);
       const rows = await prisma.ticket.groupBy({
         by: ['source'],
