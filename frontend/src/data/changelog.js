@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.55-preview';
+export const APP_VERSION = '3.9.56-preview';
 
 export const changelog = [
+  {
+    version: '3.9.56-preview',
+    date: 'September 20, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approvals: every tab has its own address</strong> — <em>For you</em>, <em>All approvals</em> and <em>Categories</em> live at their own URLs and the All-approvals filters sit in the address bar, so a refresh or a shared link lands where you were.' },
+      { type: 'improved', html: '<strong>Approvals: two lines per request</strong> — status, category, ticket and subject on the first line, the note with amount and tier on the second, and the people (requested by, for, approver) with photos on the right. When someone asks for themself that shows once. <em>For you</em> and <em>All approvals</em> now share one look; the status counters are one slim strip.' },
+      { type: 'added', html: '<strong>Approvals: filter by approver or requester with suggestions</strong> — type a name and pick the person from a list with photos; the pick shows as the person, one click to clear. Free text still works.' },
+      { type: 'improved', html: '<strong>Approval categories</strong> — a compact list: name and description on one line, the tier chain with plain names and photos beneath, the explainer folded under “How approvals work”.' },
+    ],
+  },
   {
     version: '3.9.55-preview',
     date: 'September 19, 2026',

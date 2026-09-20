@@ -199,6 +199,19 @@ function ManagerChip({ email, member, onRemove }) {
   );
 }
 
+/** Read view: avatar + name, no pill (Vahid's taste, 18 Sep 2026). The address is one hover away. */
+function PersonName({ email, member, showEmails = false }) {
+  // Unknown to the member list → a readable name from the address ("Susan Manager"),
+  // unless names could not be loaded at all, when the address itself is the honest label.
+  const name = member?.name || (showEmails ? email : String(email).split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()));
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-foreground/85" title={email}>
+      <Avatar name={name} photoUrl={member?.photoUrl} size="h-5 w-5" />
+      <span className="truncate max-w-[180px] font-medium">{name}</span>
+    </span>
+  );
+}
+
 const MAX_TIERS = 3;
 const emptyTier = (i) => ({ name: `Tier ${i + 1}`, managerEmails: [], limit: '' });
 const emptyForm = { name: '', description: '', hasAmount: false, amountCurrency: 'CAD', tiers: [emptyTier(0)] };
@@ -478,20 +491,39 @@ export default function ApprovalCategoriesPanel() {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg"><Stamp className="w-5 h-5 text-blue-600 dark:text-blue-300" /></div>
-        <div>
-          <h3 className="text-lg font-semibold text-foreground">Approval Categories</h3>
-          <p className="text-sm text-muted-foreground max-w-2xl">
-            Define what needs sign-off (e.g. <strong>Laptop purchase</strong>) and which <strong>members</strong> approve it.
-            On a ticket, a member requests approval by category and every Tier-1 manager is notified — <strong>any one</strong> can
-            approve, reject, ask for more info, <strong>escalate</strong> to the next tier, or <strong>forward</strong> to anyone as the final approver.
-            Monetary categories carry an amount; a tier limit sends bigger amounts up automatically. Approvals stay inside Ticket Pulse.
-            Workspace <strong>reviewers</strong> and admins manage these here on the Approvals page — no admin needed.
-          </p>
+    <div className="space-y-3">
+      {/* Small header: title + count, the action on the right, the explainer folded away. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/15"><Stamp className="w-4 h-4 text-blue-600 dark:text-blue-300" aria-hidden="true" /></span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-foreground">
+            Approval categories
+            {Array.isArray(categories) && categories.length > 0 && <span className="ml-1.5 font-normal tabular-nums text-muted-foreground">{categories.length}</span>}
+          </h3>
+          <p className="text-xs text-muted-foreground">What needs sign-off, and who signs it — tier by tier.</p>
         </div>
+        {!creating && (
+          <button
+            type="button"
+            onClick={() => { setCreating(true); setEditingId(null); }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-semibold hover:bg-blue-700 tp-focus-ring"
+          >
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New approval category
+          </button>
+        )}
       </div>
+      <details className="group text-xs text-muted-foreground">
+        <summary className="tp-focus-ring inline-flex cursor-pointer list-none items-center gap-1 rounded font-medium text-blue-700 hover:underline dark:text-blue-200 [&::-webkit-details-marker]:hidden">
+          <ArrowRight className="h-3 w-3 transition-transform group-open:rotate-90" aria-hidden="true" /> How approvals work
+        </summary>
+        <p className="mt-1.5 max-w-3xl leading-relaxed">
+          Define what needs sign-off (e.g. <strong>Laptop purchase</strong>) and which <strong>members</strong> approve it.
+          On a ticket, a member requests approval by category and every Tier-1 manager is notified — <strong>any one</strong> can
+          approve, reject, ask for more info, <strong>escalate</strong> to the next tier, or <strong>forward</strong> to anyone as the final approver.
+          Monetary categories carry an amount; a tier limit sends bigger amounts up automatically. Approvals stay inside Ticket Pulse.
+          Workspace <strong>reviewers</strong> and admins manage these here on the Approvals page — no admin needed.
+        </p>
+      </details>
 
       {error && (
         <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-sm text-red-700 dark:text-red-200">
@@ -514,16 +546,8 @@ export default function ApprovalCategoriesPanel() {
         </div>
       )}
 
-      {creating ? (
+      {creating && (
         <CategoryForm members={members} memberByEmail={memberByEmail} onCancel={() => setCreating(false)} onSave={create} saving={saving} directoryLocked={directoryLocked} onDirectoryLocked={() => setDirectoryLocked(true)} />
-      ) : (
-        <button
-          type="button"
-          onClick={() => { setCreating(true); setEditingId(null); }}
-          className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-blue-700 tp-focus-ring"
-        >
-          <Plus className="w-4 h-4" /> New approval category
-        </button>
       )}
 
       {loading ? (
@@ -531,7 +555,7 @@ export default function ApprovalCategoriesPanel() {
       ) : (categories || []).length === 0 ? (
         <p className="text-sm text-muted-foreground/75 italic px-1">No approval categories yet. Create one above to enable ticket approvals.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {categories.map((c) => (
             editingId === c.id ? (
               <CategoryForm
@@ -546,41 +570,46 @@ export default function ApprovalCategoriesPanel() {
                 onDirectoryLocked={() => setDirectoryLocked(true)}
               />
             ) : (
-              <div key={c.id} className={`relative rounded-lg border px-3.5 py-3 ${c.isActive ? 'border-border bg-card' : 'border-dashed border-input bg-muted/70'}`}>
+              <div key={c.id} className={`group/cat relative rounded-lg border px-3.5 py-2.5 ${c.isActive ? 'border-border bg-card' : 'border-dashed border-input bg-muted/70'}`}>
                 {!c.isActive && <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-red-400" aria-hidden="true" />}
-                <div className="flex items-start gap-3">
+                <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-sm font-semibold ${c.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{c.name}</span>
+                    {/* Line 1: name · description, one line */}
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className={`text-sm font-semibold whitespace-nowrap ${c.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{c.name}</span>
                       {c.hasAmount && (
-                        <span className="inline-flex items-center gap-0.5 rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-px text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title="Requests carry an amount">
+                        <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap" title="Requests carry an amount">
                           <BadgeDollarSign className="w-3 h-3" aria-hidden="true" /> {c.amountCurrency || 'CAD'}
                         </span>
                       )}
                       {!c.isActive && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200"><Ban className="w-3 h-3" /> Inactive</span>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 dark:text-red-300 whitespace-nowrap"><Ban className="w-3 h-3" aria-hidden="true" /> Inactive</span>
                       )}
+                      {c.description && <span className="truncate text-xs text-muted-foreground" title={c.description}>{c.description}</span>}
                     </div>
-                    {c.description && <p className="text-xs text-muted-foreground mt-0.5">{c.description}</p>}
-                    {(c.managerEmails || []).length === 0 && (
-                      <p className="text-[11px] text-amber-600 dark:text-amber-300 mt-2">No managers — add some so this can be used</p>
-                    )}
-                    {(c.managerEmails || []).length > 0 && chainOf(c).map((t, i, all) => (
-                      <div key={i} className="flex flex-wrap items-center gap-1.5 mt-2">
-                        {all.length > 1 && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
+                    {/* Line 2: the approval chain — tier, its people, the next tier */}
+                    {(c.managerEmails || []).length === 0 ? (
+                      <p className="text-[11px] text-amber-600 dark:text-amber-300 mt-1">No approvers yet — add some so this can be used</p>
+                    ) : (
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {chainOf(c).map((t, i, all) => (
+                          <span key={i} className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
                             {i > 0 && <ArrowRight className="w-3 h-3 text-muted-foreground/50" aria-hidden="true" />}
-                            <span className="rounded border border-border bg-muted/70 px-1 py-px">{t.name || `Tier ${i + 1}`}</span>
-                            {c.hasAmount && t.limit !== null && t.limit !== undefined ? <span className="text-muted-foreground/75">up to {money(t.limit, c.amountCurrency)}</span> : null}
+                            {all.length > 1 && (
+                              <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                                {t.name || `Tier ${i + 1}`}
+                                {c.hasAmount && t.limit !== null && t.limit !== undefined ? <span className="font-normal text-muted-foreground/75"> · up to {money(t.limit, c.amountCurrency)}</span> : null}
+                              </span>
+                            )}
+                            {(t.managerEmails || []).map((email) => (
+                              <PersonName key={email} email={email} member={memberByEmail[email.toLowerCase()]} showEmails={membersUnavailable} />
+                            ))}
                           </span>
-                        )}
-                        {(t.managerEmails || []).map((email) => (
-                          <ManagerChip key={email} email={email} member={memberByEmail[email.toLowerCase()]} />
                         ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex items-center gap-0.5 shrink-0 transition-opacity md:opacity-50 md:group-hover/cat:opacity-100 md:focus-within:opacity-100">
                     <button onClick={() => { setEditingId(c.id); setCreating(false); }} title="Edit" className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring"><Pencil className="w-4 h-4" /></button>
                     <button onClick={() => toggleActive(c)} title={c.isActive ? 'Deactivate' : 'Reactivate'} className={`p-1.5 rounded-lg tp-focus-ring ${c.isActive ? 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300' : 'text-emerald-600 dark:text-emerald-300 hover:text-emerald-700 dark:hover:text-emerald-200'}`}>
                       {c.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
