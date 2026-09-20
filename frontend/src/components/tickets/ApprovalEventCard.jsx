@@ -129,6 +129,11 @@ export default function ApprovalEventCard({ entry, meta, body }) {
               <Block label="Condition" labelClass="text-amber-700 dark:text-amber-300">{structured.condition}</Block>
             )}
             {structured.note && <Block label="Decision note">{structured.note}</Block>}
+            {typeof structured.requesterNotified === 'boolean' && (
+              <p className="mt-2.5 text-[12px] text-muted-foreground" data-testid="requester-notified">
+                {structured.requesterNotified ? 'E-mailed to the agents and the requester.' : 'E-mailed to the agents only — the requester was not copied.'}
+              </p>
+            )}
             {structured.requestNote && (
               <Block label={`Asked by ${askedBy}`}>
                 <span className="text-muted-foreground">“{structured.requestNote}”</span>

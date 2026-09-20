@@ -666,6 +666,28 @@ function insightDrilldownColumns(insight) {
   }
 }
 
+/** Intake method (QA 09-18 #2): buckets + what agents pick as the source when they log by hand. */
+function IntakeBreakdown({ intake }) {
+  if (!intake?.rows?.length) return <EmptyState />;
+  const coverage = intake.coverage?.total ? Math.round((intake.coverage.withCreationActivity / intake.coverage.total) * 100) : 0;
+  return (
+    <div className="space-y-3" data-testid="intake-breakdown">
+      <CategoricalBars data={intake.rows} height={Math.max(150, 40 + intake.rows.length * 34)} />
+      {intake.agentSourcePicks?.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          When agents log a ticket themselves they set the source to{' '}
+          {intake.agentSourcePicks.map((r, i) => (
+            <span key={r.name}>{i > 0 ? ', ' : ''}<span className="font-medium text-foreground/85">{r.name}</span> ({formatNumber(r.count)})</span>
+          ))}.
+        </p>
+      )}
+      <p className="text-[11px] text-muted-foreground/75">
+        Read from FreshService’s creation activity (who created the ticket) for {coverage}% of these tickets; the rest use the mail headers FreshService fills only for e-mail it received. Ticket Pulse–born tickets carry their own lane.
+      </p>
+    </div>
+  );
+}
+
 function CategoricalBars({ data, nameKey = 'name', valueKey = 'count', height = 260 }) {
   const palette = useChartPalette();
   if (!data?.length) return <EmptyState />;
@@ -2652,6 +2674,17 @@ export default function Analytics({ view = 'standard' }) {
         </Panel>
         <Panel title="Priority Mix">
           <CategoricalBars data={demand?.breakdowns?.priority || []} />
+        </Panel>
+        {/* QA 09-18 #2: how tickets actually arrived — not the source an agent
+            picked. Field Equipment's "Email 341" was mostly agents logging
+            tickets by hand with Source = Email. */}
+        <Panel
+          title="Intake method"
+          subtitle={demand?.breakdowns?.intake?.total
+            ? `${demand.breakdowns.intake.emailedPct}% e-mailed in by requesters · ${demand.breakdowns.intake.agentLoggedPct}% logged by agents (${formatNumber(demand.breakdowns.intake.total)} created in range)`
+            : 'Who created each ticket and how it arrived'}
+        >
+          <IntakeBreakdown intake={demand?.breakdowns?.intake} />
         </Panel>
       </div>
     </div>

@@ -286,6 +286,44 @@ router.put(
 );
 
 /**
+ * GET/PUT /api/settings/reply-greeting (QA 09-18 #4)
+ * Per-workspace "Hi <requester>," greeting and sign-off pre-filled into the
+ * reply composer. Admin-only; agents read it through /tickets/meta.
+ */
+router.get(
+  '/reply-greeting',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { getReplyGreetingSettings } = await import('../services/replyGreetingService.js');
+    res.json({ success: true, data: await getReplyGreetingSettings(req.workspaceId) });
+  }),
+);
+
+router.put(
+  '/reply-greeting',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const patch = {};
+    if (req.body?.enabled !== undefined) {
+      if (typeof req.body.enabled !== 'boolean') throw new ValidationError('enabled must be true or false');
+      patch.enabled = req.body.enabled;
+    }
+    for (const key of ['greeting', 'signoff']) {
+      if (req.body?.[key] === undefined) continue;
+      if (typeof req.body[key] !== 'string') throw new ValidationError(`${key} must be a string`);
+      if (req.body[key].length > 400) throw new ValidationError(`${key} is too long (max 400 characters)`);
+      patch[key] = req.body[key];
+    }
+    const { setReplyGreetingSettings } = await import('../services/replyGreetingService.js');
+    res.json({ success: true, data: await setReplyGreetingSettings(req.workspaceId, patch) });
+  }),
+);
+
+/**
  * GET /api/settings/sender-identity
  * Workspace-scoped outbound sender identity (Phase EB): the From display
  * name override, the inherited global default, and the addresses it rides on.

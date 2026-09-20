@@ -1,6 +1,19 @@
-export const APP_VERSION = '3.9.56-preview';
+export const APP_VERSION = '3.9.57-preview';
 
 export const changelog = [
+  {
+    version: '3.9.57-preview',
+    date: 'September 20, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approvals: the requester is no longer on the verdict e-mail by default</strong> — an approver’s note is written for the agents. Approve, approve with condition and reject now carry a large “Also e-mail the requester” box, off unless you tick it; the ticket’s assignee and anyone who escalated or forwarded the request hear the verdict alongside the other approvers. The ticket story says who was e-mailed.' },
+      { type: 'fixed', html: '<strong>Tickets: the Source counts follow your view</strong> — the rail used to count every ticket in the workspace (all statuses, all time) beside a list showing Open and Pending, so “Email 341” sat next to six rows. Counts now match what clicking them shows, and the rail says so.' },
+      { type: 'added', html: '<strong>Analytics → Demand: Intake method</strong> — how tickets actually arrived: e-mailed in by the requester, logged by an agent (and the source they picked), portal, API &amp; integrations. Read from FreshService’s creation record where it is synced, otherwise from the mail headers. Field Equipment: 260 of 327 “Email” tickets were logged by an agent.' },
+      { type: 'improved', html: '<strong>Tickets: a new bulk bar</strong> — Assign, Status, Tags and Category are proper pickers with search, tags and category work on a hand-picked selection (not only “everything matching”), <em>Merge</em> folds the selection into the oldest Ticket Pulse ticket (the reason it cannot is spelled out), and <em>Details</em> opens a side panel listing the selection with one-click removal.' },
+      { type: 'added', html: '<strong>Replies open with a greeting and close with a sign-off</strong> — Settings → Ticket Ops → Reply greeting turns it on per workspace and sets the wording (“Hi {{requester.firstName}},” … “Thank you, {{agent.firstName}}”). Each agent chooses whether it is added the moment a reply starts or only from the new Greeting button; the choice is remembered. Reply templates fill the same placeholders.' },
+      { type: 'added', html: '<strong>Workflows: “Requester silent for N hours”</strong> — a time trigger that fires when the last public message on a ticket is an agent’s and it is N hours old (once per agent reply; a reply from the requester stops it). Two installable templates rebuild FreshService’s Pending Response supervisor rule: remind after 72 h, close after 96 h. Conditions gain “time since the requester last wrote” and “time since an agent last replied”.' },
+      { type: 'improved', html: '<strong>Split from a message onward</strong> — click the message where the new ask starts (or use “Split from here” on any message) and it plus everything after it become the new ticket, FreshService-style. The new ticket can take the message’s author as requester, be assigned to you in one click, and the original can be left as is, set to Pending or resolved. The “include the original description” box now actually works.' },
+    ],
+  },
   {
     version: '3.9.56-preview',
     date: 'September 20, 2026',

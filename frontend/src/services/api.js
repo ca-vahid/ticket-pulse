@@ -487,6 +487,15 @@ export const settingsAPI = {
     return await api.put('/settings/sender-identity', data);
   },
 
+  // Reply greeting + sign-off (QA 09-18 #4), per workspace.
+  getReplyGreeting: async () => {
+    return await api.get('/settings/reply-greeting');
+  },
+
+  updateReplyGreeting: async (data) => {
+    return await api.put('/settings/reply-greeting', data);
+  },
+
   initialize: async () => {
     return await api.post('/settings/initialize');
   },

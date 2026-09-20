@@ -922,6 +922,30 @@ class TicketService {
    * export, and bulk-by-query so "everything matching this filter" always
    * resolves to exactly what the list shows.
    */
+  /**
+   * Facet counts for the rail, scoped to the list's own filters (QA 09-18 #2).
+   * Only `source` for now; each facet drops its own dimension from the WHERE
+   * so an already-ticked value still shows its siblings' counts. Best effort:
+   * a failure yields null and the rail falls back to the workspace-wide meta.
+   */
+  async _listFacets(workspaceId, query = {}) {
+    const wanted = String(query.facets || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!wanted.includes('source')) return null;
+    try {
+      const { source: _omit, facets: _f, ...rest } = query;
+      const where = await this.buildListWhere(workspaceId, rest);
+      const rows = await prisma.ticket.groupBy({
+        by: ['source'],
+        where: { ...where, source: { not: null } },
+        _count: { _all: true },
+      });
+      return { sources: rows.map((r) => ({ value: r.source, count: r._count._all })) };
+    } catch (err) {
+      logger.warn(`list facets failed (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
   async buildListWhere(workspaceId, query = {}) {
     const where = { workspaceId };
 
@@ -1279,6 +1303,14 @@ class TicketService {
       ]);
     }
 
+    // QA 09-18 #2: facet counts that follow the view. `/tickets/meta` counts
+    // every ticket in the workspace (all statuses, all time), while the list
+    // defaults to Open + Pending — "Email 341" beside a six-row list. With
+    // `facets=source` the rail gets the source split of the CURRENT query
+    // (everything applied except the source filter itself), so a count is
+    // always what clicking it shows.
+    const facets = await this._listFacets(workspaceId, query);
+
     const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
@@ -1307,6 +1339,7 @@ class TicketService {
       total,
       page,
       pageSize,
+      ...(facets ? { facets } : {}),
     };
   }
 

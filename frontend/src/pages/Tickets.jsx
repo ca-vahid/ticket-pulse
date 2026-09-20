@@ -17,6 +17,10 @@ import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import AiAssignModal from '../components/tickets/AiAssignModal';
+import BulkActionBar from '../components/tickets/BulkActionBar';
+import BulkSelectionPanel from '../components/tickets/BulkSelectionPanel';
+import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
+import { mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
@@ -213,6 +217,8 @@ export default function Tickets() {
   const [relief, setRelief] = useState(null);
 
   const [meta, setMeta] = useState(null);
+  // Per-view facet counts from the list response (QA 09-18 #2); null = use meta's workspace-wide counts.
+  const [facets, setFacets] = useState(null);
   // QA 09-15 #1: a workspace can keep AI suggestions to reviewers/admins
   // (meta.aiSuggestionsForBasic). The API already withholds the `ai` block for
   // basic-access and read-only actors when the switch is off; this keeps the
@@ -481,7 +487,8 @@ export default function Tickets() {
   }, [searchParams, setSearchParams]);
 
   const queryParams = useMemo(() => {
-    const params = { page, pageSize: effectivePageSize, sort, dir };
+    // `facets=source`: the rail's Source counts follow this exact view (QA 09-18 #2).
+    const params = { page, pageSize: effectivePageSize, sort, dir, facets: 'source' };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
     // Board mode sends the SAME status scope as the list (QA 08-04 #16/#15 —
     // silently fetching every status made the board disagree with the rail
@@ -577,6 +584,7 @@ export default function Tickets() {
       const items = res.data.items || [];
       setTickets(items);
       setTotal(res.data.total || 0);
+      setFacets(res.data.facets || null);
       setLoadError(null);
 
       // FR 09-09: ask what the filters are hiding, but only when the answer is
@@ -1062,6 +1070,9 @@ export default function Tickets() {
   }, [previewId, tickets, stepPreview, openTicket, setParams]);
   const [bulkAction, setBulkAction] = useState(null); // { type: 'assign'|'status', value, label }
   const [bulkBusy, setBulkBusy] = useState(false);
+  // QA 09-18 #3: the Details side panel and a merge started from the bar.
+  const [bulkPanelOpen, setBulkPanelOpen] = useState(false);
+  const [bulkMerge, setBulkMerge] = useState(null); // { primary, others }
   // Aggregated correction loop for bulk assign: if any of the assigned tickets
   // overrode a completed AI decision, ONE toast asks why and records the chosen
   // reason for every overridden ticket (QA 08-04 #9).
@@ -1100,6 +1111,18 @@ export default function Tickets() {
   // Only TP-born tickets are writable; FS-born rows are mirrors and get skipped.
   const editableSelected = selectedTickets.filter((t) => t.origin === 'ticketpulse');
   const bulkSkipCount = selectedTickets.length - editableSelected.length;
+  // Merge from the bar (QA 09-18 #3): the oldest ticket that can survive a
+  // merge (TP-born, Open/Pending base) is the primary; everything else folds
+  // into it. The reason a selection cannot merge is the button's tooltip.
+  const mergePrimary = useMemo(() => selectedTickets
+    .filter((t) => !mergeSurvivorBlockedReason(t, statusDefs))
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))[0] || null, [selectedTickets, statusDefs]);
+  const mergeBlockedReason = selectedTickets.length < 2
+    ? 'Select at least two tickets to merge'
+    : !mergePrimary
+      ? 'None of these can receive a merge: FreshService owns FS-born conversations, and only an Open or Pending Ticket Pulse ticket can survive — add one to the selection'
+      : null;
+  const canBulkEdit = meta?.actor?.kind !== 'agent';
 
   const runBulk = async () => {
     if (!bulkAction || bulkBusy) return;
@@ -1132,12 +1155,23 @@ export default function Tickets() {
       return;
     }
 
-    const targets = editableSelected;
-    const results = await Promise.allSettled(targets.map((t) => (
-      bulkAction.type === 'assign'
-        ? ticketsAPI.assign(t.id, bulkAction.value)
-        : ticketsAPI.setStatus(t.id, bulkAction.value)
-    )));
+    // Tags apply to both origins (a TP-side annotation); everything else is
+    // TP-born only (QA 09-18 #3 opened tags/category to page selections).
+    const tagAction = bulkAction.type === 'add_tags' || bulkAction.type === 'remove_tags';
+    const targets = tagAction ? selectedTickets : editableSelected;
+    const results = await Promise.allSettled(targets.map((t) => {
+      if (bulkAction.type === 'assign') return ticketsAPI.assign(t.id, bulkAction.value);
+      if (bulkAction.type === 'status') return ticketsAPI.setStatus(t.id, bulkAction.value);
+      if (tagAction) {
+        const current = (t.tags || []).map((x) => x.id);
+        const next = bulkAction.type === 'add_tags'
+          ? [...new Set([...current, ...bulkAction.value])]
+          : current.filter((id) => !bulkAction.value.includes(id));
+        return ticketsAPI.setTags(t.id, next);
+      }
+      if (bulkAction.type === 'set_category') return ticketsAPI.update(t.id, { internalCategoryId: bulkAction.value, internalSubcategoryId: null });
+      return Promise.reject(new Error('Unsupported bulk action'));
+    }));
     const failed = [];
     results.forEach((r, i) => {
       if (r.status === 'rejected') {
@@ -1154,10 +1188,11 @@ export default function Tickets() {
         .map((t) => t.id);
       if (overriddenIds.length > 0) bulkOverride.openPrompt(overriddenIds, bulkAction.value);
     }
-    setBulkResult({ ok: targets.length - failed.length, failed, skipped: bulkSkipCount, label: bulkAction.label });
+    setBulkResult({ ok: targets.length - failed.length, failed, skipped: tagAction ? 0 : bulkSkipCount, label: bulkAction.label });
     setBulkBusy(false);
     setBulkAction(null);
     setSelectedIds(new Set());
+    setBulkPanelOpen(false);
     refreshAfterEdit();
   };
 
@@ -1525,7 +1560,7 @@ export default function Tickets() {
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}
             <div className="lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-4 lg:items-start">
-              <TicketFilterRail meta={meta} stats={stats} />
+              <TicketFilterRail meta={meta} stats={stats} facets={facets} />
 
               <div className="min-w-0">
                 {requesterId && (
@@ -2234,7 +2269,7 @@ export default function Tickets() {
       )}
 
       {/* Mobile filter bottom sheet (vaul) — always mounted so it animates in/out */}
-      <TicketFilterRail meta={meta} stats={stats} sheet mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />
+      <TicketFilterRail meta={meta} stats={stats} facets={facets} sheet mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />
 
       {/* Instant-save toast with Undo (QA 07-06 #3) */}
       {toast && (
@@ -2308,164 +2343,61 @@ export default function Tickets() {
         />
       )}
 
-      {/* Bulk action bar */}
+      {/* Bulk action bar (QA 09-18 #3): pickers, Merge, Details — see BulkActionBar. */}
       {(selectedIds.size > 0 || bulkResult || queryScope) && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 tp-card rounded-xl shadow-soft px-4 py-3 flex flex-wrap items-center gap-3 max-w-[94vw] animate-fadeIn border border-border">
-          {bulkResult ? (
-            <>
-              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                {bulkResult.failed.length === 0
-                  ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
-                  : <AlertCircle className="w-4 h-4 text-amber-500" aria-hidden="true" />}
-                {bulkResult.ok} updated ({bulkResult.label})
-              </span>
-              {bulkResult.skipped > 0 && (
-                <span className="text-xs text-muted-foreground">{bulkResult.skipped} FS-born skipped (read-only)</span>
-              )}
-              {bulkResult.failed.length > 0 && (
-                <span className="text-xs text-red-600 dark:text-red-300 max-w-xs truncate" title={bulkResult.failed.map((f) => `${f.ref}: ${f.message}`).join('\n')}>
-                  {bulkResult.failed.length} failed — {bulkResult.failed.slice(0, 3).map((f) => f.ref).join(', ')}{bulkResult.failed.length > 3 ? '…' : ''}
-                </span>
-              )}
-              <button
-                onClick={() => setBulkResult(null)}
-                aria-label="Dismiss result"
-                className="tp-focus-ring p-1 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-              </button>
-            </>
-          ) : bulkAction ? (
-            <>
-              <span className="text-sm text-foreground/85">
-                {bulkAction.type === 'assign' ? 'Assign' : 'Set'} <strong>{queryScope ? queryScope.editable : editableSelected.length}</strong> ticket{(queryScope ? queryScope.editable : editableSelected.length) === 1 ? '' : 's'}{queryScope ? ' (everything matching this filter)' : ''} to <strong>{bulkAction.label}</strong>?
-                {(queryScope ? queryScope.skippedFsBorn : bulkSkipCount) > 0 && <span className="text-xs text-muted-foreground/75"> ({queryScope ? queryScope.skippedFsBorn : bulkSkipCount} FS-born skipped)</span>}
-              </span>
-              <button
-                onClick={runBulk}
-                disabled={bulkBusy || (queryScope ? queryScope.editable === 0 : editableSelected.length === 0)}
-                className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
-              >
-                {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Check className="w-4 h-4" aria-hidden="true" />}
-                Confirm
-              </button>
-              <button
-                onClick={() => setBulkAction(null)}
-                disabled={bulkBusy}
-                className="tp-focus-ring px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground bg-card border border-border hover:border-input"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="text-sm font-semibold text-foreground">
-                {queryScope ? `All ${queryScope.total} matching selected` : `${selectedIds.size} selected`}
-              </span>
-              {!queryScope && bulkSkipCount > 0 && (
-                <span className="text-xs text-muted-foreground/75" title="FreshService-born tickets are mirrors and stay read-only here">
-                  {bulkSkipCount} FS-born read-only
-                </span>
-              )}
-              {!queryScope && allSelected && total > pageIds.length && (
-                <button
-                  onClick={selectAllMatching}
-                  className="tp-focus-ring text-xs font-semibold text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200 px-1.5 py-0.5 rounded"
-                >
-                  Select all {total} matching
-                </button>
-              )}
-              {queryScope && (
-                <button
-                  onClick={() => setQueryScope(null)}
-                  className="tp-focus-ring text-xs font-medium text-muted-foreground hover:text-foreground/85 px-1.5 py-0.5 rounded"
-                >
-                  Back to page selection
-                </button>
-              )}
-              <select
-                value=""
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  const tech = (meta?.technicians || []).find((t) => String(t.id) === e.target.value);
-                  setBulkAction({
-                    type: 'assign',
-                    value: e.target.value === 'unassign' ? null : Number(e.target.value),
-                    label: e.target.value === 'unassign' ? 'Unassigned' : (tech?.name || 'technician'),
-                  });
-                }}
-                aria-label="Bulk assign"
-                className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
-              >
-                <option value="">Bulk assign…</option>
-                <option value="unassign">Unassigned</option>
-                {(meta?.technicians || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-              <select
-                value=""
-                onChange={(e) => { if (e.target.value) setBulkAction({ type: 'status', value: e.target.value, label: e.target.value }); }}
-                aria-label="Bulk status"
-                className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
-              >
-                {/* Bulk edits are TP-born-only, so the workspace registry
-                    (custom statuses included) is the right vocabulary here. */}
-                <option value="">Bulk status…</option>
-                {statusFilterNames.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              {queryScope && (meta?.tags?.length || 0) > 0 && (
-                <select
-                  value=""
-                  onChange={(e) => {
-                    if (!e.target.value) return;
-                    const [op, id] = e.target.value.split(':');
-                    const tagObj = (meta?.tags || []).find((t) => String(t.id) === id);
-                    setBulkAction({
-                      type: op === 'add' ? 'add_tags' : 'remove_tags',
-                      value: [Number(id)],
-                      label: `${op === 'add' ? 'tag +' : 'tag −'} ${tagObj?.name || id}`,
-                    });
-                  }}
-                  aria-label="Bulk tag"
-                  className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
-                >
-                  <option value="">Bulk tag…</option>
-                  <optgroup label="Add tag">
-                    {(meta?.tags || []).map((t) => <option key={`add-${t.id}`} value={`add:${t.id}`}>+ {t.name}</option>)}
-                  </optgroup>
-                  <optgroup label="Remove tag">
-                    {(meta?.tags || []).map((t) => <option key={`rm-${t.id}`} value={`rm:${t.id}`}>− {t.name}</option>)}
-                  </optgroup>
-                </select>
-              )}
-              {queryScope && (meta?.categoryTree?.length || 0) > 0 && (
-                <select
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value === '') return;
-                    const id = e.target.value === 'none' ? null : Number(e.target.value);
-                    const name = id ? (meta?.categoryTree || []).find((c) => c.id === id)?.name : 'Uncategorized';
-                    setBulkAction({ type: 'set_category', value: id, label: `category → ${name}` });
-                  }}
-                  aria-label="Bulk category"
-                  className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
-                >
-                  <option value="">Bulk category…</option>
-                  <option value="none">Uncategorized</option>
-                  {(meta?.categoryTree || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              )}
-              <button
-                onClick={() => { setSelectedIds(new Set()); setQueryScope(null); }}
-                aria-label="Clear selection"
-                className="tp-focus-ring p-1 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-              </button>
-            </>
-          )}
-        </div>
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          editableCount={editableSelected.length}
+          skipCount={bulkSkipCount}
+          queryScope={queryScope}
+          total={total}
+          pageFullySelected={allSelected}
+          onSelectAllMatching={selectAllMatching}
+          onBackToPage={() => setQueryScope(null)}
+          technicians={meta?.technicians || []}
+          statuses={statusFilterNames}
+          tags={meta?.tags || []}
+          categories={meta?.categoryTree || []}
+          canEdit={canBulkEdit}
+          onAction={setBulkAction}
+          mergeBlockedReason={mergeBlockedReason}
+          onMerge={() => mergePrimary && setBulkMerge({ primary: mergePrimary, others: selectedTickets.filter((t) => t.id !== mergePrimary.id) })}
+          onOpenDetails={() => setBulkPanelOpen((v) => !v)}
+          detailsOpen={bulkPanelOpen}
+          onClear={() => { setSelectedIds(new Set()); setQueryScope(null); setBulkPanelOpen(false); }}
+          bulkAction={bulkAction}
+          bulkBusy={bulkBusy}
+          onConfirm={runBulk}
+          onCancel={() => setBulkAction(null)}
+          bulkResult={bulkResult}
+          onDismissResult={() => setBulkResult(null)}
+        />
       )}
-
+      {bulkPanelOpen && selectedIds.size > 0 && (
+        <BulkSelectionPanel
+          tickets={selectedTickets}
+          onRemove={(id) => setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; })}
+          onClose={() => setBulkPanelOpen(false)}
+          mergeBlockedReason={canBulkEdit ? mergeBlockedReason : 'Merging tickets requires coordinator or admin access'}
+          onMerge={() => mergePrimary && setBulkMerge({ primary: mergePrimary, others: selectedTickets.filter((t) => t.id !== mergePrimary.id) })}
+        />
+      )}
+      {bulkMerge && (
+        <MergeTicketsModal
+          ticket={bulkMerge.primary}
+          initialTickets={bulkMerge.others}
+          statusDefs={statusDefs}
+          onClose={() => setBulkMerge(null)}
+          onMerged={(data) => {
+            setBulkMerge(null);
+            setBulkPanelOpen(false);
+            setSelectedIds(new Set());
+            lastLocalMutationRef.current = Date.now();
+            setBulkResult({ ok: (data?.merged || []).length, failed: (data?.failed || []).map((f) => ({ ref: f.ref, message: f.error })), skipped: 0, label: `merged into ${bulkMerge.primary.displayRef}` });
+            refreshAfterEdit();
+          }}
+        />
+      )}
       <MobileTabBar />
     </div>
   );

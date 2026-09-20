@@ -394,7 +394,7 @@ export default function PublicApprovalDecision() {
 
   const onDecide = useCallback(async (decision, note, noteHtml, extra = {}) => {
     const conditionNote = extra?.conditionNote || null;
-    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null })) || {};
+    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, notifyRequester: extra?.notifyRequester === true })) || {};
     focusBannerRef.current = true;
     setDecidedByYou(true);
     setData((prev) => {

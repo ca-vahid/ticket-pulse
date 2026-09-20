@@ -314,7 +314,13 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  * desktop, collapsible to a slim bar, every facet URL-persisted. On mobile it
  * becomes a slide-over drawer behind the Filters button.
  */
-export default function TicketFilterRail({ meta, stats = null, mobileOpen = false, onMobileClose, sheet = false }) {
+export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false }) {
+  // QA 09-18 #2: Source counts follow the current view when the list sent
+  // them; the workspace-wide meta count is the fallback (first paint, errors).
+  const sourceCounts = useMemo(() => {
+    if (!Array.isArray(facets?.sources)) return null;
+    return new Map(facets.sources.map((s) => [String(s.value), s.count]));
+  }, [facets]);
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeTypes: registryTypes } = useTicketTypes();
   const [collapsed, setCollapsed] = useState(() => {
@@ -1005,11 +1011,14 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                   key={s.value}
                   checked={sources.includes(String(s.value))}
                   onToggle={() => toggleCsv('source', String(s.value))}
-                  count={s.count}
+                  count={sourceCounts ? (sourceCounts.get(String(s.value)) || 0) : s.count}
                 >
                   {s.label}
                 </Facet>
               ))}
+              <p className="px-1.5 pt-1 text-[10.5px] text-muted-foreground/70">
+                {sourceCounts ? 'Counts follow the current view (status, dates, other filters).' : 'Counts cover the whole workspace.'}
+              </p>
             </Section>
           </SortableFacet>
         )}

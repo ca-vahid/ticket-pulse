@@ -68,7 +68,8 @@ const tab = (name) => screen.getByRole('tab', { name });
 const typeReason = (text) => { fireEvent.click(tab('Reject')); fireEvent.change(screen.getByRole('textbox', { name: 'Reason for rejecting' }), { target: { value: text } }); };
 // Every decision confirms first — this finds and clicks the sheet's CTA.
 const confirmSheet = async (cta) => fireEvent.click(await screen.findByRole('button', { name: cta }));
-const NO_CONDITION = { conditionNote: null, conditionNoteHtml: null };
+// QA 09-18 #1: the requester is not e-mailed unless the box is ticked.
+const NO_CONDITION = { conditionNote: null, conditionNoteHtml: null, notifyRequester: false };
 
 describe('PublicApprovalDecision (approval redesign)', () => {
   beforeEach(() => {
@@ -183,7 +184,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent(/Approve with this condition\?/);
     expect(screen.getByRole('dialog')).toHaveTextContent(/Condition: UAT only/);
     await confirmSheet(/Yes, approve with condition/);
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, { conditionNote: 'UAT only — production needs a second review.', conditionNoteHtml: null }));
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, { conditionNote: 'UAT only — production needs a second review.', conditionNoteHtml: null, notifyRequester: false }));
     expect(await screen.findByText(/You approved this with a condition on Sep 2/)).toBeInTheDocument();
     expect(screen.getByTestId('decision-condition')).toHaveTextContent('UAT only — production needs a second review.');
   });

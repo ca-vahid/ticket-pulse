@@ -284,7 +284,12 @@ router.get('/', asyncHandler(async (req, res) => {
 
 router.get('/meta', asyncHandler(async (req, res) => {
   const meta = await ticketService.getMeta(req.workspaceId);
-  res.json({ success: true, data: { ...meta, actor: req.ticketActor } });
+  // QA 09-18 #4: the composer's greeting settings ride along so agents (who
+  // cannot read /settings) get them with the rest of the workspace vocabulary.
+  const replyGreeting = await import('../services/replyGreetingService.js')
+    .then(({ getReplyGreetingSettings }) => getReplyGreetingSettings(req.workspaceId))
+    .catch(() => null);
+  res.json({ success: true, data: { ...meta, actor: req.ticketActor, ...(replyGreeting ? { replyGreeting } : {}) } });
 }));
 
 router.get('/stats', asyncHandler(async (req, res) => {
@@ -375,7 +380,9 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 // posture as an unknown route) and values are size-capped: this is a
 // preference store, not a document store.
 
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity']);
+// 'composer.greeting' (QA 09-18 #4): 'auto' adds the workspace greeting the
+// moment a reply starts; 'manual' waits for the Greeting button.
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
 const PREFERENCE_VALIDATORS = {
@@ -383,6 +390,7 @@ const PREFERENCE_VALIDATORS = {
   // Search v2: the last few queries, newest first — strings only, short, few.
   'ui.recentSearches': (v) => Array.isArray(v) && v.length <= 12 && v.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= 120),
   'ui.layoutWidth': (v) => ['full', 'comfortable', 'classic'].includes(v),
+  'composer.greeting': (v) => ['auto', 'manual'].includes(v),
   'ui.ticketDensity': (v) => ['compact', 'roomy', 'dense'].includes(v),
 };
 const PREFERENCE_VALUE_MAX_BYTES = 8 * 1024;
@@ -959,6 +967,13 @@ router.post('/:id/split', asyncHandler(async (req, res) => {
     internalGroupId: req.body?.internalGroupId,
     assignedTechId: req.body?.assignedTechId,
     moveAttachments: req.body?.moveAttachments,
+    // QA 09-18 #6: the modal's "include the original description" box never
+    // reached the service (the route dropped it), so it could not be turned off.
+    includeDescription: req.body?.includeDescription,
+    fromEntryId: req.body?.fromEntryId,
+    requesterEmail: req.body?.requesterEmail,
+    requesterName: req.body?.requesterName,
+    parentStatus: req.body?.parentStatus,
     notifyRequester: req.body?.notifyRequester === true,
   }, req.ticketActor);
   res.status(201).json({ success: true, data: result });
@@ -1893,7 +1908,7 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
     req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
-    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null },
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, notifyRequester: req.body?.notifyRequester === true },
   );
   res.json({ success: true, data: approval });
 }));
@@ -1985,6 +2000,7 @@ router.post('/:id/approvals/:approvalId/change', asyncHandler(async (req, res) =
   const approval = await ticketApprovalService.changeDecision(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
     req.body?.decision, req.body?.note || null, req.ticketActor,
+    { notifyRequester: req.body?.notifyRequester === true },
   );
   res.json({ success: true, data: approval });
 }));
@@ -2134,7 +2150,7 @@ ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) 
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideByToken(
     req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
-    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null },
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, notifyRequester: req.body?.notifyRequester === true },
   );
   res.json({
     success: true,

@@ -241,7 +241,7 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
     // v2 (18 Sep 2026): the discriminator plus `parts`, the same facts as fields for the verdict card.
     expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'approved' });
     expect(noteRawPayload().parts).toMatchObject({ changed: false, verdict: 'approved' });
-    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'verdict']);
+    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'requesterNotified', 'verdict']);
     expect(noteBody()).toContain('APPROVED'); // body unchanged for the regex fallback
   });
 
@@ -253,7 +253,7 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
     // v2 (18 Sep 2026): the discriminator plus `parts`, the same facts as fields for the verdict card.
     expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'rejected' });
     expect(noteRawPayload().parts).toMatchObject({ changed: false, verdict: 'rejected' });
-    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'verdict']);
+    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'requesterNotified', 'verdict']);
     expect(noteBody()).toContain('REJECTED');
   });
 
@@ -265,7 +265,7 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
     // v2 (18 Sep 2026): the discriminator plus `parts`, the same facts as fields for the verdict card.
     expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'changed' });
     expect(noteRawPayload().parts).toMatchObject({ changed: true });
-    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'verdict']);
+    expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'note', 'requestNote', 'requestedBy', 'requestedByName', 'requesterNotified', 'verdict']);
     expect(noteBody()).toContain('CHANGED');
   });
 

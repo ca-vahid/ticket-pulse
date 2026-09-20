@@ -47,6 +47,9 @@ export const NOTIFICATION_EVENT_TYPES = [
   // FR 09-17 #2: nobody has picked the ticket up. Distinct from aging, which
   // counts age regardless of who owns it.
   'ticket.unassigned_for',
+  // QA 09-18 #5: the requester has gone quiet — the latest public message on
+  // the ticket is an agent's and it is N hours old. Fires once per agent reply.
+  'ticket.requester_silent_for',
   'ticket.sla_pre_breach',
   'ticket.sla_breach',
   // Scheduled (ticketless) trigger: fires once per configured slot in the
@@ -63,6 +66,7 @@ export const NOTIFICATION_EVENT_TYPES = [
 export const TIME_TRIGGER_EVENT_TYPES = [
   'ticket.aging',
   'ticket.unassigned_for',
+  'ticket.requester_silent_for',
   'ticket.sla_pre_breach',
   'ticket.sla_breach',
 ];
@@ -327,6 +331,58 @@ export const WORKFLOW_TEMPLATES = [
       { id: 'e4', source: 'still-open', sourceHandle: 'false', target: 'end' },
       { id: 'e5', source: 'recipients', target: 'template' },
       { id: 'e6', source: 'template', target: 'send' },
+    ]),
+  },
+  // QA 09-18 #5 — FreshService's "Auto-close 3 day email" + "Auto-close 5 day
+  // close" supervisor rules, without a long-running watcher. Two stateless
+  // workflows on one trigger: each 5-minute tick reads the conversation
+  // itself (latest public message is an agent's, N hours old); a requester
+  // reply stops both, a new agent reply restarts both. No parked runs.
+  {
+    key: 'pending_response_reminder',
+    name: 'Pending Response — remind the requester after 72 h',
+    description: 'When a ticket in a Pending-base status (e.g. "Pending Response") has had no word from the requester for 72 hours after the agent\'s last reply, e-mail them: is it fixed? Reply if not — otherwise it closes in 24 hours. Hours, statuses and wording are on the nodes. Pair it with the auto-close template.',
+    triggerType: 'ticket.requester_silent_for',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.requester_silent_for', silentHours: 72, statusBase: 'Pending' } },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: '{{ ticket.subject }}',
+          html: '<p>Hi {{ requester.name }},</p><p>We are still waiting to hear back from you on <strong>{{ ticket.displayRef }}</strong> ({{ ticket.subject }}). Is everything working now?</p><p>If it is, there is nothing you need to do — we will close the ticket in 24 hours. If it is not, just reply to this e-mail (or to the original thread) and we will pick it up from there.</p>',
+          text: 'Hi {{ requester.name }},\n\nWe are still waiting to hear back from you on {{ ticket.displayRef }} ({{ ticket.subject }}). Is everything working now?\n\nIf it is, there is nothing you need to do — we will close the ticket in 24 hours. If it is not, just reply to this e-mail (or to the original thread) and we will pick it up from there.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: true, includeHeader: false } },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'template' },
+      { id: 'e3', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'pending_response_autoclose',
+    name: 'Pending Response — close after 96 h of silence',
+    description: 'The second half of the supervisor rule: 96 hours after the agent\'s last reply with still no word from the requester (72 h + the 24 h the reminder promised), close the ticket with a note. Install the reminder template alongside; set both hour values to taste.',
+    triggerType: 'ticket.requester_silent_for',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.requester_silent_for', silentHours: 96, statusBase: 'Pending' } },
+      {
+        id: 'close',
+        type: 'update_ticket',
+        data: {
+          setStatus: 'Closed',
+          note: 'Closed automatically: no reply from the requester {{ event.extra.thresholdHours }} hours after our last message (reminder sent). Reply to this ticket to reopen it.',
+        },
+      },
+      { id: 'done', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'close' },
+      { id: 'e2', source: 'close', target: 'done' },
     ]),
   },
   {
@@ -1307,6 +1363,7 @@ function eventLabel(triggerType) {
     'approval.clarification_requested': 'Approval clarification requested',
     'ticket.aging': 'Ticket unresolved for N hours',
     'ticket.unassigned_for': 'Ticket unassigned for N hours',
+    'ticket.requester_silent_for': 'Requester silent for N hours',
     'ticket.sla_pre_breach': 'SLA about to breach',
     'ticket.sla_breach': 'SLA breached',
     'schedule.time': 'On a schedule (digest)',

@@ -25,6 +25,50 @@ beforeEach(() => {
   ticketsAPI.split.mockResolvedValue({ success: true, data: { child: { ref: 'TP-1050' }, copied: 1, attachmentsMoved: 1 } });
 });
 
+describe('SplitTicketModal — from a message onward (QA 09-18 #6)', () => {
+  test('opened from a message: that message and everything after it are marked, the cut line shows, and fromEntryId is sent', async () => {
+    const onSplit = vi.fn();
+    render(<SplitTicketModal ticket={ticket} onClose={() => {}} onSplit={onSplit} initialFromEntryId={9002} />);
+    await screen.findByTestId('split-entries');
+    expect(screen.getByTestId('split-cut-line')).toBeInTheDocument();
+    expect(screen.getByText('(2)')).toBeInTheDocument();
+    // the anchor's excerpt seeds the subject
+    expect(screen.getByLabelText('New ticket subject')).toHaveValue('separately, my VPN drops every hour');
+    fireEvent.click(screen.getByTestId('split-submit'));
+    await waitFor(() => {
+      expect(ticketsAPI.split).toHaveBeenCalledWith(500, expect.objectContaining({ entryIds: [], fromEntryId: 9002, subject: 'separately, my VPN drops every hour' }));
+    });
+    expect(onSplit).toHaveBeenCalled();
+  });
+
+  test('clicking a message in from-mode moves the cut; the original can be parked and the author made requester', async () => {
+    const withAuthor = entries.map((e) => (e.id === 9002 ? { ...e, author: 'Anna Lee', authorEmail: 'anna@bgcengineering.ca' } : e));
+    ticketsAPI.splittable.mockResolvedValue({ success: true, data: withAuthor });
+    render(<SplitTicketModal ticket={{ ...ticket, requester: { email: 'jsmith@bgcengineering.ca', name: 'John Smith' } }} onClose={() => {}} onSplit={() => {}} />);
+    await screen.findByTestId('split-entries');
+    fireEvent.click(screen.getByRole('radio', { name: 'From a message onward' }));
+    fireEvent.click(screen.getByRole('button', { name: /Split from the message from Anna Lee/ }));
+    expect(screen.getByText('(2)')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('split-requester-suggestion').querySelector('input'));
+    fireEvent.click(screen.getByRole("radio", { name: /Set it to Pending/ }));
+    fireEvent.click(screen.getByTestId('split-submit'));
+    await waitFor(() => {
+      expect(ticketsAPI.split).toHaveBeenCalledWith(500, expect.objectContaining({
+        fromEntryId: 9002, requesterEmail: 'anna@bgcengineering.ca', requesterName: 'Anna Lee', parentStatus: 'Pending',
+      }));
+    });
+  });
+
+  test('"me" assigns the new ticket to the current agent', async () => {
+    render(<SplitTicketModal ticket={ticket} onClose={() => {}} onSplit={() => {}} selfTechnicianId={42} technicians={[{ id: 42, name: 'Cora' }]} />);
+    await screen.findByTestId('split-entries');
+    fireEvent.click(screen.getByTestId('split-assign-me'));
+    fireEvent.change(screen.getByLabelText('New ticket subject'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByTestId('split-submit'));
+    await waitFor(() => expect(ticketsAPI.split).toHaveBeenCalledWith(500, expect.objectContaining({ assignedTechId: 42 })));
+  });
+});
+
 describe('SplitTicketModal (QA 09-08)', () => {
   test('lists the conversation and marks internal notes', async () => {
     render(<SplitTicketModal ticket={ticket} onClose={() => {}} onSplit={() => {}} />);
