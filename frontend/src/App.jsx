@@ -249,6 +249,15 @@ function App() {
                           </TicketsRoute>
                         }
                       />
+                      {/* Each Approvals tab has its own URL (all | categories) so F5 stays put. */}
+                      <Route
+                        path="/approvals/:tab"
+                        element={
+                          <TicketsRoute>
+                            <ApprovalsInbox />
+                          </TicketsRoute>
+                        }
+                      />
                       <Route
                         path="/tickets/:id"
                         element={
