@@ -2,7 +2,7 @@
 
 **For:** the ContinuIT team (office check-ins / business continuity), moving from FreshService to Ticket Pulse.
 **Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
-**Ticket Pulse version:** 3.9.54 (19 Sep 2026). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
+**Ticket Pulse version:** 3.9.55 (19 Sep 2026). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
 ---
 
@@ -85,7 +85,7 @@ Response: `201` with the ticket (`ref` like `TP-1601`, `id`, `dueBy`, `assignee`
 
 - `PATCH /tickets/{id}` — `subject`, `priority`, `category`/`subcategory`, `internalGroupId`, `ccEmails`, **`dueBy`**, `status` (+ optional `resolutionReason`/`resolutionNote`), `assignedTechId` / **`assignedTechEmail`**, `customFields` (merge), `addNote`. One call, several changes. B8: a resolution reason is required only for Security tickets; yours resolve without one.
 - B7: IT has five labels — **Open, Pending, Pending Response, Resolved, Closed** — over the four bases Open / Pending / Resolved / Closed. Key on `GET /meta → statusDetails[].baseStatus`, as you planned; "Pending Response" then folds into Pending.
-- `GET /tickets/{id}` — read shape with `dueBy`, `source`, `relations`, `readyToCloseAt`, `externalRef`, `customFields`.
+- `GET /tickets/{id}` — read shape with `dueBy`, `dueBySetBy` (`manual` = yours, `sla` = the clock), `source`, `assignee { id, name, email }`, `relations`, `readyToCloseAt`, `externalRef`, `customFields`. (Your sandbox finding of 19 Sep — the date was stored but not echoed — is fixed in 3.9.55; the `POST` 201 body and every webhook `data.ticket` carry `dueBy` too.)
 - **C2** `GET /tickets?ids=1601,TP-1602,1603&limit=100` — ids or TP-refs, mixed, up to 200 per request; pages are 100 at most, so follow `next_cursor` past that.
 - Sweep: `GET /tickets?externalRefPrefix=continuit:&updatedFrom=<watermark>` (cursor pagination; `limit` up to 100). `GET /tickets/{id}/activities` for who did what (`due_changed` rows carry `changes.dueBy.from/to`).
 - Notes (E1): `POST /tickets/{id}/notes { "body": "…", "agent": "ContinuIT · Halifax check-in (9 Sep)" }` — `agent` (≤ 60 chars) is accepted without `stage` and becomes the author line. E2 attachments: not on v1 yet; keep the link in the description.

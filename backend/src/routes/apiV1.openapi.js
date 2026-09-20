@@ -33,7 +33,10 @@ const T = {
       subject: { type: 'string' }, status: { type: 'string' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       type: { type: 'string', nullable: true },
       requester: { type: 'object', nullable: true, properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } } },
-      assignee: { type: 'object', nullable: true, properties: { id: { type: 'integer' }, name: { type: 'string' } } },
+      assignee: { type: 'object', nullable: true, properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true } } },
+      source: { type: 'integer', nullable: true, description: 'Arrival channel code; GET /meta → sources lists the labels (105 = Office Check-in).' },
+      dueBy: { type: 'string', format: 'date-time', nullable: true, description: 'The due date as stored. Echoes what a trusted-intake caller sent on create/PATCH, or the SLA clock’s date.' },
+      dueBySetBy: { type: 'string', nullable: true, enum: ['manual', 'sla', null], description: 'manual = a person or a trusted integration set it (never overwritten by the SLA clock); sla = the workspace SLA policy.' },
       group: { type: 'object', nullable: true, description: 'FreshService group placement (origin:\'freshservice\' in GET /groups). null when the ticket sits in an internal group instead.' },
       internalGroup: {
         type: 'object', nullable: true,
