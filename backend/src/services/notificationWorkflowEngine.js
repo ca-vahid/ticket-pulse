@@ -168,6 +168,43 @@ function conditionTimeFields(ticket) {
 }
 
 /**
+ * QA 09-18 #5: the reply-clock condition fields are derived from the
+ * conversation on demand — only when a condition (or branch) actually names
+ * one, so ordinary runs cost nothing extra. Missing data degrades to null
+ * (duration operators then fail closed), never to a crashed run.
+ */
+const REPLY_CLOCK_FIELDS = new Set(['ticket.lastRequesterReplyMinutes', 'ticket.lastAgentReplyMinutes']);
+function groupReferencesReplyClocks(group) {
+  if (!group || typeof group !== 'object') return false;
+  const entries = Array.isArray(group.conditions) ? group.conditions : [];
+  return entries.some((entry) => (
+    entry && Array.isArray(entry.conditions)
+      ? groupReferencesReplyClocks(entry)
+      : REPLY_CLOCK_FIELDS.has(String(entry?.field || ''))
+  ));
+}
+async function withReplyClocks(scope, eventContext) {
+  const ticketId = Number(eventContext?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return scope;
+  try {
+    const { replyClocksFor, minutesSince } = await import('./ticketReplyClockService.js');
+    const clocks = await replyClocksFor([ticketId]);
+    const c = clocks.get(ticketId) || {};
+    return {
+      ...scope,
+      ticket: {
+        ...scope.ticket,
+        lastRequesterReplyMinutes: minutesSince(c.lastRequesterReplyAt || eventContext.ticket.createdAt),
+        lastAgentReplyMinutes: minutesSince(c.lastAgentReplyAt),
+      },
+    };
+  } catch (err) {
+    logger.warn(`reply clocks unavailable for ticket ${ticketId} (condition sees null): ${err.message}`);
+    return scope;
+  }
+}
+
+/**
  * Fill `ticket.statusBase` (Phase 8c) when the emitter didn't — preview
  * contexts, approval events, and any stored/resumed context predating the
  * lifecycle-service change. Lookup goes through the workspace status
@@ -1973,16 +2010,18 @@ async function executeNode({
     // than crashing the run.
     let rule = node.data?.rule || true;
     let compileError = null;
+    let evalScope = scope;
     if (node.data?.conditionGroup) {
       try {
         const customFieldTypes = await conditionCustomFieldTypes(node.data.conditionGroup, eventContext);
         rule = compileConditionGroup(node.data.conditionGroup, { customFieldTypes });
+        if (groupReferencesReplyClocks(node.data.conditionGroup)) evalScope = await withReplyClocks(scope, eventContext);
       } catch (error) {
         compileError = error.message;
         rule = false;
       }
     }
-    const passed = compileError ? false : Boolean(jsonLogic.apply(rule, scope));
+    const passed = compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
     return { passed, rule, ...(compileError ? { compileError } : {}) };
   }
 
@@ -2038,6 +2077,9 @@ async function executeNode({
     const branchCustomFieldTypes = branchNeedsTypes
       ? await workspaceCustomFieldTypes(eventContext?.workspace?.id ?? eventContext?.ticket?.workspaceId)
       : null;
+    const branchScope = branches.some((b) => b?.conditionGroup && groupReferencesReplyClocks(b.conditionGroup))
+      ? await withReplyClocks(scope, eventContext)
+      : scope;
     for (const candidate of branches) {
       const key = String(candidate?.key || '').trim().toLowerCase();
       if (!key) continue;
@@ -2045,7 +2087,7 @@ async function executeNode({
         const rule = candidate.conditionGroup
           ? compileGroup(candidate.conditionGroup, { customFieldTypes: branchCustomFieldTypes })
           : (candidate.rule || false);
-        if (jsonLogic.apply(rule, scope)) {
+        if (jsonLogic.apply(rule, branchScope)) {
           return { matchedBranch: key, label: candidate.label || key };
         }
       } catch (error) {

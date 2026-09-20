@@ -42,6 +42,9 @@ export const CG_FIELDS = [
   { value: 'ticket.ageMinutes', label: 'Ticket age (minutes)', type: 'duration' },
   { value: 'ticket.dueInMinutes', label: 'Minutes until due (negative = overdue)', type: 'duration' },
   { value: 'ticket.frDueInMinutes', label: 'Minutes until first-response due', type: 'duration' },
+  // QA 09-18 #5: reply clocks (read from the conversation when evaluated).
+  { value: 'ticket.lastRequesterReplyMinutes', label: 'Minutes since the requester last wrote', type: 'duration' },
+  { value: 'ticket.lastAgentReplyMinutes', label: 'Minutes since an agent last replied', type: 'duration' },
   { value: 'assignedAgent.email', label: 'Assigned agent email', type: 'string' },
   { value: 'assignedAgent.name', label: 'Assigned agent name', type: 'string' },
   { value: 'requester.email', label: 'Requester email', type: 'string' },

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, Hand, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
+import { GREETING_PLACEHOLDERS, fillGreetingPlaceholders } from '../../utils/replyGreeting';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
@@ -968,6 +969,112 @@ export function CreateTemplatesSection() {
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New template
         </button>
       )}
+    </SectionCard>
+  );
+}
+
+/**
+ * Reply greeting + sign-off (QA 09-18 #4): FreshService opens every reply
+ * with "Hi <Requester>," — this is the workspace's version of that, with a
+ * sign-off too. Agents choose per person whether it is added automatically.
+ */
+export function ReplyGreetingSection() {
+  const [cfg, setCfg] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [savedAt, setSavedAt] = useState(null);
+
+  useEffect(() => {
+    settingsAPI.getReplyGreeting()
+      .then((res) => { const v = res.data?.data || res.data; setCfg(v); setDraft(v); })
+      .catch(() => { const v = { enabled: false, greeting: '', signoff: '' }; setCfg(v); setDraft(v); });
+  }, []);
+
+  const save = async (patch) => {
+    setBusy(true); setError(null);
+    try {
+      const res = await settingsAPI.updateReplyGreeting(patch);
+      const v = res.data?.data || res.data;
+      setCfg(v); setDraft(v); setSavedAt(Date.now());
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  if (!draft) return null;
+  const dirty = draft.greeting !== cfg.greeting || draft.signoff !== cfg.signoff;
+  const sample = { requester: { name: 'Jenny Kolada-Tran' }, agent: { name: 'Andrii Grynik' }, ticket: { displayRef: 'TP-1560', subject: 'Adding Aissa to Rental Vehicle Queries' } };
+  const previewLines = (text) => fillGreetingPlaceholders(text, sample).split('\n');
+
+  return (
+    <SectionCard icon={Hand} title="Reply greeting" hint="Opens every reply with a greeting and closes it with a sign-off, the way FreshService pre-fills “Hi <Requester>,”. Each agent chooses whether it is added the moment they start a reply or only when they click Greeting in the composer.">
+      <label className="flex items-center gap-2.5 cursor-pointer" data-testid="reply-greeting-toggle">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={draft.enabled}
+          disabled={busy}
+          onClick={() => save({ enabled: !draft.enabled })}
+          className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${draft.enabled ? 'bg-primary' : 'bg-muted-foreground/40'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-card shadow transition-transform ${draft.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </button>
+        <span className="text-sm text-foreground">Pre-fill replies in this workspace with a greeting and sign-off</span>
+      </label>
+
+      <div className={`mt-3 grid gap-3 lg:grid-cols-2 ${draft.enabled ? '' : 'opacity-60'}`}>
+        <div className="space-y-2.5">
+          <label className="block">
+            <span className="text-xs font-medium text-muted-foreground">Greeting (above the reply)</span>
+            <textarea
+              value={draft.greeting}
+              onChange={(e) => setDraft((d) => ({ ...d, greeting: e.target.value }))}
+              rows={2}
+              maxLength={400}
+              aria-label="Greeting"
+              className="tp-focus-ring mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-muted-foreground">Sign-off (below the reply)</span>
+            <textarea
+              value={draft.signoff}
+              onChange={(e) => setDraft((d) => ({ ...d, signoff: e.target.value }))}
+              rows={3}
+              maxLength={400}
+              aria-label="Sign-off"
+              className="tp-focus-ring mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground"
+            />
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {GREETING_PLACEHOLDERS.map((p) => (
+              <span key={p.token} className="font-mono text-[10.5px] text-muted-foreground" title={p.hint}>{p.token}</span>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => save({ greeting: draft.greeting, signoff: draft.signoff })}
+              disabled={busy || !dirty}
+              className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+              Save wording
+            </button>
+            {savedAt && !dirty && <span className="text-[11px] text-emerald-700 dark:text-emerald-300">Saved</span>}
+            {error && <span className="text-[11px] text-red-600 dark:text-red-300">{error}</span>}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/30 p-3" data-testid="reply-greeting-preview">
+          <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1.5">How a reply opens and closes</p>
+          <div className="rounded-md bg-card border border-border px-3 py-2.5 text-sm text-foreground/85 space-y-2">
+            <p>{previewLines(draft.greeting).map((l, i) => <span key={i}>{l}<br /></span>)}</p>
+            <p className="text-muted-foreground/60 italic">…the agent's reply…</p>
+            <p>{previewLines(draft.signoff).map((l, i) => <span key={i}>{l}<br /></span>)}</p>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/75">Names come from the ticket and the signed-in agent. The e-mail signature (Settings → Signatures) still goes under the sign-off.</p>
+        </div>
+      </div>
     </SectionCard>
   );
 }
@@ -2146,6 +2253,7 @@ export default function TicketOpsPanel() {
       <TagsSection />
       <CategoryGroupSection />
       <MacrosSection />
+      <ReplyGreetingSection />
       <QuickNotesSection />
       {/* New-ticket form ABOVE Custom fields: the two lists read as one
           FreshService-style Ticket Fields editor (built-ins, then customs). */}

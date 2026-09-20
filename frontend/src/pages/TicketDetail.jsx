@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCheck, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCheck, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -10,6 +10,7 @@ import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
 import FancySelect from '../components/common/FancySelect';
+import { fillGreetingPlaceholders, wrapWithGreeting } from '../utils/replyGreeting';
 import FieldCardNote from '../components/tickets/FieldCardNote';
 import PinnedIntakeCard from '../components/tickets/PinnedIntakeCard';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
@@ -58,7 +59,7 @@ export function newIdempotencyKey() {
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
-import { assignmentAPI, ticketsAPI } from '../services/api';
+import { assignmentAPI, ticketsAPI, uiPreferencesAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
@@ -358,7 +359,7 @@ export function forwardedMetaOf(entry) {
   return null;
 }
 
-export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined }) {
+export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
   // small rich-text composer variant; Save PATCHes through the parent.
@@ -544,6 +545,19 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
                   <Trash2 className="w-3 h-3" aria-hidden="true" />
                 </button>
               )
+            )}
+            {typeof onSplitFrom === 'function' && entry?.id && (
+              /* QA 09-18 #6: FreshService's split-from-a-note — this message and
+                 everything after it become a new ticket. */
+              <button
+                onClick={() => onSplitFrom(entry.id)}
+                aria-label="Split into a new ticket from here"
+                title="Split into a new ticket from this message onward"
+                data-testid="split-from-here"
+                className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-violet-700 dark:hover:text-violet-300 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+              >
+                <Scissors className="w-3 h-3" aria-hidden="true" />
+              </button>
             )}
             <button
               onClick={() => onCopy?.(body)}
@@ -829,6 +843,7 @@ export default function TicketDetail() {
   const [cloneConfirm, setCloneConfirm] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false); // multi-merge modal (QA 07-13 #1)
   const [splitOpen, setSplitOpen] = useState(false); // split into a new ticket (QA 09-08)
+  const [splitFromId, setSplitFromId] = useState(null); // QA 09-18 #6: opened from a message's "Split from here"
   const [isSending, setIsSending] = useState(false);
   const [requestApprovalOpen, setRequestApprovalOpen] = useState(false);
   const [deleteApprovalTarget, setDeleteApprovalTarget] = useState(null); // approval group pending delete-confirm
@@ -923,7 +938,44 @@ export default function TicketDetail() {
   // from the ticket's reply-cc (or cc) list — initial value only, once per
   // ticket. User edits (including clearing) stay authoritative, restored
   // drafts win, and notes/forwards never seed.
+  // ---- Reply greeting + sign-off (QA 09-18 #4) ----
+  // Workspace wording rides on /tickets/meta; the per-agent choice (auto |
+  // manual) is a remembered preference. Auto is the default once the
+  // workspace turns it on — one click on "auto" turns it off for good.
+  const greetingCfg = meta?.replyGreeting || null;
+  const greetingOn = Boolean(greetingCfg?.enabled);
+  const [greetingPref, setGreetingPref] = useState(null);
+  const greetingPrefRef = useRef(null);
+  useEffect(() => {
+    if (!greetingOn || greetingPrefRef.current) return;
+    greetingPrefRef.current = 'loading';
+    Promise.resolve()
+      .then(() => uiPreferencesAPI?.get?.('composer.greeting'))
+      .then((res) => { const v = res?.data?.value; greetingPrefRef.current = v === 'manual' ? 'manual' : 'auto'; setGreetingPref(greetingPrefRef.current); })
+      .catch(() => { greetingPrefRef.current = 'auto'; setGreetingPref('auto'); });
+  }, [greetingOn]);
+  const greetingCtx = () => ({
+    requester: ticket?.requester || null,
+    agent: { name: meta?.actor?.name || '', email: meta?.actor?.email || '' },
+    ticket: { displayRef: ticket?.displayRef || '', subject: ticket?.subject || '' },
+  });
+  const applyGreeting = (currentBody = composerBody) => {
+    if (!greetingOn) return;
+    const next = wrapWithGreeting(currentBody, greetingCfg, greetingCtx());
+    if (next === String(currentBody || '').trim()) return;
+    setComposerBody(next);
+    setComposerText(htmlToText(next));
+  };
+  const saveGreetingPref = (value) => {
+    greetingPrefRef.current = value;
+    setGreetingPref(value);
+    Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.greeting', value)).catch(() => {});
+  };
+
   const switchComposerMode = (mode) => {
+    if (mode === 'reply' && greetingOn && greetingPrefRef.current !== 'manual' && !composerText.trim()) {
+      applyGreeting('');
+    }
     if (mode === 'reply' && !ccSeededRef.current) {
       ccSeededRef.current = true;
       if (composerCc.length === 0) {
@@ -1608,7 +1660,8 @@ export default function TicketDetail() {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [templatesOpen]);
   const insertTemplate = (template) => {
-    const addition = template.bodyHtml || String(template.bodyText || '').replace(/\n/g, '<br>');
+    // QA 09-18 #4: templates may carry the greeting placeholders too.
+    const addition = fillGreetingPlaceholders(template.bodyHtml || String(template.bodyText || '').replace(/\n/g, '<br>'), greetingCtx());
     const joined = composerText.trim() ? `${composerBody}<p><br></p>${addition}` : addition;
     setComposerBody(joined);
     setComposerText(htmlToText(joined));
@@ -2171,7 +2224,7 @@ export default function TicketDetail() {
                                 <ActionIcon name="merge" className="h-5 w-5" /> Merge
                               </button>
                               <button
-                                onClick={() => { setSplitOpen(true); setNoiseMenuOpen(false); }}
+                                onClick={() => { setSplitFromId(null); setSplitOpen(true); setNoiseMenuOpen(false); }}
                                 role="menuitem"
                                 title="Carve a separate issue out of this conversation into its own ticket"
                                 data-testid="split-button"
@@ -2601,6 +2654,7 @@ export default function TicketDetail() {
                                     onEditField={focusCustomFields}
                                     onCopied={notifyCopied}
                                     onFilterNavigate={navigate}
+                                    onSplitFrom={canConverse && meta?.actor?.kind !== 'agent' ? (id) => { setSplitFromId(id); setSplitOpen(true); } : null}
                                   />
                                 </ul>
                               </li>
@@ -2758,6 +2812,29 @@ export default function TicketDetail() {
                             </span>
                           )}
 
+                          {composerMode === 'reply' && greetingOn && (
+                            <span className="inline-flex items-center gap-1.5" data-testid="greeting-controls">
+                              <button
+                                type="button"
+                                onClick={() => applyGreeting()}
+                                title={`Add “${fillGreetingPlaceholders(greetingCfg.greeting, greetingCtx()).split('\n')[0]}” above and the sign-off below your reply`}
+                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground bg-card border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
+                              >
+                                <Hand className="w-3.5 h-3.5" aria-hidden="true" />
+                                <span className="hidden sm:inline">Greeting</span>
+                              </button>
+                              <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer select-none" title="Add the greeting and sign-off automatically whenever you start a reply (remembered for you)">
+                                <input
+                                  type="checkbox"
+                                  checked={greetingPref !== 'manual'}
+                                  onChange={(e) => saveGreetingPref(e.target.checked ? 'auto' : 'manual')}
+                                  className="tp-focus-ring h-3.5 w-3.5 rounded border-input text-primary"
+                                  aria-label="Add the greeting automatically"
+                                />
+                                auto
+                              </label>
+                            </span>
+                          )}
                           {composerMode === 'reply' && (
                             <span className="text-[11px] text-muted-foreground/75 truncate">
                               {isNative
@@ -3933,11 +4010,15 @@ export default function TicketDetail() {
         <SplitTicketModal
           ticket={ticket}
           technicians={meta?.technicians || []}
-          onClose={() => setSplitOpen(false)}
+          initialFromEntryId={splitFromId}
+          selfTechnicianId={meta?.actor?.technicianId ?? null}
+          onClose={() => { setSplitOpen(false); setSplitFromId(null); }}
           onSplit={(result) => {
             setSplitOpen(false);
+            setSplitFromId(null);
             lastLocalMutationRef.current = Date.now();
-            showToast('emerald', `Split into ${result?.child?.ref || 'a new ticket'} — this ticket is unchanged`);
+            const parentNote = result?.parentStatus?.applied ? ` — this ticket is now ${result.parentStatus.requested}` : result?.parentStatus?.applied === false ? ` — this ticket could not be set to ${result.parentStatus.requested}` : ' — this ticket is unchanged';
+            showToast(result?.parentStatus?.applied === false ? 'amber' : 'emerald', `Split into ${result?.child?.ref || 'a new ticket'}${parentNote}`);
             fetchTicket({ silent: true });
           }}
         />

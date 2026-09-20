@@ -73,6 +73,61 @@ beforeEach(() => {
   });
 });
 
+describe('ticketSplitService.split — from a point in time (QA 09-18 #6)', () => {
+  test('fromEntryId carries that message and everything after it, in order, deduped with entryIds', async () => {
+    const all = [
+      entry(9001, { occurredAt: new Date('2026-09-01T10:00:00Z') }),
+      entry(9002, { occurredAt: new Date('2026-09-02T09:00:00Z') }),
+      entry(9003, { occurredAt: new Date('2026-09-02T10:00:00Z'), isPrivate: true, authorType: 'agent' }),
+    ];
+    prismaMock.ticketThreadEntry.findFirst = jest.fn().mockResolvedValue(all[1]);
+    prismaMock.ticketThreadEntry.findMany.mockImplementation(({ where }) => {
+      if (where?.id?.in) return Promise.resolve(all.filter((e) => where.id.in.includes(e.id)));
+      // the "onward" query: at/after the anchor
+      return Promise.resolve(all.filter((e) => e.occurredAt >= all[1].occurredAt));
+    });
+    const out = await ticketSplitService.split(500, 1, { subject: 'VPN drops', fromEntryId: 9002, entryIds: [9003] }, actor);
+    const copiedIds = prismaMock.ticketThreadEntry.createMany.mock.calls[0][0].data.map((d) => d.externalEntryId);
+    expect(copiedIds).toEqual(['split:500:9002', 'split:500:9003']);
+    expect(out.copied).toBe(2);
+    expect(out.fromEntryId).toBe(9002);
+    // the parent's note says where the cut was
+    const parentNote = ticketServiceMock.addPrivateNote.mock.calls.find((c) => c[0] === 500)[2].bodyText;
+    expect(parentNote).toMatch(/Everything from the message of .* by John Smith onward went with it/);
+  });
+
+  test('an anchor from another ticket is refused', async () => {
+    prismaMock.ticketThreadEntry.findFirst = jest.fn().mockResolvedValue(null);
+    await expect(ticketSplitService.split(500, 1, { subject: 'VPN', fromEntryId: 4242 }, actor))
+      .rejects.toThrow(/not part of this ticket/);
+  });
+
+  test('a requester override makes someone else the child\'s requester; the parent keeps theirs', async () => {
+    await ticketSplitService.split(500, 1, { subject: 'VPN', entryIds: [9001], requesterEmail: 'ANNA@bgcengineering.ca', requesterName: 'Anna Lee' }, actor);
+    const data = ticketServiceMock.createTicket.mock.calls[0][1];
+    expect(data.requesterEmail).toBe('anna@bgcengineering.ca');
+    expect(data.requesterName).toBe('Anna Lee');
+    expect(data.requesterId).toBeUndefined();
+  });
+
+  test('parentStatus is applied after the split — FS-born parents through the FS write-back, failures reported not thrown', async () => {
+    ticketServiceMock.updateFsTicket = jest.fn().mockResolvedValue({});
+    const out = await ticketSplitService.split(500, 1, { subject: 'VPN', entryIds: [9001], parentStatus: 'Pending' }, actor);
+    expect(ticketServiceMock.updateFsTicket).toHaveBeenCalledWith(500, 1, { status: 'Pending' }, actor);
+    expect(out.parentStatus).toEqual({ requested: 'Pending', applied: true });
+
+    ticketServiceMock.updateFsTicket.mockRejectedValue(new Error('FS queue busy'));
+    const out2 = await ticketSplitService.split(500, 1, { subject: 'VPN', entryIds: [9001], parentStatus: 'Resolved' }, actor);
+    expect(out2.child.ref).toBe('TP-1050');
+    expect(out2.parentStatus).toMatchObject({ requested: 'Resolved', applied: false });
+
+    ticketServiceMock.changeStatus = jest.fn().mockResolvedValue({});
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsParent, origin: 'ticketpulse', nativeNumber: 77, freshserviceTicketId: null });
+    await ticketSplitService.split(500, 1, { subject: 'VPN', entryIds: [9001], parentStatus: 'Resolved' }, actor);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(500, 1, 'Resolved', actor, expect.objectContaining({ resolutionNote: expect.stringMatching(/Split into TP-1050/) }));
+  });
+});
+
 describe('ticketSplitService.split', () => {
   test('an FS-born parent can be split — the case merge would refuse', async () => {
     const out = await ticketSplitService.split(500, 1, { subject: 'VPN drops every hour', entryIds: [9001, 9002] }, actor);

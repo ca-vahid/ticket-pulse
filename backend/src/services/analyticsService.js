@@ -1369,6 +1369,93 @@ export async function getOverview(workspaceId, query = {}) {
   });
 }
 
+/**
+ * Intake method (QA 09-18 #2): who created the ticket and how it arrived.
+ *
+ * "Source" is a field an agent can pick — Field Equipment logs most of its
+ * tickets by hand in FreshService with Source = Email (260 of 327). The
+ * truthful signal is the FreshService creation activity ("created ticket for
+ * …", actor.is_agent) when the activity feed is synced, else the To: header
+ * FreshService fills only for mail it received; TP-born tickets carry their
+ * own lane on the source code. Every ticket lands in exactly one bucket.
+ */
+export const INTAKE_LABELS = Object.freeze({
+  emailed: 'E-mailed in by the requester',
+  agent: 'Logged by an agent',
+  portal: 'Self-service portal',
+  integration: 'API & integrations',
+  unknown: 'Email (creator unknown)',
+});
+
+export function classifyIntake(ticket, byAgent) {
+  const source = Number(ticket?.source);
+  const hasTo = Array.isArray(ticket?.toEmails) && ticket.toEmails.length > 0;
+  if (ticket?.origin === 'ticketpulse') {
+    if (source === 1) return 'emailed';
+    if (source === 2) return 'portal';
+    if (source === 103 || source === 3 || source === 9 || source === 102) return 'agent';
+    if (source >= 100) return 'integration';
+    return 'agent';
+  }
+  if (source === 1001 || source === 1002 || source === 100) return 'integration';
+  if (byAgent === true) return 'agent';
+  if (byAgent === false) {
+    if (source === 2) return 'portal';
+    return 'emailed';
+  }
+  // No creation activity synced for this ticket: fall back to the headers.
+  if (hasTo) return 'emailed';
+  if (source === 2) return 'portal';
+  if (source === 1) return 'unknown';
+  return 'agent';
+}
+
+async function intakeBreakdown(workspaceId, rangeInfo, createdTickets) {
+  const empty = { rows: [], total: 0, emailedPct: null, agentLoggedPct: null, coverage: { withCreationActivity: 0, total: 0 }, bySource: [], agentSourcePicks: [] };
+  if (!createdTickets.length) return empty;
+  const byAgent = new Map();
+  try {
+    const rows = await Promise.resolve().then(() => prisma.$queryRaw`
+      SELECT e.ticket_id, (e.raw_payload->'actor'->>'is_agent') = 'true' AS by_agent
+      FROM ticket_thread_entries e
+      JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.workspace_id = ${Number(workspaceId)}
+        AND t.created_at >= ${rangeInfo.start} AND t.created_at <= ${rangeInfo.end}
+        AND e.source = 'freshservice_activity'
+        AND e.content LIKE 'created ticket for %'`);
+    for (const r of rows || []) byAgent.set(Number(r.ticket_id), r.by_agent === true);
+  } catch { /* activity feed unavailable — the fallbacks below still classify */ }
+
+  const counts = new Map();
+  const bySource = new Map(); // label -> { emailed, agent, other }
+  const agentPicks = new Map(); // source label an agent picked while logging
+  for (const t of createdTickets) {
+    const bucket = classifyIntake(t, byAgent.has(t.id) ? byAgent.get(t.id) : null);
+    increment(counts, bucket);
+    const label = t.source !== null && t.source !== undefined ? ticketSourceLabel(t.source) : 'Unknown';
+    const row = bySource.get(label) || { name: label, emailed: 0, agent: 0, other: 0 };
+    if (bucket === 'emailed') row.emailed += 1;
+    else if (bucket === 'agent') row.agent += 1;
+    else row.other += 1;
+    bySource.set(label, row);
+    if (bucket === 'agent') increment(agentPicks, label);
+  }
+  const total = createdTickets.length;
+  const pct = (n) => Number(((n / total) * 100).toFixed(1));
+  return {
+    rows: Object.keys(INTAKE_LABELS)
+      .filter((k) => counts.has(k))
+      .map((k) => ({ key: k, name: INTAKE_LABELS[k], count: counts.get(k), pct: pct(counts.get(k)) }))
+      .sort((a, b) => b.count - a.count),
+    total,
+    emailedPct: pct(counts.get('emailed') || 0),
+    agentLoggedPct: pct(counts.get('agent') || 0),
+    coverage: { withCreationActivity: byAgent.size, total },
+    bySource: Array.from(bySource.values()).sort((a, b) => (b.emailed + b.agent + b.other) - (a.emailed + a.agent + a.other)),
+    agentSourcePicks: topFromMap(agentPicks, 8),
+  };
+}
+
 export async function getDemandFlow(workspaceId, query = {}) {
   return withCache(workspaceId, 'demand-flow', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
@@ -1384,6 +1471,8 @@ export async function getDemandFlow(workspaceId, query = {}) {
           status: true,
           priority: true,
           source: true,
+          origin: true,
+          toEmails: true,
           createdAt: true,
           firstAssignedAt: true,
           ticketCategory: true,
@@ -1435,6 +1524,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
       trendMap.set(key, row);
     }
     const categoryBreakdown = categoryBreakdownFromTickets(createdTickets, 10, workspaceId);
+    const intake = await intakeBreakdown(workspaceId, rangeInfo, createdTickets);
 
     return {
       metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
@@ -1449,6 +1539,8 @@ export async function getDemandFlow(workspaceId, query = {}) {
         category: categoryBreakdown.rows,
         categoryCoverage: categoryBreakdown.coverage,
         requester: topFromMap(requesterMap),
+        // QA 09-18 #2: how tickets actually arrived, not the source an agent picked.
+        intake,
         noiseShare: {
           count: noiseCount,
           pct: createdTickets.length ? Number(((noiseCount / createdTickets.length) * 100).toFixed(1)) : 0,

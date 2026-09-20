@@ -309,6 +309,44 @@ class NotificationTimeTriggerService {
     return out;
   }
 
+  /**
+   * QA 09-18 #5 — "the requester has gone quiet". One indexed query per
+   * workflow per tick: tickets in the chosen statuses whose LATEST public
+   * message is an agent's and older than N hours. The dedupe stamp is that
+   * agent message's id, so a workflow fires once per agent reply: a newer
+   * agent reply restarts the clock, a requester reply stops it (the latest
+   * message is theirs, so the ticket drops out of the scan). Nothing is
+   * parked, nothing polls per ticket — FreshService's supervisor rule without
+   * the supervisor.
+   *
+   * Trigger config: silentHours (default 72), statusBase 'Pending' (default)
+   * | 'Open' | 'any' (both), statuses [] (explicit names win over the base).
+   */
+  async _processRequesterSilent(workflow, config, now) {
+    const silentHours = Math.max(1, Number(config.silentHours) || 72);
+    const cutoff = new Date(now.getTime() - silentHours * 3600 * 1000);
+    const explicit = (Array.isArray(config.statuses) ? config.statuses : []).map((s) => String(s || '').trim()).filter(Boolean);
+    const base = config.statusBase === 'Open' ? 'Open' : config.statusBase === 'any' ? ['Open', 'Pending'] : 'Pending';
+    const statuses = explicit.length ? explicit : await statusService.statusNamesForBase(workflow.workspaceId, base);
+    const { requesterSilentCandidates } = await import('./ticketReplyClockService.js');
+    const candidates = await requesterSilentCandidates(workflow.workspaceId, { statuses, cutoff, limit: MAX_TICKETS_PER_WORKFLOW_TICK });
+    let dispatched = 0;
+    for (const c of candidates) {
+      const result = await emitTicketEvent(workflow.triggerType, c.ticketId, {
+        source: 'time_trigger',
+        dedupeStamp: `silent:${silentHours}h:${c.lastAgentEntryId}`,
+        extra: {
+          thresholdHours: silentHours,
+          lastAgentReplyAt: new Date(c.lastAgentReplyAt).toISOString(),
+          silentForMs: now.getTime() - new Date(c.lastAgentReplyAt).getTime(),
+        },
+        onlyWorkflowId: workflow.id,
+      });
+      if (result?.status === 'completed' && (result.workflowCount || 0) > 0) dispatched += 1;
+    }
+    return dispatched;
+  }
+
   _triggerConfig(workflow) {
     const nodes = workflow.publishedDefinition?.nodes || [];
     const trigger = nodes.find((n) => n.type === 'trigger');
@@ -356,6 +394,8 @@ class NotificationTimeTriggerService {
       where = { dueBy: { lt: now } };
       stampFor = (t) => `sla_breach:${new Date(t.dueBy).toISOString()}`;
       extraFor = (t) => ({ dueBy: new Date(t.dueBy).toISOString() });
+    } else if (workflow.triggerType === 'ticket.requester_silent_for') {
+      return this._processRequesterSilent(workflow, config, now);
     } else {
       return 0;
     }

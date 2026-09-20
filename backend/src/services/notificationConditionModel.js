@@ -63,6 +63,10 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.ageMinutes': { label: 'Ticket age', type: 'duration', path: 'ticket.ageMinutes' },
   'ticket.dueInMinutes': { label: 'Time until due', type: 'duration', path: 'ticket.dueInMinutes' },
   'ticket.frDueInMinutes': { label: 'Time until first-response due', type: 'duration', path: 'ticket.frDueInMinutes' },
+  // QA 09-18 #5: reply clocks, read from the conversation when a condition
+  // asks for them (the requester's original request counts as their first word).
+  'ticket.lastRequesterReplyMinutes': { label: 'Time since the requester last wrote', type: 'duration', path: 'ticket.lastRequesterReplyMinutes' },
+  'ticket.lastAgentReplyMinutes': { label: 'Time since an agent last replied', type: 'duration', path: 'ticket.lastAgentReplyMinutes' },
   'assignedAgent.email': { label: 'Assigned agent email', type: 'string', path: 'assignedAgent.email' },
   'assignedAgent.name': { label: 'Assigned agent name', type: 'string', path: 'assignedAgent.name' },
   'requester.email': { label: 'Requester email', type: 'string', path: 'requester.email' },

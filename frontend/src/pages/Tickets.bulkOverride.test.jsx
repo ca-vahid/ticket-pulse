@@ -80,7 +80,9 @@ const runBulkAssign = async () => {
   await screen.findAllByText('Row 11'); // desktop row + mobile card both render
 
   fireEvent.click(screen.getByRole('checkbox', { name: 'Select all tickets on this page' }));
-  fireEvent.change(await screen.findByRole('combobox', { name: 'Bulk assign' }), { target: { value: '7' } });
+  // QA 09-18 #3: the bar's Assign picker is a menu, not a native select.
+  fireEvent.click(await screen.findByRole('button', { name: 'Bulk assign' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Terry Tech' }));
   fireEvent.click(await screen.findByRole('button', { name: /Confirm/ }));
   await waitFor(() => expect(assignSpy).toHaveBeenCalledTimes(2));
 };

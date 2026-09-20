@@ -88,6 +88,7 @@ const EVENT_LABELS = {
   'approval.clarification_requested': 'Approval clarification requested',
   'ticket.aging': 'Ticket unresolved for N hours',
   'ticket.unassigned_for': 'Ticket unassigned for N hours',
+  'ticket.requester_silent_for': 'Requester silent for N hours',
   'ticket.sla_pre_breach': 'SLA about to breach',
   'ticket.sla_breach': 'SLA breached',
   'schedule.time': 'On a schedule (digest)',
@@ -132,6 +133,8 @@ export const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.aging', hint: 'Unresolved for N hours (threshold on the trigger node)' },
       // FR 09-17 #2 — "nobody picked this up".
       { value: 'ticket.unassigned_for', hint: 'Still has nobody assigned N hours after it arrived (or after it was released)' },
+      // QA 09-18 #5 — FreshService's "Pending Response" supervisor rule.
+      { value: 'ticket.requester_silent_for', hint: 'The requester has not written back N hours after the agent’s last reply (e.g. Pending Response)' },
       { value: 'ticket.sla_pre_breach', hint: 'SLA due date approaching' },
       { value: 'ticket.sla_breach', hint: 'SLA due date passed' },
       { value: 'schedule.time', hint: 'Daily/weekly digest slot (no ticket)' },
@@ -9452,6 +9455,46 @@ export default function NotificationWorkflowsPanel({
               <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">
                 Open tickets with nobody assigned for this long fire once (checked every few minutes). The clock starts when the
                 ticket arrived, or when it was last released back to the queue. Assigning it stops the trigger.
+              </p>
+            </div>
+          )}
+          {triggerType === 'ticket.requester_silent_for' && (
+            <div className="space-y-2" data-testid="requester-silent-options">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
+                Fire when the requester has been silent for (hours)
+                <input
+                  type="number"
+                  min="1"
+                  value={selectedNode.data?.silentHours ?? 72}
+                  onChange={(event) => updateNodeData({ silentHours: Math.max(1, Number(event.target.value) || 72) })}
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
+                />
+              </label>
+              <label className="block text-xs font-medium uppercase text-muted-foreground">
+                Which tickets
+                <select
+                  value={selectedNode.data?.statusBase ?? 'Pending'}
+                  onChange={(event) => updateNodeData({ statusBase: event.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+                >
+                  <option value="Pending">Pending-base statuses (Pending, Pending Response, …)</option>
+                  <option value="Open">Open-base statuses</option>
+                  <option value="any">Open and Pending</option>
+                </select>
+              </label>
+              <label className="block text-xs font-medium uppercase text-muted-foreground">
+                Only these statuses (optional, comma-separated)
+                <input
+                  type="text"
+                  value={(selectedNode.data?.statuses || []).join(', ')}
+                  onChange={(event) => updateNodeData({ statuses: event.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+                  placeholder="Pending Response"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+                />
+              </label>
+              <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">
+                Counts from the agent’s last public reply. Fires once per agent reply: a new agent reply restarts the clock, a reply
+                from the requester stops it. Checked every few minutes — no run is held open waiting.
               </p>
             </div>
           )}

@@ -311,11 +311,26 @@ describe('decide with a condition', () => {
     expect(data.conditionNoteHtml).toContain('UAT <b>only</b>');
     // ticket note names the condition
     expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyText).toMatch(/APPROVED WITH CONDITION ✔ by Neville — "Go ahead" · Condition: "UAT only"/);
-    // decision message
+    // decision message — QA 09-18 #1: internal by default, the requester was not on it
     const decision = prismaMock.approvalMessage.create.mock.calls.find((c) => c[0].data.kind === 'decision');
-    expect(decision[0].data).toMatchObject({ audience: 'requester', authorEmail: 'neville@x.io', bodyText: 'Approved with condition\nCondition: UAT only\nGo ahead' });
-    // e-mails: the agent (existing lane) + requester + Vahid (the other approver)
-    const sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
+    expect(decision[0].data).toMatchObject({ audience: 'internal', authorEmail: 'neville@x.io', bodyText: 'Approved with condition\nCondition: UAT only\nGo ahead' });
+    expect(decision[0].data.toEmails).not.toContain('rita@x.io');
+    // e-mails: the agent (existing lane) + Vahid (the other approver); the requester only when asked
+    let sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
+    expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'vahid@x.io']);
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload.parts.requesterNotified).toBe(false);
+
+    // ...and with the box ticked the requester is on it, with requester-visible history only
+    mailMock.sendTransactionalEmail.mockClear();
+    prismaMock.approvalMessage.create.mockClear();
+    prismaMock.ticketThreadEntry.create.mockClear();
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'Go ahead', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { conditionNote: 'UAT only', conditionNoteHtml: '<p>UAT <b>only</b></p>', notifyRequester: true });
+    const decision2 = prismaMock.approvalMessage.create.mock.calls.find((c) => c[0].data.kind === 'decision');
+    expect(decision2[0].data).toMatchObject({ audience: 'requester' });
+    expect(decision2[0].data.toEmails).toContain('rita@x.io');
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload.parts.requesterNotified).toBe(true);
+    sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
     expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'rita@x.io', 'vahid@x.io']);
     const agent = sends.find((s) => s.to === 'req@x.io');
     expect(agent.subject).toMatch(/^Approved with condition: your approval request/);
@@ -333,13 +348,35 @@ describe('decide with a condition', () => {
     expect(vahid.html).toContain('/tickets/501');
   });
 
-  test('a rejection ignores any condition and still fans out', async () => {
+  test('a rejection ignores any condition, fans out to the agents, and reaches the requester only when asked', async () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
     await ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'No', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { conditionNote: 'ignored' });
     expect(prismaMock.ticketApproval.update.mock.calls[0][0].data.conditionNote).toBeNull();
-    const sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
+    let sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
+    // QA 09-18 #1: the rejection note stays between the agents by default
+    expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'vahid@x.io']);
+    expect(sends.find((s) => s.to === 'rita@x.io')).toBeUndefined();
+
+    mailMock.sendTransactionalEmail.mockClear();
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
+    await ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'No', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { notifyRequester: true });
+    sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
     expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'rita@x.io', 'vahid@x.io']);
     expect(sends.find((s) => s.to === 'rita@x.io').subject).toBe('Not approved: New laptop [TP-1234]');
+  });
+
+  test('the ticket assignee and whoever escalated the request hear the verdict too (QA 09-18 #1)', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ escalationLog: [{ kind: 'escalated', fromTier: 1, toTier: 2, byEmail: 'agent2@x.io', byName: 'Agent Two', at: new Date().toISOString() }] }));
+    const ticketFind = prismaMock.ticket.findUnique.getMockImplementation?.() || null;
+    prismaMock.ticket.findUnique.mockImplementation(async (args) => {
+      const base = ticketFind ? await ticketFind(args) : (prismaMock.ticket.findUnique.mock.results[0]?.value ?? null);
+      if (args?.select?.assignedTech) return { assignedTech: { email: 'tech@x.io', name: 'Tech One' } };
+      return base;
+    });
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'neville@x.io', name: 'Neville', role: 'admin' });
+    const sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
+    expect(sends.map((s) => s.to).sort()).toEqual(['agent2@x.io', 'req@x.io', 'tech@x.io', 'vahid@x.io']);
+    expect(sends.find((s) => s.to === 'tech@x.io').html).toContain('/tickets/501');
   });
 });
 

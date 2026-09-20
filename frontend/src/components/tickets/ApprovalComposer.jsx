@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, ArrowUpRight, Check, ChevronDown, CircleAlert, Forward, Lock, MessageCircleQuestion, PenLine, ShieldAlert, Users, X,
+  Activity, ArrowUpRight, Check, ChevronDown, CircleAlert, Forward, Lock, Mail, MessageCircleQuestion, PenLine, ShieldAlert, Users, X,
 } from 'lucide-react';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { HandoffPanel } from './ApprovalHandoff';
@@ -18,7 +18,11 @@ import { SafeHtml, formatDay } from './ticketUi';
  * every recipient is a chip the approver can untick.
  *
  * Callbacks return promises; the parent updates its own state on success.
- *   onDecide(decision, note, noteHtml, { conditionNote, conditionNoteHtml })
+ *   onDecide(decision, note, noteHtml, { conditionNote, conditionNoteHtml, notifyRequester })
+ *
+ * QA 09-18 #1: the ticket requester is NOT on the decision e-mail unless the
+ * approver ticks the large "Also e-mail the requester" box - a rejection note
+ * written for the agents reached an end user on 18 Sep 2026.
  *   onAsk({ kind, mode, to, cc, bodyText, bodyHtml })
  *   onHandoff({ mode, note, toEmail })
  */
@@ -46,10 +50,10 @@ const TABS = [
 ];
 
 const PLACEHOLDER = {
-  approved: 'Optional note — the requester, the agent and the other approvers read it in the decision e-mail.',
+  approved: 'Optional note — the agent and the other approvers read it in the decision e-mail (the requester too, only if you tick the box below).',
   condition: 'The condition — required. e.g. “Approved for UAT only; production needs a separate review.”',
   question: 'Your question…',
-  rejected: 'The reason — required. The requester reads it.',
+  rejected: 'The reason — required. The agents read it; the requester only if you tick the box below.',
 };
 
 /**
@@ -65,7 +69,8 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel]);
   if (!pending) return null;
-  const { decision, note, conditionNote, amountLabel } = pending;
+  const { decision, note, conditionNote, amountLabel, notifyRequester } = pending;
+  const requesterWho = approval?.requesterName ? `the requester (${approval.requesterName})` : 'the requester';
   const ref = approval?.ticketRef || '';
   const forWhom = approval?.requesterName ? ` for ${approval.requesterName}` : '';
   const verbs = {
@@ -79,9 +84,11 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
   if (decision === 'approved') {
     consequence = approval?.autoEscalates
       ? `${amountLabel || 'The amount'} is over your ${approval.tierName || 'tier'} limit${approval.amountLimitLabel ? ` (${approval.amountLimitLabel})` : ''}. Your approval is recorded and the request moves on to ${approval.nextTier?.approverNames?.join(', ') || approval.nextTier?.name || 'the next tier'} automatically.`
-      : `This ends the request — the requester, the agent and the other approvers get the decision by e-mail${conditionNote ? ', with your condition' : ''}. You can change your mind later only from inside the app.`;
+      : `This ends the request — the agent and the other approvers get the decision by e-mail${conditionNote ? ', with your condition' : ''}${notifyRequester ? `, and so does ${requesterWho}` : `. ${requesterWho[0].toUpperCase()}${requesterWho.slice(1)} is not e-mailed`}. You can change your mind later only from inside the app.`;
   } else if (decision === 'rejected') {
-    consequence = 'This ends the request with your reason. The requester, the agent and the other approvers are notified right away.';
+    consequence = notifyRequester
+      ? `This ends the request with your reason. The agent, the other approvers and ${requesterWho} are notified right away.`
+      : `This ends the request with your reason. The agent and the other approvers are notified right away — ${requesterWho} is not e-mailed, the agent follows up.`;
   } else if (decision === 'escalate') {
     consequence = `You are handed off — ${approval?.nextTier?.approverNames?.join(', ') || 'the next tier'} decide from here and your note goes with it.`;
   } else {
@@ -209,6 +216,8 @@ export default function ApprovalComposer({
   const [pending, setPending] = useState(null); // { decision, note, noteHtml, conditionNote, toEmail, toName, amountLabel }
   const [askMode, setAskMode] = useState('requester');
   const [picked, setPicked] = useState({});
+  // QA 09-18 #1: off by default — the requester hears the verdict from the agent.
+  const [notifyRequester, setNotifyRequester] = useState(false);
   const [showSignature, setShowSignature] = useState(false);
   const editorRef = useRef(null);
   const text = note.trim();
@@ -226,7 +235,7 @@ export default function ApprovalComposer({
     if (busy) return;
     if (!canDecide && ['approved', 'rejected', 'condition'].includes(decision)) return;
     if (decision === 'rejected' && !text) {
-      setError('Add a reason for rejecting so the requester knows what to change.');
+      setError('Add a reason for rejecting — the agents read it and pass it on.');
       setTab('rejected');
       editorRef.current?.focus();
       return;
@@ -238,16 +247,16 @@ export default function ApprovalComposer({
     }
     setError(null);
     if (decision === 'condition') {
-      setPending({ decision: 'approved', note: null, noteHtml: null, conditionNote: text, conditionNoteHtml: rich(), amountLabel: approval?.amountLabel || null });
+      setPending({ decision: 'approved', note: null, noteHtml: null, conditionNote: text, conditionNoteHtml: rich(), amountLabel: approval?.amountLabel || null, notifyRequester });
       return;
     }
-    setPending({ decision, note: text || null, noteHtml: rich(), conditionNote: null, amountLabel: approval?.amountLabel || null });
-  }, [busy, text, noteHtml, approval, canDecide]); // eslint-disable-line react-hooks/exhaustive-deps
+    setPending({ decision, note: text || null, noteHtml: rich(), conditionNote: null, amountLabel: approval?.amountLabel || null, notifyRequester });
+  }, [busy, text, noteHtml, approval, canDecide, notifyRequester]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runDecision = useCallback(async (p) => {
     setSubmitting(p.decision);
     try {
-      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null });
+      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, notifyRequester: p.notifyRequester === true });
       setPending(null);
       clear();
     } catch (err) {
@@ -320,7 +329,7 @@ export default function ApprovalComposer({
       else if (key === 'r') {
         event.preventDefault();
         if (hasNote) { setTab('rejected'); stage('rejected'); }
-        else { setTab('rejected'); setError('Add a reason for rejecting so the requester knows what to change.'); editorRef.current?.focus(); }
+        else { setTab('rejected'); setError('Add a reason for rejecting — the agents read it and pass it on.'); editorRef.current?.focus(); }
       }
     };
     window.addEventListener('keydown', onKey);
@@ -439,6 +448,32 @@ export default function ApprovalComposer({
                     </div>
                   )}
                 </div>
+              )}
+
+              {isDecision && (
+                <label
+                  data-testid="notify-requester"
+                  className={`mt-3 flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors ${notifyRequester ? 'border-primary/50 bg-primary/5 dark:bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/50'}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="tp-focus-ring mt-0.5 h-5 w-5 shrink-0 rounded border-input text-primary accent-[hsl(var(--primary))]"
+                    checked={notifyRequester}
+                    onChange={(e) => setNotifyRequester(e.target.checked)}
+                    disabled={busy}
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 text-[13.5px] font-semibold text-foreground">
+                      <Mail className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                      Also e-mail the requester{approval?.requesterName ? `, ${approval.requesterName}` : ''}
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-relaxed text-muted-foreground">
+                      {notifyRequester
+                        ? 'They receive the verdict and your note by e-mail.'
+                        : 'Off: the verdict and your note go to the agents on this request only. The agent tells the requester.'}
+                    </span>
+                  </span>
+                </label>
               )}
 
               {error && (

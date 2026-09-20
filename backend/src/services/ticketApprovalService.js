@@ -899,6 +899,7 @@ class TicketApprovalService {
       noteHtml,
       conditionNote: extra?.conditionNote || null,
       conditionNoteHtml: extra?.conditionNoteHtml || null,
+      notifyRequester: extra?.notifyRequester === true,
     });
   }
 
@@ -920,6 +921,7 @@ class TicketApprovalService {
       noteHtml,
       conditionNote: extra?.conditionNote || null,
       conditionNoteHtml: extra?.conditionNoteHtml || null,
+      notifyRequester: extra?.notifyRequester === true,
     });
   }
 
@@ -1331,7 +1333,7 @@ class TicketApprovalService {
    * — e.g. they clicked the wrong button or reconsidered. Reuses the decide
    * path with re-decide allowed.
    */
-  async changeDecision(ticketId, workspaceId, approvalId, decision, note, actor) {
+  async changeDecision(ticketId, workspaceId, approvalId, decision, note, actor, extra = {}) {
     const approval = await prisma.ticketApproval.findFirst({
       where: { id: approvalId, ticketId, workspaceId },
     });
@@ -1348,6 +1350,7 @@ class TicketApprovalService {
       actorLabel: actor?.name || actor?.email || approval.approverName || approval.approverEmail,
       actorEmail: actor?.email || approval.approverEmail,
       changedFrom: approval.status,
+      notifyRequester: extra?.notifyRequester === true,
     });
   }
 
@@ -1420,7 +1423,11 @@ class TicketApprovalService {
     return rows;
   }
 
-  async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote = null, conditionNoteHtml = null }) {
+  // QA 09-18 #1: the ticket requester is NOT on the verdict e-mail unless the
+  // approver ticks "also e-mail the requester" - an approver's rejection note
+  // written for the agents reached the end user (ticket 242909, 18 Sep 2026).
+  async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote = null, conditionNoteHtml = null, notifyRequester = false }) {
+    notifyRequester = notifyRequester === true;
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
       throw new ValidationError('Decision must be "approved" or "rejected"');
@@ -1521,7 +1528,7 @@ class TicketApprovalService {
       activityType: changedFrom ? 'approval_decision_changed' : `approval_${normalized}`,
       performedBy: actorLabel,
       performedAt: new Date(),
-      details: { approvalId: approval.id, via, note: note || null, ...(changedFrom ? { changedFrom, to: normalized } : {}) },
+      details: { approvalId: approval.id, via, note: note || null, requesterNotified: notifyRequester, ...(changedFrom ? { changedFrom, to: normalized } : {}) },
     }).catch(() => {});
 
     // Audit trail on the conversation only. Approvals are TP-only, so the note
@@ -1572,6 +1579,8 @@ class TicketApprovalService {
                 ? ((await this._resolvePersonName(approval.requestedBy).catch(() => null)) || prettifyLocalPart(approval.requestedBy))
                 : null,
               requestNote: askedFor ? (askedFor.length > 400 ? `${askedFor.slice(0, 400).trimEnd()}…` : askedFor) : null,
+              // QA 09-18 #1: whether the end user was on the verdict e-mail.
+              requesterNotified: notifyRequester,
             },
           },
         },
@@ -1580,7 +1589,7 @@ class TicketApprovalService {
       await emitApprovalEvent('approval.decided', ticket.id, {
         // requestedBy lets workflows target the requester (approval_requester token).
         approvalId: approval.id, status: normalized, approverEmail: approval.approverEmail,
-        requestedBy: approval.requestedBy,
+        requestedBy: approval.requestedBy, requesterNotified: notifyRequester,
       });
       this._broadcast(ticket, 'approval');
 
@@ -1596,7 +1605,7 @@ class TicketApprovalService {
       // reply-style, with the condition, the signature and the history each
       // of them is allowed to see.
       try {
-        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml });
+        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, notifyRequester });
       } catch (err) {
         logger.warn(`Approval decision thread e-mails failed (non-fatal): ${err.message}`);
       }
@@ -1769,32 +1778,41 @@ class TicketApprovalService {
   }
 
   /**
-   * Approvals v3 — the decision goes to everyone else on the request: the
-   * ticket requester (requester-visible history only) and every other
-   * approver in the chain (full history). The agent already got theirs.
+   * Approvals v3 — the decision goes to everyone else on the request: every
+   * other approver in the chain (full history) and, QA 09-18 #1, the other
+   * agents who touched the request — the ticket's assignee and whoever
+   * escalated or forwarded it. The agent who asked already got theirs.
+   * The ticket requester is on it ONLY when the approver ticked
+   * "also e-mail the requester" (`notifyRequester`): by default the verdict
+   * and its note stay between the agents.
    */
-  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null } = {}) {
+  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, notifyRequester = false } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return { sent: false, reason: 'suppressed' };
     const { default: conversation } = await import('./approvalConversationService.js');
     const { renderDecisionThreadEmail } = await import('./approvalEmailTemplate.js');
     const parts = await conversation.participants(approval);
     const groupId = approval.requestGroupId || `single-${approval.id}`;
-    // Record the decision on the conversation (requester-visible).
+    const agentEmail = String(approval.requestedBy || '').toLowerCase();
+    const deciderEmail = String(actorEmail || approval.approverEmail || '').toLowerCase();
+    const involved = await this._involvedAgents(ticket, approval, parts).catch(() => []);
+    const includeRequester = notifyRequester === true && Boolean(parts.requester);
+    // Record the decision on the conversation. Its audience decides whether a
+    // later requester-facing e-mail may quote it: 'internal' keeps a verdict
+    // the requester never received out of their history.
     await prisma.approvalMessage.create({
       data: {
         workspaceId: approval.workspaceId, ticketId: approval.ticketId, approvalId: approval.id, requestGroupId: groupId,
-        kind: 'decision', audience: 'requester', authorEmail: String(actorEmail || approval.approverEmail || '').toLowerCase(),
+        kind: 'decision', audience: includeRequester ? 'requester' : 'internal', authorEmail: deciderEmail,
         authorName: actorLabel || approval.approverName || null, authorRole: 'approver',
         bodyText: [decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved', conditionNote ? `Condition: ${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
-        bodyHtml: null, via: 'app', toEmails: [parts.requester?.email, parts.agent?.email, ...parts.approvers.map((a) => a.email)].filter(Boolean),
+        bodyHtml: null, via: 'app',
+        toEmails: [...new Set([includeRequester ? parts.requester?.email : null, parts.agent?.email, ...parts.approvers.map((a) => a.email), ...involved.map((a) => a.email)].filter(Boolean))],
       },
     }).catch((err) => logger.warn(`Decision message write failed (non-fatal): ${err.message}`));
 
-    const agentEmail = String(approval.requestedBy || '').toLowerCase();
-    const deciderEmail = String(actorEmail || approval.approverEmail || '').toLowerCase();
     const recipients = [];
-    if (parts.requester && parts.requester.email !== agentEmail && parts.requester.email !== deciderEmail) recipients.push({ ...parts.requester, audience: 'requester' });
-    for (const a of parts.approvers) {
+    if (includeRequester && parts.requester.email !== agentEmail && parts.requester.email !== deciderEmail) recipients.push({ ...parts.requester, audience: 'requester' });
+    for (const a of [...parts.approvers, ...involved]) {
       if (a.email === agentEmail || a.email === deciderEmail || recipients.some((r) => r.email === a.email)) continue;
       recipients.push({ ...a, audience: null });
     }
@@ -1822,6 +1840,36 @@ class TicketApprovalService {
       if (res?.sent !== false) sent += 1;
     }
     return { sent: sent > 0, count: sent };
+  }
+
+  /**
+   * QA 09-18 #1: the other agents on a request — the ticket's current
+   * assignee and everyone who escalated or forwarded it along the chain
+   * (escalationLog.byEmail). Approvers and the asking agent are handled by
+   * the caller; this only adds people who would otherwise never hear the
+   * verdict. Best effort: a missing relation or column yields [].
+   */
+  async _involvedAgents(ticket, approval, parts) {
+    const out = [];
+    const seen = new Set([
+      String(parts?.requester?.email || '').toLowerCase(),
+      String(parts?.agent?.email || '').toLowerCase(),
+      ...((parts?.approvers || []).map((a) => String(a.email || '').toLowerCase())),
+    ].filter(Boolean));
+    const add = (email, name, role = 'agent') => {
+      const e = String(email || '').trim().toLowerCase();
+      if (!looksLikeEmail(e) || seen.has(e)) return;
+      seen.add(e);
+      out.push({ role, email: e, name: name || prettifyLocalPart(e) || e });
+    };
+    const withTech = await Promise.resolve()
+      .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, select: { assignedTech: { select: { email: true, name: true } } } }))
+      .catch(() => null);
+    if (withTech?.assignedTech?.email) add(withTech.assignedTech.email, withTech.assignedTech.name);
+    for (const e of (Array.isArray(approval.escalationLog) ? approval.escalationLog : [])) {
+      if (e && e.byEmail) add(e.byEmail, e.byName || null);
+    }
+    return out;
   }
 
   /**

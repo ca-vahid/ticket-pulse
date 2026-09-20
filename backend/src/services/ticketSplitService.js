@@ -44,6 +44,14 @@ class TicketSplitService {
    * @param {number} workspaceId
    * @param {object} input
    *   entryIds        {number[]} thread entries to carry over (may be empty)
+   *   fromEntryId     {number?}  QA 09-18 #6 — "from this message onward": that
+   *                              message and every conversation message after it
+   *                              (FreshService's split-from-a-note), unioned with entryIds
+   *   requesterEmail  {string?}  QA 09-18 #6 — the child's requester when the
+   *                              split-out ask came from someone else on the thread
+   *   parentStatus    {string?}  QA 09-18 #6 — what happens to the original once the
+   *                              split is done: a status name (e.g. Pending, Resolved);
+   *                              absent/'keep' leaves it untouched. Best effort.
    *   subject         {string}   required — the new ticket's subject
    *   description     {string?}  optional opening description
    *   requesterId     {number?}  defaults to the parent's requester
@@ -99,6 +107,34 @@ class TicketSplitService {
       entries = entries.filter((e) => requestedIds.includes(e.id));
     }
 
+    // QA 09-18 #6: a point-in-time split. The anchor must be one of THIS
+    // ticket's conversation messages; everything from it onward (by time,
+    // then id) joins the selection. Notes after the cut ride along too — the
+    // agents' own working notes about the new issue belong with it.
+    const fromEntryId = Number(input.fromEntryId);
+    let fromEntry = null;
+    if (Number.isFinite(fromEntryId) && fromEntryId > 0) {
+      fromEntry = await prisma.ticketThreadEntry.findFirst({
+        where: { id: fromEntryId, ticketId: parentId, source: CONVERSATION_SOURCES },
+      });
+      if (!fromEntry) throw new ValidationError('The message to split from is not part of this ticket\'s conversation');
+      const onward = await prisma.ticketThreadEntry.findMany({
+        where: {
+          ticketId: parentId,
+          source: CONVERSATION_SOURCES,
+          OR: [
+            { occurredAt: { gt: fromEntry.occurredAt } },
+            { occurredAt: fromEntry.occurredAt, id: { gte: fromEntry.id } },
+          ],
+          AND: [{ OR: [{ bodyText: { not: null } }, { content: { not: null } }, { bodyHtml: { not: null } }] }],
+        },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      });
+      const seen = new Set(entries.map((e) => e.id));
+      for (const e of onward) if (!seen.has(e.id)) { seen.add(e.id); entries.push(e); }
+      entries.sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt) || a.id - b.id);
+    }
+
     const parentRef = ticketDisplayRef(parent);
     const actorLabel = actor?.name || actor?.email || 'an agent';
 
@@ -116,15 +152,24 @@ class TicketSplitService {
         : '',
     ].filter(Boolean).join('');
 
+    // QA 09-18 #6: the split-out ask often comes from a different person on
+    // the thread (a colleague replying "and can you also…"). An explicit
+    // requester e-mail wins over the parent's requester.
+    const requesterEmail = String(input.requesterEmail || '').trim().toLowerCase();
+    const requesterOverride = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(requesterEmail) && requesterEmail !== String(parent.requester?.email || '').toLowerCase()
+      ? { requesterEmail, requesterName: String(input.requesterName || '').trim() || undefined }
+      : null;
     const child = await ticketService.createTicket(workspaceId, {
       subject,
       description: opening,
       priority: Number(input.priority) || parent.priority || 2,
-      requesterId: input.requesterId !== undefined && input.requesterId !== null
-        ? Number(input.requesterId) || undefined
-        : (parent.requesterId || undefined),
-      requesterEmail: parent.requester?.email || undefined,
-      requesterName: parent.requester?.name || undefined,
+      ...(requesterOverride ? requesterOverride : {
+        requesterId: input.requesterId !== undefined && input.requesterId !== null
+          ? Number(input.requesterId) || undefined
+          : (parent.requesterId || undefined),
+        requesterEmail: parent.requester?.email || undefined,
+        requesterName: parent.requester?.name || undefined,
+      }),
       internalCategoryId: input.internalCategoryId !== undefined
         ? (input.internalCategoryId === null ? null : Number(input.internalCategoryId))
         : (parent.internalCategoryId || null),
@@ -235,6 +280,7 @@ class TicketSplitService {
     //    must already be complete and durable by now. Best-effort, like merge.
     const parts = [
       `Split into ${childRef} ("${subject}") by ${actorLabel}.`,
+      fromEntry ? `Everything from the message of ${new Date(fromEntry.occurredAt).toLocaleString('en-CA', { timeZone: 'America/Vancouver' })}${fromEntry.actorName ? ` by ${fromEntry.actorName}` : ''} onward went with it.` : null,
       copied ? `${copied} message${copied === 1 ? '' : 's'} copied across.` : null,
       attachmentsMoved ? `${attachmentsMoved} attachment${attachmentsMoved === 1 ? '' : 's'} moved to ${childRef}.` : null,
       attachmentsCopied ? `${attachmentsCopied} description attachment${attachmentsCopied === 1 ? '' : 's'} copied to ${childRef}.` : null,
@@ -249,7 +295,7 @@ class TicketSplitService {
     }, actor).catch((err) => logger.warn(`Split child note failed (non-fatal): ${err.message}`));
 
     // 6. Audit on both tickets.
-    const details = { childId: child.id, childRef, parentId, parentRef, copied, attachmentsMoved, attachmentsCopied, includeDescription, linkKind, subject };
+    const details = { childId: child.id, childRef, parentId, parentRef, copied, attachmentsMoved, attachmentsCopied, includeDescription, linkKind, subject, fromEntryId: fromEntry?.id || null, requesterOverride: requesterOverride?.requesterEmail || null };
     await Promise.all([
       ticketActivityRepository.create({
         ticketId: parentId,
@@ -274,6 +320,26 @@ class TicketSplitService {
       }))
       .catch((err) => logger.warn(`ticket.split webhook skipped (non-fatal): ${err.message}`));
 
+    // 7. QA 09-18 #6: what happens to the original. The split is durable by
+    //    now, so a status change that fails (FS lane, registry) is reported,
+    //    never fatal. TP-born → the audited status path; FS-born → the FS
+    //    write-back merge already uses for its sources.
+    let parentStatus = null;
+    const wantedStatus = String(input.parentStatus || '').trim();
+    if (wantedStatus && wantedStatus.toLowerCase() !== 'keep' && wantedStatus !== parent.status) {
+      try {
+        if (parent.origin === 'ticketpulse') {
+          await ticketService.changeStatus(parentId, workspaceId, wantedStatus, actor, { resolutionNote: `Split into ${childRef}` });
+        } else {
+          await ticketService.updateFsTicket(parentId, workspaceId, { status: wantedStatus }, actor);
+        }
+        parentStatus = { requested: wantedStatus, applied: true };
+      } catch (err) {
+        logger.warn(`Split parent status change to ${wantedStatus} failed (non-fatal): ${err.message}`);
+        parentStatus = { requested: wantedStatus, applied: false, error: err.message };
+      }
+    }
+
     return {
       parent: { id: parentId, ref: parentRef },
       child: { id: child.id, ref: childRef, subject },
@@ -281,6 +347,8 @@ class TicketSplitService {
       attachmentsMoved,
       attachmentsCopied,
       linkKind,
+      fromEntryId: fromEntry?.id || null,
+      parentStatus,
     };
   }
 
@@ -300,14 +368,16 @@ class TicketSplitService {
       orderBy: { occurredAt: 'asc' },
       select: {
         id: true, eventType: true, actorName: true, actorEmail: true, authorType: true,
-        isPrivate: true, occurredAt: true, bodyText: true, content: true,
+        isPrivate: true, occurredAt: true, bodyText: true, content: true, incoming: true,
       },
     });
     return rows.map((r) => ({
       id: r.id,
       eventType: r.eventType,
       author: r.actorName || r.actorEmail || 'unknown',
+      authorEmail: r.actorEmail ? String(r.actorEmail).toLowerCase() : null,
       authorType: r.authorType,
+      incoming: r.incoming === true,
       isPrivate: r.isPrivate === true,
       occurredAt: r.occurredAt,
       excerpt: String(r.bodyText || r.content || '').replace(/\s+/g, ' ').trim().slice(0, 180),

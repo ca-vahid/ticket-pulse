@@ -20,12 +20,13 @@ const refOf = (t) => t?.displayRef
  * tickets can be folded IN as sources — their conversation is copied and the
  * FreshService ticket is closed with a pointer note (QA 07-16 #5).
  */
-export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDefs = null }) {
+export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDefs = null, initialTickets = [] }) {
   const [candidates, setCandidates] = useState(null); // [{...ticket, why}]
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
-  const [selected, setSelected] = useState(() => new Map([[ticket.id, ticket]]));
+  // QA 09-18 #3: opened from the queue's bulk bar with the selection already in.
+  const [selected, setSelected] = useState(() => new Map([[ticket.id, ticket], ...initialTickets.filter((t) => t && t.id !== ticket.id).map((t) => [t.id, t])]));
   const [primaryId, setPrimaryId] = useState(ticket.id);
   const [notifyRequester, setNotifyRequester] = useState(false);
   const [busy, setBusy] = useState(false);
