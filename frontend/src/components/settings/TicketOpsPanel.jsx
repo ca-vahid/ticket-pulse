@@ -1069,7 +1069,7 @@ export function ReplyGreetingSection() {
           <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1.5">How a reply opens and closes</p>
           <div className="rounded-md bg-card border border-border px-3 py-2.5 text-sm text-foreground/85 space-y-2">
             <p>{previewLines(draft.greeting).map((l, i) => <span key={i}>{l}<br /></span>)}</p>
-            <p className="text-muted-foreground/60 italic">…the agent's reply…</p>
+            <p className="text-muted-foreground/60 italic">…the agent&rsquo;s reply…</p>
             <p>{previewLines(draft.signoff).map((l, i) => <span key={i}>{l}<br /></span>)}</p>
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground/75">Names come from the ticket and the signed-in agent. The e-mail signature (Settings → Signatures) still goes under the sign-off.</p>

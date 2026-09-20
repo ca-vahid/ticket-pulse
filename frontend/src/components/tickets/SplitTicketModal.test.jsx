@@ -50,7 +50,7 @@ describe('SplitTicketModal — from a message onward (QA 09-18 #6)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Split from the message from Anna Lee/ }));
     expect(screen.getByText('(2)')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('split-requester-suggestion').querySelector('input'));
-    fireEvent.click(screen.getByRole("radio", { name: /Set it to Pending/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Set it to Pending/ }));
     fireEvent.click(screen.getByTestId('split-submit'));
     await waitFor(() => {
       expect(ticketsAPI.split).toHaveBeenCalledWith(500, expect.objectContaining({

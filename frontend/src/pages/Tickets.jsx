@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
-  Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, Check,
+  Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
   AlignJustify, Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
