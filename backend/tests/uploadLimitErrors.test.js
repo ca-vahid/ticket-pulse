@@ -51,6 +51,15 @@ describe('upload limits are client errors with a usable message', () => {
     expect(loggerMock.error).not.toHaveBeenCalled();
   });
 
+  test('a client that aborted mid-request → 400 request_aborted, no restart advice (21 Sep 2026)', () => {
+    const res = run(Object.assign(new Error('request aborted'), { type: 'request.aborted', code: 'ECONNABORTED', status: 400, statusCode: 400 }));
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('request_aborted');
+    expect(res.body.message).toMatch(/cancelled by the client/i);
+    expect(loggerMock.error).not.toHaveBeenCalled();
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+  });
+
   test('a genuine programming error is still a 500 and still flagged', () => {
     const res = run(new TypeError('x is not a function'));
     expect(res.statusCode).toBe(500);

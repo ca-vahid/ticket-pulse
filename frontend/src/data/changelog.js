@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.62-preview';
+export const APP_VERSION = '3.9.63-preview';
 
 export const changelog = [
+  {
+    version: '3.9.63-preview',
+    date: 'September 21, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Quieter, truer server log</strong> \u2014 a browser tab closing mid-request is recorded as a cancelled request, not as a crash; and a failed FreshService activity fetch now logs the real FreshService reason instead of a serialisation error.' },
+    ],
+  },
   {
     version: '3.9.62-preview',
     date: 'September 21, 2026',
