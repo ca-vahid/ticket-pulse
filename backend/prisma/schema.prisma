@@ -115,6 +115,7 @@ model Workspace {
   tickets                           Ticket[]
   syncLogs                          SyncLog[]
   noiseRules                        NoiseRule[]
+  alertCorrelationRules             AlertCorrelationRule[]
   businessHours                     BusinessHour[]
   holidays                          Holiday[]
   autoResponses                     AutoResponse[]
@@ -1506,6 +1507,37 @@ model Ticket {
   @@index([workspaceId, origin])
   @@index([mirrorState])
   @@map("tickets")
+}
+
+// Alert correlation (20 Sep 2026): pair rules (fired ↔ cleared) + storm grouping for
+// machine alerts. Regexes; `(?<key>…)` names the instance, `(?<family>…)` the storm family.
+model AlertCorrelationRule {
+  id                  Int       @id @default(autoincrement())
+  workspaceId         Int       @map("workspace_id")
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                String    @db.VarChar(160)
+  description         String?   @db.Text
+  isEnabled           Boolean   @default(true) @map("is_enabled")
+  senderPattern       String    @map("sender_pattern") @db.Text
+  firedPattern        String    @map("fired_pattern") @db.Text
+  clearedPattern      String?   @map("cleared_pattern") @db.Text
+  followupPattern     String?   @map("followup_pattern") @db.Text
+  pairWindowMinutes   Int       @default(360) @map("pair_window_minutes")
+  pairAction          String    @default("resolve") @map("pair_action") @db.VarChar(20) // resolve | link_only
+  orphanClearedAction String    @default("resolve") @map("orphan_cleared_action") @db.VarChar(20) // resolve | leave
+  stormEnabled        Boolean   @default(true) @map("storm_enabled")
+  stormWindowMinutes  Int       @default(60) @map("storm_window_minutes")
+  stormMinCount       Int       @default(3) @map("storm_min_count")
+  resolutionReason    String    @default("benign_expected") @map("resolution_reason") @db.VarChar(40)
+  skipAi              Boolean   @default(true) @map("skip_ai")
+  matchCount          Int       @default(0) @map("match_count")
+  lastMatchedAt       DateTime? @map("last_matched_at")
+  createdBy           String?   @map("created_by") @db.VarChar(255)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([workspaceId, isEnabled])
+  @@map("alert_correlation_rules")
 }
 
 model NoiseRule {

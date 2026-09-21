@@ -10,6 +10,7 @@ import { dataCache } from '../services/dataCache';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import NoiseRulesPanel from '../components/NoiseRulesPanel';
+import AlertCorrelationPanel from '../components/settings/AlertCorrelationPanel';
 import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
@@ -1767,6 +1768,13 @@ export default function Settings() {
                 {/* Noise Rules */}
                 {activeSectionId === 'noise-rules' && (
                   <NoiseRulesPanel />
+                )}
+
+                {/* Alert correlation (20 Sep 2026) */}
+                {activeSectionId === 'alert-correlation' && (
+                  <div className="p-6">
+                    <AlertCorrelationPanel />
+                  </div>
                 )}
 
                 {/* Vacation Tracker */}

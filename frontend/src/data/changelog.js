@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.59-preview';
+export const APP_VERSION = '3.9.60-preview';
 
 export const changelog = [
+  {
+    version: '3.9.60-preview',
+    date: 'September 20, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Alert correlation</strong> — machine alerts that come in pairs (“Fired” then “Resolved”, “is Down” then “is Up”, “ON” then “OFF”) are matched the moment the second one arrives: both are resolved with a note and linked, at any hour, with no AI run. A burst of the same alert across many hosts is folded under one parent ticket. A ticket a person has touched or already closed is never changed. Rules live in Settings → Alert correlation, with a dry run over history, an “apply to open tickets” button, suggestions for senders with no rule yet, and four starter rules for IT (Azure Monitor, Site24x7, Cambio Earth, Rapid Recovery).' },
+    ],
+  },
   {
     version: '3.9.59-preview',
     date: 'September 20, 2026',

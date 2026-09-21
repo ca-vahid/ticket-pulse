@@ -13,10 +13,10 @@ import { ticketRef, actorRef } from './relationWebhookPayload.js';
 const LINK_KINDS = ['duplicate_of', 'related_to'];
 // Kinds the generic unlink() refuses to touch — they have dedicated lifecycles
 // (removeParent) or are immutable audit pointers (merged_into).
-const PROTECTED_LINK_KINDS = new Set(['parent_of', 'merged_into']);
+const PROTECTED_LINK_KINDS = new Set(['parent_of', 'merged_into', 'cleared_by']);
 // The inverse label shown on the other ticket. merged_into links are created
 // by ticketMergeService (not user-linkable directly).
-const INVERSE_LABEL = { duplicate_of: 'has duplicate', related_to: 'related to', parent_of: 'child of', merged_into: 'merged from' };
+const INVERSE_LABEL = { duplicate_of: 'has duplicate', related_to: 'related to', parent_of: 'child of', merged_into: 'merged from', cleared_by: 'clears' };
 
 /**
  * Explicit ticket relationships: duplicate_of / related_to / parent_of.

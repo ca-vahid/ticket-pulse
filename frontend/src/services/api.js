@@ -1263,6 +1263,20 @@ export const ticketsAPI = {
  * 'ui.theme'). Marked speculative: a stray 401 (the theme seed racing
  * sign-in) must never trip the AuthContext recovery loop.
  */
+/** Alert correlation (20 Sep 2026): pair rules + storm grouping for machine alerts. */
+export const alertCorrelationAPI = {
+  listRules: () => api.get('/alert-correlation/rules'),
+  starter: () => api.get('/alert-correlation/starter'),
+  createRule: (data) => api.post('/alert-correlation/rules', data),
+  installStarter: () => api.post('/alert-correlation/rules/starter'),
+  updateRule: (id, data) => api.put(`/alert-correlation/rules/${id}`, data),
+  deleteRule: (id) => api.delete(`/alert-correlation/rules/${id}`),
+  preview: (days) => api.post('/alert-correlation/preview', { days }),
+  apply: (days) => api.post('/alert-correlation/apply', { days }),
+  suggestions: (days) => api.get('/alert-correlation/suggestions', { params: { days } }),
+  activity: (days) => api.get('/alert-correlation/activity', { params: { days } }),
+};
+
 export const uiPreferencesAPI = {
   get: (key) => api.get(`/tickets/preferences/${encodeURIComponent(key)}`, { _speculative: true }),
   set: (key, value) => api.put(`/tickets/preferences/${encodeURIComponent(key)}`, { value }, { _speculative: true }),

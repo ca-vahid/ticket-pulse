@@ -1,5 +1,6 @@
 import {
   Bell,
+  Radar,
   BarChart3,
   Bot,
   Brain,
@@ -50,6 +51,7 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // this Settings mount is the admin's second door to the same panel.
   { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin', group: 'Tickets & AI' },
+  { id: 'alert-correlation', label: 'Alert correlation', Icon: Radar, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
   // Notifications & Public
