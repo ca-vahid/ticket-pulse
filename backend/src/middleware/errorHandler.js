@@ -38,6 +38,15 @@ export function errorHandler(err, req, res, _next) {
     err = friendly;
   }
 
+  // A client that hung up before the body arrived (body-parser's raw-body
+  // 'request.aborted', e.g. the presence beacon of a tab being closed) is not
+  // a crash either (21 Sep 2026: one "consider restarting" line per closed tab).
+  if (err?.type === 'request.aborted') {
+    const aborted = new AppError('The request was cancelled by the client before it finished sending.', 400);
+    aborted.code = 'request_aborted';
+    err = aborted;
+  }
+
   // Determine status code
   const statusCode = err.statusCode || 500;
 

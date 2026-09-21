@@ -525,7 +525,7 @@ class FreshServiceClient {
       const response = await this._fetchWithRetry(`/tickets/${ticketId}/activities`, {}, 3);
       return response.data.activities || [];
     } catch (error) {
-      logger.error(`Error fetching activities for ticket ${ticketId}:`, error);
+      logger.error(`Error fetching activities for ticket ${ticketId}:`, { status: getFreshServiceStatus(error), message: error.message });
       throw error;
     }
   }
