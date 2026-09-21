@@ -186,6 +186,32 @@ class AssignmentPipelineService {
       return { skipped: true, reason: 'priority_assessment_after_hours_disabled' };
     }
 
+    // ── Alert correlation (automatic triggers only, 20 Sep 2026) ─────────
+    // "Server down" / "server up" from a monitoring sender pair up here and
+    // both resolve; a burst of alerts folds under one parent. Runs before
+    // the duplicate guard and before any queueing, so a correlated alert
+    // never waits for business hours and never reaches the LLM.
+    if (!isManual && !reboundFrom && !isPriorityAssessmentOnly) {
+      try {
+        const { default: alertCorrelationService } = await import('./alertCorrelationService.js');
+        const correlation = await alertCorrelationService.evaluateTicket(ticketId, workspaceId, { triggerSource });
+        if (correlation?.handled && correlation.skipAi) {
+          const run = await alertCorrelationService.recordRun(ticketId, workspaceId, triggerSource, correlation);
+          this._broadcastRunUpdate(workspaceId, ticketId, run.id, 'completed');
+          emit({ type: 'complete', runId: run.id });
+          return { skipped: true, reason: 'alert_correlated', correlation: correlation.kind, runId: run.id };
+        }
+        if (correlation?.defer) {
+          // A clear notice whose alert may be a minute behind in the sync: the
+          // 5-minute sweep re-evaluates it; no AI run is queued meanwhile.
+          emit({ type: 'complete', runId: null });
+          return { skipped: true, reason: 'alert_pending', correlation: correlation.kind };
+        }
+      } catch (err) {
+        logger.warn('Alert correlation failed (non-fatal, continuing with run)', { ticketId, workspaceId, error: err.message });
+      }
+    }
+
     // ── Duplicate-burst guard (automatic triggers only) ─────────────────
     // Same requester + same normalized subject within a 15-minute window ⇒
     // link as duplicate of the first copy and skip the LLM entirely (one

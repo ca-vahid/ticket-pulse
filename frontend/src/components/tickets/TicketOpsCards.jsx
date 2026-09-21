@@ -14,6 +14,7 @@ const KIND_LABEL = {
   duplicate_of: 'duplicate of',
   related_to: 'related to',
   parent_of: 'parent of',
+  cleared_by: 'cleared by',
   merged_into: 'merged into',
 };
 

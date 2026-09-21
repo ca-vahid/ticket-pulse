@@ -414,6 +414,14 @@ async function initialize() {
       logger.warn('Notification time-trigger worker failed to start (non-fatal):', e.message);
     }
 
+    // Alert correlation: 5-minute sweep pairing fired/cleared machine alerts and grouping storms.
+    try {
+      const { default: alertCorrelationService } = await import('./services/alertCorrelationService.js');
+      alertCorrelationService.start();
+    } catch (e) {
+      logger.warn('Alert correlation sweep failed to start (non-fatal):', e.message);
+    }
+
     // Custom agent alerts: coalescing flush worker (storm protection).
     try {
       const { default: agentAlertService } = await import('./services/agentAlertService.js');
