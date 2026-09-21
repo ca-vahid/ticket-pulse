@@ -1,6 +1,6 @@
 # ContinuIT × Ticket Pulse — integration guide (go-live edition)
 
-**For:** the ContinuIT team (office check-ins / business continuity), moving from FreshService to Ticket Pulse.
+**For:** the ContinuIT team (office check-ins), moving from FreshService to Ticket Pulse.
 **Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
 **Ticket Pulse version:** 3.9.55 (19 Sep 2026). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
