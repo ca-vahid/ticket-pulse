@@ -1192,7 +1192,10 @@ class TicketApprovalService {
    */
   async overview(workspaceId, { status = null, categoryId = null, limit = 200, q = null, approver = null, requestedBy = null, from = null, to = null, sort = 'newest' } = {}) {
     const where = { workspaceId };
-    if (status) where.status = status;
+    // Several statuses at once ("Approved and Not approved") arrive comma-joined (20 Sep 2026).
+    const statuses = String(status || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 1) where.status = statuses[0];
+    else if (statuses.length > 1) where.status = { in: statuses };
     if (categoryId) where.approvalCategoryId = Number(categoryId);
     // QA 09-16 #4: the redesigned Approvals page filters by people, dates and text.
     const text = (v) => String(v || '').trim();

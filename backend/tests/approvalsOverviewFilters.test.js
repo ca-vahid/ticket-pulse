@@ -46,6 +46,12 @@ describe('ticketApprovalService.overview filters (QA 09-16 #4)', () => {
     args = prismaMock.ticketApproval.findMany.mock.calls[1][0];
     expect(args.orderBy).toEqual([{ status: 'asc' }, { id: 'desc' }]);
   });
+
+  test('several statuses arrive comma-joined and become an IN (Approvals status menu, 20 Sep 2026)', async () => {
+    await ticketApprovalService.overview(1, { status: 'approved, rejected' });
+    const args = prismaMock.ticketApproval.findMany.mock.calls[0][0];
+    expect(args.where.status).toEqual({ in: ['approved', 'rejected'] });
+  });
 });
 
 describe('overview rows carry people’s NAMES (18 Sep 2026)', () => {

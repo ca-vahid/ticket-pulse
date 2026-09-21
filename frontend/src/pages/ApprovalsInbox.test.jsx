@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { formatDayTime, timeAgo } from '../components/tickets/ticketUi';
+import { resolveWhen } from '../components/common/WhenFilter';
 
 // Phase B + E (QA 08-11 #4, 08-14 #3): the inbox subtitle names approvals as a
 // Ticket Pulse-only feature, and row timestamps follow "absolute · relative".
@@ -84,7 +85,7 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     expect(screen.queryByTestId('approval-categories-panel')).not.toBeInTheDocument();
   });
 
-  test('All approvals (QA 09-16 #4): filter bar drives the overview query — search, status tile, sort, more filters', async () => {
+  test('All approvals (QA 09-16 #4, B1 20 Sep 2026): filter bar drives the overview query — search, status strip + menu (several at once), approver, When presets', async () => {
     roleState.role = 'reviewer';
     apiOverrides.approvalsOverview = vi.fn(() => Promise.resolve({
       stats: { pending: 1, info_requested: 0, approved: 27, rejected: 2, cancelled: 19 },
@@ -93,19 +94,42 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     renderPage('/approvals?tab=all');
     await screen.findByText('New Computer/Improving Speeds');
     expect(screen.getByTestId('approvals-filters')).toBeInTheDocument();
-    // status tile = one-click filter
+    // the ticket is an icon after the title, not a number
+    expect(screen.getByRole('link', { name: 'Open ticket #228440' })).toHaveAttribute('href', '/tickets/9?tab=approvals');
+    // status strip = one-click toggles; two on = comma-joined
     fireEvent.click(screen.getByRole('button', { name: /27\s*Approved/ }));
     await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'approved' })));
-    // more filters: approver + dates
-    fireEvent.click(screen.getByRole('button', { name: /More filters/ }));
+    fireEvent.click(screen.getByRole('button', { name: /2\s*Not approved/ }));
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'approved,rejected' })));
+    // the status menu shows the same choice with counts, and unticks one
+    fireEvent.click(screen.getByRole('button', { name: /^Status: 2 statuses/ }));
+    const approvedOpt = screen.getByRole('option', { name: /Approved\s*27/ });
+    expect(approvedOpt).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(approvedOpt);
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'rejected' })));
+    // approver is typed straight into the bar
     fireEvent.change(screen.getByLabelText('Approver'), { target: { value: 'reza' } });
-    fireEvent.change(await screen.findByLabelText('Requested from'), { target: { value: '2026-09-01' } });
-    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'approved', approver: 'reza', from: '2026-09-01' })));
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'rejected', approver: 'reza' })));
+    // When: one control, presets resolve to from / to
+    fireEvent.click(screen.getByRole('button', { name: /^When: Any time/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Last 30 days' }));
+    const { from, to } = resolveWhen('30d');
+    await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith(expect.objectContaining({ approver: 'reza', from, to })));
+    expect(screen.getByRole('button', { name: /^When: Last 30 days/ })).toBeInTheDocument();
     // export is offered for the filtered set
     expect(screen.getByRole('button', { name: /Export CSV/ })).not.toBeDisabled();
     // clear
     fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }));
     await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith({}));
+  });
+
+  test('For you (A1, 20 Sep 2026): one Decide button, no Ask / Escalate / Forward, the ticket is an icon after the title', async () => {
+    renderPage();
+    await screen.findByText('New laptop for Rita');
+    expect(screen.getByRole('button', { name: /Decide/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Escalate|Forward|^Ask/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open ticket TP-77' })).toHaveAttribute('href', '/tickets/501?tab=approvals');
+    expect(screen.queryByText('TP-77')).not.toBeInTheDocument();
   });
 
   test('pending rows show "absolute · relative" timestamps (QA 08-14 #3)', async () => {

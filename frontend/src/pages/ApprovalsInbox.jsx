@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Ban, CheckCircle2, Clock, XCircle,
-  Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
-  Search, Download, SlidersHorizontal, CalendarDays, UserRound,
+  Loader2, Check, X, MessageCircleQuestion, Inbox, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
+  Search, Download, UserRound, Ticket, Flag, ChevronDown,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer from '../components/tickets/ApprovalComposer';
@@ -11,6 +11,7 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import FancySelect from '../components/common/FancySelect';
+import WhenFilter, { resolveWhen } from '../components/common/WhenFilter';
 import { ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
@@ -20,15 +21,16 @@ import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { BrandArt, PersonAvatar, formatDayTime, timeAgo } from '../components/tickets/ticketUi';
 
 /**
- * Approvals (QA 09-16 #4 redesign; density pass 20 Sep 2026): an illustrated
- * inbox that matches the rest of the app — status art per row, people with
- * photos, and for reviewers a real filter bar (text, status, category,
- * approver, requester, dates, sort) with CSV export over the filtered set.
+ * Approvals (QA 09-16 #4 redesign; density pass 20 Sep 2026, "A1 + B1"): an
+ * illustrated inbox that matches the rest of the app — status art per row,
+ * people with photos in their own column, one Decide button (ask / escalate /
+ * forward live inside it), the ticket as an icon after the title. Reviewers
+ * get a real filter bar: text, a status menu (several at once), category,
+ * approver, requester, one When control (presets + calendar), sort, CSV.
  *
  * Every tab has its own URL (/approvals, /approvals/all, /approvals/categories)
  * and the All-approvals filters live in the query string, so F5 and shared
- * links land where you were. Rows are two lines: what was asked and what
- * happened to it on the left, the people on the right.
+ * links land where you were.
  */
 const STATUS_META = {
   pending: { label: 'Pending', art: 'approval-waiting', dot: 'bg-amber-500' },
@@ -77,7 +79,7 @@ function SidePerson({ label, name, email, size = 'h-7 w-7' }) {
   );
 }
 
-/** Inline mention: small avatar + name, for "Requested by X · for Y" in a sentence. */
+/** Inline mention: small avatar + name, for "Neville asks …" in a sentence. */
 function InlinePerson({ name, email }) {
   const photo = useRequesterPhoto(email);
   const shown = name || prettyName(email);
@@ -93,7 +95,7 @@ function InlinePerson({ name, email }) {
  * The people on an approval, de-duplicated: when the person who asked is also
  * the one it is for (Soheil asking for himself) one entry does, labelled so.
  */
-function peopleOf(a) {
+function peopleOf(a, { withApprover = true } = {}) {
   const out = [];
   const byEmail = lower(a.requestedBy);
   const forEmail = lower(a.requesterEmail);
@@ -103,7 +105,7 @@ function peopleOf(a) {
     out.push({ label: 'Requested by', name: a.requestedByName, email: a.requestedBy });
     if (a.requesterName || a.requesterEmail) out.push({ label: 'For', name: a.requesterName, email: a.requesterEmail });
   }
-  out.push({ label: 'Approver', name: a.approverName, email: a.approverEmail });
+  if (withApprover) out.push({ label: 'Approver', name: a.approverName, email: a.approverEmail });
   return out;
 }
 
@@ -208,12 +210,62 @@ const STAT_TILES = [
   { key: 'rejected', label: 'Not approved', color: 'text-red-600 dark:text-red-300' },
   { key: 'cancelled', label: 'Cancelled', color: 'text-muted-foreground' },
 ];
+const splitStatuses = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+/** Status menu: several at once ("Approved and Not approved"), counts beside each. */
+function StatusFilter({ value, onChange, stats }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const chosen = splitStatuses(value);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (!rootRef.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  const toggle = (k) => onChange((chosen.includes(k) ? chosen.filter((x) => x !== k) : [...chosen, k]).join(','));
+  const label = chosen.length === 0 ? 'Any status' : chosen.length === 1 ? STATUS_META[chosen[0]]?.label || chosen[0] : `${chosen.length} statuses`;
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={`Status: ${label}`}
+        className={`tp-focus-ring inline-flex h-9 w-full items-center gap-1.5 rounded-lg border px-2.5 text-sm ${chosen.length ? 'border-blue-300 bg-blue-50 font-semibold text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200' : 'border-input bg-card text-foreground'}`}
+      >
+        <Flag className={`h-3.5 w-3.5 flex-shrink-0 ${chosen.length ? '' : 'text-muted-foreground/75'}`} aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
+      </button>
+      {open && (
+        <div role="listbox" aria-multiselectable="true" aria-label="Status" className="tp-card absolute left-0 top-full z-30 mt-1 w-52 rounded-xl p-1.5 shadow-soft animate-popIn">
+          {STAT_TILES.map(({ key, label: l }) => {
+            const on = chosen.includes(key);
+            return (
+              <button key={key} type="button" role="option" aria-selected={on} onClick={() => toggle(key)} className={`tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] ${on ? 'text-foreground' : 'text-foreground/85 hover:bg-muted'}`}>
+                <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${on ? 'border-blue-600 bg-blue-600 text-white' : 'border-input bg-card'}`} aria-hidden="true">{on && <Check className="h-3 w-3" />}</span>
+                <span className={`h-2 w-2 flex-shrink-0 rounded-full ${STATUS_META[key].dot}`} aria-hidden="true" />
+                <span className="flex-1">{l}</span>
+                <span className="text-xs tabular-nums text-muted-foreground/75">{stats?.[key] ?? 0}</span>
+              </button>
+            );
+          })}
+          <button type="button" onClick={() => { onChange(''); setOpen(false); }} disabled={!chosen.length} className="tp-focus-ring mt-1 flex w-full items-center rounded-lg border-t border-border/60 px-2 pb-1 pt-2 text-xs font-semibold text-blue-700 hover:underline disabled:text-muted-foreground/60 disabled:no-underline dark:text-blue-200">Clear</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'status', label: 'By status' },
 ];
-const EMPTY_FILTERS = { q: '', status: '', categoryId: '', approver: '', requestedBy: '', from: '', to: '', sort: 'newest' };
+const EMPTY_FILTERS = { q: '', status: '', categoryId: '', approver: '', requestedBy: '', when: '', sort: 'newest' };
 const FILTER_KEYS = Object.keys(EMPTY_FILTERS);
 
 const TABS = ['mine', 'all', 'categories'];
@@ -228,6 +280,8 @@ function tabFromLocation(location) {
 function filtersFromParams(sp) {
   const f = { ...EMPTY_FILTERS };
   for (const k of FILTER_KEYS) { const v = sp.get(k); if (v) f[k] = v; }
+  // Links from before the When control carried from / to.
+  if (!f.when && (sp.get('from') || sp.get('to'))) f.when = `${sp.get('from') || sp.get('to')}..${sp.get('to') || sp.get('from')}`;
   if (!SORT_OPTIONS.some((o) => o.value === f.sort)) f.sort = 'newest';
   return f;
 }
@@ -245,14 +299,21 @@ function csvEscape(v) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const RefLink = ({ a, state }) => (
-  <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={state} className="tp-focus-ring inline-flex items-center gap-0.5 rounded font-mono text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-200">
-    {a.displayRef} <ExternalLink className="h-3 w-3" aria-hidden="true" />
+/** The ticket as an icon after the title: opens /tickets/:id on its Approvals tab. */
+const TicketIcon = ({ a, state }) => (
+  <Link
+    to={`/tickets/${a.ticketId}?tab=approvals`}
+    state={state}
+    title={`Open ${a.displayRef}`}
+    aria-label={`Open ticket ${a.displayRef}`}
+    className="tp-focus-ring inline-flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25"
+  >
+    <Ticket className="h-3.5 w-3.5" aria-hidden="true" />
   </Link>
 );
 const Dot = () => <span className="text-muted-foreground/40" aria-hidden="true">·</span>;
-const When = ({ at }) => (
-  <span className="whitespace-nowrap text-[11px] text-muted-foreground/75" title={new Date(at).toLocaleString()}>
+const When = ({ at, className = '' }) => (
+  <span className={`whitespace-nowrap text-[11px] text-muted-foreground/75 ${className}`} title={new Date(at).toLocaleString()}>
     <span className="hidden sm:inline">{`${formatDayTime(at)} · ${timeAgo(at)}`}</span>
     <span className="sm:hidden">{timeAgo(at)}</span>
   </span>
@@ -278,7 +339,6 @@ export default function ApprovalsInbox() {
   const [overview, setOverview] = useState(null); // { stats, items }
   const [filters, setFilters] = useState(() => filtersFromParams(searchParams));
   const [debouncedQ, setDebouncedQ] = useState(filters.q.trim());
-  const [showFilters, setShowFilters] = useState(() => Boolean(filters.from || filters.to));
   const [expanded, setExpanded] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   // Filter changes refetch SILENTLY (a spinner replacing the filter bar while
@@ -344,17 +404,18 @@ export default function ApprovalsInbox() {
 
   const overviewParams = useMemo(() => {
     const p = {};
-    if (filters.status) p.status = filters.status;
+    if (filters.status) p.status = splitStatuses(filters.status).join(',');
     if (filters.categoryId) p.categoryId = filters.categoryId;
     if (debouncedQ) p.q = debouncedQ;
     if (filters.approver.trim()) p.approver = filters.approver.trim();
     if (filters.requestedBy.trim()) p.requestedBy = filters.requestedBy.trim();
-    if (filters.from) p.from = filters.from;
-    if (filters.to) p.to = filters.to;
+    const when = resolveWhen(filters.when);
+    if (when.from) p.from = when.from;
+    if (when.to) p.to = when.to;
     if (filters.sort && filters.sort !== 'newest') p.sort = filters.sort;
     return p;
-  }, [filters.status, filters.categoryId, debouncedQ, filters.approver, filters.requestedBy, filters.from, filters.to, filters.sort]);
-  const activeFilterCount = Object.keys(overviewParams).filter((k) => k !== 'sort').length;
+  }, [filters.status, filters.categoryId, debouncedQ, filters.approver, filters.requestedBy, filters.when, filters.sort]);
+  const activeFilterCount = ['status', 'categoryId', 'q', 'approver', 'requestedBy', 'from'].filter((k) => overviewParams[k]).length;
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true); else setRefreshing(true);
@@ -392,6 +453,7 @@ export default function ApprovalsInbox() {
 
   const resubmit = (a) => act(() => ticketsAPI.resubmitApproval(a.ticketId, a.id), a.id);
   const setFilter = (patch) => setFilters((f) => ({ ...f, ...patch }));
+  const toggleStatus = (k) => { const cur = splitStatuses(filters.status); setFilter({ status: (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]).join(',') }); };
   const toggleExpanded = (id) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const exportCsv = () => {
@@ -433,24 +495,7 @@ export default function ApprovalsInbox() {
     return [...map.values()].sort((x, y) => x.name.localeCompare(y.name));
   }, [meta, overview, pending, needsInfo]);
 
-  const inboxActions = (a) => (
-    <div className="flex flex-wrap items-center gap-1 sm:flex-nowrap">
-      <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-        {busyId === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Decide
-      </button>
-      <button onClick={() => openComposer(a)} disabled={busyId === a.id} title="Ask the requester a question" className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:text-violet-200 dark:hover:bg-violet-500/15">
-        <MessageCircleQuestion className="h-3 w-3" /> Ask
-      </button>
-      {a.canEscalate && (
-        <button onClick={() => openComposer(a)} disabled={busyId === a.id} title={`Escalate to ${a.nextTierName || 'the next tier'}`} className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:text-amber-200 dark:hover:bg-amber-500/15">
-          <ArrowUpRight className="h-3 w-3" /> Escalate
-        </button>
-      )}
-      <button onClick={() => openComposer(a)} disabled={busyId === a.id} title="Forward to anyone in the workspace as the final approver" className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
-        <Forward className="h-3 w-3" /> Forward
-      </button>
-    </div>
-  );
+  const chosenStatuses = splitStatuses(filters.status);
 
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
@@ -516,15 +561,15 @@ export default function ApprovalsInbox() {
           <div className="flex items-center justify-center py-24 text-muted-foreground/75"><Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" /></div>
         ) : view === 'all' && canReview ? (
           <div className="space-y-3" data-testid="approvals-all">
-            {/* Status strip = one-click filters. One card, five segments, one line. */}
+            {/* Status strip = counts at a glance and one-click toggles (several may be on). */}
             <div role="group" aria-label="Approvals by status" className="tp-card flex divide-x divide-border/70 overflow-hidden rounded-xl">
               {STAT_TILES.map(({ key, label, color }) => {
-                const active = filters.status === key;
+                const active = chosenStatuses.includes(key);
                 return (
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setFilter({ status: active ? '' : key })}
+                    onClick={() => toggleStatus(key)}
                     aria-pressed={active}
                     className={`tp-focus-ring relative flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition-colors ${active ? 'bg-muted/70' : 'hover:bg-muted/40'}`}
                   >
@@ -537,7 +582,7 @@ export default function ApprovalsInbox() {
               })}
             </div>
 
-            {/* Filter bar */}
+            {/* Filter bar — everything in one row, nothing behind "More filters" */}
             <div className="tp-card rounded-xl p-2.5" data-testid="approvals-filters">
               <div className="flex flex-wrap items-center gap-2">
                 <label className="relative min-w-[200px] flex-1">
@@ -551,27 +596,22 @@ export default function ApprovalsInbox() {
                     className="tp-focus-ring h-9 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm placeholder:text-muted-foreground/75"
                   />
                 </label>
+                <div className="w-36">
+                  <StatusFilter value={filters.status} onChange={(v) => setFilter({ status: v })} stats={overview?.stats} />
+                </div>
                 <div className="w-44">
                   <FancySelect value={filters.categoryId} onChange={(v) => setFilter({ categoryId: v })} options={categoryOptions} aria-label="Approval category" />
                 </div>
-                <div className="w-44">
+                <div className="w-40">
                   <PersonFilter id="ap-f-approver" label="Approver" placeholder="Any approver" value={filters.approver} onChange={(v) => setFilter({ approver: v })} people={personOptions} />
                 </div>
-                <div className="w-44">
+                <div className="w-40">
                   <PersonFilter id="ap-f-requested-by" label="Requested by" placeholder="Any requester" value={filters.requestedBy} onChange={(v) => setFilter({ requestedBy: v })} people={personOptions} />
                 </div>
+                <WhenFilter className="w-40" value={filters.when} onChange={(v) => setFilter({ when: v })} />
                 <div className="w-36">
                   <FancySelect value={filters.sort} onChange={(v) => setFilter({ sort: v })} options={SORT_OPTIONS} aria-label="Sort approvals" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowFilters((v) => !v)}
-                  aria-expanded={showFilters}
-                  className={`tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold ${showFilters || filters.from || filters.to ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200' : 'border-border bg-card text-muted-foreground hover:text-foreground'}`}
-                >
-                  <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" /> More filters
-                  {activeFilterCount > 0 && <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">{activeFilterCount}</span>}
-                </button>
                 {refreshing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/60" aria-label="Updating" />}
                 <button
                   type="button"
@@ -583,19 +623,6 @@ export default function ApprovalsInbox() {
                   <Download className="h-3.5 w-3.5" aria-hidden="true" /> Export CSV
                 </button>
               </div>
-              {showFilters && (
-                <div className="mt-2.5 flex flex-wrap items-end gap-3 border-t border-border/60 pt-2.5 animate-popIn">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    <label htmlFor="ap-f-from" className="mb-1 inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden="true" /> Requested from</label>
-                    <input id="ap-f-from" type="date" value={filters.from} onChange={(e) => setFilter({ from: e.target.value })} className="tp-focus-ring block h-9 w-44 rounded-lg border border-input bg-card px-3 text-sm text-foreground" />
-                  </div>
-                  <div className="text-xs font-medium text-muted-foreground">
-                    <label htmlFor="ap-f-to" className="mb-1 inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden="true" /> Requested to</label>
-                    <input id="ap-f-to" type="date" value={filters.to} onChange={(e) => setFilter({ to: e.target.value })} className="tp-focus-ring block h-9 w-44 rounded-lg border border-input bg-card px-3 text-sm text-foreground" />
-                  </div>
-                  <span className="hidden items-center gap-1 pb-2 text-[11px] text-muted-foreground/75 sm:inline-flex"><SlidersHorizontal className="h-3 w-3" aria-hidden="true" /> Approver and requester are in the bar above — type a name or pick from the list.</span>
-                </div>
-              )}
               {activeFilterCount > 0 && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <span>{overview?.items?.length ?? 0} approval{(overview?.items?.length ?? 0) === 1 ? '' : 's'} match</span>
@@ -610,7 +637,7 @@ export default function ApprovalsInbox() {
             {(overview?.items?.length || 0) === 0 ? (
               <div className="tp-card rounded-xl p-10 text-center">
                 <BrandArt name="approval-inbox" className="mx-auto mb-3 h-12 w-12 opacity-80" />
-                <p className="text-sm font-medium text-foreground/85">No approvals{filters.status ? ` with status “${STATUS_META[filters.status]?.label}”` : ''}{activeFilterCount ? ' match these filters' : ' yet'}.</p>
+                <p className="text-sm font-medium text-foreground/85">No approvals{chosenStatuses.length === 1 ? ` with status “${STATUS_META[chosenStatuses[0]]?.label}”` : ''}{activeFilterCount ? ' match these filters' : ' yet'}.</p>
               </div>
             ) : (
               <ul className="space-y-1.5">
@@ -628,11 +655,11 @@ export default function ApprovalsInbox() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 text-[12px]">
                               <span className={`whitespace-nowrap font-semibold ${(STATUS_ICON[a.status] || STATUS_ICON.cancelled).text}`}>{meta_.label || a.status}</span>
-                              {a.categoryName && <><Dot /><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
                               <Dot />
-                              <RefLink a={a} state={backState} />
-                              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
-                              <When at={a.decidedAt || a.createdAt} />
+                              <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
+                              <TicketIcon a={a} state={backState} />
+                              {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
+                              <When at={a.decidedAt || a.createdAt} className="ml-auto" />
                             </div>
                             <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                               {note ? (
@@ -660,7 +687,7 @@ export default function ApprovalsInbox() {
           </div>
         ) : (
           <div className="space-y-5">
-            {/* Pending for me */}
+            {/* Pending for me — A1: what · who · when + Decide */}
             <section>
               <h2 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Pending for you ({pending.length})</h2>
               {pending.length === 0 ? (
@@ -676,17 +703,12 @@ export default function ApprovalsInbox() {
                           <StatusGlyph status="pending" />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 text-[12px]">
-                              {a.categoryName && <><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span><span className="hidden lg:inline"><Dot /></span></>}
-                              <RefLink a={a} state={backState} />
-                              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
-                              <When at={a.createdAt} />
+                              <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
+                              <TicketIcon a={a} state={backState} />
+                              {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
                             </div>
                             <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              <span className="flex flex-shrink-0 items-center gap-1.5">
-                                <span className="text-muted-foreground/75">By</span> <InlinePerson name={a.requestedByName} email={a.requestedBy} />
-                                {a.requesterName && lower(a.requesterEmail) !== lower(a.requestedBy) && <><span className="text-muted-foreground/75">for</span> <InlinePerson name={a.requesterName} email={a.requesterEmail} /></>}
-                              </span>
-                              {a.requestNote && <><Dot /><span className="min-w-0 truncate" title={a.requestNote}>“{a.requestNote}”</span></>}
+                              {a.requestNote ? <span className="min-w-0 truncate" title={a.requestNote}>“{a.requestNote}”</span> : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
                               <span className="ml-auto flex flex-shrink-0 items-center gap-2">
                                 <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
                                 <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} className="!text-[11px]" />
@@ -695,8 +717,18 @@ export default function ApprovalsInbox() {
                             </div>
                           </div>
                         </div>
+                        {/* Who: requested by / for, stacked */}
+                        <div className="flex flex-shrink-0 flex-row gap-4 border-t border-border/70 pt-2 md:w-44 md:flex-col md:gap-1 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                          {peopleOf(a, { withApprover: false }).map((p) => <SidePerson key={p.label} label={p.label} name={p.name} email={p.email} size="h-6 w-6" />)}
+                        </div>
+                        {/* When · act */}
                         {openId !== a.id && (
-                          <div className="flex-shrink-0 border-t border-border/70 pt-2 md:border-l md:border-t-0 md:pl-4 md:pt-0">{inboxActions(a)}</div>
+                          <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 md:flex-col md:items-end md:gap-1 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                            <When at={a.createdAt} />
+                            <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                              {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Decide
+                            </button>
+                          </div>
                         )}
                       </div>
                       {openId === a.id && (
@@ -738,10 +770,9 @@ export default function ApprovalsInbox() {
                           <StatusGlyph status="info_requested" />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 text-[12px]">
-                              {a.categoryName && <><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span><span className="hidden lg:inline"><Dot /></span></>}
-                              <RefLink a={a} state={backState} />
-                              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
-                              <When at={a.createdAt} />
+                              <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
+                              <TicketIcon a={a} state={backState} />
+                              {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
                             </div>
                             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300">
                               <InlinePerson name={a.approverName} email={a.approverEmail} />
@@ -750,11 +781,14 @@ export default function ApprovalsInbox() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex flex-shrink-0 items-center gap-1 border-t border-border/70 pt-2 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-                          <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
-                            {busyId === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />} Resubmit
-                          </button>
-                          <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-7 items-center rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info on ticket →</Link>
+                        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 md:flex-col md:items-end md:gap-1 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                          <When at={a.createdAt} />
+                          <span className="flex items-center gap-1">
+                            <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info →</Link>
+                            <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
+                              {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Resubmit
+                            </button>
+                          </span>
                         </div>
                       </div>
                     </li>

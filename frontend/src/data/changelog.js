@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.57-preview';
+export const APP_VERSION = '3.9.59-preview';
 
 export const changelog = [
+  {
+    version: '3.9.59-preview',
+    date: 'September 20, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approvals → For you: one button</strong> — Decide is the only action on a row; asking a question, escalating and forwarding live inside it. The ticket is an icon after the title (click to open), and who asked / who it is for sit in their own column with the time and the button on the right.' },
+      { type: 'added', html: '<strong>Approvals → All approvals: a Status menu</strong> — pick several at once (Approved and Not approved together); the count strip toggles the same way. Counts sit beside each status.' },
+      { type: 'added', html: '<strong>Approvals: one When control</strong> — Today, Last 7 / 30 / 90 days, This month, Last month, This quarter, This year, or pick a range on the calendar, all in one popover. The two date boxes and “More filters” are gone; the choice sits in the address bar like the other filters.' },
+    ],
+  },
   {
     version: '3.9.57-preview',
     date: 'September 20, 2026',
