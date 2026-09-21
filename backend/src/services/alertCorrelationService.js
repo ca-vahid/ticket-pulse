@@ -843,13 +843,25 @@ class AlertCorrelationService {
 
   async activity(workspaceId, { days = 30 } = {}) {
     const since = new Date(Date.now() - Math.min(365, Math.max(1, Number(days) || 30)) * 86400 * 1000);
+    // TicketActivity has no Prisma relation to Ticket (3.9.61 hotfix: the
+    // relation filter threw and the catch hid it, so the list was always
+    // empty). Read the activities first, then the tickets of this workspace.
     const rows = await prisma.ticketActivity.findMany({
-      where: { activityType: ACTIVITY_TYPE, performedAt: { gte: since }, ticket: { workspaceId } },
+      where: { activityType: ACTIVITY_TYPE, performedAt: { gte: since } },
       orderBy: { performedAt: 'desc' },
-      take: 200,
-      select: { id: true, ticketId: true, performedAt: true, details: true, ticket: { select: { subject: true, status: true, freshserviceTicketId: true, nativeNumber: true, origin: true } } },
+      take: 600,
+      select: { id: true, ticketId: true, performedAt: true, details: true },
     }).catch(() => []);
-    return rows.map((r) => ({ id: r.id, ticketId: r.ticketId, ref: ticketDisplayRef({ id: r.ticketId, ...r.ticket }), subject: r.ticket?.subject, status: r.ticket?.status, at: r.performedAt, ...(r.details || {}) }));
+    if (!rows.length) return [];
+    const tickets = await prisma.ticket.findMany({
+      where: { id: { in: [...new Set(rows.map((r) => r.ticketId))] }, workspaceId },
+      select: { id: true, subject: true, status: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
+    }).catch(() => []);
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    return rows
+      .filter((r) => byId.has(r.ticketId))
+      .slice(0, 200)
+      .map((r) => { const t = byId.get(r.ticketId); return { id: r.id, ticketId: r.ticketId, ref: ticketDisplayRef(t), subject: t.subject, status: t.status, at: r.performedAt, ...(r.details || {}) }; });
   }
 
   // ------------------------------------------------------------- worker

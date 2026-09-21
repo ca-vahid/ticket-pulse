@@ -296,6 +296,21 @@ describe('storms', () => {
   });
 });
 
+describe('activity', () => {
+  test('lists this workspace\'s alert_correlated activities without a ticket relation (3.9.61)', async () => {
+    prismaMock.ticketActivity.findMany.mockResolvedValue([
+      { id: 1, ticketId: 11, performedAt: new Date('2026-09-21T00:48:00Z'), details: { kind: 'pair', otherRef: '#243182', resolved: true } },
+      { id: 2, ticketId: 99, performedAt: new Date('2026-09-21T00:47:00Z'), details: { kind: 'pair', otherRef: '#1', resolved: true } },
+    ]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 11, subject: 'Fired:Sev3 ...', status: 'Resolved', freshserviceTicketId: 243170n, nativeNumber: null, origin: 'freshservice' }]);
+    const rows = await svc.activity(1, { days: 1 });
+    expect(prismaMock.ticketActivity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.not.objectContaining({ ticket: expect.anything() }) }));
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [11, 99] }, workspaceId: 1 } }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ticketId: 11, ref: '#243170', kind: 'pair', otherRef: '#243182', resolved: true, status: 'Resolved' });
+  });
+});
+
 describe('recordRun', () => {
   test('writes a completed, non-actionable run the assignment page can show', async () => {
     prismaMock.assignmentPipelineRun.create.mockResolvedValue({ id: 77 });

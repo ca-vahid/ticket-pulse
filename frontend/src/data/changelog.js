@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.60-preview';
+export const APP_VERSION = '3.9.61-preview';
 
 export const changelog = [
+  {
+    version: '3.9.61-preview',
+    date: 'September 20, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Alert correlation: “What the rules did” was always empty</strong> — the list now shows every pair, storm child, orphan and follow-up from the last 30 days.' },
+    ],
+  },
   {
     version: '3.9.60-preview',
     date: 'September 20, 2026',
