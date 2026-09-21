@@ -31,7 +31,7 @@ const plan = (m) => console.log(`  ${APPLY ? 'DO  ' : 'PLAN'} ${m}`);
 const prisma = new PrismaClient();
 
 const SANDBOX = { name: 'ContinuIT Sandbox', slug: 'continuit-sandbox' };
-const REQUESTER = { name: 'ContinuIT · Business Continuity', email: 'continuit@bgcengineering.ca' };
+const REQUESTER = { name: 'ContinuIT', email: 'continuit@bgcengineering.ca' };
 const TAGS = [['continuit', 'teal'], ['office-check-in', 'sky']];
 const CLIENT = {
   name: 'ContinuIT',
