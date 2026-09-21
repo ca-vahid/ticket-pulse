@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import {
   Ban, CheckCircle2, Clock, XCircle,
   Loader2, Check, X, MessageCircleQuestion, Inbox, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
-  Search, Download, UserRound, Ticket, Flag, ChevronDown,
+  Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer from '../components/tickets/ApprovalComposer';
@@ -312,6 +312,31 @@ const TicketIcon = ({ a, state }) => (
   </Link>
 );
 const Dot = () => <span className="text-muted-foreground/40" aria-hidden="true">·</span>;
+/**
+ * The note on a row: one truncated line at rest, the whole text on click
+ * (Vahid, 21 Sep 2026: an approver had no way to read the full request in
+ * the UI). Short notes are plain text; anything that could be cut gets the
+ * More / Less control.
+ */
+function RowNote({ note, open, onToggle, muted = false }) {
+  if (!note) return null;
+  const long = note.length > 60;
+  if (!long) return <span className={`min-w-0 truncate ${muted ? 'text-muted-foreground/60' : ''}`}>“{note}”</span>;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      title={open ? 'Show less' : 'Show the whole note'}
+      className={`tp-focus-ring group/note flex min-w-0 items-start gap-1 rounded text-left hover:text-foreground/85 ${open ? '' : 'items-center'}`}
+    >
+      <span className={`min-w-0 ${open ? 'whitespace-pre-line' : 'truncate'}`}>“{note}”</span>
+      <span className="inline-flex flex-shrink-0 items-center gap-0.5 text-[11px] font-medium text-blue-700 group-hover/note:underline dark:text-blue-200">
+        {open ? <>Less <ChevronUp className="h-3 w-3" aria-hidden="true" /></> : <>More <ChevronDown className="h-3 w-3" aria-hidden="true" /></>}
+      </span>
+    </button>
+  );
+}
 const When = ({ at, className = '' }) => (
   <span className={`whitespace-nowrap text-[11px] text-muted-foreground/75 ${className}`} title={new Date(at).toLocaleString()}>
     <span className="hidden sm:inline">{`${formatDayTime(at)} · ${timeAgo(at)}`}</span>
@@ -645,7 +670,6 @@ export default function ApprovalsInbox() {
                   const meta_ = STATUS_META[a.status] || {};
                   const isOpen = expanded.has(a.id);
                   const note = a.decisionNote || a.conditionNote || a.requestNote || '';
-                  const longNote = note.length > 90;
                   return (
                     <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5 transition-shadow hover:shadow-subtle" data-testid="approval-row">
                       <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-5">
@@ -662,11 +686,7 @@ export default function ApprovalsInbox() {
                               <When at={a.decidedAt || a.createdAt} className="ml-auto" />
                             </div>
                             <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              {note ? (
-                                longNote ? (
-                                  <button type="button" onClick={() => toggleExpanded(a.id)} aria-expanded={isOpen} title={isOpen ? 'Show less' : 'Show the whole note'} className={`tp-focus-ring min-w-0 rounded text-left hover:text-foreground/85 ${isOpen ? 'whitespace-pre-line' : 'truncate'}`}>“{note}”</button>
-                                ) : <span className="min-w-0 truncate">“{note}”</span>
-                              ) : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
+                              {note ? <RowNote note={note} open={isOpen} onToggle={() => toggleExpanded(a.id)} /> : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
                               <span className="ml-auto flex flex-shrink-0 items-center gap-2">
                                 <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
                                 {a.tierCount > 1 && <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} className="!text-[11px]" />}
@@ -698,7 +718,7 @@ export default function ApprovalsInbox() {
                 <ul className="space-y-1.5">
                   {pending.map((a) => (
                     <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5" data-testid="inbox-row">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+                      <div className={`flex flex-col gap-2 md:flex-row md:gap-4 ${expanded.has(a.id) ? 'md:items-start' : 'md:items-center'}`}>
                         <div className="flex min-w-0 flex-1 items-center gap-3">
                           <StatusGlyph status="pending" />
                           <div className="min-w-0 flex-1">
@@ -708,7 +728,7 @@ export default function ApprovalsInbox() {
                               {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
                             </div>
                             <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              {a.requestNote ? <span className="min-w-0 truncate" title={a.requestNote}>“{a.requestNote}”</span> : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
+                              {a.requestNote ? <RowNote note={a.requestNote} open={expanded.has(a.id)} onToggle={() => toggleExpanded(a.id)} /> : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
                               <span className="ml-auto flex flex-shrink-0 items-center gap-2">
                                 <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
                                 <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} className="!text-[11px]" />
@@ -777,7 +797,7 @@ export default function ApprovalsInbox() {
                             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300">
                               <InlinePerson name={a.approverName} email={a.approverEmail} />
                               <span className="text-muted-foreground/75">asks</span>
-                              {a.decisionNote && <span className="min-w-0 truncate" title={a.decisionNote}>“{a.decisionNote}”</span>}
+                              {a.decisionNote && <RowNote note={a.decisionNote} open={expanded.has(a.id)} onToggle={() => toggleExpanded(a.id)} />}
                             </div>
                           </div>
                         </div>

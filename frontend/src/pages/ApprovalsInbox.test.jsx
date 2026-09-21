@@ -132,6 +132,21 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     expect(screen.queryByText('TP-77')).not.toBeInTheDocument();
   });
 
+  test('For you: a long request note opens in full on More (21 Sep 2026 — approvers could not read the whole request)', async () => {
+    const longNote = 'Ray has asked us to move our Microsoft 365 tenant to Unified App Management (UAM). UAM is a Microsoft change that puts app management for Teams, Outlook, Word, Excel, PowerPoint and Copilot under one set of controls.';
+    apiOverrides.approvalInbox = vi.fn(() => Promise.resolve([{ ...pendingRow, requestNote: longNote }]));
+    renderPage();
+    const more = await screen.findByRole('button', { name: /More$/ });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(more.querySelector('span')).toHaveClass('truncate');
+    fireEvent.click(more);
+    const less = screen.getByRole('button', { name: /Less$/ });
+    expect(less).toHaveAttribute('aria-expanded', 'true');
+    expect(less.querySelector('span')).toHaveClass('whitespace-pre-line');
+    expect(less).toHaveTextContent(longNote);
+    apiOverrides.approvalInbox = vi.fn(() => Promise.resolve([pendingRow]));
+  });
+
   test('pending rows show "absolute · relative" timestamps (QA 08-14 #3)', async () => {
     renderPage();
     await screen.findByText('New laptop for Rita');
