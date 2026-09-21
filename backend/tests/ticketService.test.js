@@ -834,6 +834,30 @@ describe('ticketService.updateFsTicket — required-department auto-resolution',
     expect(fsClientMock.updateTicketFields).toHaveBeenCalledTimes(1); // no retry without a department
   });
 
+  test('a 405 from FreshService (ticket already spam/deleted there) is a 409 with a reason, not a raw 500', async () => {
+    const refused = new Error('PUT method is not allowed. It should be one of these method(s): GET');
+    refused.freshserviceStatus = 405;
+    refused.freshserviceDetail = { description: 'PUT method is not allowed. It should be one of these method(s): GET' };
+    fsClientMock.updateTicketFields.mockRejectedValue(refused);
+
+    const err = await ticketService.updateFsTicket(601, 1, { priority: 2 }, actor).catch((e) => e);
+    expect(err.statusCode).toBe(409);
+    expect(err.isOperational).toBe(true);
+    expect(err.message).toMatch(/marked spam or deleted there/);
+    expect(fsClientMock.getTicket).not.toHaveBeenCalled();
+  });
+
+  test('a 4xx refusal without a field list carries the FreshService reason as a validation error', async () => {
+    const refused = new Error('Request failed with status code 403');
+    refused.freshserviceStatus = 403;
+    refused.freshserviceDetail = { description: 'Access denied: ticket belongs to another workspace' };
+    fsClientMock.updateTicketFields.mockRejectedValue(refused);
+
+    const err = await ticketService.updateFsTicket(601, 1, { priority: 2 }, actor).catch((e) => e);
+    expect(err.statusCode).toBe(400);
+    expect(err.message).toMatch(/FreshService rejected the change — Access denied: ticket belongs to another workspace/);
+  });
+
   test('non-department validation errors render field labels via the wrapped detail', async () => {
     fsClientMock.updateTicketFields.mockRejectedValue(interceptorWrappedError({
       direct: false,
@@ -1634,7 +1658,7 @@ describe('ticketService plain-text descriptions (QA 08-06 #5)', () => {
   // status token.
   const FRASER_DESCRIPTION = 'Approval request update from Power Automate\nStatus changed to <Processed>\nRecord ID: 1260';
 
-  test("createTicket keeps <Processed> in descriptionText and escapes it into the HTML rendering", async () => {
+  test('createTicket keeps <Processed> in descriptionText and escapes it into the HTML rendering', async () => {
     await ticketService.createTicket(1, {
       subject: 'Approval request update',
       description: FRASER_DESCRIPTION,

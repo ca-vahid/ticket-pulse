@@ -94,3 +94,18 @@ describe('GET /api/v1/meta statuses (per-workspace registry)', () => {
     expect(response.body.data.statuses).toEqual(['Open', 'Pending', 'Resolved', 'Closed']);
   });
 });
+
+describe('unknown routes inside /api/v1 (21 Sep 2026)', () => {
+  test('DELETE /api/v1/tickets/:id is a 404 problem document, not a fall-through', async () => {
+    const res = await request(buildApp()).delete('/api/v1/tickets/45781');
+    expect(res.status).toBe(404);
+    expect(res.headers['content-type']).toMatch(/application\/problem\+json/);
+    expect(res.body).toMatchObject({ status: 404, code: 'not_found' });
+    expect(res.body.detail).toMatch(/No DELETE \/api\/v1\/tickets\/45781 in API v1/);
+  });
+
+  test('GET /api/v1/docs still serves (the catch-all sits after the real routes)', async () => {
+    const res = await request(buildApp()).get('/api/v1/docs');
+    expect(res.status).toBe(200);
+  });
+});
