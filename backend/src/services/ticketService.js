@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto';
 // FS agent id by (workspace, e-mail) for reply attribution — see _fsAgentIdByEmail.
 const FS_AGENT_ID_CACHE = new Map();
 import mirrorService from './mirrorService.js';
-import { getFreshServiceDetail } from '../integrations/freshservice.js';
+import { getFreshServiceDetail, getFreshServiceStatus } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
 import watcherNotificationService from './watcherNotificationService.js';
 import customFieldService from './customFieldService.js';
@@ -123,7 +123,23 @@ function fsValidationError(err) {
   // reached us (the QA 08-05 dead-branch bug).
   const detail = getFreshServiceDetail(err);
   const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
-  if (!fieldErrors.length) return err;
+  if (!fieldErrors.length) {
+    // No field list: FreshService refused the whole write. Name the reason
+    // instead of leaking a raw Error (21 Sep 2026: an agent edited #243265
+    // after FreshService had marked it spam; FS answered 405 "PUT method is
+    // not allowed", the agent saw a generic 500 twice, and the log said
+    // "consider restarting the process").
+    const status = getFreshServiceStatus(err);
+    const reason = detail?.description || detail?.message || err?.message || 'no reason given';
+    if (status === 405) {
+      return new ConflictError('FreshService no longer accepts changes to this ticket — it is marked spam or deleted there. Nothing was changed in Ticket Pulse; the next sync will bring its status across.');
+    }
+    if (status === 404) return new NotFoundError('This ticket no longer exists in FreshService. Nothing was changed in Ticket Pulse.');
+    if (status && status >= 400 && status < 500) {
+      return new ValidationError(`FreshService rejected the change — ${reason}. Nothing was changed in Ticket Pulse.`);
+    }
+    return err;
+  }
   const parts = fieldErrors.map((fe) => {
     const label = FS_FIELD_LABELS[fe.field] || fe.field || 'a field';
     const missing = /type Null/i.test(String(fe.message || '')) || fe.code === 'missing_field';

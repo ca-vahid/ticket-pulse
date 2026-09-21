@@ -1129,6 +1129,14 @@ router.get('/docs', (req, res) => {
   res.type('html').send(renderDocsPage(`${req.protocol}://${req.get('host')}`));
 });
 
+// Unknown route inside /api/v1 (21 Sep 2026): answer with a problem document.
+// Before this, a DELETE /api/v1/tickets/:id (which does not exist) fell through
+// to the app's session-auth routes and came back as a bare 401 "Authentication
+// required" — ContinuIT read that as an auth failure rather than a missing route.
+router.use((req, res, next) => {
+  next(problems.notFound(`No ${req.method} ${req.originalUrl.split('?')[0]} in API v1 — see /api/v1/docs for the routes that exist`));
+});
+
 // problem+json for everything raised inside /api/v1
 router.use(apiProblemHandler);
 

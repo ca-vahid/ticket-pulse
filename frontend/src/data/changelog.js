@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.61-preview';
+export const APP_VERSION = '3.9.62-preview';
 
 export const changelog = [
+  {
+    version: '3.9.62-preview',
+    date: 'September 21, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Public API: unknown routes answer properly</strong> \u2014 a call to a path that does not exist under /api/v1 (for example deleting a ticket) now returns a 404 problem document that names the path and points to the docs, instead of a bare \u201cAuthentication required\u201d from the app\u2019s sign-in layer.' },
+      { type: 'fixed', html: '<strong>Editing a ticket FreshService has already marked spam</strong> \u2014 the change is now refused with a clear reason (\u201cFreshService no longer accepts changes to this ticket\u201d) instead of a generic error, and the next sync brings the spam status across.' },
+    ],
+  },
   {
     version: '3.9.61-preview',
     date: 'September 20, 2026',
