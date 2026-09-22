@@ -44,6 +44,9 @@ export default function AppHeader({
   activePage = 'dashboard',
   dashboardActions = null,
   extraActions = null,
+  // Quiet in-title navigation (Mail Workflows, 22 Sep 2026): a page can put
+  // its section tabs right after the title instead of a band of its own.
+  titleAddon = null,
   backgroundSyncRunning = false,
   backgroundSyncStep = null,
   killingSync = false,
@@ -736,6 +739,7 @@ export default function AppHeader({
             {pageTitle && (
               <h1 className="hidden truncate text-sm font-bold tracking-tight text-foreground lg:block">{pageTitle}</h1>
             )}
+            {titleAddon && <div className="hidden min-w-0 items-center lg:flex">{titleAddon}</div>}
           </div>
 
           {/* Search everywhere (16 Sep 2026): tickets, people, tasks, conversations. */}

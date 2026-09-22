@@ -1,6 +1,6 @@
 // eslint-disable-next-line no-unused-vars
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, Position, ReactFlow, getSmoothStepPath } from '@xyflow/react';
+import { Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, MiniMap, Position, ReactFlow, getSmoothStepPath } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -35,8 +35,6 @@ import {
   Mail,
   Maximize2,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   PanelRight,
   Pencil,
   Play,
@@ -1525,17 +1523,34 @@ function WorkflowGraphNode({ id, data }) {
   const isTrigger = data.nodeType === 'trigger';
   const isTerminal = registry.terminal === true;
   const isCondition = data.nodeType === 'condition';
+  // "C2" cards (22 Sep 2026): a coloured icon tile, the step name in sentence
+  // case, the type as a muted subtitle — no uppercase labels, no side stripe.
   return (
     <div
       className={cls(
-        'relative min-h-[62px] w-[180px] rounded-lg border px-3 py-2 transition-shadow duration-200',
+        'relative flex h-[56px] w-[210px] items-center gap-2.5 rounded-xl border px-2.5 transition-shadow duration-200',
         isUnknown ? 'bg-muted/50' : 'bg-card',
         data.selected
-          ? 'border-indigo-300 dark:border-indigo-500/40 shadow-lg ring-2 ring-indigo-400/60'
+          ? 'border-primary shadow-lg ring-[3px] ring-primary/20'
           : 'border-border shadow-sm hover:border-input hover:shadow-md',
       )}
-      style={{ borderLeft: `5px solid ${color}` }}
     >
+      <span
+        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-white shadow-inner"
+        style={{ backgroundColor: color }}
+        aria-hidden="true"
+      >
+        {NodeIcon ? <NodeIcon className="h-4 w-4" /> : <span className="text-xs font-bold">?</span>}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-semibold leading-4 text-foreground">{data.label || id}</div>
+        <div className="truncate text-[10.5px] font-medium leading-4 text-muted-foreground" title={data.sourceCaption || undefined}>
+          {data.sourceCaption || registry.label || data.nodeType}
+        </div>
+        {isUnknown && (
+          <div className="truncate text-[10px] font-medium leading-4 text-amber-700 dark:text-amber-300">Unrecognized step — hard-refresh (Ctrl+Shift+R).</div>
+        )}
+      </div>
       {!isTrigger && (
         <Handle
           type="target"
@@ -1543,19 +1558,6 @@ function WorkflowGraphNode({ id, data }) {
           title="Drop a connection here from another node's bottom dot"
           className="!h-3 !w-3 !border-2 !border-card !bg-muted-foreground transition-transform hover:!scale-150"
         />
-      )}
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color }}>
-        {NodeIcon && <NodeIcon className="h-3 w-3" />}
-        {registry.label || data.nodeType}
-      </div>
-      <div className="truncate text-sm font-semibold text-foreground">{data.label || id}</div>
-      {isUnknown && (
-        <div className="mt-0.5 text-[10px] font-medium leading-4 text-muted-foreground">
-          Unrecognized step — hard-refresh (Ctrl+Shift+R) to update this app.
-        </div>
-      )}
-      {data.sourceCaption && (
-        <div className="truncate text-[10px] font-medium text-indigo-500" title={data.sourceCaption}>{data.sourceCaption}</div>
       )}
       {isCondition && (
         <>
@@ -1719,6 +1721,11 @@ function flowNodesFromDefinition(definition, selectedNodeId) {
     id: node.id,
     type: 'workflowNode',
     position: layout.get(node.id) || { x: 0, y: index * 116 },
+    // Explicit size (the C2 card is fixed at 210×56): lets the MiniMap draw the
+    // nodes without waiting on measurement, since the node list is rebuilt from
+    // the definition on every render.
+    width: 210,
+    height: 56,
     sourcePosition: Position.Bottom,
     targetPosition: Position.Top,
     data: {
@@ -2096,7 +2103,7 @@ function computeVerticalLayout(definition) {
   if (nodes.size === 0) return layout;
 
   const V_GAP = 116;
-  const H_GAP = 240;
+  const H_GAP = 260;
 
   // y: longest-path rank (cycle-safe relaxation, capped by node count).
   const rank = new Map([...nodes.keys()].map((id) => [id, 0]));
@@ -4542,27 +4549,9 @@ export function AuditModeBadge({ mode, compact = false }) {
   );
 }
 
-function WorkflowStatus({ workflow }) {
-  const isEnabled = !!workflow?.isEnabled;
-  return (
-    <span className="flex shrink-0 flex-wrap justify-end gap-1">
-      {workflow?.mockModeEnabled && <MockModeBadge compact />}
-      <span
-        className={cls(
-          'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-          isEnabled ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-border bg-muted text-muted-foreground',
-        )}
-      >
-        <span className={cls('h-1.5 w-1.5 rounded-full', isEnabled ? 'bg-emerald-500' : 'bg-muted-foreground/60')} />
-        {isEnabled ? 'Enabled' : 'Disabled'}
-      </span>
-    </span>
-  );
-}
-
 // Stable on/off switch: the label never changes (so you always read it the same
 // way), and the track position + color shows the current state — not the action.
-function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone = 'emerald' }) {
+function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone = 'emerald', compact = false }) {
   const onTrack = tone === 'sky' ? 'bg-sky-500' : 'bg-emerald-500';
   const onShell = tone === 'sky' ? 'border-sky-300 dark:border-sky-500/40 bg-sky-50 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200' : 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200';
   return (
@@ -4579,11 +4568,92 @@ function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone
         checked ? onShell : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
       )}
     >
-      <span>{label}</span>
+      {!compact && <span>{label}</span>}
       <span className={cls('relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors', checked ? onTrack : 'bg-muted-foreground/40')}>
         <span className={cls('inline-block h-3 w-3 transform rounded-full bg-card shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
       </span>
     </button>
+  );
+}
+
+/**
+ * The workflow's state as words with dots — "Enabled · Mock · Observe-only" —
+ * instead of two toggles and an amber banner ("t1", 22 Sep 2026). Click to
+ * open a small menu that holds the Live and Mock switches and explains what
+ * observe-only means. The observe-only word keeps its test id.
+ */
+function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onToggleMock, canToggleMock, mockTitle }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (!rootRef.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  if (!workflow) return null;
+  const enabled = workflow.isEnabled === true;
+  const mock = workflow.mockModeEnabled === true;
+  const observe = enabled && mock;
+  const words = [
+    { key: 'live', dot: enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40', text: enabled ? 'Enabled' : published ? 'Off' : 'Draft' },
+    ...(mock ? [{ key: 'mock', dot: 'bg-sky-500', text: 'Mock' }] : []),
+    ...(observe ? [{ key: 'observe', dot: 'bg-amber-500', text: 'Observe-only', testId: 'observe-only-warning' }] : []),
+  ];
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Live, mock and observe-only — click to change"
+        className="tp-focus-ring inline-flex h-8 items-center gap-2.5 rounded-md border border-transparent px-2 text-xs font-semibold text-foreground/85 hover:border-border hover:bg-muted/50"
+        data-testid="workflow-state-line"
+      >
+        {words.map((w, i) => (
+          <span key={w.key} className="inline-flex items-center gap-1.5" data-testid={w.testId}>
+            {i > 0 && <span className="-ml-1 text-muted-foreground/40" aria-hidden="true">·</span>}
+            <span className={cls('h-2 w-2 rounded-full', w.dot)} aria-hidden="true" />
+            {w.text}
+          </span>
+        ))}
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/60" aria-hidden="true" />
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Workflow state" className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl border border-border bg-card p-3 shadow-xl animate-popIn">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-foreground">Live</div>
+              <div className="text-[11px] leading-4 text-muted-foreground">Runs on matching events and takes real actions.</div>
+            </div>
+            <WorkflowToggle
+              label="Live"
+              tone="emerald"
+              compact
+              checked={enabled}
+              onClick={onToggleEnabled}
+              disabled={saving || (!enabled && !published)}
+              title={enabled ? 'Live: real notifications send on matching events. Click to turn off.' : published ? 'Off: this workflow does not run. Click to go live.' : 'Publish the workflow before it can go live.'}
+            />
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-foreground">Mock mode</div>
+              <div className="text-[11px] leading-4 text-muted-foreground">Runs and records, but sends nothing.</div>
+            </div>
+            <WorkflowToggle label="Mock mode" tone="sky" compact checked={mock} onClick={onToggleMock} disabled={saving || !canToggleMock} title={mockTitle} />
+          </div>
+          {observe && (
+            <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
+              <FlaskConical className="mr-1 inline h-3 w-3" aria-hidden="true" />
+              <strong>Observe-only.</strong> Live and mock together: the workflow runs on matching tickets but takes no real actions (no e-mails, no ticket updates). Turn mock off to make it act.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -4904,9 +4974,10 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
   );
 }
 
-function WorkflowHealthMenu({ health, warnings = [] }) {
+function WorkflowHealthMenu({ health, warnings = [], variant = 'button' }) {
   const [open, setOpen] = useState(false);
   if (!health) return null;
+  const inSidebar = variant === 'card' || variant === 'dot';
   const quality = health.workflowQuality7d || {};
   const templateFallbacks = quality.templateFallbacks || 0;
   const guardHardBlocks = quality.guardHardBlocks || 0;
@@ -4921,26 +4992,65 @@ function WorkflowHealthMenu({ health, warnings = [] }) {
     { label: 'Payloads', value: `${payloadFailures} flagged`, tone: payloadFailures ? 'text-red-700 dark:text-red-200' : 'text-emerald-700 dark:text-emerald-200' },
     { label: 'Broader signal', value: `${broaderPct}%`, tone: broaderPct > 25 ? 'text-amber-700 dark:text-amber-200' : 'text-foreground' },
   ];
+  const okDot = warnCount > 0 ? 'bg-amber-500' : 'bg-emerald-500';
+  // Sidebar footer ("t3", 22 Sep 2026): the four numbers as a quiet card at
+  // the bottom of the workflow list; the full read-out opens above it.
+  const trigger = variant === 'card' ? (
+    <button
+      type="button"
+      onClick={() => setOpen((current) => !current)}
+      title="Workflow health — click for the full read-out"
+      aria-expanded={open}
+      aria-label="Workflow health"
+      className="tp-focus-ring block w-full rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+      data-testid="workflow-health-card"
+    >
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+        <span className={cls('h-2 w-2 rounded-full', okDot)} aria-hidden="true" />
+        Health
+        {warnCount > 0 && <span className="font-semibold normal-case tracking-normal text-amber-700 dark:text-amber-300">· {warnCount} warning{warnCount === 1 ? '' : 's'}</span>}
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+        <span>SendGrid <b className={cls('font-semibold', health.sendgridConfigured ? 'text-foreground/85' : 'text-red-700 dark:text-red-300')}>{health.sendgridConfigured ? (health.sendgridMode === 'smtp' ? 'SMTP' : 'OK') : 'Missing'}</b></span>
+        <span>Enabled <b className="font-semibold text-foreground/85">{health.enabledWorkflows || 0}</b></span>
+        <span>Audit 7d <b className="font-semibold text-foreground/85">{health.workflowAuditRuns7d ?? health.mockRuns7d ?? 0}</b></span>
+        <span>Fail 24h <b className={cls('font-semibold', health.failedEmailDeliveries24h ? 'text-red-700 dark:text-red-300' : 'text-foreground/85')}>{health.failedEmailDeliveries24h || 0}</b></span>
+      </div>
+    </button>
+  ) : variant === 'dot' ? (
+    <button
+      type="button"
+      onClick={() => setOpen((current) => !current)}
+      title={warnCount > 0 ? `Workflow health — ${warnCount} warning${warnCount === 1 ? '' : 's'}` : 'Workflow health — all checks clean'}
+      aria-expanded={open}
+      aria-label="Workflow health"
+      className="tp-focus-ring mb-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+    >
+      <span className="relative"><Activity className="h-4 w-4" /><span className={cls('absolute -right-1 -top-1 h-2 w-2 rounded-full ring-2 ring-card', okDot)} aria-hidden="true" /></span>
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={() => setOpen((current) => !current)}
+      title="Workflow health"
+      aria-expanded={open}
+      className={cls(
+        'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition',
+        warnCount > 0 ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
+      )}
+    >
+      <Activity className="h-4 w-4" />
+      <span>Health</span>
+      {warnCount > 0 && <span className="rounded-full bg-amber-200 dark:bg-amber-500/30 px-1.5 text-[10px] font-bold text-amber-900 dark:text-amber-200">{warnCount}</span>}
+    </button>
+  );
   return (
-    <div className="relative mr-auto">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        title="Workflow health"
-        aria-expanded={open}
-        className={cls(
-          'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition',
-          warnCount > 0 ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
-        )}
-      >
-        <Activity className="h-4 w-4" />
-        <span>Health</span>
-        {warnCount > 0 && <span className="rounded-full bg-amber-200 dark:bg-amber-500/30 px-1.5 text-[10px] font-bold text-amber-900 dark:text-amber-200">{warnCount}</span>}
-      </button>
+    <div className={cls('relative', inSidebar ? '' : 'mr-auto')}>
+      {trigger}
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-40 mt-2 w-[22rem] rounded-xl border border-border bg-card p-3 shadow-xl">
+          <div className={cls('absolute z-40 rounded-xl border border-border bg-card p-3 shadow-xl', inSidebar ? 'bottom-full left-1 mb-2 w-[min(22rem,calc(100vw-5rem))]' : 'left-0 mt-2 w-[22rem]')}>
             <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
               <Activity className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
               Workflow health
@@ -7054,139 +7164,141 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
     if (ok) setRenaming(false);
   };
   return (
-    <div className="border-b border-border/60 px-4 py-3">
-      {/* Prominent identity of the workflow currently being edited. */}
-      <div className="mb-3 flex items-start justify-between gap-3 border-b border-border/60 pb-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span className={cls('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1', visuals.chip)}>
-            <HeaderIcon className={cls('h-4 w-4', visuals.icon_)} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">Editing workflow</div>
-            {renaming ? (
-              <form
-                onSubmit={(event) => { event.preventDefault(); submitRename(); }}
-                className="mt-0.5 flex items-center gap-1"
-              >
-                <input
-                  autoFocus
-                  value={nameDraft}
-                  onChange={(event) => setNameDraft(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Escape') setRenaming(false); }}
-                  placeholder="Workflow name"
-                  className="min-w-0 flex-1 rounded-md border border-blue-300 dark:border-blue-500/40 px-2 py-1 text-base font-bold leading-6 text-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
-                />
-                <button type="submit" title="Save name" className="shrink-0 rounded-md p-1 text-emerald-600 dark:text-emerald-300 transition hover:bg-emerald-50 dark:hover:bg-emerald-500/15">
-                  <Check className="h-4 w-4" />
-                </button>
-                <button type="button" title="Cancel" onClick={() => setRenaming(false)} className="shrink-0 rounded-md p-1 text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85">
-                  <XCircle className="h-4 w-4" />
-                </button>
-              </form>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-base font-bold leading-6 text-foreground" title={workflow?.name}>
-                  {workflow ? workflowDisplayName(workflow) : 'No workflow selected'}
-                </span>
-                {workflow && onRename && (
-                  <button
-                    type="button"
-                    onClick={() => { setNameDraft(workflow.name || workflowDisplayName(workflow)); setRenaming(true); }}
-                    title="Rename workflow"
-                    className="shrink-0 rounded-md p-1 text-muted-foreground/50 transition hover:bg-muted hover:text-blue-600 dark:hover:text-blue-300"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
+    <>
+      {/* H1 (22 Sep 2026): the workflow's identity floats on the canvas instead of a header band. */}
+      <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[min(520px,calc(100%-24px))]">
+        <div className="pointer-events-auto flex items-center justify-between gap-3 rounded-xl border border-border bg-card/95 px-3 py-2 shadow-subtle backdrop-blur">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className={cls('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1', visuals.chip)}>
+              <HeaderIcon className={cls('h-4 w-4', visuals.icon_)} />
+            </span>
+            <div className="min-w-0 flex-1">
+              {renaming ? (
+                <form
+                  onSubmit={(event) => { event.preventDefault(); submitRename(); }}
+                  className="mt-0.5 flex items-center gap-1"
+                >
+                  <input
+                    autoFocus
+                    value={nameDraft}
+                    onChange={(event) => setNameDraft(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Escape') setRenaming(false); }}
+                    placeholder="Workflow name"
+                    className="min-w-0 flex-1 rounded-md border border-blue-300 dark:border-blue-500/40 px-2 py-1 text-base font-bold leading-6 text-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
+                  />
+                  <button type="submit" title="Save name" className="shrink-0 rounded-md p-1 text-emerald-600 dark:text-emerald-300 transition hover:bg-emerald-50 dark:hover:bg-emerald-500/15">
+                    <Check className="h-4 w-4" />
                   </button>
-                )}
-              </div>
-            )}
-            {roleLine && <div className="truncate text-xs font-medium text-muted-foreground">{roleLine}</div>}
+                  <button type="button" title="Cancel" onClick={() => setRenaming(false)} className="shrink-0 rounded-md p-1 text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85">
+                    <XCircle className="h-4 w-4" />
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-bold leading-5 text-foreground" title={workflow?.name}>
+                    {workflow ? workflowDisplayName(workflow) : 'No workflow selected'}
+                  </span>
+                  {workflow && onRename && (
+                    <button
+                      type="button"
+                      onClick={() => { setNameDraft(workflow.name || workflowDisplayName(workflow)); setRenaming(true); }}
+                      title="Rename workflow"
+                      className="shrink-0 rounded-md p-1 text-muted-foreground/50 transition hover:bg-muted hover:text-blue-600 dark:hover:text-blue-300"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {roleLine && <div className="truncate text-xs font-medium text-muted-foreground">{roleLine}</div>}
+            </div>
           </div>
         </div>
-        {workflow && <WorkflowStatus workflow={workflow} />}
       </div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Workflow Steps</div>
-      <div className="flex flex-wrap gap-2">
-        <div className="relative">
+      {/* The step toolbar floats at the bottom centre of the canvas. */}
+      <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-border bg-card/95 p-1 shadow-subtle backdrop-blur" data-testid="workflow-step-toolbar">
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAddOpen((current) => !current)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2.5 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            Add step
+            </button>
+            {addOpen && (() => {
+              const grouped = new Set(NODE_PALETTE_GROUPS.flatMap((group) => Object.keys(group.hints)));
+              const leftovers = ADDABLE_NODE_TYPES.filter((type) => !grouped.has(type));
+              const sections = [
+                ...NODE_PALETTE_GROUPS.map((group) => ({
+                  label: group.label,
+                  entries: Object.entries(group.hints).filter(([type]) => ADDABLE_NODE_TYPES.includes(type)),
+                })),
+                ...(leftovers.length ? [{ label: 'More', entries: leftovers.map((type) => [type, null]) }] : []),
+              ].filter((section) => section.entries.length);
+              return (
+                <div className="settings-scrollbar absolute bottom-full left-0 z-20 mb-2 max-h-[26rem] w-72 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-lg">
+                  {sections.map((section) => (
+                    <div key={section.label}>
+                      <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{section.label}</p>
+                      {section.entries.map(([type, hint]) => {
+                        const Icon = WORKFLOW_NODE_REGISTRY[type]?.icon;
+                        const color = nodeAccent(NODE_COLORS[type], resolvedTheme);
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => {
+                              onAddNode(type);
+                              setAddOpen(false);
+                            }}
+                            className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15"
+                          >
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}18` }}>
+                              {Icon
+                                ? <Icon className="h-3 w-3" style={{ color }} />
+                                : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-xs font-semibold text-foreground">{NODE_LABELS[type] || type}</span>
+                              {hint && <span className="block text-[11px] leading-4 text-muted-foreground/75">{hint}</span>}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
           <button
             type="button"
-            onClick={() => setAddOpen((current) => !current)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2.5 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20"
+            onClick={onRemoveNode}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground/85 hover:bg-muted/50"
           >
-            <Plus className="h-3.5 w-3.5" />
-            Add step
-          </button>
-          {addOpen && (() => {
-            const grouped = new Set(NODE_PALETTE_GROUPS.flatMap((group) => Object.keys(group.hints)));
-            const leftovers = ADDABLE_NODE_TYPES.filter((type) => !grouped.has(type));
-            const sections = [
-              ...NODE_PALETTE_GROUPS.map((group) => ({
-                label: group.label,
-                entries: Object.entries(group.hints).filter(([type]) => ADDABLE_NODE_TYPES.includes(type)),
-              })),
-              ...(leftovers.length ? [{ label: 'More', entries: leftovers.map((type) => [type, null]) }] : []),
-            ].filter((section) => section.entries.length);
-            return (
-              <div className="settings-scrollbar absolute left-0 top-9 z-20 max-h-[26rem] w-72 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-lg">
-                {sections.map((section) => (
-                  <div key={section.label}>
-                    <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{section.label}</p>
-                    {section.entries.map(([type, hint]) => {
-                      const Icon = WORKFLOW_NODE_REGISTRY[type]?.icon;
-                      const color = nodeAccent(NODE_COLORS[type], resolvedTheme);
-                      return (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => {
-                            onAddNode(type);
-                            setAddOpen(false);
-                          }}
-                          className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15"
-                        >
-                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}18` }}>
-                            {Icon
-                              ? <Icon className="h-3 w-3" style={{ color }} />
-                              : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block text-xs font-semibold text-foreground">{NODE_LABELS[type] || type}</span>
-                            {hint && <span className="block text-[11px] leading-4 text-muted-foreground/75">{hint}</span>}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
-        <button
-          type="button"
-          onClick={onRemoveNode}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground/85 hover:bg-muted/50"
-        >
-          <XCircle className="h-3.5 w-3.5" />
+            <XCircle className="h-3.5 w-3.5" />
           Remove selected
-        </button>
-        <button
-          type="button"
-          onClick={onUndo}
-          disabled={!canUndo}
-          title={canUndo ? 'Undo the last editor change (including deleted steps)' : 'Nothing to undo yet'}
-          className={cls(
-            'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition',
-            canUndo
-              ? 'border-border bg-card text-foreground/85 hover:bg-muted/50'
-              : 'cursor-not-allowed border-border/60 bg-muted/50 text-muted-foreground/50',
-          )}
-        >
-          <Undo2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title={canUndo ? 'Undo the last editor change (including deleted steps)' : 'Nothing to undo yet'}
+            className={cls(
+              'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition',
+              canUndo
+                ? 'border-border bg-card text-foreground/85 hover:bg-muted/50'
+                : 'cursor-not-allowed border-border/60 bg-muted/50 text-muted-foreground/50',
+            )}
+          >
+            <Undo2 className="h-3.5 w-3.5" />
           Undo
-        </button>
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -7210,6 +7322,7 @@ export default function NotificationWorkflowsPanel({
   const [undoDepth, setUndoDepth] = useState(0);
   const [edgeInsert, setEdgeInsert] = useState(null);
   const [workflowListCollapsed, setWorkflowListCollapsed] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [routingExpanded, setRoutingExpanded] = useState(false);
   const [normalizationOpen, setNormalizationOpen] = useState(false);
   const [health, setHealth] = useState(null);
@@ -7331,7 +7444,9 @@ export default function NotificationWorkflowsPanel({
   const [auditDepartmentsLoaded, setAuditDepartmentsLoaded] = useState(false);
 
   const selectedNode = useMemo(
-    () => draft?.nodes?.find((node) => node.id === selectedNodeId) || draft?.nodes?.[0] || null,
+    // R2 (22 Sep 2026): no selection (null) means no inspector — the first
+    // node only stands in for an id that no longer exists (e.g. just removed).
+    () => (selectedNodeId === null ? null : draft?.nodes?.find((node) => node.id === selectedNodeId) || draft?.nodes?.[0] || null),
     [draft, selectedNodeId],
   );
   const selectedLlmSchemaText = useMemo(
@@ -7905,6 +8020,26 @@ export default function NotificationWorkflowsPanel({
   const hasBlockingGraphErrors = draftValidationIssues.length > 0;
   const mockAuditOpen = activeGlobalTab === 'mock-audit';
   const workflowTabActive = activeGlobalTab === 'workflows';
+  // Keyboard (22 Sep 2026): Ctrl/⌘+B folds the workflow list to its icon
+  // rail; Esc with nothing else open deselects the step, which closes the
+  // docked inspector. Typing fields and open dialogs are left alone.
+  useEffect(() => {
+    if (!workflowTabActive) return undefined;
+    const onKey = (event) => {
+      const target = event.target;
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && String(event.key).toLowerCase() === 'b') {
+        event.preventDefault();
+        setWorkflowListCollapsed((current) => !current);
+        return;
+      }
+      if (event.key === 'Escape' && !event.defaultPrevented && !typing && !document.querySelector('[role="dialog"]')) {
+        setSelectedNodeId(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [workflowTabActive]);
   const llmModeLabel = llmToolPolicy?.mode === 'tools_enabled'
     ? 'Tools'
     : llmToolPolicy?.mode === 'off'
@@ -11068,6 +11203,15 @@ export default function NotificationWorkflowsPanel({
   }
 
   const healthWarnings = Array.isArray(health?.warnings) ? health.warnings : [];
+  // Sidebar row menu (L2): the same dialogs the header actions open, for the
+  // row's own workflow — select it first so the confirms act on it.
+  const handleWorkflowRowAction = (workflow, action) => {
+    if (!workflow) return;
+    if (workflow.id !== selected?.id) handleWorkflowSelect(workflow.id);
+    if (action === 'variant') setVariantDialogOpen(true);
+    else if (action === 'archive' || action === 'restore') setArchiveConfirm({ workflow, archived: action === 'archive' });
+    else if (action === 'delete') setDeleteConfirm({ workflow });
+  };
 
   if (loading) {
     return (
@@ -11116,61 +11260,136 @@ export default function NotificationWorkflowsPanel({
             )}
 
             {workflowTabActive && (
-              <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
-                <WorkflowHealthMenu health={health} warnings={healthWarnings} />
-                <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
+              <div className="flex min-h-[36px] flex-wrap items-center gap-2" data-testid="workflow-action-row">
                 <button
                   type="button"
                   onClick={() => setNewWorkflowOpen({})}
                   disabled={saving}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-sm font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
                 New workflow
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setVariantDialogOpen(true)}
-                  disabled={saving || !selected}
-                  title="Create a variant of the selected workflow — start blank or copy its steps; you pick the name"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 px-2.5 text-sm font-medium text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 disabled:opacity-50"
-                >
-                  <Plus className="h-4 w-4" />
-                New variant
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt })}
-                  disabled={saving || !selected || selected?.isDefaultVariant}
-                  title={selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.'}
-                  className={cls(
-                    'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium disabled:opacity-50',
-                    selected?.archivedAt ? 'border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20' : 'border border-border bg-card text-foreground/85 hover:bg-muted/50',
-                  )}
-                >
-                  {selected?.archivedAt ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                  {selected?.archivedAt ? 'Restore' : 'Archive'}
-                </button>
-                {selected?.archivedAt && !selected?.isDefaultVariant && (
+                <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setDeleteConfirm({ workflow: selected })}
-                    disabled={saving || !selected}
-                    title="Permanently delete this archived variant and its workflow audit history."
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2.5 text-sm font-medium text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:opacity-50"
+                    onClick={() => setMoreMenuOpen((current) => !current)}
+                    aria-haspopup="menu"
+                    aria-expanded={moreMenuOpen}
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50"
                   >
-                    <Trash2 className="h-4 w-4" />
-                    Delete
+                    More
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/75" />
                   </button>
+                  {moreMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setMoreMenuOpen(false)} />
+                      <div role="menu" aria-label="More workflow actions" className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-border bg-card p-1 shadow-xl">
+                        {[
+                          { key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving || !selected, onClick: () => setVariantDialogOpen(true), title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' },
+                          { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || selected?.isDefaultVariant, onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
+                          ...(selected?.archivedAt && !selected?.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', Icon: Trash2, danger: true, disabled: saving || !selected, onClick: () => setDeleteConfirm({ workflow: selected }), title: 'Permanently delete this archived variant and its workflow audit history.' }] : []),
+                          { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => loadWorkflows(selected?.id) },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            role="menuitem"
+                            disabled={item.disabled}
+                            title={item.title}
+                            onClick={() => { setMoreMenuOpen(false); item.onClick(); }}
+                            className={cls('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50', item.danger ? 'text-red-700 dark:text-red-300' : 'text-foreground/85')}
+                          >
+                            <item.Icon className="h-3.5 w-3.5" />
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+                {selected && (
+                  <>
+                    <span className="mx-0.5 h-6 w-px bg-secondary" aria-hidden="true" />
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs" data-testid="routing-summary">
+                      <Waypoints className="h-3.5 w-3.5 text-muted-foreground/75" />
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Routing</span>
+                      <span className="font-semibold text-foreground/85">{workflowVariantTypeLabel(selected)}</span>
+                      <span className="text-muted-foreground/40" aria-hidden="true">·</span>
+                      <span className="text-muted-foreground">{selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}</span>
+                      {selectedIsAfterHoursWorkflow && (
+                        <>
+                          <span className="text-muted-foreground/40" aria-hidden="true">·</span>
+                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-200">
+                            <Moon className="h-3 w-3" />
+                            After-hours
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAfterHoursDrawerOpen(true)}
+                            title="Configure after-hours routing — holidays, replacement behavior, and requester copy"
+                            className="tp-focus-ring rounded font-semibold text-amber-800 hover:underline dark:text-amber-200"
+                          >
+                            Configure
+                          </button>
+                        </>
+                      )}
+                    </span>
+                    <div className="relative flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setNormalizationOpen((open) => !open)}
+                        aria-label="Normalization"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition hover:bg-muted/50"
+                        title="How routing values are normalized"
+                      >
+                        <CircleHelp className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRoutingExpanded((open) => !open)}
+                        aria-expanded={routingExpanded}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-[11px] font-semibold text-muted-foreground transition hover:bg-muted/50"
+                      >
+                        {routingExpanded ? 'Hide routing' : 'Edit routing'}
+                        <ChevronDown className={cls('h-3.5 w-3.5 transition-transform', routingExpanded && 'rotate-180')} />
+                      </button>
+                      {normalizationOpen && (
+                        <>
+                          <div className="fixed inset-0 z-30" onClick={() => setNormalizationOpen(false)} />
+                          <div className="absolute left-0 top-full z-40 mt-1 w-80 rounded-lg border border-border bg-card p-3 text-xs leading-5 text-muted-foreground shadow-xl">
+                            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                              <CircleHelp className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
+                              Normalization
+                            </div>
+                            <p>Routing values are normalized to stable route keys before they are matched.</p>
+                            {(routingMetadata.normalizationRules || []).length > 0 && (
+                              <ul className="mt-1.5 space-y-1 text-muted-foreground">
+                                {(routingMetadata.normalizationRules || []).slice(0, 6).map((rule) => (
+                                  <li key={rule} className="flex gap-1.5">
+                                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                                    <span>{rule}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </>
                 )}
-                <button
-                  type="button"
-                  onClick={() => loadWorkflows(selected?.id)}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50"
-                >
-                  <RefreshCw className="h-4 w-4" />
-              Refresh
-                </button>
+                <span className="ml-auto" aria-hidden="true" />
+                <WorkflowStateLine
+                  workflow={selected}
+                  published={selectedIsPublished}
+                  saving={saving}
+                  onToggleEnabled={toggleEnabled}
+                  onToggleMock={toggleMockMode}
+                  canToggleMock={canToggleMockMode}
+                  mockTitle={mockModeButtonTitle}
+                />
                 <button
                   type="button"
                   onClick={openPreviewModal}
@@ -11196,40 +11415,6 @@ export default function NotificationWorkflowsPanel({
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                   {hasPublishableChanges ? 'Save & publish' : 'Saved'}
                 </button>
-                <span className="mx-0.5 h-6 w-px bg-secondary" aria-hidden="true" />
-                <WorkflowToggle
-                  label="Live"
-                  tone="emerald"
-                  checked={selected?.isEnabled === true}
-                  onClick={toggleEnabled}
-                  disabled={saving || !selected || (!selected?.isEnabled && !selectedIsPublished)}
-                  title={selected?.isEnabled
-                    ? 'Live: real notifications send on matching events. Click to turn off.'
-                    : selectedIsPublished
-                      ? 'Off: this workflow does not run. Click to go live.'
-                      : 'Publish the workflow before it can go live.'}
-                />
-                <WorkflowToggle
-                  label="Mock mode"
-                  tone="sky"
-                  checked={selected?.mockModeEnabled === true}
-                  onClick={toggleMockMode}
-                  disabled={saving || !selected || !canToggleMockMode}
-                  title={mockModeButtonTitle}
-                />
-                {/* QA 08-06 (Susan, ws5): Live + mock together looked healthy
-                    but sent nothing — spell the combination out loudly right
-                    next to the toggles. */}
-                {selected?.isEnabled === true && selected?.mockModeEnabled === true && (
-                  <span
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2.5 text-xs font-bold text-amber-800 dark:text-amber-200"
-                    data-testid="observe-only-warning"
-                    title="This workflow is Live AND in mock mode: it runs on matching tickets but takes no real actions (no emails, no ticket updates). Turn off mock mode to make it act."
-                  >
-                    <FlaskConical className="h-3.5 w-3.5" />
-                    Observe-only — no real actions
-                  </span>
-                )}
               </div>
             )}
           </div>
@@ -11329,298 +11514,209 @@ export default function NotificationWorkflowsPanel({
 
         {activeGlobalTab === 'workflows' && (
           <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
-            {selected && (
-              <div className="shrink-0">
-                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2">
-                  <Waypoints className="h-4 w-4 text-muted-foreground/75" />
-                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Routing</span>
-                  <span className={cls(
-                    'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                    selected.isDefaultVariant ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200' : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200',
-                  )}
-                  >
-                    {workflowVariantTypeLabel(selected)}
-                  </span>
-                  <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                    {selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}
-                  </span>
-                  {selectedIsAfterHoursWorkflow && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-200">
-                      <Moon className="h-3 w-3" />
-                      After-hours
-                    </span>
-                  )}
-                  <div className="relative ml-auto flex items-center gap-1.5">
-                    {selectedIsAfterHoursWorkflow && (
-                      <button
-                        type="button"
-                        onClick={() => setAfterHoursDrawerOpen(true)}
-                        title="Configure after-hours routing — holidays, replacement behavior, and requester copy"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200 transition hover:bg-amber-100 dark:hover:bg-amber-500/20"
-                      >
-                        <CalendarClock className="h-3.5 w-3.5" />
-                        Configure
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setNormalizationOpen((open) => !open)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition hover:bg-muted/50"
-                      title="How routing values are normalized"
-                    >
-                      <CircleHelp className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
-                      Normalization
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRoutingExpanded((open) => !open)}
-                      aria-expanded={routingExpanded}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition hover:bg-muted/50"
-                    >
-                      {routingExpanded ? 'Hide routing' : 'Edit routing'}
-                      <ChevronDown className={cls('h-3.5 w-3.5 transition-transform', routingExpanded && 'rotate-180')} />
-                    </button>
-                    {normalizationOpen && (
-                      <>
-                        <div className="fixed inset-0 z-30" onClick={() => setNormalizationOpen(false)} />
-                        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border border-border bg-card p-3 text-xs leading-5 text-muted-foreground shadow-xl">
-                          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                            <CircleHelp className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
-                            Normalization
-                          </div>
-                          <p>Routing values are normalized to stable route keys before they are matched.</p>
-                          {(routingMetadata.normalizationRules || []).length > 0 && (
-                            <ul className="mt-1.5 space-y-1 text-muted-foreground">
-                              {(routingMetadata.normalizationRules || []).slice(0, 6).map((rule) => (
-                                <li key={rule} className="flex gap-1.5">
-                                  <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
-                                  <span>{rule}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {routingExpanded && renderRoutingSettingsPanel()}
-              </div>
+            {selected && routingExpanded && (
+              <div className="shrink-0 border-b border-border">{renderRoutingSettingsPanel()}</div>
             )}
 
             <div
               className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--workflow-list-width)_minmax(0,1fr)]"
-              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '340px' }}
+              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '300px' }}
             >
-              <aside
-                className={cls(
-                  'z-10 flex min-h-0 flex-col overflow-hidden border-r border-border transition-colors duration-300',
-                  workflowListCollapsed ? 'bg-muted' : 'bg-muted/50',
-                )}
-              >
-                <div
-                  className={cls(
-                    'flex items-center gap-2 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground',
-                    workflowListCollapsed ? 'justify-center px-2' : 'justify-between',
-                  )}
-                >
-                  {!workflowListCollapsed && (
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <span>Workspace Workflows</span>
-                      {archivedWorkflowCount > 0 && (
-                        <label className="flex items-center gap-1.5 text-[11px] font-medium normal-case tracking-normal text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            checked={showArchivedWorkflows}
-                            onChange={(event) => updateShowArchivedWorkflows(event.target.checked)}
-                            className="h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300 focus:ring-blue-500"
-                          />
-                          Show only archived ({archivedWorkflowCount})
-                        </label>
-                      )}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setWorkflowListCollapsed((current) => !current)}
-                    aria-label={workflowListCollapsed ? 'Expand workspace workflows' : 'Collapse workspace workflows'}
-                    title={workflowListCollapsed ? 'Expand workspace workflows' : 'Collapse workspace workflows'}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground shadow-sm transition hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200"
-                  >
-                    {workflowListCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-                  </button>
-                </div>
-                {workflowListCollapsed ? (
-                  <div className="flex flex-1 flex-col items-center gap-3 border-t border-border px-2 py-3 text-muted-foreground">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/20 text-xs font-bold text-blue-700 dark:text-blue-200 ring-1 ring-blue-200 dark:ring-blue-500/30">
-                      {visibleWorkflows.length}
-                    </span>
-                    <span
-                      className="hidden min-h-0 rotate-180 break-words text-[10px] font-bold uppercase leading-4 tracking-wide text-muted-foreground [writing-mode:vertical-rl] lg:block"
-                      title={selected?.name || 'Workflows'}
-                    >
-                      {selected?.name || 'Workflows'}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto border-t border-border/60">
-                    <WorkflowIndex
-                      workflows={visibleWorkflows}
-                      selectedId={selected?.id}
-                      onSelect={handleWorkflowSelect}
-                      onToggleEnabled={toggleEnabledFor}
-                      togglingId={togglingWorkflowId}
-                      onCreateForTrigger={(triggerType) => setNewWorkflowOpen({ trigger: triggerType })}
-                      getDisplayName={workflowDisplayName}
-                      getVisuals={triggerVisuals}
-                      eventLabels={EVENT_LABELS}
-                      isAfterHours={isAfterHoursWorkflow}
-                    />
-                  </div>
-                )}
+              <aside className="z-10 flex min-h-0 flex-col overflow-visible border-r border-border bg-card/70" data-testid="workflow-sidebar-aside">
+                <WorkflowIndex
+                  workflows={visibleWorkflows}
+                  selectedId={selected?.id}
+                  onSelect={handleWorkflowSelect}
+                  onToggleEnabled={toggleEnabledFor}
+                  togglingId={togglingWorkflowId}
+                  onCreateForTrigger={(triggerType) => setNewWorkflowOpen({ trigger: triggerType })}
+                  onCreate={() => setNewWorkflowOpen({})}
+                  getDisplayName={workflowDisplayName}
+                  getVisuals={triggerVisuals}
+                  eventLabels={EVENT_LABELS}
+                  isAfterHours={isAfterHoursWorkflow}
+                  onRowAction={handleWorkflowRowAction}
+                  collapsed={workflowListCollapsed}
+                  onToggleCollapsed={() => setWorkflowListCollapsed((current) => !current)}
+                  showArchived={showArchivedWorkflows}
+                  archivedCount={archivedWorkflowCount}
+                  onShowArchivedChange={updateShowArchivedWorkflows}
+                  footer={<WorkflowHealthMenu health={health} warnings={healthWarnings} variant={workflowListCollapsed ? 'dot' : 'card'} />}
+                />
               </aside>
 
-              <PanelGroup
-                id={WORKFLOW_EDITOR_LAYOUT_ID}
-                orientation="horizontal"
-                defaultLayout={editorLayout.defaultLayout}
-                onLayoutChanged={editorLayout.onLayoutChanged}
-                className="min-h-0 min-w-0"
-              >
-                <Panel id="workflow-canvas" minSize="38%" defaultSize="56%">
-                  <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border">
-                    <NodePalette
-                      onAddNode={addWorkflowNode}
-                      onRemoveNode={removeSelectedNode}
-                      onUndo={undoDraftChange}
-                      canUndo={undoDepth > 0}
-                      workflow={selected}
-                      onRename={renameWorkflow}
-                    />
-                    {hasBlockingGraphErrors && (
-                      <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
-                          <div className="min-w-0">
-                            <div className="font-semibold">Workflow needs fixes before publish</div>
-                            <ul className="mt-1 space-y-0.5">
-                              {draftValidationIssues.slice(0, 4).map((issue) => (
-                                <li key={issue} className="truncate">- {issue}</li>
-                              ))}
-                              {draftValidationIssues.length > 4 && (
-                                <li>{draftValidationIssues.length - 4} more validation issues</li>
-                              )}
-                            </ul>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    <div className="relative min-h-[360px] flex-1 overflow-hidden bg-muted/50">
-                      {draft ? (
-                        <ReactFlow
-                          colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
-                          style={FLOW_CANVAS_VARS}
-                          nodes={flowNodes}
-                          edges={flowEdges}
-                          nodeTypes={FLOW_NODE_TYPES}
-                          edgeTypes={FLOW_EDGE_TYPES}
-                          fitView
-                          fitViewOptions={{ padding: 0.2 }}
-                          nodesDraggable={false}
-                          minZoom={0.25}
-                          maxZoom={1.6}
-                          panActivationKeyCode={null}
-                          isValidConnection={isValidWorkflowConnection}
-                          onConnect={handleFlowConnect}
-                          onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-                          onNodesChange={handleFlowNodesChange}
-                        >
-                          <Controls />
-                          <Background gap={18} color={resolvedTheme === 'dark' ? '#283549' : '#e5e7eb'} />
-                        </ReactFlow>
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a workflow</div>
-                      )}
-                      {draft && (
-                        <div className="pointer-events-none absolute bottom-2 right-2 z-10 max-w-[280px] rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-muted-foreground shadow-subtle">
-                          Click <span className="font-bold text-blue-600 dark:text-blue-300">+</span> on a line to insert a step. Drag a node&apos;s bottom dot to another node&apos;s top dot to connect blocks.
-                        </div>
-                      )}
-                      {edgeInsert && draft && (
-                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 dark:bg-black/50 p-4" onClick={() => setEdgeInsert(null)}>
-                          <div
-                            className="w-64 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <div className="border-b border-border/60 px-3 py-2">
-                              <div className="text-xs font-bold text-foreground">Insert a step</div>
-                              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                                Between <span className="font-semibold">{edgeInsert.source}</span> and <span className="font-semibold">{edgeInsert.target}</span>
-                                {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
-                              </div>
+              <div className="flex min-h-0 min-w-0">
+                <PanelGroup
+                  id={WORKFLOW_EDITOR_LAYOUT_ID}
+                  orientation="horizontal"
+                  defaultLayout={editorLayout.defaultLayout}
+                  onLayoutChanged={editorLayout.onLayoutChanged}
+                  className="min-h-0 min-w-0 flex-1"
+                >
+                  <Panel id="workflow-canvas" minSize="38%" defaultSize="56%">
+                    <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border">
+                      {hasBlockingGraphErrors && (
+                        <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
+                          <div className="flex items-start gap-2">
+                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
+                            <div className="min-w-0">
+                              <div className="font-semibold">Workflow needs fixes before publish</div>
+                              <ul className="mt-1 space-y-0.5">
+                                {draftValidationIssues.slice(0, 4).map((issue) => (
+                                  <li key={issue} className="truncate">- {issue}</li>
+                                ))}
+                                {draftValidationIssues.length > 4 && (
+                                  <li>{draftValidationIssues.length - 4} more validation issues</li>
+                                )}
+                              </ul>
                             </div>
-                            {ADDABLE_NODE_TYPES.map((type) => {
-                              const TypeIcon = WORKFLOW_NODE_REGISTRY[type]?.icon;
-                              return (
-                                <button
-                                  key={type}
-                                  type="button"
-                                  onClick={() => insertNodeBetween(edgeInsert, type)}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15"
-                                >
-                                  {TypeIcon ? (
-                                    <TypeIcon className="h-3.5 w-3.5" style={{ color: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
-                                  ) : (
-                                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
-                                  )}
-                                  {NODE_LABELS[type] || type}
-                                </button>
-                              );
-                            })}
-                            <button
-                              type="button"
-                              onClick={() => setEdgeInsert(null)}
-                              className="w-full border-t border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50"
-                            >
-                              Cancel
-                            </button>
                           </div>
                         </div>
                       )}
-                    </div>
-                  </main>
-                </Panel>
-
-                <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-muted transition hover:bg-blue-300" />
-
-                <Panel id="workflow-inspector" minSize="25%" maxSize="62%" defaultSize="44%">
-                  <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-                    <div className="shrink-0 border-b border-border px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inspector</div>
-                          <h3 className="text-sm font-semibold text-foreground">{selectedNode ? NODE_LABELS[selectedNode.type] || selectedNode.type : 'No node selected'}</h3>
-                        </div>
-                        {selectedNode?.type === 'llm_generate' && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-200">
-                            <Bot className="h-3.5 w-3.5" />
-                        Drafts email
-                          </span>
+                      <div className="relative min-h-[360px] flex-1 overflow-hidden bg-muted/50">
+                        {draft ? (
+                          <ReactFlow
+                            colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
+                            style={FLOW_CANVAS_VARS}
+                            nodes={flowNodes}
+                            edges={flowEdges}
+                            nodeTypes={FLOW_NODE_TYPES}
+                            edgeTypes={FLOW_EDGE_TYPES}
+                            fitView
+                            fitViewOptions={{ padding: 0.2 }}
+                            nodesDraggable={false}
+                            minZoom={0.25}
+                            maxZoom={1.6}
+                            panActivationKeyCode={null}
+                            isValidConnection={isValidWorkflowConnection}
+                            onConnect={handleFlowConnect}
+                            onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+                            onPaneClick={() => setSelectedNodeId(null)}
+                            onNodesChange={handleFlowNodesChange}
+                          >
+                            <Controls showInteractive={false} />
+                            <MiniMap
+                              pannable
+                              zoomable
+                              className="!m-3 !rounded-lg !border !border-border !bg-card/90 !shadow-subtle"
+                              nodeColor={(node) => nodeAccent(NODE_COLORS[node.data?.nodeType], resolvedTheme)}
+                              maskColor={resolvedTheme === 'dark' ? 'rgba(15,23,42,0.55)' : 'rgba(241,245,249,0.7)'}
+                            />
+                            <Background gap={18} color={resolvedTheme === 'dark' ? '#283549' : '#e5e7eb'} />
+                          </ReactFlow>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a workflow</div>
                         )}
-                        {selectedNode?.type === 'send_email' && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-200">
-                            <Send className="h-3.5 w-3.5" />
-                        Email
-                          </span>
+                        {draft && (
+                          <NodePalette
+                            onAddNode={addWorkflowNode}
+                            onRemoveNode={removeSelectedNode}
+                            onUndo={undoDraftChange}
+                            canUndo={undoDepth > 0}
+                            workflow={selected}
+                            onRename={renameWorkflow}
+                          />
+                        )}
+                        {edgeInsert && draft && (
+                          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 dark:bg-black/50 p-4" onClick={() => setEdgeInsert(null)}>
+                            <div
+                              className="w-64 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <div className="border-b border-border/60 px-3 py-2">
+                                <div className="text-xs font-bold text-foreground">Insert a step</div>
+                                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                                Between <span className="font-semibold">{edgeInsert.source}</span> and <span className="font-semibold">{edgeInsert.target}</span>
+                                  {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
+                                </div>
+                              </div>
+                              {ADDABLE_NODE_TYPES.map((type) => {
+                                const TypeIcon = WORKFLOW_NODE_REGISTRY[type]?.icon;
+                                return (
+                                  <button
+                                    key={type}
+                                    type="button"
+                                    onClick={() => insertNodeBetween(edgeInsert, type)}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15"
+                                  >
+                                    {TypeIcon ? (
+                                      <TypeIcon className="h-3.5 w-3.5" style={{ color: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
+                                    ) : (
+                                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
+                                    )}
+                                    {NODE_LABELS[type] || type}
+                                  </button>
+                                );
+                              })}
+                              <button
+                                type="button"
+                                onClick={() => setEdgeInsert(null)}
+                                className="w-full border-t border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50"
+                              >
+                              Cancel
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-                      {renderInspector()}
-                    </div>
-                  </aside>
-                </Panel>
-              </PanelGroup>
+                    </main>
+                  </Panel>
+
+                  {selectedNode && draft && (
+                    <>
+                      <PanelResizeHandle id="workflow-editor-resizer" className="w-1.5 bg-border/60 transition hover:bg-primary/60 data-[resize-handle-active]:bg-primary" />
+
+                      <Panel id="workflow-inspector" minSize="25%" maxSize="62%" defaultSize="40%">
+                        <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-card animate-slide-in-right" data-testid="workflow-inspector">
+                          <div className="shrink-0 border-b border-border px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex min-w-0 items-center gap-2.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedNodeId(null)}
+                                  aria-label="Close inspector (Esc)"
+                                  title="Close inspector (Esc)"
+                                  className="tp-focus-ring -ml-1 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </button>
+                                <div className="min-w-0">
+                                  <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{NODE_LABELS[selectedNode.type] || selectedNode.type}</div>
+                                  <h3 className="truncate text-sm font-semibold text-foreground">{selectedNode.data?.label || selectedNode.id}</h3>
+                                </div>
+                              </div>
+                              {selectedNode?.type === 'llm_generate' && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-200">
+                                  <Bot className="h-3.5 w-3.5" />
+                        Drafts email
+                                </span>
+                              )}
+                              {selectedNode?.type === 'send_email' && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-200">
+                                  <Send className="h-3.5 w-3.5" />
+                        Email
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+                            {renderInspector()}
+                          </div>
+                        </aside>
+                      </Panel>
+                    </>
+                  )}
+                </PanelGroup>
+                {!selectedNode && draft && (
+                  <div
+                    className="hidden w-9 shrink-0 flex-col items-center border-l border-border bg-card/70 pt-3 lg:flex"
+                    title="Select a step on the canvas to edit it"
+                    data-testid="workflow-inspector-rail"
+                  >
+                    <span className="rotate-180 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 [writing-mode:vertical-rl]">Inspector</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

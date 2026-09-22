@@ -3,13 +3,13 @@
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 vi.mock('../../contexts/WorkspaceContext', () => ({
   useWorkspace: () => ({ currentWorkspace: { id: 1 } }),
 }));
 
-const { default: WorkflowIndex } = await import('./WorkflowIndex.jsx');
+const { default: WorkflowIndex, workflowState, workflowMeta } = await import('./WorkflowIndex.jsx');
 
 const GroupIcon = (props) => <svg data-testid="group-icon" {...props} />;
 
@@ -22,17 +22,29 @@ const WORKFLOWS = [
     isEnabled: true,
     publishedVersion: 3,
     _count: { runs: 12 },
-    runs: [{ status: 'completed', startedAt: new Date().toISOString() }],
+    runs: [{ status: 'completed', startedAt: new Date(Date.now() - 6 * 3600e3).toISOString() }],
   },
   {
     id: 2,
-    name: 'VIP variant with a much longer descriptive workflow name for wrapping',
+    name: 'VIP variant',
     triggerType: 'ticket.assigned',
     isDefaultVariant: false,
     isEnabled: false,
     publishedVersion: 0,
+    routingRule: { field: 'x' },
     _count: { runs: 0 },
     runs: [],
+  },
+  {
+    id: 3,
+    name: 'After-hours arrival',
+    triggerType: 'ticket.created',
+    isDefaultVariant: true,
+    isEnabled: true,
+    mockModeEnabled: true,
+    publishedVersion: 17,
+    _count: { runs: 4 },
+    runs: [{ status: 'completed', startedAt: new Date(Date.now() - 2 * 86400e3).toISOString() }],
   },
 ];
 
@@ -46,121 +58,86 @@ function renderIndex(overrides = {}) {
     onCreateForTrigger: vi.fn(),
     getDisplayName: (workflow) => workflow.name,
     getVisuals: () => ({ icon: GroupIcon }),
-    eventLabels: { 'ticket.assigned': 'Ticket assigned' },
-    isAfterHours: () => false,
+    eventLabels: { 'ticket.assigned': 'Ticket assigned', 'ticket.created': 'Ticket arrived' },
+    isAfterHours: (w) => w.id === 3,
     ...overrides,
   };
   render(<WorkflowIndex {...props} />);
   return props;
 }
 
-function cardFor(name) {
-  return screen.getByTitle(name).closest('.group');
-}
+const rowFor = (name) => screen.getByText(name).closest('[data-testid="workflow-row"]');
 
-describe('WorkflowIndex sidebar cards (QA 08-02 legibility polish)', () => {
+describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
   afterEach(() => cleanup());
 
-  test('each workflow renders as a clearly bounded card', () => {
+  test('rows are one line each: a state dot, the name, one muted meta line — no pills', () => {
     renderIndex();
-    const card = cardFor('VIP variant with a much longer descriptive workflow name for wrapping');
-    expect(card).toHaveClass('rounded-lg');
-    expect(card).toHaveClass('border');
-    expect(card).toHaveClass('border-border');
-    // Unselected cards get the hover affordances.
-    expect(card.className).toContain('hover:border-input');
-    expect(card.className).toContain('hover:shadow-subtle');
-  });
-
-  test('the selected card carries the blue border treatment on the card itself', () => {
-    renderIndex();
-    const selectedCard = cardFor('Assignment notice');
-    expect(selectedCard).toHaveClass('border-2');
-    expect(selectedCard).toHaveClass('border-blue-500');
-    expect(selectedCard.querySelector('[aria-current="true"]')).not.toBeNull();
-    // Unselected sibling keeps the neutral bounded look.
-    const otherCard = cardFor('VIP variant with a much longer descriptive workflow name for wrapping');
-    expect(otherCard).not.toHaveClass('border-blue-500');
-  });
-
-  test('workflow names read at text-sm font-semibold and clamp to two lines', () => {
-    renderIndex();
-    const name = screen.getByTitle('Assignment notice');
-    expect(name).toHaveClass('text-sm');
-    expect(name).toHaveClass('font-semibold');
-    expect(name).toHaveClass('text-foreground');
-    expect(name).toHaveClass('line-clamp-2');
-  });
-
-  test('cards in a trigger group are separated by gap-1.5', () => {
-    renderIndex();
-    const card = cardFor('Assignment notice');
-    expect(card.parentElement).toHaveClass('gap-1.5');
-  });
-
-  test('trigger group header keeps the tinted band with a bolder label and count pill', () => {
-    renderIndex();
-    const label = screen.getByText('Ticket assigned');
-    expect(label).toHaveClass('text-xs');
-    expect(label).toHaveClass('font-bold');
-    expect(label).toHaveClass('tracking-wide');
-    const pill = screen.getByText('2'); // both workflows share the trigger
-    expect(pill).toHaveClass('rounded-full');
-  });
-
-  test('the enabled toggle sits at the right edge, vertically centered', () => {
-    renderIndex();
-    const toggle = screen.getByRole('switch', { name: /Assignment notice/ });
-    expect(toggle).toHaveClass('self-center');
-    expect(toggle).toHaveClass('shrink-0');
-  });
-});
-
-describe('WorkflowIndex routing chip (QA 08-06 #6)', () => {
-  afterEach(() => cleanup());
-
-  test('workflows with a routing rule show the amber "Routed" chip with a tooltip', () => {
-    renderIndex({
-      workflows: [
-        WORKFLOWS[0],
-        { ...WORKFLOWS[1], routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] } },
-      ],
-    });
-    const chip = screen.getByText('Routed');
-    expect(chip).toHaveClass('bg-amber-50');
-    expect(chip).toHaveAttribute('title', 'Only runs when its routing rule matches');
-  });
-
-  test('rule-less workflows and default variants show no chip', () => {
-    renderIndex({
-      workflows: [
-        // Default variant WITH a rule would still not show the chip.
-        { ...WORKFLOWS[0], routingRule: { '==': [{ var: 'x' }, 'y'] } },
-        { ...WORKFLOWS[1], routingRule: null },
-      ],
-    });
-    expect(screen.queryByText('Routed')).toBeNull();
-  });
-});
-
-describe('WorkflowIndex observe-only chip (QA 08-06 mock-mode visibility)', () => {
-  afterEach(() => cleanup());
-
-  test('an ENABLED workflow with mock mode on shows the prominent Observe-only chip', () => {
-    renderIndex({
-      workflows: [{ ...WORKFLOWS[0], mockModeEnabled: true }, WORKFLOWS[1]],
-    });
-    const chip = screen.getByText('Observe-only');
-    // Stronger treatment than the Routed chip: amber-100 fill + amber-400 ring.
-    expect(chip).toHaveClass('bg-amber-100');
-    expect(chip).toHaveClass('ring-amber-400');
-    expect(chip.getAttribute('title')).toMatch(/NO real actions/);
-  });
-
-  test('a DISABLED workflow with mock mode on shows no chip (nothing runs anyway)', () => {
-    renderIndex({
-      workflows: [WORKFLOWS[0], { ...WORKFLOWS[1], isEnabled: false, mockModeEnabled: true }],
-    });
+    const row = rowFor('Assignment notice');
+    expect(row).toHaveAttribute('data-state', 'on');
+    expect(within(row).getByText('Default · v3 · ran 6h ago')).toBeInTheDocument();
     expect(screen.queryByText('Observe-only')).toBeNull();
+    expect(screen.queryByText('Routed')).toBeNull();
+    // the same facts live in the meta line and the state, not in chips
+    expect(rowFor('VIP variant')).toHaveAttribute('data-state', 'draft');
+    expect(within(rowFor('VIP variant')).getByText('Routed · draft · no runs')).toBeInTheDocument();
+    expect(rowFor('After-hours arrival')).toHaveAttribute('data-state', 'observe');
+    expect(within(rowFor('After-hours arrival')).getByText('Default · After-hours · v17 · ran 2d ago')).toBeInTheDocument();
+  });
+
+  test('the selected row carries the inset primary bar and the name goes bold', () => {
+    renderIndex();
+    const row = rowFor('Assignment notice');
+    expect(row.className).toContain('shadow-[inset_3px_0_0');
+    expect(within(row).getByText('Assignment notice')).toHaveClass('font-semibold');
+    expect(row.querySelector('[aria-current="true"]')).not.toBeNull();
+    expect(rowFor('VIP variant').className).not.toContain('shadow-[inset_3px_0_0');
+  });
+
+  test('groups are collapsible with a plain count; the enable switch and row menu exist per row', () => {
+    const props = renderIndex({ onRowAction: vi.fn() });
+    const group = screen.getByRole('button', { name: /^Ticket assigned/ });
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(within(group).getByLabelText('2 workflows')).toHaveTextContent('2');
+    fireEvent.click(group);
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Assignment notice')).toBeNull();
+    fireEvent.click(group);
+    // switch
+    fireEvent.click(screen.getByRole('switch', { name: 'Disable Assignment notice' }));
+    expect(props.onToggleEnabled).toHaveBeenCalledWith(WORKFLOWS[0]);
+    expect(screen.getByRole('switch', { name: 'Enable VIP variant' })).toBeDisabled(); // draft
+    // row menu
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for VIP variant' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));
+    expect(props.onRowAction).toHaveBeenCalledWith(WORKFLOWS[1], 'archive');
+  });
+
+  test('filters are text: Enabled narrows, Failing shows a count only when something fails, Archived is a toggle', () => {
+    const props = renderIndex({ onShowArchivedChange: vi.fn(), archivedCount: 4 });
+    expect(screen.getByRole('button', { name: 'Failing' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Enabled' }));
+    expect(screen.queryByText('VIP variant')).toBeNull();
+    expect(screen.getByText('Assignment notice')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Archived 4' }));
+    expect(props.onShowArchivedChange).toHaveBeenCalledWith(true);
+  });
+
+  test('icon-collapse mode folds the panel to a rail of trigger icons with counts', () => {
+    const props = renderIndex({ collapsed: true, onToggleCollapsed: vi.fn(), footer: <span>health</span> });
+    expect(screen.getByTestId('workflow-sidebar-rail')).toBeInTheDocument();
+    expect(screen.queryByText('Assignment notice')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Ticket assigned, 2 workflows' })).toBeInTheDocument();
+    expect(screen.getByText('health')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Expand workflows/ }));
+    expect(props.onToggleCollapsed).toHaveBeenCalled();
+  });
+
+  test('workflowState / workflowMeta read the same facts the old chips did', () => {
+    expect(workflowState({ archivedAt: '2026-09-01' }).key).toBe('archived');
+    expect(workflowState({ isEnabled: true, runs: [{ status: 'failed' }] }).key).toBe('failing');
+    expect(workflowState({ isEnabled: true, mockModeEnabled: true }).key).toBe('observe');
+    expect(workflowState({ isEnabled: false, publishedVersion: 2 }).key).toBe('off');
+    expect(workflowMeta({ isDefaultVariant: false, triggerType: 'manual', publishedVersion: 2, runs: [] })).toBe('Sub-workflow · v2 · no runs');
   });
 });

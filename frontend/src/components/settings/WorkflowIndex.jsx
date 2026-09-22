@@ -1,24 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, FlaskConical, Loader2, Plus, Search, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Loader2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 /**
- * Workflow index (QA 07-07 #8) — the redesigned list rail, extracted from
- * NotificationWorkflowsPanel. Zapier/n8n-style rows: inline enable toggle,
- * last-run health with relative time, search-as-you-type, quick filters and
- * a pinned needs-attention strip. Grouping by trigger (with persisted
- * collapse state) carries over from the old list.
+ * Workflow sidebar (Mail Workflows redesign "L2", 22 Sep 2026) — the list
+ * rail rebuilt in the shadcn/ui Sidebar shape: a header, a search, a text
+ * filter row, collapsible groups per trigger with plain counts, one-line
+ * rows (state dot · name · meta) with a hover toggle and a row-action menu,
+ * a footer slot (health), and an icon-collapse mode (⌘B) that folds the
+ * whole panel to a 56px rail of trigger icons so the canvas gets the width.
  *
- * Naming/visual conventions stay owned by the panel and arrive as props
- * (getDisplayName, getVisuals, eventLabels, isAfterHours) so the two can't
- * drift apart.
+ * No pills: state is the dot (green enabled, amber observe-only, red failing,
+ * grey off, hollow archived) plus a short muted meta line. Naming and trigger
+ * visuals still arrive from the panel as props so the two can't drift.
  */
 
 function cx(...parts) {
   return parts.filter(Boolean).join(' ');
 }
 
-function relativeTime(value) {
+export function relativeTime(value) {
   if (!value) return null;
   const ms = Date.now() - new Date(value).getTime();
   if (!Number.isFinite(ms) || ms < 0) return 'just now';
@@ -32,14 +33,8 @@ function relativeTime(value) {
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function runFailed(status) {
+export function runFailed(status) {
   return /(fail|error|bounce|reject|block)/i.test(String(status || ''));
-}
-
-function runChipClass(status) {
-  if (runFailed(status)) return 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 ring-red-200 dark:ring-red-500/30';
-  if (/(complete|success|sent|deliver|ok)/i.test(String(status || ''))) return 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 ring-emerald-200 dark:ring-emerald-500/30';
-  return 'bg-muted text-muted-foreground ring-border';
 }
 
 function loadCollapsed(storageKey) {
@@ -71,139 +66,136 @@ function groupByTrigger(workflows) {
   return groups;
 }
 
+/** The one-word state of a workflow, and the dot that shows it. */
+export function workflowState(workflow) {
+  if (workflow.archivedAt) return { key: 'archived', label: 'Archived', dot: 'border border-muted-foreground/50 bg-transparent' };
+  const lastRun = workflow.runs?.[0];
+  if (workflow.isEnabled && lastRun && runFailed(lastRun.status)) return { key: 'failing', label: 'Failing', dot: 'bg-red-500' };
+  if (workflow.isEnabled && workflow.mockModeEnabled) return { key: 'observe', label: 'Observe-only', dot: 'bg-amber-500' };
+  if (workflow.isEnabled) return { key: 'on', label: 'Enabled', dot: 'bg-emerald-500' };
+  if (!(workflow.publishedVersion > 0)) return { key: 'draft', label: 'Draft', dot: 'bg-muted-foreground/40' };
+  return { key: 'off', label: 'Off', dot: 'bg-muted-foreground/40' };
+}
+
+/** "Default · v17 · ran 6h ago" — the one muted line under a name. */
+export function workflowMeta(workflow, { isAfterHours = () => false } = {}) {
+  const parts = [];
+  if (workflow.isDefaultVariant) parts.push('Default');
+  else if (workflow.triggerType === 'manual') parts.push('Sub-workflow');
+  else if (workflow.routingRule) parts.push('Routed');
+  else parts.push('Variant');
+  if (isAfterHours(workflow)) parts.push('After-hours');
+  const version = workflow.publishedVersion || 0;
+  parts.push(version > 0 ? `v${version}` : 'draft');
+  const lastRun = workflow.runs?.[0];
+  if (lastRun) parts.push(`${runFailed(lastRun.status) ? 'failed' : 'ran'} ${relativeTime(lastRun.startedAt)}`);
+  else parts.push('no runs');
+  return parts.join(' · ');
+}
+
+function RowMenu({ workflow, displayName, onRowAction, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDoc = (e) => { if (!ref.current?.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [onClose]);
+  const isArchived = Boolean(workflow.archivedAt);
+  const items = [
+    { key: 'variant', label: 'New variant…' },
+    ...(workflow.isDefaultVariant ? [] : [{ key: isArchived ? 'restore' : 'archive', label: isArchived ? 'Restore' : 'Archive' }]),
+    ...(isArchived && !workflow.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', danger: true }] : []),
+  ];
+  return (
+    <div ref={ref} role="menu" aria-label={`Actions for ${displayName}`} className="tp-card absolute right-2 top-full z-30 mt-0.5 w-44 rounded-lg p-1 shadow-soft animate-popIn">
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          role="menuitem"
+          onClick={() => { onRowAction(workflow, item.key); onClose(); }}
+          className={cx('tp-focus-ring flex w-full items-center rounded-md px-2 py-1.5 text-left text-xs font-medium hover:bg-muted', item.danger ? 'text-red-700 dark:text-red-300' : 'text-foreground/85')}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function IndexRow({
   workflow, selected, nested, onSelect, onToggleEnabled, toggling,
-  getDisplayName, isAfterHours,
+  getDisplayName, isAfterHours, onRowAction,
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const isEnabled = !!workflow.isEnabled;
   const isArchived = Boolean(workflow.archivedAt);
-  const lastRun = workflow.runs?.[0];
-  const failed = lastRun && runFailed(lastRun.status);
-  const runs = workflow._count?.runs || 0;
   const version = workflow.publishedVersion || 0;
-
-  // QA 08-02 (Susan): rows were hard to tell apart — each workflow is now a
-  // clearly bounded card. The colored left edge keeps the enabled/failed/
-  // archived state read; selection promotes to a full blue border.
+  const state = workflowState(workflow);
+  const name = getDisplayName(workflow);
+  const meta = workflowMeta(workflow, { isAfterHours });
   return (
     <div
+      data-testid="workflow-row"
+      data-state={state.key}
       className={cx(
-        'group relative flex w-full items-center gap-2 rounded-lg px-3 py-2.5 transition-[border-color,box-shadow,background-color]',
-        nested && 'ml-3',
-        selected
-          ? 'z-[1] border-2 border-blue-500 bg-blue-50/70 dark:bg-blue-500/10 shadow-subtle'
-          : cx(
-            'border border-l-4 border-border hover:border-input hover:shadow-subtle',
-            isArchived
-              ? 'border-l-input bg-muted'
-              : failed && isEnabled
-                ? 'border-l-red-400 bg-card hover:bg-red-50/40 dark:hover:bg-red-500/10'
-                : isEnabled
-                  ? 'border-l-emerald-400 bg-card'
-                  : 'border-l-input bg-muted/50',
-          ),
+        'group/row relative flex items-center gap-2 pr-2 transition-colors',
+        nested ? 'pl-8' : 'pl-3',
+        selected ? 'bg-primary/10 shadow-[inset_3px_0_0_hsl(var(--primary))]' : 'hover:bg-muted/70',
       )}
     >
       <button
         type="button"
         onClick={() => onSelect(workflow.id)}
         aria-current={selected ? 'true' : undefined}
-        className="min-w-0 flex-1 self-start text-left"
+        title={`${name} — ${state.label} · ${meta}`}
+        className="tp-focus-ring flex min-w-0 flex-1 items-center gap-2 rounded py-1.5 text-left"
       >
-        <span
-          className={cx(
-            'block text-sm font-semibold leading-5 line-clamp-2',
-            isArchived ? 'text-muted-foreground' : isEnabled ? 'text-foreground' : 'text-muted-foreground',
-          )}
-          title={workflow.name}
-        >
-          {getDisplayName(workflow)}
-        </span>
-        <span className="mt-1 flex flex-wrap items-center gap-1">
-          {workflow.isDefaultVariant ? (
-            <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-200 ring-1 ring-blue-200 dark:ring-blue-500/30">Default</span>
-          ) : workflow.triggerType === 'manual' ? (
-            <span className="inline-flex items-center rounded-md bg-violet-50 dark:bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-200 ring-1 ring-violet-200 dark:ring-violet-500/30">Sub-workflow</span>
-          ) : (
-            <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground ring-1 ring-border">Variant</span>
-          )}
-          {isAfterHours(workflow) && (
-            <span className="inline-flex items-center rounded-md bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-200 ring-1 ring-amber-200 dark:ring-amber-500/30">After-hours</span>
-          )}
-          {/* QA 08-06 (Susan, ws5): an enabled workflow in mock mode runs on
-              every matching ticket but takes NO real actions — the loudest
-              chip in the row, stronger than "Routed". */}
-          {isEnabled && workflow.mockModeEnabled && (
-            <span
-              className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200 ring-1 ring-amber-400"
-              title="Mock mode: this workflow runs on matching tickets but takes NO real actions (no emails, no ticket updates). Open it and turn off mock mode to make it act."
-            >
-              <FlaskConical className="h-2.5 w-2.5" />
-              Observe-only
-            </span>
-          )}
-          {/* QA 08-06 #6: a routing rule silently gates the workflow — say so. */}
-          {!workflow.isDefaultVariant && Boolean(workflow.routingRule) && (
-            <span
-              className="inline-flex items-center rounded-md bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-200 ring-1 ring-amber-200 dark:ring-amber-500/30"
-              title="Only runs when its routing rule matches"
-            >
-              Routed
-            </span>
-          )}
-          {version > 0
-            ? <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground ring-1 ring-border">v{version}</span>
-            : <span className="inline-flex items-center rounded-md bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-200 ring-1 ring-amber-200 dark:ring-amber-500/30">Draft</span>}
-          {isArchived && (
-            <span
-              className="inline-flex items-center rounded-md bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground ring-1 ring-input"
-              title={`Archived ${new Date(workflow.archivedAt).toLocaleString()}`}
-            >
-              archived · {new Date(workflow.archivedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-            </span>
-          )}
-          {lastRun ? (
-            <span
-              className={cx('inline-flex max-w-[11rem] items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold ring-1', runChipClass(lastRun.status))}
-              title={`Last run: ${lastRun.status} · ${new Date(lastRun.startedAt).toLocaleString()} · ${runs} total`}
-            >
-              {failed && <AlertTriangle className="h-2.5 w-2.5 shrink-0" />}
-              <span className="truncate">{failed ? 'failed' : lastRun.status} · {relativeTime(lastRun.startedAt)}</span>
-            </span>
-          ) : (
-            <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground ring-1 ring-border">no runs</span>
-          )}
+        <span className={cx('h-2 w-2 flex-shrink-0 rounded-full', state.dot)} aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className={cx('block truncate text-[13px] leading-4', selected ? 'font-semibold text-foreground' : isArchived || !isEnabled ? 'font-medium text-muted-foreground' : 'font-medium text-foreground/90')}>
+            {name}
+          </span>
+          <span className="block truncate text-[10.5px] leading-3.5 text-muted-foreground/75">{meta}</span>
         </span>
       </button>
-
-      {/* Inline enable toggle — flipping a workflow on/off shouldn't require
-          opening it. Drafts can't enable (nothing published to run). */}
+      {/* Inline enable switch — shows on hover, focus and for the selected row. Drafts can't enable. */}
       {!isArchived && (
         <button
           type="button"
           role="switch"
           aria-checked={isEnabled}
-          aria-label={`${isEnabled ? 'Disable' : 'Enable'} ${getDisplayName(workflow)}`}
+          aria-label={`${isEnabled ? 'Disable' : 'Enable'} ${name}`}
           disabled={toggling === workflow.id || (!isEnabled && version === 0)}
           title={!isEnabled && version === 0 ? 'Publish the workflow before enabling it' : isEnabled ? 'Disable' : 'Enable'}
           onClick={(e) => { e.stopPropagation(); onToggleEnabled(workflow); }}
           className={cx(
-            'relative h-5 w-9 shrink-0 self-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-            isEnabled ? 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-500' : 'border-input bg-secondary',
+            'tp-focus-ring relative h-4 w-7 flex-shrink-0 rounded-full border transition-[opacity,background-color] disabled:cursor-not-allowed disabled:opacity-40',
+            isEnabled ? 'border-emerald-300 bg-emerald-500 dark:border-emerald-500/40' : 'border-input bg-secondary',
+            selected || isEnabled ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100',
           )}
         >
           {toggling === workflow.id ? (
-            <Loader2 className="absolute inset-0 m-auto h-3 w-3 animate-spin text-white" />
+            <Loader2 className="absolute inset-0 m-auto h-2.5 w-2.5 animate-spin text-white" />
           ) : (
-            <span
-              className={cx(
-                'absolute top-0.5 h-3.5 w-3.5 rounded-full bg-card shadow transition-all',
-                isEnabled ? 'left-[18px]' : 'left-0.5',
-              )}
-            />
+            <span className={cx('absolute top-0.5 h-2.5 w-2.5 rounded-full bg-card shadow transition-all', isEnabled ? 'left-[14px]' : 'left-0.5')} />
           )}
         </button>
       )}
+      {onRowAction && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`More actions for ${name}`}
+          className={cx('tp-focus-ring flex-shrink-0 rounded p-0.5 text-muted-foreground/75 hover:bg-muted hover:text-foreground', menuOpen ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      )}
+      {menuOpen && <RowMenu workflow={workflow} displayName={name} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
     </div>
   );
 }
@@ -215,20 +207,27 @@ export default function WorkflowIndex({
   onToggleEnabled,
   togglingId = null,
   onCreateForTrigger,
+  onCreate = null,
   getDisplayName,
   getVisuals,
   eventLabels,
   isAfterHours,
+  onRowAction = null,
+  collapsed = false,
+  onToggleCollapsed = null,
+  showArchived = false,
+  archivedCount = 0,
+  onShowArchivedChange = null,
+  footer = null,
 }) {
   const { currentWorkspace } = useWorkspace();
   const storageKey = `tp_wf_collapsed_${currentWorkspace?.id ?? 'all'}`;
-  const [collapsed, setCollapsed] = useState(() => loadCollapsed(storageKey));
+  const [groupsCollapsed, setGroupsCollapsed] = useState(() => loadCollapsed(storageKey));
   const [query, setQuery] = useState('');
-  const [enabledOnly, setEnabledOnly] = useState(false);
-  const [failingOnly, setFailingOnly] = useState(false);
+  const [filter, setFilter] = useState('all'); // all | enabled | failing
 
   useEffect(() => {
-    setCollapsed(loadCollapsed(storageKey));
+    setGroupsCollapsed(loadCollapsed(storageKey));
   }, [storageKey]);
 
   const persist = (nextSet) => {
@@ -237,7 +236,7 @@ export default function WorkflowIndex({
     } catch { /* collapse still works for the session */ }
   };
   const toggleGroup = (triggerType) => {
-    setCollapsed((current) => {
+    setGroupsCollapsed((current) => {
       const next = new Set(current);
       if (next.has(triggerType)) next.delete(triggerType);
       else next.add(triggerType);
@@ -246,177 +245,181 @@ export default function WorkflowIndex({
     });
   };
 
+  const failingCount = useMemo(
+    () => workflows.filter((w) => w.isEnabled && !w.archivedAt && w.runs?.[0] && runFailed(w.runs[0].status)).length,
+    [workflows],
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return workflows.filter((workflow) => {
-      if (enabledOnly && !workflow.isEnabled) return false;
-      if (failingOnly && !(workflow.runs?.[0] && runFailed(workflow.runs[0].status))) return false;
+      if (filter === 'enabled' && !workflow.isEnabled) return false;
+      if (filter === 'failing' && !(workflow.runs?.[0] && runFailed(workflow.runs[0].status))) return false;
       if (!q) return true;
       return getDisplayName(workflow).toLowerCase().includes(q)
         || String(workflow.name || '').toLowerCase().includes(q)
         || String(eventLabels[workflow.triggerType] || workflow.triggerType || '').toLowerCase().includes(q);
     });
-  }, [workflows, query, enabledOnly, failingOnly, getDisplayName, eventLabels]);
-
-  // Enabled workflows whose last run failed bubble to a pinned strip —
-  // failures shouldn't hide inside a collapsed group.
-  const needsAttention = useMemo(
-    () => workflows.filter((w) => w.isEnabled && !w.archivedAt && w.runs?.[0] && runFailed(w.runs[0].status)),
-    [workflows],
-  );
+  }, [workflows, query, filter, getDisplayName, eventLabels]);
 
   const groups = groupByTrigger(filtered);
-  const filtering = Boolean(query.trim()) || enabledOnly || failingOnly;
-  // Collapse state is judged (and toggled) against EVERY trigger group, not
-  // just the ones surviving the current filter — otherwise the button label
-  // flip-flops as filters change and "Collapse all" looks broken.
-  const allTriggerTypes = useMemo(
-    () => [...new Set(workflows.map((w) => w.triggerType || 'other'))],
-    [workflows],
-  );
-  const allCollapsed = allTriggerTypes.length > 0 && allTriggerTypes.every((type) => collapsed.has(type));
-  // A typed search auto-expands so matches are visible; the chip filters keep
-  // manual collapse intact.
+  const allGroups = groupByTrigger(workflows);
   const searching = Boolean(query.trim());
+  const filtering = searching || filter !== 'all' || showArchived;
+  const selectedTrigger = workflows.find((w) => w.id === selectedId)?.triggerType || null;
+
+  // ---- icon-collapse mode: a 56px rail of trigger icons ----
+  if (collapsed) {
+    return (
+      <div className="flex h-full flex-col items-center gap-1 py-2" data-testid="workflow-sidebar-rail">
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label="Expand workflows (Ctrl+B)"
+            title="Expand workflows (Ctrl+B)"
+            className="tp-focus-ring mb-1 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
+        {[...allGroups.entries()].map(([triggerType, bucket]) => {
+          const GroupIcon = getVisuals(triggerType).icon;
+          const total = (bucket.default ? 1 : 0) + bucket.customs.length;
+          const active = selectedTrigger === triggerType;
+          return (
+            <button
+              key={triggerType}
+              type="button"
+              onClick={onToggleCollapsed || undefined}
+              title={`${eventLabels[triggerType] || triggerType} · ${total}`}
+              aria-label={`${eventLabels[triggerType] || triggerType}, ${total} workflows`}
+              className={cx('tp-focus-ring relative inline-flex h-9 w-9 items-center justify-center rounded-lg', active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}
+            >
+              <GroupIcon className="h-4 w-4" aria-hidden="true" />
+              <span className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-card px-1 text-[9px] font-semibold leading-[14px] text-muted-foreground ring-1 ring-border">{total}</span>
+            </button>
+          );
+        })}
+        <div className="mt-auto">{footer}</div>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* Search + quick filters */}
-      <div className="sticky top-0 z-20 space-y-1.5 border-b border-border/60 bg-card/95 px-2.5 py-2 backdrop-blur">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/75" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search workflows…"
-            aria-label="Search workflows"
-            className="w-full rounded-md border border-border bg-card py-1.5 pl-7 pr-7 text-xs text-foreground/85 placeholder:text-muted-foreground/75 focus:border-indigo-300 dark:focus:border-indigo-500/40 focus:outline-none"
-          />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery('')}
-              aria-label="Clear search"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/75 hover:text-muted-foreground"
-            >
-              <X className="h-3 w-3" />
+    <div className="flex h-full min-h-0 flex-col" data-testid="workflow-sidebar">
+      {/* Header */}
+      <div className="flex items-center gap-1 px-3 pb-1 pt-2.5">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Workflows</span>
+        <span className="ml-auto flex items-center gap-0.5">
+          {onCreate && (
+            <button type="button" onClick={onCreate} className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-semibold text-primary hover:bg-primary/10">
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" /> New
             </button>
           )}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-pressed={enabledOnly}
-            onClick={() => setEnabledOnly((v) => !v)}
-            className={cx(
-              'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-              enabledOnly ? 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-border text-muted-foreground hover:border-emerald-200 dark:hover:border-emerald-500/30',
-            )}
-          >
-            Enabled
-          </button>
-          <button
-            type="button"
-            aria-pressed={failingOnly}
-            onClick={() => setFailingOnly((v) => !v)}
-            className={cx(
-              'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
-              failingOnly ? 'border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200' : 'border-border text-muted-foreground hover:border-red-200 dark:hover:border-red-500/30',
-            )}
-          >
-            Failing{needsAttention.length > 0 ? ` (${needsAttention.length})` : ''}
-          </button>
-          {!searching && (
+          {onToggleCollapsed && (
             <button
               type="button"
-              onClick={() => {
-                const next = allCollapsed ? new Set() : new Set(allTriggerTypes);
-                persist(next);
-                setCollapsed(next);
-              }}
-              className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
+              onClick={onToggleCollapsed}
+              aria-label="Collapse workflows (Ctrl+B)"
+              title="Collapse workflows (Ctrl+B)"
+              className="tp-focus-ring inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/75 hover:bg-muted hover:text-foreground"
             >
-              {allCollapsed ? 'Expand all' : 'Collapse all'}
+              <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
-        </div>
+        </span>
       </div>
 
-      {/* Needs attention — pinned above the groups */}
-      {needsAttention.length > 0 && !failingOnly && (
-        <div className="border-b border-red-100 dark:border-red-500/20 bg-red-50/60 dark:bg-red-500/10 px-2.5 py-1.5">
-          <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-red-600 dark:text-red-300">
-            <AlertTriangle className="h-3 w-3" /> Needs attention
-          </p>
-          {needsAttention.slice(0, 3).map((workflow) => (
-            <button
-              key={workflow.id}
-              type="button"
-              onClick={() => onSelect(workflow.id)}
-              className="mt-1 flex w-full items-center gap-1.5 rounded-md bg-card/80 px-2 py-1 text-left text-xs text-foreground/85 ring-1 ring-red-100 dark:ring-red-500/30 hover:bg-card"
-            >
-              <span className="min-w-0 flex-1 truncate font-medium">{getDisplayName(workflow)}</span>
-              <span className="shrink-0 text-[10px] text-red-500">{relativeTime(workflow.runs[0].startedAt)}</span>
-            </button>
-          ))}
-          {needsAttention.length > 3 && (
-            <button
-              type="button"
-              onClick={() => setFailingOnly(true)}
-              className="mt-1 text-[10px] font-semibold text-red-600 dark:text-red-300 hover:underline"
-            >
-              +{needsAttention.length - 3} more failing
-            </button>
-          )}
-        </div>
-      )}
+      {/* Search */}
+      <div className="relative px-2.5 pb-1.5">
+        <Search className="pointer-events-none absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-[60%] text-muted-foreground/75" aria-hidden="true" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search workflows…"
+          aria-label="Search workflows"
+          className="tp-focus-ring h-8 w-full rounded-md border border-border bg-card pl-7 pr-7 text-xs text-foreground placeholder:text-muted-foreground/75"
+        />
+        {query && (
+          <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-4 top-1/2 -translate-y-[60%] rounded p-0.5 text-muted-foreground/75 hover:text-foreground">
+            <X className="h-3 w-3" aria-hidden="true" />
+          </button>
+        )}
+      </div>
 
-      {filtered.length === 0 && (
-        <div className="px-3 py-8 text-center text-xs leading-5 text-muted-foreground">
-          {filtering
-            ? 'Nothing matches — clear the search or filters.'
-            : 'No workflows yet. Use “New workflow” above to start from a trigger or a template.'}
-        </div>
-      )}
+      {/* Filters — text, not chips */}
+      <div className="flex items-center gap-3 border-b border-border/60 px-3 pb-1.5 text-[11px]" role="group" aria-label="Filter workflows">
+        {[
+          { key: 'all', label: 'All' },
+          { key: 'enabled', label: 'Enabled' },
+          { key: 'failing', label: failingCount ? `Failing ${failingCount}` : 'Failing' },
+        ].map((f) => {
+          const on = filter === f.key && !showArchived;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={on}
+              onClick={() => { setFilter(f.key); onShowArchivedChange?.(false); }}
+              className={cx('tp-focus-ring rounded-sm border-b-2 pb-0.5 font-medium', on ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground/85', f.key === 'failing' && failingCount && !on ? 'text-red-600 dark:text-red-300' : '')}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+        {onShowArchivedChange && archivedCount > 0 && (
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            onClick={() => onShowArchivedChange(!showArchived)}
+            className={cx('tp-focus-ring ml-auto rounded-sm border-b-2 pb-0.5 font-medium', showArchived ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground/85')}
+          >
+            Archived {archivedCount}
+          </button>
+        )}
+      </div>
 
-      <div className="divide-y divide-border">
+      {/* Groups */}
+      <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto py-1">
+        {filtered.length === 0 && (
+          <div className="px-3 py-8 text-center text-xs leading-5 text-muted-foreground">
+            {filtering ? 'Nothing matches — clear the search or filters.' : 'No workflows yet. Use “New” to start from a trigger or a template.'}
+          </div>
+        )}
         {[...groups.entries()].map(([triggerType, bucket]) => {
           const total = (bucket.default ? 1 : 0) + bucket.customs.length;
           const GroupIcon = getVisuals(triggerType).icon;
-          const isCollapsed = collapsed.has(triggerType) && !searching;
-          // Slate wash behind each group so the white bordered cards pop.
+          const isCollapsed = groupsCollapsed.has(triggerType) && !searching;
+          const label = eventLabels[triggerType] || triggerType;
           return (
-            <section key={triggerType} className="bg-muted/40">
-              <div className="sticky top-[76px] z-10 flex w-full items-center border-y border-l-4 border-indigo-100 dark:border-indigo-500/20 border-l-indigo-500 bg-indigo-50 dark:bg-indigo-500/15 transition-colors hover:bg-indigo-100/70 dark:hover:bg-indigo-500/15">
+            <section key={triggerType} className="group/grp">
+              <div className="flex items-center pr-2">
                 <button
                   type="button"
                   onClick={() => toggleGroup(triggerType)}
                   aria-expanded={!isCollapsed}
-                  className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left"
+                  className="tp-focus-ring flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1.5 text-left"
                 >
-                  <ChevronDown className={cx('h-4 w-4 shrink-0 text-indigo-400 transition-transform', isCollapsed && '-rotate-90')} />
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-card text-indigo-600 dark:text-indigo-300 ring-1 ring-indigo-200 dark:ring-indigo-500/30">
-                    <GroupIcon className="h-3 w-3" />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-wide text-indigo-800 dark:text-indigo-200">{eventLabels[triggerType] || triggerType}</span>
-                  <span className="shrink-0 rounded-full bg-indigo-100 dark:bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-200 ring-1 ring-indigo-200 dark:ring-indigo-500/30">{total}</span>
+                  <ChevronDown className={cx('h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60 transition-transform', isCollapsed && '-rotate-90')} aria-hidden="true" />
+                  <GroupIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground/85">{label}</span>
+                  <span className="flex-shrink-0 text-[11px] tabular-nums text-muted-foreground/75" aria-label={`${total} workflows`}>{total}</span>
                 </button>
                 {onCreateForTrigger && (
                   <button
                     type="button"
                     onClick={() => onCreateForTrigger(triggerType)}
-                    aria-label={`Create a workflow for ${eventLabels[triggerType] || triggerType}`}
-                    title={`Create a workflow for ${eventLabels[triggerType] || triggerType}`}
-                    className="mr-2 shrink-0 rounded-md p-1 text-indigo-400 opacity-0 transition-opacity hover:bg-card hover:text-indigo-700 dark:hover:text-indigo-200 focus:opacity-100 group-hover:opacity-100 [.group:hover_&]:opacity-100 hover:opacity-100"
+                    aria-label={`Create a workflow for ${label}`}
+                    title={`Create a workflow for ${label}`}
+                    className="tp-focus-ring flex-shrink-0 rounded p-0.5 text-muted-foreground/75 opacity-0 hover:bg-muted hover:text-foreground group-hover/grp:opacity-100 focus-visible:opacity-100"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 )}
               </div>
-              {/* gap-1.5 between the bounded cards so each workflow reads as
-                  its own item instead of the rows visually merging. */}
               {!isCollapsed && (
-                <div className="flex flex-col gap-1.5 px-2 py-2">
+                <div className="pb-1">
                   {bucket.default && (
                     <IndexRow
                       workflow={bucket.default}
@@ -427,6 +430,7 @@ export default function WorkflowIndex({
                       toggling={togglingId}
                       getDisplayName={getDisplayName}
                       isAfterHours={isAfterHours}
+                      onRowAction={onRowAction}
                     />
                   )}
                   {bucket.customs.map((workflow) => (
@@ -440,6 +444,7 @@ export default function WorkflowIndex({
                       toggling={togglingId}
                       getDisplayName={getDisplayName}
                       isAfterHours={isAfterHours}
+                      onRowAction={onRowAction}
                     />
                   ))}
                 </div>
@@ -448,6 +453,8 @@ export default function WorkflowIndex({
           );
         })}
       </div>
+
+      {footer && <div className="flex-shrink-0 border-t border-border/60">{footer}</div>}
     </div>
   );
 }

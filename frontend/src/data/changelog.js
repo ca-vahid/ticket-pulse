@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.9.64-preview';
+export const APP_VERSION = '3.9.65-preview';
 
 export const changelog = [
+  {
+    version: '3.9.65-preview',
+    date: 'September 22, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail Workflows: the editor gets the room</strong> — the gradient band and its four tabs are gone; <em>Workflows · LLM context · Email branding · Audit</em> sit beside the page title, and one action row replaces the toolbar and the routing strip. Five bands above the canvas became two.' },
+      { type: 'improved', html: '<strong>Mail Workflows: a calmer workflow list</strong> — one line per workflow (state dot · name · “Default · v17 · ran 6h ago”), collapsible trigger groups with plain counts, an enable switch and a row menu on hover, text filters, and <kbd>Ctrl</kbd>+<kbd>B</kbd> folds the whole list to a rail of trigger icons. No more chips.' },
+      { type: 'improved', html: '<strong>Mail Workflows: the inspector only appears when a step is selected</strong> — it docks on the right, resizes by dragging the divider (the width is remembered), and folds to a thin rail when nothing is selected. Esc, the ✕ or a click on empty canvas closes it.' },
+      { type: 'improved', html: '<strong>Mail Workflows: cleaner steps</strong> — each step is an icon tile with its name and type in sentence case; the workflow’s identity floats on the canvas, the step toolbar sits at the bottom, and a minimap shows where you are.' },
+      { type: 'improved', html: '<strong>Mail Workflows: state as words, health in the sidebar</strong> — “Enabled · Mock · Observe-only” with dots replaces the two toggles and the amber banner (click it to change any of them), and SendGrid / enabled / audit / failures moved from the header into a small card at the bottom of the workflow list.' },
+    ],
+  },
   {
     version: '3.9.64-preview',
     date: 'September 21, 2026',
