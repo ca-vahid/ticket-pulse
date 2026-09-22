@@ -171,6 +171,12 @@ class TicketMergeService {
       swept.tasks ? `${swept.tasks} open task${swept.tasks === 1 ? '' : 's'}` : null,
       swept.children ? `${swept.children} child ticket${swept.children === 1 ? '' : 's'}` : null,
     ].filter(Boolean);
+    // QA 09-21 #3: the source's description is the one thing the copied
+    // conversation never carries (it is a field, not a message). Quote it.
+    const sourceDescription = String(source.descriptionText || '').replace(/\s+/g, ' ').trim();
+    const descriptionLine = sourceDescription
+      ? `Description of ${srcRef}: "${sourceDescription.length > 600 ? `${sourceDescription.slice(0, 600)}…` : sourceDescription}"`
+      : null;
     await ticketService.addPrivateNote(targetId, workspaceId, {
       bodyText: [
         `Merged ${srcRef} ("${source.subject || 'no subject'}") into this ticket — ${copied} message${copied === 1 ? '' : 's'} copied in.`,
@@ -178,7 +184,8 @@ class TicketMergeService {
         swept.approvals ? `${swept.approvals} pending approval${swept.approvals === 1 ? '' : 's'} on ${srcRef} cancelled.` : null,
         attachmentCount > 0 ? `${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'} remain on ${srcRef}.` : null,
         `Merged by ${actorLabel}.`,
-      ].filter(Boolean).join(' '),
+        descriptionLine,
+      ].filter(Boolean).join(descriptionLine ? '\n' : ' ').replace(`.\n${descriptionLine}`, `.\n\n${descriptionLine}`),
     }, actor).catch((err) => logger.warn(`Merge target note failed (non-fatal): ${err.message}`));
 
     // 5. Optional requester notification BEFORE closing. addReply routes a

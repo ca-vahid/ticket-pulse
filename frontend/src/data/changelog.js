@@ -1,6 +1,22 @@
-export const APP_VERSION = '3.9.63-preview';
+export const APP_VERSION = '3.9.64-preview';
 
 export const changelog = [
+  {
+    version: '3.9.64-preview',
+    date: 'September 21, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Time triggers can count business time</strong> \u2014 \u201cTicket unassigned / unresolved for N hours\u201d and \u201cRequester silent for N hours\u201d have a <em>Count</em> choice: all hours, business hours only, or business days only (weekends and holidays skipped, from Settings \u2192 Business Hours & Holidays). Twenty hours that start on a Friday evening now fire on Monday, not on Saturday.' },
+      { type: 'improved', html: '<strong>Merge dialog</strong> \u2014 every ticket already chosen (from the bulk bar or a ticked suggestion) sits in one \u201cIn this merge\u201d list with its own remove button; suggestions only show tickets not yet in; \u201cWhich ticket stays open?\u201d replaces \u201csurvives\u201d.' },
+      { type: 'fixed', html: '<strong>Merged ticket\u2019s description</strong> \u2014 the note on the surviving ticket now quotes the description of the ticket that was folded in.' },
+      { type: 'improved', html: '<strong>Greeting</strong> \u2014 the small \u201cauto\u201d tick box is gone; the arrow next to Greeting opens the remembered choice: add automatically when a reply starts, or only when you click Greeting.' },
+      { type: 'fixed', html: '<strong>Reply e-mail spacing</strong> \u2014 a plain reply kept its blank lines exactly as typed; two blank lines before \u201cKind regards\u201d used to arrive as six.' },
+      { type: 'fixed', html: '<strong>Editing a ticket FreshService already has as spam</strong> \u2014 the refusal now brings the Spam status across immediately, so the ticket leaves the queue instead of waiting for the next open.' },
+      { type: 'fixed', html: '<strong>iPad</strong> \u2014 the Columns menu toggles columns by touch (rows move with arrows instead of drag), and a queue with custom column widths scrolls sideways on tablets, not only on wide monitors.' },
+      { type: 'improved', html: '<strong>Approvals on tablets and phones</strong> \u2014 rows stack until 1024 px so the people column no longer squeezes the subject; Approvals is a primary tab in the phone bar.' },
+      { type: 'fixed', html: '<strong>Page width control</strong> \u2014 \u201cComfort\u201d instead of \u201cComfortable\u201d, which overlapped \u201cClassic\u201d.' },
+      { type: 'fixed', html: '<strong>Alert correlation, from QA\u2019s live test</strong> \u2014 a burst of alerts is never filed under a ticket that is already closed (the parent is always the earliest open one, and with nothing open the alert simply stays a normal ticket); a clear notice that two triggers reach in the same second is handled once, not twice; and an assignment a person makes on an FS-born alert now counts as \u201csomeone is on it\u201d, so the alert is left with them when the clear arrives.' },
+    ],
+  },
   {
     version: '3.9.63-preview',
     date: 'September 21, 2026',

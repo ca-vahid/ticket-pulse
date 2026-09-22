@@ -153,7 +153,8 @@ describe('TicketDetail reply greeting (QA 09-18 #4)', () => {
     const body = screen.getByRole('textbox', { name: 'Reply body' });
     expect(body.value).toContain('Hi Rita,');
     expect(body.value).toContain('Thank you,<br>Andrii');
-    expect(screen.getByRole('checkbox', { name: 'Add the greeting automatically' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Greeting options' }));
+    expect(screen.getByRole('menuitemradio', { name: /Add automatically when I start a reply/ })).toHaveAttribute('aria-checked', 'true');
   });
 
   test('manual (remembered): nothing is added until the Greeting button; ticking auto saves the preference', async () => {
@@ -165,14 +166,17 @@ describe('TicketDetail reply greeting (QA 09-18 #4)', () => {
     await screen.findByTestId('greeting-controls');
     const body = screen.getByRole('textbox', { name: 'Reply body' });
     expect(body).toHaveValue('');
-    expect(screen.getByRole('checkbox', { name: 'Add the greeting automatically' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Greeting options' }));
+    expect(screen.getByRole('menuitemradio', { name: /Only when I click Greeting/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: /Add automatically/ })).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.change(body, { target: { value: 'The list is updated.' } });
-    fireEvent.click(screen.getByRole('button', { name: /greeting/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^greeting$/i }));
     expect(body).toHaveValue('<p>Hi Rita,</p><p><br></p><p>The list is updated.</p><p><br></p><p>Thank you,<br>Andrii</p>');
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Add the greeting automatically' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Add automatically when I start a reply/ }));
     await waitFor(() => expect(prefs.set).toHaveBeenCalledWith('composer.greeting', 'auto'));
+    expect(screen.queryByRole('menu', { name: 'Greeting options' })).not.toBeInTheDocument();
   });
 
   test('a workspace with the greeting off shows no controls and adds nothing', async () => {

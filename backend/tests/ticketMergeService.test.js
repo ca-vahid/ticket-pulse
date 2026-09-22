@@ -58,6 +58,16 @@ beforeEach(() => {
   prismaMock.ticketApproval.updateMany.mockResolvedValue({ count: 0 });
 });
 
+describe('merge note carries the source description (QA 09-21 #3)', () => {
+  test('the target note quotes the merged ticket\'s description on its own line', async () => {
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (where.id === 10 ? { ...TP_SOURCE, descriptionText: 'test 2 — the requester wrote this in the description' } : TARGET));
+    await ticketMergeService.merge(10, 1, { targetTicketId: 20 }, { email: 'c@bgc.ca', name: 'Coord' });
+    const targetNote = ticketServiceMock.addPrivateNote.mock.calls.find(([id]) => id === 20)?.[2]?.bodyText || '';
+    expect(targetNote).toMatch(/Merged TP-10/);
+    expect(targetNote).toMatch(/\n\nDescription of TP-10: "test 2 — the requester wrote this in the description"/);
+  });
+});
+
 describe('ticketMergeService.merge', () => {
   test('TP-born source: copies entries with provenance ids, unions tags, closes source', async () => {
     prismaMock.ticket.findFirst

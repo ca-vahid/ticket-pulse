@@ -329,7 +329,8 @@ class NotificationTimeTriggerService {
     const base = config.statusBase === 'Open' ? 'Open' : config.statusBase === 'any' ? ['Open', 'Pending'] : 'Pending';
     const statuses = explicit.length ? explicit : await statusService.statusNamesForBase(workflow.workspaceId, base);
     const { requesterSilentCandidates } = await import('./ticketReplyClockService.js');
-    const candidates = await requesterSilentCandidates(workflow.workspaceId, { statuses, cutoff, limit: MAX_TICKETS_PER_WORKFLOW_TICK });
+    const found = await requesterSilentCandidates(workflow.workspaceId, { statuses, cutoff, limit: MAX_TICKETS_PER_WORKFLOW_TICK });
+    const candidates = await this._dueByClock(workflow.workspaceId, config.clock, found, silentHours, (c) => new Date(c.lastAgentReplyAt), now);
     let dispatched = 0;
     for (const c of candidates) {
       const result = await emitTicketEvent(workflow.triggerType, c.ticketId, {
@@ -345,6 +346,39 @@ class NotificationTimeTriggerService {
       if (result?.status === 'completed' && (result.workflowCount || 0) > 0) dispatched += 1;
     }
     return dispatched;
+  }
+
+  /**
+   * QA 09-21 #5/#8: a trigger can count only business time. `clock` on the
+   * trigger node: 'always' (default, wall clock) | 'business_hours' (only the
+   * hours inside the workspace's Business Hours) | 'business_days' (24 h per
+   * working day, weekends and holidays skipped). The 24/7 cutoff stays as the
+   * DB pre-filter (business time never elapses faster than wall time); this
+   * drops the candidates whose business deadline is still ahead. One loaded
+   * calendar per workflow; no calendar rows → wall clock, like the SLA clocks.
+   */
+  async _dueByClock(workspaceId, clock, items, hours, sinceOf, now = new Date()) {
+    const mode = clock === 'business_hours' || clock === 'business_days' ? clock : 'always';
+    if (mode === 'always' || !items.length) return items;
+    let calendar = null;
+    try {
+      const { default: businessCalendarService } = await import('./businessCalendarService.js');
+      calendar = await businessCalendarService.loadCalendar(workspaceId);
+      if (!calendar) return items; // no business hours configured → wall clock
+      const minutes = Math.max(1, Number(hours) || 1) * 60;
+      const out = [];
+      for (const item of items) {
+        const since = sinceOf(item);
+        const deadline = mode === 'business_hours'
+          ? await businessCalendarService.addBusinessMinutes(since, minutes, { workspaceId, calendar })
+          : await businessCalendarService.addBusinessDayMinutes(since, minutes, { workspaceId, calendar });
+        if (deadline <= now) out.push(item);
+      }
+      return out;
+    } catch (err) {
+      logger.warn(`Time trigger business clock failed, using wall clock (non-fatal): ${err.message}`);
+      return items;
+    }
   }
 
   _triggerConfig(workflow) {
@@ -425,6 +459,11 @@ class NotificationTimeTriggerService {
 
     if (unassignedCutoff) {
       tickets = await this._withUnassignedSince(tickets, unassignedCutoff);
+    }
+    if (workflow.triggerType === 'ticket.aging') {
+      tickets = await this._dueByClock(workflow.workspaceId, config.clock, tickets, Number(config.agingHours) || 24, (t) => new Date(t.createdAt), now);
+    } else if (workflow.triggerType === 'ticket.unassigned_for') {
+      tickets = await this._dueByClock(workflow.workspaceId, config.clock, tickets, Number(config.unassignedHours) || 4, (t) => new Date(t.unassignedSince), now);
     }
 
     let dispatched = 0;

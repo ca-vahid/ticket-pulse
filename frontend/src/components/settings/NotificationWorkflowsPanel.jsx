@@ -455,6 +455,31 @@ const DEFAULT_REQUESTER_GUARDRAILS = {
   tone: true,
 };
 
+// QA 09-21 #5/#8: time triggers can count only business time. Read by the
+// time-trigger worker (`clock` on the trigger node); the calendar is the
+// workspace's Settings → Business Hours & Holidays.
+function TriggerClockSelect({ value, onChange, disabled = false }) {
+  return (
+    <label className="mt-2 block text-xs font-medium uppercase text-muted-foreground" data-testid="trigger-clock">
+      Count
+      <select
+        value={value || 'always'}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+      >
+        <option value="always">All hours (24/7)</option>
+        <option value="business_hours">Business hours only</option>
+        <option value="business_days">Business days only (skip weekends and holidays)</option>
+      </select>
+      <span className="mt-1 block text-[11px] font-normal normal-case text-muted-foreground/75">
+        Business hours and holidays come from Settings → Business Hours &amp; Holidays for this workspace. With “business days”,
+        20 hours that started on a Friday evening fire on Monday, never over the weekend.
+      </span>
+    </label>
+  );
+}
+
 const TEMPLATE_CONTENT_SOURCES = [
   ['llm_with_template_fallback', 'LLM output with fallback', 'Use generated subject/body when available; otherwise use the template fields below.'],
   ['template_only', 'Template only', 'Ignore LLM output and render the template fields only.'],
@@ -9437,6 +9462,7 @@ export default function NotificationWorkflowsPanel({
                   className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
                 />
               </label>
+              <TriggerClockSelect value={selectedNode.data?.clock} onChange={(clock) => updateNodeData({ clock })} disabled={saving} />
               <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">Open/Pending tickets older than this fire once per ticket (checked every few minutes).</p>
             </div>
           )}
@@ -9452,6 +9478,7 @@ export default function NotificationWorkflowsPanel({
                   className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
                 />
               </label>
+              <TriggerClockSelect value={selectedNode.data?.clock} onChange={(clock) => updateNodeData({ clock })} disabled={saving} />
               <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">
                 Open tickets with nobody assigned for this long fire once (checked every few minutes). The clock starts when the
                 ticket arrived, or when it was last released back to the queue. Assigning it stops the trigger.
@@ -9470,6 +9497,7 @@ export default function NotificationWorkflowsPanel({
                   className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
                 />
               </label>
+              <TriggerClockSelect value={selectedNode.data?.clock} onChange={(clock) => updateNodeData({ clock })} disabled={saving} />
               <label className="block text-xs font-medium uppercase text-muted-foreground">
                 Which tickets
                 <select

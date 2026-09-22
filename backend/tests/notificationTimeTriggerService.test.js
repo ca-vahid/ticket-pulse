@@ -72,6 +72,57 @@ beforeEach(() => {
   prismaMock.ticketStatusDefinition.findMany.mockResolvedValue([]);
 });
 
+const calendarMock = { loadCalendar: jest.fn(), addBusinessMinutes: jest.fn(), addBusinessDayMinutes: jest.fn() };
+jest.unstable_mockModule('../src/services/businessCalendarService.js', () => ({ default: calendarMock }));
+
+describe('business clock on time triggers (QA 09-21 #5)', () => {
+  const clockWorkflow = (clock) => ({
+    id: 19,
+    workspaceId: 1,
+    triggerType: 'ticket.unassigned_for',
+    publishedDefinition: { nodes: [{ id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.unassigned_for', unassignedHours: 20, clock } }] },
+  });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findMany.mockResolvedValue([]);
+    prismaMock.ticketTask.findMany.mockResolvedValue([]);
+    prismaMock.ticketActivity.groupBy.mockResolvedValue([]);
+    calendarMock.loadCalendar.mockResolvedValue({ timezone: 'America/Vancouver', byDay: new Map(), isHolidayDate: () => false });
+  });
+
+  test('business_days: a ticket that is 40 wall-clock hours old but whose business-day deadline is still ahead does not fire', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([clockWorkflow('business_days')]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 501, createdAt: new Date(Date.now() - 40 * 3600 * 1000), dueBy: null }]);
+    calendarMock.addBusinessDayMinutes.mockResolvedValue(new Date(Date.now() + 6 * 3600 * 1000)); // Monday afternoon
+    await timeTriggerService.tick();
+    expect(calendarMock.addBusinessDayMinutes).toHaveBeenCalledWith(expect.any(Date), 20 * 60, expect.objectContaining({ workspaceId: 1 }));
+    expect(emitMock).not.toHaveBeenCalled();
+  });
+
+  test('business_hours: fires once the business-hours deadline has passed', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([clockWorkflow('business_hours')]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 502, createdAt: new Date(Date.now() - 80 * 3600 * 1000), dueBy: null }]);
+    calendarMock.addBusinessMinutes.mockResolvedValue(new Date(Date.now() - 60 * 1000));
+    await timeTriggerService.tick();
+    expect(emitMock).toHaveBeenCalledTimes(1);
+    expect(emitMock.mock.calls[0][1]).toBe(502);
+  });
+
+  test('always (default) never touches the calendar; no business hours configured → wall clock', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([clockWorkflow(undefined)]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 503, createdAt: new Date(Date.now() - 40 * 3600 * 1000), dueBy: null }]);
+    await timeTriggerService.tick();
+    expect(calendarMock.loadCalendar).not.toHaveBeenCalled();
+    expect(emitMock).toHaveBeenCalledTimes(1);
+    jest.clearAllMocks();
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([clockWorkflow('business_days')]);
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 504, createdAt: new Date(Date.now() - 40 * 3600 * 1000), dueBy: null }]);
+    calendarMock.loadCalendar.mockResolvedValue(null);
+    await timeTriggerService.tick();
+    expect(emitMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('notificationTimeTriggerService.tick', () => {
   test('aging workflow scans old open tickets and dispatches scoped to itself with a stable stamp', async () => {
     prismaMock.notificationWorkflow.findMany.mockResolvedValue([agingWorkflow]);

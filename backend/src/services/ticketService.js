@@ -132,7 +132,7 @@ function fsValidationError(err) {
     const status = getFreshServiceStatus(err);
     const reason = detail?.description || detail?.message || err?.message || 'no reason given';
     if (status === 405) {
-      return new ConflictError('FreshService no longer accepts changes to this ticket — it is marked spam or deleted there. Nothing was changed in Ticket Pulse; the next sync will bring its status across.');
+      return new ConflictError('FreshService no longer accepts changes to this ticket — it is marked spam or deleted there. Nothing was changed in Ticket Pulse; its status here is being brought across now.');
     }
     if (status === 404) return new NotFoundError('This ticket no longer exists in FreshService. Nothing was changed in Ticket Pulse.');
     if (status && status >= 400 && status < 500) {
@@ -3516,6 +3516,14 @@ class TicketService {
           throw new ValidationError('FreshService requires a Department before this change, and none could be resolved — no department on the FS ticket, its requester, or an Entra office-location match for the requester. Set the Department in FreshService, then try again.');
         }
       } else {
+        // QA 09-21 #1: a 405 means FreshService has the ticket as spam or
+        // deleted (it refuses PUT on those). Reconcile the row now, so the
+        // person sees it leave the queue instead of 40 s later on re-open.
+        if (getFreshServiceStatus(err) === 405) {
+          import('./syncService.js')
+            .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
+            .catch((e) => logger.debug(`Post-405 reconcile skipped (non-fatal): ${e.message}`));
+        }
         throw fsValidationError(err);
       }
     }

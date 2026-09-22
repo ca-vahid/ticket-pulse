@@ -276,13 +276,13 @@ describe('Overflow + flyout reset (QR3)', () => {
   test('pinned widths add the horizontal-scroll wrapper with the computed min-width floor; untouched users get none', async () => {
     await mountAndLoad();
     const divs = () => [...card().querySelectorAll('div')];
-    expect(divs().find((d) => d.className.includes('xl:overflow-x-auto'))).toBeUndefined();
+    expect(divs().find((d) => d.className.includes('md:overflow-x-auto'))).toBeUndefined();
 
     await dragRequester(300, 424); // → 300px (176 + 124)
     await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('300px')));
-    const scroller = divs().find((d) => d.className.includes('xl:overflow-x-auto'));
+    const scroller = divs().find((d) => d.className.includes('md:overflow-x-auto'));
     expect(scroller).toBeTruthy();
-    expect(scroller.querySelector('div').className).toContain('xl:min-w-[var(--tp-q-minw)]');
+    expect(scroller.querySelector('div').className).toContain('md:min-w-[var(--tp-q-minw)]');
     // Floor = 6 accent + 240 subject + 300 pinned + 150+210+116+88+74 tracks + 36 checkbox rail.
     expect(card().style.getPropertyValue('--tp-q-minw')).toBe('1220px');
     // Header and rows live INSIDE the scroller — they scroll together.

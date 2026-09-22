@@ -138,6 +138,31 @@ describe('pairing', () => {
     expect(res.actions.some((a) => a.type === 'left_to_person' && a.ticketId === 10)).toBe(true);
   });
 
+  test('an assignment a person wrote back to FreshService counts as a human touch (21 Sep 2026)', async () => {
+    const fired = t(10, FIRED, { createdAt: new Date('2026-09-19T11:57:00Z') });
+    const cleared = t(11, RESOLVED, { createdAt: new Date('2026-09-19T12:12:00Z') });
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => [fired, cleared].find((x) => x.id === where.id) || null);
+    prismaMock.ticket.findMany.mockResolvedValue([fired, cleared]);
+    prismaMock.ticketActivity.findFirst.mockImplementation(async ({ where }) => (where.activityType?.in?.includes('fs_write_back') ? { id: 7 } : null));
+    const res = await svc.evaluateTicket(11, 1);
+    expect(res.pair.touched).toBe(true);
+    expect(ticketServiceMock.updateFsTicket).toHaveBeenCalledTimes(1);
+    expect(ticketServiceMock.updateFsTicket.mock.calls[0][0]).toBe(11);
+  });
+
+  test('a second evaluation of the same ticket while one is running is deferred, not repeated (21 Sep 2026)', async () => {
+    const fired = t(10, FIRED, { createdAt: new Date('2026-09-19T11:57:00Z') });
+    const cleared = t(11, RESOLVED, { createdAt: new Date('2026-09-19T12:12:00Z') });
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => { await new Promise((r) => setTimeout(r, 5)); return [fired, cleared].find((x) => x.id === where.id) || null; });
+    prismaMock.ticket.findMany.mockResolvedValue([fired, cleared]);
+    const first = svc.evaluateTicket(11, 1);
+    const second = await svc.evaluateTicket(11, 1);
+    expect(second).toMatchObject({ handled: false, defer: true, kind: 'in_flight' });
+    const res = await first;
+    expect(res.kind).toBe('pair');
+    expect(ticketServiceMock.updateFsTicket).toHaveBeenCalledTimes(2); // fired + cleared, once each
+  });
+
   test('a fired ticket someone already closed keeps that status; the clear notice is filed against it and resolved', async () => {
     const fired = t(10, FIRED, { status: 'Closed', createdAt: new Date('2026-09-19T11:57:00Z') });
     const cleared = t(11, RESOLVED, { createdAt: new Date('2026-09-19T12:12:00Z') });
@@ -278,6 +303,31 @@ describe('storms', () => {
     const res = await svc.evaluateTicket(11, 1);
     expect(res).toMatchObject({ handled: false, kind: 'fired' });
     expect(linkServiceMock.setParent).not.toHaveBeenCalled();
+  });
+
+  test('with every earlier sibling already closed there is no live root: the alert stays a plain fired alert (21 Sep 2026)', async () => {
+    const a = t(10, FIRED.replace(/suncor/g, 'newafton'), { status: 'Closed', createdAt: new Date('2026-09-19T11:57:00Z') });
+    const b = t(11, FIRED.replace(/suncor/g, 'hudbay'), { status: 'Resolved', createdAt: new Date('2026-09-19T12:01:00Z') });
+    const c = t(12, FIRED, { createdAt: new Date('2026-09-19T12:06:00Z') });
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => [a, b, c].find((x) => x.id === where.id) || null);
+    prismaMock.ticket.findMany.mockResolvedValue([a, b, c]);
+    const res = await svc.evaluateTicket(12, 1);
+    expect(res).toMatchObject({ handled: false, kind: 'fired' });
+    expect(linkServiceMock.setParent).not.toHaveBeenCalled();
+  });
+
+  test('a closed parent is not followed: the root is the earliest OPEN sibling (21 Sep 2026)', async () => {
+    const root = t(9, FIRED.replace(/suncor/g, 'root'), { status: 'Closed', createdAt: new Date('2026-09-19T11:50:00Z') });
+    const a = t(10, FIRED.replace(/suncor/g, 'newafton'), { createdAt: new Date('2026-09-19T11:57:00Z') });
+    const b = t(11, FIRED.replace(/suncor/g, 'hudbay'), { createdAt: new Date('2026-09-19T12:01:00Z') });
+    const c = t(12, FIRED, { createdAt: new Date('2026-09-19T12:06:00Z') });
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => [root, a, b, c].find((x) => x.id === where.id) || null);
+    prismaMock.ticket.findMany.mockResolvedValue([a, b, c]);
+    prismaMock.ticketLink.findFirst.mockImplementation(async ({ where }) => (where.relatedTicketId === 10 && where.kind === 'parent_of' ? { ticketId: 9 } : null));
+    linkServiceMock.setParent.mockResolvedValue({});
+    const res = await svc.evaluateTicket(12, 1);
+    expect(res.storm.rootId).toBe(10);
+    expect(linkServiceMock.setParent).toHaveBeenCalledWith(12, 1, { parentTicketId: 10 }, expect.anything());
   });
 
   test('the root follows an existing parent link so a storm never nests', async () => {

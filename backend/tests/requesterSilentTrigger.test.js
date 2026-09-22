@@ -35,6 +35,8 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
+const calendarMock = { loadCalendar: jest.fn(), addBusinessMinutes: jest.fn(), addBusinessDayMinutes: jest.fn() };
+jest.unstable_mockModule('../src/services/businessCalendarService.js', () => ({ default: calendarMock }));
 const { default: timeTriggerService } = await import('../src/services/notificationTimeTriggerService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { TIME_TRIGGER_EVENT_TYPES, NOTIFICATION_EVENT_TYPES, WORKFLOW_TEMPLATES } = await import('../src/services/notificationWorkflowDefinition.js');
@@ -104,6 +106,19 @@ describe('ticket.requester_silent_for', () => {
       extra: expect.objectContaining({ thresholdHours: 72, lastAgentReplyAt: lastAgentReplyAt.toISOString() }),
     }));
     expect(emitMock.mock.calls[0][2].extra.silentForMs).toBeGreaterThan(79 * 3600 * 1000);
+  });
+
+  test('clock = business_days: 96 h of silence over a weekend does not fire until the business-day deadline passes (QA 09-21 #8)', async () => {
+    prismaMock.notificationWorkflow.findMany.mockResolvedValue([workflow({ silentHours: 96, clock: 'business_days' })]);
+    candidatesMock.mockResolvedValue([{ ticketId: 77, lastAgentEntryId: 9001, lastAgentReplyAt: hoursAgo(100) }]);
+    calendarMock.loadCalendar.mockResolvedValue({ timezone: 'America/Vancouver', byDay: new Map(), isHolidayDate: () => false });
+    calendarMock.addBusinessDayMinutes.mockResolvedValue(new Date(Date.now() + 30 * 3600 * 1000));
+    await timeTriggerService.tick();
+    expect(calendarMock.addBusinessDayMinutes).toHaveBeenCalledWith(expect.any(Date), 96 * 60, expect.objectContaining({ workspaceId: 1 }));
+    expect(emitMock).not.toHaveBeenCalled();
+    calendarMock.addBusinessDayMinutes.mockResolvedValue(new Date(Date.now() - 1000));
+    await timeTriggerService.tick();
+    expect(emitMock).toHaveBeenCalledTimes(1);
   });
 
   test('a threshold below one hour is clamped and a missing value defaults to 72', async () => {
