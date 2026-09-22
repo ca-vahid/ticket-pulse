@@ -38,16 +38,33 @@ export function runFailed(status) {
 }
 
 function loadCollapsed(storageKey) {
-  if (typeof window === 'undefined') return new Set();
+  if (typeof window === 'undefined') return null;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(storageKey));
-    return new Set(Array.isArray(parsed) ? parsed : []);
+    return Array.isArray(parsed) ? new Set(parsed) : null;
   } catch {
-    return new Set();
+    return null;
   }
 }
 
-function groupByTrigger(workflows) {
+/**
+ * Trigger groups follow a ticket's life (Vahid, 22 Sep 2026): it arrives, gets
+ * assigned, people talk, it ages, it closes, then approvals, schedules and
+ * anything the list doesn't know about — instead of whatever order the API
+ * returned them in.
+ */
+export const TRIGGER_ORDER = [
+  'ticket.created', 'ticket.assigned', 'ticket.reassigned', 'ticket.unassigned_for',
+  'ticket.status_changed', 'ticket.fields_updated',
+  'ticket.reply_received', 'ticket.public_reply_added', 'ticket.note_added', 'ticket.requester_silent_for',
+  'ticket.aging', 'ticket.sla_pre_breach', 'ticket.sla_breach',
+  'ticket.reopened', 'ticket.resolved_closed',
+  'approval.requested', 'approval.clarification_requested', 'approval.decided',
+  'schedule.time', 'manual',
+];
+const triggerRank = (type) => { const i = TRIGGER_ORDER.indexOf(type); return i === -1 ? TRIGGER_ORDER.length : i; };
+
+function groupByTrigger(workflows, eventLabels = {}) {
   const groups = new Map(); // triggerType -> { default, customs: [] }
   for (const workflow of workflows) {
     const key = workflow.triggerType || 'other';
@@ -63,7 +80,9 @@ function groupByTrigger(workflows) {
       || String(a.name || '').localeCompare(String(b.name || ''))
     ));
   }
-  return groups;
+  return new Map([...groups.entries()].sort(([a], [b]) => (
+    triggerRank(a) - triggerRank(b) || String(eventLabels[a] || a).localeCompare(String(eventLabels[b] || b))
+  )));
 }
 
 /** The one-word state of a workflow, and the dot that shows it. */
@@ -125,7 +144,7 @@ function RowMenu({ workflow, displayName, onRowAction, onClose }) {
 }
 
 function IndexRow({
-  workflow, selected, nested, onSelect, onToggleEnabled, toggling,
+  workflow, selected, onSelect, onToggleEnabled, toggling,
   getDisplayName, isAfterHours, onRowAction,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -140,8 +159,7 @@ function IndexRow({
       data-testid="workflow-row"
       data-state={state.key}
       className={cx(
-        'group/row relative flex items-center gap-2 pr-2 transition-colors',
-        nested ? 'pl-8' : 'pl-3',
+        'group/row relative flex items-center gap-2 pl-3 pr-2 transition-colors',
         selected ? 'bg-primary/10 shadow-[inset_3px_0_0_hsl(var(--primary))]' : 'hover:bg-muted/70',
       )}
     >
@@ -222,13 +240,26 @@ export default function WorkflowIndex({
 }) {
   const { currentWorkspace } = useWorkspace();
   const storageKey = `tp_wf_collapsed_${currentWorkspace?.id ?? 'all'}`;
-  const [groupsCollapsed, setGroupsCollapsed] = useState(() => loadCollapsed(storageKey));
+  // null = no saved choice → open folded, except the group holding the selected workflow (Vahid, 22 Sep 2026).
+  const [savedCollapsed, setSavedCollapsed] = useState(() => loadCollapsed(storageKey));
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all'); // all | enabled | failing
 
   useEffect(() => {
-    setGroupsCollapsed(loadCollapsed(storageKey));
+    setSavedCollapsed(loadCollapsed(storageKey));
   }, [storageKey]);
+  const allTriggerTypes = useMemo(() => [...groupByTrigger(workflows, eventLabels).keys()], [workflows, eventLabels]);
+  const selectedTriggerType = workflows.find((w) => w.id === selectedId)?.triggerType || null;
+  const groupsCollapsed = useMemo(
+    () => savedCollapsed ?? new Set(allTriggerTypes.filter((type) => type !== selectedTriggerType)),
+    [savedCollapsed, allTriggerTypes, selectedTriggerType],
+  );
+  const allCollapsed = allTriggerTypes.length > 0 && allTriggerTypes.every((type) => groupsCollapsed.has(type));
+  const setAllCollapsed = (fold) => {
+    const next = fold ? new Set(allTriggerTypes) : new Set();
+    persist(next);
+    setSavedCollapsed(next);
+  };
 
   const persist = (nextSet) => {
     try {
@@ -236,13 +267,11 @@ export default function WorkflowIndex({
     } catch { /* collapse still works for the session */ }
   };
   const toggleGroup = (triggerType) => {
-    setGroupsCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(triggerType)) next.delete(triggerType);
-      else next.add(triggerType);
-      persist(next);
-      return next;
-    });
+    const next = new Set(groupsCollapsed);
+    if (next.has(triggerType)) next.delete(triggerType);
+    else next.add(triggerType);
+    persist(next);
+    setSavedCollapsed(next);
   };
 
   const failingCount = useMemo(
@@ -262,11 +291,11 @@ export default function WorkflowIndex({
     });
   }, [workflows, query, filter, getDisplayName, eventLabels]);
 
-  const groups = groupByTrigger(filtered);
-  const allGroups = groupByTrigger(workflows);
+  const groups = groupByTrigger(filtered, eventLabels);
+  const allGroups = groupByTrigger(workflows, eventLabels);
   const searching = Boolean(query.trim());
   const filtering = searching || filter !== 'all' || showArchived;
-  const selectedTrigger = workflows.find((w) => w.id === selectedId)?.triggerType || null;
+  const selectedTrigger = selectedTriggerType;
 
   // ---- icon-collapse mode: a 56px rail of trigger icons ----
   if (collapsed) {
@@ -378,6 +407,15 @@ export default function WorkflowIndex({
             Archived {archivedCount}
           </button>
         )}
+        {!searching && allTriggerTypes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setAllCollapsed(!allCollapsed)}
+            className={cx('tp-focus-ring rounded-sm border-b-2 border-transparent pb-0.5 font-medium text-muted-foreground hover:text-foreground/85', !(onShowArchivedChange && archivedCount > 0) && 'ml-auto')}
+          >
+            {allCollapsed ? 'Expand all' : 'Collapse all'}
+          </button>
+        )}
       </div>
 
       {/* Groups */}
@@ -393,8 +431,8 @@ export default function WorkflowIndex({
           const isCollapsed = groupsCollapsed.has(triggerType) && !searching;
           const label = eventLabels[triggerType] || triggerType;
           return (
-            <section key={triggerType} className="group/grp">
-              <div className="flex items-center pr-2">
+            <section key={triggerType} className={cx('group/grp', !isCollapsed && 'my-1 border-y border-border bg-muted/40')}>
+              <div className={cx('flex items-center pr-2', !isCollapsed && 'border-b border-border/70 bg-card/60')}>
                 <button
                   type="button"
                   onClick={() => toggleGroup(triggerType)}
@@ -419,12 +457,11 @@ export default function WorkflowIndex({
                 )}
               </div>
               {!isCollapsed && (
-                <div className="pb-1">
+                <div className="divide-y divide-border/60">
                   {bucket.default && (
                     <IndexRow
                       workflow={bucket.default}
                       selected={selectedId === bucket.default.id}
-                      nested={false}
                       onSelect={onSelect}
                       onToggleEnabled={onToggleEnabled}
                       toggling={togglingId}
@@ -438,7 +475,6 @@ export default function WorkflowIndex({
                       key={workflow.id}
                       workflow={workflow}
                       selected={selectedId === workflow.id}
-                      nested={Boolean(bucket.default)}
                       onSelect={onSelect}
                       onToggleEnabled={onToggleEnabled}
                       toggling={togglingId}

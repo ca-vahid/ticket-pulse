@@ -5,12 +5,7 @@ import '@xyflow/react/dist/style.css';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import MonacoEditor from '@monaco-editor/react';
-import {
-  Group as PanelGroup,
-  Panel,
-  Separator as PanelResizeHandle,
-  useDefaultLayout,
-} from 'react-resizable-panels';
+
 import {
   Activity,
   AlertCircle,
@@ -35,6 +30,7 @@ import {
   Mail,
   Maximize2,
   Moon,
+  Map as MapIcon,
   PanelRight,
   Pencil,
   Play,
@@ -68,7 +64,20 @@ import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowIndex from './WorkflowIndex';
 import { useTheme } from '../../contexts/ThemeContext';
 
-const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
+// Inspector width (px) and the minimap choice are remembered per browser.
+const WORKFLOW_INSPECTOR_WIDTH_KEY = 'ticket-pulse-notification-workflow-inspector-w';
+const WORKFLOW_MINIMAP_KEY = 'ticket-pulse-notification-workflow-minimap';
+const INSPECTOR_MIN_W = 320;
+const INSPECTOR_RAIL_W = 36;
+// fitView keeps the graph clear of the floating identity card (top) and the
+// step toolbar (bottom). Per-side padding is a React Flow 12.6+ option.
+const FLOW_FIT_OPTIONS = { padding: { top: '84px', right: '32px', bottom: '96px', left: '32px' } };
+function readStoredNumber(key, fallback) {
+  try { const v = Number(window.localStorage.getItem(key)); return Number.isFinite(v) && v > 0 ? v : fallback; } catch { return fallback; }
+}
+function readStoredFlag(key) {
+  try { return window.localStorage.getItem(key) === '1'; } catch { return false; }
+}
 
 const EVENT_LABELS = {
   'ticket.created': 'Ticket arrived',
@@ -4598,8 +4607,8 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
   const observe = enabled && mock;
   const words = [
     { key: 'live', dot: enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40', text: enabled ? 'Enabled' : published ? 'Off' : 'Draft' },
-    ...(mock ? [{ key: 'mock', dot: 'bg-sky-500', text: 'Mock' }] : []),
-    ...(observe ? [{ key: 'observe', dot: 'bg-amber-500', text: 'Observe-only', testId: 'observe-only-warning' }] : []),
+    // Mock mode IS observe-only (runs, records, sends nothing) — one word for it (Vahid, 22 Sep 2026).
+    ...(mock ? [{ key: 'observe', dot: 'bg-amber-500', text: 'Observe-only', testId: observe ? 'observe-only-warning' : undefined }] : []),
   ];
   return (
     <div ref={rootRef} className="relative">
@@ -4640,15 +4649,15 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
           </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold text-foreground">Mock mode</div>
-              <div className="text-[11px] leading-4 text-muted-foreground">Runs and records, but sends nothing.</div>
+              <div className="text-xs font-semibold text-foreground">Observe-only</div>
+              <div className="text-[11px] leading-4 text-muted-foreground">Runs and records every step, but takes no real actions — no e-mails, no ticket updates.</div>
             </div>
-            <WorkflowToggle label="Mock mode" tone="sky" compact checked={mock} onClick={onToggleMock} disabled={saving || !canToggleMock} title={mockTitle} />
+            <WorkflowToggle label="Observe-only" tone="sky" compact checked={mock} onClick={onToggleMock} disabled={saving || !canToggleMock} title={mockTitle} />
           </div>
           {observe && (
             <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
               <FlaskConical className="mr-1 inline h-3 w-3" aria-hidden="true" />
-              <strong>Observe-only.</strong> Live and mock together: the workflow runs on matching tickets but takes no real actions (no e-mails, no ticket updates). Turn mock off to make it act.
+              <strong>Live and observe-only.</strong> It runs on matching tickets and only records what it would have done. Turn observe-only off to make it act.
             </p>
           )}
         </div>
@@ -7310,14 +7319,21 @@ export default function NotificationWorkflowsPanel({
   onHealthChange = null,
 } = {}) {
   const { resolvedTheme } = useTheme();
-  const editorLayout = useDefaultLayout({
-    id: WORKFLOW_EDITOR_LAYOUT_ID,
-    panelIds: ['workflow-canvas', 'workflow-inspector'],
-  });
+  // R2 inspector: docked width (drag the divider); the shown state lags the
+  // selection by one transition so closing animates instead of snapping.
+  const [inspectorWidth, setInspectorWidth] = useState(() => readStoredNumber(WORKFLOW_INSPECTOR_WIDTH_KEY, 420));
+  const [inspectorShown, setInspectorShown] = useState(false);
+  const [inspectorDragging, setInspectorDragging] = useState(false);
+  // The notch: a manual close / open that survives the selection.
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const editorSplitRef = useRef(null);
+  const flowInstanceRef = useRef(null);
+  const [minimapOpen, setMinimapOpen] = useState(() => readStoredFlag(WORKFLOW_MINIMAP_KEY));
   const [workflows, setWorkflows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState(null);
-  const [selectedNodeId, setSelectedNodeId] = useState('trigger');
+  // Nothing selected on open (22 Sep 2026): the inspector only docks once a step is clicked.
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
   const undoStackRef = useRef([]);
   const [undoDepth, setUndoDepth] = useState(0);
   const [edgeInsert, setEdgeInsert] = useState(null);
@@ -7496,7 +7512,7 @@ export default function NotificationWorkflowsPanel({
     setEdgeInsert(null);
     setDraft(cloneDefinition(previous));
     setSelectedNodeId((currentId) => (
-      previous.nodes?.some((node) => node.id === currentId) ? currentId : (previous.nodes?.[0]?.id || 'trigger')
+      previous.nodes?.some((node) => node.id === currentId) ? currentId : null
     ));
     setMessage({ type: 'success', text: 'Undid the last editor change' });
   }
@@ -7708,7 +7724,7 @@ export default function NotificationWorkflowsPanel({
       } else {
         setSelected(null);
         setDraft(null);
-        setSelectedNodeId('trigger');
+        setSelectedNodeId(null);
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -7726,7 +7742,7 @@ export default function NotificationWorkflowsPanel({
     undoStackRef.current = [];
     setUndoDepth(0);
     setEdgeInsert(null);
-    setSelectedNodeId(workflow.draftDefinition?.nodes?.[0]?.id || 'trigger');
+    setSelectedNodeId(null);
     setPreview(null);
     setPreviewError(null);
     setPreviewTestResult(null);
@@ -8040,6 +8056,48 @@ export default function NotificationWorkflowsPanel({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [workflowTabActive]);
+
+  const inspectorOpen = Boolean(selectedNode && draft && !inspectorCollapsed);
+  const toggleInspector = () => {
+    if (inspectorOpen) { setInspectorCollapsed(true); return; }
+    setInspectorCollapsed(false);
+    if (!selectedNode) setSelectedNodeId(draft?.nodes?.find((node) => node.id === 'trigger')?.id || draft?.nodes?.[0]?.id || null);
+  };
+  useEffect(() => {
+    if (inspectorOpen) { setInspectorShown(true); return undefined; }
+    const timer = setTimeout(() => setInspectorShown(false), 320);
+    return () => clearTimeout(timer);
+  }, [inspectorOpen]);
+  // The canvas re-fits (animated) once the panels have finished moving.
+  useEffect(() => {
+    const timer = setTimeout(() => { flowInstanceRef.current?.fitView({ ...FLOW_FIT_OPTIONS, duration: 300 }); }, 340);
+    return () => clearTimeout(timer);
+  }, [inspectorOpen, workflowListCollapsed, selected?.id]);
+  const toggleMinimap = () => setMinimapOpen((current) => {
+    const next = !current;
+    try { window.localStorage.setItem(WORKFLOW_MINIMAP_KEY, next ? '1' : '0'); } catch { /* remembered for the session */ }
+    return next;
+  });
+  const startInspectorDrag = (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = inspectorWidth;
+    const bounds = editorSplitRef.current?.getBoundingClientRect();
+    const maxWidth = bounds ? Math.max(INSPECTOR_MIN_W, Math.floor(bounds.width * 0.62)) : 900;
+    setInspectorDragging(true);
+    const onMove = (move) => {
+      const next = Math.min(maxWidth, Math.max(INSPECTOR_MIN_W, startWidth + (startX - move.clientX)));
+      setInspectorWidth(next);
+    };
+    const onUp = () => {
+      setInspectorDragging(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setInspectorWidth((current) => { try { window.localStorage.setItem(WORKFLOW_INSPECTOR_WIDTH_KEY, String(current)); } catch { /* session only */ } return current; });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
   const llmModeLabel = llmToolPolicy?.mode === 'tools_enabled'
     ? 'Tools'
     : llmToolPolicy?.mode === 'off'
@@ -8426,7 +8484,7 @@ export default function NotificationWorkflowsPanel({
     } else {
       setSelected(null);
       setDraft(null);
-      setSelectedNodeId('trigger');
+      setSelectedNodeId(null);
     }
   }
 
@@ -8450,7 +8508,7 @@ export default function NotificationWorkflowsPanel({
       } else {
         setSelected(null);
         setDraft(null);
-        setSelectedNodeId('trigger');
+        setSelectedNodeId(null);
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Delete failed' });
@@ -8806,7 +8864,7 @@ export default function NotificationWorkflowsPanel({
         next.edges.push({ id: 'recipients-to-template', source: 'recipients', target: 'template' });
       }
     });
-    setSelectedNodeId('trigger');
+    setSelectedNodeId(null);
     setMessage({ type: 'success', text: 'Step removed - use Undo to restore it' });
   }
 
@@ -11228,7 +11286,7 @@ export default function NotificationWorkflowsPanel({
     <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
       <NotificationToast message={message} onDismiss={dismissMessage} />
       {showPanelHeader && (
-        <div className="shrink-0 border-b border-card/70 dark:border-white/10 px-5 py-3">
+        <div className="shrink-0 border-b border-border px-5 py-2.5">
           {!hideTabBar && (
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -11545,175 +11603,203 @@ export default function NotificationWorkflowsPanel({
                 />
               </aside>
 
-              <div className="flex min-h-0 min-w-0">
-                <PanelGroup
-                  id={WORKFLOW_EDITOR_LAYOUT_ID}
-                  orientation="horizontal"
-                  defaultLayout={editorLayout.defaultLayout}
-                  onLayoutChanged={editorLayout.onLayoutChanged}
-                  className="min-h-0 min-w-0 flex-1"
-                >
-                  <Panel id="workflow-canvas" minSize="38%" defaultSize="56%">
-                    <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border">
-                      {hasBlockingGraphErrors && (
-                        <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
-                            <div className="min-w-0">
-                              <div className="font-semibold">Workflow needs fixes before publish</div>
-                              <ul className="mt-1 space-y-0.5">
-                                {draftValidationIssues.slice(0, 4).map((issue) => (
-                                  <li key={issue} className="truncate">- {issue}</li>
-                                ))}
-                                {draftValidationIssues.length > 4 && (
-                                  <li>{draftValidationIssues.length - 4} more validation issues</li>
-                                )}
-                              </ul>
-                            </div>
+              <div ref={editorSplitRef} className="flex min-h-0 min-w-0">
+                <div className="min-h-0 min-w-0 flex-1">
+                  <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+                    {hasBlockingGraphErrors && (
+                      <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
+                          <div className="min-w-0">
+                            <div className="font-semibold">Workflow needs fixes before publish</div>
+                            <ul className="mt-1 space-y-0.5">
+                              {draftValidationIssues.slice(0, 4).map((issue) => (
+                                <li key={issue} className="truncate">- {issue}</li>
+                              ))}
+                              {draftValidationIssues.length > 4 && (
+                                <li>{draftValidationIssues.length - 4} more validation issues</li>
+                              )}
+                            </ul>
                           </div>
                         </div>
-                      )}
-                      <div className="relative min-h-[360px] flex-1 overflow-hidden bg-muted/50">
-                        {draft ? (
-                          <ReactFlow
-                            colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
-                            style={FLOW_CANVAS_VARS}
-                            nodes={flowNodes}
-                            edges={flowEdges}
-                            nodeTypes={FLOW_NODE_TYPES}
-                            edgeTypes={FLOW_EDGE_TYPES}
-                            fitView
-                            fitViewOptions={{ padding: 0.2 }}
-                            nodesDraggable={false}
-                            minZoom={0.25}
-                            maxZoom={1.6}
-                            panActivationKeyCode={null}
-                            isValidConnection={isValidWorkflowConnection}
-                            onConnect={handleFlowConnect}
-                            onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-                            onPaneClick={() => setSelectedNodeId(null)}
-                            onNodesChange={handleFlowNodesChange}
-                          >
-                            <Controls showInteractive={false} />
+                      </div>
+                    )}
+                    <div className="relative min-h-[360px] flex-1 overflow-hidden bg-muted/50">
+                      {draft ? (
+                        <ReactFlow
+                          colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
+                          style={FLOW_CANVAS_VARS}
+                          nodes={flowNodes}
+                          edges={flowEdges}
+                          nodeTypes={FLOW_NODE_TYPES}
+                          edgeTypes={FLOW_EDGE_TYPES}
+                          fitView
+                          fitViewOptions={FLOW_FIT_OPTIONS}
+                          onInit={(instance) => { flowInstanceRef.current = instance; }}
+                          nodesDraggable={false}
+                          minZoom={0.25}
+                          maxZoom={1.6}
+                          panActivationKeyCode={null}
+                          isValidConnection={isValidWorkflowConnection}
+                          onConnect={handleFlowConnect}
+                          onNodeClick={(_event, node) => { setSelectedNodeId(node.id); setInspectorCollapsed(false); }}
+                          onPaneClick={() => setSelectedNodeId(null)}
+                          onNodesChange={handleFlowNodesChange}
+                        >
+                          <Controls showInteractive={false} />
+                          {minimapOpen && (
                             <MiniMap
                               pannable
                               zoomable
-                              className="!m-3 !rounded-lg !border !border-border !bg-card/90 !shadow-subtle"
+                              className="!mb-14 !mr-3 !rounded-lg !border !border-border !bg-card/90 !shadow-subtle"
                               nodeColor={(node) => nodeAccent(NODE_COLORS[node.data?.nodeType], resolvedTheme)}
                               maskColor={resolvedTheme === 'dark' ? 'rgba(15,23,42,0.55)' : 'rgba(241,245,249,0.7)'}
                             />
-                            <Background gap={18} color={resolvedTheme === 'dark' ? '#283549' : '#e5e7eb'} />
-                          </ReactFlow>
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a workflow</div>
-                        )}
-                        {draft && (
-                          <NodePalette
-                            onAddNode={addWorkflowNode}
-                            onRemoveNode={removeSelectedNode}
-                            onUndo={undoDraftChange}
-                            canUndo={undoDepth > 0}
-                            workflow={selected}
-                            onRename={renameWorkflow}
-                          />
-                        )}
-                        {edgeInsert && draft && (
-                          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 dark:bg-black/50 p-4" onClick={() => setEdgeInsert(null)}>
-                            <div
-                              className="w-64 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <div className="border-b border-border/60 px-3 py-2">
-                                <div className="text-xs font-bold text-foreground">Insert a step</div>
-                                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                          )}
+                          <Background gap={18} color={resolvedTheme === 'dark' ? '#283549' : '#e5e7eb'} />
+                        </ReactFlow>
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a workflow</div>
+                      )}
+                      {draft && (
+                        <button
+                          type="button"
+                          onClick={toggleMinimap}
+                          aria-pressed={minimapOpen}
+                          aria-label={minimapOpen ? 'Hide minimap' : 'Show minimap'}
+                          title={minimapOpen ? 'Hide minimap' : 'Show minimap'}
+                          className={cls('absolute bottom-3 right-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-subtle backdrop-blur', minimapOpen ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card/95 text-muted-foreground hover:text-foreground')}
+                        >
+                          <MapIcon className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      )}
+                      {draft && (
+                        <NodePalette
+                          onAddNode={addWorkflowNode}
+                          onRemoveNode={removeSelectedNode}
+                          onUndo={undoDraftChange}
+                          canUndo={undoDepth > 0}
+                          workflow={selected}
+                          onRename={renameWorkflow}
+                        />
+                      )}
+                      {edgeInsert && draft && (
+                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 dark:bg-black/50 p-4" onClick={() => setEdgeInsert(null)}>
+                          <div
+                            className="w-64 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <div className="border-b border-border/60 px-3 py-2">
+                              <div className="text-xs font-bold text-foreground">Insert a step</div>
+                              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                                 Between <span className="font-semibold">{edgeInsert.source}</span> and <span className="font-semibold">{edgeInsert.target}</span>
-                                  {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
-                                </div>
+                                {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
                               </div>
-                              {ADDABLE_NODE_TYPES.map((type) => {
-                                const TypeIcon = WORKFLOW_NODE_REGISTRY[type]?.icon;
-                                return (
-                                  <button
-                                    key={type}
-                                    type="button"
-                                    onClick={() => insertNodeBetween(edgeInsert, type)}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15"
-                                  >
-                                    {TypeIcon ? (
-                                      <TypeIcon className="h-3.5 w-3.5" style={{ color: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
-                                    ) : (
-                                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
-                                    )}
-                                    {NODE_LABELS[type] || type}
-                                  </button>
-                                );
-                              })}
+                            </div>
+                            {ADDABLE_NODE_TYPES.map((type) => {
+                              const TypeIcon = WORKFLOW_NODE_REGISTRY[type]?.icon;
+                              return (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => insertNodeBetween(edgeInsert, type)}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15"
+                                >
+                                  {TypeIcon ? (
+                                    <TypeIcon className="h-3.5 w-3.5" style={{ color: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
+                                  ) : (
+                                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
+                                  )}
+                                  {NODE_LABELS[type] || type}
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              onClick={() => setEdgeInsert(null)}
+                              className="w-full border-t border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </main>
+                </div>
+                {/* R2: the inspector column animates its width; a divider drags it; the notch closes / opens it. */}
+                {draft && (
+                  <div
+                    className={cls('relative flex min-h-0 shrink-0 overflow-hidden border-l border-border bg-card', !inspectorDragging && 'transition-[width] duration-300 ease-out motion-reduce:transition-none')}
+                    style={{ width: inspectorOpen ? inspectorWidth : INSPECTOR_RAIL_W }}
+                    data-testid="workflow-inspector-column"
+                    data-open={inspectorOpen ? 'true' : 'false'}
+                  >
+                    <button
+                      type="button"
+                      onClick={toggleInspector}
+                      aria-label={inspectorOpen ? 'Close inspector' : 'Open inspector'}
+                      title={inspectorOpen ? 'Close inspector' : 'Open inspector'}
+                      className={cls('tp-focus-ring absolute top-1/2 z-30 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-primary shadow-subtle transition-colors hover:bg-primary/10', inspectorOpen ? 'left-2' : 'left-1/2 -translate-x-1/2')}
+                      data-testid="workflow-inspector-notch"
+                    >
+                      {inspectorOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                    </button>
+                    {inspectorOpen && (
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize inspector"
+                        onPointerDown={startInspectorDrag}
+                        className={cls('absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize transition-colors hover:bg-primary/50', inspectorDragging ? 'bg-primary' : 'bg-transparent')}
+                      />
+                    )}
+                    {(inspectorOpen || inspectorShown) && selectedNode ? (
+                      <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-card" style={{ width: inspectorWidth }} data-testid="workflow-inspector">
+                        <div className="shrink-0 border-b border-border px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2.5">
                               <button
                                 type="button"
-                                onClick={() => setEdgeInsert(null)}
-                                className="w-full border-t border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50"
+                                onClick={() => setSelectedNodeId(null)}
+                                aria-label="Close inspector (Esc)"
+                                title="Close inspector (Esc)"
+                                className="tp-focus-ring -ml-1 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                               >
-                              Cancel
+                                <XCircle className="h-4 w-4" />
                               </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </main>
-                  </Panel>
-
-                  {selectedNode && draft && (
-                    <>
-                      <PanelResizeHandle id="workflow-editor-resizer" className="w-1.5 bg-border/60 transition hover:bg-primary/60 data-[resize-handle-active]:bg-primary" />
-
-                      <Panel id="workflow-inspector" minSize="25%" maxSize="62%" defaultSize="40%">
-                        <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-card animate-slide-in-right" data-testid="workflow-inspector">
-                          <div className="shrink-0 border-b border-border px-4 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex min-w-0 items-center gap-2.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedNodeId(null)}
-                                  aria-label="Close inspector (Esc)"
-                                  title="Close inspector (Esc)"
-                                  className="tp-focus-ring -ml-1 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                >
-                                  <XCircle className="h-4 w-4" />
-                                </button>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{NODE_LABELS[selectedNode.type] || selectedNode.type}</div>
-                                  <h3 className="truncate text-sm font-semibold text-foreground">{selectedNode.data?.label || selectedNode.id}</h3>
-                                </div>
+                              <div className="min-w-0">
+                                <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{NODE_LABELS[selectedNode.type] || selectedNode.type}</div>
+                                <h3 className="truncate text-sm font-semibold text-foreground">{selectedNode.data?.label || selectedNode.id}</h3>
                               </div>
-                              {selectedNode?.type === 'llm_generate' && (
-                                <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-200">
-                                  <Bot className="h-3.5 w-3.5" />
-                        Drafts email
-                                </span>
-                              )}
-                              {selectedNode?.type === 'send_email' && (
-                                <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-200">
-                                  <Send className="h-3.5 w-3.5" />
-                        Email
-                                </span>
-                              )}
                             </div>
+                            {selectedNode?.type === 'llm_generate' && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-200">
+                                <Bot className="h-3.5 w-3.5" />
+                        Drafts email
+                              </span>
+                            )}
+                            {selectedNode?.type === 'send_email' && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-200">
+                                <Send className="h-3.5 w-3.5" />
+                        Email
+                              </span>
+                            )}
                           </div>
-                          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-                            {renderInspector()}
-                          </div>
-                        </aside>
-                      </Panel>
-                    </>
-                  )}
-                </PanelGroup>
-                {!selectedNode && draft && (
-                  <div
-                    className="hidden w-9 shrink-0 flex-col items-center border-l border-border bg-card/70 pt-3 lg:flex"
-                    title="Select a step on the canvas to edit it"
-                    data-testid="workflow-inspector-rail"
-                  >
-                    <span className="rotate-180 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 [writing-mode:vertical-rl]">Inspector</span>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+                          {renderInspector()}
+                        </div>
+                      </aside>
+                    ) : (
+                      <div
+                        className="flex w-9 shrink-0 flex-col items-center bg-card/70 pt-16"
+                        title="Select a step on the canvas to edit it"
+                        data-testid="workflow-inspector-rail"
+                      >
+                        <span className="rotate-180 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 [writing-mode:vertical-rl]">Inspector</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
