@@ -58,7 +58,7 @@ function renderIndex(overrides = {}) {
     onCreateForTrigger: vi.fn(),
     getDisplayName: (workflow) => workflow.name,
     getVisuals: () => ({ icon: GroupIcon }),
-    eventLabels: { 'ticket.assigned': 'Ticket assigned', 'ticket.created': 'Ticket arrived' },
+    eventLabels: { 'ticket.assigned': 'Ticket assigned', 'ticket.created': 'Ticket arrived', 'ticket.resolved_closed': 'Resolved or closed' },
     isAfterHours: (w) => w.id === 3,
     ...overrides,
   };
@@ -69,10 +69,24 @@ function renderIndex(overrides = {}) {
 const rowFor = (name) => screen.getByText(name).closest('[data-testid="workflow-row"]');
 
 describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
-  afterEach(() => cleanup());
+  afterEach(() => { cleanup(); window.localStorage.clear(); });
+
+  test('opens folded except the selected workflow’s group; Collapse all / Expand all flips every group', () => {
+    renderIndex();
+    expect(screen.getByRole('button', { name: /^Ticket assigned/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /^Ticket arrived/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('After-hours arrival')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
+    expect(screen.queryByText('Assignment notice')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    expect(screen.getByText('After-hours arrival')).toBeInTheDocument();
+    expect(screen.getByText('Assignment notice')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse all' })).toBeInTheDocument();
+  });
 
   test('rows are one line each: a state dot, the name, one muted meta line — no pills', () => {
     renderIndex();
+    fireEvent.click(screen.getByRole('button', { name: /^Ticket arrived/ }));
     const row = rowFor('Assignment notice');
     expect(row).toHaveAttribute('data-state', 'on');
     expect(within(row).getByText('Default · v3 · ran 6h ago')).toBeInTheDocument();
@@ -95,6 +109,7 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
   });
 
   test('groups are collapsible with a plain count; the enable switch and row menu exist per row', () => {
+    window.localStorage.removeItem('tp_wf_collapsed_1');
     const props = renderIndex({ onRowAction: vi.fn() });
     const group = screen.getByRole('button', { name: /^Ticket assigned/ });
     expect(group).toHaveAttribute('aria-expanded', 'true');
@@ -131,6 +146,12 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     expect(screen.getByText('health')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Expand workflows/ }));
     expect(props.onToggleCollapsed).toHaveBeenCalled();
+  });
+
+  test('groups follow the ticket lifecycle: arrived before assigned, closed near the end, unknown types last', () => {
+    renderIndex({ workflows: [...WORKFLOWS, { id: 9, name: 'Closing note', triggerType: 'ticket.resolved_closed', isDefaultVariant: true, isEnabled: false, publishedVersion: 1, runs: [] }, { id: 10, name: 'Mystery', triggerType: 'zzz.custom', isDefaultVariant: true, isEnabled: false, publishedVersion: 1, runs: [] }] });
+    const groups = screen.getAllByRole('button', { name: /workflows$/ }).map((b) => b.querySelector('span.truncate').textContent);
+    expect(groups).toEqual(['Ticket arrived', 'Ticket assigned', 'Resolved or closed', 'zzz.custom']);
   });
 
   test('workflowState / workflowMeta read the same facts the old chips did', () => {

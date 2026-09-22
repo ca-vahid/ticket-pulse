@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.65-preview';
+export const APP_VERSION = '3.9.66-preview';
 
 export const changelog = [
+  {
+    version: '3.9.66-preview',
+    date: 'September 22, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail Workflows: the inspector waits for you</strong> — nothing is selected when a workflow opens, so the graph sits centred in the full width; click a step and the inspector slides in (and slides out on Esc, the ✕, a click on empty canvas, or the new notch on its edge, which also reopens it). Drag its edge to resize.' },
+      { type: 'improved', html: '<strong>Mail Workflows: a tidier list</strong> — trigger groups open folded (except the one you are in) in the order a ticket lives: arrived, assigned, updated, replies, ageing, closed, approvals. <em>Collapse all / Expand all</em> sits in the filter row; an open group is a bounded block with lines between its workflows; variants are no longer indented — the line under the name says “Variant” or “Routed”.' },
+      { type: 'improved', html: '<strong>Mail Workflows: small things</strong> — “Mock” is now called what it is, <em>Observe-only</em>; the workflow name card no longer sits on the first step; the minimap is off until you press its button; a proper line under the action row.' },
+    ],
+  },
   {
     version: '3.9.65-preview',
     date: 'September 22, 2026',
