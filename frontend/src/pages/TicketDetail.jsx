@@ -877,9 +877,18 @@ export default function TicketDetail() {
   // ---- Draft guard: per-ticket stash so navigating away never loses a reply ----
   const draftKey = `tp_ticket_draft_${ticketId}`;
   const draftLoadedRef = useRef(false);
+  // One composer line = one text line (QA 09-21 #7). innerText renders every
+  // block boundary as a blank line AND an empty <p><br></p> as its own line,
+  // so two blank lines in the editor became six in the e-mail (each newline
+  // is a <br> on the way out). Walk the blocks instead.
   const htmlToText = (html) => {
     const div = document.createElement('div');
     div.innerHTML = String(html || '');
+    const blocks = [...div.children];
+    const allBlocks = blocks.length > 0 && blocks.every((el) => /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE)$/.test(el.tagName));
+    if (allBlocks) {
+      return blocks.map((el) => (el.innerText || el.textContent || '').replace(/\n+$/, '')).join('\n');
+    }
     return div.innerText || div.textContent || '';
   };
   useEffect(() => {
@@ -945,6 +954,7 @@ export default function TicketDetail() {
   const greetingCfg = meta?.replyGreeting || null;
   const greetingOn = Boolean(greetingCfg?.enabled);
   const [greetingPref, setGreetingPref] = useState(null);
+  const [greetingMenuOpen, setGreetingMenuOpen] = useState(false); // QA 09-21 #4: the remembered choice lives in a menu, not a bare tick box
   const greetingPrefRef = useRef(null);
   useEffect(() => {
     if (!greetingOn || greetingPrefRef.current) return;
@@ -2823,16 +2833,46 @@ export default function TicketDetail() {
                                 <Hand className="w-3.5 h-3.5" aria-hidden="true" />
                                 <span className="hidden sm:inline">Greeting</span>
                               </button>
-                              <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer select-none" title="Add the greeting and sign-off automatically whenever you start a reply (remembered for you)">
-                                <input
-                                  type="checkbox"
-                                  checked={greetingPref !== 'manual'}
-                                  onChange={(e) => saveGreetingPref(e.target.checked ? 'auto' : 'manual')}
-                                  className="tp-focus-ring h-3.5 w-3.5 rounded border-input text-primary"
-                                  aria-label="Add the greeting automatically"
-                                />
-                                auto
-                              </label>
+                              <span className="relative inline-flex">
+                                <button
+                                  type="button"
+                                  onClick={() => setGreetingMenuOpen((v) => !v)}
+                                  aria-haspopup="menu"
+                                  aria-expanded={greetingMenuOpen}
+                                  aria-label="Greeting options"
+                                  title={greetingPref !== 'manual' ? 'Added automatically when you start a reply — click to change' : 'Added only when you click Greeting — click to change'}
+                                  className="tp-focus-ring -ml-1 inline-flex items-center px-1.5 py-1.5 rounded-lg text-xs text-muted-foreground bg-card border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                                </button>
+                                {greetingMenuOpen && (
+                                  <div role="menu" aria-label="Greeting options" className="absolute right-0 top-full mt-1 z-20 w-72 tp-card rounded-lg shadow-soft p-1 animate-popIn">
+                                    {[
+                                      ['auto', 'Add automatically when I start a reply', 'The greeting and sign-off are in every new reply; delete them if a reply does not need them.'],
+                                      ['manual', 'Only when I click Greeting', 'Replies start empty.'],
+                                    ].map(([value, label, hint]) => {
+                                      const on = (greetingPref !== 'manual') === (value === 'auto');
+                                      return (
+                                        <button
+                                          key={value}
+                                          type="button"
+                                          role="menuitemradio"
+                                          aria-checked={on}
+                                          onClick={() => { saveGreetingPref(value); setGreetingMenuOpen(false); }}
+                                          className="tp-focus-ring flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                                        >
+                                          <span className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded-full border ${on ? 'border-primary bg-primary' : 'border-input'}`} aria-hidden="true" />
+                                          <span>
+                                            <span className="block text-xs font-semibold text-foreground">{label}</span>
+                                            <span className="block text-[11px] text-muted-foreground">{hint}</span>
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                    <p className="px-2 pt-1 text-[10px] text-muted-foreground/75">Remembered for you, on every ticket.</p>
+                                  </div>
+                                )}
+                              </span>
                             </span>
                           )}
                           {composerMode === 'reply' && (

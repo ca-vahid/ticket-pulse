@@ -119,7 +119,21 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
     });
   };
 
+  // QA 09-21 #2: a chosen ticket is taken OUT of the merge with its own ✕, not
+  // by hunting for the checkbox that put it in. The opener always stays.
+  const remove = (t) => {
+    if (t.id === ticket.id) return;
+    setSelected((prev) => {
+      const next = new Map(prev);
+      next.delete(t.id);
+      if (primaryId === t.id) setPrimaryId(ticket.id);
+      return next;
+    });
+  };
+
   const group = useMemo(() => [...selected.values()].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)), [selected]);
+  const suggested = useMemo(() => (candidates || []).filter((t) => !selected.has(t.id)), [candidates, selected]);
+  const searchHits = useMemo(() => searchResults.filter((t) => !selected.has(t.id)), [searchResults, selected]);
   const secondaries = group.filter((t) => t.id !== primaryId);
   const primary = group.find((t) => t.id === primaryId);
   const primaryBlocked = primary ? mergeSurvivorBlockedReason(primary, statusDefs) : null;
@@ -142,37 +156,63 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
     }
   }, [primaryId, secondaries, notifyRequester, onMerged]);
 
-  const row = (t, why = null) => {
-    const checked = selected.has(t.id);
-    return (
-      <li key={t.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={() => toggle(t)}
-          aria-label={`Include ${refOf(t)} in the merge`}
-          className="tp-focus-ring h-4 w-4 rounded border-input"
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground/85">{t.subject || '(no subject)'}</span>
-          <span className="block text-xs text-muted-foreground/75">
-            {refOf(t)}
-            {t.createdAt ? ` · ${formatDay(t.createdAt)}` : ''}
-            {why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{why}</span>}
-            {isTerminal(t) && (
-              <span className="ml-1 text-muted-foreground/75" data-testid="merge-terminal-note">· {baseStatusOf(statusDefs, t.status) === 'Resolved' ? 'Resolved' : 'Closed'} — will be folded in as-is</span>
-            )}
-          </span>
+  const fsBadge = (t) => (isFsBorn(t) ? (
+    <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title="FreshService-born — can be folded in; it will be closed in FreshService with a pointer note">
+      FreshService
+    </span>
+  ) : null);
+  const terminalNote = (t) => (isTerminal(t) ? (
+    <span className="ml-1 text-muted-foreground/75" data-testid="merge-terminal-note">· {baseStatusOf(statusDefs, t.status) === 'Resolved' ? 'Resolved' : 'Closed'} — will be folded in as-is</span>
+  ) : null);
+
+  // A ticket that is NOT yet in the merge: tick to add.
+  const row = (t, why = null) => (
+    <li key={t.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50">
+      <input
+        type="checkbox"
+        checked={false}
+        onChange={() => toggle(t)}
+        aria-label={`Include ${refOf(t)} in the merge`}
+        className="tp-focus-ring h-4 w-4 rounded border-input"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground/85">{t.subject || '(no subject)'}</span>
+        <span className="block text-xs text-muted-foreground/75">
+          {refOf(t)}
+          {t.createdAt ? ` · ${formatDay(t.createdAt)}` : ''}
+          {why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{why}</span>}
+          {terminalNote(t)}
         </span>
-        {isFsBorn(t) && (
-          <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title="FreshService-born — can be folded in; it will be closed in FreshService with a pointer note">
-            FreshService
-          </span>
-        )}
-        <StatusPill status={t.status} />
-      </li>
-    );
-  };
+      </span>
+      {fsBadge(t)}
+      <StatusPill status={t.status} />
+    </li>
+  );
+
+  // A ticket that IS in the merge: shown once, removable, no checkbox to re-tick.
+  const chosenRow = (t) => (
+    <li key={t.id} className="flex items-center gap-2.5 px-3 py-2" data-testid="merge-chosen-row">
+      <GitMerge className="h-4 w-4 flex-shrink-0 text-violet-500" aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground/85">{t.subject || '(no subject)'}</span>
+        <span className="block text-xs text-muted-foreground/75">
+          {refOf(t)}
+          {t.createdAt ? ` · ${formatDay(t.createdAt)}` : ''}
+          {t.why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{t.why}</span>}
+          {terminalNote(t)}
+        </span>
+      </span>
+      {fsBadge(t)}
+      <StatusPill status={t.status} />
+      {t.id !== ticket.id ? (
+        <button type="button" onClick={() => remove(t)} aria-label={`Remove ${refOf(t)} from the merge`} title="Take this ticket out of the merge" className="tp-focus-ring rounded p-1 text-muted-foreground/75 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-300">
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      ) : (
+        <span className="inline-flex w-[26px] justify-center text-[10px] text-muted-foreground/60" title="The ticket this merge was opened from">opened</span>
+      )}
+    </li>
+  );
 
   return (
     <div
@@ -197,16 +237,26 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 settings-scrollbar">
-          {/* Candidates */}
+          {/* In this merge (QA 09-21 #2): everything already chosen — from the
+              bulk bar, the opener, or a ticked suggestion — in ONE list. */}
+          <div>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">In this merge ({group.length})</p>
+            <ul className="divide-y divide-border/60 rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/30 dark:bg-violet-500/10">
+              {group.map(chosenRow)}
+            </ul>
+            {group.length < 2 && <p className="mt-1 text-[11px] text-muted-foreground/75">Add at least one more ticket from the suggestions or the search.</p>}
+          </div>
+
+          {/* Suggested — only tickets not yet in the merge */}
           <div>
             <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Suggested (open tickets from {ticket.requester?.name || 'this requester'} + look-alikes)</p>
             <div className="rounded-xl border border-border">
               {candidates === null ? (
                 <p className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground/75"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Finding candidates…</p>
-              ) : candidates.length === 0 ? (
-                <p className="px-3 py-3 text-sm italic text-muted-foreground/75">No obvious candidates — search below.</p>
+              ) : suggested.length === 0 ? (
+                <p className="px-3 py-3 text-sm italic text-muted-foreground/75">{candidates.length === 0 ? 'No obvious candidates — search below.' : 'Every suggestion is already in the merge — search below for more.'}</p>
               ) : (
-                <ul className="divide-y divide-border/60">{candidates.map((t) => row(t, t.why))}</ul>
+                <ul className="divide-y divide-border/60">{suggested.map((t) => row(t, t.why))}</ul>
               )}
             </div>
           </div>
@@ -224,15 +274,15 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
               />
               {searching && <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground/75" aria-hidden="true" />}
             </div>
-            {searchResults.length > 0 && (
-              <ul className="mt-1 divide-y divide-border/60 rounded-xl border border-border">{searchResults.map((t) => row(t))}</ul>
+            {searchHits.length > 0 && (
+              <ul className="mt-1 divide-y divide-border/60 rounded-xl border border-border">{searchHits.map((t) => row(t))}</ul>
             )}
           </div>
 
           {/* Selection + primary choice */}
           {group.length >= 2 && (
             <div>
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Which ticket survives? ({group.length} in this merge)</p>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Which ticket stays open? (the others close into it)</p>
               <ul className="divide-y divide-border/60 rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/40 dark:bg-violet-500/10">
                 {group.map((t) => (
                   <li key={t.id} className="flex items-center gap-2.5 px-3 py-2">
@@ -251,7 +301,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
                       <span className="block text-xs text-muted-foreground/75">
                         {refOf(t)}
                         {primaryId === t.id
-                          ? ' · stays open, receives every conversation'
+                          ? ' · stays open and keeps every conversation'
                           : isTerminal(t)
                             ? ' · already closed — folded in as-is with a pointer note'
                             : isFsBorn(t)
@@ -282,7 +332,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
             {canMerge
               ? `${secondaries.length} ticket${secondaries.length === 1 ? '' : 's'} → ${refOf(primary || ticket)} · cannot be undone`
               : group.length >= 2 && primaryBlocked
-                ? (isFsBorn(primary) ? 'Pick a Ticket Pulse ticket as the survivor' : 'Pick an Open or Pending ticket as the survivor')
+                ? (isFsBorn(primary) ? 'Pick a Ticket Pulse ticket to stay open' : 'Pick an Open or Pending ticket to stay open')
                 : 'Select at least one other ticket'}
           </p>
           <div className="flex gap-2">

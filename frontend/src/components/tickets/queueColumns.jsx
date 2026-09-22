@@ -990,6 +990,14 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
  */
 export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths }) {
   const [open, setOpen] = useState(false);
+  // QA 09-21 #12: on a touch screen (iPad) a `draggable` row swallows the tap
+  // as a drag start and the checkbox never toggles. Coarse pointers get
+  // non-draggable rows with ▲▼ buttons; mice keep drag-to-reorder.
+  // (A test double that answers "matches" to every query is not a touch screen:
+  // require coarse AND not fine.)
+  const coarsePointer = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? Boolean(window.matchMedia('(pointer: coarse)')?.matches) && !window.matchMedia('(pointer: fine)')?.matches
+    : false;
   const [dragKey, setDragKey] = useState(null);
   // QA 09-16 #5: where the drop WILL land — { key, before } — drawn as a blue
   // insertion line while dragging, so nothing is a guess.
@@ -1082,7 +1090,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           className="absolute top-full mt-1 z-30 left-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn"
         >
           <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
-            Drag a row to reorder · applies on large screens (smaller screens keep the essentials)
+            {coarsePointer ? 'Use the arrows to reorder' : 'Drag a row to reorder'} · applies on large screens (smaller screens keep the essentials)
           </p>
           <ul className="max-h-72 overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
             {order.map((key) => {
@@ -1094,8 +1102,8 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               return (
                 <li
                   key={key}
-                  draggable={!pinned}
-                  onDragStart={(e) => { if (pinned) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', key); } catch { /* jsdom */ } }}
+                  draggable={!pinned && !coarsePointer}
+                  onDragStart={(e) => { if (pinned || coarsePointer) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', key); } catch { /* jsdom */ } }}
                   onDragEnd={() => { setDragKey(null); setDropTarget(null); }}
                   onDragOver={(e) => onRowDragOver(e, key)}
                   onDrop={(e) => { e.preventDefault(); dropOn(key); }}
@@ -1111,19 +1119,26 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
                       className={`pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-blue-500 shadow-[0_0_0_2px_rgb(59_130_246_/_0.25)] animate-fadeIn ${dropTarget.before ? '-top-px' : '-bottom-px'}`}
                     />
                   )}
-                  <label className={`flex items-center gap-2 px-1.5 py-1.5 rounded-md cursor-grab active:cursor-grabbing text-sm text-foreground/85 ${dragging ? 'bg-blue-50 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:ring-blue-500/30' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
-                    <span
-                      onKeyDown={(e) => {
-                        if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveBy(key, e.key === 'ArrowUp' ? -1 : 1); }
-                      }}
-                      tabIndex={pinned ? -1 : 0}
-                      role="button"
-                      title={pinned ? undefined : 'Drag the row to reorder · Alt+↑/↓ moves with the keyboard'}
-                      aria-label={pinned ? undefined : `Reorder ${col.label} column`}
-                      className={pinned ? 'w-3.5 flex-shrink-0' : 'tp-focus-ring rounded cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0'}
-                    >
-                      {!pinned && <GripVertical className="w-3.5 h-3.5" aria-hidden="true" />}
-                    </span>
+                  <label className={`flex items-center gap-2 px-1.5 py-1.5 rounded-md text-sm text-foreground/85 ${coarsePointer ? '' : 'cursor-grab active:cursor-grabbing'} ${dragging ? 'bg-blue-50 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:ring-blue-500/30' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
+                    {coarsePointer ? (
+                      <span className="flex flex-shrink-0 flex-col -my-1" data-testid={`column-move-${key}`}>
+                        <button type="button" onClick={(e) => { e.preventDefault(); moveBy(key, -1); }} aria-label={`Move ${col.label} column up`} className="tp-focus-ring rounded px-1 text-muted-foreground/60 hover:text-foreground leading-none min-h-[20px]">▲</button>
+                        <button type="button" onClick={(e) => { e.preventDefault(); moveBy(key, 1); }} aria-label={`Move ${col.label} column down`} className="tp-focus-ring rounded px-1 text-muted-foreground/60 hover:text-foreground leading-none min-h-[20px]">▼</button>
+                      </span>
+                    ) : (
+                      <span
+                        onKeyDown={(e) => {
+                          if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveBy(key, e.key === 'ArrowUp' ? -1 : 1); }
+                        }}
+                        tabIndex={pinned ? -1 : 0}
+                        role="button"
+                        title={pinned ? undefined : 'Drag the row to reorder · Alt+↑/↓ moves with the keyboard'}
+                        aria-label={pinned ? undefined : `Reorder ${col.label} column`}
+                        className={pinned ? 'w-3.5 flex-shrink-0' : 'tp-focus-ring rounded cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0'}
+                      >
+                        {!pinned && <GripVertical className="w-3.5 h-3.5" aria-hidden="true" />}
+                      </span>
+                    )}
                     <input
                       type="checkbox"
                       draggable={false}

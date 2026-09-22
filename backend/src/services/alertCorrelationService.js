@@ -38,7 +38,9 @@ const SWEEP_INTERVAL_MS = Number(process.env.ALERT_CORRELATION_INTERVAL_MS) || 5
 const MAX_WINDOW_MINUTES = 7 * 24 * 60;
 const TERMINAL_HARD = ['Deleted', 'Spam'];
 const SYSTEM_ACTOR_NAMES = ['System', 'FreshService', 'Ticket Pulse', 'Ticket Pulse Bot', 'Ticket Pulse Mail', ACTOR.name, 'Ticket Pulse duplicate guard'];
-const HUMAN_ACTIVITY_TYPES = ['assigned', 'reassigned', 'picked', 'self_picked', 'coordinator_assigned', 'status_changed', 'resolved', 'closed'];
+// fs_write_back rows are a person's own edits on an FS-born ticket (assignee,
+// status ...) — the engine's own write-backs carry ACTOR.name and are excluded.
+const HUMAN_ACTIVITY_TYPES = ['assigned', 'reassigned', 'picked', 'self_picked', 'coordinator_assigned', 'status_changed', 'resolved', 'closed', 'fs_write_back'];
 
 const PAIR_ACTIONS = ['resolve', 'link_only'];
 // A clear notice with no alert to match is left alone for this long before it
@@ -183,6 +185,7 @@ class AlertCorrelationService {
     this._timer = null;
     this._sweeping = false;
     this._ruleCache = new Map(); // workspaceId -> { at, rules }
+    this._inFlight = new Set(); // "ws:ticket" keys being evaluated right now
   }
 
   // ---------------------------------------------------------------- rules
@@ -248,7 +251,25 @@ class AlertCorrelationService {
    * Evaluate one ticket against the workspace's rules.
    * @returns {{ handled: boolean, kind?: 'pair'|'orphan'|'storm'|'followup'|'fired', skipAi?: boolean, actions: object[] }}
    */
-  async evaluateTicket(ticketId, workspaceId, { dryRun = false, triggerSource = null, session = null, now = new Date() } = {}) {
+  async evaluateTicket(ticketId, workspaceId, opts = {}) {
+    // Two triggers can reach the same ticket in the same second (a fast-sync
+    // tick and the sweep both saw an orphan clear come of age — 21 Sep 2026:
+    // #243405 got two notes, two FS write-backs and two run records). The
+    // second caller is told to defer; the first one's work stands.
+    const dryRun = Boolean(opts.dryRun);
+    const key = `${workspaceId}:${ticketId}`;
+    if (!dryRun && this._inFlight.has(key)) {
+      return { handled: false, kind: 'in_flight', skipAi: false, defer: true, actions: [{ type: 'deferred', ticketId, reason: 'another evaluation of this ticket is already running' }] };
+    }
+    if (!dryRun) this._inFlight.add(key);
+    try {
+      return await this._evaluate(ticketId, workspaceId, opts);
+    } finally {
+      if (!dryRun) this._inFlight.delete(key);
+    }
+  }
+
+  async _evaluate(ticketId, workspaceId, { dryRun = false, triggerSource = null, session = null, now = new Date() } = {}) {
     const result = { handled: false, kind: null, skipAi: false, actions: [] };
     const rules = await this._compiledRules(workspaceId);
     if (rules.length === 0) return result;
@@ -416,11 +437,18 @@ class AlertCorrelationService {
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     if (siblings.length + 1 < rule.stormMinCount) return false;
     const terminal = session?.asIfOpen ? new Set() : await this._terminalNames(ticket.workspaceId);
-    let root = siblings.find((t) => !terminal.has(t.status)) || siblings[0];
+    // Children hang under a LIVE incident. With every earlier sibling already
+    // closed there is nothing open to hang under: this ticket stays a plain
+    // fired alert (and is the open root for the next one). Never file a new
+    // alert under a closed ticket (21 Sep 2026: four test alerts ended up
+    // under one the noise verdict had already closed, out of everyone's sight).
+    const openSiblings = siblings.filter((t) => !terminal.has(t.status));
+    if (openSiblings.length === 0) return false;
+    let root = openSiblings[0];
     const parentId = await this._parentOf(root.id, session);
     if (parentId) {
       const parent = await this._loadTicket(parentId, ticket.workspaceId);
-      if (parent && !TERMINAL_HARD.includes(parent.status)) root = parent;
+      if (parent && !TERMINAL_HARD.includes(parent.status) && !terminal.has(parent.status)) root = parent;
     }
     if (root.id === ticket.id) return false;
     const existingParent = await this._parentOf(ticket.id, session);
@@ -635,6 +663,13 @@ class AlertCorrelationService {
     if (await this._isTerminal(ticket, session)) {
       result.actions.push({ type: 'already_terminal', ticketId: ticket.id, ref: ticketDisplayRef(ticket), status: ticket.status });
       return;
+    }
+    if (!dryRun) {
+      const fresh = await this._loadTicket(ticket.id, ticket.workspaceId).catch(() => null);
+      if (fresh && await this._isTerminal(fresh, session)) {
+        result.actions.push({ type: 'already_terminal', ticketId: ticket.id, ref: ticketDisplayRef(ticket), status: fresh.status });
+        return;
+      }
     }
     result.actions.push({ type: 'resolve', ticketId: ticket.id, ref: ticketDisplayRef(ticket), kind, otherId: other?.id || null, reason: rule.resolutionReason });
     if (dryRun) return;

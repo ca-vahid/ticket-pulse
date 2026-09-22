@@ -20,7 +20,7 @@ export const LAYOUT_PREF_KEY = 'ui.layoutWidth';
 export const LAYOUT_OPTIONS = ['full', 'comfortable', 'classic'];
 export const LAYOUT_LABELS = {
   full: { label: 'Full width', hint: 'Use the whole screen' },
-  comfortable: { label: 'Comfortable', hint: 'Centred, up to 1600 px' },
+  comfortable: { label: 'Comfort', hint: 'Centred, up to 1600 px' }, // "Comfortable" overlapped "Classic" (QA 09-21 #11)
   classic: { label: 'Classic', hint: 'Centred, up to 1280 px' },
 };
 const DEFAULT_WIDTH = 'full';

@@ -24,6 +24,7 @@ import { NAV_DESTINATIONS, useCanAccessSettings, useNavDestinations } from './na
 
 // Short labels so the fixed tabs stay legible on narrow phones.
 const SHORT_LABEL = {
+  approvals: 'Approvals',
   dashboard: 'Dashboard',
   timeline: 'Timeline',
   analytics: 'Analytics',
@@ -51,8 +52,17 @@ export default function MobileTabBar() {
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id || null;
   const destinations = useNavDestinations();
-  const primaryTabs = destinations.slice(0, 4);
-  const overflowDests = destinations.slice(4);
+  // QA 09-21 #13: Approvals was the last destination and so always lived in
+  // the "More" sheet — on a phone it looked like the app had no approvals.
+  // It now sits right after Tickets, inside the four primary tabs.
+  const approvalsDest = destinations.find((d) => d.id === 'approvals');
+  const withoutApprovals = destinations.filter((d) => d.id !== 'approvals');
+  const ticketsAt = withoutApprovals.findIndex((d) => d.id === 'tickets');
+  const ordered = approvalsDest
+    ? [...withoutApprovals.slice(0, ticketsAt + 1), approvalsDest, ...withoutApprovals.slice(ticketsAt + 1)]
+    : withoutApprovals;
+  const primaryTabs = ordered.slice(0, 4);
+  const overflowDests = ordered.slice(4);
   const moreActive = !primaryTabs.some((dest) => dest.id === activeId);
 
   const go = (path) => {

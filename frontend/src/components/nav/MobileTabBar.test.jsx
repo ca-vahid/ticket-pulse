@@ -58,10 +58,11 @@ describe('MobileTabBar', () => {
   test('workspace admin: four primary tabs, the rest + Settings in More', () => {
     wsState.availableWorkspaces = [{ id: 1, name: 'IT', role: 'admin' }];
     renderBar('/dashboard');
-    expect(tabLabels()).toEqual(['Dashboard', 'Tickets', 'Timeline', 'Analytics', 'More']);
+    // QA 09-21 #13: Approvals rides right after Tickets in the primary tabs.
+    expect(tabLabels()).toEqual(['Dashboard', 'Tickets', 'Approvals', 'Timeline', 'More']);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     const sheet = screen.getByRole('dialog', { name: 'More navigation' });
-    for (const label of ['Assignment', 'Mail Workflows', 'Agent Maps', 'Approvals', 'Settings']) {
+    for (const label of ['Analytics', 'Assignment', 'Mail Workflows', 'Agent Maps', 'Settings']) {
       expect(within(sheet).getByText(label)).toBeInTheDocument();
     }
   });

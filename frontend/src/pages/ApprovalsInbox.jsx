@@ -672,7 +672,8 @@ export default function ApprovalsInbox() {
                   const note = a.decisionNote || a.conditionNote || a.requestNote || '';
                   return (
                     <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5 transition-shadow hover:shadow-subtle" data-testid="approval-row">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-5">
+                      {/* xl, not md (QA 09-21 #13): the people panel beside the subject needs more than an iPad's 1024–1180 px. */}
+                      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-5">
                         {/* Left: what was asked, and what happened to it */}
                         <div className="flex min-w-0 flex-1 items-center gap-3">
                           <StatusGlyph status={a.status} />
@@ -695,7 +696,7 @@ export default function ApprovalsInbox() {
                           </div>
                         </div>
                         {/* Right: the people — who asked, who it is for, who decides */}
-                        <div className="grid flex-shrink-0 grid-cols-3 gap-3 border-t border-border/70 pt-2 md:w-[27rem] md:border-l md:border-t-0 md:pl-5 md:pt-0">
+                        <div className="grid flex-shrink-0 grid-cols-3 gap-3 border-t border-border/70 pt-2 xl:w-[27rem] xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
                           {peopleOf(a).map((p) => <SidePerson key={p.label} label={p.label} name={p.name} email={p.email} />)}
                         </div>
                       </div>
@@ -718,7 +719,7 @@ export default function ApprovalsInbox() {
                 <ul className="space-y-1.5">
                   {pending.map((a) => (
                     <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5" data-testid="inbox-row">
-                      <div className={`flex flex-col gap-2 md:flex-row md:gap-4 ${expanded.has(a.id) ? 'md:items-start' : 'md:items-center'}`}>
+                      <div className={`flex flex-col gap-2 xl:flex-row xl:gap-4 ${expanded.has(a.id) ? 'xl:items-start' : 'xl:items-center'}`}>
                         <div className="flex min-w-0 flex-1 items-center gap-3">
                           <StatusGlyph status="pending" />
                           <div className="min-w-0 flex-1">
@@ -738,12 +739,12 @@ export default function ApprovalsInbox() {
                           </div>
                         </div>
                         {/* Who: requested by / for, stacked */}
-                        <div className="flex flex-shrink-0 flex-row gap-4 border-t border-border/70 pt-2 md:w-44 md:flex-col md:gap-1 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                        <div className="flex flex-shrink-0 flex-row gap-4 border-t border-border/70 pt-2 xl:w-44 xl:flex-col xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
                           {peopleOf(a, { withApprover: false }).map((p) => <SidePerson key={p.label} label={p.label} name={p.name} email={p.email} size="h-6 w-6" />)}
                         </div>
                         {/* When · act */}
                         {openId !== a.id && (
-                          <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 md:flex-col md:items-end md:gap-1 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                          <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 xl:flex-col xl:items-end xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
                             <When at={a.createdAt} />
                             <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
                               {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Decide
@@ -785,7 +786,7 @@ export default function ApprovalsInbox() {
                 <ul className="space-y-1.5">
                   {needsInfo.map((a) => (
                     <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+                      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-4">
                         <div className="flex min-w-0 flex-1 items-center gap-3">
                           <StatusGlyph status="info_requested" />
                           <div className="min-w-0 flex-1">
@@ -801,7 +802,7 @@ export default function ApprovalsInbox() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 md:flex-col md:items-end md:gap-1 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 xl:flex-col xl:items-end xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
                           <When at={a.createdAt} />
                           <span className="flex items-center gap-1">
                             <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info →</Link>

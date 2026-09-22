@@ -1796,8 +1796,10 @@ export default function Tickets() {
                       {/* The wrapper scrolls but shows NO bar of its own — the sticky
                           proxy under the rows is the one scrollbar (a second one
                           appeared at the foot, 16 Sep 2026). */}
-                      <div ref={scrollWrapRef} className={widthsPinned ? 'xl:overflow-x-auto tp-scrollbar-none' : ''}>
-                        <div className={widthsPinned ? 'xl:min-w-[var(--tp-q-minw)]' : ''}>
+                      {/* md, not xl (QA 09-21 #12): an iPad is 1024–1180 px wide and had no
+                          way to reach the columns past the edge. */}
+                      <div ref={scrollWrapRef} className={widthsPinned ? 'md:overflow-x-auto tp-scrollbar-none' : ''}>
+                        <div className={widthsPinned ? 'md:min-w-[var(--tp-q-minw)]' : ''}>
                           {/* Header */}
                           <div className="hidden md:flex items-stretch border-b border-border bg-muted/40">
                             <span className="flex items-center justify-center w-9 flex-shrink-0">

@@ -39,6 +39,20 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+describe('MergeTicketsModal — opened from the bulk bar (QA 09-21 #2)', () => {
+  test('both pre-selected tickets sit in "In this merge"; removing one puts it back under Suggested', async () => {
+    render(<MergeTicketsModal ticket={PRIMARY} initialTickets={[CUSTOM_PENDING]} statusDefs={DEFS} onClose={() => {}} onMerged={() => {}} />);
+    await screen.findAllByText('Printer jams again');
+    const chosen = screen.getAllByTestId('merge-chosen-row');
+    expect(chosen.map((li) => li.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('TP-20'), expect.stringContaining('TP-24')]));
+    // The opener has no ✕; the bulk-bar companion does.
+    expect(screen.queryByRole('button', { name: 'Remove TP-20 from the merge' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove TP-24 from the merge' }));
+    expect(screen.getByRole('checkbox', { name: 'Include TP-24 in the merge' })).toBeInTheDocument();
+    expect(screen.getByText('Which ticket stays open? (the others close into it)')).toBeInTheDocument();
+  });
+});
+
 describe('MergeTicketsModal candidates (Phase MB2)', () => {
   test('lists a Resolved candidate with the "folded in as-is" note, a custom Pending-base ticket, and never a Deleted one', async () => {
     render(<MergeTicketsModal ticket={PRIMARY} statusDefs={DEFS} onClose={() => {}} onMerged={() => {}} />);
@@ -66,9 +80,12 @@ describe('MergeTicketsModal candidates (Phase MB2)', () => {
   test('survivor radios: FS-born and Resolved candidates are disabled with the SAME reasons the header uses', async () => {
     render(<MergeTicketsModal ticket={PRIMARY} statusDefs={DEFS} onClose={() => {}} onMerged={() => {}} />);
     await screen.findAllByText('Printer jams again');
-    // TP-21 (same subject) is preselected; add the FS-born one.
-    expect(screen.getByRole('checkbox', { name: 'Include TP-21 in the merge' })).toBeChecked();
+    // TP-21 (same subject) is preselected: it sits in "In this merge" with its
+    // own ✕ and no checkbox (QA 09-21 #2). Add the FS-born one from Suggested.
+    expect(screen.getByRole('button', { name: 'Remove TP-21 from the merge' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Include TP-21 in the merge' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Include #900 in the merge' }));
+    expect(screen.getByRole('button', { name: 'Remove #900 from the merge' })).toBeInTheDocument();
 
     const fsRadio = screen.getByRole('radio', { name: 'Keep #900 as the primary' });
     expect(fsRadio).toBeDisabled();

@@ -30,6 +30,23 @@ function rowFor(key) {
 const dt = () => ({ effectAllowed: '', dropEffect: '', setData: vi.fn(), getData: vi.fn(() => '') });
 
 describe('QueueColumnsMenu — whole-row drag', () => {
+  test('on a touch screen rows are NOT draggable, the checkbox toggles, and ▲▼ reorder (QA 09-21 #12)', () => {
+    const original = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q === '(pointer: coarse)', media: q, addEventListener() {}, removeEventListener() {} });
+    try {
+      const onChange = vi.fn();
+      renderMenu(onChange);
+      for (const key of KEYS) expect(rowFor(key)).toHaveAttribute('draggable', 'false');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Priority column' }));
+      expect(onChange).toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Move Status column up' }));
+      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(/Use the arrows to reorder/)).toBeInTheDocument();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
   test('every row is draggable, not just its grip', () => {
     renderMenu();
     for (const key of KEYS) expect(rowFor(key)).toHaveAttribute('draggable', 'true');
