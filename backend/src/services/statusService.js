@@ -13,6 +13,7 @@
 import prisma from './prisma.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { setWorkspaceBindings, titleCaseStatusLabel } from '../utils/fsStatusBindings.js';
 
 export const BASE_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 export const TERMINAL_BASE_STATUSES = ['Resolved', 'Closed'];
@@ -93,7 +94,19 @@ export function invalidateStatusCache(workspaceId) {
     cache.delete(Number(workspaceId));
     pendingReads.delete(Number(workspaceId));
   }
+  // Registry writes can change a FreshService binding; refresh the in-memory
+  // map the (synchronous) transformer reads. Fire-and-forget, never fatal.
+  statusServiceRef?.loadFsBindings(workspaceId).catch(() => {});
 }
+
+// FreshService's fixed statuses; anything else is tenant-defined and binds
+// to a registry row (Pending Response build, 23 Sep 2026).
+const FS_FIXED_STATUS_IDS = new Set([2, 3, 4, 5]);
+// Labels the transformer used for 6/7 before bindings existed.
+const LEGACY_FS_STATUS_LABELS = { 6: 'Waiting on Customer', 7: 'Waiting on Third Party' };
+// Last FreshService labels read per workspace (id -> label), for fallbacks.
+const fsLabelsByWorkspace = new Map();
+let statusServiceRef = null;
 
 class StatusService {
   /**
@@ -290,6 +303,21 @@ class StatusService {
       }
     }
     if (data.color !== undefined) patch.color = this._cleanColor(data.color);
+    if (data.freshserviceStatusId !== undefined) {
+      const raw = data.freshserviceStatusId;
+      const fsId = raw === null || raw === '' ? null : Number(raw);
+      if (fsId !== null && (!Number.isInteger(fsId) || FS_FIXED_STATUS_IDS.has(fsId) || fsId < 2)) {
+        throw new ValidationError('freshserviceStatusId must be a FreshService custom status id (6 or above), or null');
+      }
+      if (fsId !== null) {
+        const taken = await prisma.ticketStatusDefinition.findFirst({
+          where: { workspaceId: Number(workspaceId), freshserviceStatusId: fsId, NOT: { id: existing.id } },
+          select: { name: true },
+        });
+        if (taken) throw new ValidationError(`FreshService status ${fsId} is already linked to "${taken.name}"`);
+      }
+      patch.freshserviceStatusId = fsId;
+    }
     if (data.sortOrder !== undefined) {
       const sortOrder = Number(data.sortOrder);
       if (!Number.isFinite(sortOrder)) throw new ValidationError('sortOrder must be a number');
@@ -349,6 +377,127 @@ class StatusService {
     return updated;
   }
 
+  // ---------- FreshService status binding (23 Sep 2026) ----------
+
+  /**
+   * Load registry rows bound to FreshService status ids into the in-memory
+   * map (utils/fsStatusBindings.js) the transformer and write-back read.
+   * One workspace, or all when workspaceId is undefined. Never throws.
+   */
+  async loadFsBindings(workspaceId) {
+    try {
+      const where = workspaceId === undefined ? {} : { id: Number(workspaceId) };
+      const workspaces = await prisma.workspace.findMany({
+        where,
+        select: { id: true, freshserviceWorkspaceId: true },
+      });
+      const rows = await prisma.ticketStatusDefinition.findMany({
+        where: {
+          ...(workspaceId === undefined ? {} : { workspaceId: Number(workspaceId) }),
+          freshserviceStatusId: { not: null },
+        },
+        select: { workspaceId: true, name: true, freshserviceStatusId: true },
+      });
+      for (const ws of workspaces) {
+        setWorkspaceBindings(ws.id, {
+          fsWorkspaceId: ws.freshserviceWorkspaceId ?? null,
+          bindings: rows.filter((r) => r.workspaceId === ws.id).map((r) => ({ fsId: r.freshserviceStatusId, name: r.name })),
+          fsLabels: fsLabelsByWorkspace.get(ws.id) || null,
+        });
+      }
+      return { workspaces: workspaces.length, bindings: rows.length };
+    } catch (err) {
+      logger.debug?.(`FreshService status bindings not loaded (${err.message})`);
+      return { workspaces: 0, bindings: 0 };
+    }
+  }
+
+  /**
+   * Read FreshService's status choices for a workspace and make sure every
+   * tenant status (id > 5) has a registry row bound to it:
+   *   - a row with the same name (case-insensitive) is bound;
+   *   - otherwise a row is created with FreshService's label in title case
+   *     ("Pending response" -> "Pending Response"), base from the label
+   *     (Pending when unclear) — but ONLY where the workspace's tickets
+   *     actually carry that status. FreshService offers its custom statuses
+   *     tenant-wide; "Pending response" is IT's process (Vahid, 23 Sep 2026),
+   *     so a workspace that never uses it must not get it in its status list.
+   *     A later ticket in that status creates the row on the next pass.
+   * Existing bindings are kept; fsDetectedAt is stamped. Never deletes.
+   */
+  async syncFsStatusChoices(workspaceId, client, fsWorkspaceId) {
+    const fields = typeof client.listTicketFormFields === 'function'
+      ? await client.listTicketFormFields({ workspace_id: Number(fsWorkspaceId) })
+      : ((await client.client.get('/ticket_form_fields', { params: { workspace_id: Number(fsWorkspaceId) } })).data?.ticket_fields || []);
+    const statusField = (fields || []).find((f) => f.name === 'status');
+    const choices = Array.isArray(statusField?.choices) ? statusField.choices : [];
+    if (!choices.length) {
+      logger.warn(`Status choice sync: no status field for ws${workspaceId}`);
+      return { detected: 0, bound: 0, created: 0 };
+    }
+    fsLabelsByWorkspace.set(Number(workspaceId), Object.fromEntries(choices.map((c) => [Number(c.id), String(c.value || '')])));
+
+    const rows = await prisma.ticketStatusDefinition.findMany({ where: { workspaceId: Number(workspaceId) } });
+    const now = new Date();
+    let bound = 0;
+    let created = 0;
+    for (const choice of choices) {
+      const fsId = Number(choice.id);
+      const label = String(choice.value || '').trim();
+      if (!Number.isInteger(fsId) || FS_FIXED_STATUS_IDS.has(fsId) || !label) continue;
+      const already = rows.find((r) => r.freshserviceStatusId === fsId);
+      if (already) {
+        await prisma.ticketStatusDefinition.update({ where: { id: already.id }, data: { fsDetectedAt: now } });
+        continue;
+      }
+      const name = titleCaseStatusLabel(label).slice(0, 50);
+      const byName = rows.find((r) => r.name.toLowerCase() === label.toLowerCase() || r.name.toLowerCase() === name.toLowerCase());
+      if (byName) {
+        if (byName.freshserviceStatusId === null || byName.freshserviceStatusId === undefined) {
+          await prisma.ticketStatusDefinition.update({
+            where: { id: byName.id },
+            data: { freshserviceStatusId: fsId, fsDetectedAt: now },
+          });
+          bound += 1;
+          logger.info(`Status choice sync: ws${workspaceId} "${byName.name}" bound to FreshService status ${fsId} ("${label}")`);
+        }
+        continue;
+      }
+      // In use here? Tickets synced under this name, or under the old fixed
+      // labels for 6/7 ("Waiting on Customer" / "Waiting on Third Party").
+      const legacyLabel = LEGACY_FS_STATUS_LABELS[fsId];
+      const inUse = await prisma.ticket.count({
+        where: { workspaceId: Number(workspaceId), status: { in: [name, label, ...(legacyLabel ? [legacyLabel] : [])] } },
+      }).catch(() => 0);
+      if (!inUse) continue;
+      const max = await prisma.ticketStatusDefinition.aggregate({ where: { workspaceId: Number(workspaceId) }, _max: { sortOrder: true } });
+      await prisma.ticketStatusDefinition.create({
+        data: {
+          workspaceId: Number(workspaceId),
+          name,
+          baseStatus: heuristicBaseStatus(label) || 'Pending',
+          color: 'amber',
+          sortOrder: (max?._max?.sortOrder ?? -1) + 1,
+          isSystem: false,
+          isActive: true,
+          freshserviceStatusId: fsId,
+          fsDetectedAt: now,
+        },
+      });
+      created += 1;
+      logger.info(`Status choice sync: ws${workspaceId} created "${name}" for FreshService status ${fsId} ("${label}")`);
+    }
+    cache.delete(Number(workspaceId));
+    pendingReads.delete(Number(workspaceId));
+    await this.loadFsBindings(workspaceId);
+    return { detected: choices.length, bound, created };
+  }
+
+  /** FreshService choices last read for a workspace ({ id: label }), or null. */
+  fsStatusLabels(workspaceId) {
+    return fsLabelsByWorkspace.get(Number(workspaceId)) || null;
+  }
+
   async reactivateStatus(workspaceId, id, updatedBy) {
     const existing = await this._requireRow(workspaceId, id);
     if (existing.isActive) return existing;
@@ -362,4 +511,6 @@ class StatusService {
   }
 }
 
-export default new StatusService();
+const statusService = new StatusService();
+statusServiceRef = statusService;
+export default statusService;

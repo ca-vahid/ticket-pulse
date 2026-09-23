@@ -944,6 +944,10 @@ model TicketStatusDefinition {
   sortOrder   Int       @default(0) @map("sort_order")
   isSystem    Boolean   @default(false) @map("is_system")
   isActive    Boolean   @default(true) @map("is_active")
+  // FreshService status id this row stands for (6 = "Pending response" on
+  // this tenant). Write-back sends it; sync reads it back to this name.
+  freshserviceStatusId Int?      @map("freshservice_status_id")
+  fsDetectedAt         DateTime? @map("fs_detected_at") @db.Timestamptz(6)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 

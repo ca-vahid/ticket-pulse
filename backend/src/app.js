@@ -368,6 +368,16 @@ async function initialize() {
       logger.warn('Notification workflow stale-run reconciliation failed (non-fatal):', e.message);
     }
 
+    // FreshService status bindings ("Pending Response" <-> FS 6) for the
+    // synchronous transformer / write-back helpers (23 Sep 2026).
+    try {
+      const { default: statusService } = await import('./services/statusService.js');
+      const loaded = await statusService.loadFsBindings();
+      logger.info(`FreshService status bindings loaded (${loaded.bindings} across ${loaded.workspaces} workspace(s))`);
+    } catch (e) {
+      logger.warn('FreshService status bindings not loaded (non-fatal):', e.message);
+    }
+
     // Native-ticketing fallback mirror: pushes TP-born ticket copies to FreshService.
     try {
       const { default: mirrorService } = await import('./services/mirrorService.js');

@@ -134,7 +134,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { default: notificationWorkflowRoutes } = await import('../src/routes/notificationWorkflow.routes.js');
+const { default: notificationWorkflowRoutes, duplicateReminderWarning } = await import('../src/routes/notificationWorkflow.routes.js');
 
 const sampleTicket = {
   id: 501,
@@ -1415,5 +1415,27 @@ describe('GET /condition-fields', () => {
     } finally {
       delete prismaMock.customFieldDefinition;
     }
+  });
+});
+
+// Duplicate-reminder guard (Pending Response build, 23 Sep 2026): while
+// FreshService runs a workspace's pending-response reminders, a LIVE Ticket
+// Pulse requester-silence workflow would email the same people twice.
+describe('duplicateReminderWarning', () => {
+  const live = { isEnabled: true, mockModeEnabled: false, triggerType: 'ticket.requester_silent_for' };
+  beforeEach(() => {
+    prismaMock.ticketStatusDefinition = { findFirst: jest.fn().mockResolvedValue({ name: 'Pending Response' }) };
+  });
+
+  test('warns for a live requester-silence workflow where a status is bound to FreshService', async () => {
+    await expect(duplicateReminderWarning(1, live)).resolves.toMatch(/FreshService already sends pending-response reminders/);
+  });
+
+  test('no warning when observe-only, disabled, another trigger, or nothing bound', async () => {
+    await expect(duplicateReminderWarning(1, { ...live, mockModeEnabled: true })).resolves.toBeNull();
+    await expect(duplicateReminderWarning(1, { ...live, isEnabled: false })).resolves.toBeNull();
+    await expect(duplicateReminderWarning(1, { ...live, triggerType: 'ticket.created' })).resolves.toBeNull();
+    prismaMock.ticketStatusDefinition.findFirst.mockResolvedValue(null);
+    await expect(duplicateReminderWarning(1, live)).resolves.toBeNull();
   });
 });

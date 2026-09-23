@@ -3,22 +3,49 @@ import logger from '../utils/logger.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId } from '../utils/fsEntryId.js';
+import {
+  FALLBACK_STATUS_LABELS,
+  boundNameForFsStatus,
+  boundFsStatusForName,
+  fsLabelForStatus,
+  titleCaseStatusLabel,
+} from '../utils/fsStatusBindings.js';
 
 /**
  * Transform FreshService API data to our database schema
  */
 
 /**
- * Map FreshService status ID to status string
+ * Map FreshService status ID to status string. 2–5 are FreshService's fixed
+ * statuses. Anything above is tenant-defined: the workspace's bound registry
+ * name wins (utils/fsStatusBindings.js). 6 used to read "Waiting on Customer"
+ * (FreshService's DEFAULT label), but this tenant calls it "Pending response",
+ * and those tickets fell out of every open count (23 Sep 2026).
  */
 const STATUS_MAP = {
   2: 'Open',
   3: 'Pending',
   4: 'Resolved',
   5: 'Closed',
-  6: 'Waiting on Customer',
-  7: 'Waiting on Third Party',
+  ...FALLBACK_STATUS_LABELS,
 };
+
+/**
+ * Ticket Pulse status name for a FreshService status id, per workspace:
+ * bound registry name → fixed map → FreshService's own label (title case,
+ * from the last status-choice sync) → 'Open' (last resort, as before).
+ * @param {number} statusId
+ * @param {{ workspaceId?: number|null, fsWorkspaceId?: number|string|null }} [scope]
+ */
+export function statusNameForFsStatus(statusId, scope = {}) {
+  const id = Number(statusId);
+  const bound = boundNameForFsStatus(id, scope);
+  if (bound) return bound;
+  if (STATUS_MAP[id]) return STATUS_MAP[id];
+  const label = fsLabelForStatus(id, scope);
+  if (label) return titleCaseStatusLabel(label);
+  return 'Open';
+}
 
 /**
  * Map FreshService priority ID to priority number
@@ -74,6 +101,7 @@ export function transformTicket(fsTicket, {
   tpSubskillCustomField = 'lf_ticket_pulse_subcategory',
   tpSkillLookupMap = null,
   tpSubskillLookupMap = null,
+  workspaceId = null,
 } = {}) {
   if (!fsTicket || !fsTicket.id) {
     logger.warn('Invalid FreshService ticket data');
@@ -86,7 +114,8 @@ export function transformTicket(fsTicket, {
       subject: fsTicket.subject || 'No Subject',
       description: fsTicket.description || null,
       descriptionText: fsTicket.description_text || null,
-      status: fsTicket.deleted ? 'Deleted' : fsTicket.spam ? 'Spam' : (STATUS_MAP[fsTicket.status] || 'Open'),
+      status: fsTicket.deleted ? 'Deleted' : fsTicket.spam ? 'Spam'
+        : statusNameForFsStatus(fsTicket.status, { workspaceId, fsWorkspaceId: fsTicket.workspace_id ?? null }),
       // Explicit FS flags (TU-3d): only detail payloads carry them. The
       // repository treats "absent" as "never downgrade a Spam/Deleted row".
       spam: typeof fsTicket.spam === 'boolean' ? fsTicket.spam : undefined,
@@ -711,10 +740,11 @@ export function mapTechnicianIds(tickets, freshserviceIdToInternalIdMap) {
 /**
  * Get status string from FreshService status ID
  * @param {number} statusId - FreshService status ID
+ * @param {{ workspaceId?: number|null, fsWorkspaceId?: number|string|null }} [scope] - binds tenant statuses (6 → "Pending Response")
  * @returns {string} Status string
  */
-export function getStatusString(statusId) {
-  return STATUS_MAP[statusId] || 'Open';
+export function getStatusString(statusId, scope = {}) {
+  return statusNameForFsStatus(statusId, scope);
 }
 
 /**
@@ -738,11 +768,17 @@ export function getPriorityNumber(priorityId) {
  * @param {{ baseStatus?: string|null }} [options] - registry-resolved base
  * @returns {number|null} FreshService status ID, or null when unmappable
  */
-export function getStatusId(status, { baseStatus = null } = {}) {
-  const direct = Object.entries(STATUS_MAP).find(([_id, str]) => str === status);
+export function getStatusId(status, { baseStatus = null, workspaceId = null } = {}) {
+  // A registry row bound to a FreshService status sends THAT id: "Pending
+  // Response" → 6, so FreshService's own pending-response rules run (it used
+  // to fall back to its base and send 3, 23 Sep 2026).
+  const bound = boundFsStatusForName(status, { workspaceId });
+  if (bound !== null) return bound;
+  const key = String(status ?? '').trim().toLowerCase();
+  const direct = Object.entries(STATUS_MAP).find(([_id, str]) => str.toLowerCase() === key);
   if (direct) return Number(direct[0]);
   if (baseStatus) {
-    const viaBase = Object.entries(STATUS_MAP).find(([_id, str]) => str === baseStatus);
+    const viaBase = Object.entries(STATUS_MAP).find(([id, str]) => Number(id) <= 5 && str === baseStatus);
     if (viaBase) return Number(viaBase[0]);
   }
   return null;

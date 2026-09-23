@@ -80,6 +80,15 @@ export function priorityWritebackSkipReasonForTrigger(triggerSource, assignmentC
   return null;
 }
 
+// Shadow runs write nothing: every run/step write becomes a no-op.
+const SHADOW_RUN_REPOSITORY = Object.freeze({
+  updatePipelineRun: async () => null,
+  createPipelineStep: async () => ({ id: null }),
+  updatePipelineStep: async () => null,
+  touchPipelineRun: async () => null,
+  getPipelineRun: async () => ({ shadow: true, status: 'cancelled' }),
+});
+
 class AssignmentPipelineService {
   /**
    * Run the agentic assignment pipeline with streaming.
@@ -866,7 +875,24 @@ class AssignmentPipelineService {
    * Core pipeline execution. Separated from runPipeline so it can be called
    * for both fresh runs and claimed queued runs.
    */
-  async _executeRun(runId, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal) {
+  /**
+   * Shadow evaluation (AI cost plan §5.1, 23 Sep 2026): run a ticket through
+   * the live pipeline's prompt, tools and loop on `model`, writing nothing —
+   * no run/step rows, no ticket fields, no assignment, no noise flag, no
+   * FreshService write-back, no events, no provider-attempt rows. `liveRunId`
+   * only lends its rebound context. Returns the verdict and token counts.
+   */
+  async shadowRun(ticketId, workspaceId, { model, provider = null, liveRunId = null, triggerSource = 'manual', signal = null } = {}) {
+    if (!model) throw new Error('shadowRun needs a model');
+    return this._executeRun(liveRunId, ticketId, workspaceId, triggerSource, Date.now(), () => {}, signal, { shadow: { model, provider } });
+  }
+
+  async _executeRun(runId, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal, { shadow = null } = {}) {
+    // Shadow mode (AI cost plan §5.1): the SAME prompt assembly, tools and
+    // loop as a live run, on a named model, with every write swapped for a
+    // no-op; the run returns its verdict before any decision is persisted.
+    const runRepo = shadow ? SHADOW_RUN_REPOSITORY : assignmentRepository;
+    const shadowStats = shadow ? { toolCalls: 0, turns: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } : null;
     const isPriorityAssessmentOnly = triggerSource === 'priority_assessment_only'
       || triggerSource === 'priority_assessment_after_hours'
       || triggerSource === 'priority_changed';
@@ -944,7 +970,7 @@ class AssignmentPipelineService {
     // Ensure run is in running state (may already be if created as running)
     const initialProvider = providerForModel(assignmentConfig?.llmModel, 'anthropic');
     const llmModel = normalizeAiModel(assignmentConfig?.llmModel, initialProvider, null, 'assignment_pipeline');
-    await assignmentRepository.updatePipelineRun(runId, {
+    await runRepo.updatePipelineRun(runId, {
       status: 'running',
       llmProvider: initialProvider,
       llmModel,
@@ -971,7 +997,7 @@ class AssignmentPipelineService {
 
       lastHeartbeatAt = now;
       heartbeatPromise = heartbeatPromise
-        .then(() => assignmentRepository.touchPipelineRun(runId))
+        .then(() => runRepo.touchPipelineRun(runId))
         .catch((error) => logger.debug('Pipeline heartbeat failed', { runId, error: error.message }));
     };
 
@@ -1008,7 +1034,7 @@ class AssignmentPipelineService {
 
       while (continueLoop && stepCounter < MAX_TURNS) {
         if (signal?.aborted) {
-          await assignmentRepository.updatePipelineRun(runId, {
+          await runRepo.updatePipelineRun(runId, {
             status: 'cancelled', totalDurationMs: Date.now() - pipelineStart,
             totalTokensUsed: totalTokens, fullTranscript,
             llmProvider,
@@ -1019,7 +1045,7 @@ class AssignmentPipelineService {
           });
           emit({ type: 'error', message: 'Pipeline cancelled by client' });
           emit({ type: 'complete', runId });
-          return await assignmentRepository.getPipelineRun(runId);
+          return await runRepo.getPipelineRun(runId);
         }
 
         stepCounter++;
@@ -1031,7 +1057,8 @@ class AssignmentPipelineService {
           operation: 'assignment_pipeline',
           workspaceId,
           legacyModel: assignmentConfig?.llmModel,
-          runLinks: { assignmentPipelineRunId: runId },
+          runLinks: shadow ? {} : { assignmentPipelineRunId: runId },
+          ...(shadow ? { shadow } : {}),
           systemPrompt,
           tools,
           messages,
@@ -1070,13 +1097,20 @@ class AssignmentPipelineService {
 
         const finalMessage = turnResult.message;
         totalTokens += turnResult.usage?.totalTokens || 0;
+        if (shadowStats) {
+          shadowStats.turns += 1;
+          shadowStats.inputTokens += turnResult.usage?.inputTokens || 0;
+          shadowStats.outputTokens += turnResult.usage?.outputTokens || 0;
+          shadowStats.cacheReadInputTokens += turnResult.usage?.cacheReadInputTokens || 0;
+          shadowStats.cacheCreationInputTokens += turnResult.usage?.cacheCreationInputTokens || 0;
+        }
         llmProvider = turnResult.provider;
         resolvedLlmModel = turnResult.model;
         llmFallbackUsed = llmFallbackUsed || turnResult.fallbackUsed;
         llmFallbackReason = turnResult.fallbackReason || llmFallbackReason;
         llmAttemptCount += turnResult.attemptNumber || 1;
 
-        await assignmentRepository.updatePipelineRun(runId, {
+        await runRepo.updatePipelineRun(runId, {
           llmProvider,
           llmModel: resolvedLlmModel,
           llmFallbackUsed,
@@ -1089,6 +1123,7 @@ class AssignmentPipelineService {
         for (const block of finalMessage.content) {
           if (block.type === 'tool_use') {
             if (block.name === 'submit_recommendation') {
+              if (shadowStats) shadowStats.toolCalls += 1;
               let accepted = true;
               let validationError = null;
               let normalizedFromString = false;
@@ -1114,7 +1149,7 @@ class AssignmentPipelineService {
                 });
               }
 
-              await assignmentRepository.createPipelineStep({
+              await runRepo.createPipelineStep({
                 pipelineRunId: runId,
                 stepNumber: stepCounter,
                 stepName: 'submit_recommendation',
@@ -1126,14 +1161,14 @@ class AssignmentPipelineService {
               });
 
               emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
-              this._broadcastRunUpdate(workspaceId, ticketId, runId, 'running', null, { step: stepCounter, tool: 'submit_recommendation' });
+              if (!shadow) this._broadcastRunUpdate(workspaceId, ticketId, runId, 'running', null, { step: stepCounter, tool: 'submit_recommendation' });
               const toolResult = accepted ? { accepted: true, normalizedFromString } : { accepted: false, error: validationError };
               toolResultMap.set(block.id, toolResult);
               emit({ type: 'tool_result', name: block.name, data: toolResult, durationMs: 0, toolUseId: block.id });
               continue;
             }
 
-            const toolStep = await assignmentRepository.createPipelineStep({
+            const toolStep = await runRepo.createPipelineStep({
               pipelineRunId: runId,
               stepNumber: stepCounter,
               stepName: block.name,
@@ -1144,12 +1179,13 @@ class AssignmentPipelineService {
             emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
             // Live queue progress: rows show which stage the analysis is at
             // ("reading the ticket · step 2"). Fire-and-forget, tiny payload.
-            this._broadcastRunUpdate(workspaceId, ticketId, runId, 'running', null, { step: stepCounter, tool: block.name });
+            if (!shadow) this._broadcastRunUpdate(workspaceId, ticketId, runId, 'running', null, { step: stepCounter, tool: block.name });
             queueHeartbeat();
 
             const toolStart = Date.now();
             let toolResult;
             try {
+              if (shadowStats) shadowStats.toolCalls += 1;
               toolResult = await executeTool(block.name, block.input, { workspaceId, ticketId });
             } catch (err) {
               toolResult = { error: err.message };
@@ -1159,7 +1195,7 @@ class AssignmentPipelineService {
 
             toolResultMap.set(block.id, sanitizedToolResult);
 
-            await assignmentRepository.updatePipelineStep(toolStep.id, {
+            await runRepo.updatePipelineStep(toolStep.id, {
               status: 'completed',
               durationMs: toolDuration,
               output: sanitizedToolResult,
@@ -1208,7 +1244,7 @@ class AssignmentPipelineService {
             .join('');
 
           if (accumulatedText) {
-            await assignmentRepository.createPipelineStep({
+            await runRepo.createPipelineStep({
               pipelineRunId: runId,
               stepNumber: stepCounter,
               stepName: 'final_response',
@@ -1293,6 +1329,22 @@ class AssignmentPipelineService {
         } catch (err) {
           logger.debug('Could not check for prior rejection of top recommendation', { runId, error: err.message });
         }
+      }
+
+      // Shadow runs stop here: the verdict is known, nothing below may run.
+      if (shadow) {
+        return {
+          shadow: true,
+          provider: llmProvider,
+          model: resolvedLlmModel,
+          recommendation,
+          isNoise,
+          noiseVetoed: noiseVeto?.vetoed === true,
+          flaggedNonActionable,
+          llmIgnoredRebound,
+          durationMs: Date.now() - pipelineStart,
+          ...shadowStats,
+        };
       }
 
       // Group exclusion / observation: one groupId lookup feeds both.
@@ -1596,6 +1648,9 @@ class AssignmentPipelineService {
       return await assignmentRepository.getPipelineRun(runId);
 
     } catch (error) {
+      // A shadow borrows the live run's id for rebound context only; its
+      // failure must never mark that live run failed.
+      if (shadow) throw error;
       const currentRun = await prisma.assignmentPipelineRun.findUnique({
         where: { id: runId },
         select: { id: true, status: true, decision: true, syncStatus: true },

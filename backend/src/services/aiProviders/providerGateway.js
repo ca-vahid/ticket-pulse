@@ -100,6 +100,18 @@ function createProviderAttemptAbortController({ parentSignal = null, timeoutMs =
 
 class ProviderGateway {
   async runToolTurn(options) {
+    // Shadow evaluation (AI cost plan §5.1, 23 Sep 2026): one direct call on
+    // the named model — no settings resolution, no failover, no
+    // ai_provider_attempts row and no provider-health update, so a shadow
+    // failure can never change live routing or pollute cost reports.
+    if (options?.shadow?.model) {
+      const { shadow } = options;
+      const callOptions = { ...options };
+      for (const key of ['shadow', 'operation', 'workspaceId', 'legacyModel', 'runLinks', 'emit', 'attemptTimeoutMs', 'requiresVision']) delete callOptions[key];
+      const provider = shadow.provider || (String(shadow.model).startsWith('claude') ? 'anthropic' : 'openai');
+      const result = await providerClient(provider).toolResponse({ ...callOptions, model: shadow.model, provider });
+      return { ...result, provider, model: shadow.model, attemptNumber: 1, fallbackUsed: false, fallbackFromProvider: null, fallbackReason: null, shadow: true };
+    }
     return this._runWithFailover({
       ...options,
       call: (provider, callOptions) => providerClient(provider).toolResponse(callOptions),

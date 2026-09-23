@@ -75,6 +75,40 @@ describe('ProviderGateway', () => {
     recordFailureMock.mockResolvedValue({});
   });
 
+  test('shadow turn calls the named model directly: no resolver, no attempt row, no health update', async () => {
+    openAiToolResponseMock.mockResolvedValue({ message: { content: [], stop_reason: 'end_turn' }, usage: { inputTokens: 5 } });
+
+    const result = await gateway.runToolTurn({
+      operation: 'assignment_pipeline',
+      workspaceId: 1,
+      legacyModel: 'claude-sonnet-5',
+      runLinks: { assignmentPipelineRunId: 99 },
+      shadow: { model: 'gpt-6-sol' },
+      systemPrompt: 'sys',
+      tools: [],
+      messages: [],
+      attemptTimeoutMs: 1000,
+    });
+
+    expect(resolveAttemptsMock).not.toHaveBeenCalled();
+    expect(prismaMock.aiProviderAttempt.create).not.toHaveBeenCalled();
+    expect(recordSuccessMock).not.toHaveBeenCalled();
+    expect(recordFailureMock).not.toHaveBeenCalled();
+    const callOptions = openAiToolResponseMock.mock.calls[0][0];
+    expect(callOptions).toMatchObject({ model: 'gpt-6-sol', provider: 'openai', systemPrompt: 'sys' });
+    expect(callOptions.shadow).toBeUndefined();
+    expect(callOptions.runLinks).toBeUndefined();
+    expect(result).toMatchObject({ shadow: true, provider: 'openai', model: 'gpt-6-sol', fallbackUsed: false });
+  });
+
+  test('shadow turn infers Anthropic from a claude model id', async () => {
+    anthropicToolResponseMock.mockResolvedValue({ message: { content: [], stop_reason: 'end_turn' }, usage: {} });
+    const result = await gateway.runToolTurn({ shadow: { model: 'claude-sonnet-5' }, messages: [], tools: [] });
+    expect(anthropicToolResponseMock).toHaveBeenCalledTimes(1);
+    expect(openAiToolResponseMock).not.toHaveBeenCalled();
+    expect(result.provider).toBe('anthropic');
+  });
+
   test('returns Anthropic primary success without calling fallback', async () => {
     setAttempts([
       { provider: 'anthropic', model: 'claude-sonnet-4-6' },

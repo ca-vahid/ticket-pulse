@@ -11,6 +11,9 @@ import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId, fsConversationEntryIdCandidates } from '../utils/fsEntryId.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
+import { boundFsStatusForName } from '../utils/fsStatusBindings.js';
+import { latestFsFieldChanges } from '../utils/fsActivityChanges.js';
+import { getStatusString } from '../integrations/freshserviceTransformer.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // TP status labels → FreshService status codes (canonical labels only —
@@ -52,6 +55,24 @@ const RECONCILE_BUSY_QUEUE_DEPTH = Number(process.env.NATIVE_TICKET_RECONCILE_BU
 // workspace's last completed pass the sweep runs regardless; the 90 s queue
 // timeout still bounds the damage if the queue really is jammed.
 const RECONCILE_MAX_DEFER_MS = Number(process.env.NATIVE_TICKET_RECONCILE_MAX_DEFER_MS || 15 * 60 * 1000);
+// Latest change wins (23 Sep 2026): recently closed TP tickets are reconciled
+// too, so a reopen on the FreshService copy is seen.
+const RECENTLY_CLOSED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const RECENTLY_CLOSED_LIMIT = 10;
+// Clock skew allowance between FreshService activity times and ours.
+const LATEST_WINS_SKEW_MS = 5000;
+const LATEST_WINS_REPUSH_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Actor for a change adopted from FreshService (shown in Activity). */
+function fsActor(change) {
+  const isPerson = !change?.actorType || String(change.actorType).toLowerCase() === 'agent';
+  return {
+    name: `${change?.actor || 'FreshService'} (in FreshService)`,
+    email: null,
+    role: isPerson ? undefined : 'automation',
+    source: 'freshservice',
+  };
+}
 // Repeat interval for the identical "Mirror conflict" warn line per ticket (log hygiene, 16 Sep 2026).
 const CONFLICT_WARN_INTERVAL_MS = Number(process.env.MIRROR_CONFLICT_WARN_INTERVAL_MS || 60 * 60 * 1000);
 
@@ -570,12 +591,117 @@ class MirrorService {
    */
   async _fsStatusCode(ticket) {
     if (FS_STATUS_CODES[ticket.status] !== undefined) return FS_STATUS_CODES[ticket.status];
+    // A status bound to a FreshService status ("Pending Response" -> 6) sends
+    // that id, so FreshService's own pending-response rules run (23 Sep 2026).
+    const bound = boundFsStatusForName(ticket.status, { workspaceId: ticket.workspaceId });
+    if (bound !== null) return bound;
     try {
       const base = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status);
       return FS_STATUS_CODES[base] ?? null;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Latest change wins, per field (status, agent), for a TP-born ticket whose
+   * FreshService copy disagrees. Reads the FS activity feed once:
+   *   - FS change newer than TP's last change (and not our own echo) ->
+   *     adopted in Ticket Pulse, attributed "<name> (in FreshService)", not
+   *     written back;
+   *   - TP newer, or no FS change found -> TP value re-queued to the copy
+   *     (at most once an hour per ticket);
+   *   - a DELETED FS copy deletes the TP ticket too (soft delete: status
+   *     'Deleted', kept under the Deleted view with its history) — Vahid,
+   *     23 Sep 2026, symmetric with a TP delete removing the FS copy.
+   * @returns {{ status: boolean, agent: boolean, notes: string[] }} settled fields
+   */
+  async _applyLatestChangeWins(ticket, fsTicket, client, { statusDrift, assigneeDrift }) {
+    const out = { status: false, agent: false, notes: [] };
+    if (!statusDrift && !assigneeDrift) return out;
+    if (['Deleted', 'Spam'].includes(ticket.status)) return out;
+    // Our own write is still queued: Ticket Pulse is the newer side by definition.
+    if (ticket.mirrorState === 'pending') return out;
+    if (typeof client.fetchTicketActivities !== 'function') return out;
+
+    const fsId = Number(ticket.freshserviceTicketId);
+    const activities = await client.fetchTicketActivities(fsId);
+    const changes = latestFsFieldChanges(activities);
+    if (fsTicket.deleted || changes.deletedBy) {
+      const who = changes.deletedBy?.actor || 'someone';
+      const { default: ticketSvc } = await import('./ticketService.js');
+      try {
+        await ticketSvc.deleteTicket(ticket.id, ticket.workspaceId, fsActor({ actor: who, actorType: 'agent' }), { fromFreshService: true });
+        out.status = true;
+        out.agent = true;
+        logger.info(`Latest change wins: ${ticketDisplayRef(ticket)} deleted (its FreshService copy was deleted by ${who})`);
+      } catch (err) {
+        out.notes.push(`FS copy deleted in FreshService by ${who}, but deleting here failed: ${err.message}`);
+      }
+      return out;
+    }
+
+    const tpLast = async (types) => {
+      const row = await prisma.ticketActivity.findFirst({
+        where: { ticketId: ticket.id, activityType: { in: types } },
+        orderBy: { performedAt: 'desc' },
+        select: { performedAt: true },
+      }).catch(() => null);
+      return row?.performedAt ? new Date(row.performedAt) : new Date(ticket.createdAt || 0);
+    };
+    const { default: ticketService } = await import('./ticketService.js');
+    let repush = false;
+
+    if (statusDrift) {
+      const tpAt = await tpLast(['status_changed']);
+      if (changes.status && changes.status.at.getTime() > tpAt.getTime() + LATEST_WINS_SKEW_MS) {
+        const name = getStatusString(Number(fsTicket.status), { workspaceId: ticket.workspaceId });
+        try {
+          await ticketService.changeStatus(ticket.id, ticket.workspaceId, name, fsActor(changes.status), { fromFreshService: true });
+          out.status = true;
+          logger.info(`Latest change wins: ${ticketDisplayRef(ticket)} status -> "${name}" (changed in FreshService by ${changes.status.actor})`);
+        } catch (err) {
+          out.notes.push(`FS status "${changes.status.value}" by ${changes.status.actor} could not be applied: ${err.message}`);
+        }
+      } else {
+        repush = true;
+      }
+    }
+
+    if (assigneeDrift) {
+      const tpAt = await tpLast(['assigned']);
+      const fsResponder = fsTicket.responder_id ? String(fsTicket.responder_id) : null;
+      if (changes.agent && fsResponder && changes.agent.at.getTime() > tpAt.getTime() + LATEST_WINS_SKEW_MS) {
+        const tech = await prisma.technician.findFirst({
+          where: { workspaceId: ticket.workspaceId, freshserviceId: BigInt(fsResponder) },
+          select: { id: true, name: true },
+        }).catch(() => null);
+        if (tech) {
+          try {
+            await ticketService.assignTicket(ticket.id, ticket.workspaceId, tech.id, fsActor(changes.agent), { fromFreshService: true });
+            out.agent = true;
+            logger.info(`Latest change wins: ${ticketDisplayRef(ticket)} agent -> ${tech.name} (changed in FreshService by ${changes.agent.actor})`);
+          } catch (err) {
+            out.notes.push(`FS agent ${changes.agent.value} by ${changes.agent.actor} could not be applied: ${err.message}`);
+          }
+        } else {
+          out.notes.push(`FS agent ${changes.agent.value} is not a technician in this workspace`);
+        }
+      } else {
+        repush = true;
+      }
+    }
+
+    if (repush) {
+      if (!this._latestWinsRepushAt) this._latestWinsRepushAt = new Map();
+      const last = this._latestWinsRepushAt.get(ticket.id) || 0;
+      if (Date.now() - last >= LATEST_WINS_REPUSH_INTERVAL_MS) {
+        this._latestWinsRepushAt.set(ticket.id, Date.now());
+        if (this._latestWinsRepushAt.size > 5000) this._latestWinsRepushAt.delete(this._latestWinsRepushAt.keys().next().value);
+        await this.enqueueFieldSync(ticket.workspaceId, ticket.id).catch(() => {});
+      }
+    }
+    return out;
   }
 
   async _mirrorCreate(job, client) {
@@ -898,6 +1024,26 @@ class MirrorService {
       take: activeOnly ? limit : 500,
     });
 
+    // Latest change wins (23 Sep 2026): a ticket Ticket Pulse closed can be
+    // reopened on its FreshService copy, so recently closed ones are checked
+    // too (a small, bounded extra set).
+    if (activeOnly && !since) {
+      const terminalNames = await statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']);
+      const recent = await prisma.ticket.findMany({
+        where: {
+          workspaceId,
+          origin: TICKET_ORIGIN.TICKETPULSE,
+          freshserviceTicketId: { not: null },
+          status: { in: terminalNames },
+          updatedAt: { gte: new Date(Date.now() - RECENTLY_CLOSED_WINDOW_MS) },
+        },
+        include: { assignedTech: { select: { freshserviceId: true, name: true } } },
+        orderBy: { updatedAt: 'desc' },
+        take: RECENTLY_CLOSED_LIMIT,
+      }).catch(() => []);
+      tickets.push(...recent.filter((r) => !tickets.some((t) => t.id === r.id)));
+    }
+
     let imported = 0;
     let conflicts = 0;
     for (const ticket of tickets) {
@@ -1080,8 +1226,22 @@ class MirrorService {
       const fsResponder = fsTicket.responder_id ? Number(fsTicket.responder_id) : null;
       const ourResponder = ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null;
       const drift = [];
-      if (ourStatusCode && fsStatusCode && fsStatusCode !== ourStatusCode) drift.push(`status (FS ${fsStatusCode} vs TP ${ourStatusCode})`);
-      if (fsResponder !== ourResponder) drift.push(`assignee (FS ${fsResponder || 'none'} vs TP ${ourResponder || 'none'})`);
+      const statusDrift = Boolean(ourStatusCode && fsStatusCode && fsStatusCode !== ourStatusCode);
+      const assigneeDrift = fsResponder !== ourResponder;
+      // Latest change wins (Vahid, 23 Sep 2026): a change made on the
+      // FreshService copy AFTER Ticket Pulse's own last change is adopted here.
+      // Only what is left unresolved is recorded as a conflict.
+      let settled = { status: false, agent: false, notes: [] };
+      if (statusDrift || assigneeDrift) {
+        settled = await this._applyLatestChangeWins(ticket, fsTicket, client, { statusDrift, assigneeDrift })
+          .catch((err) => {
+            logger.warn(`Latest-change check failed for ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+            return { status: false, agent: false, notes: [] };
+          });
+      }
+      if (statusDrift && !settled.status) drift.push(`status (FS ${fsStatusCode} vs TP ${ourStatusCode})`);
+      if (assigneeDrift && !settled.agent) drift.push(`assignee (FS ${fsResponder || 'none'} vs TP ${ourResponder || 'none'})`);
+      drift.push(...settled.notes);
       if (drift.length) {
         conflicts += 1;
         // The DB row is already de-duplicated per drift signature (TU-3c); the

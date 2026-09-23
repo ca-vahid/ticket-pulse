@@ -740,7 +740,7 @@ class TicketService {
    * tickets are managed in FreshService. Keeps the row (audit/analytics/history)
    * but drops it from active views. Cancels any queued AI runs.
    */
-  async deleteTicket(ticketId, workspaceId, actor) {
+  async deleteTicket(ticketId, workspaceId, actor, { fromFreshService = false } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     if (String(ticket.status) === 'Deleted') {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), deleted: true, alreadyDeleted: true };
@@ -761,11 +761,15 @@ class TicketService {
     await this._audit(ticket.id, 'status_changed', actor, {
       oldStatus: ticket.status,
       newStatus: 'Deleted',
-      note: `Ticket deleted by ${actor?.name || actor?.email || 'a user'}`,
+      note: fromFreshService
+        ? `Deleted in FreshService by ${String(actor?.name || '').replace(/ \(in FreshService\)$/, '')}`
+        : `Ticket deleted by ${actor?.name || actor?.email || 'a user'}`,
+      ...(fromFreshService ? { via: 'freshservice' } : {}),
     });
     // Clean up the FreshService fallback mirror copy (best-effort, async) so a
     // ticket deleted in Ticket Pulse doesn't linger open in FreshService.
-    if (ticket.freshserviceTicketId) {
+    // Deleted IN FreshService (latest change wins): the copy is already gone.
+    if (ticket.freshserviceTicketId && !fromFreshService) {
       mirrorService.enqueueDelete(workspaceId, ticket.id).catch((err) => {
         logger.warn(`Failed to enqueue FS mirror delete for ticket ${ticket.id}: ${err.message}`);
       });
@@ -3340,7 +3344,7 @@ class TicketService {
       // and each FS transition emailed the requester.)
       if (normalized !== ticket.status) {
         const baseStatus = await statusService.baseStatusOf(workspaceId, normalized);
-        const fsStatusId = getStatusId(normalized, { baseStatus });
+        const fsStatusId = getStatusId(normalized, { baseStatus, workspaceId });
         if (fsStatusId === null) {
           throw new ValidationError(`Status "${normalized}" has no FreshService equivalent — give it a base status in Settings → Ticket Ops → Ticket statuses`);
         }
@@ -3549,7 +3553,7 @@ class TicketService {
     //    fields must NOT desync us).
     const rejected = [];
     if (fsPayload.status !== undefined && fsTicket.status !== fsPayload.status) {
-      rejected.push(`status (FS kept ${getStatusString(fsTicket.status)})`);
+      rejected.push(`status (FS kept ${getStatusString(fsTicket.status, { workspaceId })})`);
     }
     if (fsPayload.priority !== undefined && fsTicket.priority !== fsPayload.priority) rejected.push('priority');
     if (fsPayload.responder_id !== undefined && String(fsTicket.responder_id ?? '') !== String(fsPayload.responder_id ?? '')) rejected.push('assignee');
@@ -3833,7 +3837,14 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), isNoise: flag, resolved };
   }
 
-  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null } = {}) {
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.fromFreshService] the change was made on the
+   *   ticket's FreshService copy and is being adopted here (latest change
+   *   wins, 23 Sep 2026): not written back, and no resolution reason demanded
+   *   (the person closed it in FreshService, where there is no such field).
+   */
+  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null, fromFreshService = false } = {}) {
     // Per-workspace registry validation (Phase 8a) — replaces the hardcoded
     // NATIVE_TICKET_STATUSES allowlist. Returns the canonical-cased label.
     status = await statusService.assertValidStatus(workspaceId, status);
@@ -3851,7 +3862,7 @@ class TicketService {
     const newBase = await statusService.baseStatusOf(workspaceId, status);
 
     const now = new Date();
-    const patch = { status, mirrorState: 'pending' };
+    const patch = { status, mirrorState: fromFreshService ? 'mirrored' : 'pending' };
     const wasTerminal = TERMINAL_STATUSES.includes(oldBase);
     const isTerminal = TERMINAL_STATUSES.includes(newBase);
 
@@ -3867,14 +3878,17 @@ class TicketService {
     if (isTerminal) {
       const resolution = validateResolution(
         { resolutionReason, resolutionNote },
-        { required: requiresResolutionReason(ticket) && !ticket.resolutionReason },
+        { required: !fromFreshService && requiresResolutionReason(ticket) && !ticket.resolutionReason },
       );
+      // Closed on the FreshService copy: same kind the on-open mirror-back
+      // records (syncService.reconcileSingleTicket).
+      const kind = fromFreshService ? 'freshservice' : resolvedByKindFromActor(actor);
       if (resolution.resolutionReason) {
         patch.resolutionReason = resolution.resolutionReason;
         patch.resolutionNote = resolution.resolutionNote;
-        patch.resolvedByKind = resolvedByKindFromActor(actor);
+        patch.resolvedByKind = kind;
       } else if (!ticket.resolvedByKind) {
-        patch.resolvedByKind = resolvedByKindFromActor(actor);
+        patch.resolvedByKind = kind;
       }
     }
 
@@ -3926,6 +3940,7 @@ class TicketService {
     await this._audit(ticket.id, 'status_changed', actor, {
       oldStatus: ticket.status, newStatus: status,
       ...(patch.resolutionReason ? { resolutionReason: patch.resolutionReason, resolutionNote: patch.resolutionNote } : {}),
+      ...(fromFreshService ? { via: 'freshservice', note: `Changed in FreshService by ${String(actor?.name || '').replace(/ \(in FreshService\)$/, '')}` } : {}),
     });
     // ticket.status_changed (with from/to extra) is derived inside
     // _notifyLifecycle now — single emit path shared with the FS sync, with a
@@ -3933,7 +3948,8 @@ class TicketService {
     // along so the status-changed webhook can say WHO (Simorgh D3).
     await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
-    await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    // Adopted from FreshService: the copy already has it — no echo write.
+    if (!fromFreshService) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // Roll-up: this ticket may be somebody's child (its parent may now be ready
     // to close, or no longer be), and may itself be a parent that just reopened.
     await ticketRollUpService.afterChildStatusChange(ticket.id, workspaceId, { actor });
@@ -3941,7 +3957,7 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
-  async assignTicket(ticketId, workspaceId, technicianId, actor) {
+  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const targetId = technicianId === null || technicianId === undefined ? null : Number(technicianId);
     if (targetId !== null) await this._validateTechnician(workspaceId, targetId);
@@ -3959,15 +3975,16 @@ class TicketService {
       });
     }
 
+    const mirrorState = fromFreshService ? 'mirrored' : 'pending';
     const patch = targetId === null
-      ? { assignedTechId: null, mirrorState: 'pending' }
+      ? { assignedTechId: null, mirrorState }
       : {
         assignedTechId: targetId,
         assignedAt: now,
         firstAssignedAt: ticket.firstAssignedAt || now,
         isSelfPicked,
         assignedBy: actor?.name || actor?.email || 'Ticket Pulse',
-        mirrorState: 'pending',
+        mirrorState,
       };
 
     const updated = await prisma.ticket.update({
@@ -3992,11 +4009,14 @@ class TicketService {
     await this._audit(ticket.id, 'assigned', actor, {
       fromTechId: ticket.assignedTechId,
       toTechId: targetId,
-      note: targetId === null ? 'Unassigned' : 'Ticket reassigned',
+      note: fromFreshService
+        ? `Reassigned in FreshService by ${String(actor?.name || '').replace(/ \(in FreshService\)$/, '')}`
+        : (targetId === null ? 'Unassigned' : 'Ticket reassigned'),
+      ...(fromFreshService ? { via: 'freshservice' } : {}),
     });
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
-    await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    if (!fromFreshService) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // The new owner inherits the ticket's unassigned open tasks (Simorgh B7).
     if (targetId !== null && updated.assignedTech?.email) {
       import('./ticketTaskService.js')
