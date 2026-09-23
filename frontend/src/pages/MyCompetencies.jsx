@@ -72,7 +72,7 @@ export default function MyCompetencies() {
   });
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
-  // Notifications is now its own page (/notifications); this page shows
+  // Mail & alerts is its own page (/mail-alerts); this page shows
   // competencies + the archived IT Summit view.
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {

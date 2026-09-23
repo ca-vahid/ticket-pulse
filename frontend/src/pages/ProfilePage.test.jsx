@@ -32,7 +32,7 @@ describe('ProfilePage', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Susan Xu' })).toBeInTheDocument();
     expect(screen.getByText(/Photo: uploaded here/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Change photo/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Mail & alerts/ })).toHaveAttribute('href', '/notifications');
+    expect(screen.getByRole('link', { name: /Mail & alerts/ })).toHaveAttribute('href', '/mail-alerts');
     expect(screen.getByRole('link', { name: /My Skills/ })).toHaveAttribute('href', '/my-competencies');
 
     fireEvent.click(screen.getByRole('button', { name: /Use the directory photo/ }));

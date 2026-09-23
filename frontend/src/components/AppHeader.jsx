@@ -608,7 +608,7 @@ export default function AppHeader({
         id: 'notifications',
         label: 'Mail & alerts',
         description: 'Notifications, my alerts & signature',
-        path: '/notifications',
+        path: '/mail-alerts',
         Icon: Bell,
       },
       ...(canManageWorkspace ? [{

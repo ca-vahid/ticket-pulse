@@ -217,13 +217,15 @@ function App() {
                       />
 
                       <Route
-                        path="/notifications"
+                        path="/mail-alerts"
                         element={
                           <AgentRoute>
                             <Notifications />
                           </AgentRoute>
                         }
                       />
+                      {/* The page is "Mail & alerts"; the old address keeps working (23 Sep 2026). */}
+                      <Route path="/notifications" element={<Navigate to="/mail-alerts" replace />} />
 
                       <Route
                         path="/profile"

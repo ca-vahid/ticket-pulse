@@ -209,7 +209,7 @@ export default function MobileTabBar() {
 
               <button
                 type="button"
-                onClick={() => go('/notifications')}
+                onClick={() => go('/mail-alerts')}
                 className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground hover:bg-muted"
               >
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground">
