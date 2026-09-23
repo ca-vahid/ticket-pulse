@@ -2,7 +2,7 @@
 
 **For:** the ContinuIT team (office check-ins), moving from FreshService to Ticket Pulse.
 **Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
-**Ticket Pulse version:** 3.9.74 (23 Sep 2026; search §11, score model 2026-09-23b). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
+**Ticket Pulse version:** 3.9.75 (23 Sep 2026; search §11, score model 2026-09-23c). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
 ---
 
@@ -207,7 +207,7 @@ Every field except `text` is optional, with the defaults you proposed. The respo
               "externalRef": null, "externalReferences": [{ "system": "FRESHSERVICE", "id": "243301" }],
               "url": "https://ticketpulse.bgcsaas.com/tickets/45790",
               "snippet": "first ~200 characters of the description" } ],
-  "meta": { "scoreModel": "2026-09-23b", "thresholds": { "likely": 0.7, "possible": 0.6 },
+  "meta": { "scoreModel": "2026-09-23c", "thresholds": { "likely": 0.7, "possible": 0.6 },
             "semantic": true, "candidates": 980, "embedded": 980, "truncated": false, "tookMs": 310 } }
 ```
 
@@ -218,7 +218,7 @@ How it ranks:
 - **References.** `TP-1591` or `#241406` in the text returns that ticket with score 1.
 - **Tickets without a vector** are still found by the keyword half. They come back as `matchedOn: "keyword"`, capped at 0.6.
 - **FreshService-born tickets** are included, with `externalReferences` filled. Every open IT ticket now has a vector: we embedded the 626 open FreshService tickets that were missing one, and the nightly job now covers every open ticket regardless of age.
-- **`department`** is treated as an office name. The same office named in your text and in the ticket lifts the score. A different named office lowers it. It is never a filter.
+- **Offices.** Office names in your text, plus `department` if you send it, are compared with the ticket's main office. That is the office in its subject, its `continuit_office` field or its requester's office; the description counts only when none of those names one. The same office lifts the score and a different office lowers it. It is never a filter.
 - **`requesterEmail`** adds 0.05 when it matches. It is never a filter.
 
 ### 11.2 What the score means (please read before setting thresholds)
@@ -238,6 +238,8 @@ On a fresh run of 30 meeting-style paraphrases and 15 unrelated IT items, which 
 The unrelated items that score high are nearly always same-office work in a neighbouring area, for example "replace the UPS batteries in the Kelowna network closet" against "Kelowna office firewall replacement". Your **Not the same** button is the right answer to those. We recommend prompting at 0.6 as you planned, and wording the card as a question.
 
 **Score model 2026-09-23b (3.9.74, after your acceptance run).** Being in the same office can still raise a score, but it can no longer carry a ticket over 0.7 on its own. On the calibration set, this took unrelated sentences at 0.7 or more from 5 of 45 to 1 of 45, and true matches from 90 to 88 of 120. The 0.6 line did not change.
+
+**Score model 2026-09-23c (3.9.75).** Office comparison now uses the ticket's main office. It used to use every office the description mentioned, and the Kelowna firewall ticket discusses the Kamloops plan at length. From your first real runs: "Kamloops office visit" against that ticket went from 0.99 to 0.94. It stays high because the ticket really is where the Kamloops firewall plan is written down. "Retire the inactive Calgary DC" no longer hits TP-1643, falling from 0.75 to 0.14. The calibration numbers above did not change.
 
 It does not fix your Kelowna example, and we'd rather say so. Without any office boost, "UPS batteries in the Kelowna network closet" against "Kelowna office firewall replacement" already scores about 0.78. The raw similarity is only moderate (0.60), but that ticket stands out sharply from every other open IT ticket, because it is the only Kelowna network job. A rule strict enough to catch it would also drop real matches, so the "Not the same" button stays the right answer here. Your other two borderline examples ("Anton workload export" and "Azure VM failover test") are in our set for the next calibration.
 

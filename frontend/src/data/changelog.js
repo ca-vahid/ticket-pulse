@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.74-preview';
+export const APP_VERSION = '3.9.75-preview';
 
 export const changelog = [
+  {
+    version: '3.9.75-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Public API: office-aware matching</strong> — "already a ticket" matches now compare offices using a ticket’s main office (its subject, office field or requester), not every office its description happens to mention.' },
+    ],
+  },
   {
     version: '3.9.74-preview',
     date: 'September 23, 2026',
