@@ -105,8 +105,8 @@ def legend():
 def workload_table(stats, me, since):
     people = []
     for s in stats:
-        if not s['open_now']:
-            continue  # nothing on their plate: no row
+        if not s['open_now'] or not s.get('active', True):
+            continue  # nothing on their plate, or no longer on the team (Vahid, 23 Sep): no row
         opn = s['open_now'] - s['pending_now']
         people.append(dict(s, open=opn, is_me=s['agent'] == me, L=person_links(s['tech_id'], since)))
     # alphabetical so order never reads as a ranking; Vahid's own queue last
@@ -117,8 +117,7 @@ def workload_table(stats, me, since):
             f'<td style="{H}text-align:right;">OLDEST</td><td style="{H}text-align:right;white-space:nowrap;">THIS WEEK</td></tr>']
     for p in people:
         name = 'Your queue' if p['is_me'] else p['agent']
-        tag = ('<div style="font-size:11px;color:#b45309;font-weight:600;margin-top:1px;">inactive, needs reassigning</div>'
-               if not p.get('active', True) and p['open_now'] > 0 else '')
+        tag = ''
         on_time = max(0, p['open'] - p['overdue_now'])
         b = bar([(p['overdue_now'], RED), (on_time, BLUE), (p['pending_now'], GREY)], maxv)
         caption = ((a_(p['L']['overdue'], f"{p['overdue_now']} overdue", RED, '700', '12.5px') + '&nbsp;&middot;&nbsp;')
@@ -137,11 +136,13 @@ def workload_table(stats, me, since):
             f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{"".join(rows)}</table>')
 
 
-def ticket_table(review, me, standup, exclude, asks):
+def ticket_table(review, me, standup, exclude, asks, inactive=frozenset()):
     by = {}
     more = {}
     excluded = []
     for r in review:
+        if r['agent'] in inactive:
+            continue  # inactive people are left out entirely (Vahid, 23 Sep)
         if r['lane'] == 'truncated':
             more[r['agent']] = r.get('more', 0)
             continue
@@ -198,12 +199,13 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8')
         sys.stdout.write(workload_table(ws1.get('agentStats') or [], args.me, since))
         return
+    inactive = frozenset(x['agent'] for x in (ws1.get('agentStats') or []) if not x.get('active', True))
     label = 'STANDUP EDITION &middot; up to 4 tickets per person' if args.standup else 'the most pressing ticket per person'
     html = (f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#475569;margin-bottom:8px;">WORKLOAD NOW</div>'
             f'{workload_table(ws1.get("agentStats") or [], args.me, since)}'
             f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#475569;margin:24px 0 6px;">TICKETS TO RAISE '
             f'<span style="font-weight:400;letter-spacing:0;color:{FAINT};">&nbsp;{label}</span></div>'
-            f'{ticket_table(ws1.get("agentReview") or [], args.me, args.standup, exclude, asks)}'
+            f'{ticket_table(ws1.get("agentReview") or [], args.me, args.standup, exclude, asks, inactive)}'
             f'<div style="font-size:12px;color:{FAINT};margin-top:10px;">Every name and number opens that exact list in Ticket Pulse (keep IT selected). '
             f'&ldquo;This week&rdquo; is the last 7 days; its &ldquo;out&rdquo; link opens all resolved tickets for that person.</div>')
     # Windows consoles default to cp1252, which mangles em dashes in subjects.
