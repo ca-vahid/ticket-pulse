@@ -360,7 +360,7 @@ export function forwardedMetaOf(entry) {
   return null;
 }
 
-export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null }) {
+export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
   // small rich-text composer variant; Save PATCHes through the parent.
@@ -425,7 +425,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
 
   // Approval-lifecycle events read as their own compact, color-coded card so
   // approved / rejected / needs-info is obvious at a glance vs. ordinary notes.
-  if (apEvent) return <ApprovalEventCard entry={entry} meta={apEvent} body={body} />;
+  if (apEvent) return <ApprovalEventCard entry={entry} meta={apEvent} body={body} nameForEmail={nameForEmail} />;
 
   // TP-authored notes (assignment/system) get the brand mark, not "TP"
   // initials — keyed off authorType so renamed system actors still read as
@@ -1338,6 +1338,14 @@ export default function TicketDetail() {
     }
     return map;
   }, [meta?.technicians]);
+  // Approver e-mails on the approval card read as names (23 Sep 2026).
+  const nameForEmail = useCallback((email) => {
+    const key = String(email || '').trim().toLowerCase();
+    if (!key) return null;
+    const hit = [...(meta?.technicians || []), ...(meta?.members || [])].find((p) => String(p?.email || '').toLowerCase() === key);
+    return hit?.name && String(hit.name).toLowerCase() !== key ? hit.name : null;
+  }, [meta?.technicians, meta?.members]);
+
   const photoFor = useCallback((entry) => {
     const email = entry.actorEmail ? String(entry.actorEmail).toLowerCase() : null;
     if (email && techPhotoByEmail.has(email)) return techPhotoByEmail.get(email);
@@ -2709,6 +2717,7 @@ export default function TicketDetail() {
                                     onPreview={previewImage}
                                     onImageRef={previewImageRef}
                                     photoFor={photoFor}
+                                    nameForEmail={nameForEmail}
                                     onCopy={copyText}
                                     canDelete={isAdmin && ticket?.origin === 'ticketpulse'}
                                     onDelete={deleteNote}

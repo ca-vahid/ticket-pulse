@@ -19,6 +19,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { BrandArt, PersonAvatar, formatDayTime, timeAgo } from '../components/tickets/ticketUi';
+import { cleanNoteText } from '../utils/noteText';
 
 /**
  * Approvals (QA 09-16 #4 redesign; density pass 20 Sep 2026, "A1 + B1"): an
@@ -318,7 +319,9 @@ const Dot = () => <span className="text-muted-foreground/40" aria-hidden="true">
  * the UI). Short notes are plain text; anything that could be cut gets the
  * More / Less control.
  */
-function RowNote({ note, open, onToggle, muted = false }) {
+function RowNote({ note: rawNote, open, onToggle, muted = false }) {
+  // Stored notes could carry "&nbsp;" and friends (23 Sep 2026) — read as text.
+  const note = cleanNoteText(rawNote);
   if (!note) return null;
   const long = note.length > 60;
   if (!long) return <span className={`min-w-0 truncate ${muted ? 'text-muted-foreground/60' : ''}`}>“{note}”</span>;
