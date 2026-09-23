@@ -728,6 +728,19 @@ export default function TicketDetail() {
   }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
   const pageTab = ['approvals', 'history', 'ai', 'tasks'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
+  // Arriving with ?tab=approvals (the Approvals page's ticket link): bring the
+  // approvals card to the top of the view once, after the ticket renders.
+  const approvalsSectionRef = useRef(null);
+  const approvalsScrolledRef = useRef(false);
+  useEffect(() => {
+    if (pageTab !== 'approvals' || approvalsScrolledRef.current) return undefined;
+    const t = setTimeout(() => {
+      if (!approvalsSectionRef.current) return;
+      approvalsScrolledRef.current = true;
+      approvalsSectionRef.current.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }, 60);
+    return () => clearTimeout(t);
+  });
   const setPageTab = (tab) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -3120,7 +3133,7 @@ export default function TicketDetail() {
                 )}
 
                 {pageTab === 'approvals' && (
-                  <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Approvals">
+                  <section ref={approvalsSectionRef} className="tp-card rounded-xl p-4 sm:p-5 scroll-mt-20" aria-label="Approvals">
                     <div className="flex flex-wrap items-center gap-2 mb-3">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
                       <h2 className="text-sm font-bold text-foreground">Approvals</h2>

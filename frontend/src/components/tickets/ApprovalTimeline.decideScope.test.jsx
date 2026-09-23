@@ -3,7 +3,7 @@
 // Tier 1, and the requester) saw an Approve button on Neville's Tier-2 row.
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('../../services/api', () => ({ ticketsAPI: { approvalMessages: vi.fn(() => Promise.resolve({ data: [] })) } }));
 vi.mock('../../hooks/useRequesterPhoto', () => ({ useRequesterPhoto: () => null }));
@@ -45,7 +45,41 @@ describe('who may decide an approval row', () => {
     expect(screen.queryByRole('tab', { name: /^Approve$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Reject/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Ask a question/ })).not.toBeInTheDocument();
+    // 23 Sep 2026: Forward stays folded — nothing opens or takes focus on arrival.
+    expect(screen.queryByRole('tab', { name: /Forward/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Forward to someone else' }));
     expect(screen.getByRole('tab', { name: /Forward/ })).toBeInTheDocument();
+    expect(document.activeElement?.getAttribute('aria-label')).not.toBe('Forward to');
+  });
+
+  test('a shared request the viewer also approves: "Also with …", no second Forward, honest wording', async () => {
+    const mine = { ...row, id: 67, approverEmail: 'vhaeri@x.io', tier: 1 };
+    const theirs = { ...row, id: 68, approverEmail: 'nvyland@x.io', tier: 1 };
+    render(
+      <ApprovalTimeline approvals={[mine, theirs]} meta={metaFor({ email: 'vhaeri@x.io', kind: 'admin', workspaceRole: 'admin' })} ticketId={44036}
+        onDecide={vi.fn()} onForward={vi.fn()} onEscalate={vi.fn()} onCancel={vi.fn()} onResubmit={vi.fn()} />,
+    );
+    const waiting = await screen.findByTestId('approval-waiting-on');
+    expect(waiting).toHaveTextContent(/Also with Neville Vyland — whichever of you decides first closes the request/);
+    expect(waiting).not.toHaveTextContent(/only they can decide/);
+    expect(screen.queryByRole('button', { name: 'Forward to someone else' })).not.toBeInTheDocument();
+    // The viewer's own composer is there, with its own Forward tab.
+    expect(screen.getByRole('tab', { name: /^Approve$/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab', { name: /Forward/ })).toHaveLength(1);
+    // Requested by a name, not an address.
+    expect(screen.getByText(/Requested by/)).toHaveTextContent('Vahid Haeri');
+  });
+
+  test('an admin looking at a two-approver request they are not on: "one of the approvers; any one of them decides"', async () => {
+    const a = { ...row, id: 69, approverEmail: 'nvyland@x.io', tier: 1 };
+    const b = { ...row, id: 70, approverEmail: 'ada@x.io', tier: 1 };
+    render(
+      <ApprovalTimeline approvals={[a, b]} meta={metaFor({ email: 'vhaeri@x.io', kind: 'admin', workspaceRole: 'admin' })} ticketId={44036}
+        onDecide={vi.fn()} onForward={vi.fn()} onEscalate={vi.fn()} onCancel={vi.fn()} onResubmit={vi.fn()} />,
+    );
+    const lines = await screen.findAllByTestId('approval-waiting-on');
+    expect(lines[0]).toHaveTextContent(/Waiting on Neville Vyland — one of the approvers; any one of them decides/);
   });
 
   test('the named approver gets the full composer', async () => {

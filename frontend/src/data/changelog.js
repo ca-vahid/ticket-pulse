@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.69-preview';
+export const APP_VERSION = '3.9.70-preview';
 
 export const changelog = [
+  {
+    version: '3.9.70-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Opening a ticket from Approvals lands on the approval</strong> \u2014 the ticket link on the Approvals page now brings the approval card to the top of the view. The Forward people picker no longer opens itself (it was taking focus on load, which dropped its list open and scrolled the page to the bottom).' },
+      { type: 'fixed', html: '<strong>Shared approvals say what is true</strong> \u2014 on a request with several approvers, another approver\u2019s row reads \u201cAlso with \u2026 whichever of you decides first closes the request\u201d when you are one of them, instead of \u201conly they can decide\u201d plus a second Forward box. For admins who are not on the request, Forward sits behind a \u201cForward to someone else\u201d link. \u201cRequested by\u201d shows the person\u2019s name, and the request note no longer shows stray \u201c&amp;nbsp;\u201d.' },
+    ],
+  },
   {
     version: '3.9.69-preview',
     date: 'September 23, 2026',
