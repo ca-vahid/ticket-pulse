@@ -117,6 +117,20 @@ describe('SignaturePanel (my signature, agent portal)', () => {
     expect(preview.className).not.toContain('tp-sig-tight ');
   });
 
+  test('the preview applies the send-time margin rule, so an inline margin:0 no longer hides the choice (23 Sep 2026)', async () => {
+    agentAPI.getMySignature.mockResolvedValue({ success: true, data: { ...stored, html: '<p style="margin:0;color:#123456">Vahid Haeri</p><p style="margin:0">IT Manager</p>' } });
+    render(<SignaturePanel />);
+    await screen.findByText('Email signature');
+    const paragraphs = () => [...screen.getByTestId('signature-preview').querySelectorAll('p')].map((p) => p.getAttribute('style'));
+    expect(paragraphs()[0]).toMatch(/^margin: 0(;|$)/);
+    fireEvent.click(screen.getByRole('radio', { name: 'Relaxed' }));
+    expect(paragraphs()[0]).toMatch(/^margin: 0 0 12px;/);
+    expect(paragraphs()[0]).toContain('color');
+    expect(paragraphs()[1]).toBe('margin: 0 0 12px');
+    fireEvent.click(screen.getByRole('radio', { name: 'Normal' }));
+    expect(paragraphs()[1]).toBe('margin: 0 0 6px');
+  });
+
   test('a stored spacing preference is loaded, not reset to the default', async () => {
     agentAPI.getMySignature.mockResolvedValue({ success: true, data: { ...stored, spacing: 'normal' } });
     render(<SignaturePanel />);

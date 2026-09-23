@@ -164,7 +164,7 @@ export default function ProfilePage() {
         </section>
 
         <nav aria-label="Your settings" className="mt-4 grid gap-2.5 sm:grid-cols-2">
-          <Link to="/notifications" className="tp-card tp-focus-ring flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-muted/50">
+          <Link to="/mail-alerts" className="tp-card tp-focus-ring flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-muted/50">
             <Bell className="h-5 w-5 text-primary" aria-hidden="true" />
             <span>
               <span className="block text-sm font-semibold text-foreground">Mail &amp; alerts</span>

@@ -4,6 +4,7 @@ import { agentAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import RichTextEditor from '../tickets/RichTextEditor';
 import { SafeHtml } from '../tickets/ticketUi';
+import { applySignatureSpacing } from '../../utils/signatureSpacing';
 
 /**
  * My email signature (QA 08-14 #1 / Mega 08-15 Phase D). Lives on the
@@ -165,7 +166,7 @@ export default function SignaturePanel() {
             data-spacing={spacing}
           >
             {String(html || '').trim()
-              ? <SafeHtml html={html} />
+              ? <SafeHtml html={applySignatureSpacing(html, spacing)} />
               : <p className="text-sm text-muted-foreground/75">Nothing yet — your reply emails go out unsigned.</p>}
           </div>
           {!enabled && (
