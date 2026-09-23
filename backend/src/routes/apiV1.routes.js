@@ -556,10 +556,17 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   await resolveAssigneeEmail(req, body);
   if (body.status !== undefined) {
     // Simorgh C4/D3: a reason (+ note) may ride with a resolving status change.
-    await ticketService.changeStatus(id, req.workspaceId, body.status, actor, {
-      resolutionReason: body.resolutionReason ?? null,
-      resolutionNote: body.resolutionNote ?? null,
-    });
+    const resolution = { resolutionReason: body.resolutionReason ?? null, resolutionNote: body.resolutionNote ?? null };
+    const { default: fsBornStatusService } = await import('../services/fsBornStatusService.js');
+    if (await fsBornStatusService.isFreshServiceBorn(id, req.workspaceId)) {
+      // FreshService-born (23 Sep 2026): written to FreshService first, per-client opt-in.
+      if (req.apiKey.fsStatusWrite !== true) {
+        throw problems.forbidden('This ticket belongs to FreshService. Changing its status through the API needs the "may change status on FreshService tickets" permission on this client — ask the Ticket Pulse team.', 'fs_status_write_not_enabled');
+      }
+      await fsBornStatusService.changeFsBornStatus(id, req.workspaceId, body.status, actor, resolution);
+    } else {
+      await ticketService.changeStatus(id, req.workspaceId, body.status, actor, resolution);
+    }
   }
   if (body.assignedTechId !== undefined) {
     await ticketService.assignTicket(id, req.workspaceId, body.assignedTechId ? Number(body.assignedTechId) : null, actor);

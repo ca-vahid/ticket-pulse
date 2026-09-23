@@ -128,6 +128,7 @@ async function resolvePrincipal(raw) {
     rateLimitPerMin: null, keyId: null, oauthClientId: client.id, bucket: `oauth:${client.clientId}`,
     trustedIntake: client.trustedIntake === true, defaultSource: client.defaultSource ?? null,
     structureOwnTicketsOnly: client.structureOwnTicketsOnly === true,
+    fsStatusWrite: client.fsStatusWrite === true,
   };
 }
 
@@ -176,6 +177,7 @@ export const requireApiKey = (scope) => async (req, res, next) => {
       oauthClientId: principal.oauthClientId || null,
       trustedIntake: principal.trustedIntake === true, defaultSource: principal.defaultSource ?? null,
       structureOwnTicketsOnly: principal.structureOwnTicketsOnly === true,
+      fsStatusWrite: principal.fsStatusWrite === true,
     };
     req.workspaceId = principal.workspaceId;
     req.apiMode = principal.mode;

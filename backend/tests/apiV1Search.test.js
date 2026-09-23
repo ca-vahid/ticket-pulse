@@ -24,6 +24,8 @@ prismaMock.$queryRawUnsafe = jest.fn();
 prismaMock.ticketTag = { findFirst: jest.fn() };
 prismaMock.ticketTagLink = { findMany: jest.fn() };
 const similarMock = { search: jest.fn() };
+const fsStatusMock = { isFreshServiceBorn: jest.fn(), changeFsBornStatus: jest.fn() };
+jest.unstable_mockModule('../src/services/fsBornStatusService.js', () => ({ default: fsStatusMock }));
 jest.unstable_mockModule('../src/services/ticketSimilaritySearchService.js', () => ({ default: similarMock }));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
@@ -150,5 +152,37 @@ describe('one-tag add / remove (linking)', () => {
     prismaMock.ticketTag.findFirst.mockResolvedValue(null);
     await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'nope' }).expect(404);
     expect(ticketServiceMock.setTags).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH status on a FreshService-born ticket (23 Sep 2026)', () => {
+  beforeEach(() => {
+    ticketServiceMock.getTicket.mockResolvedValue({ id: 901, workspaceId: 8, origin: 'freshservice', freshserviceTicketId: 222417n, status: 'Resolved', subject: 's', ccEmails: [], customFields: {} });
+    fsStatusMock.changeFsBornStatus.mockResolvedValue({ changed: true });
+  });
+
+  test('without the client permission → 403 fs_status_write_not_enabled, nothing written', async () => {
+    fsStatusMock.isFreshServiceBorn.mockResolvedValue(true);
+    apiKey = { ...KEY, fsStatusWrite: false };
+    const res = await request(app()).patch('/api/v1/tickets/901').send({ status: 'Resolved' }).expect(403);
+    expect(res.body.code).toBe('fs_status_write_not_enabled');
+    expect(fsStatusMock.changeFsBornStatus).not.toHaveBeenCalled();
+    expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+  });
+
+  test('with the permission → written through the FreshService path with the reason and note', async () => {
+    fsStatusMock.isFreshServiceBorn.mockResolvedValue(true);
+    apiKey = { ...KEY, fsStatusWrite: true };
+    await request(app()).patch('/api/v1/tickets/901').send({ status: 'Resolved', resolutionReason: 'other', resolutionNote: 'Reported done at the Kelowna check-in' }).expect(200);
+    expect(fsStatusMock.changeFsBornStatus).toHaveBeenCalledWith(901, 8, 'Resolved', expect.objectContaining({ role: 'api' }), { resolutionReason: 'other', resolutionNote: 'Reported done at the Kelowna check-in' });
+    expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+  });
+
+  test('a Ticket Pulse-born ticket keeps the old path, permission or not', async () => {
+    fsStatusMock.isFreshServiceBorn.mockResolvedValue(false);
+    apiKey = { ...KEY, fsStatusWrite: false };
+    await request(app()).patch('/api/v1/tickets/901').send({ status: 'Pending' }).expect(200);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(901, 8, 'Pending', expect.any(Object), { resolutionReason: null, resolutionNote: null });
+    expect(fsStatusMock.changeFsBornStatus).not.toHaveBeenCalled();
   });
 });

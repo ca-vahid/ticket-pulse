@@ -2,7 +2,7 @@
 
 **For:** the ContinuIT team (office check-ins), moving from FreshService to Ticket Pulse.
 **Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
-**Ticket Pulse version:** 3.9.75 (23 Sep 2026; search §11, score model 2026-09-23c). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
+**Ticket Pulse version:** 3.9.76 (23 Sep 2026; search §11, score model 2026-09-23c; FreshService-ticket status §11.6). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
 ---
 
@@ -292,7 +292,14 @@ PATCH /api/v1/tickets/TP-1591               { "customFields": { "continuit_task_
 - **Webhooks for linked tickets.** Subscription #7 now also delivers events for tickets tagged `continuit`, alongside tickets whose `externalRef` starts with `continuit:`. A linked ticket's status changes, assignments and notes therefore reach you like your own tickets do.
 - **Reconciliation.** Your 30-minute sweep should add `GET /tickets?tag=continuit&updatedFrom=…` to the `externalRefPrefix=continuit:` query.
 - **What doesn't change.** Tickets you create keep `externalRef = continuit:task:<id>` as now. Linking is only for tickets that already existed.
-- **Status on a linked FreshService-born ticket (`#<fsid>`).** Not through the API yet. `PATCH …/tickets/#241396 {"status": …}` returns 400, because FreshService owns those fields and Ticket Pulse only writes assignments and replies back to it. When a meeting reports the work done, add a private note to the ticket (`POST …/notes` with your `agent` label) so the assigned agent sees it and resolves it. Keep any status write for those tickets on your FreshService lane until the legacy lane empties. Status through the API works as normal on Ticket Pulse-born tickets (`TP-…`), including ones you linked to.
+- **Status on a linked FreshService-born ticket (`#<fsid>`), from 3.9.76.** You can now change it through the API: `PATCH /api/v1/tickets/#241396 { "status": "Resolved", "resolutionReason": "other", "resolutionNote": "Reported done at the Kelowna check-in (9 Oct)" }`.
+  - **FreshService first.** The status is written to FreshService before anything else, and Ticket Pulse only records it once FreshService has accepted and kept the value. If FreshService refuses, you get `409 freshservice_rejected` and nothing changes on either side.
+  - **Same rules as your own tickets.** A parent with open children can't be closed (`409 open_children`). A Security ticket needs a resolution reason. The status must be one of the IT labels from `/meta`. All of this is checked before FreshService is touched.
+  - **Webhooks and history.** A `ticket.status_changed` webhook fires with your credential as the actor, and the ticket's activity shows the write-back.
+  - **Requester e-mails.** FreshService may e-mail the requester about the change, just as it would if an agent made it. Resolve with that in mind.
+  - **Permission.** This needs a permission on your credential ("may change status on FreshService tickets"), and it is switched on for your IT client. Without it the call returns `403 fs_status_write_not_enabled`.
+  - **Scope.** Status and resolution reason only. Other fields on FreshService-born tickets stay read-only through the API.
+  - **Your FreshService lane.** You can retire the status write on your FreshService lane when you're ready. Reads through Ticket Pulse (`GET /tickets/#<fsid>`) already work.
 
 ### 11.7 Your acceptance test
 

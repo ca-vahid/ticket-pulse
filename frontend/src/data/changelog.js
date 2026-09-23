@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.75-preview';
+export const APP_VERSION = '3.9.76-preview';
 
 export const changelog = [
+  {
+    version: '3.9.76-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Public API: status changes on FreshService tickets</strong> — an integration given the new "may change status on FreshService tickets" permission can resolve or reopen a FreshService-born ticket. The change goes to FreshService first and is kept only if FreshService accepts it; child-ticket and resolution-reason rules apply as for Ticket Pulse tickets. Set it per client in Settings → API keys & webhooks.' },
+    ],
+  },
   {
     version: '3.9.75-preview',
     date: 'September 23, 2026',
