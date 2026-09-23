@@ -9,6 +9,7 @@ import ApprovalThread, { WaitingOnApproverChip } from './ApprovalThread';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { ticketsAPI } from '../../services/api';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
+import { cleanNoteText } from '../../utils/noteText';
 
 /** Approvals v3: an agent / approver answers an open question in-app. */
 function AnswerBox({ message, busy, onSend, onCancel }) {
@@ -98,6 +99,8 @@ export default function ApprovalTimeline({
 }) {
   const actorEmail = String(meta?.actor?.email || '').toLowerCase();
   const actorIsAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
+  // Rows an admin chose to hand on (the forward composer stays folded until asked for).
+  const [forwardOpen, setForwardOpen] = useState(() => new Set());
   // Requester replies to a needs-info question, keyed per approval row (QA 07-14 #1).
   const [resubmitNotes, setResubmitNotes] = useState({});
   // Approvals v3: the conversation on every request of this ticket, and which
@@ -196,13 +199,13 @@ export default function ApprovalTimeline({
                           {decider.decidedAt && <span className="text-muted-foreground/75" title={new Date(decider.decidedAt).toLocaleString()}> · {formatDayTime(decider.decidedAt)} · {timeAgo(decider.decidedAt)}</span>}
                         </p>
                         <p className="text-[13px] text-muted-foreground mt-0.5">
-                          Requested by {head.requestedByName || head.requestedBy}
+                          Requested by {head.requestedByName || people.find((p) => p.email === String(head.requestedBy || '').toLowerCase())?.name || head.requestedBy}
                           {otherCount > 0 && <> · {otherCount} other approver{otherCount === 1 ? '' : 's'} auto-cancelled</>}
                         </p>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-[15px] text-muted-foreground">Cancelled · requested by {head.requestedByName || head.requestedBy}</p>
+                    <p className="text-[15px] text-muted-foreground">Cancelled · requested by {head.requestedByName || people.find((p) => p.email === String(head.requestedBy || '').toLowerCase())?.name || head.requestedBy}</p>
                   )}
                   {/* What was asked for stays on the decided card (16 Sep 2026):
                       the verdict alone lost the agent's own words. */}
@@ -211,7 +214,7 @@ export default function ApprovalTimeline({
                       <SafeHtml html={head.requestNoteHtml} className="text-sm text-muted-foreground" />
                     </div>
                   ) : head.requestNote && (
-                    <p className="mt-4 text-sm leading-relaxed text-muted-foreground italic border-l-2 border-border pl-3.5" data-testid="timeline-request-note">“{head.requestNote}”</p>
+                    <p className="mt-4 text-sm leading-relaxed text-muted-foreground italic border-l-2 border-border pl-3.5" data-testid="timeline-request-note">“{cleanNoteText(head.requestNote)}”</p>
                   )}
                   {decider?.conditionNote && verdict === 'approved' && (
                     <div className="mt-4 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3.5" data-testid="timeline-condition">
@@ -256,7 +259,7 @@ export default function ApprovalTimeline({
             ) : (
               <div className="px-3.5 py-3">
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>Requested by <span className="font-medium text-muted-foreground">{head.requestedByName || head.requestedBy}</span>
+                  <span>Requested by <span className="font-medium text-muted-foreground">{head.requestedByName || people.find((p) => p.email === String(head.requestedBy || '').toLowerCase())?.name || head.requestedBy}</span>
                     {rows.length > 1 && <span className="text-muted-foreground/75"> · {rows.length} approvers · any one decides</span>}</span>
                   {(() => {
                     const groupId = head.requestGroupId || `single-${head.id}`;
@@ -272,7 +275,7 @@ export default function ApprovalTimeline({
                     <SafeHtml html={head.requestNoteHtml} className="text-xs text-muted-foreground" />
                   </div>
                 ) : head.requestNote && (
-                  <p className="mt-1 text-xs text-muted-foreground italic border-l-2 border-border pl-2">“{head.requestNote}”</p>
+                  <p className="mt-1 text-xs text-muted-foreground italic border-l-2 border-border pl-2">“{cleanNoteText(head.requestNote)}”</p>
                 )}
 
                 {/* Approver rail */}
@@ -285,6 +288,8 @@ export default function ApprovalTimeline({
                     // Only the named approver decides (Vahid, 17 Sep 2026). Admins see the row and can forward it.
                     const isApprover = Boolean(actorEmail) && actorEmail === approverKey;
                     const canForwardAsAdmin = actorIsAdmin && !isApprover && typeof onForward === 'function';
+                    // The viewer holds their own pending row on this request — their own composer has Forward.
+                    const viewerApprovesHere = rows.some((r) => String(r.approverEmail || '').toLowerCase() === actorEmail && (r.status === 'pending' || r.status === 'info_requested'));
                     const isRequester = meta?.actor && (meta.actor.email === ap.requestedBy || meta.actor.kind === 'admin' || meta.actor.workspaceRole === 'admin');
                     const busy = savingField === `approval-${ap.id}`;
                     const last = i === rows.length - 1;
@@ -371,12 +376,33 @@ export default function ApprovalTimeline({
                           {/* Everyone else on a pending row: who holds it. Admins may hand it on (forward-only composer). */}
                           {ap.status === 'pending' && !isApprover && (
                             <div className="mt-2" data-testid="approval-waiting-on">
+                              {/* 23 Sep 2026: "only they can decide" was wrong on a shared
+                                  request (any one approver decides), and a second Forward
+                                  sat open under a row the viewer already approves on. */}
                               <p className="text-[11px] text-muted-foreground border-l-2 border-border pl-2">
-                                Waiting on <span className="font-medium text-foreground/85">{approverLabel}</span> — only they can decide
-                                {tierCount > 1 ? ` ${(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}` : ''}.
-                                {canForwardAsAdmin ? ' If they are away, hand it to someone else below.' : ''}
+                                {viewerApprovesHere ? (
+                                  <>Also with <span className="font-medium text-foreground/85">{approverLabel}</span> — whichever of you decides first closes the request.</>
+                                ) : (
+                                  <>
+                                    Waiting on <span className="font-medium text-foreground/85">{approverLabel}</span>
+                                    {rows.length > 1 ? ' — one of the approvers; any one of them decides' : ' — only they can decide'}
+                                    {tierCount > 1 ? ` ${(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}` : ''}.
+                                  </>
+                                )}
+                                {canForwardAsAdmin && !viewerApprovesHere && !forwardOpen.has(ap.id) && (
+                                  <>
+                                    {' '}
+                                    <button
+                                      type="button"
+                                      onClick={() => setForwardOpen((prev) => new Set(prev).add(ap.id))}
+                                      className="tp-focus-ring rounded font-medium text-primary hover:underline"
+                                    >
+                                      Forward to someone else
+                                    </button>
+                                  </>
+                                )}
                               </p>
-                              {canForwardAsAdmin && (
+                              {canForwardAsAdmin && !viewerApprovesHere && forwardOpen.has(ap.id) && (
                                 <div className="mt-2">
                                   <ApprovalComposer
                                     compact

@@ -209,6 +209,9 @@ export default function ApprovalComposer({
   canDecide = true,
 }) {
   const [tab, setTab] = useState(canDecide ? 'approved' : 'forward');
+  // 23 Sep 2026: the Forward picker grabbed focus on mount, which opened its
+  // list and scrolled the ticket page to the bottom. Focus only follows a click.
+  const [tabChosen, setTabChosen] = useState(false);
   const [note, setNote] = useState('');
   const [noteHtml, setNoteHtml] = useState('');
   const [submitting, setSubmitting] = useState(null);
@@ -352,7 +355,7 @@ export default function ApprovalComposer({
               type="button"
               role="tab"
               aria-selected={tab === t.key}
-              onClick={() => { setTab(t.key); setError(null); }}
+              onClick={() => { setTab(t.key); setTabChosen(true); setError(null); }}
               disabled={busy}
               className={`tp-focus-ring -mb-px inline-flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-[13px] font-semibold transition-colors ${tab === t.key ? t.active : 'border-transparent text-muted-foreground hover:text-foreground'}`}
             >
@@ -369,6 +372,7 @@ export default function ApprovalComposer({
             <HandoffPanel
               mode={tab}
               compact={compact}
+              autoFocus={tabChosen}
               people={forwardCandidates}
               nextTierName={approval?.nextTier?.name || null}
               nextTierNames={approval?.nextTier?.approverNames || []}

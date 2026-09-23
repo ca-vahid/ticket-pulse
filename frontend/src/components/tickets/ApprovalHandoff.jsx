@@ -139,7 +139,7 @@ const MODE_META = {
   },
 };
 
-export function HandoffPanel({ mode, people = [], nextTierName = null, nextTierNames = [], onSubmit, onCancel, compact = false }) {
+export function HandoffPanel({ mode, people = [], nextTierName = null, nextTierNames = [], onSubmit, onCancel, compact = false, autoFocus = true }) {
   const meta = MODE_META[mode] || MODE_META.forward;
   const [note, setNote] = useState('');
   const [target, setTarget] = useState(null);
@@ -173,11 +173,11 @@ export function HandoffPanel({ mode, people = [], nextTierName = null, nextTierN
         </div>
       </div>
       {mode === 'forward' && (
-        <PeoplePicker people={people} value={target?.email || null} onPick={setTarget} autoFocus placeholder="Search anyone in the workspace…" ariaLabel="Forward to" />
+        <PeoplePicker people={people} value={target?.email || null} onPick={setTarget} autoFocus={autoFocus} placeholder="Search anyone in the workspace…" ariaLabel="Forward to" />
       )}
       <textarea
         rows={compact ? 2 : 3}
-        autoFocus={mode !== 'forward'}
+        autoFocus={autoFocus && mode !== 'forward'}
         value={note}
         onChange={(e) => { setNote(e.target.value); if (error) setError(null); }}
         placeholder={meta.placeholder}
