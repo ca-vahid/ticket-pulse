@@ -421,18 +421,19 @@ export default function WorkflowIndex({
           const isCollapsed = groupsCollapsed.has(triggerType) && !searching;
           const label = eventLabels[triggerType] || triggerType;
           return (
-            <section key={triggerType} className={cx('group/grp', !isCollapsed && 'my-1 border-y border-border bg-muted/40')}>
-              <div className={cx('flex items-center pr-2', !isCollapsed && 'border-b border-border/70 bg-card/60')}>
+            <section key={triggerType} className={cx('group/grp', !isCollapsed && 'mb-1 border-b border-border')}>
+              {/* Group title reads as a heading, not a row (Vahid, 23 Sep 2026): small caps on a tinted band. */}
+              <div className="flex items-center border-y border-border/70 bg-muted/70 pr-2">
                 <button
                   type="button"
                   onClick={() => toggleGroup(triggerType)}
                   aria-expanded={!isCollapsed}
                   className="tp-focus-ring flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1.5 text-left"
                 >
-                  <ChevronDown className={cx('h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60 transition-transform', isCollapsed && '-rotate-90')} aria-hidden="true" />
-                  <GroupIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground/85">{label}</span>
-                  <span className="flex-shrink-0 text-[11px] tabular-nums text-muted-foreground/75" aria-label={`${total} workflows`}>{total}</span>
+                  <ChevronDown className={cx('h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50 transition-transform', isCollapsed && '-rotate-90')} aria-hidden="true" />
+                  <GroupIcon className="h-3.5 w-3.5 flex-shrink-0 text-primary/80" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate text-[10.5px] font-bold uppercase tracking-[0.08em] text-foreground/75">{label}</span>
+                  <span className="flex-shrink-0 pr-1 text-[10.5px] font-semibold tabular-nums text-muted-foreground" aria-label={`${total} workflows`}>{total}</span>
                 </button>
                 {onCreateForTrigger && (
                   <button
