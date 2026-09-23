@@ -1499,7 +1499,12 @@ export default function Tickets() {
             <div className="relative group/cards grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4" role="group" aria-label="Quick segments">
               {queueCards.map((key) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
-                const active = segment === key || (key === 'all' && segment === 'all');
+                // "All tickets" only lights up when the view really is all
+                // statuses: a deep link like ?status=Open (the daily brief's
+                // workload links) filters the list, and a lit "All" card made
+                // that look like the filter hadn't applied (Vahid, 23 Sep).
+                const statusScoped = Boolean(statusesRaw) && statusesRaw !== 'any';
+                const active = key === 'all' ? (segment === 'all' && !statusScoped) : segment === key;
                 const count = stats?.[seg.countKey];
                 const Icon = seg.Icon;
                 return (

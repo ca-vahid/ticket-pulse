@@ -145,6 +145,20 @@ describe('Quick filter cards (Phase FC)', () => {
     expect(screen.getByText('Tickets this month').closest('button')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  test('a ?status= deep link filters the list and does NOT light the "All tickets" card', async () => {
+    mount('/tickets?assignee=42&status=Open');
+    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
+    await waitFor(() => expect(lastListParams().status).toBe('Open'));
+    expect(lastListParams().assignedTechId).toBe('42');
+    expect(screen.getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('?status=any (the "All tickets" card\'s own scope) still lights it', async () => {
+    mount('/tickets?status=any');
+    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
+    expect(screen.getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('the configurator gear renders for admins only and deep-links Settings → Ticket Ops', async () => {
     roleRef.value = 'admin';
     mount();
