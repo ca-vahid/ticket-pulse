@@ -150,6 +150,7 @@ function WebhooksSection() {
                 {(sub.events || []).map((e) => <span key={e} className="px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 text-[10px] font-mono">{e}</span>)}
               </span>
               {sub.externalRefPrefix && <span className="text-[10px] text-muted-foreground/75" title="Only tickets whose external reference starts with this">only <code className="font-mono">{sub.externalRefPrefix}…</code></span>}
+              {sub.matchTag && <span className="text-[10px] text-muted-foreground/75" title="Also tickets carrying this tag">{sub.externalRefPrefix ? 'or' : 'only'} tagged <code className="font-mono">{sub.matchTag}</code></span>}
               <span className="ml-auto text-muted-foreground/75">
                 {sub.failureCount > 0 ? `${sub.failureCount} fails · ` : ''}
                 {sub.lastDeliveryAt ? `last ${fmtDate(sub.lastDeliveryAt)}` : 'never delivered'}
@@ -183,6 +184,10 @@ function WebhooksSection() {
             <span>Only tickets whose external reference starts with</span>
             <input value={draft.externalRefPrefix || ''} onChange={(e) => setDraft({ ...draft, externalRefPrefix: e.target.value })} placeholder="e.g. continuit: (blank = every ticket)" aria-label="External reference prefix" maxLength={100} className="tp-focus-ring flex-1 min-w-[180px] border border-border rounded-md px-2 py-1 font-mono" />
           </label>
+          <label className="flex flex-wrap items-center gap-2 text-muted-foreground">
+            <span>…or carrying the tag</span>
+            <input value={draft.matchTag || ''} onChange={(e) => setDraft({ ...draft, matchTag: e.target.value })} placeholder="e.g. continuit (blank = no tag filter)" aria-label="Tag filter" maxLength={100} className="tp-focus-ring flex-1 min-w-[180px] border border-border rounded-md px-2 py-1 font-mono" />
+          </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
             {WEBHOOK_EVENTS.map(([event, label]) => (
               <label key={event} className="flex items-center gap-1.5 text-muted-foreground">
@@ -197,7 +202,7 @@ function WebhooksSection() {
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ url: '', events: ['ticket.created'], externalRefPrefix: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200"><Plus className="w-3.5 h-3.5" aria-hidden="true" /> New webhook</button>
+        <button onClick={() => setDraft({ url: '', events: ['ticket.created'], externalRefPrefix: '', matchTag: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200"><Plus className="w-3.5 h-3.5" aria-hidden="true" /> New webhook</button>
       )}
     </section>
   );

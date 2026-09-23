@@ -947,7 +947,7 @@ export const ticketsAPI = {
 
   // Outbound webhooks (admin)
   listWebhooks: async () => await api.get('/tickets/webhook-subscriptions'),
-  createWebhook: async ({ url, events, externalRefPrefix }) => await api.post('/tickets/webhook-subscriptions', { url, events, ...(externalRefPrefix ? { externalRefPrefix } : {}) }),
+  createWebhook: async ({ url, events, externalRefPrefix, matchTag }) => await api.post('/tickets/webhook-subscriptions', { url, events, ...(externalRefPrefix ? { externalRefPrefix } : {}), ...(matchTag ? { matchTag } : {}) }),
   updateWebhook: async (id, data) => await api.patch(`/tickets/webhook-subscriptions/${id}`, data),
   deleteWebhook: async (id) => await api.delete(`/tickets/webhook-subscriptions/${id}`),
   testWebhook: async (id) => await api.post(`/tickets/webhook-subscriptions/${id}/test`),

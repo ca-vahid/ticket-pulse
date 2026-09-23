@@ -103,7 +103,7 @@ describe('children and merge-many', () => {
   test('POST /merge-many resolves every source reference, guards primary + sources, caps at 20', async () => {
     const res = await request(app()).post('/api/v1/tickets/TP-1601/merge-many').send({ sources: ['TP-1602', 3] }).expect(200);
     expect(guardMock.assertClientMayStructure).toHaveBeenCalledWith(apiKey, [1, 2, 3], 'merge');
-    expect(mergeMock.mergeMany).toHaveBeenCalledWith(1, 1, { ticketIds: [2, 3], notifyRequester: false }, expect.any(Object));
+    expect(mergeMock.mergeMany).toHaveBeenCalledWith(1, 1, { ticketIds: [2, 3], notifyRequester: false, resolutionReason: null, resolutionNote: null }, expect.any(Object));
     expect(res.body.data.merged).toHaveLength(2);
     await request(app()).post('/api/v1/tickets/1/merge-many').send({ sources: [] }).expect(400);
     await request(app()).post('/api/v1/tickets/1/merge-many').send({ sources: Array.from({ length: 21 }, (_, i) => 100 + i) }).expect(400);

@@ -1232,7 +1232,7 @@ router.get('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async (
     where: { workspaceId: req.workspaceId },
     orderBy: { id: 'asc' },
     select: {
-      id: true, url: true, events: true, externalRefPrefix: true, isEnabled: true, failureCount: true,
+      id: true, url: true, events: true, externalRefPrefix: true, matchTag: true, isEnabled: true, failureCount: true,
       lastDeliveryAt: true, lastError: true, recentDeliveries: true, createdBy: true, createdAt: true,
     },
   });
@@ -1244,6 +1244,14 @@ function webhookPrefixFromBody(body) {
   if (!body || body.externalRefPrefix === undefined) return undefined;
   const v = body.externalRefPrefix === null ? '' : String(body.externalRefPrefix).trim();
   if (v.length > 100) throw new ValidationError('externalRefPrefix must be 100 characters or fewer');
+  return v || null;
+}
+
+// Same contract for the tag filter (ContinuIT search, 23 Sep 2026).
+function webhookTagFromBody(body) {
+  if (!body || body.matchTag === undefined) return undefined;
+  const v = body.matchTag === null ? '' : String(body.matchTag).trim();
+  if (v.length > 100) throw new ValidationError('matchTag must be 100 characters or fewer');
   return v || null;
 }
 
@@ -1261,9 +1269,14 @@ router.post('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async 
   const secret = `whsec_${crypto.randomBytes(24).toString('base64')}`;
   // ContinuIT D2: optional "only tickets whose externalRef starts with…".
   const externalRefPrefix = webhookPrefixFromBody(req.body);
+  const matchTag = webhookTagFromBody(req.body);
   const sub = await prisma.webhookSubscription.create({
-    data: { workspaceId: req.workspaceId, url, secret, events, createdBy: req.ticketActor.email, ...(externalRefPrefix !== undefined ? { externalRefPrefix } : {}) },
-    select: { id: true, url: true, events: true, externalRefPrefix: true, isEnabled: true, createdAt: true },
+    data: {
+      workspaceId: req.workspaceId, url, secret, events, createdBy: req.ticketActor.email,
+      ...(externalRefPrefix !== undefined ? { externalRefPrefix } : {}),
+      ...(matchTag !== undefined ? { matchTag } : {}),
+    },
+    select: { id: true, url: true, events: true, externalRefPrefix: true, matchTag: true, isEnabled: true, createdAt: true },
   });
   invalidateWebhookCache(req.workspaceId);
   // The signing secret is returned exactly once.
@@ -1291,10 +1304,12 @@ router.patch('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandle
   }
   const externalRefPrefix = webhookPrefixFromBody(req.body);
   if (externalRefPrefix !== undefined) data.externalRefPrefix = externalRefPrefix;
+  const matchTag = webhookTagFromBody(req.body);
+  if (matchTag !== undefined) data.matchTag = matchTag;
   const sub = await prisma.webhookSubscription.update({
     where: { id },
     data,
-    select: { id: true, url: true, events: true, externalRefPrefix: true, isEnabled: true, failureCount: true },
+    select: { id: true, url: true, events: true, externalRefPrefix: true, matchTag: true, isEnabled: true, failureCount: true },
   });
   invalidateWebhookCache(req.workspaceId);
   res.json({ success: true, data: sub });

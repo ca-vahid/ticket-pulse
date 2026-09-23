@@ -1003,6 +1003,38 @@ router.put('/tickets/:id/tags', S('tags:write'), asyncHandler(async (req, res) =
   res.json({ success: true, data: result });
 }));
 
+// Add or remove ONE tag without replacing the set (ContinuIT linking,
+// 23 Sep 2026): PUT replaces every tag, so a caller tagging someone else's
+// ticket had to read-modify-write and could drop a tag an agent just added.
+// The tag is named by id or by name.
+async function resolveTagRef(req, ref) {
+  const raw = String(ref ?? '').trim();
+  if (!raw) throw problems.badRequest('Name the tag by `tagId` or `name`');
+  const tag = await prisma.ticketTag.findFirst({
+    where: { workspaceId: req.workspaceId, isActive: true, ...(/^\d+$/.test(raw) ? { id: Number(raw) } : { name: { equals: raw, mode: 'insensitive' } }) },
+    select: { id: true, name: true },
+  });
+  if (!tag) throw problems.notFound(`Tag "${raw}" not found in this workspace (GET /tags lists them)`);
+  return tag;
+}
+
+router.post('/tickets/:id/tags', S('tags:write'), asyncHandler(async (req, res) => {
+  const id = await tid(req);
+  const tag = await resolveTagRef(req, req.body?.tagId ?? req.body?.name);
+  const current = await prisma.ticketTagLink.findMany({ where: { ticketId: id }, select: { tagId: true } });
+  const ids = [...new Set([...current.map((l) => l.tagId), tag.id])];
+  const result = await ticketService.setTags(id, req.workspaceId, ids, apiActor(req));
+  res.json({ success: true, data: result });
+}));
+
+router.delete('/tickets/:id/tags/:tag', S('tags:write'), asyncHandler(async (req, res) => {
+  const id = await tid(req);
+  const tag = await resolveTagRef(req, req.params.tag);
+  const current = await prisma.ticketTagLink.findMany({ where: { ticketId: id }, select: { tagId: true } });
+  const result = await ticketService.setTags(id, req.workspaceId, current.map((l) => l.tagId).filter((t) => t !== tag.id), apiActor(req));
+  res.json({ success: true, data: result });
+}));
+
 // ------------------------------------------------- directory (read-only)
 
 router.get('/contacts', S('contacts:read'), asyncHandler(async (req, res) => {
@@ -1120,7 +1152,88 @@ router.get('/custom-fields', S('customfields:read'), asyncHandler(async (req, re
 
 // ------------------------------------------------------------------ search
 
+// ContinuIT search request (23 Sep 2026): "is there already a ticket for
+// this?" — hybrid semantic + keyword + reference search for free text. The
+// score is calibrated (ticketSimilaritySearchService SCORE_MODEL); meta
+// carries the model version and the published thresholds.
+async function runSimilar(req, items, options) {
+  const { default: svc } = await import('../services/ticketSimilaritySearchService.js');
+  try {
+    return await svc.search(req.workspaceId, items, options);
+  } catch (err) {
+    if (err.validation) throw problems.badRequest(err.message, [{ field: err.field, code: 'invalid' }]);
+    throw err;
+  }
+}
+
+const SIMILAR_OPTION_KEYS = ['limit', 'minScore', 'status', 'updatedFrom', 'excludeExternalRefPrefix', 'requesterEmail', 'department'];
+const pickSimilarOptions = (body) => Object.fromEntries(SIMILAR_OPTION_KEYS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
+
+router.post('/search/similar', S('search:read'), asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const { results, meta } = await runSimilar(req, [{ key: 'text', text: body.text }], pickSimilarOptions(body));
+  res.json({ success: true, data: results.text, meta });
+}));
+
+router.post('/search/similar/batch', S('search:read'), asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const { results, meta } = await runSimilar(req, body.items, pickSimilarOptions(body));
+  res.json({ success: true, data: results, meta });
+}));
+
+// Keyword search over more than the subject (ContinuIT request 3):
+// `in=subject,description,conversations`. Subject hits rank first, then
+// description, then conversation text; full-text (English stemming) on the
+// indexed expressions. Conversation text needs conversations:read.
+const SEARCH_IN = ['subject', 'description', 'conversations'];
+
+async function searchTicketsIn(req, q, fields, limit) {
+  const params = [req.workspaceId, q];
+  const parts = [];
+  if (fields.includes('subject')) {
+    parts.push(`SELECT t.id, 3 AS bucket, ts_rank_cd(to_tsvector('english', coalesce(t.subject, '')), websearch_to_tsquery('english', $2), 32) AS r
+      FROM tickets t WHERE t.workspace_id = $1 AND t.is_noise = false
+        AND (t.subject ILIKE '%' || $2 || '%' OR to_tsvector('english', coalesce(t.subject, '')) @@ websearch_to_tsquery('english', $2))`);
+  }
+  if (fields.includes('description')) {
+    parts.push(`SELECT t.id, 2 AS bucket, ts_rank_cd(to_tsvector('english', coalesce(t.subject, '') || ' ' || coalesce(t.description_text, '')), websearch_to_tsquery('english', $2), 32) AS r
+      FROM tickets t WHERE t.workspace_id = $1 AND t.is_noise = false
+        AND to_tsvector('english', coalesce(t.subject, '') || ' ' || coalesce(t.description_text, '')) @@ websearch_to_tsquery('english', $2)`);
+  }
+  if (fields.includes('conversations')) {
+    parts.push(`SELECT e.ticket_id AS id, 1 AS bucket, max(ts_rank_cd(to_tsvector('english', coalesce(e.body_text, '')), websearch_to_tsquery('english', $2), 32)) AS r
+      FROM ticket_thread_entries e WHERE e.workspace_id = $1
+        AND to_tsvector('english', coalesce(e.body_text, '')) @@ websearch_to_tsquery('english', $2)
+      GROUP BY e.ticket_id`);
+  }
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT h.id, max(h.bucket) AS bucket, max(h.r) AS r, t.updated_at
+    FROM (${parts.join(' UNION ALL ')}) h JOIN tickets t ON t.id = h.id AND t.is_noise = false
+    GROUP BY h.id, t.updated_at
+    ORDER BY bucket DESC, r DESC, t.updated_at DESC
+    LIMIT ${limit}`, ...params);
+  return rows.map((r) => Number(r.id));
+}
+
 router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) => {
+  const inRaw = String(req.query.in || '').trim();
+  if (inRaw) {
+    const fields = [...new Set(inRaw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))];
+    const unknown = fields.filter((f) => !SEARCH_IN.includes(f));
+    if (!fields.length || unknown.length) throw problems.badRequest(`in must list any of: ${SEARCH_IN.join(', ')}`);
+    if (fields.includes('conversations') && !scopeSatisfies(req.apiKey.scopes, 'conversations:read')) {
+      throw problems.forbidden("Searching conversations needs the 'conversations:read' scope", 'insufficient_scope');
+    }
+    const q = String(req.query.query || req.query.q || '').trim();
+    if (q.length < 2) throw problems.badRequest('query must be at least 2 characters');
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 25, 50));
+    const ids = await searchTicketsIn(req, q.slice(0, 200), fields, limit);
+    const result = ids.length ? await ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }) : { items: [] };
+    const order = new Map(ids.map((id, i) => [id, i]));
+    const items = [...(result.items || [])].sort((a, b) => order.get(a.id) - order.get(b.id));
+    res.json({ success: true, data: { items: items.map(ticketShape), pagination: { limit, count: items.length } } });
+    return;
+  }
   const result = await ticketService.listTickets(req.workspaceId, { ...req.query, q: req.query.query || req.query.q });
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize }

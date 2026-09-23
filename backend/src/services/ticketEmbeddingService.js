@@ -72,6 +72,14 @@ async function embedTexts(texts) {
     .map((d) => d.embedding);
 }
 
+/**
+ * Embed free text the same way ticket content is embedded (model + dims), for
+ * query-side similarity (ticketSimilaritySearchService). null when no key.
+ */
+export async function embedQueryTexts(texts) {
+  return embedTexts(texts);
+}
+
 class TicketEmbeddingService {
   /**
    * (Re)generate the embedding for one ticket. Skips silently when the
@@ -156,11 +164,14 @@ class TicketEmbeddingService {
   async backfillWorkspace(workspaceId, { max = 500, sinceDays = 90 } = {}) {
     if (!isEmbeddingConfigured()) return { embedded: 0, skipped: 'unconfigured' };
     const since = new Date(Date.now() - sinceDays * 24 * 3600 * 1000);
+    // Recent tickets AND every ticket still in play, whatever its age — the
+    // similarity search (ContinuIT, 23 Sep 2026) looks at open work first,
+    // and 2/3 of open FreshService-born IT tickets were older than 90 days.
     const missing = await prisma.ticket.findMany({
       where: {
         workspaceId,
-        createdAt: { gte: since },
         embedding: null,
+        OR: [{ createdAt: { gte: since } }, { status: { notIn: ['Resolved', 'Closed', 'Deleted', 'Spam'] } }],
       },
       orderBy: { createdAt: 'desc' },
       take: max,

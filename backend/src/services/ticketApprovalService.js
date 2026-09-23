@@ -1216,7 +1216,14 @@ class TicketApprovalService {
    */
   async overview(workspaceId, { status = null, categoryId = null, limit = 200, q = null, approver = null, requestedBy = null, from = null, to = null, sort = 'newest' } = {}) {
     const where = { workspaceId };
-    if (status) where.status = status;
+    if (status) {
+      // The Approvals Status menu (3.9.59) sends several statuses comma-joined;
+      // a literal "approved,rejected" matched nothing, so a two-status pick
+      // emptied the page.
+      const list = String(status).split(',').map((s) => s.trim()).filter(Boolean);
+      if (list.length > 1) where.status = { in: [...new Set(list)] };
+      else if (list.length === 1) where.status = list[0];
+    }
     if (categoryId) where.approvalCategoryId = Number(categoryId);
     // QA 09-16 #4: the redesigned Approvals page filters by people, dates and text.
     const text = (v) => String(v || '').trim();
