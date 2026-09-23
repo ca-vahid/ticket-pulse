@@ -461,7 +461,8 @@ function previewTicketSearchWhere(workspaceId, search, filters = {}) {
   return and.length > 0 ? { ...where, AND: and } : where;
 }
 
-async function buildPreviewEventContext({ ticket, triggerType }) {
+// Exported for scripts/replay-workflow-generation.mjs (model comparison replays).
+export async function buildPreviewEventContext({ ticket, triggerType }) {
   const occurredAt = ticketEventTimestamp(ticket, triggerType) || new Date().toISOString();
   const policyContext = await enrichEventContextWithNotificationPolicy({
     event: {
@@ -2188,6 +2189,25 @@ router.post(
   }),
 );
 
+/**
+ * Duplicate-reminder guard (23 Sep 2026, plans/PENDING_RESPONSE_STATUS_SYNC.md):
+ * while FreshService runs a workspace's pending-response process (a registry
+ * status is bound to a FreshService status), a LIVE Ticket Pulse workflow on
+ * requester silence would email the same requesters a second time. Warn, do
+ * not block. Returns the warning text, or null.
+ */
+export async function duplicateReminderWarning(workspaceId, workflow) {
+  if (!workflow || workflow.isEnabled !== true || workflow.mockModeEnabled === true) return null;
+  if (workflow.triggerType !== 'ticket.requester_silent_for') return null;
+  const { default: prisma } = await import('../services/prisma.js');
+  const bound = await prisma.ticketStatusDefinition.findFirst({
+    where: { workspaceId: Number(workspaceId), freshserviceStatusId: { not: null }, isActive: true },
+    select: { name: true },
+  }).catch(() => null);
+  if (!bound) return null;
+  return `FreshService already sends pending-response reminders for this workspace ("${bound.name}" is its FreshService status). With this workflow live, requesters of FreshService tickets would get both — limit it to Ticket Pulse tickets or leave it off until cut-over.`;
+}
+
 router.put(
   '/:id/mock-mode',
   asyncHandler(async (req, res) => {
@@ -2197,7 +2217,8 @@ router.put(
       req.body?.enabled === true,
       requestActor(req),
     );
-    res.json({ success: true, data: workflow });
+    const warning = await duplicateReminderWarning(req.workspaceId, workflow);
+    res.json({ success: true, data: workflow, ...(warning ? { warning } : {}) });
   }),
 );
 
@@ -2218,7 +2239,8 @@ router.put(
         afterHoursEnabled: workflow.isEnabled === true,
       }, requestActor(req));
     }
-    res.json({ success: true, data: workflow });
+    const warning = await duplicateReminderWarning(req.workspaceId, workflow);
+    res.json({ success: true, data: workflow, ...(warning ? { warning } : {}) });
   }),
 );
 

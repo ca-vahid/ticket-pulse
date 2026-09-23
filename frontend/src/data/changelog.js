@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.9.71-preview';
+export const APP_VERSION = '3.9.72-preview';
 
 export const changelog = [
+  {
+    version: '3.9.72-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Pending Response is FreshService&rsquo;s Pending response</strong> &mdash; choosing Pending Response in Ticket Pulse now sets FreshService&rsquo;s own <em>Pending response</em> status, so FreshService&rsquo;s reminder and auto-close process runs as it does for tickets set there. It used to send plain Pending, which started nothing, and the next sync then renamed the ticket back to Pending. FreshService tickets in Pending response now read <em>Pending Response</em> in Ticket Pulse instead of <em>Waiting on Customer</em>, and count as open work everywhere again (they had dropped out of queue, dashboard and workload counts).' },
+      { type: 'improved', html: '<strong>The latest change wins between a Ticket Pulse ticket and its FreshService copy</strong> &mdash; when someone closes, reopens, re-statuses or reassigns the FreshService copy of a Ticket Pulse ticket after the last change in Ticket Pulse, Ticket Pulse now follows it, and Activity says who (e.g. &ldquo;Closed in FreshService by Mehdi Abbaspour&rdquo;). These changes used to be ignored, so tickets closed in FreshService stayed open here. Deleting the FreshService copy deletes the Ticket Pulse ticket too (it stays under Deleted, with its history), just as deleting in Ticket Pulse already removes the copy.' },
+      { type: 'improved', html: '<strong>Every FreshService status is known</strong> &mdash; Ticket Pulse reads each workspace&rsquo;s FreshService statuses and links them to its own (Settings &rarr; Ticket statuses shows the link). A status Ticket Pulse did not know used to arrive as Open.' },
+      { type: 'improved', html: '<strong>No double reminders</strong> &mdash; switching on a Ticket Pulse workflow that emails requesters about silence, in a workspace where FreshService already sends pending-response reminders, now warns that requesters would get both.' },
+      { type: 'fixed', html: '<strong>Workspace syncs really are staggered now</strong> &mdash; the five workspaces&rsquo; five-minute syncs were meant to run on different minutes from 3.9.67, but the scheduler read the new timing as &ldquo;every fifth minute&rdquo; and all five kept starting in the same second. They now start a minute apart, as intended.' },
+    ],
+  },
   {
     version: '3.9.71-preview',
     date: 'September 23, 2026',

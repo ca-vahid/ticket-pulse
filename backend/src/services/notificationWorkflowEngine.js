@@ -3330,7 +3330,7 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
     if (typeof client.fetchTicketSafe === 'function') {
       const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
       if (fsTicket && typeof fsTicket === 'object' && fsTicket.status !== undefined && fsTicket.status !== null) {
-        const fsStatusName = getStatusString(Number(fsTicket.status));
+        const fsStatusName = getStatusString(Number(fsTicket.status), { workspaceId: ticket.workspaceId });
         if (fsStatusName === setStatus) {
           return {
             skipped: true,

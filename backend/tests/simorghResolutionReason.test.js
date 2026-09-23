@@ -137,8 +137,21 @@ describe('the reason travels everywhere it must', () => {
     const writeAt = fn.indexOf('prisma.ticket.update(');
     expect(validateAt).toBeGreaterThan(-1);
     expect(validateAt).toBeLessThan(writeAt);
-    expect(fn).toMatch(/required: requiresResolutionReason\(ticket\) && !ticket\.resolutionReason/);
+    // Closed on the FreshService copy (latest change wins, 23 Sep 2026): the
+    // person closed it where there is no reason field — never demanded there.
+    expect(fn).toMatch(/required: !fromFreshService && requiresResolutionReason\(ticket\) && !ticket\.resolutionReason/);
     expect(fn).toMatch(/patch\.resolutionReason = null;\s*patch\.resolutionNote = null;\s*patch\.resolvedByKind = null;/);
+  });
+
+  test('a change adopted from FreshService is not written back, and is recorded as resolved in FreshService', () => {
+    const fn = ticketSvc.slice(ticketSvc.indexOf('async changeStatus('), ticketSvc.indexOf('async assignTicket('));
+    expect(fn).toMatch(/if \(!fromFreshService\) await mirrorService\.enqueueFieldSync\(workspaceId, ticket\.id\);/);
+    expect(fn).toMatch(/const kind = fromFreshService \? 'freshservice' : resolvedByKindFromActor\(actor\);/);
+    expect(fn).toMatch(/mirrorState: fromFreshService \? 'mirrored' : 'pending'/);
+    const assign = ticketSvc.slice(ticketSvc.indexOf('async assignTicket('), ticketSvc.indexOf('async _isAiOverride('));
+    expect(assign).toMatch(/if \(!fromFreshService\) await mirrorService\.enqueueFieldSync\(workspaceId, ticket\.id\);/);
+    const del = ticketSvc.slice(ticketSvc.indexOf('async deleteTicket('), ticketSvc.indexOf('async _notifyLifecycle('));
+    expect(del).toMatch(/if \(ticket\.freshserviceTicketId && !fromFreshService\)/);
   });
 
   test('the actor reaches the lifecycle emitter, and the status-family events carry who/when/why', () => {

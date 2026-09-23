@@ -14,14 +14,20 @@ export function clampFastSyncInterval(value) {
  * 90 s queue timeouts for the mirror and thread fetches (22 Sep 2026, ~110
  * timeouts an hour in business hours). Spread, the same work costs nothing
  * extra and never lands on itself. Cadence per workspace is unchanged.
+ *
+ * The minutes are written out (`1,6,11,…,56`), never as a stepped range:
+ * node-cron 3.0.3 expands `1-59/5` to the multiples of 5 inside 1–59, ignoring
+ * the start — so 3.9.67's `1-59/5` … `4-59/5` all fired on :05, :10 … together
+ * (the stagger never took effect) and skipped :00 (23 Sep 2026).
  */
 export function fullSyncCronExpression(intervalMinutes, workspaceId = 0) {
   const every = Math.trunc(Number(intervalMinutes));
   const n = Number.isFinite(every) && every >= 1 && every <= 60 ? every : 5;
   const id = Math.max(0, Math.trunc(Number(workspaceId) || 0));
   if (n === 1) return '* * * * *';
-  if (n === 60) return `${id % 60} * * * *`;
-  return `${id % n}-59/${n} * * * *`;
+  const minutes = [];
+  for (let m = id % n; m < 60; m += n) minutes.push(m);
+  return `${minutes.join(',')} * * * *`;
 }
 
 /** node-cron expression (with seconds) for "every N minutes at :SS". */

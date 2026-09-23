@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, ArrowDown, ArrowUp, Check, CircleDot, Info, Loader2, Lock, Plus, RotateCcw } from 'lucide-react';
+import { Archive, ArrowDown, ArrowUp, Check, CircleDot, Info, Loader2, Lock, Plus, RotateCcw, Link2 } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
 import { invalidateConditionFieldsCache } from './ConditionGroupBuilder';
 
@@ -197,6 +197,14 @@ export default function TicketStatusesSection() {
                   <Lock className="w-3 h-3" aria-hidden="true" /> system
                 </span>
               )}
+              {r.freshserviceStatusId ? (
+                <span
+                  className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/75"
+                  title={`Choosing "${r.name}" sets FreshService status ${r.freshserviceStatusId}, and FreshService status ${r.freshserviceStatusId} shows here as "${r.name}". FreshService's own rules for that status run.`}
+                >
+                  <Link2 className="w-3 h-3" aria-hidden="true" /> FreshService status {r.freshserviceStatusId}
+                </span>
+              ) : null}
               <span className="flex-1" />
               <button
                 type="button"

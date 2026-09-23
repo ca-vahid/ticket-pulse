@@ -1272,6 +1272,7 @@ class SyncService {
 
     const transformOptions = {};
     if (workspaceId) {
+      transformOptions.workspaceId = workspaceId;
       const wsConfig = await this._getWorkspaceConfig(workspaceId);
       if (wsConfig.categoryCustomField) {
         transformOptions.categoryCustomField = wsConfig.categoryCustomField;
@@ -2893,6 +2894,16 @@ class SyncService {
       source: 'ticket-type-sync',
     });
     const result = await ticketTypeService.syncFromFreshService(workspaceId, client, workspace.freshserviceWorkspaceId);
+    // Same cadence, same form-field read: FreshService tenant statuses
+    // ("Pending response" = 6) bind to registry rows (23 Sep 2026).
+    try {
+      const statuses = await statusService.syncFsStatusChoices(workspaceId, client, workspace.freshserviceWorkspaceId);
+      if (statuses.bound || statuses.created) {
+        logger.info(`Status registry: FreshService statuses for workspace ${workspaceId} — ${statuses.bound} bound, ${statuses.created} created`);
+      }
+    } catch (err) {
+      logger.warn(`Status choice sync failed for workspace ${workspaceId} (non-fatal): ${err.message}`);
+    }
     if (result.registered > 0) {
       logger.info(`Ticket-type registry: auto-registered ${result.registered} new FS type(s) for workspace ${workspaceId}`);
     }
@@ -4394,7 +4405,7 @@ class SyncService {
         const patch = {};
 
         // Status
-        const fsStatusName = getStatusString(Number(fsTicket.status));
+        const fsStatusName = getStatusString(Number(fsTicket.status), { workspaceId, fsWorkspaceId: fsTicket.workspace_id ?? null });
         let statusChanged = fsStatusName !== current.status;
         // RO-5: don't revert a status Ticket Pulse just wrote to FS while FS's
         // updated_at still predates that write.

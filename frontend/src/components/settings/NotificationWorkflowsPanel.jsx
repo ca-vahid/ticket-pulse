@@ -4670,10 +4670,12 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
 function NotificationToast({ message, onDismiss }) {
   useEffect(() => {
     if (!message) return undefined;
-    const timer = setTimeout(onDismiss, 4200);
+    // Warnings carry a decision — give them time to be read.
+    const timer = setTimeout(onDismiss, message.type === 'warning' ? 12000 : 4200);
     return () => clearTimeout(timer);
   }, [message, onDismiss]);
   const isError = message?.type === 'error';
+  const isWarning = message?.type === 'warning';
   return (
     <AnimatePresence>
       {message && (
@@ -4687,11 +4689,13 @@ function NotificationToast({ message, onDismiss }) {
           aria-live="polite"
           className={cls(
             'fixed bottom-5 right-5 z-[70] flex max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-soft backdrop-blur',
-            isError ? 'border-red-200 dark:border-red-500/30 bg-red-50/95 dark:bg-red-500/10 text-red-800 dark:text-red-200' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/95 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
+            isError ? 'border-red-200 dark:border-red-500/30 bg-red-50/95 dark:bg-red-500/10 text-red-800 dark:text-red-200'
+              : isWarning ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50/95 dark:bg-amber-500/10 text-amber-900 dark:text-amber-100'
+                : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/95 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
           )}
         >
-          <span className={cls('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full', isError ? 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300')}>
-            {isError ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          <span className={cls('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full', isError ? 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' : isWarning ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300')}>
+            {isError || isWarning ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
           </span>
           <span className="min-w-0 flex-1 text-sm font-medium leading-5">{message.text}</span>
           <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 rounded-md p-0.5 text-muted-foreground/75 transition hover:bg-black/5 hover:text-muted-foreground">
@@ -8406,6 +8410,7 @@ export default function NotificationWorkflowsPanel({
     try {
       const response = await notificationWorkflowAPI.setEnabled(workflow.id, !workflow.isEnabled);
       applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      if (response.warning) setMessage({ type: 'warning', text: response.warning });
       await refreshHealth();
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Toggle failed' });
@@ -8594,7 +8599,9 @@ export default function NotificationWorkflowsPanel({
         setAfterHoursPolicy((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
         setAfterHoursDraft((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
       }
-      setMessage({ type: 'success', text: response.data.isEnabled ? 'Workflow enabled' : 'Workflow disabled' });
+      setMessage(response.warning
+        ? { type: 'warning', text: response.warning }
+        : { type: 'success', text: response.data.isEnabled ? 'Workflow enabled' : 'Workflow disabled' });
       await refreshHealth();
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -8622,7 +8629,7 @@ export default function NotificationWorkflowsPanel({
         setAfterHoursPolicy((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
         setAfterHoursDraft((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
       }
-      setMessage({
+      setMessage(response.warning ? { type: 'warning', text: response.warning } : {
         type: 'success',
         text: alsoDisableMock
           ? 'Workflow enabled — mock mode is off, real actions will run.'
