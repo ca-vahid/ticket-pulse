@@ -49,18 +49,18 @@ describe('TicketFilterRail workspace custom statuses (Phase 8b)', () => {
     }
   });
 
-  test('default scope checks every Open/Pending-BASE status — "Needs Rework" arrives checked', () => {
+  test('default scope checks nothing — every status shows (QA 09-22 #4); custom names are still facets', () => {
     renderRail();
-    expect(screen.getByRole('checkbox', { name: /needs rework/i })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /^open/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /needs rework/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^open/i })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: /fixed/i })).not.toBeChecked();
   });
 
-  test('toggling a custom status round-trips it through ?status=', () => {
+  test('toggling a custom status round-trips it through ?status= (alone, since nothing is pre-checked)', () => {
     renderRail();
     fireEvent.click(screen.getByRole('checkbox', { name: /fixed/i }));
     const search = new URLSearchParams(screen.getByTestId('search').textContent);
-    expect(search.get('status').split(',')).toEqual(['Open', 'Pending', 'Needs Rework', 'Fixed']);
+    expect(search.get('status').split(',')).toEqual(['Fixed']);
   });
 
   test('a custom name arriving via URL stays checked (the old dropper silently discarded it)', () => {

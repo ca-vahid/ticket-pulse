@@ -66,6 +66,7 @@ import {
   groupReferencesCustomFields,
   registerCustomFieldConditionOps,
 } from './notificationConditionModel.js';
+import { bulletproofButtons } from '../utils/emailHtmlHardening.js';
 
 const liquid = new Liquid({
   strictFilters: false,
@@ -2748,7 +2749,9 @@ async function executeNode({
     });
     state.email = email;
     const subject = email.subject || node.data?.subject || 'Ticket Pulse notification';
-    const htmlBody = email.html || null;
+    // Padded-anchor "buttons" become table-cell buttons for classic Outlook
+    // (QA 09-22 #3) — every template, at send time.
+    const htmlBody = bulletproofButtons(email.html) || null;
     const textBody = email.text || stripHtml(htmlBody);
     const actionLinks = compactActionLinkDiagnostics(email.actionLinks || {});
     const branding = email.branding || {

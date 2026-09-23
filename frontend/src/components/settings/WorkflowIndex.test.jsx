@@ -108,7 +108,7 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     expect(rowFor('VIP variant').className).not.toContain('shadow-[inset_3px_0_0');
   });
 
-  test('groups are collapsible with a plain count; the enable switch and row menu exist per row', () => {
+  test('groups are collapsible with a plain count; rows show a quiet On/Off/Draft state, no switch (QA 09-22 #11); the row menu exists', () => {
     window.localStorage.removeItem('tp_wf_collapsed_1');
     const props = renderIndex({ onRowAction: vi.fn() });
     const group = screen.getByRole('button', { name: /^Ticket assigned/ });
@@ -118,10 +118,11 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     expect(group).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Assignment notice')).toBeNull();
     fireEvent.click(group);
-    // switch
-    fireEvent.click(screen.getByRole('switch', { name: 'Disable Assignment notice' }));
-    expect(props.onToggleEnabled).toHaveBeenCalledWith(WORKFLOWS[0]);
-    expect(screen.getByRole('switch', { name: 'Enable VIP variant' })).toBeDisabled(); // draft
+    // no switch in the sidebar any more — the state reads as text
+    expect(screen.queryByRole('switch')).toBeNull();
+    expect(within(rowFor('Assignment notice')).getByText('On')).toBeInTheDocument();
+    expect(within(rowFor('VIP variant')).getByText('Draft')).toBeInTheDocument(); // draft: nothing published
+    expect(props.onToggleEnabled).not.toHaveBeenCalled();
     // row menu
     fireEvent.click(screen.getByRole('button', { name: 'More actions for VIP variant' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));

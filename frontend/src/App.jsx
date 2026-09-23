@@ -25,6 +25,7 @@ import PublicTicketUrgency from './pages/PublicTicketUrgency';
 import PublicTicketFeedback from './pages/PublicTicketFeedback';
 import MyCompetencies from './pages/MyCompetencies';
 import Notifications from './pages/Notifications';
+import ProfilePage from './pages/ProfilePage';
 import Tickets from './pages/Tickets';
 import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
@@ -220,6 +221,15 @@ function App() {
                         element={
                           <AgentRoute>
                             <Notifications />
+                          </AgentRoute>
+                        }
+                      />
+
+                      <Route
+                        path="/profile"
+                        element={
+                          <AgentRoute>
+                            <ProfilePage />
                           </AgentRoute>
                         }
                       />

@@ -606,8 +606,8 @@ export default function AppHeader({
       },
       {
         id: 'notifications',
-        label: 'Notifications',
-        description: 'Email, alerts & signature',
+        label: 'Mail & alerts',
+        description: 'Notifications, my alerts & signature',
         path: '/notifications',
         Icon: Bell,
       },
@@ -645,10 +645,18 @@ export default function AppHeader({
             role="menu"
             className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
           >
-            <div className="border-b border-border px-3 py-2">
+            {/* QA 09-22 #7: the name opens the profile page (photo, contact, links). */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setUserMenuOpen(false); navigate('/profile'); }}
+              title="Your profile and photo"
+              className="tp-focus-ring block w-full border-b border-border px-3 py-2 text-left hover:bg-muted"
+            >
               <p className="truncate text-sm font-semibold text-foreground">{displayUserName}</p>
               <p className="truncate text-xs text-muted-foreground">{user?.email || user?.username || wsRole}</p>
-            </div>
+              <p className="mt-0.5 text-[11px] font-medium text-primary">Profile &amp; photo</p>
+            </button>
 
             {menuItems.map(({ id, label, description, path, Icon }) => (
               <button

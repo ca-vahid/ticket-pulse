@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { clampFastSyncInterval, fastSyncCronExpression } from '../utils/fastSyncCron.js';
+import { clampFastSyncInterval, fastSyncCronExpression, fullSyncCronExpression } from '../utils/fastSyncCron.js';
 import syncService from './syncService.js';
 import vtService from './vacationTrackerService.js';
 import vtRepo from './vacationTrackerRepository.js';
@@ -83,9 +83,10 @@ class ScheduledSyncService {
       intervalMinutes = 5;
     }
 
-    const cronExpression = `*/${intervalMinutes} * * * *`;
+    // Staggered per workspace (22 Sep 2026): see fullSyncCronExpression.
+    const cronExpression = fullSyncCronExpression(intervalMinutes, wsId);
 
-    logger.info(`Starting scheduled sync for workspace "${wsName}" (id=${wsId}) every ${intervalMinutes}m`);
+    logger.info(`Starting scheduled sync for workspace "${wsName}" (id=${wsId}) every ${intervalMinutes}m (cron "${cronExpression}")`);
 
     const tz = workspace.defaultTimezone || 'America/Los_Angeles';
 

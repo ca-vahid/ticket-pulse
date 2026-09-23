@@ -8,8 +8,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   Users, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
   AlertCircle, CheckCircle2, MapPin, Search, UserPlus, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, KeyRound,
+  ArrowUpDown, ArrowUp, ArrowDown, KeyRound, Camera,
 } from 'lucide-react';
+import PhotoUploadDialog from './PhotoUploadDialog';
 
 const COMMON_TIMEZONES = [
   'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York',
@@ -237,6 +238,10 @@ export default function MembersPanel() {
   const [addMode, setAddMode] = useState('member');
 
   const wsId = currentWorkspace?.id;
+
+  // QA 09-22 #7: an admin sets a photo for anyone on the roster.
+  const [photoFor, setPhotoFor] = useState(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -713,6 +718,7 @@ export default function MembersPanel() {
                       onSaveEdit={() => saveEdit(t.id)}
                       saving={saving}
                       onToggle={() => toggleActive(t)}
+                      onPhoto={() => setPhotoFor(t)}
                       toggling={togglingId === t.id}
                       onRevoke={t.origin === 'app' ? () => changeAccess(t, '') : null}
                       revoking={t.origin === 'app' && accessBusyEmail === t.email}
@@ -731,6 +737,38 @@ export default function MembersPanel() {
           </div>
         </div>
       )}
+      {photoFor && (
+        <PhotoUploadDialog
+          title={`Photo for ${photoFor.name}`}
+          initialPhotoUrl={photoFor.photoUrl || null}
+          busy={photoBusy}
+          onSave={async (dataUrl) => {
+            setPhotoBusy(true);
+            try {
+              await settingsAPI.uploadTechnicianPhoto(photoFor.id, dataUrl);
+              setPhotoFor(null);
+              await load();
+            } catch (err) {
+              setError(err.response?.data?.message || err.message || 'Could not save the photo');
+            } finally {
+              setPhotoBusy(false);
+            }
+          }}
+          onRevert={async () => {
+            setPhotoBusy(true);
+            try {
+              await settingsAPI.revertTechnicianPhoto(photoFor.id);
+              setPhotoFor(null);
+              await load();
+            } catch (err) {
+              setError(err.response?.data?.message || err.message || 'Could not revert the photo');
+            } finally {
+              setPhotoBusy(false);
+            }
+          }}
+          onClose={() => setPhotoFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -738,7 +776,7 @@ export default function MembersPanel() {
 function MemberTableRow({
   row, t, colSpanAll, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, saving,
   onToggle, toggling, guidanceOpen, guidanceDraft, setGuidanceDraft, onOpenGuidance, onCloseGuidance, onSaveGuidance, guidanceSaving,
-  onRevoke = null, revoking = false,
+  onRevoke = null, revoking = false, onPhoto = null,
 }) {
   const appOnly = t.origin === 'app';
   return (
@@ -759,6 +797,12 @@ function MemberTableRow({
               <button onClick={onRevoke} disabled={revoking} title="Remove app access" aria-label={`Remove app access for ${t.name}`}
                 className="p-1.5 rounded-lg tp-focus-ring text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15">
                 {revoking ? <Loader className="w-4 h-4 animate-spin" /> : <PowerOff className="w-4 h-4" />}
+              </button>
+            )}
+            {!appOnly && t.isActive && onPhoto && (
+              <button onClick={onPhoto} title="Upload a photo for this person (replaces the directory photo)"
+                className="p-1.5 rounded-lg tp-focus-ring text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/10">
+                <Camera className="w-4 h-4" />
               </button>
             )}
             {!appOnly && t.isActive && !guidanceOpen && (

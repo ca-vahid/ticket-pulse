@@ -121,6 +121,25 @@ async function getWorkflowOrThrow(workspaceId, id) {
   return workflow;
 }
 
+// The seven default-variant upserts used to run on EVERY list call —
+// sequential round trips, each a write — and the Mail Workflows page waited
+// on them before painting anything (QA 09-22 #10). The list now seeds a
+// workspace at most once per ten minutes; create/install paths still call
+// ensureDefaultWorkflows directly.
+const DEFAULTS_SEEDED_TTL_MS = 10 * 60 * 1000;
+const defaultsSeededAt = new Map();
+
+export function resetDefaultWorkflowsMemo() {
+  defaultsSeededAt.clear();
+}
+
+async function ensureDefaultWorkflowsMemo(workspaceId) {
+  const last = defaultsSeededAt.get(workspaceId) || 0;
+  if (Date.now() - last < DEFAULTS_SEEDED_TTL_MS) return;
+  await ensureDefaultWorkflows(workspaceId);
+  defaultsSeededAt.set(workspaceId, Date.now());
+}
+
 export async function ensureDefaultWorkflows(workspaceId, actor = null) {
   const changedBy = actorEmail(actor);
   const results = [];
@@ -167,7 +186,7 @@ export async function ensureDefaultWorkflows(workspaceId, actor = null) {
 }
 
 export async function listWorkflows(workspaceId) {
-  await ensureDefaultWorkflows(workspaceId);
+  await ensureDefaultWorkflowsMemo(workspaceId);
   return prisma.notificationWorkflow.findMany({
     where: { workspaceId },
     orderBy: [
@@ -202,7 +221,7 @@ export async function listWorkflows(workspaceId) {
 }
 
 export async function getWorkflow(workspaceId, id) {
-  await ensureDefaultWorkflows(workspaceId);
+  await ensureDefaultWorkflowsMemo(workspaceId);
   const workflow = await prisma.notificationWorkflow.findFirst({
     where: { id: normalizeId(id), workspaceId },
     include: {

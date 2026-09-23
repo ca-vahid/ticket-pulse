@@ -202,6 +202,49 @@ export function isRichContent(html) {
   return /<(b|strong|i|em|u|ul|ol|li|a|table|img)\b/i.test(String(html || ''));
 }
 
+const BLOCK_TAGS = /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE|TR|SECTION|ARTICLE)$/;
+
+/**
+ * Plain text from editor HTML the way a mail client reads it: every block is
+ * one paragraph, <br> is one line break, an EMPTY paragraph is one blank line.
+ * The browser's innerText counts a <p> boundary as two breaks, so a single
+ * blank line between paragraphs became five newlines — and five <br/>s in the
+ * requester's mail (QA 09-22 #1). Runs of three or more newlines collapse to a
+ * blank line; list items get a dash.
+ */
+export function htmlToPlainText(html) {
+  const source = String(html || '');
+  if (!source) return '';
+  if (!/<[a-z][\s\S]*>/i.test(source)) return source.replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trimEnd();
+  const rootEl = document.createElement('div');
+  rootEl.innerHTML = source;
+  const out = [];
+  const endsWithBreak = () => out.length > 0 && out[out.length - 1].endsWith('\n');
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) { out.push(child.nodeValue.replace(/\u00a0/g, ' ')); continue; }
+      if (child.nodeType !== 1) continue;
+      const tag = child.tagName;
+      if (tag === 'BR') { out.push('\n'); continue; }
+      if (tag === 'STYLE' || tag === 'SCRIPT') continue;
+      if (BLOCK_TAGS.test(tag)) {
+        if (out.length && !endsWithBreak()) out.push('\n');
+        const before = out.length;
+        if (tag === 'LI') out.push('- ');
+        walk(child);
+        // "<p><br></p>" is one blank line, not a line break AND a paragraph end.
+        const produced = out.slice(before).join('');
+        if (produced === '\n') out.length = before;
+        out.push('\n');
+        continue;
+      }
+      walk(child);
+    }
+  };
+  walk(rootEl);
+  return out.join('').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
 function textToHtml(text) {
   const div = document.createElement('div');
   div.textContent = String(text || '');
@@ -249,7 +292,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     const el = editorRef.current;
     if (!el) return;
     const html = sanitizeRichHtml(el.innerHTML);
-    const text = el.innerText.replace(/\u00a0/g, ' ').trimEnd();
+    const text = htmlToPlainText(html);
     lastEmittedRef.current = html;
     setIsEmpty(!el.textContent.trim());
     onChange?.({ html, text });

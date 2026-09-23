@@ -111,6 +111,8 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'due', verb: 'changed the due date', detail: bits.join(' · ') || null });
     } else if (t === 'requester_reply') {
       item = baseItem({ event: 'reply', verb: 'replied', detail: d.note || null });
+    } else if (t === 'solution_verified' || t === 'solution_cleared') {
+      item = baseItem({ event: 'solution', verb: t === 'solution_verified' ? 'marked this as a verified solution' : 'removed the verified-solution mark', detail: d.note || null });
     } else if (t === 'noise_flagged' || t === 'noise_cleared') {
       item = baseItem({ event: 'noise', verb: t === 'noise_flagged' ? 'marked as noise' : 'cleared the noise flag', detail: d.note || d.reason || null });
     } else if (t === 'forwarded' || t === 'forwarded_intake' || t === 'forwarded_intake_unparsed' || t === 'agent_cc_intake') {

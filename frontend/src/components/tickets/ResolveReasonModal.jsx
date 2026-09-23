@@ -14,6 +14,7 @@ import { RESOLUTION_REASONS } from '../../utils/resolutionReasons';
 export default function ResolveReasonModal({ ticketRef, targetStatus, busy = false, onConfirm, onClose }) {
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  const [verifiedSolution, setVerifiedSolution] = useState(false);
   const firstRef = useRef(null);
 
   useEffect(() => { firstRef.current?.focus(); }, []);
@@ -88,6 +89,20 @@ export default function ResolveReasonModal({ ticketRef, targetStatus, busy = fal
           className="tp-focus-ring mt-1 w-full resize-none rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60"
         />
 
+        {/* QA 09-22 #6: the best solutions are recognised at closure time. */}
+        <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/50">
+          <input
+            type="checkbox"
+            checked={verifiedSolution}
+            onChange={(e) => setVerifiedSolution(e.target.checked)}
+            className="tp-focus-ring mt-0.5 h-3.5 w-3.5 accent-primary"
+          />
+          <span>
+            <span className="font-medium text-foreground">Mark as a verified solution</span>
+            <span className="block text-[11px] text-muted-foreground">Worth finding again — it will show up for tickets in this category. The note above is what fixed it.</span>
+          </span>
+        </label>
+
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="tp-focus-ring rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted/50">
             Cancel
@@ -95,7 +110,7 @@ export default function ResolveReasonModal({ ticketRef, targetStatus, busy = fal
           <button
             type="button"
             disabled={!canConfirm}
-            onClick={() => onConfirm?.({ resolutionReason: reason, resolutionNote: note.trim() || null })}
+            onClick={() => onConfirm?.({ resolutionReason: reason, resolutionNote: note.trim() || null, verifiedSolution })}
             className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}

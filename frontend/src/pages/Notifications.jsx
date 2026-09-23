@@ -26,8 +26,8 @@ export default function Notifications() {
             <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="hidden h-9 w-9 object-contain dark:block" />
             <div className="hidden h-8 w-px bg-secondary sm:block" />
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-foreground">Notifications</div>
-              <div className="truncate text-xs text-muted-foreground">Email, alerts &amp; signature.</div>
+              <div className="truncate text-sm font-semibold text-foreground">Mail &amp; alerts</div>
+              <div className="truncate text-xs text-muted-foreground">Notifications, alerts &amp; your signature.</div>
             </div>
           </div>
           <div className="flex flex-none items-center gap-2">
@@ -58,7 +58,7 @@ export default function Notifications() {
             <Bell className="h-5 w-5" />
           </span>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Notifications</h1>
+            <h1 className="text-xl font-bold text-foreground">Mail &amp; alerts</h1>
             <p className="text-sm text-muted-foreground">
               Choose how Ticket Pulse reaches you, set up alerts for the tickets you want to hear about, and manage your email signature.
             </p>

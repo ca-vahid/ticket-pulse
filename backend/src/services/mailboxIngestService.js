@@ -1178,7 +1178,11 @@ class MailboxIngestService {
   async _createFromForward(connection, email, intake) {
     const { agent, parsed } = intake;
     const original = parsed.original;
-    const subject = this._subjectFor(original.subject || agentIntake.stripSubject(email.subject));
+    // The OUTER subject wins (QA 09-22 #2): what the agent typed on the
+    // forward's subject line is the ticket's subject, FW:/Fwd: prefixes
+    // stripped. The quoted "Subject:" header is only the fallback for a
+    // client that blanks the outer line. (TP-1626 lost "(THIS IS A TEST)".)
+    const subject = this._subjectFor(agentIntake.stripSubject(email.subject) || original.subject);
     const sliced = Boolean(parsed.originalHtml || parsed.originalText);
     const description = parsed.originalHtml
       || (parsed.originalText ? textToHtml(parsed.originalText) : null)

@@ -509,6 +509,12 @@ export const settingsAPI = {
   },
 
   getTechnicians: () => api.get('/settings/technicians'),
+  // Profile photos (QA 09-22 #7): own photo, and an admin setting one for the roster.
+  myPhoto: () => api.get('/photos/me'),
+  uploadMyPhoto: (dataUrl) => api.put('/photos/me', { dataUrl }),
+  revertMyPhoto: () => api.delete('/photos/me'),
+  uploadTechnicianPhoto: (id, dataUrl) => api.put(`/photos/${id}`, { dataUrl }),
+  revertTechnicianPhoto: (id) => api.delete(`/photos/${id}`),
   // Per-user email signatures — admin management (Mega 08-15 Phase D)
   getSignatures: () => api.get('/settings/signatures'),
   updateSignature: (email, data) => api.put(`/settings/signatures/${encodeURIComponent(email)}`, data),
@@ -1019,6 +1025,14 @@ export const ticketsAPI = {
 
   related: async (id) => {
     return await api.get(`/tickets/${id}/related`);
+  },
+
+  // Verified solutions (QA 09-22 #6)
+  setSolution: async (id, { verified = true, note = null } = {}) => {
+    return await api.post(`/tickets/${id}/solution`, { verified, note });
+  },
+  solutions: async (id) => {
+    return await api.get(`/tickets/${id}/solutions`);
   },
 
   forward: async (id, { to, note }) => {

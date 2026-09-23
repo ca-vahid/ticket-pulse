@@ -24,7 +24,7 @@ import { mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, StateChip, StatusPill, TagChip, TypePill,
+  ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SolutionMark, StateChip, StatusPill, TagChip, TypePill,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
@@ -263,7 +263,11 @@ export default function Tickets() {
   // back to the canonical 4 until meta loads.
   const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
   const statusFilterNames = useMemo(() => statusDefs.map((d) => d.name), [statusDefs]);
-  const defaultStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+  // QA 09-22 #4: nothing is pre-selected — the page opens on every status
+  // (Deleted/Spam stay out server-side). `openStatuses` is the Open/Pending
+  // scope the "Show it" widen still reasons about.
+  const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+  const defaultStatuses = useMemo(() => [], []);
   const metaStatusesLoaded = (meta?.statuses?.length || 0) > 0;
   // Keyed on the raw ?status VALUE, not the searchParams object — the object
   // changes identity on every unrelated URL write (?peek= open/close, page),
@@ -295,6 +299,7 @@ export default function Tickets() {
   const createdTo = searchParams.get('createdTo') || '';
   const due = searchParams.get('due') || '';
   const noise = searchParams.get('noise') || '';
+  const solution = searchParams.get('solution') || '';
   const tag = searchParams.get('tag') || '';
   const tagMode = searchParams.get('tagMode') || '';
   const impactFilter = searchParams.get('impact') || '';
@@ -508,6 +513,7 @@ export default function Tickets() {
     if (createdTo) params.createdTo = createdTo;
     if (due) params.due = due;
     if (noise) params.noise = noise;
+    if (solution) params.solution = solution;
     if (tag) {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
@@ -522,7 +528,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, solution, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,
@@ -1281,14 +1287,14 @@ export default function Tickets() {
       } else {
         refreshAfterEdit();
         showToast(`${label} — outside the current "${segment.replace(/_/g, ' ')}" view`, undo, {
-          action: { label: 'Show it', run: () => setParams({ segment: null, status: [...new Set([...defaultStatuses, nextStatus])].join(',') }) },
+          action: { label: 'Show it', run: () => setParams({ segment: null, status: [...new Set([...openStatuses, nextStatus])].join(',') }) },
         });
       }
       return;
     }
     refreshAfterEdit();
     showToast(label, undo);
-  }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange, statusDefs, statusInScope, segment, statuses, defaultStatuses, setParams]);
+  }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange, statusDefs, statusInScope, segment, statuses, openStatuses, setParams]);
   const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label || 'Last activity';
 
   // Board "Closed hidden" affordance: does the effective fetch scope exclude
@@ -1920,6 +1926,7 @@ export default function Tickets() {
                                     </span>
                                   )}
                                   {ticket.isExternal && <ExternalChip />}
+                                  {ticket.solutionVerifiedAt && <SolutionMark />}
                                   <StateChip state={ticket.stateChip} />
                                   {ticket.hasProposedReply && (
                                     <span

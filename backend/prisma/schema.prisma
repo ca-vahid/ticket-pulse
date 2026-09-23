@@ -1166,6 +1166,9 @@ model Technician {
   workspace       Workspace @relation(fields: [workspaceId], references: [id])
   isActive        Boolean   @default(true) @map("is_active")
   photoSyncedAt   DateTime? @map("photo_synced_at")
+  // 'custom' = uploaded in the app (own profile or an admin); the Entra photo
+  // sync leaves it alone. null/'entra' = directory photo (QA 09-22 #7).
+  photoSource     String?   @map("photo_source") @db.VarChar(20)
   showOnMap       Boolean   @default(true) @map("show_on_map")
   isMapManager    Boolean   @default(false) @map("is_map_manager")
   workStartTime   String?   @map("work_start_time") @db.VarChar(5)
@@ -1459,6 +1462,12 @@ model Ticket {
   // person closes it. Cleared when a child reopens or the parent closes.
   readyToCloseAt DateTime? @map("ready_to_close_at")
   externalRef String? @map("external_ref") @db.VarChar(200)
+  // Verified solutions (QA 09-22 #6): an agent marks a ticket as a solution
+  // worth finding again — any origin, any status, in hindsight too. Ticket
+  // Pulse-only; nothing is written to FreshService.
+  solutionVerifiedAt DateTime? @map("solution_verified_at")
+  solutionVerifiedBy String?   @map("solution_verified_by") @db.VarChar(255)
+  solutionNote       String?   @map("solution_note") @db.Text
 
   // Partial unique index in SQL (WHERE external_ref IS NOT NULL) — one
   // ticket per (workspace, ref); the P2002 on it is the concurrent-create

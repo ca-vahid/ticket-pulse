@@ -659,6 +659,13 @@ describe('agent forwards (Phase FW)', () => {
     for (const call of recencyCalls) expect(call[0].where.requester.is.email.equals).toBe(RITA);
   });
 
+  test('the OUTER subject wins — what the agent typed stays, FW: stripped (QA 09-22 #2)', async () => {
+    asAgent();
+    await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html', { subject: 'FW: Invoice 4471 still unpaid (THIS IS A TEST)' }));
+    const [, input] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.subject).toBe('Invoice 4471 still unpaid (THIS IS A TEST)');
+  });
+
   test('non-agent FW: → unchanged (sender is the requester, no forwarded meta)', async () => {
     const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html', { from: 'someone@customer.example', fromName: 'Some One' }));
     expect(outcome).toBe('created');
