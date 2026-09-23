@@ -553,6 +553,17 @@ function recommendationList(recommendation) {
     : Array.isArray(recommendation) ? recommendation : [];
 }
 
+/**
+ * Plain text → the paragraph HTML the e-mail and the FreshService copy carry.
+ * Three or more newlines collapse to one blank line (QA 09-22 #1): the
+ * composer's innerText counted a paragraph boundary as two breaks, so ONE
+ * empty line between paragraphs arrived as five <br/>s in the requester's mail.
+ */
+export function textToReplyHtml(text) {
+  const clean = String(text || '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return `<p>${clean.replace(/\n/g, '<br/>')}</p>`;
+}
+
 const TICKET_INCLUDE = {
   assignedTech: { select: { id: true, name: true, email: true, photoUrl: true, isActive: true, origin: true } },
   requester: {
@@ -971,6 +982,8 @@ class TicketService {
     if (query.status) where.status = { in: asList(query.status) };
     if (query.priority) where.priority = { in: asList(query.priority).map(Number).filter(Number.isFinite) };
     if (query.origin) where.origin = String(query.origin);
+    // Verified solutions (QA 09-22 #6): the "Verified solutions" view.
+    if (String(query.solution || '') === 'verified') where.solutionVerifiedAt = { not: null };
     if (query.requesterId) {
       const rid = Number(query.requesterId);
       if (Number.isFinite(rid) && rid > 0) where.requesterId = rid;
@@ -3731,6 +3744,73 @@ class TicketService {
   // destructive migration with no user-visible upside; old entries remain
   // readable in the audit trail.
 
+  /**
+   * Verified solutions (QA 09-22 #6). Any origin, any status — a closed
+   * FS-born ticket is exactly the kind of thing worth marking in hindsight.
+   * Ticket Pulse-only: nothing is written to FreshService. The note defaults
+   * to the resolution note so "what fixed it" is there without retyping.
+   */
+  async setSolution(ticketId, workspaceId, { verified = true, note = null } = {}, actor) {
+    const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+    const flag = verified !== false && verified !== 'false';
+    const typed = String(note ?? '').trim();
+    const cleanNote = flag ? (typed || ticket.solutionNote || ticket.resolutionNote || '').trim().slice(0, 4000) || null : null;
+    const who = actor?.name || actor?.email || null;
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: flag
+        ? { solutionVerifiedAt: ticket.solutionVerifiedAt || new Date(), solutionVerifiedBy: ticket.solutionVerifiedBy || who, solutionNote: cleanNote }
+        : { solutionVerifiedAt: null, solutionVerifiedBy: null, solutionNote: null },
+      include: TICKET_INCLUDE,
+    });
+    await this._audit(ticket.id, flag ? 'solution_verified' : 'solution_cleared', actor, { note: cleanNote });
+    this._broadcast(workspaceId, 'solution', updated, { solutionVerified: flag });
+    return { ...updated, displayRef: ticketDisplayRef(updated) };
+  }
+
+  /**
+   * "Verified solutions in this category": the most specific match first
+   * (same subcategory), then the category, then the FreshService category
+   * string for tickets the taxonomy has not placed. Never the ticket itself.
+   */
+  async solutionSuggestions(ticketId, workspaceId, { limit = 5 } = {}) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      select: { id: true, internalCategoryId: true, internalSubcategoryId: true, category: true },
+    });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+    const select = {
+      id: true, nativeNumber: true, origin: true, freshserviceTicketId: true, subject: true, status: true,
+      solutionNote: true, resolutionNote: true, solutionVerifiedAt: true, solutionVerifiedBy: true, resolvedAt: true,
+      internalCategory: { select: { id: true, name: true } },
+      internalSubcategory: { select: { id: true, name: true } },
+      assignedTech: { select: { id: true, name: true } },
+    };
+    const tiers = [];
+    if (ticket.internalSubcategoryId) tiers.push({ scope: 'subcategory', where: { internalSubcategoryId: ticket.internalSubcategoryId } });
+    if (ticket.internalCategoryId) tiers.push({ scope: 'category', where: { internalCategoryId: ticket.internalCategoryId } });
+    if (ticket.category) tiers.push({ scope: 'category', where: { category: ticket.category } });
+    const seen = new Set([ticket.id]);
+    const items = [];
+    let scope = null;
+    for (const tier of tiers) {
+      if (items.length >= limit) break;
+      const rows = await prisma.ticket.findMany({
+        where: { workspaceId, solutionVerifiedAt: { not: null }, id: { notIn: [...seen] }, ...tier.where },
+        orderBy: { solutionVerifiedAt: 'desc' },
+        take: limit - items.length,
+        select,
+      });
+      for (const r of rows) {
+        seen.add(r.id);
+        items.push({ ...r, displayRef: ticketDisplayRef(r), matchedOn: tier.scope });
+      }
+      if (rows.length && !scope) scope = tier.scope;
+    }
+    return { items, scope, hasCategory: tiers.length > 0 };
+  }
+
   async setNoise(ticketId, workspaceId, { noise = true, resolve = false } = {}, actor) {
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
@@ -4011,7 +4091,7 @@ class TicketService {
       const fsUserId = await this._fsActorUserId(ticket.workspaceId, actor);
       const who = actor?.name || actor?.email || 'Ticket Pulse';
       const marker = `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>${TP_NOTE_MARKER}</b> ${esc(who)} · reply to requester · e-mailed by Ticket Pulse</p>`;
-      const html = entry.bodyHtml || `<p>${String(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      const html = entry.bodyHtml || textToReplyHtml(entry.bodyText);
       const result = await client.addNote(Number(ticket.freshserviceTicketId), `${marker}${html}`, {
         isPrivate: false,
         attachments,
@@ -4163,7 +4243,7 @@ class TicketService {
       const client = await mirrorService.getInteractiveClient(workspaceId);
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
       const fsId = Number(ticket.freshserviceTicketId);
-      const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      const html = bodyHtml || textToReplyHtml(bodyText);
       // FS-born replies: FS emails the requester with the body we send it, so
       // the signature rides the createReply payload (notes stay unsigned).
       const outboundHtml = signature ? appendSignatureToEmail({ html }, signature).html : html;
@@ -4434,7 +4514,7 @@ class TicketService {
     if (fsConversationId) {
       const client = await mirrorService.getInteractiveClient(workspaceId);
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
-      const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      const html = bodyHtml || textToReplyHtml(bodyText);
       // Our own sends carried the TP note marker — re-prepend it so the FS
       // copy keeps matching the exclusion rule; imported FS-authored notes
       // (source ≠ ticketpulse_user) go back unmarked, as they arrived.
@@ -4914,7 +4994,7 @@ class TicketService {
     const subject = effectiveReplySubject(ticket, subjectOverride);
     // The acting agent's signature (Phase D) joins the OUTBOUND email only —
     // entry.bodyHtml (the stored thread entry) intentionally stays clean.
-    let html = entry.bodyHtml || `<p>${(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+    let html = entry.bodyHtml || textToReplyHtml(entry.bodyText);
     let text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
     if (signature) ({ html, text } = appendSignatureToEmail({ html, text }, signature));
     // Phase RL (RL-8): quote the last inbound message under the reply so the

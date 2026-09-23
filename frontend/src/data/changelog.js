@@ -1,6 +1,24 @@
-export const APP_VERSION = '3.9.66-preview';
+export const APP_VERSION = '3.9.67-preview';
 
 export const changelog = [
+  {
+    version: '3.9.67-preview',
+    date: 'September 22, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Reply spacing, for real this time</strong> — one blank line in the editor is one blank line in the e-mail. The composer’s plain text came from the browser, which counts a paragraph boundary as two line breaks, so a single empty line arrived as five; the mail lane also caps runs of blank lines now.' },
+      { type: 'fixed', html: '<strong>Forwarded subject keeps what you typed</strong> — a ticket created from an agent’s forward takes the subject line of the forward (FW: stripped), not the quoted header inside it. “A Code Setup Request (THIS IS A TEST)” stays whole.' },
+      { type: 'fixed', html: '<strong>E-mail buttons render in classic Outlook</strong> — a button written as a padded link becomes a proper table-cell button at send time, for every workflow template. Desktop Outlook ignored the padding and rounded corners, which is the colour artifact one user saw around “Open Ticket Pulse”.' },
+      { type: 'improved', html: '<strong>Tickets page opens on every status</strong> — no status is pre-selected any more; tick statuses to narrow. “My open” still means open and pending.' },
+      { type: 'improved', html: '<strong>Requester page reads like the queue</strong> — each ticket shows its category and subcategory, the assignee with their photo, status and date, and the list filters by status, category and agent.' },
+      { type: 'new', html: '<strong>Verified solutions</strong> — mark any ticket (closed and FreshService ones too) as a solution worth finding again, with a line on what fixed it. Marked tickets carry a check in the queue and on the ticket, the “Verified solutions” view lists them, and a ticket in the same category shows “Verified solutions” in its side column. The resolve dialog has the checkbox too.' },
+      { type: 'new', html: '<strong>Your profile photo</strong> — open your name in the account menu to see your profile and upload a photo (it replaces the directory picture everywhere in Ticket Pulse; the directory sync leaves it alone). Admins can set a photo for anyone under Settings → Members.' },
+      { type: 'improved', html: '<strong>“Mail &amp; alerts”</strong> — the account-menu entry formerly called Notifications now says what it holds: notifications, your alert rules and your e-mail signature. The profile page links to it.' },
+      { type: 'improved', html: '<strong>Mail Workflows opens faster</strong> — the workflow list paints as soon as it arrives instead of after seven calls, the selected workflow loads alongside the catalogs, and the default-variant seeding that ran on every visit now runs at most every ten minutes.' },
+      { type: 'improved', html: '<strong>No more accidental switches in the workflow sidebar</strong> — the on/off toggle left the rows (a quiet On / Off / Draft state stays); enabling lives in the workflow’s own header.' },
+      { type: 'improved', html: '<strong>Scheduled syncs no longer all fire in the same minute</strong> \u2014 each workspace\u2019s full FreshService sync takes its own minute inside its cadence (still every five minutes per workspace), so the five workspaces stop hitting FreshService at once and the mirror and thread fetches stop timing out behind them at :00, :05, :10 \u2026' },
+      { type: 'fixed', html: '<strong>Integration reads no longer stall the app</strong> \u2014 a ticket read through the public API answers from Ticket Pulse\u2019s copy instead of re-asking FreshService for the ticket and its thread on every call. An integration paging through a few hundred tickets used to queue three FreshService calls each on the lane the app itself uses, and people opening tickets meanwhile saw the thread fail to load.' },
+    ],
+  },
   {
     version: '3.9.66-preview',
     date: 'September 22, 2026',

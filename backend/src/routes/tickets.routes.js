@@ -1700,6 +1700,21 @@ router.post('/:id/forward', requireNativeTicketing, asyncHandler(async (req, res
 
 // Noise flag works for any origin (it's Ticket Pulse's own classification),
 // so it deliberately skips requireNativeTicketing.
+// Verified solutions (QA 09-22 #6): mark / unmark, and the suggestions card.
+router.post('/:id/solution', asyncHandler(async (req, res) => {
+  const ticket = await ticketService.setSolution(
+    parseTicketId(req), req.workspaceId,
+    { verified: req.body?.verified, note: req.body?.note },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: ticket });
+}));
+
+router.get('/:id/solutions', asyncHandler(async (req, res) => {
+  const data = await ticketService.solutionSuggestions(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data });
+}));
+
 router.post('/:id/noise', asyncHandler(async (req, res) => {
   const ticket = await ticketService.setNoise(
     parseTicketId(req), req.workspaceId,

@@ -5,10 +5,110 @@ import azureAdService from '../services/azureAdService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
 import logger from '../utils/logger.js';
 import prisma from '../services/prisma.js';
+import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 const router = express.Router();
 
 router.use(requireAuth);
+
+// ---------------------------------------------------------------------------
+// In-app photos (QA 09-22 #7): a person uploads their own picture from the
+// profile page; a workspace admin can set one for anyone on the roster. The
+// browser resizes to a small JPEG first; the server keeps the data URL like
+// the Entra photos already stored, stamps photoSource='custom', and the
+// directory sync leaves custom photos alone.
+// ---------------------------------------------------------------------------
+const PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
+const MAX_PHOTO_BYTES = 300 * 1024;
+const PHOTO_SELECT = { id: true, name: true, email: true, photoUrl: true, photoSource: true, photoSyncedAt: true, workspaceId: true };
+
+function photoInput(body) {
+  const dataUrl = String(body?.dataUrl || '').trim();
+  const m = PHOTO_DATA_URL.exec(dataUrl);
+  if (!m) throw new ValidationError('Send the photo as a JPEG, PNG or WebP image.');
+  const bytes = Math.floor((m[2].length * 3) / 4);
+  if (bytes > MAX_PHOTO_BYTES) throw new ValidationError('That photo is too large — it should be under 300 KB after resizing.');
+  return dataUrl;
+}
+
+function requestEmail(req) {
+  return String(req.user?.email || req.session?.user?.email || '').trim().toLowerCase();
+}
+
+async function ownTechnician(req) {
+  const email = requestEmail(req);
+  const technician = email
+    ? await prisma.technician.findFirst({
+      where: { workspaceId: req.workspaceId, isActive: true, email: { equals: email, mode: 'insensitive' } },
+      select: PHOTO_SELECT,
+    })
+    : null;
+  if (!technician) throw new NotFoundError('No technician profile for this account in the current workspace');
+  return technician;
+}
+
+async function technicianInWorkspace(req) {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) throw new ValidationError('Invalid technician id');
+  const technician = await prisma.technician.findFirst({ where: { id, workspaceId: req.workspaceId }, select: PHOTO_SELECT });
+  if (!technician) throw new NotFoundError('Technician not found in this workspace');
+  return technician;
+}
+
+async function setCustomPhoto(technician, dataUrl, who) {
+  const updated = await prisma.technician.update({
+    where: { id: technician.id },
+    data: { photoUrl: dataUrl, photoSource: 'custom', photoSyncedAt: new Date() },
+    select: PHOTO_SELECT,
+  });
+  try { clearReadCache(); } catch { /* cache is best effort */ }
+  logger.info(`Profile photo uploaded for ${technician.email || technician.id} by ${who}`);
+  return updated;
+}
+
+async function revertToDirectoryPhoto(technician, who) {
+  let photoUrl = null;
+  if (technician.email && azureAdService.isConfigured()) {
+    photoUrl = await azureAdService.getUserPhoto(technician.email).catch(() => null);
+  }
+  const updated = await prisma.technician.update({
+    where: { id: technician.id },
+    data: { photoUrl, photoSource: photoUrl ? 'entra' : null, photoSyncedAt: new Date() },
+    select: PHOTO_SELECT,
+  });
+  try { clearReadCache(); } catch { /* cache is best effort */ }
+  logger.info(`Profile photo reverted to the directory for ${technician.email || technician.id} by ${who}`);
+  return updated;
+}
+
+router.get('/me', asyncHandler(async (req, res) => {
+  const technician = await ownTechnician(req);
+  res.json({ success: true, data: technician });
+}));
+
+router.put('/me', asyncHandler(async (req, res) => {
+  const technician = await ownTechnician(req);
+  const updated = await setCustomPhoto(technician, photoInput(req.body), requestEmail(req));
+  res.json({ success: true, data: updated });
+}));
+
+router.delete('/me', asyncHandler(async (req, res) => {
+  const technician = await ownTechnician(req);
+  const updated = await revertToDirectoryPhoto(technician, requestEmail(req));
+  res.json({ success: true, data: updated });
+}));
+
+router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const technician = await technicianInWorkspace(req);
+  const updated = await setCustomPhoto(technician, photoInput(req.body), requestEmail(req));
+  res.json({ success: true, data: updated });
+}));
+
+router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const technician = await technicianInWorkspace(req);
+  const updated = await revertToDirectoryPhoto(technician, requestEmail(req));
+  res.json({ success: true, data: updated });
+}));
 
 /**
  * POST /api/photos/sync
@@ -36,6 +136,8 @@ router.post(
         isActive: true,
         workspaceId: req.workspaceId,
         email: { not: null },
+        // A photo uploaded in the app is never overwritten by the directory.
+        OR: [{ photoSource: null }, { photoSource: { not: 'custom' } }],
       },
       select: {
         id: true,
@@ -76,6 +178,7 @@ router.post(
       try {
         const updateData = {
           photoUrl: result.photoUrl,
+          photoSource: result.photoUrl ? 'entra' : null,
           photoSyncedAt: new Date(),
         };
 
@@ -167,11 +270,15 @@ router.post(
 
     const technician = await prisma.technician.findUnique({
       where: { id: techId },
-      select: { id: true, email: true, name: true, location: true },
+      select: { id: true, email: true, name: true, location: true, photoSource: true, photoUrl: true },
     });
 
     if (!technician) {
       return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
+    if (technician.photoSource === 'custom') {
+      return res.json({ success: true, message: 'This person uploaded their own photo — the directory photo is not applied over it', photoUrl: technician.photoUrl, location: technician.location || null });
     }
 
     if (!technician.email) {
@@ -185,7 +292,7 @@ router.post(
       azureAdService.getUserProfile(technician.email),
     ]);
 
-    const updateData = { photoUrl, photoSyncedAt: new Date() };
+    const updateData = { photoUrl, photoSource: photoUrl ? 'entra' : null, photoSyncedAt: new Date() };
     const adLocation = profile?.officeLocation || profile?.city || null;
     if (adLocation && (!technician.location || technician.location.trim() === '')) {
       updateData.location = adLocation;

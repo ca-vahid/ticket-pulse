@@ -177,7 +177,7 @@ describe('board drop — no vanish on success (Phase MB4)', () => {
 
   test('a drop that stays inside the scope keeps the scope and shows the plain toast', async () => {
     listSpy.mockResolvedValue({ data: { items: [row(1, 'Open')], total: 1 } });
-    mount('/tickets'); // default Open+Pending scope
+    mount('/tickets?status=Open,Pending'); // an explicit Open+Pending scope (the default is every status since QA 09-22 #4)
     await screen.findByTestId('board-stub');
     fireEvent.click(screen.getByRole('button', { name: 'drop TP-1 to Pending' }));
     await waitFor(() => expect(setStatusSpy).toHaveBeenCalledWith(1, 'Pending'));

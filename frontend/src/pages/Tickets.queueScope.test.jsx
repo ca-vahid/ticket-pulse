@@ -96,24 +96,24 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Tickets queue scope (QA 08-04 Phase 1)', () => {
-  test('default fetch scope is Open+Pending — in list AND board mode (board no longer widens silently)', async () => {
+  test('default fetch scope is every status (QA 09-22 #4) — in list AND board mode; a ticked scope is sent as-is', async () => {
     mount();
     await waitFor(() => expect(listSpy).toHaveBeenCalled());
-    expect(lastListParams().status).toBe('Open,Pending');
+    expect(lastListParams().status).toBeUndefined();
     expect(lastListParams().segment).toBeUndefined();
     cleanup();
 
     localStorage.setItem('tp_ticket_layout', 'board');
     listSpy.mockClear();
-    mount();
+    mount('/tickets?status=Open,Pending');
     await waitFor(() => expect(listSpy).toHaveBeenCalled());
     // Board sends the SAME scope as the list — rail checkboxes stay honest.
     expect(lastListParams().status).toBe('Open,Pending');
   });
 
-  test('board with the default scope shows the Closed-hidden empty state', async () => {
+  test('board with an Open+Pending scope shows the Closed-hidden empty state', async () => {
     localStorage.setItem('tp_ticket_layout', 'board');
-    mount();
+    mount('/tickets?status=Open,Pending');
     await waitFor(() => expect(screen.getByText('Closed hidden by current filters')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Show closed' })).toBeInTheDocument();
   });

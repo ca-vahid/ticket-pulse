@@ -26,7 +26,7 @@ describe('Notifications page', () => {
     render(<Notifications />, { wrapper: MemoryRouter });
 
     // Dedicated "Notifications" heading, not "My Competencies" (QA 07-21 #3).
-    expect(screen.getAllByText('Notifications').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Mail & alerts').length).toBeGreaterThan(0);
     expect(screen.queryByText('My Competencies')).not.toBeInTheDocument();
     // All three sections stacked on one page (QA 07-21 #4, #5 + Phase D).
     expect(screen.getByText('Delivery preferences panel')).toBeInTheDocument();

@@ -114,6 +114,8 @@ vi.mock('../components/tickets/RichTextEditor', async () => {
       />
     )),
     isRichContent: () => false,
+    // QA 09-22 #1: TicketDetail reads plain text through the editor's block walker.
+    htmlToPlainText: (html) => String(html || '').replace(/<\/p>\s*<p>/g, '\n\n').replace(/<br\s*\/?>/g, '\n').replace(/<[^>]+>/g, ''),
   };
 });
 

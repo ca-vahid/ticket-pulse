@@ -6,7 +6,7 @@ import {
   endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subDays, subMonths, subWeeks,
 } from 'date-fns';
 import {
-  CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
+  BadgeCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
   GripVertical, LayoutList, ListFilter, Plus, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
@@ -415,7 +415,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
   const statusNames = useMemo(() => statusDefs.map((d) => d.name), [statusDefs]);
   // The default scope is every Open/Pending-BASE status (custom ones included).
-  const defaultStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+  // QA 09-22 #4: no status is pre-selected (every status shows); "My open"
+  // still pins the Open/Pending-BASE scope explicitly.
+  const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+  const defaultStatuses = useMemo(() => [], []);
 
   // Status keeps its special default (Open+Pending bases when the param is
   // absent). The URL parser drops names the workspace doesn't define — but
@@ -565,13 +568,14 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     // left board mode (which once fetched every status) showing closed cards
     // under an "open" label (QA 08-04 #15). Scope = Open/Pending-BASE names
     // so custom open statuses stay in "my open" (Phase 8b).
-    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: defaultStatuses.join(',') } }] : []),
+    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: openStatuses.join(',') } }] : []),
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
     { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
     { key: 'awaiting', label: 'Awaiting reply', params: { segment: 'awaiting' } },
     { key: 'noise', label: 'Noise & spam', params: { noise: 'only', status: 'any' }, icon: VolumeX },
     { key: 'deleted', label: 'Deleted', params: { segment: 'deleted', status: 'any' }, icon: Trash2 },
     { key: 'resolved', label: 'Recently resolved', params: { segment: 'resolved' } },
+    { key: 'solutions', label: 'Verified solutions', params: { solution: 'verified', status: 'any' }, icon: BadgeCheck },
     { key: 'scheduled', label: 'Scheduled', params: { view: 'scheduled' }, icon: CalendarClock },
   ];
   const applyView = (v) => {
@@ -590,7 +594,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'solution', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }

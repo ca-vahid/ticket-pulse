@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Loader2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react';
+import { ChevronDown, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 /**
@@ -144,7 +144,7 @@ function RowMenu({ workflow, displayName, onRowAction, onClose }) {
 }
 
 function IndexRow({
-  workflow, selected, onSelect, onToggleEnabled, toggling,
+  workflow, selected, onSelect,
   getDisplayName, isAfterHours, onRowAction,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -178,28 +178,18 @@ function IndexRow({
           <span className="block truncate text-[10.5px] leading-3.5 text-muted-foreground/75">{meta}</span>
         </span>
       </button>
-      {/* Inline enable switch — shows on hover, focus and for the selected row. Drafts can't enable. */}
+      {/* The enable switch moved to the workflow's own header (QA 09-22 #11):
+          in the sidebar it was too easy to hit. The state stays readable. */}
       {!isArchived && (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isEnabled}
-          aria-label={`${isEnabled ? 'Disable' : 'Enable'} ${name}`}
-          disabled={toggling === workflow.id || (!isEnabled && version === 0)}
-          title={!isEnabled && version === 0 ? 'Publish the workflow before enabling it' : isEnabled ? 'Disable' : 'Enable'}
-          onClick={(e) => { e.stopPropagation(); onToggleEnabled(workflow); }}
+        <span
           className={cx(
-            'tp-focus-ring relative h-4 w-7 flex-shrink-0 rounded-full border transition-[opacity,background-color] disabled:cursor-not-allowed disabled:opacity-40',
-            isEnabled ? 'border-emerald-300 bg-emerald-500 dark:border-emerald-500/40' : 'border-input bg-secondary',
-            selected || isEnabled ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100',
+            'flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide',
+            isEnabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground/70',
           )}
+          aria-label={`${name} is ${isEnabled ? 'on' : version === 0 ? 'a draft' : 'off'}`}
         >
-          {toggling === workflow.id ? (
-            <Loader2 className="absolute inset-0 m-auto h-2.5 w-2.5 animate-spin text-white" />
-          ) : (
-            <span className={cx('absolute top-0.5 h-2.5 w-2.5 rounded-full bg-card shadow transition-all', isEnabled ? 'left-[14px]' : 'left-0.5')} />
-          )}
-        </button>
+          {isEnabled ? 'On' : version === 0 ? 'Draft' : 'Off'}
+        </span>
       )}
       {onRowAction && (
         <button

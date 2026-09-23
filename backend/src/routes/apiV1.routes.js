@@ -520,8 +520,17 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
   });
 }));
 
+// API reads answer from Ticket Pulse's copy (22 Sep 2026). The UI's detail
+// load reconciles the ticket with FreshService and refreshes an FS-born thread
+// on the interactive lane because a reader is waiting on the page; an
+// integration paging through tickets is not — ContinuIT read 234 details in
+// 26 s and each one queued three FreshService calls, 300 deep on the shared
+// limiter, and the people using the app got 15 s thread timeouts for it. The
+// syncs keep this copy fresh; the API does not need to re-ask FreshService.
+const API_READ = Object.freeze({ reconcile: false });
+
 router.get('/tickets/:id', S('tickets:read'), asyncHandler(async (req, res) => {
-  const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId);
+  const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId, API_READ);
   // Where it was merged, its parent, how many children. A merged ticket still
   // answers here — the reference stays resolvable and says where the work went.
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
@@ -637,7 +646,7 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     const written = await ticketService.addPrivateNote(id, req.workspaceId, noteInput, actor);
     note = { entryId: written?.entry?.id ?? written?.id ?? null };
   }
-  const ticket = await ticketService.getTicket(id, req.workspaceId);
+  const ticket = await ticketService.getTicket(id, req.workspaceId, API_READ);
   res.json({ success: true, data: ticketShape(ticket), ...(note ? { note } : {}) });
 }));
 
@@ -757,7 +766,7 @@ router.delete('/tickets/:id/links/:linkId', S('tickets:write'), asyncHandler(asy
 // -------------------------------------------------------- conversations
 
 router.get('/tickets/:id/conversations', S('conversations:read'), asyncHandler(async (req, res) => {
-  const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId);
+  const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId, API_READ);
   res.json({ success: true, data: (ticket.thread || []).filter((e) => e.bodyText || e.content).map(threadEntryShape) });
 }));
 

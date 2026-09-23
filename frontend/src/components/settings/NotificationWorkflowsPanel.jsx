@@ -7389,6 +7389,7 @@ export default function NotificationWorkflowsPanel({
   const [showArchivedWorkflows, setShowArchivedWorkflows] = useState(false);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedLoading, setSelectedLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [variableCatalog, setVariableCatalog] = useState([]);
   const [variableSearch, setVariableSearch] = useState('');
@@ -7688,27 +7689,13 @@ export default function NotificationWorkflowsPanel({
     setLoading(true);
     setMessage(null);
     try {
-      const [response, healthResponse, variablesResponse, emailBlocksResponse, afterHoursResponse, llmCatalogResponse, llmPolicyResponse] = await Promise.all([
-        notificationWorkflowAPI.list(),
-        notificationWorkflowAPI.health(),
-        notificationWorkflowAPI.variables(),
-        notificationWorkflowAPI.getEmailBlocks(),
-        notificationWorkflowAPI.getAfterHoursPolicy(),
-        notificationWorkflowAPI.getLlmToolCatalog(),
-        notificationWorkflowAPI.getLlmToolPolicy(),
-      ]);
+      // The list first, on its own: the sidebar paints as soon as it lands
+      // (QA 09-22 #10). Catalogs, policies and health fill in behind it, and
+      // the selected workflow loads alongside them instead of after them.
+      const response = await notificationWorkflowAPI.list();
       const items = response.data || [];
-      const policy = { ...DEFAULT_AFTER_HOURS_POLICY, ...(afterHoursResponse.data || {}) };
-      const llmPolicy = { ...DEFAULT_LLM_TOOL_POLICY, ...(llmPolicyResponse.data || {}) };
-      setVariableCatalog(variablesResponse.data || []);
-      setLlmToolCatalog(llmCatalogResponse.data || []);
-      setLlmToolPolicy(llmPolicy);
-      setLlmToolDraft(llmPolicy);
-      applyEmailBlocksResponse(emailBlocksResponse.data || EMPTY_EMAIL_BLOCKS);
-      setAfterHoursPolicy(policy);
-      setAfterHoursDraft(policy);
       setWorkflows(items);
-      setHealth(healthResponse.data || null);
+      setLoading(false);
       const requestedWorkflow = selectId ? items.find((item) => String(item.id) === String(selectId)) : null;
       const currentWorkflow = selected?.id ? items.find((item) => String(item.id) === String(selected.id)) : null;
       const isVisibleWorkflow = (workflow) => workflow && (showArchivedWorkflows ? Boolean(workflow.archivedAt) : !workflow.archivedAt);
@@ -7719,13 +7706,33 @@ export default function NotificationWorkflowsPanel({
         || (isVisibleWorkflow(currentWorkflow) ? currentWorkflow : null)
         || fallbackWorkflow
         || null;
-      if (nextWorkflow) {
-        await loadWorkflow(nextWorkflow.id, false);
-      } else {
-        setSelected(null);
-        setDraft(null);
-        setSelectedNodeId(null);
-      }
+      const selectedLoad = nextWorkflow
+        ? loadWorkflow(nextWorkflow.id, false)
+        : Promise.resolve().then(() => {
+          setSelected(null);
+          setDraft(null);
+          setSelectedNodeId('trigger');
+        });
+      const catalogsLoad = Promise.all([
+        notificationWorkflowAPI.health(),
+        notificationWorkflowAPI.variables(),
+        notificationWorkflowAPI.getEmailBlocks(),
+        notificationWorkflowAPI.getAfterHoursPolicy(),
+        notificationWorkflowAPI.getLlmToolCatalog(),
+        notificationWorkflowAPI.getLlmToolPolicy(),
+      ]).then(([healthResponse, variablesResponse, emailBlocksResponse, afterHoursResponse, llmCatalogResponse, llmPolicyResponse]) => {
+        const policy = { ...DEFAULT_AFTER_HOURS_POLICY, ...(afterHoursResponse.data || {}) };
+        const llmPolicy = { ...DEFAULT_LLM_TOOL_POLICY, ...(llmPolicyResponse.data || {}) };
+        setVariableCatalog(variablesResponse.data || []);
+        setLlmToolCatalog(llmCatalogResponse.data || []);
+        setLlmToolPolicy(llmPolicy);
+        setLlmToolDraft(llmPolicy);
+        applyEmailBlocksResponse(emailBlocksResponse.data || EMPTY_EMAIL_BLOCKS);
+        setAfterHoursPolicy(policy);
+        setAfterHoursDraft(policy);
+        setHealth(healthResponse.data || null);
+      });
+      await Promise.all([selectedLoad, catalogsLoad]);
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
     } finally {
@@ -7735,22 +7742,27 @@ export default function NotificationWorkflowsPanel({
 
   async function loadWorkflow(id, refreshList = true) {
     setMessage(null);
-    const response = await notificationWorkflowAPI.get(id);
-    const workflow = response.data;
-    setSelected(workflow);
-    setDraft(normalizeEditorDefinition(workflow.draftDefinition));
-    undoStackRef.current = [];
-    setUndoDepth(0);
-    setEdgeInsert(null);
-    setSelectedNodeId(null);
-    setPreview(null);
-    setPreviewError(null);
-    setPreviewTestResult(null);
-    setSelectedMockRun(null);
-    setMockAuditTestResult(null);
-    if (refreshList) {
-      const listResponse = await notificationWorkflowAPI.list();
-      setWorkflows(listResponse.data || []);
+    setSelectedLoading(true);
+    try {
+      const response = await notificationWorkflowAPI.get(id);
+      const workflow = response.data;
+      setSelected(workflow);
+      setDraft(normalizeEditorDefinition(workflow.draftDefinition));
+      undoStackRef.current = [];
+      setUndoDepth(0);
+      setEdgeInsert(null);
+      setSelectedNodeId(workflow.draftDefinition?.nodes?.[0]?.id || 'trigger');
+      setPreview(null);
+      setPreviewError(null);
+      setPreviewTestResult(null);
+      setSelectedMockRun(null);
+      setMockAuditTestResult(null);
+      if (refreshList) {
+        const listResponse = await notificationWorkflowAPI.list();
+        setWorkflows(listResponse.data || []);
+      }
+    } finally {
+      setSelectedLoading(false);
     }
   }
 
@@ -11659,7 +11671,9 @@ export default function NotificationWorkflowsPanel({
                           <Background gap={18} color={resolvedTheme === 'dark' ? '#283549' : '#e5e7eb'} />
                         </ReactFlow>
                       ) : (
-                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a workflow</div>
+                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                          {selectedLoading ? <><RefreshCw className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Loading workflow</> : 'Select a workflow'}
+                        </div>
                       )}
                       {draft && (
                         <button

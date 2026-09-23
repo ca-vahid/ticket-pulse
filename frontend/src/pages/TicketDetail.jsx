@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, CheckCheck, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -32,7 +32,8 @@ import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import CcChips from '../components/tickets/CcChips';
 import RecipientsLine, { seedReplyCc, ccSourceForReply } from '../components/tickets/RecipientsLine';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
-import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
+import RichTextEditor, { htmlToPlainText, isRichContent } from '../components/tickets/RichTextEditor';
+import SolutionNoteModal from '../components/tickets/SolutionNoteModal';
 import ComposerSignatureStrip from '../components/tickets/ComposerSignatureStrip';
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
@@ -41,7 +42,7 @@ import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
-  BrandArt, ExternalChip, MirrorBadge, OriginChip, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
+  BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, pipelineRunLabel,
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
@@ -881,16 +882,9 @@ export default function TicketDetail() {
   // block boundary as a blank line AND an empty <p><br></p> as its own line,
   // so two blank lines in the editor became six in the e-mail (each newline
   // is a <br> on the way out). Walk the blocks instead.
-  const htmlToText = (html) => {
-    const div = document.createElement('div');
-    div.innerHTML = String(html || '');
-    const blocks = [...div.children];
-    const allBlocks = blocks.length > 0 && blocks.every((el) => /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE)$/.test(el.tagName));
-    if (allBlocks) {
-      return blocks.map((el) => (el.innerText || el.textContent || '').replace(/\n+$/, '')).join('\n');
-    }
-    return div.innerText || div.textContent || '';
-  };
+  // One reader for every path (draft restore, templates, greeting) — the
+  // editor's own emit uses the same walker (QA 09-22 #1).
+  const htmlToText = (html) => htmlToPlainText(html);
   useEffect(() => {
     draftLoadedRef.current = false;
     ccSeededRef.current = false;
@@ -1606,6 +1600,33 @@ export default function TicketDetail() {
   // ---- Related tickets (accuracy-first): facts + clearly-labeled suggestions ----
   const [related, setRelated] = useState(null);
   const [dupeDismissed, setDupeDismissed] = useState(false);
+
+  // ---- Verified solutions in this category (QA 09-22 #6) ----
+  const [solutions, setSolutions] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSolutions(null);
+    ticketsAPI.solutions(ticketId)
+      .then((res) => { if (!cancelled) setSolutions(res.data); })
+      .catch(() => { if (!cancelled) setSolutions({ items: [], scope: null, hasCategory: false }); });
+    return () => { cancelled = true; };
+  }, [ticketId, ticket?.internalCategoryId, ticket?.internalSubcategoryId, ticket?.solutionVerifiedAt]);
+  const [solutionPrompt, setSolutionPrompt] = useState(null); // { note }
+  const setSolutionFlag = async (verified, note = null) => {
+    setSolutionPrompt(null);
+    setSavingField('solution');
+    try {
+      await ticketsAPI.setSolution(ticketId, { verified, note });
+      await fetchTicket({ silent: true });
+      showToast('emerald', verified
+        ? 'Marked as a verified solution — it now shows up for tickets in this category'
+        : 'Verified-solution mark removed');
+    } catch (err) {
+      showToast('red', err.response?.data?.message || err.message || 'Change failed');
+    } finally {
+      setSavingField(null);
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     setRelated(null);
@@ -1746,13 +1767,20 @@ export default function TicketDetail() {
       undo: () => ticketsAPI.setStatus(ticketId, prev),
     });
   };
-  const confirmResolveReason = ({ resolutionReason, resolutionNote }) => {
+  const confirmResolveReason = ({ resolutionReason, resolutionNote, verifiedSolution = false }) => {
     const { next, prev, field } = resolvePrompt;
     setResolvePrompt(null);
     applyChange(field, () => ticketsAPI.setStatus(ticketId, next, { resolutionReason, resolutionNote }), {
       label: `Status → ${next} · ${reasonLabel(resolutionReason)}`,
       undo: () => ticketsAPI.setStatus(ticketId, prev),
     });
+    // "Mark as a verified solution" on the resolve dialog (QA 09-22 #6): the
+    // note doubles as "what fixed it".
+    if (verifiedSolution) {
+      ticketsAPI.setSolution(ticketId, { verified: true, note: resolutionNote })
+        .then(() => fetchTicket({ silent: true }))
+        .catch(() => null);
+    }
   };
   const resolveTicket = () => changeStatusGated('Resolved', ticket?.status, 'resolve');
 
@@ -2023,6 +2051,7 @@ export default function TicketDetail() {
                       >
                         <PriorityBadge priority={ticket.priority} />
                         <StatusBadge status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
+                        {ticket.solutionVerifiedAt && <SolutionMark withLabel className="ml-1" />}
                       </div>
                       {canPickUp && (
                         <button
@@ -2175,6 +2204,32 @@ export default function TicketDetail() {
                       {savingField === 'noise' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="noise" />}
                       {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
                     </button>
+                    <button
+                      onClick={() => (ticket.solutionVerifiedAt
+                        ? setSolutionFlag(false)
+                        : setSolutionPrompt({ note: ticket.solutionNote || ticket.resolutionNote || '' }))}
+                      disabled={savingField === 'solution'}
+                      title={ticket.solutionVerifiedAt
+                        ? 'Remove the verified-solution mark'
+                        : 'Mark this ticket as a verified solution — it shows up for tickets in the same category'}
+                      className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                        ticket.solutionVerifiedAt
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
+                          : 'border-border bg-card text-muted-foreground hover:border-emerald-300 hover:text-emerald-700 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200'
+                      }`}
+                    >
+                      {savingField === 'solution' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" />}
+                      {ticket.solutionVerifiedAt ? 'Verified solution' : 'Mark as solution'}
+                    </button>
+                    {solutionPrompt && (
+                      <SolutionNoteModal
+                        ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
+                        initialNote={solutionPrompt.note}
+                        busy={savingField === 'solution'}
+                        onConfirm={(note) => setSolutionFlag(true, note)}
+                        onClose={() => setSolutionPrompt(null)}
+                      />
+                    )}
                     {canConverse && (
                       <MacroMenu
                         ticketId={ticketId}
@@ -3522,6 +3577,32 @@ export default function TicketDetail() {
                   />
                 </div>
 
+                {/* Verified solutions in this category (QA 09-22 #6) */}
+                {solutions?.items?.length > 0 && (
+                  <div className="tp-card rounded-xl p-4" data-testid="verified-solutions-card">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Lightbulb className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+                      <h2 className="text-sm font-bold text-foreground">Verified solutions</h2>
+                      <span className="text-[10px] text-muted-foreground/75">{solutions.scope === 'subcategory' ? 'same subcategory' : 'same category'}</span>
+                    </div>
+                    <ul className="space-y-1">
+                      {solutions.items.map((s) => (
+                        <li key={s.id}>
+                          <Link to={`/tickets/${s.id}`} className="tp-focus-ring block rounded-lg px-2 py-1.5 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10">
+                            <span className="flex items-center gap-2">
+                              <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{s.displayRef}</span>
+                              <span className="min-w-0 flex-1 text-xs font-medium text-foreground/85 truncate">{s.subject || '(no subject)'}</span>
+                            </span>
+                            {(s.solutionNote || s.resolutionNote) && (
+                              <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground line-clamp-2">{s.solutionNote || s.resolutionNote}</span>
+                            )}
+                            {s.solutionVerifiedBy && <span className="mt-0.5 block text-[10px] text-muted-foreground/70">verified by {s.solutionVerifiedBy}</span>}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {/* Related tickets: facts first, suggestions clearly labeled */}
                 {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed) || (related.similarByContent?.length > 0)) && (
                   <div className="tp-card rounded-xl p-4">

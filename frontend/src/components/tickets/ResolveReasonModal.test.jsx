@@ -29,7 +29,7 @@ describe('ResolveReasonModal', () => {
     fireEvent.click(screen.getByLabelText(/False positive/));
     fireEvent.change(screen.getByLabelText(/Note/), { target: { value: '  Consumer VPN on a BYOD phone. ' } });
     fireEvent.click(screen.getByRole('button', { name: /^Resolved$/ }));
-    expect(onConfirm).toHaveBeenCalledWith({ resolutionReason: 'false_positive', resolutionNote: 'Consumer VPN on a BYOD phone.' });
+    expect(onConfirm).toHaveBeenCalledWith({ resolutionReason: 'false_positive', resolutionNote: 'Consumer VPN on a BYOD phone.', verifiedSolution: false });
   });
 
   test('"Other" demands a note', () => {
