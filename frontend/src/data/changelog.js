@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.73-preview';
+export const APP_VERSION = '3.9.74-preview';
 
 export const changelog = [
+  {
+    version: '3.9.74-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Public API: fewer false "already a ticket" matches</strong> — being in the same office no longer lifts an unrelated ticket over the "likely" line on its own, and batch searches answer faster.' },
+    ],
+  },
   {
     version: '3.9.73-preview',
     date: 'September 23, 2026',

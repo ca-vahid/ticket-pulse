@@ -2,7 +2,7 @@
 
 **For:** the ContinuIT team (office check-ins), moving from FreshService to Ticket Pulse.
 **Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
-**Ticket Pulse version:** 3.9.73 (23 Sep 2026; search added — §11). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
+**Ticket Pulse version:** 3.9.74 (23 Sep 2026; search §11, score model 2026-09-23b). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
 ---
 
@@ -207,7 +207,7 @@ Every field except `text` is optional, with the defaults you proposed. The respo
               "externalRef": null, "externalReferences": [{ "system": "FRESHSERVICE", "id": "243301" }],
               "url": "https://ticketpulse.bgcsaas.com/tickets/45790",
               "snippet": "first ~200 characters of the description" } ],
-  "meta": { "scoreModel": "2026-09-23", "thresholds": { "likely": 0.7, "possible": 0.6 },
+  "meta": { "scoreModel": "2026-09-23b", "thresholds": { "likely": 0.7, "possible": 0.6 },
             "semantic": true, "candidates": 980, "embedded": 980, "truncated": false, "tookMs": 310 } }
 ```
 
@@ -237,6 +237,10 @@ On a fresh run of 30 meeting-style paraphrases and 15 unrelated IT items, which 
 
 The unrelated items that score high are nearly always same-office work in a neighbouring area, for example "replace the UPS batteries in the Kelowna network closet" against "Kelowna office firewall replacement". Your **Not the same** button is the right answer to those. We recommend prompting at 0.6 as you planned, and wording the card as a question.
 
+**Score model 2026-09-23b (3.9.74, after your acceptance run).** Being in the same office can still raise a score, but it can no longer carry a ticket over 0.7 on its own. On the calibration set, this took unrelated sentences at 0.7 or more from 5 of 45 to 1 of 45, and true matches from 90 to 88 of 120. The 0.6 line did not change.
+
+It does not fix your Kelowna example, and we'd rather say so. Without any office boost, "UPS batteries in the Kelowna network closet" against "Kelowna office firewall replacement" already scores about 0.78. The raw similarity is only moderate (0.60), but that ticket stands out sharply from every other open IT ticket, because it is the only Kelowna network job. A rule strict enough to catch it would also drop real matches, so the "Not the same" button stays the right answer here. Your other two borderline examples ("Anton workload export" and "Azure VM failover test") are in our set for the next calibration.
+
 `score` is comparable across calls as long as `meta.scoreModel` stays the same. If we ever re-calibrate, the version changes and we will tell you first.
 
 ### 11.3 `POST /api/v1/search/similar/batch` (Request 2)
@@ -256,6 +260,7 @@ Up to 20 items; keys must be unique; the options are shared. One embedding reque
 - **First call after a restart** also loads the ticket vectors, so allow about a second more.
 - **Rate limit:** 120 requests per minute per credential, as before.
 - **Repeated texts** are cached, so calling again for the same sentence is cheap.
+- **Batches:** from 3.9.74 the keyword lookups run four items at a time. A 20-item batch measured 2.5 s from outside Azure, against your 4.3 s inside Azure on 3.9.73.
 - **Statuses:** the default is open plus pending, about a thousand IT tickets. Resolved and closed history runs to about 21,000 tickets. Pass `updatedFrom` with those statuses; at most the 5,000 most recently updated tickets are compared, and `meta.truncated` tells you when that cap was hit.
 
 ### 11.5 Keyword search over more than the subject (Request 3)
@@ -285,6 +290,7 @@ PATCH /api/v1/tickets/TP-1591               { "customFields": { "continuit_task_
 - **Webhooks for linked tickets.** Subscription #7 now also delivers events for tickets tagged `continuit`, alongside tickets whose `externalRef` starts with `continuit:`. A linked ticket's status changes, assignments and notes therefore reach you like your own tickets do.
 - **Reconciliation.** Your 30-minute sweep should add `GET /tickets?tag=continuit&updatedFrom=…` to the `externalRefPrefix=continuit:` query.
 - **What doesn't change.** Tickets you create keep `externalRef = continuit:task:<id>` as now. Linking is only for tickets that already existed.
+- **Status on a linked FreshService-born ticket (`#<fsid>`).** Not through the API yet. `PATCH …/tickets/#241396 {"status": …}` returns 400, because FreshService owns those fields and Ticket Pulse only writes assignments and replies back to it. When a meeting reports the work done, add a private note to the ticket (`POST …/notes` with your `agent` label) so the assigned agent sees it and resolves it. Keep any status write for those tickets on your FreshService lane until the legacy lane empties. Status through the API works as normal on Ticket Pulse-born tickets (`TP-…`), including ones you linked to.
 
 ### 11.7 Your acceptance test
 
