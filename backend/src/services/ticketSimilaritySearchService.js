@@ -37,7 +37,12 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 
 export const SCORE_MODEL = Object.freeze({
-  version: '2026-09-23',
+  // 2026-09-23b: office agreement alone can no longer carry a score over
+  // "likely" (ContinuIT acceptance: Kelowna UPS batteries vs Kelowna
+  // firewall scored 0.83). On the calibration set this took unrelated
+  // phrases >= 0.7 from 5/45 to 1/45 for 90 -> 88/120 true matches; the 0.6
+  // line is unchanged.
+  version: '2026-09-23b',
   weights: Object.freeze({ cosine: 4.4, z: 1.91, gap: 8.72, officeMatch: 0.54, officeConflict: -1.38 }),
   bias: -8.43,
   thresholds: Object.freeze({ likely: 0.7, possible: 0.6 }),
@@ -121,8 +126,15 @@ export function keywordQuery(text) {
  */
 export function semanticScore({ cosine, z, gap, officeMatch = false, officeConflict = false }) {
   const w = SCORE_MODEL.weights;
-  const logit = w.cosine * cosine + w.z * z + w.gap * Math.max(gap, -0.2)
-    + (officeMatch ? w.officeMatch : 0) + (officeConflict ? w.officeConflict : 0) + SCORE_MODEL.bias;
+  const base = w.cosine * cosine + w.z * z + w.gap * Math.max(gap, -0.2)
+    + (officeConflict ? w.officeConflict : 0) + SCORE_MODEL.bias;
+  if (officeMatch) {
+    // Same office may lift a score, but never across "likely" on its own.
+    const withOffice = sigmoid(base + w.officeMatch);
+    const without = sigmoid(base);
+    return without < SCORE_MODEL.thresholds.likely ? Math.min(withOffice, SCORE_MODEL.thresholds.likely - 0.01) : withOffice;
+  }
+  const logit = base;
   return sigmoid(logit);
 }
 
@@ -374,11 +386,20 @@ class TicketSimilaritySearchService {
         scored.sort((a, b) => b.s - a.s);
         shortlist = scored.slice(0, SEMANTIC_SHORTLIST);
       }
-      const [kw, refIds] = await Promise.all([
-        this._keywordHits(workspaceId, opts, statusNames, items[n].text),
-        this._referenceHits(workspaceId, items[n].text),
-      ]);
-      perItem.push({ shortlist, mean, sd, kw, refIds });
+      perItem.push({ shortlist, mean, sd, kw: [], refIds: [] });
+    }
+    // Keyword + reference lookups, four items at a time: a batch of 20 ran
+    // them one after another (4.3 s in ContinuIT's acceptance run). Four
+    // keeps the 9-connection pool free for everyone else.
+    for (let start = 0; start < items.length; start += 4) {
+      await Promise.all(items.slice(start, start + 4).map(async (item, k) => {
+        const [kw, refIds] = await Promise.all([
+          this._keywordHits(workspaceId, opts, statusNames, item.text),
+          this._referenceHits(workspaceId, item.text),
+        ]);
+        perItem[start + k].kw = kw;
+        perItem[start + k].refIds = refIds;
+      }));
     }
 
     // Load every ticket any item may return, once.

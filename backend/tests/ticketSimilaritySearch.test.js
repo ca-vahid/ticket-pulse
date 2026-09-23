@@ -96,6 +96,18 @@ describe('pure helpers', () => {
     expect(semanticScore({ ...base, gap: 0.15 })).toBeGreaterThan(semanticScore(base));
     expect(semanticScore({ ...base, officeConflict: true })).toBeLessThan(semanticScore(base));
     expect(semanticScore({ ...base, officeMatch: true })).toBeGreaterThan(semanticScore(base));
+  });
+
+  test('office agreement alone cannot carry a score over "likely" (2026-09-23b)', () => {
+    // Below the line without the office: capped just under it.
+    const weak = { cosine: 0.6, z: 3, gap: 0.05 };
+    expect(semanticScore(weak)).toBeLessThan(SCORE_MODEL.thresholds.likely);
+    expect(semanticScore({ ...weak, officeMatch: true })).toBeLessThan(SCORE_MODEL.thresholds.likely);
+    expect(semanticScore({ ...weak, officeMatch: true })).toBeGreaterThanOrEqual(semanticScore(weak));
+    // Already over the line without it: the office still adds.
+    const strong = { cosine: 0.75, z: 4.5, gap: 0.15 };
+    expect(semanticScore(strong)).toBeGreaterThan(SCORE_MODEL.thresholds.likely);
+    expect(semanticScore({ ...strong, officeMatch: true })).toBeGreaterThan(semanticScore(strong));
     // A typical unrelated best match (raw 0.55, z 2, gap 0.01) stays under "possible".
     expect(semanticScore({ cosine: 0.55, z: 2, gap: 0.01 })).toBeLessThan(SCORE_MODEL.thresholds.possible);
   });
