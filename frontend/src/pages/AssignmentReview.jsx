@@ -4409,7 +4409,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
     primaryProvider: 'anthropic',
     primaryModel: 'claude-sonnet-5',
     fallbackProvider: 'openai',
-    fallbackModel: 'gpt-5.6-sol',
+    fallbackModel: 'gpt-6-sol',
     autoFallbackEnabled: true,
     fallbackMode: 'retry_safe_checkpoint',
   };
@@ -4471,7 +4471,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
       <button
         type="button"
         onClick={() => {
-          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.6-sol' : 'claude-sonnet-5');
+          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-6-sol' : 'claude-sonnet-5');
           updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
         }}
         className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200' : 'bg-card border-border text-muted-foreground hover:bg-muted/50'}`}

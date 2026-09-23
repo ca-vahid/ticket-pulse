@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.70-preview';
+export const APP_VERSION = '3.9.71-preview';
 
 export const changelog = [
+  {
+    version: '3.9.71-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>GPT-6 Sol and GPT-6 Luna</strong> \u2014 OpenAI\u2019s new models are available under Settings \u2192 AI &amp; Routing. GPT-6 Sol is the default OpenAI model and replaces GPT-5.6 Sol (and the older GPT-5.5 choice) everywhere it was selected, at well under half the price; GPT-6 Luna is the new economy option for drafting. Assignment still runs on Claude Sonnet 5 \u2014 moving it is a separate, tested decision.' },
+    ],
+  },
   {
     version: '3.9.70-preview',
     date: 'September 23, 2026',

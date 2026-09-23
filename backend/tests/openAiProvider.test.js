@@ -17,7 +17,7 @@ jest.unstable_mockModule('../src/config/index.js', () => ({
   default: {
     openai: {
       apiKey: 'test-openai-key',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     },
   },
 }));
@@ -91,14 +91,14 @@ describe('OpenAiProvider streaming tool responses', () => {
       systemPrompt: 'Assign the ticket.',
       messages: [{ role: 'user', content: 'Ticket 123' }],
       tools: [{ name: 'get_ticket_details', input_schema: { type: 'object', properties: {} } }],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       onText,
       onThinking,
       onInputJson,
     });
 
     expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       include: ['reasoning.encrypted_content'],
       tools: [expect.objectContaining({ name: 'get_ticket_details' })],
     }), undefined);
@@ -138,7 +138,7 @@ describe('OpenAiProvider streaming tool responses', () => {
       systemPrompt: 'Assign the ticket.',
       messages: [{ role: 'user', content: 'Ticket 123' }],
       tools: [],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       onText,
     });
 
@@ -179,7 +179,7 @@ describe('OpenAiProvider streaming tool responses', () => {
       systemPrompt: 'Write notification copy.',
       messages: [{ role: 'user', content: 'Ticket 27883' }],
       tools: [{ name: 'find_similar_tickets', input_schema: { type: 'object', properties: {} } }],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     });
 
     await provider.toolResponse({
@@ -199,7 +199,7 @@ describe('OpenAiProvider streaming tool responses', () => {
         },
       ],
       tools: [{ name: 'find_similar_tickets', input_schema: { type: 'object', properties: {} } }],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     });
 
     const continuationInput = streamMock.mock.calls[1][0].input;
@@ -234,7 +234,7 @@ describe('OpenAiProvider JSON responses', () => {
     const result = await provider.sendJson({
       systemPrompt: 'Classify the ticket.',
       userMessage: '{"ticketId":123}',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     });
 
     expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -272,7 +272,7 @@ describe('OpenAiProvider JSON responses - multimodal input (Phase AF)', () => {
         { type: 'image', source: { type: 'url', url: 'https://example.com/shot.jpg' } },
         { type: 'text', text: 'Pasted material here.' },
       ],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     });
 
     const body = createMock.mock.calls[0][0];
@@ -296,7 +296,7 @@ describe('OpenAiProvider JSON responses - multimodal input (Phase AF)', () => {
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' } },
         { type: 'text', text: 'Return the JSON object described.' },
       ],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     });
     const content = createMock.mock.calls[0][0].input[0].content;
     expect(content.filter((part) => part.type === 'input_text')).toEqual([
@@ -309,7 +309,7 @@ describe('OpenAiProvider JSON responses - multimodal input (Phase AF)', () => {
     await provider.sendJson({
       systemPrompt: 's',
       userMessage: [{ type: 'image', source: { type: 'base64', media_type: 'image/webp', data: 'CCCC' } }],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     });
     const content = createMock.mock.calls[0][0].input[0].content;
     expect(content).toEqual([
@@ -323,19 +323,19 @@ describe('OpenAiProvider JSON responses - multimodal input (Phase AF)', () => {
     await expect(provider.sendJson({
       systemPrompt: 's',
       userMessage: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'x' } }],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     })).rejects.toThrow(/Unsupported OpenAI input block type: document/);
     await expect(provider.sendJson({
       systemPrompt: 's',
       userMessage: [{ type: 'image', source: { type: 'base64', media_type: 'image/png' } }],
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
     })).rejects.toThrow(/Unsupported OpenAI image block/);
     expect(createMock).not.toHaveBeenCalled();
   });
 
   test('plain-string JSON input keeps the legacy string shape', async () => {
     const provider = new OpenAiProvider();
-    await provider.sendJson({ systemPrompt: 's', userMessage: 'Classify this', model: 'gpt-5.6-sol' });
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'Classify this', model: 'gpt-6-sol' });
     expect(createMock.mock.calls[0][0].input).toEqual([{ role: 'user', content: 'Return JSON only.\n\nClassify this' }]);
   });
 });

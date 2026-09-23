@@ -29,9 +29,12 @@ export const AI_OPERATIONS = [
 // in the settings dropdown for opt-back.
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
 export const SONNET_4_6_MODEL = 'claude-sonnet-4-6';
-// GPT-5.6 Sol (Jul 2026): OpenAI's flagship, successor to gpt-5.5 in the
-// default slot ($5/M in, $30/M out — complex reasoning/coding/agentic tier).
-export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
+// GPT-6 Sol (released 22 Sep 2026, verified 23 Sep against the prod key: tool
+// call + history replay + image input through OpenAiProvider). $2/M in, $10/M
+// out, cached reads 90% off and no cache-write fee — the default OpenAI slot,
+// replacing GPT-5.6 Sol ($5/$30).
+export const DEFAULT_OPENAI_MODEL = 'gpt-6-sol';
+export const OPENAI_ECONOMY_MODEL = 'gpt-6-luna';
 export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
 export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
 
@@ -45,8 +48,13 @@ const LEGACY_MODEL_ALIASES = new Map([
   ['gpt-5', DEFAULT_OPENAI_MODEL],
   ['gpt-5-mini', DEFAULT_OPENAI_MODEL],
   ['gpt-5-nano', DEFAULT_OPENAI_MODEL],
-  // Saved settings created while gpt-5.5 was the default migrate silently.
+  // Saved settings created while gpt-5.5 / gpt-5.6-sol were the default read
+  // as GPT-6 Sol (23 Sep 2026). The settings rows themselves are rewritten by
+  // scripts/migrate-openai-models-gpt6.mjs so Settings shows what runs.
   ['gpt-5.5', DEFAULT_OPENAI_MODEL],
+  ['gpt-5.6-sol', DEFAULT_OPENAI_MODEL],
+  // gpt-5.6-luna is NOT aliased: it runs as ws2's assignment fallback and Luna 6
+  // has not been shadow-tested on assignment (plans/AI_MODEL_COST_PLAN.md §3).
 ]);
 
 export const MODEL_METADATA = [
@@ -103,20 +111,32 @@ export const MODEL_METADATA = [
   {
     provider: AI_PROVIDER_OPENAI,
     model: DEFAULT_OPENAI_MODEL,
-    label: 'GPT-5.6 Sol',
+    label: 'GPT-6 Sol',
     operations: AI_OPERATIONS,
     supportsStreaming: false,
     supportsTools: true,
     supportsJson: true,
     supportsThinking: true,
-    // Text + image input per the OpenAI model page (Responses `input_image`).
+    // Image input verified live 23 Sep 2026 (Responses `input_image`).
     supportsVision: true,
-    costNotes: 'Default OpenAI fallback model (flagship tier, successor to GPT-5.5). Tune reasoning effort instead of selecting a separate pro model.',
+    costNotes: 'Default OpenAI model: roughly Sonnet-class on business workflows at about two-thirds the price ($2/M in, $10/M out, cached reads 90% off, no cache-write fee). Replaces GPT-5.6 Sol.',
+  },
+  {
+    provider: AI_PROVIDER_OPENAI,
+    model: OPENAI_ECONOMY_MODEL,
+    label: 'GPT-6 Luna (Economy)',
+    operations: AI_OPERATIONS,
+    supportsStreaming: false,
+    supportsTools: true,
+    supportsJson: true,
+    supportsThinking: true,
+    supportsVision: true,
+    costNotes: 'Economy model ($0.10/M in, $0.50/M out): drafting and classification. Not for assignment until shadow-tested — GPT-5.6 Luna over-dismissed invoices as noise (Aug 2026).',
   },
   {
     provider: AI_PROVIDER_OPENAI,
     model: 'gpt-5.6-luna',
-    label: 'GPT-5.6 Luna (Economy)',
+    label: 'GPT-5.6 Luna (legacy economy)',
     operations: AI_OPERATIONS,
     supportsStreaming: false,
     supportsTools: true,
