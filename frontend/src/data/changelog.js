@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.72-preview';
+export const APP_VERSION = '3.9.73-preview';
 
 export const changelog = [
+  {
+    version: '3.9.73-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Public API: "is there already a ticket for this?"</strong> — integrations such as ContinuIT can send a sentence and get back the open tickets that describe the same work, best first, with a calibrated likeness score. It understands rephrasings, exact names like BGC1, and TP- or # ticket numbers, and it covers FreshService tickets too. A batch form handles a whole meeting in one call.' },
+      { type: 'added', html: '<strong>Public API: search descriptions and conversations</strong> — the ticket search can now look beyond the subject, into the description and the conversation, with subject matches first.' },
+      { type: 'added', html: '<strong>Webhooks: tickets carrying a tag</strong> — a webhook limited to one integration’s tickets can also include tickets carrying a chosen tag, so tickets it linked to (rather than created) report their changes too. Set it when creating the webhook in Settings → API keys & webhooks.' },
+      { type: 'fixed', html: '<strong>Approvals: picking two statuses emptied the list</strong> — choosing more than one status in the Approvals status menu now shows approvals in any of them.' },
+    ],
+  },
   {
     version: '3.9.72-preview',
     date: 'September 23, 2026',

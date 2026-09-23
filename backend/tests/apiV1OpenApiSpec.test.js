@@ -168,3 +168,16 @@ describe('OpenAPI spec + docs — cf_* list filters (Phase 2)', () => {
     expect(page).toMatch(/case-insensitive contains/);
   });
 });
+
+describe('OpenAPI spec — ContinuIT search (23 Sep 2026)', () => {
+  test('similar search, batch, in= and one-tag routes are documented', () => {
+    expect(spec.paths['/search/similar'].post).toBeDefined();
+    expect(spec.paths['/search/similar/batch'].post).toBeDefined();
+    expect(spec.paths['/search/tickets'].get.parameters.map((p) => p.name)).toEqual(expect.arrayContaining(['query', 'in', 'limit']));
+    expect(spec.paths['/tickets/{id}/tags'].post).toBeDefined();
+    expect(spec.paths['/tickets/{id}/tags/{tag}'].delete).toBeDefined();
+    expect(schemas.SimilarHit.properties.matchedOn.enum).toEqual(['semantic', 'keyword', 'both']);
+    expect(schemas.SimilarMeta.properties.thresholds).toBeDefined();
+    expect(schemas.SimilarSearchOptions.properties.limit.maximum).toBe(20);
+  });
+});

@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 const prismaMock = {
   ticket: { findUnique: jest.fn().mockResolvedValue(null) },
+  ticketTagLink: { findFirst: jest.fn().mockResolvedValue(null) },
   webhookSubscription: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
@@ -205,5 +206,39 @@ describe('externalRefPrefix filter (ContinuIT D2)', () => {
     dispatchWebhookEvent(1, 'ticket.parent_changed', { parent: { id: 1, externalRef: 'continuit:p' }, child: { id: 2, externalRef: null } });
     await flush();
     expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('matchTag filter (ContinuIT search, 23 Sep 2026)', () => {
+  const TAGGED = { ...SUB, id: 3, externalRefPrefix: 'continuit:', matchTag: 'continuit', events: ['ticket.created', 'task.created'] };
+
+  test('a linked ticket (someone else\'s externalRef) is delivered when its payload carries the tag', async () => {
+    prismaMock.webhookSubscription.findMany.mockResolvedValue([TAGGED]);
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 9, externalRef: null, tags: ['ContinuIT', 'vpn'] } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.ticketTagLink.findFirst).not.toHaveBeenCalled();
+  });
+
+  test('a payload without the tag is confirmed on the row: tagged → delivered, untagged → not', async () => {
+    prismaMock.webhookSubscription.findMany.mockResolvedValue([TAGGED]);
+    prismaMock.ticketTagLink.findFirst.mockResolvedValueOnce({ ticketId: 10 });
+    dispatchWebhookEvent(1, 'task.created', { ticket: { id: 10, externalRef: '#241406' } });
+    await flush();
+    expect(prismaMock.ticketTagLink.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { ticketId: 10, tag: { name: { equals: 'continuit', mode: 'insensitive' } } } }));
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+
+    prismaMock.ticketTagLink.findFirst.mockResolvedValueOnce(null);
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 11, externalRef: null, tags: [] } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  test('the prefix still wins on its own, without a tag lookup', async () => {
+    prismaMock.webhookSubscription.findMany.mockResolvedValue([TAGGED]);
+    dispatchWebhookEvent(1, 'ticket.created', { ticket: { id: 12, externalRef: 'continuit:task:1', tags: [] } });
+    await flush();
+    expect(prismaMock.webhookDelivery.createMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.ticketTagLink.findFirst).not.toHaveBeenCalled();
   });
 });

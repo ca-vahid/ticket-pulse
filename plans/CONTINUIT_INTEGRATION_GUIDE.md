@@ -2,7 +2,7 @@
 
 **For:** the ContinuIT team (office check-ins), moving from FreshService to Ticket Pulse.
 **Answers:** "ContinuIT ↔ Ticket Pulse — Integration request", rev. 2, 15 Sep 2026. Section letters below (A, R, B, C, D, E, F) are yours. `plans/SIMORGH_INTEGRATION_GUIDE.md` stays the long-form reference for anything not repeated here.
-**Ticket Pulse version:** 3.9.55 (19 Sep 2026). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
+**Ticket Pulse version:** 3.9.73 (23 Sep 2026; search added — §11). **Status:** live in IT. Decision from Vahid: **no sandbox round — go straight to IT.** The sandbox workspace exists if you ever want a scratch space, but acceptance happens on real tickets.
 
 ---
 
@@ -178,3 +178,114 @@ A check-in that produces several tasks can be **one parent with children**. `POS
 ## 10. Hand-over (out of band)
 
 IT `client_id` + `client_secret`, webhook signing secret. Sandbox pair from 19 Sep still valid if wanted.
+
+## 11. Finding a ticket that already exists (search request, 23 Sep 2026)
+
+Your "ticket search for meeting follow-ups" request is live in IT. Requests 1, 2 and 3 are all built. Nothing new is needed on the credential: `search:read` is already in your scopes.
+
+### 11.1 `POST /api/v1/search/similar`
+
+```http
+POST /api/v1/search/similar
+{ "text": "Replace the failing firewall at the Fredericton office once the shipment arrives",
+  "limit": 5, "minScore": 0.5,
+  "status": ["open", "pending"],
+  "updatedFrom": "2026-06-01",
+  "excludeExternalRefPrefix": "continuit:",
+  "requesterEmail": "om@bgcengineering.ca",
+  "department": "Fredericton" }
+```
+
+Every field except `text` is optional, with the defaults you proposed. The response is exactly your shape, best first, plus `office` (the requester's Entra office) and a `meta` block:
+
+```json
+{ "data": [ { "id": 45790, "ref": "TP-1591", "subject": "Fredericton firewall replacement",
+              "status": "Open", "baseStatus": "open", "score": 0.82, "matchedOn": "semantic",
+              "requester": { "name": "…", "email": "…" }, "assignee": { "name": "…", "email": "…" },
+              "department": "…", "office": "Fredericton",
+              "createdAt": "…", "updatedAt": "…", "dueBy": null,
+              "externalRef": null, "externalReferences": [{ "system": "FRESHSERVICE", "id": "243301" }],
+              "url": "https://ticketpulse.bgcsaas.com/tickets/45790",
+              "snippet": "first ~200 characters of the description" } ],
+  "meta": { "scoreModel": "2026-09-23", "thresholds": { "likely": 0.7, "possible": 0.6 },
+            "semantic": true, "candidates": 980, "embedded": 980, "truncated": false, "tookMs": 310 } }
+```
+
+How it ranks:
+
+- **Semantic.** Your text is embedded with the same model as the stored ticket vectors (subject + description).
+- **Keyword.** Postgres full-text search on subject and description. This is what catches exact names like "BGC1" or "A82". A mixed letter-and-digit token that appears in a ticket lifts it to at least 0.75.
+- **References.** `TP-1591` or `#241406` in the text returns that ticket with score 1.
+- **Tickets without a vector** are still found by the keyword half. They come back as `matchedOn: "keyword"`, capped at 0.6.
+- **FreshService-born tickets** are included, with `externalReferences` filled. Every open IT ticket now has a vector: we embedded the 626 open FreshService tickets that were missing one, and the nightly job now covers every open ticket regardless of age.
+- **`department`** is treated as an office name. The same office named in your text and in the ticket lifts the score. A different named office lowers it. It is never a filter.
+- **`requesterEmail`** adds 0.05 when it matches. It is never a filter.
+
+### 11.2 What the score means (please read before setting thresholds)
+
+`score` is calibrated, not raw cosine similarity. With these embeddings every IT ticket "sounds like" every other one: unrelated IT phrases reach 0.55–0.70 raw cosine, so a raw threshold cannot tell "same work" from "same kind of work". The score blends how close the ticket is, how far it stands out from the rest of the open tickets, how far it leads the runner-up, and whether the offices agree. It was fitted on 165 meeting-style sentences against the 588 open IT tickets and checked on held-out data:
+
+| Your threshold | True matches flagged (in the top 3) | Unrelated sentences flagged |
+|---|---|---|
+| 0.6 ("worth asking") | about 80% | about 20% |
+| 0.7 ("likely the same work") | about 75% | about 10% |
+
+On a fresh run of 30 meeting-style paraphrases and 15 unrelated IT items, which the fit never saw:
+- All 30 paraphrases had the right ticket in the top 3, and 28 had it first.
+- 29 of the 30 scored 0.6 or more.
+- 3 of the 15 unrelated items scored 0.6 or more.
+
+The unrelated items that score high are nearly always same-office work in a neighbouring area, for example "replace the UPS batteries in the Kelowna network closet" against "Kelowna office firewall replacement". Your **Not the same** button is the right answer to those. We recommend prompting at 0.6 as you planned, and wording the card as a question.
+
+`score` is comparable across calls as long as `meta.scoreModel` stays the same. If we ever re-calibrate, the version changes and we will tell you first.
+
+### 11.3 `POST /api/v1/search/similar/batch` (Request 2)
+
+```http
+POST /api/v1/search/similar/batch
+{ "items": [ { "key": "extracted-1", "text": "…" }, { "key": "extracted-2", "text": "…" } ],
+  "limit": 3, "minScore": 0.55 }
+→ { "data": { "extracted-1": [ …hits… ], "extracted-2": [] }, "meta": { … } }
+```
+
+Up to 20 items; keys must be unique; the options are shared. One embedding request serves the whole batch, so one meeting review costs one call.
+
+### 11.4 Speed and limits
+
+- **Timings measured** from outside Azure against production: median 0.4 s, worst 1.0 s for a single search, and 1.6 s for a batch of 10. Inside Azure it is faster.
+- **First call after a restart** also loads the ticket vectors, so allow about a second more.
+- **Rate limit:** 120 requests per minute per credential, as before.
+- **Repeated texts** are cached, so calling again for the same sentence is cheap.
+- **Statuses:** the default is open plus pending, about a thousand IT tickets. Resolved and closed history runs to about 21,000 tickets. Pass `updatedFrom` with those statuses; at most the 5,000 most recently updated tickets are compared, and `meta.truncated` tells you when that cap was hit.
+
+### 11.5 Keyword search over more than the subject (Request 3)
+
+`GET /api/v1/search/tickets?query=lenovo calgary&in=subject,description,conversations&limit=25`
+
+- Full-text search with English stemming. Subject hits rank first, then description, then conversation text.
+- `limit` goes up to 50. There is no cursor in this mode.
+- `conversations` needs `conversations:read`, which you have.
+- Without `in`, the old substring search on subject, requester and number is unchanged.
+
+### 11.6 Linking a task to an existing ticket — use a tag and a custom field, not `externalRef`
+
+Your document proposed setting `externalRef = continuit:task:<id>` on the ticket you link to. That will fail more often than it works:
+- `externalRef` is set once. A ticket that already has one returns 409 `external_ref_immutable`, and every Simorgh ticket and every ticket you created already has one.
+- One ref names one ticket, so two meetings could never link to the same ticket.
+
+Link like this instead:
+
+```http
+POST  /api/v1/tickets/TP-1591/tags          { "name": "continuit" }
+PATCH /api/v1/tickets/TP-1591               { "customFields": { "continuit_task_ids": "6d129c88,9a1f03bb" } }
+```
+
+- **Adding the tag.** `POST …/tags` adds one tag and keeps the ones already there. `PUT …/tags` replaces the whole set, so never use it on a ticket someone else tags. `DELETE /api/v1/tickets/{id}/tags/continuit` removes just that tag when you unlink.
+- **Recording the task ids.** `continuit_task_ids` is a plain text field holding a comma-separated list of your task ids. Your trusted credential creates the field on first write. Read the current value from `GET /tickets/{id}`, then write the new list.
+- **Webhooks for linked tickets.** Subscription #7 now also delivers events for tickets tagged `continuit`, alongside tickets whose `externalRef` starts with `continuit:`. A linked ticket's status changes, assignments and notes therefore reach you like your own tickets do.
+- **Reconciliation.** Your 30-minute sweep should add `GET /tickets?tag=continuit&updatedFrom=…` to the `externalRefPrefix=continuit:` query.
+- **What doesn't change.** Tickets you create keep `externalRef = continuit:task:<id>` as now. Linking is only for tickets that already existed.
+
+### 11.7 Your acceptance test
+
+Every step of your plan works as written. Before you run steps 1 and 2 with your own phrases, expect the following. Step 1 should pass at 0.6. Step 2 ("none above 0.5") will fail for some phrases if they are same-office neighbours of a real ticket (see 11.2). In that case the question to ask is whether the top hit was a reasonable "is this it?", not whether the score stayed low.

@@ -86,7 +86,8 @@ describe('ticketMergeService.merge', () => {
     expect(prismaMock.ticketLink.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({ kind: 'merged_into', ticketId: 10, relatedTicketId: 20 }),
     }));
-    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(10, 1, 'Closed', expect.anything());
+    // Since Simorgh Phase B the merged source closes as a duplicate with a note naming the survivor.
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(10, 1, 'Closed', expect.anything(), { resolutionReason: 'duplicate', resolutionNote: 'Merged into TP-20' });
     expect(activityMock.create).toHaveBeenCalledTimes(2);
   });
 

@@ -203,6 +203,45 @@ const T = {
       agent: { type: 'string', maxLength: 60, nullable: true, description: 'Display name of the sub-agent for that stage, e.g. "Rostam". Notes only.' },
     },
   },
+  SimilarSearchOptions: {
+    type: 'object',
+    properties: {
+      limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 },
+      minScore: { type: 'number', minimum: 0, maximum: 1, default: 0.5 },
+      status: { type: 'array', items: { type: 'string', enum: ['open', 'pending', 'resolved', 'closed'] }, default: ['open', 'pending'], description: 'Base statuses. Resolved/closed history is large — pair it with updatedFrom.' },
+      updatedFrom: { type: 'string', format: 'date-time' },
+      excludeExternalRefPrefix: { type: 'string', description: 'Skip tickets whose externalRef starts with this (e.g. continuit:).' },
+      requesterEmail: { type: 'string', format: 'email', description: 'Boost (+0.05) for tickets from this requester; not a filter.' },
+      department: { type: 'string', description: 'Office name (e.g. Fredericton). Same office lifts the score, a different named office lowers it; not a filter.' },
+    },
+  },
+  SimilarSearch: { allOf: [{ type: 'object', required: ['text'], properties: { text: { type: 'string', minLength: 3, maxLength: 4000 } } }, { $ref: '#/components/schemas/SimilarSearchOptions' }] },
+  SimilarHit: {
+    type: 'object',
+    properties: {
+      id: { type: 'integer' }, ref: { type: 'string', example: 'TP-1591' }, subject: { type: 'string' },
+      status: { type: 'string' }, baseStatus: { type: 'string', enum: ['open', 'pending', 'resolved', 'closed'] },
+      score: { type: 'number', description: 'Calibrated 0–1, comparable across calls for the same meta.scoreModel.' },
+      matchedOn: { type: 'string', enum: ['semantic', 'keyword', 'both'] },
+      requester: { type: 'object', nullable: true, properties: { name: { type: 'string' }, email: { type: 'string' } } },
+      assignee: { type: 'object', nullable: true, properties: { name: { type: 'string' }, email: { type: 'string', nullable: true } } },
+      department: { type: 'string', nullable: true }, office: { type: 'string', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+      dueBy: { type: 'string', format: 'date-time', nullable: true },
+      externalRef: { type: 'string', nullable: true },
+      externalReferences: { type: 'array', items: { type: 'object', properties: { system: { type: 'string' }, id: { type: 'string' } } } },
+      url: { type: 'string' }, snippet: { type: 'string', nullable: true },
+    },
+  },
+  SimilarMeta: {
+    type: 'object',
+    properties: {
+      scoreModel: { type: 'string', example: '2026-09-23' },
+      thresholds: { type: 'object', properties: { likely: { type: 'number', example: 0.7 }, possible: { type: 'number', example: 0.6 } } },
+      semantic: { type: 'boolean', description: 'false = embeddings were unavailable for this call; keyword and references only.' },
+      candidates: { type: 'integer' }, embedded: { type: 'integer' }, truncated: { type: 'boolean' }, tookMs: { type: 'integer' },
+    },
+  },
   Contact: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, department: { type: 'string', nullable: true }, jobTitle: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, unattended: { type: 'boolean' } } },
   Task: { type: 'object', properties: { id: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string', nullable: true }, status: { type: 'string', enum: ['open', 'in_progress', 'done'] }, assignee: { type: 'object', nullable: true }, dueAt: { type: 'string', format: 'date-time', nullable: true } } },
   ApprovalVerdict: {
@@ -632,7 +671,11 @@ export function buildOpenApiSpec(baseUrl) {
         post: op('Request approval against a category', 'approvals:write', { tag: 'approvals', body: { type: 'object', required: ['approvalCategoryId'], properties: { approvalCategoryId: { type: 'integer' }, note: { type: 'string' } } }, status: 201 }),
       },
       '/tags': { get: op('List the workspace tag palette', 'tags:read', { tag: 'taxonomy' }) },
-      '/tickets/{id}/tags': { put: op('Replace a ticket’s tag set', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagIds: { type: 'array', items: { type: 'integer' } } } } }) },
+      '/tickets/{id}/tags': {
+        put: op('Replace a ticket’s tag set', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagIds: { type: 'array', items: { type: 'integer' } } } } }),
+        post: op('Add ONE tag, keeping the others (by `tagId` or `name`). Use this — not PUT — to tag a ticket someone else also tags.', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagId: { type: 'integer' }, name: { type: 'string', description: 'Case-insensitive tag name, e.g. continuit' } } } }),
+      },
+      '/tickets/{id}/tags/{tag}': { delete: op('Remove ONE tag (by id or name), keeping the others', 'tags:write', { tag: 'taxonomy', parameters: [{ name: 'tag', in: 'path', required: true, schema: { type: 'string' }, description: 'Tag id or name' }] }) },
       '/contacts': { get: op('List/search requesters — `q` (name/e-mail contains), `location` (Entra office, contains), `email` (exact), `limit` (≤ 500). Rows carry department and jobTitle (FreshService or Entra, whichever is filled).', 'contacts:read', { tag: 'directory', parameters: [{ name: 'q', in: 'query', required: false, schema: { type: 'string' } }, { name: 'location', in: 'query', required: false, schema: { type: 'string' } }, { name: 'email', in: 'query', required: false, schema: { type: 'string', format: 'email' } }, { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 100, maximum: 500 } }], responseRef: ref('Contact') }) },
       '/contacts/{id}': { get: op('Get a requester', 'contacts:read', { tag: 'directory', responseRef: ref('Contact') }) },
       '/agents': { get: op('List agents/technicians: id, name, email, isActive, freshserviceId (string), location (office), photoUrl, origin (freshservice|local), groups[] (id, name, origin, freshserviceId). `?active=true` (or `?includeInactive=false`) narrows to active.', 'agents:read', { tag: 'directory', parameters: [{ name: 'active', in: 'query', required: false, schema: { type: 'boolean' } }, { name: 'includeInactive', in: 'query', required: false, schema: { type: 'boolean', default: true } }], responseRef: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, isActive: { type: 'boolean' }, freshserviceId: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, photoUrl: { type: 'string', nullable: true }, origin: { type: 'string', enum: ['freshservice', 'local'] }, groups: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, origin: { type: 'string' }, freshserviceId: { type: 'string', nullable: true } } } } } } } }) },
@@ -658,7 +701,13 @@ export function buildOpenApiSpec(baseUrl) {
       '/categories': { get: op('List categories & subcategories: id, name, parentId, description, isActive. Active only unless `?includeInactive=true`.', 'categories:read', { tag: 'taxonomy', parameters: [{ name: 'includeInactive', in: 'query', required: false, schema: { type: 'boolean', default: false } }] }) },
       '/types': { get: op('List ticket types', 'types:read', { tag: 'taxonomy' }) },
       '/custom-fields': { get: op('List active custom-field definitions (incl. API-provisioned)', 'customfields:read', { tag: 'taxonomy', responseRef: { type: 'array', items: ref('CustomFieldDefinition') } }) },
-      '/search/tickets': { get: op('Search tickets (?query=…)', 'search:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true }) },
+      '/search/tickets': { get: op('Search tickets (?query=…). Without `in`: substring on subject, requester and ticket number. With `in=subject,description,conversations`: full-text (English stemming), subject hits first, then description, then conversation text; `limit` ≤ 50; `conversations` needs conversations:read.', 'search:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true, parameters: [
+        { name: 'query', in: 'query', required: true, schema: { type: 'string' } },
+        { name: 'in', in: 'query', required: false, schema: { type: 'string', example: 'subject,description,conversations' } },
+        { name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 25, maximum: 50 } },
+      ] }) },
+      '/search/similar': { post: op('Is there already a ticket for this? Hybrid search for free text — semantic (ticket embeddings) + keyword (full-text on subject and description) + references (TP-1234, #241406 score 1). `score` is calibrated (meta.scoreModel): ≥ 0.7 likely the same work, ≥ 0.6 worth asking. Default statuses open + pending; tickets without an embedding are still found by the keyword half.', 'search:read', { tag: 'tickets', body: ref('SimilarSearch'), responseRef: { type: 'array', items: ref('SimilarHit') }, meta: ref('SimilarMeta') }) },
+      '/search/similar/batch': { post: op('The same search for up to 20 texts in one call (one embedding request). data = { <key>: [hits] }.', 'search:read', { tag: 'tickets', body: { allOf: [ref('SimilarSearchOptions'), { type: 'object', required: ['items'], properties: { items: { type: 'array', maxItems: 20, items: { type: 'object', required: ['text'], properties: { key: { type: 'string', maxLength: 100 }, text: { type: 'string', maxLength: 4000 } } } } } }] }, responseRef: { type: 'object', additionalProperties: { type: 'array', items: ref('SimilarHit') } }, meta: ref('SimilarMeta') }) },
     },
   };
 }

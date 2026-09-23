@@ -116,17 +116,43 @@ function payloadTicketRef(payload) {
   return { externalRef: undefined, ticketId: t?.id ?? payload.ticketId ?? null };
 }
 
+// matchTag (ContinuIT search, 23 Sep 2026): a filtered subscription also
+// receives tickets carrying this tag — tickets the integration LINKED to
+// rather than created, so their externalRef belongs to someone else (or
+// FreshService). Prefix OR tag; neither set = every ticket.
+function payloadTagNames(payload) {
+  const t = payload && typeof payload === 'object' ? payload.ticket : null;
+  if (!t || !Array.isArray(t.tags)) return undefined;
+  return t.tags.map((x) => String(typeof x === 'string' ? x : x?.name || '').toLowerCase());
+}
+
 async function subscriptionAcceptsPayload(sub, payload) {
   const prefix = typeof sub.externalRefPrefix === 'string' ? sub.externalRefPrefix.trim() : '';
-  if (!prefix) return true;
+  const tag = typeof sub.matchTag === 'string' ? sub.matchTag.trim().toLowerCase() : '';
+  if (!prefix && !tag) return true;
   const ref = payloadTicketRef(payload);
   let { externalRef } = ref;
   const { ticketId } = ref;
-  if (externalRef === undefined && ticketId) {
-    const row = await prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { externalRef: true } }).catch(() => null);
-    externalRef = row?.externalRef ?? null;
+  if (prefix) {
+    if (externalRef === undefined && ticketId) {
+      const row = await prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { externalRef: true } }).catch(() => null);
+      externalRef = row?.externalRef ?? null;
+    }
+    if (typeof externalRef === 'string' && externalRef.startsWith(prefix)) return true;
   }
-  return typeof externalRef === 'string' && externalRef.startsWith(prefix);
+  if (tag) {
+    // The payload's tag list is trusted only when it says yes: some builders
+    // carry no tags (or a stale list), so a "no" is confirmed on the row.
+    const names = payloadTagNames(payload);
+    if (names && names.includes(tag)) return true;
+    if (!ticketId) return false;
+    const link = await prisma.ticketTagLink.findFirst({
+      where: { ticketId: Number(ticketId), tag: { name: { equals: tag, mode: 'insensitive' } } },
+      select: { ticketId: true },
+    }).catch(() => null);
+    return !!link;
+  }
+  return false;
 }
 
 export function dispatchWebhookEvent(workspaceId, eventType, payload) {

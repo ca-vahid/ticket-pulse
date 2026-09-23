@@ -73,7 +73,7 @@ describe('GET /api/v1/tickets/:id — relations', () => {
 describe('ticket references in request bodies', () => {
   test('merge: `target` may be a display reference', async () => {
     await request(buildApp()).post('/api/v1/tickets/TP-1504/merge').send({ target: 'TP-1490' }).expect(200);
-    expect(mergeMock.merge).toHaveBeenCalledWith(44797, 1, { targetTicketId: 44001, notifyRequester: false }, expect.any(Object));
+    expect(mergeMock.merge).toHaveBeenCalledWith(44797, 1, { targetTicketId: 44001, notifyRequester: false, resolutionReason: null, resolutionNote: null }, expect.any(Object));
   });
 
   test('merge: the numeric `targetTicketId` keeps working, as a number or a numeric string', async () => {
