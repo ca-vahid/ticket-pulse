@@ -327,6 +327,8 @@ model OAuthClient {
   // Simorgh B6 (19 Sep 2026): may only merge / split / re-parent / link
   // tickets this client created. Enforced by ticketStructureGuard.
   structureOwnTicketsOnly Boolean @default(false) @map("structure_own_tickets_only")
+  // May change the status of FreshService-born tickets (written to FS first). Opt-in.
+  fsStatusWrite          Boolean @default(false) @map("fs_status_write")
   ipAllowlist      String[]  @default([]) @map("ip_allowlist")
   defaultSource    Int?      @map("default_source")
   isEnabled        Boolean   @default(true) @map("is_enabled")

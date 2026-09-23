@@ -151,7 +151,7 @@ const T = {
   UpdateTicket: {
     type: 'object',
     properties: {
-      status: { type: 'string', example: 'Pending' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
+      status: { type: 'string', example: 'Pending', description: 'Any label from GET /meta statuses. On a FreshService-born ticket the change is written to FreshService first and needs the client permission "may change status on FreshService tickets" (403 fs_status_write_not_enabled otherwise; 409 freshservice_rejected when FreshService refuses). Roll-up and resolution-reason rules apply to both kinds.' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       subject: { type: 'string' }, assignedTechId: { type: 'integer', nullable: true },
       assignedTechEmail: { type: 'string', format: 'email', description: 'Reassign by e-mail (resolved to assignedTechId; 400 unknown_agent_email when no active agent has it). "" unassigns.' },
       internalCategoryId: { type: 'integer' }, internalSubcategoryId: { type: 'integer' },
