@@ -220,3 +220,16 @@ describe('search()', () => {
     expect(results.q[0]).toMatchObject({ id: 1, matchedOn: 'keyword' });
   });
 });
+
+describe('main office (2026-09-23c)', () => {
+  test('a ticket whose description mentions another office is judged by its subject office', async () => {
+    const saved = TICKETS[1];
+    TICKETS[1] = { ...saved, subject: 'Kelowna office firewall replacement', descriptionText: 'Kelowna only; Kamloops is coordinated separately.', requester: null };
+    wire();
+    const svc = new TicketSimilaritySearchService();
+    const plain = (await svc.search(1, [{ key: 'q', text: 'firewall upgrade at the office' }], { minScore: 0 })).results.q.find((h) => h.id === 1).score;
+    const other = (await svc.search(1, [{ key: 'q', text: 'firewall upgrade during the Kamloops visit' }], { minScore: 0 })).results.q.find((h) => h.id === 1).score;
+    TICKETS[1] = saved;
+    expect(other).toBeLessThan(plain);
+  });
+});

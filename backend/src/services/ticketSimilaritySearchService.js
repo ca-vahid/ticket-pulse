@@ -42,7 +42,12 @@ export const SCORE_MODEL = Object.freeze({
   // firewall scored 0.83). On the calibration set this took unrelated
   // phrases >= 0.7 from 5/45 to 1/45 for 90 -> 88/120 true matches; the 0.6
   // line is unchanged.
-  version: '2026-09-23b',
+  // 2026-09-23c: a ticket's office is its MAIN office — subject, the
+  // continuit_office field and the requester's office; the description counts
+  // only when those name none. The Kelowna firewall ticket discusses Kamloops
+  // at length, so "Kamloops firewall visit" matched it as same-office (0.99).
+  // Neutral on the calibration set (same counts at 0.6 and 0.7).
+  version: '2026-09-23c',
   weights: Object.freeze({ cosine: 4.4, z: 1.91, gap: 8.72, officeMatch: 0.54, officeConflict: -1.38 }),
   bias: -8.43,
   thresholds: Object.freeze({ likely: 0.7, possible: 0.6 }),
@@ -436,7 +441,8 @@ class TicketSimilaritySearchService {
         if (cosine !== null) {
           const best = shortlist[0];
           const other = best && best.id !== id ? best.s : (shortlist[1]?.s ?? cosine);
-          const tOffices = new Set([...officesIn(text), ...officesIn(t.requester?.entraOfficeLocation), ...officesIn(t.customFields?.continuit_office)]);
+          const primary = new Set([...officesIn(t.subject), ...officesIn(t.requester?.entraOfficeLocation), ...officesIn(t.customFields?.continuit_office)]);
+          const tOffices = primary.size ? primary : officesIn(t.descriptionText);
           const overlap = [...qOffices].some((o) => tOffices.has(o));
           semantic = semanticScore({
             cosine, z: (cosine - mean) / sd, gap: cosine - other,
