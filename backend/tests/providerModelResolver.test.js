@@ -45,7 +45,7 @@ describe('ProviderModelResolver', () => {
 
     expect(result.attempts).toEqual([{
       provider: 'openai',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       fallbackFromProvider: 'anthropic',
       fallbackReason: 'primary_down',
       healthStatus: 'healthy',
@@ -65,7 +65,7 @@ describe('ProviderModelResolver', () => {
 
     expect(result.attempts).toEqual([
       expect.objectContaining({ provider: 'anthropic', model: 'claude-sonnet-4-6', fallbackFromProvider: null }),
-      expect.objectContaining({ provider: 'openai', model: 'gpt-5.6-sol', fallbackFromProvider: 'anthropic' }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-6-sol', fallbackFromProvider: 'anthropic' }),
     ]);
   });
 
@@ -88,7 +88,7 @@ describe('ProviderModelResolver', () => {
     });
 
     expect(result.attempts).toEqual([
-      expect.objectContaining({ provider: 'openai', model: 'gpt-5.6-sol' }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-6-sol' }),
     ]);
   });
 });
@@ -99,7 +99,7 @@ describe('ProviderModelResolver vision gate (Phase AF)', () => {
       primaryProvider: 'anthropic',
       primaryModel: 'claude-haiku-4-5-20251001',
       fallbackProvider: 'openai',
-      fallbackModel: 'gpt-5.6-sol',
+      fallbackModel: 'gpt-6-sol',
       autoFallbackEnabled: true,
     });
     const resolver = new ProviderModelResolver();
@@ -119,7 +119,7 @@ describe('ProviderModelResolver vision gate (Phase AF)', () => {
   test('drops a non-vision fallback instead of sending images into a 400', async () => {
     getSettingMock.mockResolvedValue({
       primaryProvider: 'openai',
-      primaryModel: 'gpt-5.6-sol',
+      primaryModel: 'gpt-6-sol',
       fallbackProvider: 'anthropic',
       fallbackModel: 'claude-haiku-4-5-20251001',
       autoFallbackEnabled: true,
@@ -134,7 +134,7 @@ describe('ProviderModelResolver vision gate (Phase AF)', () => {
     expect(result.visionFallbackDropped).toBe(true);
     expect(result.fallback.model).toBeNull();
     expect(result.attempts).toEqual([
-      expect.objectContaining({ provider: 'openai', model: 'gpt-5.6-sol', fallbackFromProvider: null }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-6-sol', fallbackFromProvider: null }),
     ]);
   });
 
@@ -162,7 +162,7 @@ describe('ProviderModelResolver vision gate (Phase AF)', () => {
       primaryProvider: 'anthropic',
       primaryModel: 'claude-haiku-4-5-20251001',
       fallbackProvider: 'openai',
-      fallbackModel: 'gpt-5.6-sol',
+      fallbackModel: 'gpt-6-sol',
       autoFallbackEnabled: true,
     });
     const resolver = new ProviderModelResolver();

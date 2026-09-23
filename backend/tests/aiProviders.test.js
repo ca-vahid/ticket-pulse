@@ -20,6 +20,28 @@ import {
   supportsOperation,
 } from '../src/utils/aiProviders.js';
 
+describe('GPT-6 migration (23 Sep 2026)', () => {
+  test('gpt-5.5 and gpt-5.6-sol settings read as GPT-6 Sol; gpt-5.6-luna is left alone', () => {
+    expect(normalizeAiModel('gpt-5.5', AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
+    expect(normalizeAiModel('gpt-5.6-sol', AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
+    expect(normalizeAiModel('gpt-5', AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
+    expect(normalizeAiModel('gpt-6-luna', AI_PROVIDER_OPENAI)).toBe('gpt-6-luna');
+    expect(normalizeAiModel('gpt-5.6-luna', AI_PROVIDER_OPENAI)).toBe('gpt-5.6-luna');
+    expect(defaultModelForProvider(AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
+  });
+
+  test('every registered model has its own price row (no silent Sonnet-price default)', async () => {
+    const { MODEL_PRICING_USD_PER_MTOK, costUsdFor } = await import('../src/services/tokenUsageService.js');
+    for (const m of MODEL_METADATA) {
+      const row = MODEL_PRICING_USD_PER_MTOK.find(([prefix]) => m.model.startsWith(prefix));
+      expect({ model: m.model, priced: Boolean(row) }).toEqual({ model: m.model, priced: true });
+    }
+    // GPT-6 Sol: $2 in / $10 out per M, cached reads $0.20, no cache-write fee.
+    expect(costUsdFor({ provider: 'openai', model: 'gpt-6-sol', inputTokens: 1e6, outputTokens: 1e6 })).toBeCloseTo(12, 5);
+    expect(costUsdFor({ provider: 'openai', model: 'gpt-6-luna', inputTokens: 1e6, outputTokens: 1e6 })).toBeCloseTo(0.6, 5);
+  });
+});
+
 describe('ai provider utilities', () => {
   test('detects provider families from model names', () => {
     expect(isAnthropicModel('claude-sonnet-4-6')).toBe(true);
@@ -67,19 +89,14 @@ describe('ai provider utilities', () => {
       provider: AI_PROVIDER_OPENAI,
       operation: 'assignment_pipeline',
     });
-    // Approved set: GPT-5.6 Sol (default/fallback, successor to GPT-5.5) +
-    // GPT-5.6 Luna (economy tier,
-    // added Aug 2026 after OpenAI's 80% price cut — ~10x cheaper than Sonnet).
+    // Approved set (23 Sep 2026): GPT-6 Sol (default), GPT-6 Luna (economy),
+    // and GPT-5.6 Luna kept for the one ws2 fallback that still names it.
     expect(openAiModels).toEqual([
-      expect.objectContaining({
-        model: DEFAULT_OPENAI_MODEL,
-        label: 'GPT-5.6 Sol',
-      }),
-      expect.objectContaining({
-        model: 'gpt-5.6-luna',
-        label: expect.stringContaining('Economy'),
-      }),
+      expect.objectContaining({ model: 'gpt-6-sol', label: 'GPT-6 Sol' }),
+      expect.objectContaining({ model: 'gpt-6-luna', label: 'GPT-6 Luna (Economy)' }),
+      expect.objectContaining({ model: 'gpt-5.6-luna', label: expect.stringContaining('legacy') }),
     ]);
+    expect(DEFAULT_OPENAI_MODEL).toBe('gpt-6-sol');
 
     const anthropicModels = getModelMetadata({
       provider: AI_PROVIDER_ANTHROPIC,
