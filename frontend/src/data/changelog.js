@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.67-preview';
+export const APP_VERSION = '3.9.68-preview';
 
 export const changelog = [
+  {
+    version: '3.9.68-preview',
+    date: 'September 22, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Replies to approval e-mails on FreshService tickets no longer vanish</strong> \u2014 a reply carrying a FreshService ticket number was assumed to reach FreshService on its own and was dropped. Ticket Pulse now checks whether FreshService\u2019s own helpdesk address was actually a recipient; when it was not, the reply lands on the ticket and is written into FreshService as a note. Every skip is counted on the Mailboxes card.' },
+      { type: 'improved', html: '<strong>Every approval e-mail can be replied to</strong> \u2014 requests, decisions, hand-offs and clarifications carry the ticket\u2019s reply address and threading headers, so a reply threads back even when the subject is rewritten.' },
+      { type: 'improved', html: '<strong>A last resort for FreshService tickets</strong> \u2014 a reply from the requester or a participant with the same subject on an open ticket threads onto it; when two tickets fit, it is held for a person with both candidates instead of guessed. The look-back for recent tickets grew from three days to thirty.' },
+      { type: 'new', html: '<strong>Re-check inbox</strong> \u2014 Settings \u2192 Mailboxes can run a window of an inbox through the matching again: a dry run says what each message would do, Apply brings in what was missed and leaves everything already on a ticket alone.' },
+    ],
+  },
   {
     version: '3.9.67-preview',
     date: 'September 22, 2026',

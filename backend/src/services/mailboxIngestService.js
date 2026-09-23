@@ -11,6 +11,7 @@ import { sseManager } from '../routes/sse.routes.js';
 import agentIntake from './agentIntakeService.js';
 import { PARSER_VERSION, textToHtml } from '../utils/forwardedMailParser.js';
 import { fsConversationEntryId } from '../utils/fsEntryId.js';
+import { freshserviceWillIngest } from './fsHelpdeskAddressService.js';
 
 // In-memory memory of messages handed to the hold queue (RL-4) so the delta
 // poller does not re-fetch them every catch-up round; bounded, process-local
@@ -20,6 +21,42 @@ const HELD_CACHE_MAX = 5000;
 const TICK_MS = Number(process.env.MAILBOX_INGEST_TICK_MS || 30 * 1000);
 const FIRST_LOOKBACK_MS = 15 * 60 * 1000; // fresh connections look back 15 minutes
 const MAX_CREATES_PER_SENDER_PER_CYCLE = 3;
+
+// Every skip is counted (23 Sep 2026): a week of silently dropped replies on
+// #242611 was invisible because a skip wrote nothing anywhere. In-memory,
+// per workspace, 24-hour window — the mailbox card reads it.
+const INGEST_SKIPS = new Map(); // workspaceId -> Array<{ at, reason }>
+const SKIP_WINDOW_MS = 24 * 60 * 60 * 1000;
+export function recordIngestSkip(workspaceId, reason) {
+  const key = Number(workspaceId) || 0;
+  const list = (INGEST_SKIPS.get(key) || []).filter((s) => Date.now() - s.at < SKIP_WINDOW_MS);
+  list.push({ at: Date.now(), reason: String(reason || 'unknown') });
+  INGEST_SKIPS.set(key, list.slice(-500));
+}
+export function ingestSkipCounts(workspaceId) {
+  const list = (INGEST_SKIPS.get(Number(workspaceId) || 0) || []).filter((s) => Date.now() - s.at < SKIP_WINDOW_MS);
+  const counts = {};
+  for (const s of list) counts[s.reason] = (counts[s.reason] || 0) + 1;
+  return { total: list.length, byReason: counts, windowHours: 24 };
+}
+
+/**
+ * Subject as a matching key: reply/forward prefixes, our ticket tokens and
+ * whitespace gone, lowercase. "RE: Approved with condition: X [#242611]" and
+ * "X" compare equal only on X, which is the point.
+ */
+export function normalizeSubjectForMatch(subject) {
+  return String(subject || '')
+    .replace(/^\s*(?:(?:re|fw|fwd|aw|wg|tr|rv|sv|vs|enc)\s*(?:\[\d+\])?\s*:\s*)+/i, '')
+    .replace(/\bticket\s*#?\d+\b/gi, ' ')
+    .replace(/\[?#\d{4,}\]?/g, ' ')
+    .replace(/\bTP-\d{3,}\b/gi, ' ')
+    .replace(/\[\s*\]/g, ' ')
+    .replace(/^\s*(?:approved(?: with condition)?|rejected|approval (?:requested|forwarded|escalated)|clarification (?:requested|needed))\s*:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
 // Poller demotion (MB-2d): a mailbox with a live Graph subscription gets its
 // mail pushed within seconds, so the poller only runs as a delta/catch-up
 // reconciliation every 5 min by default (clamped 1–15 min). Connections
@@ -457,8 +494,20 @@ class MailboxIngestService {
       recencySender: ctx ? ctx.recencySender : email.from,
     });
     if (match?.skip) {
-      logger.info(`Mailbox ingest decision: skip (${match.reason}) for "${email.subject}" from ${email.from}`);
+      recordIngestSkip(connection.workspaceId, match.reason);
+      logger.info(`Mailbox ingest decision: skip (${match.reason}) for "${email.subject}" from ${email.from}${match.ticketId ? ` — FreshService ticket ${match.ticketId} receives this mail itself` : ''}`);
       return 'skipped';
+    }
+    if (match?.hold) {
+      // Two or more plausible FreshService tickets (23 Sep 2026): never guess,
+      // never drop — park it with the candidates for a person.
+      return this._holdOrFallback(connection, email, {
+        kind: 'ambiguous_ticket',
+        agent,
+        bestGuessTicketId: match.bestGuessTicketId ?? null,
+        candidates: { tickets: match.candidates || [] },
+        decision: { rule: match.rule || 'fs_subject_sender_ambiguous', details: { candidates: (match.candidates || []).map((c) => c.displayRef || c.id) } },
+      }, 'ambiguous_ticket', senderCreates);
     }
     if (match?.ticket) {
       await this.ingestReply(connection, match.ticket, email, match.via, { agent, ctx });
@@ -477,6 +526,23 @@ class MailboxIngestService {
         await this.ingestReply(connection, ticket, email, 'body_ref', { agent, ctx });
         return 'reply';
       }
+    }
+
+    // Rung 3b (23 Sep 2026): a FreshService number in the quoted body of a
+    // token-stripped reply. Same rule as rung 3 — ours unless FreshService
+    // itself was a recipient.
+    for (const fsNumber of reply.bodyRefs.fs) {
+      const ticket = await prisma.ticket.findFirst({
+        where: { workspaceId: connection.workspaceId, freshserviceTicketId: BigInt(fsNumber), origin: TICKET_ORIGIN.FRESHSERVICE },
+      });
+      if (!ticket) continue;
+      if (await freshserviceWillIngest(connection.workspaceId, email)) {
+        recordIngestSkip(connection.workspaceId, 'freshservice_ref');
+        logger.info(`Mailbox ingest decision: skip (freshservice_ref, body) for "${email.subject}" from ${email.from} — FreshService ticket ${ticket.id} receives this mail itself`);
+        return 'skipped';
+      }
+      await this.ingestReply(connection, ticket, email, 'fs_body_ref', { agent, ctx });
+      return 'reply';
     }
 
     const intake = await agentIntake.classifyIntake(connection, email, { knownReferenceFound: false, agent, ctx });
@@ -632,14 +698,20 @@ class MailboxIngestService {
       if (ticket) return { ticket, via: 'tp_ref' };
     }
 
-    // 3. FreshService ref → FS receives this mail itself; do not double-ingest
+    // 3. FreshService ref in the subject. Skip ONLY when FreshService itself
+    // receives this mail (its helpdesk address is among the recipients);
+    // otherwise the mail answered something Ticket Pulse sent and we own it
+    // (#242611, 23 Sep 2026 — a week of replies to approval mails were dropped
+    // here because "FS receives this mail itself" was assumed, not checked).
     const fsMatch = subject.match(/(?:\[?#|Ticket\s*#?)(\d{4,})\]?/i);
     if (fsMatch) {
       const fsTicket = await prisma.ticket.findFirst({
         where: { workspaceId, freshserviceTicketId: BigInt(fsMatch[1]), origin: TICKET_ORIGIN.FRESHSERVICE },
-        select: { id: true },
       });
-      if (fsTicket) return { skip: true, reason: 'freshservice_ref' };
+      if (fsTicket) {
+        if (await freshserviceWillIngest(workspaceId, email)) return { skip: true, reason: 'freshservice_ref', ticketId: fsTicket.id };
+        return { ticket: fsTicket, via: 'fs_ref_subject' };
+      }
     }
 
     // 4. Sender + recency against open TP-born tickets (open = Open/Pending-
@@ -654,14 +726,97 @@ class MailboxIngestService {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
         status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
-        updatedAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
+        // 30 days (was 3 — a Monday reply to a Thursday ticket made a duplicate).
+        updatedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
         requester: { is: { email: { equals: sender, mode: 'insensitive' } } },
       },
       orderBy: { updatedAt: 'desc' },
     });
     if (recent) return { ticket: recent, via: 'sender_recency' };
 
+    // 5. FreshService-born, last resort (23 Sep 2026): the sender is the
+    // ticket's requester, a Cc participant or wrote on its thread in the last
+    // 30 days, the normalised subject is the ticket's, the ticket is open and
+    // was touched in 30 days. Exactly one → thread it (FS write-back follows);
+    // more than one → HOLD with the candidates, never guess.
+    const normalized = normalizeSubjectForMatch(subject);
+    if (normalized) {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      // Promise-wrapped so a partial mock or a missing column degrades to "no candidates".
+      const rows = await Promise.resolve().then(async () => prisma.ticket.findMany({
+        where: {
+          workspaceId,
+          origin: TICKET_ORIGIN.FRESHSERVICE,
+          status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
+          updatedAt: { gte: since },
+          OR: [
+            { requester: { is: { email: { equals: sender, mode: 'insensitive' } } } },
+            { ccEmails: { has: sender.toLowerCase() } },
+            { threadEntries: { some: { actorEmail: { equals: sender, mode: 'insensitive' }, occurredAt: { gte: since } } } },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 25,
+      })).then((r) => (Array.isArray(r) ? r : [])).catch((err) => { logger.warn(`rung 5 lookup failed (non-fatal): ${err.message}`); return []; });
+      const candidates = rows.filter((r) => normalizeSubjectForMatch(r.subject) === normalized).slice(0, 3);
+      if (candidates.length === 1) return { ticket: candidates[0], via: 'fs_subject_sender' };
+      if (candidates.length > 1) {
+        return {
+          hold: true,
+          reason: 'ambiguous_ticket',
+          rule: 'fs_subject_sender_ambiguous',
+          bestGuessTicketId: candidates[0].id,
+          candidates: candidates.map((c) => ({ id: c.id, displayRef: ticketDisplayRef(c), subject: c.subject, updatedAt: c.updatedAt })),
+        };
+      }
+    }
+
     return null;
+  }
+
+  /**
+   * Re-check an inbox window (23 Sep 2026): skipped mail was never recorded,
+   * so running the window through the ladder again picks up exactly what was
+   * dropped — everything that WAS ingested or held dedupes on its Message-ID.
+   * dryRun reports what each message WOULD do and writes nothing.
+   */
+  async recheckInbox(connection, { since, dryRun = true, top = 250 } = {}) {
+    const sinceDate = since instanceof Date ? since : new Date(since);
+    if (Number.isNaN(sinceDate.getTime())) throw Object.assign(new Error('since must be a date'), { statusCode: 400 });
+    const emails = await graphMailClient.getInboxMessagesForIngest(connection.address, sinceDate, Math.min(Math.max(Number(top) || 250, 1), 500));
+    const results = [];
+    const senderCreates = new Map();
+    for (const email of emails) {
+      const base = { subject: email.subject, from: email.from, receivedAt: email.receivedAt || null, internetMessageId: email.internetMessageId || null };
+      try {
+        if (await this._alreadyIngested(connection, email.internetMessageId)) { results.push({ ...base, outcome: 'already_ingested' }); continue; }
+        if (!dryRun) {
+          const outcome = await this.ingestSingleMessage(connection, email, senderCreates);
+          results.push({ ...base, outcome });
+          continue;
+        }
+        const loopReason = looksLikeLoopMail(email, connection.address);
+        if (loopReason) { results.push({ ...base, outcome: 'skipped', reason: loopReason }); continue; }
+        const agent = await agentIntake.resolveAgentSender(connection.workspaceId, email.from);
+        const ctx = agent ? await agentIntake.prepareAgentContext(connection, email, agent) : null;
+        const match = await this.matchEmailToTicket(connection.workspaceId, email, connection.address, {
+          subject: ctx ? ctx.subjectForMatch : undefined,
+          recencySender: ctx ? ctx.recencySender : email.from,
+        });
+        if (match?.skip) results.push({ ...base, outcome: 'skipped', reason: match.reason, ticketId: match.ticketId || null });
+        else if (match?.hold) results.push({ ...base, outcome: 'held', reason: match.reason, candidates: match.candidates });
+        else if (match?.ticket) results.push({ ...base, outcome: 'reply', via: match.via, ticketId: match.ticket.id, ticket: ticketDisplayRef(match.ticket), agent: agent ? agent.email : null });
+        else {
+          const reply = agentIntake.looksLikeReply(email);
+          results.push({ ...base, outcome: reply.strongEvidence.length ? 'would_hold_or_create' : 'would_create', evidence: reply.evidence, bodyRefs: reply.bodyRefs });
+        }
+      } catch (err) {
+        results.push({ ...base, outcome: 'error', error: err.message });
+      }
+    }
+    const counts = {};
+    for (const r of results) counts[r.outcome] = (counts[r.outcome] || 0) + 1;
+    return { scanned: emails.length, since: sinceDate.toISOString(), dryRun: Boolean(dryRun), counts, results };
   }
 
   /** Rung 1b lookup — OR over provider_message_id + message_id, falling back pre-RL-5. */

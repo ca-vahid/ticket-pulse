@@ -36,6 +36,7 @@ export const HOLD_REASONS = Object.freeze([
   'agent_reply_no_requester',
   'ambiguous_sender',
   'policy_replies_only',
+  'ambiguous_ticket', // two or more FreshService tickets match the sender + subject (23 Sep 2026)
 ]);
 
 export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'discarded']);

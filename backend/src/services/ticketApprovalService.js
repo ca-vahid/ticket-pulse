@@ -819,7 +819,7 @@ class TicketApprovalService {
         : kind === 'escalated'
           ? `Approval ESCALATED to ${toTierName} (${targets.join(', ')}) by ${actorName} — "${cleanNote}"`
           : `Approval FORWARDED to ${targets[0]} by ${actorName} — "${cleanNote}"`;
-      await prisma.ticketThreadEntry.create({
+      const handoffNote = await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
           workspaceId: ticket.workspaceId,
@@ -840,7 +840,7 @@ class TicketApprovalService {
       }).catch((err) => logger.warn(`Approval hand-off note write failed (non-fatal): ${err.message}`));
 
       try {
-        await this._emailRequesterHandoff(ticket, approval, { kind, byName: actorName, byEmail: actorEmail, targets, toTierName, fromTierName });
+        await this._emailRequesterHandoff(ticket, approval, { kind, byName: actorName, byEmail: actorEmail, targets, toTierName, fromTierName, threadEntryId: handoffNote?.id || null });
       } catch (err) {
         logger.warn(`Approval hand-off requester e-mail failed (non-fatal): ${err.message}`);
       }
@@ -971,7 +971,7 @@ class TicketApprovalService {
     }).catch(() => {});
 
     if (ticket) {
-      await prisma.ticketThreadEntry.create({
+      const clarificationNote = await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
           workspaceId: ticket.workspaceId,
@@ -993,7 +993,7 @@ class TicketApprovalService {
         },
       }).catch((err) => logger.warn(`Clarification note write failed (non-fatal): ${err.message}`));
 
-      await this._emailRequesterClarification(ticket, approval, question);
+      await this._emailRequesterClarification(ticket, approval, question, { threadEntryId: clarificationNote?.id || null });
       await emitApprovalEvent('approval.clarification_requested', ticket.id, {
         approvalId: approval.id, approverEmail: approval.approverEmail, requestedBy: approval.requestedBy,
       });
@@ -1192,10 +1192,7 @@ class TicketApprovalService {
    */
   async overview(workspaceId, { status = null, categoryId = null, limit = 200, q = null, approver = null, requestedBy = null, from = null, to = null, sort = 'newest' } = {}) {
     const where = { workspaceId };
-    // Several statuses at once ("Approved and Not approved") arrive comma-joined (20 Sep 2026).
-    const statuses = String(status || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (statuses.length === 1) where.status = statuses[0];
-    else if (statuses.length > 1) where.status = { in: statuses };
+    if (status) where.status = status;
     if (categoryId) where.approvalCategoryId = Number(categoryId);
     // QA 09-16 #4: the redesigned Approvals page filters by people, dates and text.
     const text = (v) => String(v || '').trim();
@@ -1547,7 +1544,7 @@ class TicketApprovalService {
       const noteBody = (changedFrom
         ? `Approval CHANGED to ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`
         : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`) + (cleanCondition ? ` · Condition: "${cleanCondition}"` : '') + askedForLabel;
-      await prisma.ticketThreadEntry.create({
+      const decisionNote = await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
           workspaceId: ticket.workspaceId,
@@ -1599,7 +1596,7 @@ class TicketApprovalService {
       // QA 08-11 #5: the agent who asked hears about the verdict by email.
       // Non-fatal — the decision is already persisted.
       try {
-        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml });
+        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, threadEntryId: decisionNote?.id || null });
       } catch (err) {
         logger.warn(`Approval decision email failed (non-fatal): ${err.message}`);
       }
@@ -1608,7 +1605,7 @@ class TicketApprovalService {
       // reply-style, with the condition, the signature and the history each
       // of them is allowed to see.
       try {
-        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, notifyRequester });
+        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, notifyRequester, threadEntryId: decisionNote?.id || null });
       } catch (err) {
         logger.warn(`Approval decision thread e-mails failed (non-fatal): ${err.message}`);
       }
@@ -1737,7 +1734,9 @@ class TicketApprovalService {
     });
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, attachments, label: 'approval' });
+    // `ticket` → Reply-To +tp/+fs and threading headers, so an approver's
+    // reply threads onto the ticket instead of dying on a bare mailbox (23 Sep 2026).
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, attachments, label: 'approval', ticket });
   }
 
   /**
@@ -1749,7 +1748,7 @@ class TicketApprovalService {
    * `actorEmail` is the DECIDING actor, not approval.approverEmail — an admin
    * deciding on the approver's behalf must not read as a self-decision.
    */
-  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null } = {}) {
+  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, threadEntryId = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] decision email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
       return { sent: false, reason: 'suppressed' };
@@ -1777,7 +1776,7 @@ class TicketApprovalService {
       requester: { name: ticket.requester?.name || null },
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision' });
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision', ticket, threadEntryId });
   }
 
   /**
@@ -1789,7 +1788,7 @@ class TicketApprovalService {
    * "also e-mail the requester" (`notifyRequester`): by default the verdict
    * and its note stay between the agents.
    */
-  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, notifyRequester = false } = {}) {
+  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, notifyRequester = false, threadEntryId = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return { sent: false, reason: 'suppressed' };
     const { default: conversation } = await import('./approvalConversationService.js');
     const { renderDecisionThreadEmail } = await import('./approvalEmailTemplate.js');
@@ -1839,7 +1838,7 @@ class TicketApprovalService {
         requestNoteHtml: approval.requestNoteHtml || null, requestNote: approval.requestNote || null, requestedByName: parts.agent?.name || null,
         thread: thread.filter((m) => m.kind !== 'decision'),
       });
-      const res = await sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: r.email, subject: `${verdictLabel}: ${ticket.subject || 'ticket'} [${ref}]`, html, label: 'approval decision' });
+      const res = await sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: r.email, subject: `${verdictLabel}: ${ticket.subject || 'ticket'} [${ref}]`, html, label: 'approval decision', ticket, threadEntryId });
       if (res?.sent !== false) sent += 1;
     }
     return { sent: sent > 0, count: sent };
@@ -1880,7 +1879,7 @@ class TicketApprovalService {
    * Deliberately carries NO note — the approver's reasoning stays between
    * approvers (Vahid, 15 Sep 2026).
    */
-  async _emailRequesterHandoff(ticket, approval, { kind, byName, byEmail = null, targets = [], toTierName = null, fromTierName = null } = {}) {
+  async _emailRequesterHandoff(ticket, approval, { kind, byName, byEmail = null, targets = [], toTierName = null, fromTierName = null, threadEntryId = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] hand-off email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
       return { sent: false, reason: 'suppressed' };
@@ -1899,11 +1898,11 @@ class TicketApprovalService {
       requester: { name: ticket.requester?.name || null },
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval hand-off' });
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval hand-off', ticket, threadEntryId });
   }
 
   /** Notify the requester that an approver needs more info before deciding. */
-  async _emailRequesterClarification(ticket, approval, question) {
+  async _emailRequesterClarification(ticket, approval, question, { threadEntryId = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] clarification email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
       return { sent: false, reason: 'suppressed' };
@@ -1921,7 +1920,7 @@ class TicketApprovalService {
       requester: { name: ticket.requester?.name || null },
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval clarification' });
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval clarification', ticket, threadEntryId });
   }
 
   _broadcast(ticket, action) {

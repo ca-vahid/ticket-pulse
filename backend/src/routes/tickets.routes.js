@@ -643,7 +643,8 @@ router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) =>
     }),
     graphSendLane(req.workspaceId),
   ]);
-  res.json({ success: true, data: mailboxes.map(presentMailbox), meta: { sendLane } });
+  const { ingestSkipCounts } = await import('../services/mailboxIngestService.js');
+  res.json({ success: true, data: mailboxes.map(presentMailbox), meta: { sendLane, ingestSkips: ingestSkipCounts(req.workspaceId) } });
 }));
 
 // ---------------------------------------------------------------- hold queue
@@ -1340,6 +1341,22 @@ router.get('/webhook-subscriptions/:subId/deliveries', requireTicketingAdmin, as
 router.post('/webhook-deliveries/:deliveryId/redeliver', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { redeliver } = await import('../services/webhookDispatchService.js');
   res.json({ success: true, data: await redeliver(Number(req.params.deliveryId), req.workspaceId) });
+}));
+
+// Re-check an inbox window through the ingest ladder (23 Sep 2026). dryRun
+// (default) reports what each message would do; dryRun:false ingests. Mail
+// that was already ingested or held dedupes on its Message-ID either way.
+router.post('/mailboxes/:mailboxId/recheck', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const mailboxId = Number(req.params.mailboxId);
+  const connection = await prisma.mailboxConnection.findFirst({ where: { id: mailboxId, workspaceId: req.workspaceId } });
+  if (!connection) throw new NotFoundError('Mailbox not found in this workspace');
+  const since = req.body?.since ? new Date(req.body.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  if (Number.isNaN(since.getTime())) throw new ValidationError('since must be an ISO date');
+  const dryRun = req.body?.dryRun !== false;
+  const { default: mailboxIngestService } = await import('../services/mailboxIngestService.js');
+  const report = await mailboxIngestService.recheckInbox(connection, { since, dryRun, top: req.body?.top });
+  logger.info(`Mailbox re-check ${dryRun ? 'dry run' : 'APPLIED'} on ${connection.address} since ${since.toISOString()} by ${req.ticketActor?.email || 'admin'}: ${JSON.stringify(report.counts)}`);
+  res.json({ success: true, data: report });
 }));
 
 router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {

@@ -3,7 +3,7 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   mailboxConnection: { findMany: jest.fn(), update: jest.fn() },
   ticketThreadEntry: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
-  ticket: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+  ticket: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   requester: { findUnique: jest.fn() },
   technician: { findFirst: jest.fn(), findMany: jest.fn() },
   notificationDelivery: { findFirst: jest.fn() },
@@ -20,6 +20,21 @@ const activityMock = { create: jest.fn() };
 const conversationMock = { answer: jest.fn(), plusAddressApprovalKey: jest.fn(() => null) };
 jest.unstable_mockModule('../src/services/approvalConversationService.js', () => ({ default: conversationMock, plusAddressApprovalKey: conversationMock.plusAddressApprovalKey }));
 
+// FreshService helpdesk addresses (23 Sep 2026): it@example.com reads FS mail.
+const helpdeskMock = { fsHelpdeskAddresses: jest.fn(async () => new Set(['it@example.com'])) };
+jest.unstable_mockModule('../src/services/fsHelpdeskAddressService.js', () => {
+  const isFreshserviceTenantAddress = (a) => /@[a-z0-9.-]*\.freshservice\.com$/i.test(String(a || ''));
+  return {
+    fsHelpdeskAddresses: helpdeskMock.fsHelpdeskAddresses,
+    isFreshserviceTenantAddress,
+    freshserviceWillIngest: async (workspaceId, email) => {
+      const recipients = [...(email.to || []), ...(email.cc || [])].map((a) => String(a).toLowerCase());
+      if (recipients.some(isFreshserviceTenantAddress)) return true;
+      const set = await helpdeskMock.fsHelpdeskAddresses(workspaceId);
+      return recipients.some((a) => set.has(a));
+    },
+  };
+});
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: graphMock }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
@@ -62,6 +77,7 @@ beforeEach(() => {
   prismaMock.ticketThreadEntry.findFirst.mockResolvedValue(null);
   prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9001, ...data }));
   prismaMock.ticket.findFirst.mockResolvedValue(null);
+  prismaMock.ticket.findMany.mockResolvedValue([]);
   prismaMock.ticket.update.mockResolvedValue({});
   prismaMock.requester.findUnique.mockResolvedValue(null);
   prismaMock.technician.findFirst.mockResolvedValue(null);
@@ -158,17 +174,123 @@ describe('matching ladder', () => {
     }));
   });
 
-  test('3: FreshService #ref is skipped (FS ingests the same mail itself)', async () => {
-    // Subject has no TP ref, so the FIRST ticket.findFirst call is the FS lookup.
-    prismaMock.ticket.findFirst.mockResolvedValueOnce({ id: 900 });
+  const FS_TICKET = { id: 900, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: BigInt(224183), nativeNumber: null, status: 'Open', subject: 'VPN issue', requesterFreshserviceId: null };
 
+  test('3a: FreshService #ref is skipped ONLY when the helpdesk address is a recipient (FS ingests it itself)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ ...FS_TICKET });
     const outcome = await mailboxIngestService.processEmail(connection, {
-      ...baseEmail, subject: 'RE: [#224183] VPN issue',
+      ...baseEmail, subject: 'RE: [#224183] VPN issue', to: ['it@example.com', 'helpdesk-pilot@example.com'],
     });
-
     expect(outcome).toBe('skipped');
     expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    const { ingestSkipCounts } = await import('../src/services/mailboxIngestService.js');
+    expect(ingestSkipCounts(1).byReason.freshservice_ref).toBeGreaterThanOrEqual(1);
+  });
+
+  test('3b: helpdesk absent → the reply threads onto the FS-born ticket and is written back to FreshService (#242611)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ ...FS_TICKET });
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...FS_TICKET });
+    const addNote = jest.fn(async () => ({ conversation: { id: 555 } }));
+    mirrorServiceMock.getInteractiveClient.mockResolvedValueOnce({ addNote });
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'RE: Approved with condition: VPN issue [#224183]', to: ['helpdesk-pilot@example.com'],
+    });
+    expect(outcome).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ticketId: 900, source: 'email_inbound', eventType: 'reply' }),
+    }));
+    expect(addNote).toHaveBeenCalledWith(224183, expect.any(String), expect.objectContaining({ incoming: true }));
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+  });
+
+  test('3c: a FreshService tenant address in Cc counts as the helpdesk', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ ...FS_TICKET });
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'RE: [#224183] VPN issue', to: ['helpdesk-pilot@example.com'], cc: ['acme@acme.freshservice.com'],
+    });
+    expect(outcome).toBe('skipped');
+  });
+
+  test('3d: token-stripped subject, "#224183" only in the quoted body → same lane as 3b', async () => {
+    // rung 3 sees no token; rung 4/5 find nothing; the body ref then resolves the FS ticket
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(null) // rung 4 sender+recency (TP-born)
+      .mockResolvedValueOnce({ ...FS_TICKET }); // rung 3b body ref
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'RE: your approval', to: ['helpdesk-pilot@example.com'],
+      bodyText: 'Thanks, go ahead.\n\nFrom: Ticket Pulse\nSubject: Approved: VPN issue [#224183]',
+      bodyHtml: '<p>Thanks, go ahead.</p><p>From: Ticket Pulse<br>Subject: Approved: VPN issue [#224183]</p>',
+    });
+    expect(outcome).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ ticketId: 900 }) }));
+  });
+
+  test('5: FS-born last rung — requester + normalised subject + open + 30 d → threads; two candidates → held with both', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(null);
+    const a = { ...FS_TICKET, id: 901, freshserviceTicketId: BigInt(240001), subject: 'Laptop battery swelling', updatedAt: new Date() };
+    prismaMock.ticket.findMany.mockResolvedValueOnce([a, { ...FS_TICKET, id: 902, freshserviceTicketId: BigInt(240002), subject: 'Something else', updatedAt: new Date() }]);
+    let outcome = await mailboxIngestService.processEmail(connection, { ...baseEmail, subject: 'Re: Laptop battery swelling', to: ['helpdesk-pilot@example.com'] });
+    expect(outcome).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ ticketId: 901 }) }));
+    const where = prismaMock.ticket.findMany.mock.calls[0][0].where;
+    expect(where.origin).toBe('freshservice');
+    expect(where.OR[0]).toEqual({ requester: { is: { email: { equals: 'rita@example.com', mode: 'insensitive' } } } });
+
+    jest.clearAllMocks();
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue(null);
+    prismaMock.ticket.findFirst.mockResolvedValue(null);
+    holdMock.holdMessage.mockResolvedValue({ id: 32 });
+    prismaMock.ticket.findMany.mockResolvedValueOnce([a, { ...a, id: 903, freshserviceTicketId: BigInt(240003) }]);
+    outcome = await mailboxIngestService.processEmail(connection, { ...baseEmail, subject: 'RE: RE: Laptop battery swelling', to: ['helpdesk-pilot@example.com'], internetMessageId: '<abc-124@example.com>' });
+    expect(outcome).toBe('held');
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(connection, expect.anything(), expect.objectContaining({
+      reason: 'ambiguous_ticket', bestGuessTicketId: 901,
+      candidates: { tickets: [expect.objectContaining({ id: 901, displayRef: '#240001' }), expect.objectContaining({ id: 903, displayRef: '#240003' })] },
+    }));
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+  });
+
+  test('5: an agent forward on rung 5 matches on the quoted original sender, never the agent', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue({ ...AGENT, workspaceId: 1 });
+    prismaMock.ticket.findFirst.mockResolvedValue(null);
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, id: 'msg-fw5', from: AGENT.email, fromName: AGENT.name, subject: 'FW: Invoice 4471 still unpaid',
+      to: ['helpdesk-pilot@example.com'], bodyHtml: forwardFixture('outlook-owa.html'), bodyText: null,
+    });
+    const senders = prismaMock.ticket.findMany.mock.calls.map((c) => c[0].where.OR[0].requester.is.email.equals);
+    expect(senders.length).toBeGreaterThan(0);
+    for (const s of senders) expect(s).toBe(RITA);
+  });
+
+  test('normalizeSubjectForMatch strips prefixes, our tokens and verdict prefixes', async () => {
+    const { normalizeSubjectForMatch } = await import('../src/services/mailboxIngestService.js');
+    expect(normalizeSubjectForMatch('RE: Approved with condition: Microsoft Teams Unified App Management error message [#242611]')).toBe('microsoft teams unified app management error message');
+    expect(normalizeSubjectForMatch('FW: RE: Laptop  battery [TP-1042]')).toBe('laptop battery');
+    expect(normalizeSubjectForMatch('Ticket #12345 — Printer')).toBe('— printer');
+  });
+
+  test('recheckInbox: dry run reports what each message would do and writes nothing; the real run ingests', async () => {
+    const svc = mailboxIngestService;
+    graphMock.getInboxMessagesForIngest.mockResolvedValue([
+      { ...baseEmail, id: 'g1', internetMessageId: '<seen@example.com>', subject: 'already' },
+      { ...baseEmail, id: 'g2', internetMessageId: '<new@example.com>', subject: 'RE: [#224183] VPN issue', to: ['helpdesk-pilot@example.com'] },
+    ]);
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(async ({ where }) => (where.emailMessageId === '<seen@example.com>' ? { id: 1 } : null));
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...FS_TICKET });
+    const dry = await svc.recheckInbox(connection, { since: '2026-09-22T00:00:00Z', dryRun: true });
+    expect(dry.scanned).toBe(2);
+    expect(dry.counts).toEqual({ already_ingested: 1, reply: 1 });
+    expect(dry.results[1]).toEqual(expect.objectContaining({ outcome: 'reply', via: 'fs_ref_subject', ticket: '#224183' }));
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+
+    const spy = jest.spyOn(svc, 'ingestSingleMessage').mockResolvedValue('reply');
+    const real = await svc.recheckInbox(connection, { since: '2026-09-22T00:00:00Z', dryRun: false });
+    expect(real.counts).toEqual({ already_ingested: 1, reply: 1 });
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
   });
 
   test('4: sender + recency matches an open TP-born ticket', async () => {

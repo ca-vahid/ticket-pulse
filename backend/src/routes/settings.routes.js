@@ -343,17 +343,24 @@ router.get(
 // who FreshService attributes our replies/notes to, and which system mails a
 // reply on an FS-born ticket. Read together with the identity so one card shows both.
 async function freshserviceLaneFlags(workspaceId) {
-  const [{ isFsReplyAsAgentEnabled }, { isFsBornRepliesViaTicketPulseEnabled }, { getRequesterReplyCopySettings }] = await Promise.all([
+  const [{ isFsReplyAsAgentEnabled }, { isFsBornRepliesViaTicketPulseEnabled }, { getRequesterReplyCopySettings }, { getFsHelpdeskSetting, fsHelpdeskAddresses }] = await Promise.all([
     import('../services/fsReplyAsAgentService.js'),
     import('../services/fsBornReplyLaneService.js'),
     import('../services/requesterReplyCopyService.js'),
+    import('../services/fsHelpdeskAddressService.js'),
   ]);
-  const [fsReplyAsAgent, fsBornRepliesViaTicketPulse, copy] = await Promise.all([
+  const [fsReplyAsAgent, fsBornRepliesViaTicketPulse, copy, fsHelpdeskEmails, effective] = await Promise.all([
     isFsReplyAsAgentEnabled(workspaceId),
     isFsBornRepliesViaTicketPulseEnabled(workspaceId),
     getRequesterReplyCopySettings(workspaceId),
+    getFsHelpdeskSetting(workspaceId),
+    fsHelpdeskAddresses(workspaceId).catch(() => new Set()),
   ]);
-  return { fsReplyAsAgent, fsBornRepliesViaTicketPulse, requesterReplyCopy: copy.enabled, requesterReplyCopyExtra: copy.extra.join(', ') };
+  // fsHelpdeskEmails = the override (blank = learned); fsHelpdeskEmailsEffective = what the ingest ladder uses right now.
+  return {
+    fsReplyAsAgent, fsBornRepliesViaTicketPulse, requesterReplyCopy: copy.enabled, requesterReplyCopyExtra: copy.extra.join(', '),
+    fsHelpdeskEmails, fsHelpdeskEmailsEffective: [...effective].join(', '),
+  };
 }
 
 /**
@@ -392,6 +399,11 @@ router.put(
     if (typeof req.body?.fsBornRepliesViaTicketPulse === 'boolean') {
       const { setFsBornRepliesViaTicketPulseEnabled } = await import('../services/fsBornReplyLaneService.js');
       await setFsBornRepliesViaTicketPulseEnabled(req.workspaceId, req.body.fsBornRepliesViaTicketPulse);
+    }
+    if (typeof req.body?.fsHelpdeskEmails === 'string') {
+      if (req.body.fsHelpdeskEmails.length > 1000) throw new ValidationError('fsHelpdeskEmails is too long');
+      const { setFsHelpdeskAddresses } = await import('../services/fsHelpdeskAddressService.js');
+      await setFsHelpdeskAddresses(req.workspaceId, req.body.fsHelpdeskEmails);
     }
     if (typeof req.body?.requesterReplyCopy === 'boolean' || typeof req.body?.requesterReplyCopyExtra === 'string') {
       const { setRequesterReplyCopySettings, parseAddressList } = await import('../services/requesterReplyCopyService.js');

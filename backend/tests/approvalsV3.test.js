@@ -332,6 +332,13 @@ describe('decide with a condition', () => {
     expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload.parts.requesterNotified).toBe(true);
     sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
     expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'rita@x.io', 'vahid@x.io']);
+    // 23 Sep 2026 (#242611): every decision mail carries the ticket (Reply-To
+    // +tp/+fs, threading headers) and the decision note it belongs to, so a
+    // reply threads back even when the subject is rewritten.
+    for (const s of sends) {
+      expect(s.ticket).toEqual(expect.objectContaining({ id: 501 }));
+      expect(s).toHaveProperty('threadEntryId');
+    }
     const agent = sends.find((s) => s.to === 'req@x.io');
     expect(agent.subject).toMatch(/^Approved with condition: your approval request/);
     expect(agent.html).toContain('UAT only');

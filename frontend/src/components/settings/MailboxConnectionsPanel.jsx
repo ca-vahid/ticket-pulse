@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertCircle, CheckCircle, Inbox, Loader2, Mail, Plus, Send, ShieldAlert, Star, Trash2, Wifi, XCircle, Zap,
+  AlertCircle, CheckCircle, History, Inbox, Loader2, Mail, Plus, Send, ShieldAlert, Star, Trash2, Wifi, XCircle, Zap,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
@@ -119,6 +119,9 @@ export default function MailboxConnectionsPanel() {
   const [sendLane, setSendLane] = useState(null); // RL-2: Graph outbound lane state
   const [testResult, setTestResult] = useState(null); // RL-7: { mailboxId, ...checks }
   const [heldCount, setHeldCount] = useState(null);
+  // 23 Sep 2026: skips are counted (a week of dropped replies was invisible), and an inbox window can be re-checked.
+  const [ingestSkips, setIngestSkips] = useState(null);
+  const [recheck, setRecheck] = useState(null); // { mailboxId, since, busy, report }
   const { activeTypes } = useTicketTypes(); // workspace type registry
 
   const load = useCallback(async () => {
@@ -126,6 +129,7 @@ export default function MailboxConnectionsPanel() {
       const res = await ticketsAPI.listMailboxes();
       setMailboxes(res.data || []);
       setSendLane(res.meta?.sendLane || null);
+      setIngestSkips(res.meta?.ingestSkips || null);
       setError(null);
     } catch (err) {
       setError(err.response?.data?.message || err.message);
@@ -255,6 +259,21 @@ export default function MailboxConnectionsPanel() {
     }
   };
 
+  const defaultSince = () => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+  const openRecheck = (mb) => setRecheck({ mailboxId: mb.id, since: defaultSince(), busy: false, report: null });
+  const runRecheck = async (mb, dryRun) => {
+    setRecheck((r) => ({ ...r, busy: true }));
+    setError(null);
+    try {
+      const res = await ticketsAPI.recheckMailbox(mb.id, { since: new Date(recheck.since).toISOString(), dryRun });
+      setRecheck((r) => ({ ...r, busy: false, report: res.data, applied: !dryRun }));
+      if (!dryRun) { setNotice(`${mb.address}: re-check applied — ${Object.entries(res.data?.counts || {}).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ')}`); load(); }
+    } catch (err) {
+      setRecheck((r) => ({ ...r, busy: false }));
+      setError(err.response?.data?.message || err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 mb-2">
@@ -287,6 +306,13 @@ export default function MailboxConnectionsPanel() {
         </p>
       </div>
 
+      {ingestSkips && ingestSkips.total > 0 && (
+        <p className="text-xs text-muted-foreground" data-testid="mailbox-ingest-skips">
+          <b className="text-foreground/85">Skipped in the last {ingestSkips.windowHours} h: {ingestSkips.total}</b>
+          {' '}— {Object.entries(ingestSkips.byReason).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ')}.
+          A “freshservice ref” skip means FreshService itself was a recipient, so it has the mail; anything else is in the log with its reason. Counted since the last restart.
+        </p>
+      )}
       {sendLane?.status === 'not_granted' && (
         <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg" role="alert" data-testid="mailbox-send-lane-alert">
           <ShieldAlert className="w-4 h-4 text-red-600 dark:text-red-300 mt-0.5 flex-shrink-0" aria-hidden="true" />
@@ -564,6 +590,16 @@ export default function MailboxConnectionsPanel() {
                 Test
               </button>
               <button
+                type="button"
+                onClick={() => (recheck?.mailboxId === mb.id ? setRecheck(null) : openRecheck(mb))}
+                aria-expanded={recheck?.mailboxId === mb.id}
+                title="Run a window of this inbox through the matching ladder again — mail that was already brought in is left alone"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50 border border-border rounded-lg hover:bg-muted tp-focus-ring"
+              >
+                <History className="w-3 h-3" aria-hidden="true" />
+                Re-check inbox
+              </button>
+              <button
                 onClick={() => toggle(mb)}
                 className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border ${
                   mb.isEnabled
@@ -582,6 +618,67 @@ export default function MailboxConnectionsPanel() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {recheck && (
+        <div className="tp-card rounded-xl p-4 space-y-3" data-testid="mailbox-recheck">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-xs font-medium text-muted-foreground">
+              Re-check {mailboxes.find((m) => m.id === recheck.mailboxId)?.address || 'this inbox'} since
+              <input
+                type="datetime-local"
+                value={recheck.since}
+                onChange={(e) => setRecheck((r) => ({ ...r, since: e.target.value, report: null }))}
+                className="mt-1 block px-2 py-1.5 text-sm border border-input rounded-lg bg-card text-foreground tp-focus-ring"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={recheck.busy}
+              onClick={() => runRecheck(mailboxes.find((m) => m.id === recheck.mailboxId), true)}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-foreground bg-card border border-border rounded-lg hover:bg-muted tp-focus-ring disabled:opacity-60"
+            >
+              {recheck.busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Dry run
+            </button>
+            {recheck.report && !recheck.applied && (
+              <button
+                type="button"
+                disabled={recheck.busy}
+                onClick={() => runRecheck(mailboxes.find((m) => m.id === recheck.mailboxId), false)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary rounded-lg hover:opacity-90 tp-focus-ring disabled:opacity-60"
+              >
+                Apply
+              </button>
+            )}
+            <button type="button" onClick={() => setRecheck(null)} className="text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded px-2 py-1.5">Close</button>
+          </div>
+          <p className="text-xs text-muted-foreground/75">
+            Dry run says what each message would do; nothing is written. Apply brings in what was missed — mail already on a ticket or in the hold queue is left alone.
+          </p>
+          {recheck.report && (
+            <div className="text-xs">
+              <p className="font-medium text-foreground/85">
+                {recheck.applied ? 'Applied' : 'Would do'}: {Object.entries(recheck.report.counts || {}).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ') || 'nothing — no mail in that window'}
+                {' '}({recheck.report.scanned} scanned)
+              </p>
+              {(recheck.report.results || []).filter((r) => r.outcome !== 'already_ingested').length > 0 && (
+                <table className="mt-2 w-full text-[11px]">
+                  <thead><tr className="text-left text-muted-foreground/75"><th className="pr-2 py-1 font-medium">When</th><th className="pr-2 py-1 font-medium">From</th><th className="pr-2 py-1 font-medium">Subject</th><th className="py-1 font-medium">Outcome</th></tr></thead>
+                  <tbody>
+                    {recheck.report.results.filter((r) => r.outcome !== 'already_ingested').map((r) => (
+                      <tr key={r.internetMessageId || `${r.receivedAt}-${r.subject}`} className="border-t border-border/60">
+                        <td className="pr-2 py-1 whitespace-nowrap text-muted-foreground">{r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '—'}</td>
+                        <td className="pr-2 py-1 truncate max-w-[14rem]">{r.from}</td>
+                        <td className="pr-2 py-1 truncate max-w-[22rem]">{r.subject}</td>
+                        <td className="py-1 whitespace-nowrap">{r.outcome.replace(/_/g, ' ')}{r.ticket ? ` → ${r.ticket}` : ''}{r.reason ? ` (${r.reason.replace(/_/g, ' ')})` : ''}{r.error ? ` — ${r.error}` : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
 
