@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.68-preview';
+export const APP_VERSION = '3.9.69-preview';
 
 export const changelog = [
+  {
+    version: '3.9.69-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approval requests read cleanly</strong> \u2014 the request card on a ticket now shows who asked, for what and of whom (by name), with the note as its own block, instead of one run-on sentence. Stray \u201c&amp;nbsp;\u201d and other HTML leftovers are gone from request, decision and condition notes on the ticket, on the Approvals page and in new approval e-mails.' },
+    ],
+  },
   {
     version: '3.9.68-preview',
     date: 'September 22, 2026',

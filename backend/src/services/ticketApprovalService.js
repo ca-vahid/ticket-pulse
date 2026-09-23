@@ -53,6 +53,29 @@ const NOTE_SANITIZE_OPTIONS = {
   transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noreferrer' }) },
 };
 
+/**
+ * Plain-text notes are stored as text people read (23 Sep 2026): the request
+ * composer's text arrived with HTML entities left in it ("storage -&nbsp;
+ * instead of …"), and every card, e-mail and export repeated them. Decode the
+ * common entities (twice, for "&amp;nbsp;"), turn non-breaking spaces into
+ * spaces and tidy runs of spaces; line breaks stay.
+ */
+const NOTE_ENTITIES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", hellip: '…', mdash: '—', ndash: '–', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“' };
+export function cleanPlainNote(value) {
+  if (value === null || value === undefined) return null;
+  let s = String(value);
+  const decode = (t) => t.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name) => {
+    const key = name.toLowerCase();
+    if (key.startsWith('#x')) { const cp = parseInt(key.slice(2), 16); return Number.isFinite(cp) ? String.fromCodePoint(cp) : whole; }
+    if (key.startsWith('#')) { const cp = parseInt(key.slice(1), 10); return Number.isFinite(cp) ? String.fromCodePoint(cp) : whole; }
+    return Object.prototype.hasOwnProperty.call(NOTE_ENTITIES, key) ? NOTE_ENTITIES[key] : whole;
+  });
+  for (let i = 0; i < 2 && /&(#x?[0-9a-f]+|[a-z]+);/i.test(s); i += 1) s = decode(s);
+  const clean = s.replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +([,.;:!?])/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
+  return clean || null;
+}
+
 export function sanitizeNoteHtml(html) {
   const clean = sanitizeHtml(String(html || ''), NOTE_SANITIZE_OPTIONS).trim();
   return clean || null;
@@ -156,7 +179,8 @@ class TicketApprovalService {
    * (sharing requestGroupId) — any one can approve. Each manager gets a personal
    * magic link. TP-only (no FreshService involvement).
    */
-  async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null, notifyApprover = true, amount = null }, actor) {
+  async request(ticketId, workspaceId, { approvalCategoryId, note: rawNote = null, noteHtml = null, notifyApprover = true, amount = null }, actor) {
+    const note = cleanPlainNote(rawNote);
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: {
@@ -1426,7 +1450,9 @@ class TicketApprovalService {
   // QA 09-18 #1: the ticket requester is NOT on the verdict e-mail unless the
   // approver ticks "also e-mail the requester" - an approver's rejection note
   // written for the agents reached the end user (ticket 242909, 18 Sep 2026).
-  async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote = null, conditionNoteHtml = null, notifyRequester = false }) {
+  async _decide(approval, decision, rawNote, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote: rawCondition = null, conditionNoteHtml = null, notifyRequester = false }) {
+    const note = cleanPlainNote(rawNote);
+    const conditionNote = cleanPlainNote(rawCondition);
     notifyRequester = notifyRequester === true;
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {

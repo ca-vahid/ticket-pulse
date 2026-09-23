@@ -1,6 +1,7 @@
 import { CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
 import { PersonAvatar, timeAgo } from './ticketUi';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
+import { cleanNoteText } from '../../utils/noteText';
 
 /**
  * An approval verdict in the ticket conversation (18 Sep 2026 redesign).
@@ -54,6 +55,33 @@ export function parseApprovalSentence(text) {
   };
 }
 
+/**
+ * "Approval requested · Category → a@x, b@x by Name · CAD 1200 — "note"" → parts
+ * (23 Sep 2026). v1 payloads also carry category / approvers / note, which win.
+ */
+export function parseApprovalRequest(entry) {
+  const raw = entry?.rawPayload || {};
+  const text = String(entry?.bodyText || entry?.content || '').trim();
+  const m = text.match(/^Approval requested\s*·\s*([\s\S]+?)\s*→\s*([\s\S]+?)\s+by\s+([\s\S]+?)(?:\s*·\s*([A-Z]{3}\s+[\d.,]+))?(?:\s+—\s+([\s\S]*))?$/);
+  if (raw.kind === 'approval_event' && raw.event === 'requested') {
+    return {
+      category: raw.category || (m ? m[1].trim() : null),
+      approvers: Array.isArray(raw.approvers) && raw.approvers.length ? raw.approvers : (m ? m[2].split(',').map((s) => s.trim()).filter(Boolean) : []),
+      requesterName: entry?.actorName || (m ? m[3].trim() : null),
+      amount: m && m[4] ? m[4] : null,
+      note: cleanNoteText(raw.note || (m && m[5] ? unquote(m[5]) : '')) || null,
+    };
+  }
+  if (!m) return null;
+  return {
+    category: m[1].trim(),
+    approvers: m[2].split(',').map((s) => s.trim()).filter(Boolean),
+    requesterName: entry?.actorName || m[3].trim(),
+    amount: m[4] || null,
+    note: cleanNoteText(m[5] ? unquote(m[5]) : '') || null,
+  };
+}
+
 const prettyFromEmail = (v) => {
   const s = String(v || '');
   if (!s.includes('@')) return s;
@@ -69,20 +97,69 @@ function Block({ label, labelClass = 'text-muted-foreground/75', children }) {
   );
 }
 
-export default function ApprovalEventCard({ entry, meta, body }) {
-  const structured = entry?.rawPayload?.parts || parseApprovalSentence(entry?.bodyText || entry?.content);
+export default function ApprovalEventCard({ entry, meta, body, nameForEmail = null }) {
+  const request = meta?.label === 'Requested' ? parseApprovalRequest(entry) : null;
+  const parsed = request ? null : (entry?.rawPayload?.parts || parseApprovalSentence(entry?.bodyText || entry?.content));
+  // Every note reads as text: stored notes could carry "&nbsp;" and friends.
+  const structured = parsed ? {
+    ...parsed,
+    note: cleanNoteText(parsed.note) || null,
+    condition: cleanNoteText(parsed.condition) || null,
+    requestNote: cleanNoteText(parsed.requestNote) || null,
+  } : null;
   const toneKey = structured?.verdict
     // "Not approved" contains "approv" — test the negative FIRST or it reads as approved.
     || (/reject|not approved/i.test(meta?.label || '') ? 'rejected' : /clarif/i.test(meta?.label || '') ? 'clarification' : /approv/i.test(meta?.label || '') ? 'approved' : 'requested');
   const tone = TONES[toneKey] || TONES.requested;
-  const photo = useRequesterPhoto(structured ? entry?.actorEmail : null);
+  const photo = useRequesterPhoto(structured || request ? entry?.actorEmail : null);
+  const personName = (email) => (typeof nameForEmail === 'function' && nameForEmail(email)) || prettyFromEmail(email);
   const when = (
     <span className="ml-auto text-xs text-muted-foreground/75 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
       {timeAgo(entry.occurredAt)}
     </span>
   );
 
-  // Requests, clarifications and anything unparseable: the quiet one-paragraph form.
+  // An approval request (23 Sep 2026): who asked, for what, of whom — and the
+  // note as its own block, instead of one run-on sentence with raw entities.
+  if (request) {
+    const approverNames = request.approvers.map(personName).filter(Boolean);
+    return (
+      <li className="flex justify-center">
+        <div className="relative w-full max-w-[92%] overflow-hidden rounded-2xl border border-border bg-card pl-5 pr-5 py-4 shadow-subtle" data-testid="approval-request-card">
+          <span className={`absolute inset-y-0 left-0 w-1 ${tone.rule}`} aria-hidden="true" />
+          <div className="flex items-start gap-3.5">
+            <div className="relative flex-shrink-0">
+              <PersonAvatar name={request.requesterName} photoUrl={typeof photo === 'string' ? photo : null} size="h-11 w-11" textSize="text-xs" />
+              <span className={`absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card ${tone.dot} flex items-center justify-center`}>
+                <tone.Icon className="w-2.5 h-2.5 text-white" aria-hidden="true" />
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <p className="text-[15px] text-foreground">
+                  <span className="font-semibold">{request.requesterName || 'Someone'}</span>{' '}
+                  <span className={`font-semibold ${tone.text}`}>{meta?.label === 'Started' ? 'started an approval' : 'asked for approval'}</span>
+                </p>
+                {when}
+              </div>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
+                {request.category && <span className="font-medium text-foreground/85">{request.category}</span>}
+                {request.amount && <span> · {request.amount}</span>}
+                {approverNames.length > 0 && <span> · to {approverNames.join(', ')}</span>}
+              </p>
+              {request.note && (
+                <Block label="Request">
+                  <span className="whitespace-pre-line">{request.note}</span>
+                </Block>
+              )}
+            </div>
+          </div>
+        </div>
+      </li>
+    );
+  }
+
+  // Clarifications, starts and anything unparseable: the quiet one-paragraph form.
   if (!structured) {
     return (
       <li className="flex justify-center">
@@ -93,7 +170,7 @@ export default function ApprovalEventCard({ entry, meta, body }) {
             <span className={`text-sm font-semibold ${tone.text}`}>Approval · {meta?.label}</span>
             {when}
           </div>
-          <p className="mt-1.5 text-[15px] leading-relaxed text-foreground/85 break-words">{body}</p>
+          <p className="mt-1.5 text-[15px] leading-relaxed text-foreground/85 break-words whitespace-pre-line">{typeof body === 'string' ? cleanNoteText(body) : body}</p>
         </div>
       </li>
     );
