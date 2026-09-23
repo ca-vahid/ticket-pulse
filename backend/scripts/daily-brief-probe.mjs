@@ -15,6 +15,7 @@ const url = process.env.DATABASE_URL || (() => {
   try { return readFileSync(path.join(HERE, '.env.prod'), 'utf8').match(/PROD_DATABASE_URL=(.+)/)?.[1]?.trim().replace(/^"|"$/g, ''); } catch { return null; }
 })();
 if (!url) { console.error('daily-brief-probe: set DATABASE_URL (prod) or create backend/scripts/.env.prod with PROD_DATABASE_URL=...'); process.exit(2); }
+console.error('daily-brief-probe: db host =', url.replace(/\/\/[^@]*@/, '//***@').split('?')[0]);
 const prisma = new PrismaClient({ datasources: { db: { url } } });
 const HOURS = Number(process.argv[2]) || 24;
 const W = `now() - interval '${HOURS} hours'`;
@@ -98,6 +99,88 @@ for (const ws of wss) {
     SELECT t.freshservice_ticket_id AS fs, t.subject, t.priority, t.status
     FROM tickets t WHERE t.workspace_id=$1 AND t.created_at >= ${W} AND t.priority >= 3
     ORDER BY t.priority DESC, t.created_at DESC LIMIT 8`, ws.id);
+  // ---- IT (ws1) per-agent review: tickets Vahid may need to raise with each
+  // person at standup (Tue/Thu). Three lanes, each with the evidence needed to
+  // judge "valid note" at brief time (last agent-content entry + snippet):
+  //  A. urgent_no_action  — P3/P4 Open with NO agent-content entry ever
+  //  B. overdue           — Open past dueBy; lastAgentAt/lastNote show whether
+  //                         anything was said after it went overdue
+  //  C. stale_pending     — Pending with no agent-content entry in 5+ days
+  //                         (pendingSince approximated by last status_event)
+  // Agent-content = reply|public_reply|note|private_note|forward (activity/
+  // status/group/assignment events are machine noise, not "actions").
+  if (ws.id === 1) {
+    w.agentReview = await safe('agentReview', () => prisma.$queryRawUnsafe(`
+      WITH content AS (
+        SELECT e.ticket_id, max(e.occurred_at) AS last_agent_at
+        FROM ticket_thread_entries e
+        WHERE e.event_type IN ('reply','public_reply','note','private_note','forward')
+          AND e.event_type <> 'customer_reply'
+        GROUP BY e.ticket_id
+      ), lastnote AS (
+        SELECT DISTINCT ON (e.ticket_id) e.ticket_id, e.occurred_at,
+          left(regexp_replace(COALESCE(e.body_text,''), '\s+', ' ', 'g'), 140) AS snippet
+        FROM ticket_thread_entries e
+        WHERE e.event_type IN ('note','private_note','reply','public_reply')
+        ORDER BY e.ticket_id, e.occurred_at DESC
+      ), lastst AS (
+        SELECT e.ticket_id, max(e.occurred_at) AS last_status_at
+        FROM ticket_thread_entries e WHERE e.event_type = 'status_event' GROUP BY e.ticket_id
+      )
+      SELECT tech.name AS agent, t.freshservice_ticket_id AS fs, t.id AS tp_id, t.origin,
+        left(t.subject, 90) AS subject, t.status, t.priority, t.due_by AS due,
+        t.created_at::date AS created, c.last_agent_at, ls.last_status_at,
+        ln.snippet AS last_note, ln.occurred_at AS last_note_at,
+        CASE
+          WHEN t.priority >= 3 AND t.status NOT IN ('Resolved','Closed') AND c.last_agent_at IS NULL THEN 'urgent_no_action'
+          WHEN t.due_by IS NOT NULL AND t.due_by < now() AND t.status = 'Open' THEN 'overdue'
+          ELSE 'stale_pending' END AS lane
+      FROM tickets t
+      JOIN technicians tech ON tech.id = t.assigned_tech_id
+      LEFT JOIN content c ON c.ticket_id = t.id
+      LEFT JOIN lastnote ln ON ln.ticket_id = t.id
+      LEFT JOIN lastst ls ON ls.ticket_id = t.id
+      WHERE t.workspace_id = 1 AND COALESCE(t.is_noise, false) = false
+        AND (
+          (t.priority >= 3 AND t.status NOT IN ('Resolved','Closed') AND c.last_agent_at IS NULL)
+          OR (t.due_by IS NOT NULL AND t.due_by < now() AND t.status = 'Open')
+          OR (t.status = 'Pending'
+              AND COALESCE(c.last_agent_at, t.created_at) < now() - interval '5 days')
+        )
+      ORDER BY tech.name, t.priority DESC, t.due_by NULLS LAST, t.created_at`)
+      .then((rows) => {
+        const ranked = { urgent_no_action: 0, overdue: 1, stale_pending: 2 };
+        const byAgent = new Map();
+        for (const r of rows) {
+          if (!byAgent.has(r.agent)) byAgent.set(r.agent, []);
+          byAgent.get(r.agent).push(r);
+        }
+        const capped = [];
+        for (const [, list] of byAgent) {
+          list.sort((a, b) => (ranked[a.lane] - ranked[b.lane])
+            || (new Date(b.created) - new Date(a.created)));
+          const kept = list.slice(0, 6);
+          if (list.length > 6) kept.push({ agent: list[0].agent, lane: 'truncated', more: list.length - 6 });
+          capped.push(...kept);
+        }
+        return capped;
+      }));
+    // Per-agent stats over the window (weekly overview; cheap enough daily).
+    w.agentStats = await safe('agentStats', () => prisma.$queryRawUnsafe(`
+      SELECT tech.name AS agent,
+        count(*) FILTER (WHERE t.created_at >= ${W})::int AS assigned_new,
+        count(*) FILTER (WHERE t.resolved_at >= ${W})::int AS resolved,
+        count(*) FILTER (WHERE t.status IN ('Open','Pending'))::int AS open_now,
+        count(*) FILTER (WHERE t.status = 'Open' AND t.due_by IS NOT NULL AND t.due_by < now())::int AS overdue_now,
+        count(*) FILTER (WHERE t.status = 'Pending')::int AS pending_now,
+        COALESCE(max(EXTRACT(day FROM now() - t.created_at)) FILTER (WHERE t.status IN ('Open','Pending')), 0)::int AS oldest_open_days
+      FROM tickets t JOIN technicians tech ON tech.id = t.assigned_tech_id
+      WHERE t.workspace_id = 1 AND COALESCE(t.is_noise, false) = false
+        AND (t.created_at >= ${W} OR t.resolved_at >= ${W} OR t.status IN ('Open','Pending'))
+      GROUP BY tech.name HAVING count(*) FILTER (WHERE t.status IN ('Open','Pending')) > 0
+        OR count(*) FILTER (WHERE t.resolved_at >= ${W}) > 0
+      ORDER BY open_now DESC, resolved DESC LIMIT 20`));
+  }
   out.workspaces.push(w);
 }
 writeFileSync(path.join(DIR, 'daily-data.json'), JSON.stringify(out, (k, v) => typeof v === 'bigint' ? Number(v) : v, 1));
