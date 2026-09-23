@@ -66,7 +66,7 @@ beforeEach(() => {
 
 describe('contract surface', () => {
   test('exports the reason vocabulary and the policy enum the routes validate against', () => {
-    expect(HOLD_REASONS).toEqual(expect.arrayContaining(['unknown_reference', 'agent_reply_no_requester', 'ambiguous_sender']));
+    expect(HOLD_REASONS).toEqual(expect.arrayContaining(['unknown_reference', 'agent_reply_no_requester', 'ambiguous_sender', 'ambiguous_ticket']));
     expect(NEW_TICKET_POLICIES).toEqual(['create', 'replies_only', 'hold_unmatched']);
   });
   test('heldMessageKey prefers the RFC Message-ID and falls back to the Graph id', () => {
