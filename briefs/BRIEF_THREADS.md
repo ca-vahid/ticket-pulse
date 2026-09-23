@@ -8,7 +8,7 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 22 Sep 2026 (quiet day: ContinuIT webhooks clean; P4 owned by Reza; hulk #243374 joins decision-ticket lane on Vahid's desk)._
+_Last updated: 23 Sep 2026 (per-agent review debuted compact; hulk CLOSED via decision playbook; two new P4s; Thu = first full standup edition)._
 
 ## Probe read rules (do not remove)
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
@@ -40,7 +40,7 @@ _Last updated: 22 Sep 2026 (quiet day: ContinuIT webhooks clean; P4 owned by Rez
 - TOR-LIDAR1 Vol 2: alarm RETURNED Sep 18 after exactly one quiet day — Wednesday was coincidence, not cleanup; threshold-or-cleanup decision back on the table.
 
 ### (d) Wanderers (hand-off count — pattern lesson: every wanderer telegraphed by hand-off 3; flag then, while it's cheap)
-- DECISION-TICKET LANE (both on Vahid): #242774 Ring Camera (day 7) + #243374 bgc-van-hulk connectivity (3 hand-offs day one, Sep 22). Pattern named: advice/decision tickets carousel upward by nature — structural options offered: "decision needed" tag + weekly 15-min review, or explicit park-with-note. Honest-parking rule applies to the manager's desk too.
+- DECISION-TICKET LANE: playbook PROVEN Sep 22 — #243374 hulk decided, handed to Mehdi, closed same-day. #242774 Ring Camera (day 8, Vahid) is the remaining test; apply the same playbook.
 - #239678 Outlook access — Pending (Reza), parked OK.
 - Fording River #241459 — Pending (Anton), third holder.
 - CLOSED: #240446 "Outlook down" (7 hand-offs, Sep 14); #242189 BGCPT Folders (Sep 16 — FIRST CLEAN SAVE for the hand-off-3 flag: flagged Mon, owner-noted Tue, closed Wed).
@@ -52,8 +52,11 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - H&S non-zero unassigned Sep 17–18 was morning-queue flow both days, not backlog — softened; drop unless multi-day carryover appears.
 - Pentest HIGHs #241753/#241754 finished week one unmoved: calendar-block suggestion (half-day each, noted in ticket) — track uptake; ROPC pairs naturally with the Passkeys question.
 - #242963 Rachel Sutherland new-hire build (Adrian) — hire-date deadline; confirm date is in-thread.
-- #243247 crashing-laptop P4 — OWNED by Reza Sep 22 (ask worked); track to close.
-- #243458 Outlook Glitch — 2 hand-offs (Soheil); third hand-off ⇒ early flag; "Glitch" subject = retitle-or-diagnose fork (the #240446 lesson).
+- #243247 crashing-laptop P4 — Pending with Reza (parked mid-diagnosis, OK).
+- #243704 Kelowna firewall coordination — scheduled-infra; date-in-thread ask made Sep 23.
+- PER-AGENT REVIEW notables (first pass Sep 23, raise Thu): Andrew's #204686 New Hire Devansh Babla P1 pending since MAY (close/re-scope); Stephen's #199582 stock-room access due Dec 2025 = oldest overdue in ws1; Mehdi's #238939 "Weird" (retitle); Vahid's own queue = largest review pile (6 untouched urgents +49, top #241861 Teams allow-list); Sam's overdue tail (+20) second-largest; excluded-as-explained: Reid #179369, Susan QA-test.
+- #243775 P4 email-search (Reza, Sep 23 AM) + #243678 P4 laptop-no-internet (unowned Sep 23 AM) — track to close.
+- CLOSED/RESOLVED Sep 22: #243458 Outlook Glitch (Soheil, at hand-off two — no wanderer).
 - #243396 BeyondTrust/PowerShell policy hardening — proactive security lane, good sign; no chase needed.
 - H&S HASP burst = Banyan/AurMac 2026 geotech ramp — expect elevated HASP volume for weeks (normal).
 - #242950 screen-lock — Pending (Marcus), single report; second report ⇒ GPO/policy push.

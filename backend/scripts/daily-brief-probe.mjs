@@ -165,21 +165,25 @@ for (const ws of wss) {
         }
         return capped;
       }));
-    // Per-agent stats over the window (weekly overview; cheap enough daily).
+    // Per-agent workload for the IT memo's "overdue inside the bar" table and
+    // the weekly overview. new/resolved use a FIXED 7-day window regardless of
+    // the probe's --hours (a 24 h daily would otherwise read "this week" as one
+    // day). tech_id feeds the Tickets deep links (?assignee=<id>&status=…).
+    const W7 = `now() - interval '7 days'`;
     w.agentStats = await safe('agentStats', () => prisma.$queryRawUnsafe(`
-      SELECT tech.name AS agent,
-        count(*) FILTER (WHERE t.created_at >= ${W})::int AS assigned_new,
-        count(*) FILTER (WHERE t.resolved_at >= ${W})::int AS resolved,
+      SELECT tech.name AS agent, tech.id AS tech_id, tech.is_active AS active,
+        count(*) FILTER (WHERE t.created_at >= ${W7})::int AS assigned_new,
+        count(*) FILTER (WHERE t.resolved_at >= ${W7})::int AS resolved,
         count(*) FILTER (WHERE t.status IN ('Open','Pending'))::int AS open_now,
         count(*) FILTER (WHERE t.status = 'Open' AND t.due_by IS NOT NULL AND t.due_by < now())::int AS overdue_now,
         count(*) FILTER (WHERE t.status = 'Pending')::int AS pending_now,
         COALESCE(max(EXTRACT(day FROM now() - t.created_at)) FILTER (WHERE t.status IN ('Open','Pending')), 0)::int AS oldest_open_days
       FROM tickets t JOIN technicians tech ON tech.id = t.assigned_tech_id
       WHERE t.workspace_id = 1 AND COALESCE(t.is_noise, false) = false
-        AND (t.created_at >= ${W} OR t.resolved_at >= ${W} OR t.status IN ('Open','Pending'))
-      GROUP BY tech.name HAVING count(*) FILTER (WHERE t.status IN ('Open','Pending')) > 0
-        OR count(*) FILTER (WHERE t.resolved_at >= ${W}) > 0
-      ORDER BY open_now DESC, resolved DESC LIMIT 20`));
+        AND (t.created_at >= ${W7} OR t.resolved_at >= ${W7} OR t.status IN ('Open','Pending'))
+      GROUP BY tech.id, tech.name, tech.is_active HAVING count(*) FILTER (WHERE t.status IN ('Open','Pending')) > 0
+        OR count(*) FILTER (WHERE t.resolved_at >= ${W7}) > 0
+      ORDER BY tech.name LIMIT 30`));
   }
   out.workspaces.push(w);
 }
