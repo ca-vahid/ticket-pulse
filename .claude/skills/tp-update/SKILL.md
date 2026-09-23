@@ -80,6 +80,14 @@ Additive migrations run without asking; anything that drops/renames stops and as
 ## 6. Response PDF + e-mail
 - Tools live in `qa/tools/`: `build_html.py` (branded CSS, cover, sections), `render-pdf.mjs <in.html> <out.pdf> "<footer>"`,
   `shoot.mjs <dir>` (screenshots every `*.html` in the evidence dir), `send-qa-response.mjs`.
+- **Annotate every "after" screenshot — this is not optional.** The QA reads the PDF, not the app: each
+  screenshot of a changed screen gets red numbered markers and/or red rounded boxes drawn on it with
+  `qa/tools/annotate.py` (Pillow; `pad_left()` adds a white gutter so markers sit beside the content, never
+  on the words; `annotate(src, dst, markers=[(x, y, n)…], boxes=[(x0, y0, x1, y1)…])`; coordinates are the
+  PNG's own pixels, 2x scale). Save as `m<N>-<slug>-marked.png`, Read it back to check placement, and pair
+  every number with a `callouts([(n, text)…])` legend right under `img()` in `report_content.py`. A section
+  whose screenshot has no markers and no legend is unfinished (the 09-15 … 09-22 rounds shipped without
+  them because this step lived in per-package scripts; it now lives in `qa/tools/`).
 - Author `qa/evidence-<MMDD>/report_content.py` (COVER + SECTIONS) in the established voice: cover → "The short
   version" verdict table → one section per item ("You asked" quote, screenshot, "What production says" with a
   `<pre>` of real rows, "What we changed", "Try it") → "What changed, and your list" with the decisions for Vahid.
