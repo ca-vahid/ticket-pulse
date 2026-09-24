@@ -899,6 +899,7 @@ export const ticketsAPI = {
 
   // Explicit ticket links + duplicate-close
   links: async (id) => await api.get(`/tickets/${id}/links`),
+  externalReferences: async (id) => await api.get(`/tickets/${id}/external-references`),
   // relatedTicketRef accepts what users see: TP-1042, #231164, or a bare number.
   addLink: async (id, relatedTicketRef, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketRef, kind }),
   removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),

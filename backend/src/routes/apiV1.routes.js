@@ -140,6 +140,9 @@ function ticketShape(t) {
     resolvedByKind: t.resolvedByKind || null,
     // Roll-up (Simorgh B8): every child is done; a person closes the parent.
     readyToCloseAt: t.readyToCloseAt || null,
+    // Alert occurrences (Sentinel integration): 0 = not an alert ticket.
+    occurrenceCount: t.occurrenceCount ?? 0,
+    lastOccurrenceAt: t.lastOccurrenceAt || null,
     // Due date + who set it (ContinuIT B1; their acceptance run 19 Sep found
     // the date was stored but never echoed). 'manual' = a person or a
     // trusted integration; 'sla' = the workspace SLA clock.
@@ -1025,6 +1028,70 @@ router.get('/tags', S('tags:read'), asyncHandler(async (req, res) => {
     select: { id: true, name: true, color: true }, orderBy: { name: 'asc' },
   });
   res.json({ success: true, data: tags });
+}));
+
+// ---------------------------------------------- monitoring alerts (Sentinel)
+// ONE call per alert (Sentinel integration, 24 Sep 2026): Ticket Pulse finds
+// the ticket by fingerprint and creates, counts a repeat, reopens within the
+// window, or starts a new linked ticket — see alertOccurrenceService.
+router.post('/alert-occurrences', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
+  const { default: alertOccurrenceService } = await import('../services/alertOccurrenceService.js');
+  let result;
+  try {
+    result = await alertOccurrenceService.record(req.workspaceId, body, apiActor(req));
+  } catch (err) {
+    if (err.validation) {
+      throw new ApiProblem({
+        status: err.code === 'informational_not_ticketed' ? 422 : 400,
+        code: err.code || 'invalid_request', title: 'Invalid request', detail: err.message,
+        errors: [{ field: err.field, code: 'invalid' }],
+      });
+    }
+    throw err;
+  }
+  const ticket = await ticketService.getTicket(result.ticketId, req.workspaceId);
+  const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js');
+  const base = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
+  let previousTicket = null;
+  if (result.previousTicketId) {
+    const prev = await prisma.ticket.findUnique({ where: { id: result.previousTicketId }, select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true } });
+    if (prev) previousTicket = { id: prev.id, ref: ticketDisplayRef(prev), url: `${base}/tickets/${prev.id}` };
+  }
+  res.status(result.action === 'created' ? 201 : 200).json({
+    success: true,
+    action: result.action,
+    data: { ...ticketShape(ticket), url: `${base}/tickets/${ticket.id}` },
+    occurrence: { count: result.occurrenceCount, lastSeenAt: result.lastOccurrenceAt },
+    priorityRaised: result.priorityRaised,
+    previousTicket,
+  });
+}));
+
+// External references (R9): the records in other systems this ticket belongs to.
+router.get('/tickets/:id/references', S('tickets:read'), asyncHandler(async (req, res) => {
+  const { default: refs } = await import('../services/ticketExternalReferenceService.js');
+  res.json({ success: true, data: await refs.listReferences(await tid(req), req.workspaceId) });
+}));
+
+router.post('/tickets/:id/references', S('tickets:write'), asyncHandler(async (req, res) => {
+  const { default: refs } = await import('../services/ticketExternalReferenceService.js');
+  const id = await tid(req);
+  const raw = Array.isArray(req.body?.references) ? req.body.references : (req.body?.reference ? [req.body.reference] : []);
+  if (!raw.length) throw problems.badRequest('Send `references` (a list) or `reference`');
+  if (raw.length > refs.MAX_REFERENCES_PER_CALL) throw problems.badRequest(`At most ${refs.MAX_REFERENCES_PER_CALL} references per call`);
+  let normalized;
+  try {
+    normalized = raw.map((r) => refs.normalizeReference(r, { defaultSystem: req.body?.system || null }));
+  } catch (err) {
+    if (err.validation) throw problems.badRequest(err.message, [{ field: err.field, code: 'invalid' }]);
+    throw err;
+  }
+  const exists = await prisma.ticket.findFirst({ where: { id, workspaceId: req.workspaceId }, select: { id: true } });
+  if (!exists) throw problems.notFound('Ticket not found');
+  const result = await refs.addReferences(id, req.workspaceId, normalized, apiActor(req).email);
+  res.json({ success: true, data: await refs.listReferences(id, req.workspaceId), meta: result });
 }));
 
 router.put('/tickets/:id/tags', S('tags:write'), asyncHandler(async (req, res) => {

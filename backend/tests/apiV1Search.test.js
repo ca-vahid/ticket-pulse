@@ -23,8 +23,13 @@ let apiKey;
 prismaMock.$queryRawUnsafe = jest.fn();
 prismaMock.ticketTag = { findFirst: jest.fn() };
 prismaMock.ticketTagLink = { findMany: jest.fn() };
+prismaMock.ticket = { findFirst: jest.fn(), findUnique: jest.fn() };
 const similarMock = { search: jest.fn() };
 const fsStatusMock = { isFreshServiceBorn: jest.fn(), changeFsBornStatus: jest.fn() };
+const alertMock = { record: jest.fn() };
+jest.unstable_mockModule('../src/services/alertOccurrenceService.js', () => ({ default: alertMock }));
+const refsMock = { listReferences: jest.fn(), addReferences: jest.fn(), normalizeReference: jest.fn((r) => ({ system: 'sentinel', externalId: r.incidentId, alertId: r.alertId || null })), MAX_REFERENCES_PER_CALL: 50 };
+jest.unstable_mockModule('../src/services/ticketExternalReferenceService.js', () => ({ default: refsMock }));
 jest.unstable_mockModule('../src/services/fsBornStatusService.js', () => ({ default: fsStatusMock }));
 jest.unstable_mockModule('../src/services/ticketSimilaritySearchService.js', () => ({ default: similarMock }));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -184,5 +189,60 @@ describe('PATCH status on a FreshService-born ticket (23 Sep 2026)', () => {
     await request(app()).patch('/api/v1/tickets/901').send({ status: 'Pending' }).expect(200);
     expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(901, 8, 'Pending', expect.any(Object), { resolutionReason: null, resolutionNote: null });
     expect(fsStatusMock.changeFsBornStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /alert-occurrences (Sentinel, 24 Sep 2026)', () => {
+  beforeEach(() => {
+    ticketServiceMock.getTicket.mockResolvedValue({ id: 45790, workspaceId: 8, origin: 'ticketpulse', nativeNumber: 1700, displayRef: 'TP-1700', subject: '[Sentinel] FTP down', status: 'Open', priority: 2, ccEmails: [], customFields: {}, occurrenceCount: 3, lastOccurrenceAt: new Date('2026-09-24T17:00:00Z') });
+  });
+
+  test('created → 201 with action, ticket (incl. url + occurrence fields) and occurrence block', async () => {
+    alertMock.record.mockResolvedValue({ action: 'created', ticketId: 45790, previousTicketId: null, occurrenceCount: 1, lastOccurrenceAt: '2026-09-24T17:00:00Z', priorityRaised: false });
+    const res = await request(app()).post('/api/v1/alert-occurrences').send({ fingerprint: 'sentinel:abc12345', title: 'x', requesterEmail: 's@bgc.ca' }).expect(201);
+    expect(res.body.action).toBe('created');
+    expect(res.body.data).toMatchObject({ id: 45790, ref: 'TP-1700', occurrenceCount: 3 });
+    expect(res.body.data.url).toMatch(/\/tickets\/45790$/);
+    expect(res.body.occurrence).toEqual({ count: 1, lastSeenAt: '2026-09-24T17:00:00Z' });
+  });
+
+  test('occurrence / reopened / duplicate → 200', async () => {
+    for (const action of ['occurrence', 'reopened', 'duplicate']) {
+      alertMock.record.mockResolvedValue({ action, ticketId: 45790, previousTicketId: null, occurrenceCount: 4, lastOccurrenceAt: null, priorityRaised: action === 'occurrence' });
+      const res = await request(app()).post('/api/v1/alert-occurrences').send({ fingerprint: 'sentinel:abc12345' }).expect(200);
+      expect(res.body.action).toBe(action);
+    }
+  });
+
+  test('a later ticket carries previousTicket with its ref and url', async () => {
+    alertMock.record.mockResolvedValue({ action: 'created', ticketId: 45790, previousTicketId: 45001, occurrenceCount: 1, lastOccurrenceAt: null, priorityRaised: false });
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 45001, origin: 'ticketpulse', nativeNumber: 1600, freshserviceTicketId: null });
+    const res = await request(app()).post('/api/v1/alert-occurrences').send({ fingerprint: 'sentinel:abc12345' }).expect(201);
+    expect(res.body.previousTicket).toMatchObject({ id: 45001, ref: 'TP-1600' });
+  });
+
+  test('validation → 400 naming the field; Informational → 422 informational_not_ticketed', async () => {
+    alertMock.record.mockRejectedValueOnce(Object.assign(new Error('fingerprint is required'), { validation: true, field: 'fingerprint', code: 'invalid_request' }));
+    await request(app()).post('/api/v1/alert-occurrences').send({}).expect(400);
+    alertMock.record.mockRejectedValueOnce(Object.assign(new Error('Informational alerts are not ticketed'), { validation: true, field: 'severity', code: 'informational_not_ticketed' }));
+    const res = await request(app()).post('/api/v1/alert-occurrences').send({ severity: 'Informational' }).expect(422);
+    expect(res.body.code).toBe('informational_not_ticketed');
+  });
+});
+
+describe('ticket references (R9)', () => {
+  test('GET lists; POST adds (list or single) and answers the list + counts', async () => {
+    refsMock.listReferences.mockResolvedValue([{ id: 1, system: 'sentinel', incidentId: 'inc-1' }]);
+    const list = await request(app()).get('/api/v1/tickets/901/references').expect(200);
+    expect(list.body.data).toHaveLength(1);
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 901 });
+    refsMock.addReferences.mockResolvedValue({ added: 1, skipped: 1 });
+    const res = await request(app()).post('/api/v1/tickets/901/references').send({ references: [{ incidentId: 'inc-1', alertId: 'a1' }, { incidentId: 'inc-2' }] }).expect(200);
+    expect(refsMock.addReferences).toHaveBeenCalledWith(901, 8, [expect.objectContaining({ externalId: 'inc-1' }), expect.objectContaining({ externalId: 'inc-2' })], expect.any(String));
+    expect(res.body.meta).toEqual({ added: 1, skipped: 1 });
+  });
+
+  test('an empty body is a 400', async () => {
+    await request(app()).post('/api/v1/tickets/901/references').send({}).expect(400);
   });
 });

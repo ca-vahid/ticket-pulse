@@ -1612,6 +1612,12 @@ router.post('/:id/summarize', asyncHandler(async (req, res) => {
   res.json({ success: true, data: summary });
 }));
 
+// Records in other systems (Sentinel incidents…) this ticket belongs to.
+router.get('/:id/external-references', asyncHandler(async (req, res) => {
+  const { default: refs } = await import('../services/ticketExternalReferenceService.js');
+  res.json({ success: true, data: await refs.listReferences(parseTicketId(req), req.workspaceId) });
+}));
+
 // Explicit ticket links (duplicate_of / related_to / parent_of) + duplicate-close.
 router.get('/:id/links', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
