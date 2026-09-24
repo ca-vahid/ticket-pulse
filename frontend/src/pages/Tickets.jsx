@@ -27,6 +27,7 @@ import {
   ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SolutionMark, StateChip, StatusPill, TagChip, TypePill,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
+import ParkDialog, { ParkedMark } from '../components/tickets/ParkControls';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
 import {
   BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
@@ -57,12 +58,14 @@ const SORT_OPTIONS = [
   // Optional-column sorts (Phase QC) — nulls-last on the backend, like dueBy.
   { value: 'source', label: 'Source' },
   { value: 'department', label: 'Department' },
+  // Parked view: soonest wake first.
+  { value: 'parkedUntil', label: 'Wake date (parked)' },
 ];
 // Fields whose FIRST click sorts ascending — status asc walks the lifecycle
 // Open-first (QA 08-04 #14a) and due asc puts the soonest deadline on top;
 // categorical columns (source/department) read A→Z. Desc-first only makes
 // sense for recency/priority fields.
-const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department']);
+const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department', 'parkedUntil']);
 
 // KPI stat cards (mockup: colored icon tile + large number + label). Clicking a
 // card applies that segment. WHICH six cards render is an admin choice per
@@ -267,7 +270,9 @@ export default function Tickets() {
   // (Deleted/Spam stay out server-side). `openStatuses` is the Open/Pending
   // scope the "Show it" widen still reasons about.
   const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
-  const defaultStatuses = useMemo(() => [], []);
+  // QA 09-23 #4: the workspace's default status filter (Settings → Ticket Ops);
+  // empty = every status. The URL always wins (?status=any shows everything).
+  const defaultStatuses = useMemo(() => (Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : []), [meta?.defaultStatuses]);
   const metaStatusesLoaded = (meta?.statuses?.length || 0) > 0;
   // Keyed on the raw ?status VALUE, not the searchParams object — the object
   // changes identity on every unrelated URL write (?peek= open/close, page),
@@ -300,6 +305,8 @@ export default function Tickets() {
   const due = searchParams.get('due') || '';
   const noise = searchParams.get('noise') || '';
   const solution = searchParams.get('solution') || '';
+  // Parked filter (plans/PARKED_BUILD_PLAN.md): any|none|until_date|waiting_on|eta|waking7
+  const parkedFilter = searchParams.get('parked') || '';
   const tag = searchParams.get('tag') || '';
   const tagMode = searchParams.get('tagMode') || '';
   const impactFilter = searchParams.get('impact') || '';
@@ -462,6 +469,7 @@ export default function Tickets() {
     approval: ['approval', 'approvalCategory'],
     requester: ['requesterId', 'requesterName'],
     noise: ['noise'],
+    parked: ['parked'],
   };
 
   // FR 09-09: drop one filter group, keeping the typed text. For Status we ADD
@@ -488,12 +496,15 @@ export default function Tickets() {
       for (const k of keys) next.delete(k);
     }
     next.delete('page');
+    // "Clear every filter" means every status, even where the workspace
+    // opens the list on a default status filter (QA 09-23 #4).
+    if (defaultStatuses.length) next.set('status', 'any');
     setSearchParams(next, { replace: false });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, defaultStatuses]);
 
   const queryParams = useMemo(() => {
     // `facets=source`: the rail's Source counts follow this exact view (QA 09-18 #2).
-    const params = { page, pageSize: effectivePageSize, sort, dir, facets: 'source' };
+    const params = { page, pageSize: effectivePageSize, sort, dir, facets: 'source,parked' };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
     // Board mode sends the SAME status scope as the list (QA 08-04 #16/#15 —
     // silently fetching every status made the board disagree with the rail
@@ -514,6 +525,7 @@ export default function Tickets() {
     if (due) params.due = due;
     if (noise) params.noise = noise;
     if (solution) params.solution = solution;
+    if (parkedFilter) params.parked = parkedFilter;
     if (tag) {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
@@ -528,7 +540,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, solution, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, solution, parkedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,
@@ -1042,6 +1054,8 @@ export default function Tickets() {
 
   // ---- Bulk selection & actions (page-scoped, or query-scoped via "Select all N") ----
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  // Parked (plans/PARKED_BUILD_PLAN.md): bulk park dialog state.
+  const [bulkPark, setBulkPark] = useState(null); // null | { busy, error }
 
   // Keyboard queue navigation (gap plan 2 P4.2): j/k (or ↑/↓) move the peek
   // selection — j with nothing open starts at the top — Enter opens the
@@ -1932,6 +1946,7 @@ export default function Tickets() {
                                   )}
                                   {ticket.isExternal && <ExternalChip />}
                                   {ticket.solutionVerifiedAt && <SolutionMark />}
+                                  {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
                                   <StateChip state={ticket.stateChip} />
                                   {ticket.hasProposedReply && (
                                     <span
@@ -2161,7 +2176,7 @@ export default function Tickets() {
                                             AI
                                           </span>
                                         ))}
-                                        <StatusPill status={ticket.status} className="ml-auto" tone={statusToneFromDefs(statusDefs, ticket.status)} />
+                                        <StatusPill status={ticket.parkedUntil ? 'Parked' : ticket.status} className="ml-auto" tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
                                       </div>
                                       {/* Anchor for long-press / new-tab on touch +
                                           right-click on small windows (QA 08-07 #7);
@@ -2376,6 +2391,18 @@ export default function Tickets() {
           onAction={setBulkAction}
           mergeBlockedReason={mergeBlockedReason}
           onMerge={() => mergePrimary && setBulkMerge({ primary: mergePrimary, others: selectedTickets.filter((t) => t.id !== mergePrimary.id) })}
+          onPark={selectedIds.size > 0 ? () => setBulkPark({ busy: false, error: null }) : null}
+          onUnpark={selectedTickets.some((t) => t.parkedUntil) ? async () => {
+            const ids = selectedTickets.filter((t) => t.parkedUntil).map((t) => t.id);
+            try {
+              const res = await ticketsAPI.bulkUnpark(ids);
+              setBulkResult({ ok: res.data?.done ?? ids.length, failed: (res.data?.failed || []).map((f) => ({ ref: `#${f.id}`, message: f.error })), skipped: 0, label: 'unpark' });
+              setSelectedIds(new Set());
+              fetchTicketsRef.current?.({ silent: true });
+            } catch (err) {
+              setBulkResult({ ok: 0, failed: [{ ref: 'unpark', message: err.response?.data?.message || err.message }], skipped: 0, label: 'unpark' });
+            }
+          } : null}
           onOpenDetails={() => setBulkPanelOpen((v) => !v)}
           detailsOpen={bulkPanelOpen}
           onClear={() => { setSelectedIds(new Set()); setQueryScope(null); setBulkPanelOpen(false); }}
@@ -2387,6 +2414,28 @@ export default function Tickets() {
           onDismissResult={() => setBulkResult(null)}
         />
       )}
+      {bulkPark && (
+        <ParkDialog
+          bulkCount={selectedIds.size}
+          busy={bulkPark.busy}
+          error={bulkPark.error}
+          onClose={() => setBulkPark(null)}
+          onSubmit={async (data) => {
+            setBulkPark({ busy: true, error: null });
+            try {
+              const res = await ticketsAPI.bulkPark([...selectedIds], data);
+              const failed = res.data?.failed || [];
+              setBulkPark(null);
+              setBulkResult({ ok: res.data?.done ?? 0, failed: failed.map((f) => ({ ref: `#${f.id}`, message: f.error })), skipped: 0, label: `park until ${data.until}` });
+              setSelectedIds(new Set());
+              fetchTicketsRef.current?.({ silent: true });
+            } catch (err) {
+              setBulkPark({ busy: false, error: err.response?.data?.message || err.message || 'Park failed' });
+            }
+          }}
+        />
+      )}
+
       {bulkPanelOpen && selectedIds.size > 0 && (
         <BulkSelectionPanel
           tickets={selectedTickets}

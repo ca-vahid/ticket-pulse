@@ -34,6 +34,9 @@ export const WEBHOOK_EVENTS = [
   // Roll-up (Simorgh B8): every child of a parent is done; the parent is NOT
   // closed automatically — this is the nudge.
   'ticket.ready_to_close',
+  // Parked (plans/PARKED_BUILD_PLAN.md): parked / back on its date.
+  'ticket.parked',
+  'ticket.woke',
   // Relations + tasks (Simorgh ask 3, Phase B-2). task.updated is coalesced
   // per task (one delivery per minute); task.completed is always immediate.
   'ticket.linked',

@@ -7,7 +7,7 @@ import {
 } from 'date-fns';
 import {
   BadgeCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
-  GripVertical, LayoutList, ListFilter, Plus, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
+  GripVertical, LayoutList, ListFilter, PauseCircle, Plus, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
 import { statusDefsFromMeta, statusDotClass, statusNamesForBase } from './statusDefs';
@@ -355,7 +355,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'customFields', 'created', 'due', 'origin', 'approval'];
+  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'parked', 'customFields', 'created', 'due', 'origin', 'approval'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
@@ -418,7 +418,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   // QA 09-22 #4: no status is pre-selected (every status shows); "My open"
   // still pins the Open/Pending-BASE scope explicitly.
   const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
-  const defaultStatuses = useMemo(() => [], []);
+  // QA 09-23 #4: the workspace's default status filter ([] = every status).
+  const defaultStatuses = useMemo(() => (Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : []), [meta?.defaultStatuses]);
 
   // Status keeps its special default (Open+Pending bases when the param is
   // absent). The URL parser drops names the workspace doesn't define — but
@@ -577,6 +578,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     { key: 'resolved', label: 'Recently resolved', params: { segment: 'resolved' } },
     { key: 'solutions', label: 'Verified solutions', params: { solution: 'verified', status: 'any' }, icon: BadgeCheck },
     { key: 'scheduled', label: 'Scheduled', params: { view: 'scheduled' }, icon: CalendarClock },
+    // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose, soonest wake first.
+    { key: 'parked', label: 'Parked', params: { segment: 'parked', status: 'any', sort: 'parkedUntil', dir: 'asc' }, icon: PauseCircle },
   ];
   const applyView = (v) => {
     setSearchParams((prev) => {
@@ -594,7 +597,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'solution', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'solution', 'parked', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -1026,6 +1029,29 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             </Section>
           </SortableFacet>
         )}
+
+        {/* Parked (plans/PARKED_BUILD_PLAN.md): one pick; counts follow the view. */}
+        <SortableFacet {...facetProps('parked')}>
+          <Section title="Parked" activeCount={get('parked') ? 1 : 0} onClear={() => setParams({ parked: null })}>
+            {[
+              { value: 'none', label: 'Not parked' },
+              { value: 'any', label: 'Parked (all)' },
+              { value: 'until_date', label: 'Waiting until a date' },
+              { value: 'waiting_on', label: 'Waiting on someone' },
+              { value: 'eta', label: 'In progress, with an ETA' },
+              { value: 'waking7', label: 'Waking in the next 7 days' },
+            ].map((opt) => (
+              <Facet
+                key={opt.value}
+                checked={get('parked') === opt.value}
+                onToggle={() => setParams({ parked: get('parked') === opt.value ? null : opt.value })}
+                count={facets?.parked ? (facets.parked[opt.value] ?? 0) : undefined}
+              >
+                {opt.label}
+              </Facet>
+            ))}
+          </Section>
+        </SortableFacet>
 
         {/* Custom fields (Phase 2) — defs-driven typed inputs over cf_* params */}
         {cfDefs.length > 0 && (

@@ -728,6 +728,16 @@ class TicketService {
       Promise.resolve(dispatch).catch((err) => {
         logger.warn(`ticket.fields_updated workflow dispatch failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
       });
+      // QA 09-23 #1: a person (or the API / a workflow) set the category —
+      // the same ticket.categorized the AI pipeline fires.
+      const categoryKey = changedKeys.find((k) => k === 'internalCategoryId' || k === 'category' || k === 'internalCategory');
+      if (categoryKey) {
+        Promise.resolve(ticketLifecycleNotificationService.emitTicketEvent?.('ticket.categorized', ticket.id, {
+          source: 'ticketpulse_native',
+          dedupeStamp: `categorized:${ticket.id}:${stamp}`,
+          extra: { first: !changes[categoryKey]?.from, by: extra.actorKind || 'human', changes: changes[categoryKey] },
+        })).catch(() => {});
+      }
       return { dispatched: true, dedupeStamp: stamp, changedFields: extra.changedFields };
     } catch (err) {
       logger.warn(`ticket.fields_updated dispatch failed for ticket ${ticket?.id} (non-fatal): ${err.message}`);
@@ -961,18 +971,45 @@ class TicketService {
    */
   async _listFacets(workspaceId, query = {}) {
     const wanted = String(query.facets || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!wanted.includes('source')) return null;
+    if (!wanted.includes('source') && !wanted.includes('parked')) return null;
     try {
-      const rest = { ...query };
-      delete rest.source;
-      delete rest.facets;
-      const where = await this.buildListWhere(workspaceId, rest);
-      const rows = await prisma.ticket.groupBy({
-        by: ['source'],
-        where: { ...where, source: { not: null } },
-        _count: { _all: true },
-      });
-      return { sources: rows.map((r) => ({ value: r.source, count: r._count._all })) };
+      const out = {};
+      if (wanted.includes('source')) {
+        const rest = { ...query };
+        delete rest.source;
+        delete rest.facets;
+        const where = await this.buildListWhere(workspaceId, rest);
+        const rows = await prisma.ticket.groupBy({
+          by: ['source'],
+          where: { ...where, source: { not: null } },
+          _count: { _all: true },
+        });
+        out.sources = rows.map((r) => ({ value: r.source, count: r._count._all }));
+      }
+      // Parked facet: counts per park kind + not parked, the view's other
+      // filters applied (its own dimension dropped, like Source).
+      if (wanted.includes('parked')) {
+        const rest = { ...query };
+        delete rest.parked;
+        delete rest.facets;
+        const where = await this.buildListWhere(workspaceId, rest);
+        if (where.parkedUntil === null) delete where.parkedUntil;
+        const [kinds, none, waking7] = await Promise.all([
+          prisma.ticket.groupBy({ by: ['parkKind'], where: { ...where, parkedUntil: { not: null } }, _count: { _all: true } }),
+          prisma.ticket.count({ where: { ...where, parkedUntil: null } }),
+          prisma.ticket.count({ where: { ...where, parkedUntil: { not: null, lte: new Date(Date.now() + 7 * 86400e3) } } }),
+        ]);
+        const byKind = Object.fromEntries(kinds.map((r) => [r.parkKind, r._count._all]));
+        out.parked = {
+          any: kinds.reduce((n, r) => n + r._count._all, 0),
+          none,
+          until_date: byKind.until_date || 0,
+          waiting_on: byKind.waiting_on || 0,
+          eta: byKind.eta || 0,
+          waking7,
+        };
+      }
+      return out;
     } catch (err) {
       logger.warn(`list facets failed (non-fatal): ${err.message}`);
       return null;
@@ -984,6 +1021,14 @@ class TicketService {
 
     const asList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(',')).map((s) => String(s).trim()).filter(Boolean);
     if (query.status) where.status = { in: asList(query.status) };
+    // Parked filter (plans/PARKED_BUILD_PLAN.md): ?parked=any|none|until_date|waiting_on|eta|waking7
+    if (query.parked) {
+      const p = String(query.parked);
+      if (p === 'any') where.parkedUntil = { not: null };
+      else if (p === 'none') where.parkedUntil = null;
+      else if (p === 'waking7') where.parkedUntil = { not: null, lte: new Date(Date.now() + 7 * 86400e3) };
+      else if (['until_date', 'waiting_on', 'eta'].includes(p)) where.parkKind = p;
+    }
     if (query.priority) where.priority = { in: asList(query.priority).map(Number).filter(Number.isFinite) };
     if (query.origin) where.origin = String(query.origin);
     // Verified solutions (QA 09-22 #6): the "Verified solutions" view.
@@ -1148,7 +1193,13 @@ class TicketService {
     // "resolved" = every Resolved/Closed-base name. With only the canonical 4
     // configured these resolve to exactly the old hardcoded lists.
     const now = new Date();
-    if (query.segment === 'open') {
+    // Parked tickets wait on purpose: they are neither open work nor late, so
+    // every open-work segment leaves them out; the "parked" segment is theirs.
+    const OPEN_WORK_SEGMENTS = ['open', 'unassigned', 'due_today', 'overdue', 'awaiting'];
+    if (OPEN_WORK_SEGMENTS.includes(query.segment) && where.parkedUntil === undefined) where.parkedUntil = null;
+    if (query.segment === 'parked') {
+      where.parkedUntil = { not: null };
+    } else if (query.segment === 'open') {
       where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
     } else if (query.segment === 'unassigned') {
       where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
@@ -1291,7 +1342,7 @@ class TicketService {
       };
     }
 
-    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department'].includes(query.sort) ? query.sort : 'createdAt';
+    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department', 'parkedUntil'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
 
     let total;
@@ -1314,6 +1365,9 @@ class TicketService {
         orderBy = [{ dueBy: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else if (sortField === 'requester') {
         orderBy = [{ requester: { name: sortDir } }, { id: 'desc' }];
+      } else if (sortField === 'parkedUntil') {
+        // Parked view: soonest wake first; unparked rows trail.
+        orderBy = [{ parkedUntil: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else if (sortField === 'source' || sortField === 'department') {
         // Optional-column sorts (Phase QC): both are nullable, so blanks trail
         // in either direction like dueBy. Note: department sorts on the
@@ -1738,7 +1792,9 @@ class TicketService {
       statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']),
       workspaceTimezone(workspaceId),
     ]);
-    const open = { workspaceId, isNoise: false, status: { in: openNames } };
+    // Parked tickets are not open work (plans/PARKED_BUILD_PLAN.md) — every
+    // count built on `open` leaves them out; they get their own card.
+    const open = { workspaceId, isNoise: false, status: { in: openNames }, parkedUntil: null };
     // "Tickets this week/month/year" (Phase FC): same visible-queue base as
     // `all` plus a zoned createdAt floor — mirrors the created_* segment
     // where-clauses exactly so a card's count always equals its click.
@@ -1813,6 +1869,10 @@ class TicketService {
       createdThisMonth,
       createdThisYear,
       byTechnician,
+      ...(await Promise.all([
+        prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null } } }),
+        prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null, lte: new Date(now.getTime() + 7 * 86400e3) } } }),
+      ]).then(([parked, parkedWakingWeek]) => ({ parked, parkedWakingWeek })).catch(() => ({ parked: 0, parkedWakingWeek: 0 }))),
     };
   }
 
@@ -2500,6 +2560,8 @@ class TicketService {
       // Admin-chosen quick filter cards (Phase FC): ordered array of exactly
       // 6 registry keys. The frontend registry owns labels/icons.
       queueCards,
+      // QA 09-23 #4: the workspace's default status filter for the list ([] = every status).
+      defaultStatuses: await import('./ticketDefaultStatusService.js').then(({ default: svc }) => svc.get(workspaceId)).catch(() => []),
       // Resolved new-ticket form (Phase TF): built-in field visibility/
       // required/defaults + workspace default source/group for the composer.
       // TP composer only — FreshService-owned forms are untouched.
@@ -3652,6 +3714,11 @@ class TicketService {
         await this._emitFieldsUpdated({ ticket, changes: fieldChanges, actor, auditRowId: writeBackAudit?.id ?? null });
       }
     }
+    if (changes.status && (updated.parkedUntil || ticket.parkedUntil)) {
+      await import('./ticketParkService.js')
+        .then(({ default: ticketParkService }) => ticketParkService.afterStatusChange(ticket.id, workspaceId, { newStatus: localPatch.status, actor }))
+        .catch((err) => logger.warn(`Park end after status change skipped for ticket ${ticket.id}: ${err.message}`));
+    }
     if (changes.status) {
       // In-process marker (RO-5): snapshot / fast refresh / on-open reconcile
       // consult it before overwriting the status we just wrote. The audit row
@@ -3948,6 +4015,14 @@ class TicketService {
     // along so the status-changed webhook can say WHO (Simorgh D3).
     await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
+    // Parked (plans/PARKED_BUILD_PLAN.md): a status change that is not the
+    // park's own ends the park — a person, the API, bulk, or a change adopted
+    // from FreshService moved the ticket on.
+    if (updated.parkedUntil || ticket.parkedUntil) {
+      await import('./ticketParkService.js')
+        .then(({ default: ticketParkService }) => ticketParkService.afterStatusChange(ticket.id, workspaceId, { newStatus: status, actor }))
+        .catch((err) => logger.warn(`Park end after status change skipped for ticket ${ticket.id}: ${err.message}`));
+    }
     // Adopted from FreshService: the copy already has it — no echo write.
     if (!fromFreshService) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // Roll-up: this ticket may be somebody's child (its parent may now be ready
@@ -4499,15 +4574,27 @@ class TicketService {
       where: { id: Number(entryId), ticketId, workspaceId },
     });
     if (!entry) throw new NotFoundError('Note not found on this ticket');
-    if (entry.eventType !== 'note') {
+    // QA 09-23 #6: notes written in FreshService sync in as 'private_note'
+    // (1,536 of them in IT in 30 days) and could not be edited by anyone —
+    // not even their author (Gaby). Both kinds are internal notes.
+    if (entry.eventType !== 'note' && entry.eventType !== 'private_note') {
       throw new ValidationError('Only internal notes can be edited');
     }
     if (entry.authorType === 'system') {
       throw new ValidationError('System and approval notes cannot be edited');
     }
     const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
-    const isAuthor = Boolean(entry.actorEmail && actor?.email)
+    let isAuthor = Boolean(entry.actorEmail && actor?.email)
       && String(entry.actorEmail).toLowerCase() === String(actor.email).toLowerCase();
+    // Synced FreshService notes carry the author's FreshService id, not an
+    // e-mail: match it against the acting technician's.
+    if (!isAuthor && entry.actorFreshserviceId && actor?.technicianId) {
+      const tech = await prisma.technician.findFirst({
+        where: { id: Number(actor.technicianId) },
+        select: { freshserviceId: true },
+      }).catch(() => null);
+      isAuthor = Boolean(tech?.freshserviceId) && String(tech.freshserviceId) === String(entry.actorFreshserviceId);
+    }
     if (!isAuthor && !isAdmin) {
       throw new ValidationError('Only the note author or an admin can edit this note');
     }
@@ -4545,6 +4632,11 @@ class TicketService {
         await client.updateConversation(Number(fsConversationId), { body: fsBody });
       } catch (err) {
         if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+        // Ticket Pulse writes to FreshService as its integration agent;
+        // FreshService may refuse edits to a note another agent wrote there.
+        if (getFreshServiceStatus(err) === 403) {
+          throw new ValidationError('FreshService does not let Ticket Pulse edit a note written there by someone else — edit it in FreshService.');
+        }
         throw err;
       }
     }

@@ -11,7 +11,7 @@ import {
   Download,
   ExternalLink,
   Filter,
-  Gauge,
+  Clock3, Gauge,
   Info,
   Loader2,
   Maximize2,
@@ -141,6 +141,7 @@ const TEAM_TABLE_COLUMNS = [
   ['assigned', 'Assigned', 'agentAssigned'],
   ['openNow', 'Open Now', 'agentOpenNow'],
   ['pendingNow', 'Pending Now', 'agentPendingNow'],
+  ['parkedNow', 'Parked Now', null],
   ['selfPicked', 'Self', 'agentSelfPicked'],
   ['coordinatorAssigned', 'Coordinator', 'agentCoordinatorAssigned'],
   ['appAssigned', 'App', 'agentAppAssigned'],
@@ -602,6 +603,7 @@ function insightDrilldownColumns(insight) {
       { key: 'assigned', label: 'Assigned', render: (row) => formatNumber(row.assigned || 0) },
       { key: 'openNow', label: 'Open Now', render: (row) => formatNumber(row.openNow || 0) },
       { key: 'pendingNow', label: 'Pending Now', render: (row) => formatNumber(row.pendingNow || 0) },
+      { key: 'parkedNow', label: 'Parked Now', render: (row) => formatNumber(row.parkedNow || 0) },
       { key: 'closed', label: 'Closed', render: (row) => formatNumber(row.closed || 0) },
       { key: 'rejected', label: 'Rejected', render: (row) => formatNumber(row.rejected || 0) },
       { key: 'availableDays', label: 'Available', render: (row) => formatNumber(row.availableDays || 0) },
@@ -2033,6 +2035,8 @@ export default function Analytics({ view = 'standard' }) {
       // pending queues (QA 07-27 #1).
       { name: 'Open now', data: teamRows.map((row) => ({ y: row.openNow || 0, technicianId: row.technicianId })) },
       { name: 'Pending now', data: teamRows.map((row) => ({ y: row.pendingNow || 0, technicianId: row.technicianId })) },
+      // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date — its own band.
+      { name: 'Parked', data: teamRows.map((row) => ({ y: row.parkedNow || 0, technicianId: row.technicianId })) },
       { name: 'Closed / resolved', data: teamRows.map((row) => ({ y: row.closed || 0, technicianId: row.technicianId })) },
     ],
   }), [teamRows, toggleTeamSelection, palette]);
@@ -3999,6 +4003,16 @@ export default function Analytics({ view = 'standard' }) {
           tone={ops?.routingAccuracy?.heldPct != null && ops.routingAccuracy.heldPct < 80 ? 'amber' : 'green'}
           metric="routingAccuracy"
         />
+        {ops?.parks && (
+          <StatCard
+            title="Parked"
+            value={formatNumber(ops.parks.created)}
+            subtitle={`${formatNumber(ops.parks.woke)} woke · ${formatNumber(ops.parks.endedEarly)} ended early${ops.parks.parkedThreePlusTickets ? ` · ${ops.parks.parkedThreePlusTickets} parked 3+ times` : ''}`}
+            icon={Clock3}
+            tone="blue"
+            metric="parks"
+          />
+        )}
         <StatCard
           title="Rebounds"
           value={formatNumber(ops?.pipeline?.rebounds)}

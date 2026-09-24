@@ -15,6 +15,7 @@ const prismaMock = {
   workspace: { findUnique: jest.fn() },
   ticket: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn(), findMany: jest.fn() },
   ticketThreadEntry: { create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+  technician: { findFirst: jest.fn() },
   ticketAssignmentEpisode: { create: jest.fn(), updateMany: jest.fn() },
   ticketTypeDefinition: { findMany: jest.fn().mockResolvedValue([]) },
   ticketStatusDefinition: {
@@ -239,6 +240,40 @@ describe('ticketService.updateNote re-mirroring', () => {
       body: expect.stringContaining('<p>edited on fs-born</p>'),
     });
     expect(mirrorServiceMock.enqueueThreadEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  // QA 09-23 #6: Gaby could not edit notes she wrote IN FreshService — they
+  // sync in as 'private_note' with her FreshService id, not her e-mail.
+  test('a note written in FreshService (private_note) can be edited by its author, matched by FreshService id', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue({
+      ...baseNote, eventType: 'private_note', source: 'freshservice_conversation', actorEmail: null, authorType: null,
+      actorFreshserviceId: BigInt(1000008456), externalEntryId: 'fs-conversation:777', mirrorState: null,
+    });
+    prismaMock.technician.findFirst.mockResolvedValue({ freshserviceId: BigInt(1000008456) });
+
+    await ticketService.updateNote(501, 1, 9002, { bodyHtml: '<p>fixed typo</p>' }, author);
+
+    expect(fsClientMock.updateConversation).toHaveBeenCalledWith(777, { body: '<p>fixed typo</p>' });
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalled();
+  });
+
+  test('someone else’s FreshService note is refused for a non-admin', async () => {
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue({
+      ...baseNote, eventType: 'private_note', actorEmail: null, authorType: null, actorFreshserviceId: BigInt(1000008456),
+    });
+    prismaMock.technician.findFirst.mockResolvedValue({ freshserviceId: BigInt(5) });
+    await expect(ticketService.updateNote(501, 1, 9002, { bodyHtml: '<p>x</p>' }, otherAgent)).rejects.toThrow(/author or an admin/);
+  });
+
+  test('FreshService refusing the edit (403) says to edit it there, and nothing changes here', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue({
+      ...baseNote, eventType: 'private_note', source: 'freshservice_conversation', externalEntryId: 'fs-conversation:778',
+    });
+    fsClientMock.updateConversation.mockRejectedValueOnce(Object.assign(new Error('forbidden'), { response: { status: 403 } }));
+    await expect(ticketService.updateNote(501, 1, 9002, { bodyHtml: '<p>x</p>' }, admin)).rejects.toThrow(/edit it in FreshService/);
+    expect(prismaMock.ticketThreadEntry.update).not.toHaveBeenCalled();
   });
 
   // Phase DR1/DR5: the canonical `fs-conversation:<id>` stamp the live write

@@ -1,7 +1,7 @@
 import prisma from './prisma.js';
 import statusService from './statusService.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { REQUESTER_PROFILE_SELECT } from './requesterProfileService.js';
+import { REQUESTER_PROFILE_SELECT, refreshRequesterEntraProfile } from './requesterProfileService.js';
 
 /**
  * Search v2 / requester page (16 Sep 2026): everything the /requesters/:id
@@ -21,11 +21,23 @@ function median(values) {
 export async function requesterProfile(requesterId, workspaceId) {
   const id = Number(requesterId);
   if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Invalid requester id');
-  const requester = await prisma.requester.findUnique({
-    where: { id },
-    select: { ...REQUESTER_PROFILE_SELECT, freshserviceId: true, isActive: true, createdAt: true, unattended: true, entraMissingAt: true },
-  });
+  const select = { ...REQUESTER_PROFILE_SELECT, freshserviceId: true, isActive: true, createdAt: true, unattended: true, entraMissingAt: true, entraProfileSyncedAt: true };
+  let requester = await prisma.requester.findUnique({ where: { id }, select });
   if (!requester) throw new NotFoundError('Requester not found');
+  // QA 09-23 #7: the directory lookup only ever ran on ticket activity, so a
+  // person without a recent ticket never got their job title / office (29 of
+  // 75 Cambio Earth profiles, #800 among them). Opening the page now looks
+  // them up once (a week's freshness; a recorded miss is retried after a
+  // day), capped at 3 s so the page never waits on the directory.
+  const stale = !requester.entraProfileSyncedAt || Date.now() - new Date(requester.entraProfileSyncedAt).getTime() > 7 * 86400e3;
+  const recentMiss = requester.entraMissingAt && Date.now() - new Date(requester.entraMissingAt).getTime() < 86400e3;
+  if (requester.email && stale && !recentMiss) {
+    const refreshed = await Promise.race([
+      refreshRequesterEntraProfile(requester).then(() => true).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+    if (refreshed) requester = (await prisma.requester.findUnique({ where: { id }, select }).catch(() => null)) || requester;
+  }
 
   const base = { workspaceId, requesterId: id, isNoise: false };
   const [openNames, doneNames] = await Promise.all([

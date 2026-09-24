@@ -88,9 +88,11 @@ for (const ws of wss) {
     WHERE t.workspace_id=$1 AND e.end_method='rejected' AND e.ended_at >= ${W}
     GROUP BY t.id, t.freshservice_ticket_id, t.subject, tech.name, c.name, t.status ORDER BY 3 DESC LIMIT 6`, ws.id);
   w.backlog = (await prisma.$queryRawUnsafe(`
-    SELECT count(*) FILTER (WHERE assigned_tech_id IS NULL)::int AS unassigned_open,
-      count(*) FILTER (WHERE updated_at < now() - interval '3 days')::int AS stale3d
+    SELECT count(*) FILTER (WHERE assigned_tech_id IS NULL AND parked_until IS NULL)::int AS unassigned_open,
+      count(*) FILTER (WHERE updated_at < now() - interval '3 days' AND parked_until IS NULL)::int AS stale3d
+      , count(*) FILTER (WHERE parked_until IS NOT NULL)::int AS parked
     FROM tickets WHERE workspace_id=$1 AND status IN ('Open','Pending') AND COALESCE(is_noise,false)=false`, ws.id))[0];
+  // Parked tickets (Sep 2026) wait on purpose: counted apart, never stale or unassigned work.
   w.assigners = await prisma.$queryRawUnsafe(`
     SELECT COALESCE(tech.name,'(unassigned)') AS who, count(*)::int AS n
     FROM tickets t LEFT JOIN technicians tech ON tech.id=t.assigned_tech_id

@@ -1,6 +1,23 @@
-export const APP_VERSION = '3.9.77-preview';
+export const APP_VERSION = '3.9.78-preview';
 
 export const changelog = [
+  {
+    version: '3.9.78-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Parked tickets</strong> &mdash; a ticket that is waiting on purpose (a transfer on Oct 5, someone back from leave on Nov 16, a colleague to answer, a project with an ETA) can now be <em>parked</em> until a date, with a one-line reason. It reads <em>Parked</em> in Ticket Pulse (FreshService just sees Pending), leaves the open, overdue and workload counts, and comes back to its assignee on the date &mdash; with an e-mail to them. A reply from the requester, or any status change, brings it back early. Park from the ticket&rsquo;s More menu, several at once from the selection bar, or through a workflow or the API. Up to six months; Standard members and up.' },
+      { type: 'new', html: '<strong>Parked everywhere it counts</strong> &mdash; a <em>Parked</em> stat card, a Parked filter and saved view (soonest wake first), the wake date in the Due column, a muted &ldquo;+N parked&rdquo; on the dashboard, a Parked band in Team Balance and park numbers in Automation Ops. Parked tickets never get requester reminders, aging or SLA nags, and the follow-up lists and briefs leave them out until their date.' },
+      { type: 'new', html: '<strong>HR notices park themselves</strong> &mdash; in IT, a transfer, departure, new-hire or leave notice with a clear date is parked until that date as it arrives (e.g. &ldquo;Transfer effective Oct 5 (from the HR notice)&rdquo;); when the date is not clear the ticket offers it as a one-click suggestion. Nothing is guessed.' },
+      { type: 'new', html: '<strong>Workflows: &ldquo;Ticket categorized&rdquo; and &ldquo;Stop other workflows for this ticket change&rdquo;</strong> &mdash; a new trigger fires when the AI (or a person) sets the category, so a mail can name it; and a workflow can now stop the others for the same ticket change &mdash; a Power Apps resubmission that reopens and updates a ticket sends one e-mail instead of three. Two field edits a moment apart now always merge into one &ldquo;Ticket updated&rdquo; mail.' },
+      { type: 'improved', html: '<strong>Default statuses per workspace</strong> &mdash; Settings &rarr; Ticket Ops &rarr; Default statuses picks which statuses the Tickets list opens on (Project Accounting: Open and Pending); none ticked means every status. &ldquo;Clear filters&rdquo; always shows everything.' },
+      { type: 'fixed', html: '<strong>Requester pages show their tickets again</strong> &mdash; the Tickets tab on a person&rsquo;s page asked for a status that does not exist and always showed none. It now lists every ticket from them, says &ldquo;No open tickets&rdquo; only when you filtered to open ones, and the blue tab marker stays inside its rounded corners.' },
+      { type: 'fixed', html: '<strong>Notes written in FreshService can be edited</strong> &mdash; the author (or an admin) can now edit an internal note written in FreshService, not only notes written in Ticket Pulse. If FreshService refuses the edit, Ticket Pulse says to make it there.' },
+      { type: 'fixed', html: '<strong>Every requester profile gets its directory details</strong> &mdash; opening a person&rsquo;s page looks them up in the directory when their job title and office were never filled in (the lookup used to run only on new tickets, so people without a recent one &mdash; many Cambio Earth colleagues among them &mdash; stayed blank).' },
+      { type: 'improved', html: '<strong>A clearer verified-solution mark</strong> &mdash; the small green tick is now a proper pictogram (a document under an award seal), a little larger in the list and larger again on the ticket.' },
+      { type: 'improved', html: '<strong>Your e-mail signature lives on your profile</strong> &mdash; it moved from Mail &amp; alerts to Profile, photo &amp; signature.' },
+      { type: 'fixed', html: '<strong>Every recently closed Ticket Pulse ticket is checked against FreshService</strong> &mdash; the check that follows a close or reopen on a ticket&rsquo;s FreshService copy only looked at the ten most recently changed closed tickets, so some were never reached. It now works through all of them in turn.' },
+    ],
+  },
   {
     version: '3.9.77-preview',
     date: 'September 24, 2026',

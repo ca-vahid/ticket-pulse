@@ -1922,6 +1922,26 @@ class AssignmentPipelineService {
       } else if (changed) {
         import('./agentAlertService.js').then(({ default: s }) => s.evaluate('recategorized', ticketId)).catch(() => {});
       }
+      // QA 09-23 #1: workflows can now wait for the category. A "received"
+      // mail on ticket.created goes out ~1 s after creation, 49 s before the
+      // AI names the category (TP-1638); ticket.categorized fires here, once
+      // per actual change, with first/from/to so a workflow can pick.
+      if (safeCategoryId && (!hadCategory || changed)) {
+        import('./ticketLifecycleNotificationService.js')
+          .then(({ emitTicketEvent }) => emitTicketEvent('ticket.categorized', ticketId, {
+            source: 'assignment_pipeline',
+            dedupeStamp: `categorized:${ticketId}:${safeCategoryId}:${safeSubcategoryId || 0}`,
+            extra: {
+              first: !hadCategory,
+              fromCategoryId: priorClassification?.internalCategoryId ?? null,
+              toCategoryId: safeCategoryId,
+              toSubcategoryId: safeSubcategoryId || null,
+              fit: categoryFit,
+              by: 'ai',
+            },
+          }))
+          .catch(() => {});
+      }
     } catch (err) {
       logger.warn('Failed to persist internal ticket classification', { ticketId, workspaceId, error: err.message });
     }

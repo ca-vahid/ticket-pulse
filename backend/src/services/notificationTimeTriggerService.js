@@ -179,6 +179,7 @@ class NotificationTimeTriggerService {
       workspaceId,
       status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
       isNoise: false,
+      parkedUntil: null, // parked tickets wait on purpose
     };
     const [openCount, unassignedCount, overdueCount, dueTodayCount, oldest] = await Promise.all([
       prisma.ticket.count({ where: openWhere }),
@@ -450,6 +451,8 @@ class NotificationTimeTriggerService {
         workspaceId: workflow.workspaceId,
         status: { in: scanStatuses },
         isNoise: false,
+        // Parked tickets wait on purpose: no aging / unassigned / SLA nags.
+        parkedUntil: null,
         ...where,
       },
       select: { id: true, createdAt: true, dueBy: true },

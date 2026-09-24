@@ -6,6 +6,7 @@ import { AppError, AuthenticationError, AuthorizationError, NotFoundError, Valid
 import { locateTicketWorkspaceForUser } from '../services/ticketWorkspaceLocator.js';
 import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
+import ticketParkService, { parkView } from '../services/ticketParkService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import { heartbeatPresence, leavePresence, presenceSnapshot } from '../services/presenceService.js';
@@ -302,6 +303,13 @@ router.get('/stats', asyncHandler(async (req, res) => {
 // unique keys) lives in queueCardConfigService; the admin gate is the same
 // requireTicketingAdmin the sibling ticket-ops routes use (declared below —
 // function declarations hoist).
+// QA 09-23 #4: default status filter for the list, per workspace ([] = every status).
+router.put('/default-statuses', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: ticketDefaultStatusService } = await import('../services/ticketDefaultStatusService.js');
+  const statuses = await ticketDefaultStatusService.set(req.workspaceId, req.body?.statuses);
+  res.json({ success: true, data: { statuses } });
+}));
+
 router.put('/queue-cards', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: queueCardConfigService } = await import('../services/queueCardConfigService.js');
   const cards = await queueCardConfigService.setCards(req.workspaceId, req.body?.cards, req.ticketActor.email);
@@ -926,6 +934,60 @@ router.put('/:id/tags', asyncHandler(async (req, res) => {
 // Apply one action to EVERYTHING matching the current filter (not just the
 // page). Preview first for the confirm count; expectedTotal guards staleness.
 
+// ------------------------------------------------------------------ parked
+// A park is a marker, not a status (plans/PARKED_BUILD_PLAN.md): the ticket
+// goes to Pending (FreshService sees 3) and wakes on its date. Standard role
+// or higher (readonly is refused app-wide by blockReadonlyWrites).
+
+router.get('/:id/park', asyncHandler(async (req, res) => {
+  const id = parseTicketId(req);
+  const [active, history] = await Promise.all([ticketParkService.activePark(id), ticketParkService.history(id)]);
+  res.json({ success: true, data: { active: parkView(active), history: history.map(parkView).map((p, i) => ({ ...p, endedAt: history[i].endedAt, endReason: history[i].endReason, endedBy: history[i].endedBy })) } });
+}));
+
+router.post('/:id/park', asyncHandler(async (req, res) => {
+  const result = await ticketParkService.park(parseTicketId(req), req.workspaceId, {
+    kind: req.body?.kind,
+    until: req.body?.until,
+    reason: req.body?.reason,
+    waitingOn: req.body?.waitingOn,
+  }, req.ticketActor, { source: 'agent' });
+  res.status(201).json({ success: true, data: result });
+}));
+
+// HR notices: the clear date the notice states (null when there is none).
+router.get('/:id/park-suggestion', asyncHandler(async (req, res) => {
+  const data = await ticketParkService.hrSuggestion(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+router.delete('/:id/park', asyncHandler(async (req, res) => {
+  const result = await ticketParkService.unpark(parseTicketId(req), req.workspaceId, { reason: 'unparked', reopen: true }, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+// Bulk park / unpark for a selection (one reason for all). Coordinators+.
+router.post('/bulk-park', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') throw new ValidationError('Bulk parking requires coordinator or admin access');
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Boolean).slice(0, 200);
+  if (!ids.length) throw new ValidationError('Choose at least one ticket');
+  const unpark = req.body?.unpark === true;
+  const results = [];
+  for (const id of ids) {
+    try {
+      const r = unpark
+        ? await ticketParkService.unpark(id, req.workspaceId, { reason: 'unparked', reopen: true }, req.ticketActor)
+        : await ticketParkService.park(id, req.workspaceId, {
+          kind: req.body?.kind, until: req.body?.until, reason: req.body?.reason, waitingOn: req.body?.waitingOn,
+        }, req.ticketActor, { source: 'bulk' });
+      results.push({ id, ok: true, ...(unpark ? { unparked: r.unparked } : {}) });
+    } catch (err) {
+      results.push({ id, ok: false, error: err.message });
+    }
+  }
+  res.json({ success: true, data: { done: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), results } });
+}));
+
 router.post('/bulk-by-query', asyncHandler(async (req, res) => {
   if (req.ticketActor.kind === 'agent') {
     throw new ValidationError('Bulk editing requires coordinator or admin access');
@@ -1421,6 +1483,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const ticketId = parseTicketId(req);
   try {
     const ticket = await ticketService.getTicket(ticketId, req.workspaceId, { reconcile });
+    // Parked (plans/PARKED_BUILD_PLAN.md): the active park rides on the ticket.
+    if (ticket?.parkedUntil) ticket.park = parkView(await ticketParkService.activePark(ticketId));
     res.json({ success: true, data: ticket });
   } catch (err) {
     if (!(err instanceof NotFoundError)) throw err;

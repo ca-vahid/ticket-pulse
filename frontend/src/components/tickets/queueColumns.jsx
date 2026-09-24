@@ -10,6 +10,7 @@ import {
   dueIn, formatDayTime, ticketCategoryLabels, ticketSourceLabel, timeAgo, timeAgoShort,
 } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
+import { ParkedMark } from './ParkControls';
 import { ticketsAPI } from '../../services/api';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 
@@ -363,6 +364,15 @@ function renderAssignee(ticket, ctx) {
 
 function renderStatus(ticket, ctx) {
   const { isEditable, fsRowEditable, removedLike, statusDefs } = ctx;
+  // Parked (plans/PARKED_BUILD_PLAN.md): reads "Parked" here, whatever the
+  // underlying Pending — open the ticket to change the date or unpark.
+  if (ticket.parkedUntil && !removedLike) {
+    return (
+      <span className={`${ctx.cell('status')} py-1`} style={ctx.cellStyle('status')} title="Parked — waiting on purpose until its date. FreshService shows Pending.">
+        <StatusPill status="Parked" size="sm" tone="slate" />
+      </span>
+    );
+  }
   return (
     <span className={`${ctx.cell('status')} py-1`} style={ctx.cellStyle('status')}>
       {(isEditable || fsRowEditable) && !removedLike ? (
@@ -397,11 +407,13 @@ function renderDue(ticket, ctx) {
     <span className={`${ctx.cell('due')} ${ctx.cellPad}`} style={ctx.cellStyle('due')}>
       {removedLike
         ? <span className="text-xs text-muted-foreground/50">—</span>
-        : resolvedLike
-          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30">Done</span>
-          : ticket.dueBy
-            ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} compact={!ctx.roomy} />
-            : <span className="text-xs text-muted-foreground/50">—</span>}
+        : ticket.parkedUntil
+          ? <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />
+          : resolvedLike
+            ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30">Done</span>
+            : ticket.dueBy
+              ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} compact={!ctx.roomy} />
+              : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
 }

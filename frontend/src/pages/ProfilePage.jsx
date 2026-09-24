@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { settingsAPI } from '../services/api';
 import PhotoUploadDialog from '../components/settings/PhotoUploadDialog';
+import SignaturePanel from '../components/agent/SignaturePanel';
 import { PersonAvatar } from '../components/tickets/ticketUi';
 
 /**
@@ -163,12 +164,18 @@ export default function ProfilePage() {
           )}
         </section>
 
+        {/* QA 09-23 #5: the signature is part of who you are in e-mail — it
+            lives with your photo, not under Mail & alerts. */}
+        <div className="mt-4">
+          <SignaturePanel />
+        </div>
+
         <nav aria-label="Your settings" className="mt-4 grid gap-2.5 sm:grid-cols-2">
           <Link to="/mail-alerts" className="tp-card tp-focus-ring flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-muted/50">
             <Bell className="h-5 w-5 text-primary" aria-hidden="true" />
             <span>
               <span className="block text-sm font-semibold text-foreground">Mail &amp; alerts</span>
-              <span className="block text-xs text-muted-foreground">How you are notified, your alert rules, your e-mail signature.</span>
+              <span className="block text-xs text-muted-foreground">How you are notified and your alert rules.</span>
             </span>
           </Link>
           <Link to="/my-competencies" className="tp-card tp-focus-ring flex items-center gap-3 rounded-xl px-4 py-3 hover:bg-muted/50">

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, BadgeCheck, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -1033,8 +1033,11 @@ export function UnassignedBadge({ size = 'h-6 w-6', withLabel = true, labelClass
 }
 
 /**
- * Verified-solution mark (QA 09-22 #6): a check in a soft emerald disc, no
- * pill. Quiet in the queue, labelled on the ticket page.
+ * Verified-solution mark (QA 09-22 #6; QA 09-23 #3 asked for something that
+ * reads as more than a tag): a generated pictogram — a document with a
+ * lightbulb under an emerald award seal (brand/actions/verified-solution,
+ * gpt-image-2, flat matte like the header actions). 20 px in lists, 24 px
+ * with the label on the ticket page. No pill.
  */
 export function SolutionMark({ className = '', withLabel = false }) {
   return (
@@ -1043,9 +1046,7 @@ export function SolutionMark({ className = '', withLabel = false }) {
       title="Verified solution — marked by an agent as worth finding again"
       data-testid="solution-mark"
     >
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
-        <BadgeCheck className="h-3 w-3" aria-hidden="true" />
-      </span>
+      <BrandArt name="verified-solution" className={withLabel ? 'h-6 w-6' : 'h-5 w-5'} />
       {withLabel ? <span className="text-[11px] font-semibold">Verified solution</span> : <span className="sr-only">Verified solution</span>}
     </span>
   );

@@ -51,7 +51,8 @@ describe('RequesterDetail', () => {
     await waitFor(() => expect(document.querySelector('img[src^="data:image/png"]')).not.toBeNull());
     expect(apiMock.ticketsAPI.requesterProfile).toHaveBeenCalledWith('9');
     // The unfiltered history: every status, a bigger page.
-    expect(apiMock.ticketsAPI.list).toHaveBeenCalledWith({ requesterId: '9', status: 'any', pageSize: 100, sort: 'createdAt', dir: 'desc' });
+    // QA 09-23 #2: no status param (the server default is every status); 'any' matched nothing.
+    expect(apiMock.ticketsAPI.list).toHaveBeenCalledWith({ requesterId: '9', pageSize: 100, sort: 'createdAt', dir: 'desc' });
 
     const stats = screen.getByRole('region', { name: 'Service history' });
     expect(within(stats).getByText('Open').previousSibling).toHaveTextContent('2');

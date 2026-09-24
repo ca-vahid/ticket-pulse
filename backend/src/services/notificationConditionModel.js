@@ -60,6 +60,9 @@ export const CONDITION_FIELDS = Object.freeze({
   // Requester sentiment (gap plan 2 P5.1) — the requester's state, team-safe.
   'ticket.sentiment': { label: 'Requester sentiment', type: 'enum', path: 'ticket.sentiment', options: ['positive', 'neutral', 'frustrated'] },
   'ticket.isNoise': { label: 'Is noise/spam', type: 'boolean', path: 'ticket.isNoise' },
+  // Parked (plans/PARKED_BUILD_PLAN.md)
+  'ticket.isParked': { label: 'Is parked', type: 'boolean', path: 'ticket.isParked' },
+  'ticket.parkKind': { label: 'Park kind', type: 'enum', path: 'ticket.parkKind', options: ['until_date', 'waiting_on', 'eta'] },
   'ticket.ageMinutes': { label: 'Ticket age', type: 'duration', path: 'ticket.ageMinutes' },
   'ticket.dueInMinutes': { label: 'Time until due', type: 'duration', path: 'ticket.dueInMinutes' },
   'ticket.frDueInMinutes': { label: 'Time until first-response due', type: 'duration', path: 'ticket.frDueInMinutes' },

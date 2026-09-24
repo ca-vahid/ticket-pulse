@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -46,6 +46,7 @@ import {
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, pipelineRunLabel,
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
+import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { readHideMachinePreference, writeHideMachinePreference } from '../components/tickets/activityKind';
 
@@ -1138,6 +1139,37 @@ export default function TicketDetail() {
   // Per-workspace type registry: sidebar Type options ('Case' for Accounting…).
   const { activeTypes: activeTicketTypes } = useTicketTypes();
   const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
+  // Parked (plans/PARKED_BUILD_PLAN.md): any origin, Standard role or higher
+  // (the server refuses read-only members too).
+  const canPark = Boolean(ticket) && meta?.actor?.workspaceRole !== 'readonly' && meta?.actor?.role !== 'readonly'
+    && !['Deleted', 'Spam'].includes(ticket?.status) && baseStatusOf(statusDefs, ticket?.status) !== 'Resolved' && baseStatusOf(statusDefs, ticket?.status) !== 'Closed';
+  const parkTicket = async (data) => {
+    setParkBusy(true); setParkError(null);
+    try {
+      await ticketsAPI.park(ticketId, data);
+      setParkDialog(null);
+      lastLocalMutationRef.current = Date.now();
+      await fetchTicket({ silent: true });
+      showToast('emerald', `Parked until ${new Date(`${data.until}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`);
+    } catch (err) {
+      setParkError(err.response?.data?.message || err.message || 'Could not park the ticket');
+    } finally {
+      setParkBusy(false);
+    }
+  };
+  const unparkTicket = async () => {
+    setParkBusy(true);
+    try {
+      await ticketsAPI.unpark(ticketId);
+      lastLocalMutationRef.current = Date.now();
+      await fetchTicket({ silent: true });
+      showToast('emerald', 'Unparked — the ticket is back in the queue');
+    } catch (err) {
+      showToast('red', err.response?.data?.message || 'Could not unpark');
+    } finally {
+      setParkBusy(false);
+    }
+  };
   // Forward sends from the workspace mailbox over Graph; without a send-capable
   // mailbox the server refuses (400). meta.forwardAvailable tells us up front;
   // an older backend (no flag) keeps the old behaviour.
@@ -1452,12 +1484,12 @@ export default function TicketDetail() {
   const isAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
 
   // Note editing (FR 08-07 #8): author-or-admin, internal notes only, never
-  // system entries. Works on BOTH origins — FS-imported notes are eventType
-  // 'private_note', so only TP-authored/reconciled notes qualify (matching
-  // the server-side guard).
+  // system entries. Works on BOTH origins. Notes written in FreshService sync
+  // in as 'private_note' — editable too since QA 09-23 #6 (Gaby could not
+  // edit her own); their author e-mail is filled in when the thread loads.
   const actorEmail = String(meta?.actor?.email || '').toLowerCase();
   const canEditEntry = useCallback((e) => {
-    if (e?.eventType !== 'note' || e?.authorType === 'system') return false;
+    if ((e?.eventType !== 'note' && e?.eventType !== 'private_note') || e?.authorType === 'system') return false;
     if (isAdmin) return true;
     const em = String(e?.actorEmail || '').toLowerCase();
     return Boolean(em && em === actorEmail);
@@ -1633,6 +1665,22 @@ export default function TicketDetail() {
     return () => { cancelled = true; };
   }, [ticketId, ticket?.internalCategoryId, ticket?.internalSubcategoryId, ticket?.solutionVerifiedAt]);
   const [solutionPrompt, setSolutionPrompt] = useState(null); // { note }
+  // Parked (plans/PARKED_BUILD_PLAN.md)
+  const [parkDialog, setParkDialog] = useState(null); // null | { initial }
+  const [parkBusy, setParkBusy] = useState(false);
+  const [parkError, setParkError] = useState(null);
+  const [parkSuggestion, setParkSuggestion] = useState(null);
+  const [parkSuggestionDismissed, setParkSuggestionDismissed] = useState(false);
+  // HR notices: the date the notice states, read strictly (null when unclear).
+  const parkSuggestionKey = ticket && !ticket.parkedUntil && canPark ? `${ticketId}:${ticket.status}` : null;
+  useEffect(() => {
+    if (!parkSuggestionKey) { setParkSuggestion(null); return undefined; }
+    let alive = true;
+    ticketsAPI.parkSuggestion(ticketId)
+      .then((res) => { if (alive) setParkSuggestion(res?.data || null); })
+      .catch(() => { if (alive) setParkSuggestion(null); });
+    return () => { alive = false; };
+  }, [parkSuggestionKey, ticketId]);
   const setSolutionFlag = async (verified, note = null) => {
     setSolutionPrompt(null);
     setSavingField('solution');
@@ -2062,6 +2110,22 @@ export default function TicketDetail() {
                           )}
                         </h1>
                       )}
+                      {ticket.parkedUntil ? (
+                        <ParkLine
+                          park={ticket.park}
+                          parkedUntil={ticket.parkedUntil}
+                          canEdit={canPark}
+                          busy={parkBusy}
+                          onExtend={() => { setParkError(null); setParkDialog({ initial: ticket.park || { until: ticket.parkedUntil } }); }}
+                          onUnpark={unparkTicket}
+                        />
+                      ) : (canPark && !parkSuggestionDismissed && (
+                        <ParkSuggestion
+                          suggestion={parkSuggestion}
+                          onUse={() => { setParkError(null); setParkDialog({ initial: { kind: 'until_date', until: parkSuggestion.until, reason: parkSuggestion.reason, suggestedUntil: parkSuggestion.until } }); }}
+                          onDismiss={() => setParkSuggestionDismissed(true)}
+                        />
+                      ))}
                     </div>
                     <div className="flex flex-shrink-0 flex-col items-end gap-2">
                       <div
@@ -2071,7 +2135,8 @@ export default function TicketDetail() {
                         }`}
                       >
                         <PriorityBadge priority={ticket.priority} />
-                        <StatusBadge status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
+                        {/* Parked reads "Parked" (FreshService still sees Pending). */}
+                        <StatusBadge status={ticket.parkedUntil ? 'Parked' : ticket.status} tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
                         {ticket.solutionVerifiedAt && <SolutionMark withLabel className="ml-1" />}
                       </div>
                       {canPickUp && (
@@ -2242,6 +2307,18 @@ export default function TicketDetail() {
                       {savingField === 'solution' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" />}
                       {ticket.solutionVerifiedAt ? 'Verified solution' : 'Mark as solution'}
                     </button>
+                    {parkDialog && (
+                      <ParkDialog
+                        ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
+                        requesterEmail={ticket.requester?.email || null}
+                        initial={parkDialog.initial}
+                        busy={parkBusy}
+                        error={parkError}
+                        onClose={() => setParkDialog(null)}
+                        onSubmit={parkTicket}
+                        onUsePendingResponse={ticket.origin === 'ticketpulse' ? () => { setParkDialog(null); changeStatusGated('Pending Response', ticket.status); } : null}
+                      />
+                    )}
                     {solutionPrompt && (
                       <SolutionNoteModal
                         ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
@@ -2286,6 +2363,22 @@ export default function TicketDetail() {
                           <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
                             <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
                           </button>
+                          {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
+                            <button
+                              onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
+                              role="menuitem"
+                              data-testid="park-button"
+                              title="Park until a date — it waits on purpose and comes back to its assignee then"
+                              className={moreItemClass}
+                            >
+                              <PauseCircle className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.parkedUntil ? 'Change park date…' : 'Park…'}
+                            </button>
+                          )}
+                          {canPark && ticket.parkedUntil && (
+                            <button onClick={() => { unparkTicket(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                              <Play className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Unpark
+                            </button>
+                          )}
                           {ticketingOn && (
                             <>
                               <span aria-hidden="true" className="my-1 h-px bg-border/60" />

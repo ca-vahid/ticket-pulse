@@ -464,6 +464,11 @@ export async function updateWorkflowRouting(workspaceId, id, data = {}, actor = 
     lastChangedBy: actorEmail(actor),
   };
 
+  // QA 09-23 #8: "stop other workflows for this ticket change".
+  if (Object.prototype.hasOwnProperty.call(data, 'stopFurtherWorkflows')) {
+    updateData.stopFurtherWorkflows = data.stopFurtherWorkflows === true;
+  }
+
   if (Object.prototype.hasOwnProperty.call(data, 'isDefaultVariant')) {
     if (workflow.isDefaultVariant && data.isDefaultVariant !== true) {
       throw new ValidationError('Default workflow variants cannot be removed through routing settings');

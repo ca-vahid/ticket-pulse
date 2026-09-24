@@ -155,7 +155,10 @@ export default function RequesterDetail() {
     setHistory(null);
     setTickets(null);
     setStatusFilter(''); setCategoryFilter(''); setAgentFilter('');
-    ticketsAPI.list({ requesterId: id, status: 'any', pageSize: PAGE_SIZE, sort: 'createdAt', dir: 'desc' })
+    // QA 09-23 #2: no status param = every status except Deleted/Spam (the
+    // server default). 'any' was sent here and matched a status literally
+    // called "any" — every requester showed 0 tickets.
+    ticketsAPI.list({ requesterId: id, pageSize: PAGE_SIZE, sort: 'createdAt', dir: 'desc' })
       .then((res) => {
         if (!alive) return;
         const body = res?.data || res || {};
@@ -177,7 +180,7 @@ export default function RequesterDetail() {
     let alive = true;
     setTicketsLoading(true);
     const params = { requesterId: id, pageSize: PAGE_SIZE, sort: 'createdAt', dir: 'desc' };
-    if (statusFilter) params.segment = statusFilter; else params.status = 'any';
+    if (statusFilter) params.segment = statusFilter;
     if (categoryFilter) params.internalCategoryId = categoryFilter;
     if (agentFilter) params.assignedTechId = agentFilter;
     ticketsAPI.list(params)
@@ -308,7 +311,7 @@ export default function RequesterDetail() {
 
             <div role="tablist" className="mt-5 mb-3 flex items-end gap-1 border-b border-border">
               {[{ k: 'tickets', label: 'Tickets', Icon: TicketIcon }, { k: 'profile', label: 'Profile', Icon: UserRound }].map(({ k, label, Icon }) => (
-                <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`tp-focus-ring relative -mb-px inline-flex items-center gap-1.5 rounded-t-lg border px-4 py-2.5 text-sm font-medium ${tab === k ? 'border-border border-b-card bg-card text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+                <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`tp-focus-ring relative -mb-px inline-flex items-center gap-1.5 overflow-hidden rounded-t-lg border px-4 py-2.5 text-sm font-medium ${tab === k ? 'border-border border-b-card bg-card text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
                   {tab === k && <span className="absolute inset-x-0 top-0 h-0.5 rounded-t bg-primary" aria-hidden="true" />}
                   <Icon className="h-4 w-4" aria-hidden="true" /> {label}
                 </button>
@@ -337,7 +340,7 @@ export default function RequesterDetail() {
                 {tickets === null ? (
                   <div className="flex items-center justify-center py-16 text-muted-foreground/75"><Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /></div>
                 ) : tickets.length === 0 ? (
-                  <div className="px-6 py-12 text-center text-sm text-muted-foreground/75"><Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/50" aria-hidden="true" />{filtersActive ? 'No tickets match these filters.' : 'No tickets from this person in this workspace.'}</div>
+                  <div className="px-6 py-12 text-center text-sm text-muted-foreground/75"><Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/50" aria-hidden="true" />{statusFilter === 'open' && !categoryFilter && !agentFilter ? 'No open tickets from this person in this workspace.' : filtersActive ? 'No tickets match these filters.' : 'No tickets from this person in this workspace yet.'}</div>
                 ) : (
                   <ul className="divide-y divide-border/60">
                     {tickets.map((t) => {
