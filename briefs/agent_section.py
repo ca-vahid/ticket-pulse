@@ -107,7 +107,7 @@ def workload_table(stats, me, since):
     for s in stats:
         if not s['open_now'] or not s.get('active', True):
             continue  # nothing on their plate, or no longer on the team (Vahid, 23 Sep): no row
-        opn = s['open_now'] - s['pending_now']
+        opn = s['open_now'] - s['pending_now'] - s.get('parked_now', 0)  # parked wait on purpose (v3.9.78)
         people.append(dict(s, open=opn, is_me=s['agent'] == me, L=person_links(s['tech_id'], since)))
     # alphabetical so order never reads as a ranking; Vahid's own queue last
     people.sort(key=lambda p: (p['is_me'], p['agent']))
@@ -123,7 +123,7 @@ def workload_table(stats, me, since):
         caption = ((a_(p['L']['overdue'], f"{p['overdue_now']} overdue", RED, '700', '12.5px') + '&nbsp;&middot;&nbsp;')
                    if p['overdue_now'] else '') + \
             a_(p['L']['open'], f"{p['open']} open", '#1d4ed8', '600', '12.5px') + '&nbsp;&middot;&nbsp;' + \
-            a_(p['L']['pending'], f"{p['pending_now']} pending", SUB, '500', '12.5px')
+            a_(p['L']['pending'], f"{p['pending_now']} pending", SUB, '500', '12.5px') +             (f'<span style="color:{FAINT};font-size:12.5px;">&nbsp;&middot;&nbsp;{p["parked_now"]} parked</span>' if p.get('parked_now') else '')
         bg = ' bgcolor="#f8faff"' if p['is_me'] else ''
         c = f'padding:12px 10px;border-bottom:1px solid {LINE};vertical-align:middle;'
         rows.append(

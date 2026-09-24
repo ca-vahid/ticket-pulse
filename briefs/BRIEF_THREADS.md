@@ -8,7 +8,7 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 23 Sep 2026 (per-agent review debuted compact; hulk CLOSED via decision playbook; two new P4s; Thu = first full standup edition)._
+_Last updated: 24 Sep 2026 (sent by hand ~9:30 — 8:45 cron did not fire; Parked + Pending Response shipped; follow-up outcomes)._
 
 ## Probe read rules (do not remove)
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
@@ -65,6 +65,22 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (f) External integrations (Simorgh + ContinuIT)
 - Simorgh: v3.8.56–70 base + v3.9.50–52 SOC relations Phases A/B (relation/task webhooks, FS-side closes delivered). Note trusted-intake volume when traffic appears.
 - ContinuIT LIVE Sat Sep 19 (v3.9.53–55, source 105): dead-webhook issue RESOLVED within a day (0 new dead in 24h by Sep 22, 430 successes) — watch drops to routine; mention only on new dead deliveries.
+
+### (i) Follow-up email responses (23 Sep)
+- Sep 24 outcome: Andrii DONE (closed #216841/#220915, parked transfers to Oct 5–6). Anton: closed #165792, parked #202791 to Nov 16, but #173857 DarkTrace + #228595 still NO note/park — flagged to Vahid Sep 24 to update from Anton's email or ask at standup. Next check: if still bare Fri, one quiet line only.
+- IT resolved 129 vs 49 in on Sep 23 (post-email cleanup day).
+- 12 personal follow-up emails went out Sep 23 (/ticket-followups). Anton and Andrii replied to Vahid BY EMAIL, not in the tickets. Vahid's call: give them until Thu morning; if the tickets still show no human note, flag it in the IT brief so Vahid updates them himself (don't nag the person).
+- Anton: #165792 Group Policy Cleanup (closing it) · #173857 DarkTrace (in progress, ETA Oct 31) · #202791 Michèle Ostiguy on leave (nothing until return Nov 16) · #228595 accounting DL external access (waiting on Alexa + Kirsten).
+- Andrii: #216841 + #220915 were reminder tickets (closing both) · #235207 Alyssa Sandeman + #238553 Laura Beamish transfers (nothing until Oct 5).
+- Until the "Parked" feature ships, treat these as PARKED in brief counts and never call them stale: #235207/#238553 until Oct 5, #202791 until Nov 16, #173857 until Oct 31, #228595 chase ~Sep 30. Knowledge only — no stopgap code.
+- "Parked" feature: plan reviewed by TP Continious Dev (plans/PARKED_TICKETS_PLAN.md, decisions block at top); they are building Part A (status binding) first. Vahid announces Parked at the Thu Sep 24 meeting. Follow-up email actions/reply-to-notes were DROPPED.
+- EXPECTED METRIC SHIFT when Part A ships: 'Waiting on Customer' rows get relabelled "Pending Response" (FS status 6) and start counting in dashboard/queue open counts; FS status 7 / custom 8+ stop syncing as "Open". Read those moves as the fix, not an anomaly. TP pending-response workflows must stay OFF for FS-born tickets (FreshService owns those reminders) — flag it if one is enabled for FS-born.
+
+### (j) Parked + Pending Response LIVE (v3.9.78 / v3.9.72, Sep 23 eve)
+- 27 IT tickets parked on day one (all until_date). Probe/renderer exclude parked from open/pending/stale/review (parked_now shown faintly). Only until_date used so far — waiting_on / eta unused.
+- 'Waiting on Customer' label gone → "Pending Response" (IT 1, ws2 2). TP pending-response workflows stay OFF for FS-born.
+- NEW WATCH: Sentinel alert intake (v3.9.79) — new machine-alert source into IT; watch volume, point alert correlation at it.
+- NEW: #243879 Mac mail blocked by new IT policies (3 bounces, Soheil) — likely legacy-auth/ROPC side effect; + #243921 MS Authenticator issues same day.
 
 ### (h) Platform reliability
 - Drain thread RETIRED Sep 21: first Monday 8 AM drain under the v3.9.34 concurrency bound ran 20/20 clean. Mention only on relapse.

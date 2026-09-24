@@ -143,6 +143,7 @@ for (const ws of wss) {
       LEFT JOIN lastnote ln ON ln.ticket_id = t.id
       LEFT JOIN lastst ls ON ls.ticket_id = t.id
       WHERE t.workspace_id = 1 AND COALESCE(t.is_noise, false) = false
+        AND t.parked_until IS NULL  -- parked tickets wait on purpose (v3.9.78)
         AND (
           (t.priority >= 3 AND t.status NOT IN ('Resolved','Closed') AND c.last_agent_at IS NULL)
           OR (t.due_by IS NOT NULL AND t.due_by < now() AND t.status = 'Open')
@@ -178,7 +179,8 @@ for (const ws of wss) {
         count(*) FILTER (WHERE t.resolved_at >= ${W7})::int AS resolved,
         count(*) FILTER (WHERE t.status IN ('Open','Pending'))::int AS open_now,
         count(*) FILTER (WHERE t.status = 'Open' AND t.due_by IS NOT NULL AND t.due_by < now())::int AS overdue_now,
-        count(*) FILTER (WHERE t.status = 'Pending')::int AS pending_now,
+        count(*) FILTER (WHERE t.status = 'Pending' AND t.parked_until IS NULL)::int AS pending_now,
+        count(*) FILTER (WHERE t.parked_until IS NOT NULL AND t.status IN ('Open','Pending'))::int AS parked_now,
         COALESCE(max(EXTRACT(day FROM now() - t.created_at)) FILTER (WHERE t.status IN ('Open','Pending')), 0)::int AS oldest_open_days
       FROM tickets t JOIN technicians tech ON tech.id = t.assigned_tech_id
       WHERE t.workspace_id = 1 AND COALESCE(t.is_noise, false) = false
