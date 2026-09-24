@@ -32,7 +32,7 @@ jest.unstable_mockModule('../src/services/ticketEmbeddingService.js', () => ({
 
 const mod = await import('../src/services/ticketSimilaritySearchService.js');
 const {
-  officesIn, identifierTokens, referencesIn, keywordQuery, semanticScore, blendScore, SCORE_MODEL, TicketSimilaritySearchService,
+  officesIn, identifierTokens, referencesIn, keywordQuery, semanticScore, blendScore, SCORE_MODEL, TicketSimilaritySearchService, ticketOffices,
 } = mod;
 
 // 4-dim "embeddings" are enough for the geometry.
@@ -231,5 +231,27 @@ describe('main office (2026-09-23c)', () => {
     const other = (await svc.search(1, [{ key: 'q', text: 'firewall upgrade during the Kamloops visit' }], { minScore: 0 })).results.q.find((h) => h.id === 1).score;
     TICKETS[1] = saved;
     expect(other).toBeLessThan(plain);
+  });
+});
+
+describe('score model 2026-09-24', () => {
+  test('a ticket\'s office: subject/office field first, requester only when those name none, description last', () => {
+    expect([...ticketOffices({ subject: 'Halifax firewall upgrade', requester: { entraOfficeLocation: 'Vancouver' }, descriptionText: 'also Toronto' })]).toEqual(['Halifax']);
+    expect([...ticketOffices({ subject: 'Firewall upgrade', customFields: { continuit_office: 'Calgary' }, requester: { entraOfficeLocation: 'Vancouver' } })]).toEqual(['Calgary']);
+    expect([...ticketOffices({ subject: 'Laptop slow', requester: { entraOfficeLocation: 'Vancouver' }, descriptionText: 'from Toronto' })]).toEqual(['Vancouver']);
+    expect([...ticketOffices({ subject: 'Laptop slow', requester: null, descriptionText: 'the Toronto office' })]).toEqual(['Toronto']);
+  });
+
+  test('a different named office holds even a strong match under "possible"; a reference still wins', async () => {
+    const saved = TICKETS[1];
+    TICKETS[1] = { ...saved, subject: 'Halifax firewall upgrade', descriptionText: 'Firewalls for Halifax.', requester: { name: 'V', email: 'v@bgc.ca', department: null, entraDepartment: null, entraOfficeLocation: 'Vancouver' } };
+    wire();
+    const svc = new TicketSimilaritySearchService();
+    const hit = (await svc.search(1, [{ key: 'q', text: 'Vancouver firewall upgrade' }], { minScore: 0 })).results.q.find((h) => h.id === 1);
+    expect(hit.score).toBeLessThanOrEqual(SCORE_MODEL.officeConflictCap);
+    wire({ refs: [1] });
+    const byRef = (await svc.search(1, [{ key: 'q', text: 'Vancouver follow-up on TP-1591' }], { minScore: 0 })).results.q.find((h) => h.id === 1);
+    expect(byRef.score).toBe(1);
+    TICKETS[1] = saved;
   });
 });

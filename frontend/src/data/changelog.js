@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.76-preview';
+export const APP_VERSION = '3.9.77-preview';
 
 export const changelog = [
+  {
+    version: '3.9.77-preview',
+    date: 'September 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Public API: far fewer wrong "already a ticket" matches</strong> — the likeness score was recalibrated on the tickets it actually searches. A ticket about a different office is no longer offered as a match, and a ticket that is only loosely similar can no longer score as "likely the same work".' },
+    ],
+  },
   {
     version: '3.9.76-preview',
     date: 'September 23, 2026',
