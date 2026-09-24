@@ -1401,12 +1401,12 @@ describe('ticketService custom workspace statuses (Phase 8a)', () => {
     const meta = await ticketService.getMeta(1);
 
     expect(meta.statuses).toEqual([
-      { name: 'Open', baseStatus: 'Open', color: null, sortOrder: 0, isSystem: true },
-      { name: 'Pending', baseStatus: 'Pending', color: null, sortOrder: 1, isSystem: true },
-      { name: 'Resolved', baseStatus: 'Resolved', color: null, sortOrder: 2, isSystem: true },
-      { name: 'Closed', baseStatus: 'Closed', color: null, sortOrder: 3, isSystem: true },
-      { name: 'Waiting on vendor', baseStatus: 'Pending', color: null, sortOrder: 4, isSystem: false },
-      { name: 'Fixed', baseStatus: 'Resolved', color: null, sortOrder: 5, isSystem: false },
+      { name: 'Open', baseStatus: 'Open', color: null, sortOrder: 0, isSystem: true, freshserviceStatusId: null },
+      { name: 'Pending', baseStatus: 'Pending', color: null, sortOrder: 1, isSystem: true, freshserviceStatusId: null },
+      { name: 'Resolved', baseStatus: 'Resolved', color: null, sortOrder: 2, isSystem: true, freshserviceStatusId: null },
+      { name: 'Closed', baseStatus: 'Closed', color: null, sortOrder: 3, isSystem: true, freshserviceStatusId: null },
+      { name: 'Waiting on vendor', baseStatus: 'Pending', color: null, sortOrder: 4, isSystem: false, freshserviceStatusId: null },
+      { name: 'Fixed', baseStatus: 'Resolved', color: null, sortOrder: 5, isSystem: false, freshserviceStatusId: null },
     ]);
   });
 });

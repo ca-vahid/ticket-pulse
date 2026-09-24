@@ -2528,6 +2528,9 @@ class TicketService {
         color: s.color || null,
         sortOrder: s.sortOrder,
         isSystem: s.isSystem === true,
+        // Linked FreshService status (3.9.72, e.g. IT's Pending Response = 6):
+        // FS-born tickets may pick it, because FreshService knows it too.
+        freshserviceStatusId: s.freshserviceStatusId ?? null,
       })),
       priorities: [
         { value: 1, label: 'Low' },

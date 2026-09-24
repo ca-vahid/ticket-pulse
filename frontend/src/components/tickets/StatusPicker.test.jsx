@@ -131,3 +131,29 @@ describe('StatusPicker loud failures (Mega 08-30 Phase MB3, QA 08-27 #6)', () =>
     await waitFor(() => expect(onError).toHaveBeenCalledWith(err, 'Open'));
   });
 });
+
+describe('StatusPicker — FS-born tickets and linked statuses', () => {
+  const defs = [
+    { name: 'Open', baseStatus: 'Open' },
+    { name: 'Pending', baseStatus: 'Pending' },
+    { name: 'Pending Response', baseStatus: 'Pending', freshserviceStatusId: 6 },
+    { name: 'Waiting on vendor', baseStatus: 'Pending', freshserviceStatusId: null },
+    { name: 'Resolved', baseStatus: 'Resolved' },
+    { name: 'Closed', baseStatus: 'Closed' },
+  ];
+
+  test('offers a custom status linked to FreshService (Pending Response), never a TP-only one', async () => {
+    const fsChange = vi.fn().mockResolvedValue({});
+    render(<StatusPicker ticketId={501} value="Open" statusDefs={defs} fsChange={fsChange} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: open/i }));
+    fireEvent.click(await screen.findByRole('option', { name: /pending response/i }));
+    await waitFor(() => expect(fsChange).toHaveBeenCalledWith('Pending Response'));
+    expect(screen.queryByRole('option', { name: /waiting on vendor/i })).toBeNull();
+  });
+
+  test('TP-born still sees every workspace status', async () => {
+    render(<StatusPicker ticketId={501} value="Open" statusDefs={defs} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: open/i }));
+    expect(await screen.findByRole('option', { name: /waiting on vendor/i })).toBeInTheDocument();
+  });
+});

@@ -113,6 +113,57 @@ describe('mirrorService._applyLatestChangeWins', () => {
   });
 });
 
+describe('mirrorService._reconcileTicketAgainstFs — compares the ticket as it is now', () => {
+  test('a change made while the pass waited in the queue is not a conflict (TP-1621)', async () => {
+    jest.clearAllMocks();
+    // Pass loaded the ticket as Open; Power Apps closed it before the FS read came back.
+    prismaMock.ticket.findUnique.mockResolvedValue({ status: 'Closed', assignedTechId: 7, assignedTech: TICKET.assignedTech });
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue(null);
+    const recordConflict = jest.spyOn(mirrorService, '_recordMirrorConflict').mockResolvedValue();
+    const latestWins = jest.spyOn(mirrorService, '_applyLatestChangeWins');
+    jest.spyOn(mirrorService, '_fsStatusCode').mockImplementation(async (t) => (t.status === 'Closed' ? 5 : 2));
+    const client = {
+      fetchTicketSafe: jest.fn().mockResolvedValue({ id: 241865, status: 5, responder_id: 1000530661 }),
+      fetchTicket: jest.fn().mockResolvedValue({ id: 241865, status: 5, responder_id: 1000530661 }),
+      fetchTicketConversations: jest.fn().mockResolvedValue([]),
+      fetchTicketActivities: jest.fn().mockResolvedValue([]),
+    };
+
+    const out = await mirrorService._reconcileTicketAgainstFs({ ...TICKET, status: 'Open' }, client);
+
+    expect(out.conflicts).toBe(0);
+    expect(recordConflict).not.toHaveBeenCalled();
+    expect(latestWins).not.toHaveBeenCalled();
+    recordConflict.mockRestore();
+    latestWins.mockRestore();
+    mirrorService._fsStatusCode.mockRestore();
+  });
+});
+
+describe('mirrorService._reconcileTicketAgainstFs — our write still queued', () => {
+  test('the copy lagging behind a queued Ticket Pulse change is not a conflict (TP-1547)', async () => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findUnique.mockResolvedValue({ status: 'Pending', mirrorState: 'pending', assignedTechId: 7, assignedTech: TICKET.assignedTech });
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue(null);
+    const recordConflict = jest.spyOn(mirrorService, '_recordMirrorConflict').mockResolvedValue();
+    const latestWins = jest.spyOn(mirrorService, '_applyLatestChangeWins');
+    jest.spyOn(mirrorService, '_fsStatusCode').mockImplementation(async (t) => (t.status === 'Pending' ? 3 : 2));
+    const client = {
+      fetchTicketSafe: jest.fn().mockResolvedValue({ id: 241865, status: 2, responder_id: 1000530661 }),
+      fetchTicketConversations: jest.fn().mockResolvedValue([]),
+    };
+
+    const out = await mirrorService._reconcileTicketAgainstFs({ ...TICKET, status: 'Open', mirrorState: 'mirrored' }, client);
+
+    expect(out.conflicts).toBe(0);
+    expect(recordConflict).not.toHaveBeenCalled();
+    expect(latestWins).not.toHaveBeenCalled();
+    recordConflict.mockRestore();
+    latestWins.mockRestore();
+    mirrorService._fsStatusCode.mockRestore();
+  });
+});
+
 describe('mirrorService.reconcile — recently closed tickets rotate', () => {
   test('each pass takes the NEXT slice, so every recently closed ticket is reached (TP-1597 was 15th of 23)', async () => {
     jest.clearAllMocks();

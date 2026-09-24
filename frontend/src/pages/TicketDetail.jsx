@@ -70,13 +70,12 @@ import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
 import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
 import EditTicketModal from '../components/tickets/EditTicketModal';
-import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
+import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
 
 // Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
 // fields; custom labels can't write back until 8c). TP-born tickets use the
 // workspace status registry from meta.statuses (Phase 8b, see statusDefs.js).
-const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const CONVERSATION_TABS = [
   { key: 'all', label: 'All' },
   { key: 'replies', label: 'Replies' },
@@ -1131,7 +1130,7 @@ export default function TicketDetail() {
   // helpers below key lifecycle affordances off baseStatus, not the label.
   const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
   const statusOptions = useMemo(() => {
-    if (!isNative) return STATUSES;
+    if (!isNative) return fsBornStatusNames(statusDefs);
     return statusDefs.map((d) => d.name);
   }, [isNative, statusDefs]);
   const ticketTerminal = ticket ? isTerminalStatus(statusDefs, ticket.status) : false;

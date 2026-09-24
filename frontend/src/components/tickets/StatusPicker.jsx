@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2 } from 'lucide-react';
 import { StatusPill } from './ticketUi';
-import { CANONICAL_STATUS_NAMES, statusToneFromDefs } from './statusDefs';
+import { CANONICAL_STATUS_NAMES, fsBornStatusNames, statusToneFromDefs } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
 
 /**
@@ -27,9 +27,9 @@ export default function StatusPicker({
   disabled = false,
   statusDefs = null, // workspace registry defs [{name, baseStatus, color, ...}]
 }) {
-  const options = fsChange || !statusDefs?.length
+  const options = !statusDefs?.length
     ? CANONICAL_STATUS_NAMES
-    : statusDefs.map((d) => d.name);
+    : fsChange ? fsBornStatusNames(statusDefs) : statusDefs.map((d) => d.name);
   const toneOf = (name) => statusToneFromDefs(statusDefs, name);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(null); // status awaiting TP confirm

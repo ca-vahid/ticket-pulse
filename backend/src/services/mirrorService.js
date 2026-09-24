@@ -1228,13 +1228,27 @@ class MirrorService {
     }
 
     if (fsTicket && typeof fsTicket === 'object' && fsTicket.id) {
+      // Compare against the ticket as it is NOW, not the row loaded when the
+      // pass began: a pass can wait minutes in the FreshService queue, and a
+      // change made meanwhile (TP-1621, closed by Power Apps at 06:58 PT, was
+      // compared as Open at 07:01) read as "FS copy edited out-of-band".
+      const fresh = await Promise.resolve()
+        .then(() => prisma.ticket.findUnique?.({
+          where: { id: ticket.id },
+          select: { status: true, mirrorState: true, assignedTechId: true, assignedTech: { select: { freshserviceId: true, name: true } } },
+        }))
+        .catch(() => null);
+      if (fresh && fresh.status) ticket = { ...ticket, ...fresh };
+      // Our own change is still on its way to the copy (TP-1547, set Pending
+      // 10:12, compared at 10:16): the copy is behind, not edited out-of-band.
+      const writePending = ticket.mirrorState === 'pending';
       const fsStatusCode = Number(fsTicket.status);
       const ourStatusCode = await this._fsStatusCode(ticket);
       const fsResponder = fsTicket.responder_id ? Number(fsTicket.responder_id) : null;
       const ourResponder = ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null;
       const drift = [];
-      const statusDrift = Boolean(ourStatusCode && fsStatusCode && fsStatusCode !== ourStatusCode);
-      const assigneeDrift = fsResponder !== ourResponder;
+      const statusDrift = !writePending && Boolean(ourStatusCode && fsStatusCode && fsStatusCode !== ourStatusCode);
+      const assigneeDrift = !writePending && fsResponder !== ourResponder;
       // Latest change wins (Vahid, 23 Sep 2026): a change made on the
       // FreshService copy AFTER Ticket Pulse's own last change is adopted here.
       // Only what is left unresolved is recorded as a conflict.

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.80-preview';
+export const APP_VERSION = '3.9.81-preview';
 
 export const changelog = [
+  {
+    version: '3.9.81-preview',
+    date: 'September 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Pending Response on FreshService tickets</strong> &mdash; tickets that came from FreshService can now be set to <em>Pending Response</em> from the ticket page, the preview and the queue, as Ticket Pulse tickets already could. FreshService gets its own <em>Pending response</em> status, so its reminders and auto-close run as if it had been set there. The same goes for any other status your workspace has linked to a FreshService status (Settings &rarr; Ticket statuses). Statuses that exist only in Ticket Pulse stay off FreshService tickets, because FreshService would undo them on the next sync.' },
+      { type: 'fixed', html: '<strong>No false &ldquo;edited in FreshService&rdquo; notes</strong> &mdash; a ticket changed in Ticket Pulse while the FreshService check was waiting its turn (TP-1621, closed from Power Apps), or while its change was still on its way to FreshService (TP-1547), could get an Activity line saying its FreshService copy had been edited out of band. The check now compares against the ticket as it is at that moment, and waits for Ticket Pulse\'s own changes to arrive.' },
+    ],
+  },
   {
     version: '3.9.80-preview',
     date: 'September 23, 2026',
