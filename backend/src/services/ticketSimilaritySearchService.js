@@ -37,20 +37,32 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 
 export const SCORE_MODEL = Object.freeze({
-  // 2026-09-23b: office agreement alone can no longer carry a score over
-  // "likely" (ContinuIT acceptance: Kelowna UPS batteries vs Kelowna
-  // firewall scored 0.83). On the calibration set this took unrelated
-  // phrases >= 0.7 from 5/45 to 1/45 for 90 -> 88/120 true matches; the 0.6
-  // line is unchanged.
-  // 2026-09-23c: a ticket's office is its MAIN office — subject, the
-  // continuit_office field and the requester's office; the description counts
-  // only when those name none. The Kelowna firewall ticket discusses Kamloops
-  // at length, so "Kamloops firewall visit" matched it as same-office (0.99).
-  // Neutral on the calibration set (same counts at 0.6 and 0.7).
-  version: '2026-09-23c',
-  weights: Object.freeze({ cosine: 4.4, z: 1.91, gap: 8.72, officeMatch: 0.54, officeConflict: -1.38 }),
-  bias: -8.43,
+  // 2026-09-24: REFIT on the live candidate pool. The 23 Sep fits compared
+  // queries with 588 tickets of which 318 were Deleted/Spam — the live search
+  // never sees those, so its z-scores ran hot (0.95+ everywhere). Refit on the
+  // 265 open IT tickets with the same 165 queries (logistic, class-balanced).
+  // Office rules (deterministic, on top of the fit):
+  //   - a ticket's office = subject + continuit_office; else the requester's
+  //     office; else the description (IT staff file tickets for every office,
+  //     so the requester's office said "Vancouver" on a Halifax ticket)
+  //   - same office may lift a score but never across "likely" on its own
+  //   - a DIFFERENT named office holds the score under "possible" (0.59):
+  //     ContinuIT's live runs put Vancouver/Calgary network work on a Halifax
+  //     ticket at 0.74–0.96.
+  // Similarity floors: in a pool of ~265 open tickets almost any on-topic
+  // ticket "stands out", so a modest RAW cosine could still reach 0.99
+  // ("Autodesk renewal through SolidCAD" vs "CAD Spare Towers"). Below 0.60
+  // raw cosine a score stays under "likely"; below 0.55 under "possible".
+  // An exact identifier (BGC1) or a ticket reference is exempt.
+  // In-sample, all rules together vs the refit alone:
+  //   0.6 line: true 68 -> 64/73, unrelated 12 -> 10/45, reported-wrong 10 -> 3/11
+  //   0.7 line: true 61 -> 53/73, unrelated  4 ->  2/45, reported-wrong 10 -> 1/11
+  version: '2026-09-24',
+  weights: Object.freeze({ cosine: 3.869, z: 3.372, gap: 6.039, officeMatch: 1.778, officeConflict: -0.946 }),
+  bias: -12.196,
   thresholds: Object.freeze({ likely: 0.7, possible: 0.6 }),
+  officeConflictCap: 0.59,
+  cosineFloors: Object.freeze({ likely: 0.60, possible: 0.55 }),
 });
 
 export const LIMITS = Object.freeze({
@@ -95,6 +107,18 @@ export function officesIn(text) {
   if (!s) return found;
   for (const [name, re] of OFFICE_PATTERNS) if (re.test(s)) found.add(name);
   return found;
+}
+
+/**
+ * A ticket's own office(s): subject + continuit_office first; the requester's
+ * office only when those name none; the description as the last resort.
+ */
+export function ticketOffices(t) {
+  const primary = new Set([...officesIn(t?.subject), ...officesIn(t?.customFields?.continuit_office)]);
+  if (primary.size) return primary;
+  const requester = officesIn(t?.requester?.entraOfficeLocation);
+  if (requester.size) return requester;
+  return officesIn(t?.descriptionText);
 }
 
 /** Tokens that name one specific thing: letters and digits mixed (BGC1, A82, CGY-FS01, SR-4412). */
@@ -437,26 +461,36 @@ class TicketSimilaritySearchService {
         if (!t) continue;
         const text = `${t.subject || ''}\n${t.descriptionText || ''}`;
         let semantic = null;
+        let officeConflict = false;
         const cosine = sById.has(id) ? sById.get(id) : (vectors.get(id) && queryVecs[n] ? dot(queryVecs[n], vectors.get(id)) : null);
         if (cosine !== null) {
           const best = shortlist[0];
           const other = best && best.id !== id ? best.s : (shortlist[1]?.s ?? cosine);
-          const primary = new Set([...officesIn(t.subject), ...officesIn(t.requester?.entraOfficeLocation), ...officesIn(t.customFields?.continuit_office)]);
-          const tOffices = primary.size ? primary : officesIn(t.descriptionText);
+          const tOffices = ticketOffices(t);
           const overlap = [...qOffices].some((o) => tOffices.has(o));
+          officeConflict = qOffices.size > 0 && tOffices.size > 0 && !overlap;
           semantic = semanticScore({
             cosine, z: (cosine - mean) / sd, gap: cosine - other,
             officeMatch: qOffices.size > 0 && overlap,
-            officeConflict: qOffices.size > 0 && tOffices.size > 0 && !overlap,
+            officeConflict,
           });
         }
         const lowerText = text.toLowerCase();
         const identifierHit = [...qIdents].some((tok) => lowerText.includes(tok));
         const r = kwById.get(id) || 0;
-        const { score, matchedOn } = blendScore({
+        const blended = blendScore({
           semantic, keyword: r, identifierHit, exactRef: refIds.includes(id),
           requesterMatch: !!opts.requesterEmail && String(t.requester?.email || '').toLowerCase() === opts.requesterEmail,
         });
+        let { score } = blended;
+        const { matchedOn } = blended;
+        // A ticket about a different named office is never offered as "worth asking".
+        if (officeConflict && !refIds.includes(id)) score = Math.min(score, SCORE_MODEL.officeConflictCap);
+        // Raw-similarity floors (an exact identifier or reference is exempt).
+        if (cosine !== null && !identifierHit && !refIds.includes(id)) {
+          if (cosine < SCORE_MODEL.cosineFloors.possible) score = Math.min(score, SCORE_MODEL.thresholds.possible - 0.01);
+          else if (cosine < SCORE_MODEL.cosineFloors.likely) score = Math.min(score, SCORE_MODEL.thresholds.likely - 0.01);
+        }
         if (score < opts.minScore) continue;
         hits.push(shapeHit(t, { score, matchedOn, baseStatus: baseByName.get(t.status) || String(t.status).toLowerCase(), baseUrl }));
       }
