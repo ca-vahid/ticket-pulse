@@ -61,7 +61,7 @@ export const TICKET_SOURCE_LABELS = {
   13: 'Employee Onboarding', 14: 'Alerts', 15: 'MS Teams (FS)',
   18: 'Employee Offboarding', 19: 'Journey',
   100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent', 104: 'Security Agent',
-  105: 'Office Check-in',
+  105: 'Office Check-in', 106: 'Monitoring Alert',
   1001: 'API (FreshService)', 1002: 'Company Portal',
 };
 export function ticketSourceLabel(source) {

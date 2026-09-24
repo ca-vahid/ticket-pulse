@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
+import AlertOccurrenceStrip from '../components/tickets/AlertOccurrenceStrip';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
@@ -3340,6 +3341,7 @@ export default function TicketDetail() {
                         <span>Every child ticket is done — this one is ready to close.</span>
                       </p>
                     )}
+                    <AlertOccurrenceStrip ticket={ticket} />
                     {ticket.resolutionReason && (
                       <p className="mt-1 text-[11px] text-muted-foreground" data-testid="resolution-reason">
                         <span className="font-medium text-foreground/85">{reasonLabel(ticket.resolutionReason)}</span>

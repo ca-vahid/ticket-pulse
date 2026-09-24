@@ -1074,6 +1074,13 @@ class TicketService {
     }
     // Reconciliation filters (Simorgh E2): find by the caller's own key, by a
     // key prefix ("everything of mine"), by last change, and by tag name.
+    // Tickets linked to one record in another system (Sentinel integration):
+    // ?reference=sentinel:<incidentId>.
+    if (query.reference) {
+      const raw = String(query.reference).trim();
+      const cut = raw.indexOf(':');
+      if (cut > 0) where.externalRefs = { some: { system: raw.slice(0, cut).toLowerCase(), externalId: raw.slice(cut + 1) } };
+    }
     if (query.externalRef) {
       where.externalRef = String(query.externalRef).trim();
     } else if (query.externalRefPrefix) {

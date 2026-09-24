@@ -37,6 +37,8 @@ const T = {
       source: { type: 'integer', nullable: true, description: 'Arrival channel code; GET /meta → sources lists the labels (105 = Office Check-in).' },
       dueBy: { type: 'string', format: 'date-time', nullable: true, description: 'The due date as stored. Echoes what a trusted-intake caller sent on create/PATCH, or the SLA clock’s date.' },
       dueBySetBy: { type: 'string', nullable: true, enum: ['manual', 'sla', null], description: 'manual = a person or a trusted integration set it (never overwritten by the SLA clock); sla = the workspace SLA policy.' },
+      occurrenceCount: { type: 'integer', description: 'How often the monitoring alert behind this ticket fired (POST /alert-occurrences). 0 = not an alert ticket.' },
+      lastOccurrenceAt: { type: 'string', format: 'date-time', nullable: true },
       parked: { type: 'object', nullable: true, description: 'Set while the ticket is parked: waiting on purpose until a date. The ticket is Pending (FreshService sees Pending) and wakes back to Open on `until`; a requester reply or any status change ends it early. Filter the list with ?parked=any|none|until_date|waiting_on|eta|waking7.', properties: { kind: { type: 'string', enum: ['until_date', 'waiting_on', 'eta'] }, until: { type: 'string', format: 'date-time' } } },
       group: { type: 'object', nullable: true, description: 'FreshService group placement (origin:\'freshservice\' in GET /groups). null when the ticket sits in an internal group instead.' },
       internalGroup: {
@@ -243,6 +245,43 @@ const T = {
       candidates: { type: 'integer' }, embedded: { type: 'integer' }, truncated: { type: 'boolean' }, tookMs: { type: 'integer' },
     },
   },
+  ExternalReferenceInput: {
+    type: 'object', required: ['incidentId'],
+    properties: {
+      system: { type: 'string', default: 'sentinel', maxLength: 50 },
+      incidentId: { type: 'string', maxLength: 200, description: 'The record id in the other system (alias: externalId).' },
+      incidentNumber: { type: 'string', maxLength: 50 },
+      alertId: { type: 'string', maxLength: 200, description: 'When sent, the alert is recorded once per workspace — a retry with the same alert id is recognised.' },
+      url: { type: 'string', format: 'uri', description: 'https only' },
+      time: { type: 'string', format: 'date-time' },
+    },
+  },
+  ExternalReference: {
+    type: 'object',
+    properties: {
+      id: { type: 'integer' }, system: { type: 'string' }, incidentId: { type: 'string' }, incidentNumber: { type: 'string', nullable: true },
+      alertId: { type: 'string', nullable: true }, url: { type: 'string', nullable: true }, time: { type: 'string', format: 'date-time', nullable: true }, addedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  AlertOccurrence: {
+    type: 'object', required: ['fingerprint', 'title', 'requesterEmail'],
+    properties: {
+      fingerprint: { type: 'string', minLength: 8, maxLength: 200, description: 'Stable key of the alert: detection + affected object. Stored as the ticket externalRef. Recommended: "sentinel:" + SHA-256 hex.' },
+      fingerprintDisplay: { type: 'string', maxLength: 300, description: 'Readable form; stored in the custom field alert_fingerprint.' },
+      title: { type: 'string', minLength: 3, maxLength: 500 },
+      description: { type: 'string', maxLength: 100000, description: 'HTML (sanitised) or plain text. Used on create only.' },
+      occurrenceNote: { type: 'string', maxLength: 20000, description: 'Extra HTML for the repeat/reopen note; Ticket Pulse writes the heading, count, time and incident link itself.' },
+      severity: { type: 'string', enum: ['Low', 'Medium', 'High', 'Critical', 'Informational'], description: 'Maps to priority 1/2/3/4. Informational is refused (422 informational_not_ticketed).' },
+      priority: { type: 'integer', enum: [1, 2, 3, 4], description: 'Overrides severity. A repeat only ever RAISES priority.' },
+      reopenWithinDays: { type: 'integer', minimum: 0, maximum: 90, default: 7 },
+      requesterEmail: { type: 'string', format: 'email' }, requesterName: { type: 'string' },
+      category: { type: 'string' }, subcategory: { type: 'string' }, ticketType: { type: 'string' },
+      groupId: { type: 'integer' }, internalGroupId: { type: 'integer' },
+      tags: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Tag names (must exist).' },
+      customFields: { type: 'object', additionalProperties: true },
+      reference: { $ref: '#/components/schemas/ExternalReferenceInput' },
+    },
+  },
   Contact: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, department: { type: 'string', nullable: true }, jobTitle: { type: 'string', nullable: true }, location: { type: 'string', nullable: true }, unattended: { type: 'boolean' } } },
   Task: { type: 'object', properties: { id: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string', nullable: true }, status: { type: 'string', enum: ['open', 'in_progress', 'done'] }, assignee: { type: 'object', nullable: true }, dueAt: { type: 'string', format: 'date-time', nullable: true } } },
   ApprovalVerdict: {
@@ -336,6 +375,7 @@ function op(summary, scope, { tag, body, responseRef, status = 200, list = false
 // (`cf_client_name`, `cf_amount_gte`, …). Unknown keys are ignored silently.
 const CF_FILTER_PARAMETERS = [
   // Reconciliation filters (Simorgh E2).
+  { name: 'reference', in: 'query', required: false, schema: { type: 'string' }, description: 'Tickets linked to one record in another system, as <system>:<id> — e.g. reference=sentinel:5f3c1a2e-… for every ticket that came from that Sentinel incident.' },
   { name: 'ids', in: 'query', required: false, schema: { type: 'string' }, description: 'Batch read: comma-separated ticket ids or TP-refs (≤ 200), e.g. ids=1601,1602 or ids=TP-1601,TP-1602.' },
   { name: 'externalRef', in: 'query', required: false, schema: { type: 'string' }, description: 'Exact match on the caller’s own key (set at create). Wins over externalRefPrefix.' },
   { name: 'externalRefPrefix', in: 'query', required: false, schema: { type: 'string' }, description: 'Prefix match, e.g. simorgh: for “everything of mine”.' },
@@ -676,6 +716,11 @@ export function buildOpenApiSpec(baseUrl) {
         post: op('Request approval against a category', 'approvals:write', { tag: 'approvals', body: { type: 'object', required: ['approvalCategoryId'], properties: { approvalCategoryId: { type: 'integer' }, note: { type: 'string' } } }, status: 201 }),
       },
       '/tags': { get: op('List the workspace tag palette', 'tags:read', { tag: 'taxonomy' }) },
+      '/alert-occurrences': { post: op('Record ONE monitoring alert (Sentinel integration). Ticket Pulse finds the ticket by `fingerprint` and, in one step: creates it (201, action "created"); or counts a repeat on the open ticket with a note and raises its priority if the alert is more severe (200, "occurrence"); or reopens a ticket resolved/closed within `reopenWithinDays` (200, "reopened"); or, after that window, creates a new ticket linked to the old one (201, "created" + previousTicket). A retried call with an alert id already recorded changes nothing (200, "duplicate"). Two simultaneous first calls make one ticket.', 'tickets:write', { tag: 'tickets', status: 201, extraResponses: { 200: { description: 'occurrence / reopened / duplicate' }, 422: { $ref: '#/components/responses/Problem' } }, body: ref('AlertOccurrence') }) },
+      '/tickets/{id}/references': {
+        get: op('List the records in other systems this ticket belongs to (e.g. Sentinel incidents)', 'tickets:read', { tag: 'tickets', responseRef: { type: 'array', items: ref('ExternalReference') } }),
+        post: op('Add references (duplicates skipped): body { references: [...] } or { reference: {...} }, at most 50', 'tickets:write', { tag: 'tickets', body: { type: 'object', properties: { references: { type: 'array', maxItems: 50, items: ref('ExternalReferenceInput') }, reference: ref('ExternalReferenceInput') } }, responseRef: { type: 'array', items: ref('ExternalReference') } }),
+      },
       '/tickets/{id}/tags': {
         put: op('Replace a ticket’s tag set', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagIds: { type: 'array', items: { type: 'integer' } } } } }),
         post: op('Add ONE tag, keeping the others (by `tagId` or `name`). Use this — not PUT — to tag a ticket someone else also tags.', 'tags:write', { tag: 'taxonomy', body: { type: 'object', properties: { tagId: { type: 'integer' }, name: { type: 'string', description: 'Case-insensitive tag name, e.g. continuit' } } } }),

@@ -190,6 +190,7 @@ model Workspace {
   ticketTags                        TicketTag[]
   webhookSubscriptions              WebhookSubscription[]
   ticketEmbeddings                  TicketEmbedding[]
+  ticketExternalReferences          TicketExternalReference[]
   ticketTypeDefinitions             TicketTypeDefinition[]
   ticketStatusDefinitions           TicketStatusDefinition[]
   analyticsReports                  AnalyticsReport[]
@@ -579,6 +580,32 @@ model TicketTag {
   @@unique([workspaceId, name])
   @@index([workspaceId, isActive])
   @@map("ticket_tags")
+}
+
+// Records in other systems a ticket belongs to (Sentinel integration, 24 Sep
+// 2026): one alert ticket spans many Sentinel incidents, one incident can hold
+// alerts of different tickets. ref_key = "alert:<alertId>" (an alert is
+// recorded once per workspace) or "record:<externalId>#<ticketId>".
+model TicketExternalReference {
+  id          Int       @id @default(autoincrement())
+  ticketId    Int       @map("ticket_id")
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  system      String    @db.VarChar(50)
+  externalId  String    @map("external_id") @db.VarChar(200)
+  number      String?   @db.VarChar(50)
+  alertId     String?   @map("alert_id") @db.VarChar(200)
+  url         String?   @db.VarChar(1000)
+  occurredAt  DateTime? @map("occurred_at")
+  refKey      String    @map("ref_key") @db.VarChar(300)
+  createdBy   String?   @map("created_by") @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([workspaceId, system, refKey])
+  @@index([workspaceId, system, externalId])
+  @@index([ticketId])
+  @@map("ticket_external_references")
 }
 
 model TicketTagLink {
@@ -1454,6 +1481,7 @@ model Ticket {
   linksFrom                TicketLink[]              @relation("linkSource")
   linksTo                  TicketLink[]              @relation("linkTarget")
   tagLinks                 TicketTagLink[]
+  externalRefs             TicketExternalReference[]
   tasks                    TicketTask[]
   embedding                TicketEmbedding?
   pinnedCards              TicketPinnedCard[]
@@ -1477,6 +1505,10 @@ model Ticket {
   solutionVerifiedAt DateTime? @map("solution_verified_at")
   solutionVerifiedBy String?   @map("solution_verified_by") @db.VarChar(255)
   solutionNote       String?   @map("solution_note") @db.Text
+  // Alert occurrences (Sentinel integration, 24 Sep 2026): how often the alert
+  // behind this ticket fired, and when last. 0 = not an alert ticket.
+  occurrenceCount    Int       @default(0) @map("occurrence_count")
+  lastOccurrenceAt   DateTime? @map("last_occurrence_at")
   // Parked (plans/PARKED_BUILD_PLAN.md): denormalised current park, for fast
   // queue filters and counts. The park itself lives in ticket_parks.
   parkedUntil        DateTime? @map("parked_until") @db.Timestamptz(6)

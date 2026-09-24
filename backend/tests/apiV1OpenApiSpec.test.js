@@ -181,3 +181,13 @@ describe('OpenAPI spec — ContinuIT search (23 Sep 2026)', () => {
     expect(schemas.SimilarSearchOptions.properties.limit.maximum).toBe(20);
   });
 });
+
+describe('OpenAPI spec — monitoring alerts (Sentinel, 24 Sep 2026)', () => {
+  test('alert occurrences, references and the reference filter are documented', () => {
+    expect(spec.paths['/alert-occurrences'].post).toBeDefined();
+    expect(spec.paths['/tickets/{id}/references'].get).toBeDefined();
+    expect(spec.paths['/tickets/{id}/references'].post).toBeDefined();
+    expect(schemas.AlertOccurrence.required).toEqual(['fingerprint', 'title', 'requesterEmail']);
+    expect(schemas.Ticket.properties.occurrenceCount).toBeDefined();
+  });
+});

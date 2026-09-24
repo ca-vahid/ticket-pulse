@@ -37,7 +37,8 @@ export const TICKET_SOURCE = {
   MS_TEAMS: 102, // requests arriving via Teams chat (QA 07-10 #6/#7)
   AGENT: 103, // created by staff inside the Ticket Pulse app
   SECURITY_AGENT: 104, // filed by a security-operations system (Simorgh B8, 09-14)
-  OFFICE_CHECK_IN: 105, // office check-in / business-continuity tasks (ContinuIT A5, 09-19)
+  OFFICE_CHECK_IN: 105, // office check-in tasks (ContinuIT A5, 09-19)
+  MONITORING_ALERT: 106, // infrastructure alerts from Microsoft Sentinel playbooks (24 Sep 2026)
 };
 
 export const TICKET_SOURCE_LABELS = {
@@ -48,7 +49,7 @@ export const TICKET_SOURCE_LABELS = {
   13: 'Employee Onboarding', 14: 'Alerts', 15: 'MS Teams (FS)',
   18: 'Employee Offboarding', 19: 'Journey',
   100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent', 104: 'Security Agent',
-  105: 'Office Check-in',
+  105: 'Office Check-in', 106: 'Monitoring Alert',
   1001: 'API (FreshService)', 1002: 'Company Portal',
 };
 
@@ -61,6 +62,7 @@ export const AGENT_SELECTABLE_SOURCES = [
   // 105 is here so an integration may send it explicitly (and /meta lists it);
   // the in-app picker (frontend SOURCE_OPTIONS) does not offer it.
   TICKET_SOURCE.OFFICE_CHECK_IN,
+  TICKET_SOURCE.MONITORING_ALERT,
 ];
 
 export function ticketSourceLabel(source) {

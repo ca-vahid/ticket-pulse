@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.78-preview';
+export const APP_VERSION = '3.9.79-preview';
 
 export const changelog = [
+  {
+    version: '3.9.79-preview',
+    date: 'September 24, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Monitoring alerts from Microsoft Sentinel</strong> — server, FTP, certificate and up/down alerts arrive as one ticket per problem. A repeat adds to the open ticket instead of making a new one, a problem that comes back soon after it was fixed reopens its ticket, and the ticket shows how often the alert fired and links every Sentinel incident it came from.' },
+    ],
+  },
   {
     version: '3.9.78-preview',
     date: 'September 23, 2026',
