@@ -8,9 +8,10 @@
 // backend) by falling back to the canonical 4, which keeps first-paint
 // behavior identical to the old hardcoded constant sets.
 //
-// Origin rule: only TP-born tickets can carry custom statuses. FS-born
-// tickets keep FreshService's own vocabulary, so their pickers stay on
-// CANONICAL_STATUS_DEFS until the 8c FS mapping work.
+// Origin rule: TP-born tickets can carry any workspace status. FS-born
+// tickets can carry the canonical 4 plus custom statuses LINKED to a
+// FreshService status (3.9.72; IT's Pending Response = FS 6) — see
+// fsBornStatusNames. A TP-only custom status would be undone by the next sync.
 
 export const CANONICAL_STATUS_DEFS = [
   { name: 'Open', baseStatus: 'Open', color: 'blue', sortOrder: 0, isSystem: true },
@@ -24,6 +25,20 @@ export const CANONICAL_STATUS_NAMES = CANONICAL_STATUS_DEFS.map((d) => d.name);
 export function statusDefsFromMeta(meta) {
   const defs = meta?.statuses;
   return Array.isArray(defs) && defs.length > 0 ? defs : CANONICAL_STATUS_DEFS;
+}
+
+/**
+ * Status choices for an FS-born ticket: the canonical 4 plus every custom
+ * status linked to a FreshService status (`freshserviceStatusId`), in the
+ * workspace's display order. Defs not loaded → the canonical 4.
+ */
+export function fsBornStatusNames(defs) {
+  const list = Array.isArray(defs) && defs.length ? defs : CANONICAL_STATUS_DEFS;
+  const names = list
+    .filter((d) => CANONICAL_STATUS_NAMES.includes(d.name) || d.freshserviceStatusId)
+    .map((d) => d.name);
+  for (const c of CANONICAL_STATUS_NAMES) if (!names.includes(c)) names.push(c);
+  return names;
 }
 
 export function statusNamesOf(defs) {

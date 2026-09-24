@@ -21,7 +21,7 @@ import { PinnedCardChipsRow } from './PinnedIntakeCard';
 import RecipientsLine from './RecipientsLine';
 import FsSyncConfirm from './FsSyncConfirm';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
-import { CANONICAL_STATUS_NAMES, baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from './statusDefs';
+import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from './statusDefs';
 import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
 import { looksLikeRealHtml } from '../../utils/htmlContent';
@@ -156,7 +156,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   // paused checks keep custom statuses honest in the chips below.
   const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
   const statusOptions = useMemo(
-    () => (ticket?.origin === 'ticketpulse' ? statusDefs.map((d) => d.name) : CANONICAL_STATUS_NAMES),
+    () => (ticket?.origin === 'ticketpulse' ? statusDefs.map((d) => d.name) : fsBornStatusNames(statusDefs)),
     [ticket?.origin, statusDefs],
   );
   const ticketTerminal = ticket ? isTerminalStatus(statusDefs, ticket.status) : false;
