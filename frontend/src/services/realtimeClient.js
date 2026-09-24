@@ -135,6 +135,9 @@ export class RealtimeClient {
     this._wrongChannelWarned = false;
     this._offlineTerminal = false; // 4xx — don't auto-recover
     this.offlineReason = null; // e.g. 'too-many-connections' — diagnostics only
+    // Why this tab is polling: 'capped' (the account's other tabs hold every
+    // live stream) or 'network' (the stream failed here). Drives the pill copy.
+    this.pollReason = null;
     this._telemetryDecided = false;
     this._telemetrySampled = false;
 
@@ -352,6 +355,7 @@ export class RealtimeClient {
       cursor: this.cursor,
       epoch: this.epoch,
       reason: this.offlineReason,
+      pollReason: this.pollReason,
     };
   }
 
@@ -529,6 +533,7 @@ export class RealtimeClient {
     if (this.state === 'live-sse' && this.transport === 'sse') return;
     this.transport = 'sse';
     this.offlineReason = null;
+    this.pollReason = null;
     this.connectedWorkspaceId = this.targetWorkspaceId;
     this._sseFailures = [];
     this._sseAttempt = 0;
@@ -555,12 +560,27 @@ export class RealtimeClient {
 
     if (wasProbe) {
       this._probe = null;
+      if (err?.type === 'capped') {
+        // Still at the account's stream limit: keep polling, try again when
+        // the server's cool-off ends — not on the 1/5/15-minute ladder.
+        this.pollReason = 'capped';
+        this._scheduleReprobe(err.retryAfterMs);
+        return;
+      }
       this._reprobeIndex = Math.min(this._reprobeIndex + 1, REPROBE_DELAYS_MS.length - 1);
       this._scheduleReprobe();
       return;
     }
     if (this._sse !== box.handle) return; // superseded
     this._sse = null;
+
+    if (err?.type === 'capped') {
+      // Not a network problem and not sticky: poll now (no failure dance),
+      // retry the stream once the cool-off is over.
+      this.pollReason = 'capped';
+      this._enterPolling('longpoll', { reprobeMs: err.retryAfterMs });
+      return;
+    }
 
     if (err?.type === 'terminal' || err?.type === 'auth') {
       // 4xx (or credentials dead even after a refresh): polling would fail
@@ -625,16 +645,17 @@ export class RealtimeClient {
   _degradeToPolling() {
     // Sticky degrade: remember it so the next page load starts here.
     this.deps.storage.set(TRANSPORT_MEMORY_KEY, 'longpoll');
+    this.pollReason = 'network';
     this._reprobeIndex = 0;
     this._reportTelemetry('downgrade', { transport: 'longpoll' });
     this._enterPolling('longpoll');
   }
 
-  _enterPolling(mode) {
+  _enterPolling(mode, { reprobeMs = null } = {}) {
     this._closeSse();
     this.transport = mode;
     if (this.state !== 'live-poll') this._setState('connecting');
-    this._scheduleReprobe();
+    this._scheduleReprobe(reprobeMs);
     this._pollLoop();
   }
 
@@ -746,11 +767,14 @@ export class RealtimeClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  _scheduleReprobe() {
+  _scheduleReprobe(overrideMs = null) {
     if (!this._running) return;
     if (this.transport !== 'longpoll' && this.transport !== 'shortpoll') return;
     this._clearTimer('reprobe');
-    const delay = REPROBE_DELAYS_MS[Math.min(this._reprobeIndex, REPROBE_DELAYS_MS.length - 1)];
+    // A capped refusal names its own wait (Retry-After + a little slack).
+    const delay = overrideMs > 0
+      ? overrideMs + 5000
+      : REPROBE_DELAYS_MS[Math.min(this._reprobeIndex, REPROBE_DELAYS_MS.length - 1)];
     this._timers.reprobe = setTimeout(() => {
       this._timers.reprobe = null;
       if (this.transport !== 'longpoll' && this.transport !== 'shortpoll') return;

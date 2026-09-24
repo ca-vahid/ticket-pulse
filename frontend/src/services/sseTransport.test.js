@@ -170,6 +170,13 @@ describe('openFetchSse', () => {
     expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe('Bearer fresh');
   });
 
+  test('429 is a typed capped failure carrying Retry-After (other tabs hold the streams)', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 429, body: null, headers: { get: (k) => (k === 'Retry-After' ? '120' : null) } }));
+    const handle = openFetchSse({ url: 'http://x', onEvent: () => {}, fetchImpl });
+    await expect(handle.finished).rejects.toMatchObject({ type: 'capped', status: 429, retryAfterMs: 120000 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   test('other 4xx are typed terminal failures (no retry hammering)', async () => {
     const fetchImpl = vi.fn(async () => ({ ok: false, status: 403, body: null }));
     const handle = openFetchSse({ url: 'http://x', onEvent: () => {}, fetchImpl });
