@@ -474,7 +474,9 @@ export default function AppHeader({
           </div>
           {ladderState === 'live-poll' && (
             <p className="mb-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
-              Live stream unavailable on this network — updating automatically instead.
+              {rtDiag?.pollReason === 'capped'
+                ? 'Live updates are limited to 8 tabs per person — this tab refreshes automatically instead. Closing unused Ticket Pulse tabs brings it back.'
+                : 'Live stream unavailable on this network — updating automatically instead.'}
             </p>
           )}
           {/* Phase 3: the server closes a user's OLDEST stream past the

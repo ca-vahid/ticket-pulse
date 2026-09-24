@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.79-preview';
+export const APP_VERSION = '3.9.80-preview';
 
 export const changelog = [
+  {
+    version: '3.9.80-preview',
+    date: 'September 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Live updates explain the tab limit</strong> &mdash; live updates are limited to 8 tabs per person. A tab over the limit used to retry, give up and say &ldquo;Live stream unavailable on this network&rdquo;, and its retries kept the limit engaged. It now switches to auto-refresh straight away, says the tab limit is the reason, and tries the live stream again once the limit clears. Closing unused Ticket Pulse tabs brings live updates back.' },
+    ],
+  },
   {
     version: '3.9.79-preview',
     date: 'September 24, 2026',

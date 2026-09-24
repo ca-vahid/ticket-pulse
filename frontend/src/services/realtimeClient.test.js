@@ -32,7 +32,7 @@ function makeHarness({ storage = {}, workspaceId = 1 } = {}) {
           id,
           retry: null,
         }),
-        fail: (type, status) => rejectFinished(typedError(type, status)),
+        fail: (type, status, extra = {}) => rejectFinished(Object.assign(typedError(type, status), extra)),
       };
       sseHandles.push(handle);
       return handle;
@@ -217,6 +217,40 @@ describe('RealtimeClient — SSE happy path + fan-out', () => {
     await vi.advanceTimersByTimeAsync(1100);
     expect(h.deps.openSse).toHaveBeenCalledTimes(2);
     warn.mockRestore();
+  });
+});
+
+describe('RealtimeClient — per-user stream cap (429)', () => {
+  test('a capped refusal polls at once, says why, is not sticky, and retries after Retry-After', async () => {
+    const h = makeHarness();
+    makeSubscriber(h.client);
+    const first = h.lastSse();
+    first.fail('capped', 429, { retryAfterMs: 120000 });
+    await flush();
+
+    expect(h.client.transport).toBe('longpoll');
+    expect(h.client.getDiagnostics().pollReason).toBe('capped');
+    expect(h.deps.storage.get('tp_rt_transport')).toBeNull(); // not the network: no sticky degrade
+    expect(h.deps.pollOnce).toHaveBeenCalled();
+    expect(h.deps.openSse).toHaveBeenCalledTimes(1); // no 3-failure retry dance
+
+    // The 1-minute ladder re-probe does not fire during the cool-off …
+    await vi.advanceTimersByTimeAsync(REPROBE_DELAYS_MS[0] + 1000);
+    expect(h.deps.openSse).toHaveBeenCalledTimes(1);
+    // … the probe goes out once Retry-After has passed.
+    await vi.advanceTimersByTimeAsync(120000 + 5000 - REPROBE_DELAYS_MS[0]);
+    expect(h.deps.openSse).toHaveBeenCalledTimes(2);
+
+    // Still capped: keep polling, wait again. Stream accepted: back to live.
+    h.lastSse().fail('capped', 429, { retryAfterMs: 60000 });
+    await flush();
+    expect(h.client.transport).toBe('longpoll');
+    await vi.advanceTimersByTimeAsync(65000);
+    expect(h.deps.openSse).toHaveBeenCalledTimes(3);
+    h.lastSse().emit('hello', { epoch: 'e1', workspaceId: 1, lastEventId: null });
+    await flush();
+    expect(h.client.transport).toBe('sse');
+    expect(h.client.getDiagnostics().pollReason).toBeNull();
   });
 });
 

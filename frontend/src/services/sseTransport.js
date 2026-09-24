@@ -13,11 +13,13 @@ export const CONNECT_TIMEOUT_MS = 10000;
 
 /** Typed transport failure — `type` drives the ladder's reaction. */
 export class SseTransportError extends Error {
-  constructor(type, message, status = null) {
+  constructor(type, message, status = null, retryAfterMs = null) {
     super(message || type);
     this.name = 'SseTransportError';
     // 'auth'      → 401 even after a refresh (credentials dead)
     // 'terminal'  → other 4xx (workspace_forbidden, bad request) — do NOT hammer
+    // 'capped'    → 429: this account already has the maximum live streams
+    //               open (other tabs) — poll instead, retry after Retry-After
     // 'no-hello'  → headers arrived but no server event within the budget
     //               (the proxy-buffered-stream signature)
     // 'timeout'   → no response headers within the connect budget
@@ -26,6 +28,7 @@ export class SseTransportError extends Error {
     // 'aborted'   → we closed it deliberately (not a failure)
     this.type = type;
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -226,6 +229,10 @@ export function openFetchSse({
           continue; // one retry with (hopefully) fresh credentials
         }
         throw new SseTransportError('auth', 'unauthorized after refresh', 401);
+      }
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers?.get?.('Retry-After'));
+        throw new SseTransportError('capped', 'too many live connections', 429, retryAfter > 0 ? retryAfter * 1000 : null);
       }
       if (response.status >= 400 && response.status < 500) {
         throw new SseTransportError('terminal', `HTTP ${response.status}`, response.status);

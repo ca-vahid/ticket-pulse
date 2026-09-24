@@ -197,6 +197,19 @@ describe('AppHeader popover diagnostics', () => {
     expect(screen.getByText('Long-poll fallback')).toBeInTheDocument();
   });
 
+  test('live-poll because of the per-person tab limit says so, not "this network"', () => {
+    setup({}, {
+      rt: {
+        state: 'live-poll',
+        transport: 'longpoll',
+        getDiagnostics: () => ({ ...baseDiag(), state: 'live-poll', transport: 'longpoll', pollReason: 'capped' }),
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /auto-refresh/i }));
+    expect(screen.getByText(/limited to 8 tabs per person/i)).toBeInTheDocument();
+    expect(screen.queryByText(/on this network/i)).toBeNull();
+  });
+
   test('diagnostics rows are hidden on the legacy path (no getDiagnostics)', () => {
     setup(
       { sseTransportStatus: undefined, sseTransport: undefined, sseGetDiagnostics: undefined },

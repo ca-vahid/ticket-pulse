@@ -157,6 +157,25 @@ describe('broadcast — workspace scoping (regression guard)', () => {
 });
 
 describe('GET /api/sse/events — workspace resolution', () => {
+  test('429 + Retry-After while the user is in a cap cool-off (before the stream opens)', async () => {
+    sseManager.capRefuseUntil.set('admin@bgc.ca', Date.now() + 90 * 1000);
+    const res = await request(makeApp(admin)).get('/api/sse/events?workspaceId=1');
+    expect(res.status).toBe(429);
+    expect(res.body.code).toBe('too_many_connections');
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(80);
+    expect(Number(res.headers['retry-after'])).toBeLessThanOrEqual(90);
+    // A refusal is not another cap event — it cannot extend the cool-off.
+    expect(sseManager.capEvictions.get('admin@bgc.ca')).toBeUndefined();
+  });
+
+  test('refusingNewcomer: 0 outside a cool-off, case-insensitive, 0 without a user', () => {
+    expect(sseManager.refusingNewcomer('calm@bgc.ca')).toBe(0);
+    sseManager.capRefuseUntil.set('loud@bgc.ca', Date.now() + 5000);
+    expect(sseManager.refusingNewcomer('LOUD@bgc.ca')).toBeGreaterThan(0);
+    expect(sseManager.refusingNewcomer('loud@bgc.ca', Date.now() + 6000)).toBe(0);
+    expect(sseManager.refusingNewcomer(null)).toBe(0);
+  });
+
   test('401 without auth', async () => {
     const res = await request(makeApp(null)).get('/api/sse/events?workspaceId=1');
     expect(res.status).toBe(401);

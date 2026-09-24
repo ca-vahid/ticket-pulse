@@ -98,6 +98,19 @@ class SSEConnectionManager {
     return workspaceId || '__global__';
   }
 
+  /**
+   * Milliseconds left on this user's cap cool-off (0 = not refusing). The
+   * route answers 429 + Retry-After BEFORE opening the stream, so a refused
+   * tab learns why (a farewell written after `hello` was lost to the
+   * immediate socket teardown and read as a network failure) and the refusal
+   * does not count as another cap event that keeps the cool-off going.
+   */
+  refusingNewcomer(userEmail, now = Date.now()) {
+    if (!userEmail) return 0;
+    const until = this.capRefuseUntil.get(String(userEmail).toLowerCase()) || 0;
+    return until > now ? until - now : 0;
+  }
+
   _buffer(key) {
     if (!this.buffers.has(key)) {
       this.buffers.set(key, { nextId: 1, events: [] });
@@ -585,6 +598,20 @@ router.get('/events', asyncHandler(async (req, res) => {
       return res.status(problem.status).json({ success: false, code: problem.code, message: problem.message });
     }
     throw problem;
+  }
+
+  // Per-user cap cool-off: refuse up front with a status the client can read
+  // ("too many tabs", not "bad network"); the tab falls back to polling.
+  const refuseMs = sseManager.refusingNewcomer((req.session?.user || req.user)?.email || null);
+  if (refuseMs > 0) {
+    const retryAfterSeconds = Math.ceil(refuseMs / 1000);
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    return res.status(429).json({
+      success: false,
+      code: 'too_many_connections',
+      message: `Too many live connections for your account (limit ${MAX_CONNECTIONS_PER_USER}). This tab updates automatically instead.`,
+      retryAfterSeconds,
+    });
   }
 
   // Set headers for SSE. `no-transform` asks compliant intermediaries not to
