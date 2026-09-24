@@ -5,6 +5,7 @@ import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
 import { DEFAULT_QUEUE_CARDS, QUEUE_CARD_KEYS, QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../tickets/queueCards';
+import { statusDefsFromMeta } from '../tickets/statusDefs';
 import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
 import TicketStatusesSection from './TicketStatusesSection';
 
@@ -1608,6 +1609,85 @@ function TrustedDomainsSection() {
  * preview, and Restore defaults. Stored per workspace; the queue reads it
  * from meta.queueCards.
  */
+/**
+ * QA 09-23 #4: which statuses the Tickets list shows when it opens, per
+ * workspace. None ticked = every status (IT). Project Accounting: Open +
+ * Pending. The URL always wins; "clear filters" still shows everything.
+ */
+export function DefaultStatusesSection() {
+  const [defs, setDefs] = useState(null); // null = loading
+  const [selected, setSelected] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    ticketsAPI.meta()
+      .then((res) => {
+        setDefs(statusDefsFromMeta(res.data));
+        setSelected(Array.isArray(res.data?.defaultStatuses) ? res.data.defaultStatuses : []);
+      })
+      .catch(() => setDefs([]));
+  }, []);
+
+  const persist = async (next) => {
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const res = await ticketsAPI.updateDefaultStatuses(next);
+      setSelected(Array.isArray(res.data?.statuses) ? res.data.statuses : next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const toggle = (name) => {
+    const next = selected.includes(name) ? selected.filter((s) => s !== name) : [...selected, name];
+    setSelected(next);
+    persist(next);
+  };
+
+  return (
+    <SectionCard
+      icon={Eye}
+      title="Default statuses"
+      hint="Which statuses the Tickets list shows when someone opens it in this workspace. Leave all unticked to show every status. People can still pick any status from the filters; “clear filters” always shows everything."
+    >
+      {defs === null ? (
+        <p className="text-xs text-muted-foreground/75 italic">Loading…</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-2" role="group" aria-label="Default statuses">
+            {defs.map((d) => (
+              <label key={d.name} className="inline-flex items-center gap-1.5 text-sm text-foreground/85">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(d.name)}
+                  disabled={busy}
+                  onChange={() => toggle(d.name)}
+                  className="tp-focus-ring h-4 w-4 rounded border-input"
+                />
+                {d.name}
+              </label>
+            ))}
+          </div>
+          <div className="mt-2.5 flex items-center gap-3 text-xs">
+            <span className="text-muted-foreground">{selected.length ? `Opens on: ${selected.join(', ')}` : 'Opens on every status'}</span>
+            {selected.length > 0 && (
+              <button onClick={() => { setSelected([]); persist([]); }} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground/85 disabled:opacity-50">
+                <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Every status
+              </button>
+            )}
+            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/75" aria-hidden="true" />}
+            {saved && <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-300"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
+            {error && <span className="text-red-500">{error}</span>}
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
 export function QueueCardsSection() {
   const [cards, setCards] = useState(null); // null = loading
   const [busy, setBusy] = useState(false);
@@ -2248,6 +2328,7 @@ export default function TicketOpsPanel() {
       <TicketTypesSection />
       <TicketStatusesSection />
       <QueueCardsSection />
+      <DefaultStatusesSection />
       <SlaSection />
       <TrustedDomainsSection />
       <TagsSection />

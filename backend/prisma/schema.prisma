@@ -1458,6 +1458,7 @@ model Ticket {
   embedding                TicketEmbedding?
   pinnedCards              TicketPinnedCard[]
   intakeRuns               TicketIntakeRun[]
+  parks                    TicketPark[]
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields Json? @map("custom_fields")
@@ -1476,6 +1477,10 @@ model Ticket {
   solutionVerifiedAt DateTime? @map("solution_verified_at")
   solutionVerifiedBy String?   @map("solution_verified_by") @db.VarChar(255)
   solutionNote       String?   @map("solution_note") @db.Text
+  // Parked (plans/PARKED_BUILD_PLAN.md): denormalised current park, for fast
+  // queue filters and counts. The park itself lives in ticket_parks.
+  parkedUntil        DateTime? @map("parked_until") @db.Timestamptz(6)
+  parkKind           String?   @map("park_kind") @db.VarChar(20)
 
   // Partial unique index in SQL (WHERE external_ref IS NOT NULL) — one
   // ticket per (workspace, ref); the P2002 on it is the concurrent-create
@@ -2508,6 +2513,10 @@ model NotificationWorkflow {
   triggerType         String    @map("trigger_type") @db.VarChar(60)
   routingMode         String    @default("exclusive") @map("routing_mode") @db.VarChar(20)
   routingPriority     Int       @default(100) @map("routing_priority")
+  // QA 09-23 #8: when this workflow runs for a ticket, workflows of equal or
+  // lower priority (higher number) for the same ticket within the change
+  // window are skipped — one e-mail per change, not one per trigger.
+  stopFurtherWorkflows Boolean  @default(false) @map("stop_further_workflows")
   routingRule         Json?     @map("routing_rule")
   isDefaultVariant    Boolean   @default(false) @map("is_default_variant")
   archivedAt          DateTime? @map("archived_at")
@@ -3749,4 +3758,29 @@ model UserEmailSignature {
 
   @@unique([workspaceId, ownerEmail])
   @@map("user_email_signatures")
+}
+
+// Parked tickets (Sep 2026, plans/PARKED_BUILD_PLAN.md): a marker, not a
+// status — the ticket stays Pending and carries why it waits and until when.
+// At most one active park (endedAt null) per ticket; history is kept.
+model TicketPark {
+  id                 Int       @id @default(autoincrement())
+  ticketId           Int       @map("ticket_id")
+  ticket             Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  workspaceId        Int       @map("workspace_id")
+  kind               String    @db.VarChar(20) // until_date | waiting_on | eta
+  until              DateTime  @db.Timestamptz(6)
+  reason             String    @db.Text
+  waitingOn          Json?     @map("waiting_on") // [{ technicianId?, email?, name }]
+  source             String    @default("agent") @db.VarChar(20) // agent | suggested_hr | api | workflow | bulk
+  parkedBy           String?   @map("parked_by") @db.VarChar(255)
+  parkedAt           DateTime  @default(now()) @map("parked_at") @db.Timestamptz(6)
+  statusBefore       String?   @map("status_before") @db.VarChar(50)
+  dueSoonNotifiedAt  DateTime? @map("due_soon_notified_at") @db.Timestamptz(6)
+  endedAt            DateTime? @map("ended_at") @db.Timestamptz(6)
+  endReason          String?   @map("end_reason") @db.VarChar(30) // woke | unparked | requester_replied | status_changed | closed | extended
+  endedBy            String?   @map("ended_by") @db.VarChar(255)
+
+  @@index([ticketId, endedAt], map: "idx_ticket_parks_ticket")
+  @@map("ticket_parks")
 }

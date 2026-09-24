@@ -8,7 +8,9 @@ import { jest } from '@jest/globals';
 // tokens (last_replying_agent, watchers).
 
 const prismaMock = {
-  notificationWorkflowRun: { create: jest.fn(), update: jest.fn(), findFirst: jest.fn() },
+  notificationWorkflowRun: { create: jest.fn(), update: jest.fn(), findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+  notificationWorkflow: { findUnique: jest.fn() },
+  notificationWorkflowVersion: { findUnique: jest.fn() },
   notificationWorkflowStepRun: { create: jest.fn(), update: jest.fn() },
   notificationDelivery: { create: jest.fn(), findUnique: jest.fn() },
   notificationLlmToolPolicy: { findUnique: jest.fn() },
@@ -51,7 +53,7 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({ default: {}, ss
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
 const {
-  executeDefinition, executeForEvent, fieldsUpdatedGate, fieldsUpdatedTriggerOptions, recipientExclusions,
+  executeDefinition, executeForEvent, fieldsUpdatedGate, fieldsUpdatedTriggerOptions, recipientExclusions, resumeWaitingRuns,
 } = await import('../src/services/notificationWorkflowEngine.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 const { buildFieldsUpdatedExtra } = await import('../src/services/ticketChangeRenderer.js');
@@ -195,7 +197,8 @@ describe('coalescing (park / merge)', () => {
     listEnabledForEventMock.mockResolvedValue([workflowFor(7, fieldsDefinition({ coalesceMinutes: 0 }))]);
     const result = await executeForEvent(await fieldsEvent({ priority: { from: 2, to: 3 } }), { triggerSource: 'test' });
     expect(result.results[0].status).toBe('completed');
-    expect(prismaMock.notificationWorkflowRun.findFirst).not.toHaveBeenCalled();
+    // No coalesce lookup (the only findFirst is the QA 09-23 #8 stop check).
+    expect(prismaMock.notificationWorkflowRun.findFirst.mock.calls.filter(([arg]) => arg.where.status === 'waiting')).toHaveLength(0);
   });
 });
 
@@ -288,5 +291,59 @@ describe('update_ticket node → ONE fields_updated (actorKind workflow, loop-gu
     expect(Object.keys(args.changes).sort()).toEqual(['customFields.client_location', 'priority']);
     expect(args.changes.priority).toEqual({ from: 2, to: 4 });
     expect(args.changes).not.toHaveProperty('status');
+  });
+});
+
+// QA 09-23 #8: one e-mail per ticket change. TP-1526: a Power Apps
+// resubmission fired 'reopened' + two 'fields_updated' runs 49 ms apart.
+describe('stop other workflows for this ticket change', () => {
+  const stopperRow = { id: 555, workflowId: 13031, workflow: { name: 'Ticket Reopened' } };
+
+  test('a higher-or-equal priority stop-flagged run on the ticket silences this workflow', async () => {
+    listEnabledForEventMock.mockResolvedValue([workflowFor(12874, fieldsDefinition({ coalesceMinutes: 0 }))]);
+    prismaMock.notificationWorkflowRun.findFirst.mockImplementation(async ({ where }) => (where.status?.in ? stopperRow : null));
+    const result = await executeForEvent(await fieldsEvent({ priority: { from: 2, to: 3 } }), { triggerSource: 'test' });
+    expect(result.results[0]).toEqual(expect.objectContaining({ status: 'skipped', workflowId: 12874, stoppedByRunId: 555 }));
+    expect(result.results[0].reason).toMatch(/Stopped by "Ticket Reopened"/);
+    const stopQuery = prismaMock.notificationWorkflowRun.findFirst.mock.calls.find(([arg]) => arg.where.status?.in)[0];
+    expect(stopQuery.where).toEqual(expect.objectContaining({
+      ticketId: 501, workflowId: { not: 12874 }, executionMode: 'live',
+      workflow: { is: { stopFurtherWorkflows: true, routingPriority: { lte: 100 } } },
+    }));
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('no stopper → runs normally', async () => {
+    listEnabledForEventMock.mockResolvedValue([workflowFor(12874, fieldsDefinition({ coalesceMinutes: 0 }))]);
+    const result = await executeForEvent(await fieldsEvent({ priority: { from: 2, to: 3 } }), { triggerSource: 'test' });
+    expect(result.results[0].status).not.toBe('skipped');
+  });
+
+  test('a parked run is re-checked when it wakes and skipped if a stopper ran meanwhile', async () => {
+    const def = fieldsDefinition({ coalesceMinutes: 3 });
+    prismaMock.notificationWorkflowRun.findMany.mockResolvedValue([{ id: 902, workflowId: 12874, ticketId: 501, workflowVersionId: null, resumeNodeId: 'trigger', executionMode: 'live', dryRun: false, eventContext: {}, resumeState: {} }]);
+    prismaMock.notificationWorkflow.findUnique.mockResolvedValue(workflowFor(12874, def));
+    prismaMock.notificationWorkflowRun.findFirst.mockImplementation(async ({ where }) => (where.status?.in ? stopperRow : null));
+    await resumeWaitingRuns();
+    expect(prismaMock.notificationWorkflowRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 902 }, data: expect.objectContaining({ status: 'skipped', error: expect.stringMatching(/Stopped by "Ticket Reopened"/) }),
+    }));
+    expect(processDeliveryMock).not.toHaveBeenCalled();
+  });
+
+  test('race: two field edits 49 ms apart become ONE parked run (the second coalesces)', async () => {
+    listEnabledForEventMock.mockResolvedValue([workflowFor(12874, fieldsDefinition({ coalesceMinutes: 3 }))]);
+    let parked = null;
+    prismaMock.notificationWorkflowRun.update.mockImplementation(async ({ where, data }) => {
+      if (data.status === 'waiting') parked = { id: where.id, eventContext: { event: { extra: {} } }, resumeAt: data.resumeAt };
+      return {};
+    });
+    prismaMock.notificationWorkflowRun.findFirst.mockImplementation(async ({ where }) => (where.status === 'waiting' ? parked : null));
+    const [a, b] = await Promise.all([
+      executeForEvent(await fieldsEvent({ subject: { from: 'a', to: 'b' } }), { triggerSource: 'test' }),
+      executeForEvent(await fieldsEvent({ priority: { from: 2, to: 3 } }), { triggerSource: 'test' }),
+    ]);
+    const statuses = [a.results[0].status, b.results[0].status].sort();
+    expect(statuses).toEqual(['coalesced', 'waiting']);
   });
 });

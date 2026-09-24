@@ -54,6 +54,7 @@ import {
   Wand2,
   Waypoints,
   XCircle,
+  PauseCircle,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
@@ -88,6 +89,10 @@ const EVENT_LABELS = {
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
   'ticket.reopened': 'Ticket reopened',
+  'ticket.parked': 'Ticket parked',
+  'ticket.woke': 'Parked ticket woke',
+  'ticket.park_due_soon': 'Parked ticket wakes within a day',
+  'ticket.categorized': 'Ticket categorized',
   'ticket.fields_updated': 'Ticket updated (fields)',
   'ticket.public_reply_added': 'Agent replied to requester',
   'approval.requested': 'Approval requested',
@@ -116,6 +121,12 @@ export const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.resolved_closed', hint: 'Ticket reaches Resolved or Closed' },
       // FR 09-11 #4 — the named reopen trigger QA asked for.
       { value: 'ticket.reopened', hint: 'A resolved or closed ticket goes back to an open state — by a requester reply, an agent, or the API' },
+      // QA 09-23 #1: the moment a "received" mail can name the category.
+      { value: 'ticket.categorized', hint: 'The category is set — by the AI (about a minute after arrival) or by a person. Use it for mail that should name the category' },
+      // Parked (plans/PARKED_BUILD_PLAN.md)
+      { value: 'ticket.parked', hint: 'Someone parked the ticket until a date (or parked it again)' },
+      { value: 'ticket.woke', hint: 'A parked ticket reached its date and is back in the queue' },
+      { value: 'ticket.park_due_soon', hint: 'A parked ticket wakes within a day' },
     ],
   },
   {
@@ -231,6 +242,15 @@ const WORKFLOW_NODE_REGISTRY = {
     label: 'Add note',
     icon: StickyNote,
     color: '#8b5cf6',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  park_ticket: {
+    label: 'Park ticket',
+    icon: PauseCircle,
+    color: '#64748b',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -380,6 +400,7 @@ const NODE_PALETTE_GROUPS = [
     hints: {
       update_ticket: 'Assign / set status, priority, category or group',
       add_note: 'Post an internal note or interactive field card to the conversation',
+      park_ticket: 'Park the ticket for N days with a reason (or end its park)',
       create_child_ticket: 'Spawn a linked follow-up ticket',
       request_approval: 'Route an approval to a category of managers',
       propose_reply: 'Stage the draft on the ticket for human approval',
@@ -550,6 +571,8 @@ export const CONDITION_FIELD_OPTIONS = [
   { value: 'requester.timeZoneIana', label: 'Requester timezone', example: 'America/Vancouver' },
   { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
   { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
+  { value: 'ticket.isParked', label: 'Ticket is parked', example: 'false' },
+  { value: 'ticket.parkKind', label: 'Park kind', example: 'until_date' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
   { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', example: 'false' },
@@ -1992,6 +2015,9 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       note: 'Requested automatically because: {{ event.type }} on {{ ticket.subject }}',
     };
   }
+  if (type === 'park_ticket') {
+    return { label: 'Park ticket', mode: 'park', kind: 'until_date', days: 7, reasonTemplate: 'Waiting until {{ ticket.subject }} is due' };
+  }
   if (type === 'add_note') {
     // Data keys mirror the Phase-1 add_note engine contract: mode text
     // (Liquid HTML body, sanitized server-side) or field_card (structured
@@ -2267,7 +2293,7 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
   }
   // Mirrors the server rule: any ACTION node qualifies — a propose_reply-only
   // workflow (e.g. the AI first-reply template) is valid without a send node.
-  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!nodes.some((node) => CLIENT_ACTION_NODE_TYPES.includes(node.type))) {
     errors.push('Workflow must include at least one action node (send email, update ticket, add note, webhook, child ticket, approval, or stage-for-approval)');
   }
@@ -8465,6 +8491,21 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
+  async function saveStopFurther(checked) {
+    if (!selected) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.updateRouting(selected.id, { stopFurtherWorkflows: checked });
+      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      setMessage({ type: 'success', text: checked ? 'This workflow now stops other workflows for the same ticket change' : 'This workflow no longer stops other workflows' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Save failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function toggleArchived(nextArchived = !selected?.archivedAt) {
     if (!selected) return;
     setSaving(true);
@@ -9496,6 +9537,23 @@ export default function NotificationWorkflowsPanel({
               </button>
             </div>
 
+            {/* QA 09-23 #8: one e-mail per ticket change, whatever triggers fire. */}
+            <label className="flex items-start gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-sm text-foreground/85">
+              <input
+                type="checkbox"
+                checked={selected.stopFurtherWorkflows === true}
+                disabled={saving || Boolean(selected.archivedAt)}
+                onChange={(event) => saveStopFurther(event.target.checked)}
+                className="tp-focus-ring mt-0.5 h-4 w-4 rounded border-input"
+              />
+              <span>
+                <span className="font-semibold">Stop other workflows for this ticket change</span>
+                <span className="block text-xs text-muted-foreground">
+                  When this workflow runs for a ticket, other workflows with the same or a later match order ({selected.routingPriority ?? 100} or higher) stay silent for that ticket for 5 minutes — e.g. a form resubmission that reopens <em>and</em> updates a ticket sends one e-mail, not two. First to run wins among equals.
+                </span>
+              </span>
+            </label>
+
             {!selected.isDefaultVariant && (
               <div className="rounded-lg border border-border bg-muted/50 px-3 py-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -10230,6 +10288,60 @@ export default function NotificationWorkflowsPanel({
             />
           </label>
           <p className="text-[11px] text-muted-foreground/75">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'park_ticket') {
+      const mode = selectedNode.data?.mode === 'unpark' ? 'unpark' : 'park';
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
+            Action
+            <select
+              value={mode}
+              onChange={(event) => updateNodeData({ mode: event.target.value })}
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+            >
+              <option value="park">Park the ticket</option>
+              <option value="unpark">End its park (the ticket reopens)</option>
+            </select>
+          </label>
+          {mode === 'park' && (
+            <>
+              <label className="block text-xs font-medium uppercase text-muted-foreground">
+                Kind
+                <select
+                  value={selectedNode.data?.kind || 'until_date'}
+                  onChange={(event) => updateNodeData({ kind: event.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+                >
+                  <option value="until_date">Waiting until a date</option>
+                  <option value="eta">In progress, with an ETA</option>
+                </select>
+              </label>
+              <label className="block text-xs font-medium uppercase text-muted-foreground">
+                For how many days (1–184)
+                <input
+                  type="number"
+                  min="1"
+                  max="184"
+                  value={selectedNode.data?.days ?? 7}
+                  onChange={(event) => updateNodeData({ days: Math.max(1, Math.min(184, Number.parseInt(event.target.value, 10) || 1)) })}
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+                />
+              </label>
+              <label className="block text-xs font-medium uppercase text-muted-foreground">
+                Reason (Liquid)
+                <input
+                  value={selectedNode.data?.reasonTemplate || ''}
+                  onChange={(event) => updateNodeData({ reasonTemplate: event.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+                />
+              </label>
+            </>
+          )}
+          <p className="text-[11px] text-muted-foreground/75">A parked ticket goes to Pending (FreshService sees Pending) and wakes back to Open on its date. A requester reply or any status change ends the park early. Observe-only runs only report what they would do.</p>
         </div>
       );
     }

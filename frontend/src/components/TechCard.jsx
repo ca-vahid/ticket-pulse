@@ -272,6 +272,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
   // FreshService statuses: Open (active work), Pending (waiting/less urgent), Resolved, Closed
   const openOnlyCount = technician.openOnlyCount || 0;
   const pendingCount = technician.pendingCount || 0;
+  // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose — not load, shown muted.
+  const parkedCount = technician.parkedTicketCount || 0;
   const _totalOpenCount = technician.openTicketCount || 0; // Open + Pending combined
 
   // Use "Open" status count for card background color (most important metric).
@@ -565,11 +567,11 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               {viewMode === 'daily' && (
                 <span
                   className="sm:hidden flex items-baseline gap-1 border-l border-violet-200/70 pl-2.5 ml-1"
-                  title={`${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'} right now${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}
+                  title={`${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'} right now${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${parkedCount > 0 ? ` · ${parkedCount} parked (waiting on purpose, not counted as load)` : ''}`}
                 >
                   <span className="text-2xl font-bold leading-none text-foreground/85">{openOnlyCount}</span>
                   <span className="text-xs font-medium text-muted-foreground">
-                    open now{pendingCount > 0 ? ` +${pendingCount} pend` : ''}
+                    open now{pendingCount > 0 ? ` +${pendingCount} pend` : ''}{parkedCount > 0 ? ` · ${parkedCount} parked` : ''}
                   </span>
                 </span>
               )}
@@ -631,7 +633,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                   >
                     <span className={`text-lg font-bold leading-none ${getLoadTextClass(openOnlyCount)}`}>{openOnlyCount}</span>
                     <span className="text-[11px] font-medium text-muted-foreground">
-                      open now{pendingCount > 0 ? ` +${pendingCount} pend` : ''}
+                      open now{pendingCount > 0 ? ` +${pendingCount} pend` : ''}{parkedCount > 0 ? ` · ${parkedCount} parked` : ''}
                     </span>
                   </span>
                 )}

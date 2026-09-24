@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, Check, ChevronUp, FolderTree, GitMerge, Loader2, PanelRight, Search, Tag as TagIcon, UserRound, Workflow, X,
+  AlertCircle, Check, ChevronUp, FolderTree, GitMerge, Loader2, PanelRight, PauseCircle, Play, Search, Tag as TagIcon, UserRound, Workflow, X,
 } from 'lucide-react';
 
 /**
@@ -131,6 +131,8 @@ export default function BulkActionBar({
   onAction,
   mergeBlockedReason = null,
   onMerge,
+  onPark,
+  onUnpark,
   onOpenDetails,
   detailsOpen = false,
   onClear,
@@ -291,6 +293,31 @@ export default function BulkActionBar({
                 <GitMerge className="h-4 w-4" aria-hidden="true" />
                 Merge
               </button>
+              {/* Parked (plans/PARKED_BUILD_PLAN.md): any origin, one reason for all. */}
+              {onPark && (
+                <button
+                  type="button"
+                  onClick={onPark}
+                  title="Park the selected tickets until a date — they wait on purpose and come back to their assignee then"
+                  data-testid="bulk-park"
+                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-muted"
+                >
+                  <PauseCircle className="h-4 w-4" aria-hidden="true" />
+                  Park…
+                </button>
+              )}
+              {onUnpark && (
+                <button
+                  type="button"
+                  onClick={onUnpark}
+                  title="End the park on the selected tickets — they reopen now"
+                  data-testid="bulk-unpark"
+                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-muted"
+                >
+                  <Play className="h-4 w-4" aria-hidden="true" />
+                  Unpark
+                </button>
+              )}
             </>
           )}
           {!queryScope && (

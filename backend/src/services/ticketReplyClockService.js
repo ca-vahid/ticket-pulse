@@ -99,6 +99,8 @@ export async function requesterSilentCandidates(workspaceId, { statuses, cutoff,
         JOIN tickets t ON t.id = te.ticket_id
         WHERE t.workspace_id = ${Number(workspaceId)}
           AND t.status IN (${Prisma.join(names)})
+          -- Parked tickets wait on purpose: never "silent requester" material.
+          AND t.parked_until IS NULL
           AND t.is_noise = false
           AND ${PUBLIC_MESSAGE_SQL}
         ORDER BY te.ticket_id, te.occurred_at DESC, te.id DESC

@@ -47,7 +47,10 @@ const tickets = await prisma.$queryRawUnsafe(`
   FROM tickets t JOIN technicians tech ON tech.id = t.assigned_tech_id
   LEFT JOIN human h ON h.ticket_id = t.id LEFT JOIN lastnote ln ON ln.ticket_id = t.id
   WHERE t.workspace_id = $1 AND tech.is_active = true AND COALESCE(t.is_noise, false) = false
-    AND t.status IN ('Open','Pending')`, ws);
+    AND t.status IN ('Open','Pending')
+    -- Parked tickets wait on purpose until their date (Sep 2026) — never
+    -- stale, overdue or untouched for follow-up purposes.
+    AND t.parked_until IS NULL`, ws);
 
 const techs = await prisma.$queryRawUnsafe(`
   SELECT tech.id, tech.name, tech.email,

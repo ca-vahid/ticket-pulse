@@ -1026,21 +1026,28 @@ class MirrorService {
 
     // Latest change wins (23 Sep 2026): a ticket Ticket Pulse closed can be
     // reopened on its FreshService copy, so recently closed ones are checked
-    // too (a small, bounded extra set).
+    // too — a bounded slice per pass that ROTATES through the window, so every
+    // one is reached (IT had 23 in 3 days; a fixed "top 10" never reached
+    // TP-1597, closed in FreshService by its supervisor rule).
     if (activeOnly && !since) {
       const terminalNames = await statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']);
+      if (!this._recentClosedOffset) this._recentClosedOffset = new Map();
+      const offset = this._recentClosedOffset.get(workspaceId) || 0;
+      const recentWhere = {
+        workspaceId,
+        origin: TICKET_ORIGIN.TICKETPULSE,
+        freshserviceTicketId: { not: null },
+        status: { in: terminalNames },
+        updatedAt: { gte: new Date(Date.now() - RECENTLY_CLOSED_WINDOW_MS) },
+      };
       const recent = await prisma.ticket.findMany({
-        where: {
-          workspaceId,
-          origin: TICKET_ORIGIN.TICKETPULSE,
-          freshserviceTicketId: { not: null },
-          status: { in: terminalNames },
-          updatedAt: { gte: new Date(Date.now() - RECENTLY_CLOSED_WINDOW_MS) },
-        },
+        where: recentWhere,
         include: { assignedTech: { select: { freshserviceId: true, name: true } } },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: { id: 'asc' },
+        skip: offset,
         take: RECENTLY_CLOSED_LIMIT,
       }).catch(() => []);
+      this._recentClosedOffset.set(workspaceId, recent.length < RECENTLY_CLOSED_LIMIT ? 0 : offset + recent.length);
       tickets.push(...recent.filter((r) => !tickets.some((t) => t.id === r.id)));
     }
 

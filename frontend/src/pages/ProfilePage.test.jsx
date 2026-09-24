@@ -13,6 +13,8 @@ vi.mock('../services/api', () => apiMock);
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: { name: 'Susan Xu', email: 'sxu@bgcengineering.ca', role: 'admin' }, logout: vi.fn() }) }));
 vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT' } }) }));
 
+vi.mock('../components/agent/SignaturePanel', () => ({ default: () => <div>My signature panel</div> }));
+
 import ProfilePage from './ProfilePage';
 
 const ME = { id: 42, name: 'Susan Xu', email: 'sxu@bgcengineering.ca', photoUrl: 'data:image/jpeg;base64,AAAA', photoSource: 'custom' };
@@ -53,5 +55,11 @@ describe('ProfilePage', () => {
     renderPage();
     expect(await screen.findByRole('note')).toHaveTextContent('no agent profile in IT');
     expect(screen.queryByRole('button', { name: /Add a photo/ })).toBeNull();
+  });
+
+  test('the e-mail signature lives on the profile (QA 09-23 #5)', async () => {
+    apiMock.settingsAPI.myPhoto.mockResolvedValue({ data: ME });
+    renderPage();
+    expect(await screen.findByText('My signature panel')).toBeInTheDocument();
   });
 });

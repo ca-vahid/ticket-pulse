@@ -29,6 +29,14 @@ export const NOTIFICATION_EVENT_TYPES = [
   // FR 09-11 #4: terminal -> non-terminal, whatever reopened it. A named
   // trigger because nobody found status_changed + the `reopened` condition.
   'ticket.reopened',
+  // Parked tickets (plans/PARKED_BUILD_PLAN.md): parked / woke on its date /
+  // wakes within a day. Fired by ticketParkService.
+  'ticket.parked',
+  'ticket.woke',
+  'ticket.park_due_soon',
+  // QA 09-23 #1: the category was set (by the AI pipeline or a person) — the
+  // moment a "received" mail can name the category.
+  'ticket.categorized',
   // Field edits (MEGA 09-01 Phase TU, TU-5): priority / category / due dates /
   // custom fields… by a human in TP, the public API (incl. Power Apps), an
   // API resubmission, the workflow update_ticket node, or (opt-in per
@@ -774,6 +782,14 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
     inputHandles: ['default'],
     outputHandles: ['default'],
   },
+  // Parked (plans/PARKED_BUILD_PLAN.md): park the ticket for N days with a
+  // reason, or end its park.
+  park_ticket: {
+    label: 'Park ticket',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
   // N-way switch: output handles are the configured branch keys + 'otherwise'
   // (validated dynamically against node.data.branches).
   branch: {
@@ -1041,7 +1057,7 @@ function validateGraph(definition, triggerType) {
 
   // Keep in sync with the client mirror in NotificationWorkflowsPanel.jsx
   // (the builder repeats this "at least one action" check for save-time UX).
-  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
     errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
@@ -1356,6 +1372,10 @@ function eventLabel(triggerType) {
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
     'ticket.reopened': 'Ticket reopened',
+    'ticket.parked': 'Ticket parked',
+    'ticket.woke': 'Parked ticket woke',
+    'ticket.park_due_soon': 'Parked ticket wakes within a day',
+    'ticket.categorized': 'Ticket categorized',
     'ticket.fields_updated': 'Ticket updated (fields)',
     'ticket.public_reply_added': 'Agent replied to requester',
     'approval.requested': 'Approval requested',

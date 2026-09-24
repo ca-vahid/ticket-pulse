@@ -17,6 +17,8 @@ export const QUEUE_CARD_KEYS = [
   'all', 'open', 'awaiting', 'due_today', 'overdue', 'resolved',
   'created_week', 'created_month', 'created_year',
   'unassigned', 'deleted', 'noise',
+  // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date.
+  'parked',
 ];
 
 export const DEFAULT_QUEUE_CARDS = ['all', 'open', 'awaiting', 'due_today', 'overdue', 'resolved'];

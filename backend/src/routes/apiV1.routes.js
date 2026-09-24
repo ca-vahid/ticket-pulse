@@ -145,6 +145,9 @@ function ticketShape(t) {
     // trusted integration; 'sla' = the workspace SLA clock.
     dueBy: t.dueBy || null,
     dueBySetBy: t.dueBySetBy || null,
+    // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date.
+    // FreshService sees these tickets as plain Pending.
+    parked: t.parkedUntil ? { kind: t.parkKind || null, until: t.parkedUntil } : null,
   };
 }
 
@@ -655,6 +658,25 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   }
   const ticket = await ticketService.getTicket(id, req.workspaceId, API_READ);
   res.json({ success: true, data: ticketShape(ticket), ...(note ? { note } : {}) });
+}));
+
+// Parked (plans/PARKED_BUILD_PLAN.md): park = a marker, the ticket stays
+// Pending and wakes on its date; DELETE ends it (the ticket reopens).
+router.post('/tickets/:id/park', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+  const { default: ticketParkService } = await import('../services/ticketParkService.js');
+  const result = await ticketParkService.park(await tid(req), req.workspaceId, {
+    kind: req.body?.kind,
+    until: req.body?.until,
+    reason: req.body?.reason,
+    waitingOn: req.body?.waitingOn,
+  }, apiActor(req), { source: 'api' });
+  res.status(201).json({ success: true, data: result });
+}));
+
+router.delete('/tickets/:id/park', S('tickets:write'), asyncHandler(async (req, res) => {
+  const { default: ticketParkService } = await import('../services/ticketParkService.js');
+  const result = await ticketParkService.unpark(await tid(req), req.workspaceId, { reason: 'unparked', reopen: true }, apiActor(req));
+  res.json({ success: true, data: result });
 }));
 
 router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {

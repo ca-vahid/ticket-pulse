@@ -607,6 +607,10 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
       // group-scoped watch subscriptions (TU-8).
       groupId: ticket.groupId === null || ticket.groupId === undefined ? null : String(ticket.groupId),
       isNoise: ticket.isNoise === true,
+      // Parked (plans/PARKED_BUILD_PLAN.md)
+      isParked: Boolean(ticket.parkedUntil),
+      parkKind: ticket.parkKind || null,
+      parkedUntil: ticket.parkedUntil ? new Date(ticket.parkedUntil).toISOString() : null,
       origin: ticket.origin || 'freshservice',
       // Phase RL (RL-6): app | email | api | freshservice_sync | held_reply | agent_cc | forward
       createdVia: deriveCreatedVia(ticket, { source, createdVia }),
@@ -865,6 +869,13 @@ export async function emitTicketEvent(eventType, ticketId, {
   if (extra) eventContext.event.extra = extra;
   dispatchLifecycleWebhook(eventContext);
   maybeRefreshSentiment(eventContext);
+  // Parked: a requester reply wakes the ticket early (mailbox ingest, mirror
+  // pull-back and FreshService sync all arrive here).
+  if (eventType === 'ticket.reply_received' && ticket.parkedUntil) {
+    import('./ticketParkService.js')
+      .then(({ default: ticketParkService }) => ticketParkService.afterRequesterReply(ticket.id, ticket.workspaceId))
+      .catch((err) => logger.warn(`Park wake on requester reply skipped for ticket ${ticket.id}: ${err.message}`));
+  }
 
   try {
     return await notificationWorkflowEngine.executeForEvent(eventContext, {

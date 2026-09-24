@@ -1,6 +1,6 @@
 import {
   AlertCircle, Calendar, CalendarClock, CalendarDays, CalendarRange, CheckCircle2,
-  Inbox, MessageSquare, Ticket, Trash2, UserRound, VolumeX,
+  Inbox, MessageSquare, PauseCircle, Ticket, Trash2, UserRound, VolumeX,
 } from 'lucide-react';
 
 /**
@@ -32,6 +32,9 @@ export const QUEUE_CARD_REGISTRY = {
   unassigned: { label: 'Unassigned', Icon: UserRound, tile: 'bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300', num: 'text-foreground', countKey: 'unassigned' },
   deleted: { label: 'Deleted & spam', Icon: Trash2, tile: 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300', num: 'text-foreground', countKey: 'deleted' },
   noise: { label: 'Noise', Icon: VolumeX, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'noise' },
+  // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date —
+  // left out of Open / Overdue / Awaiting, counted here.
+  parked: { label: 'Parked', Icon: PauseCircle, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'parked' },
 };
 
 /** Registry order — drives the admin slot dropdowns. */

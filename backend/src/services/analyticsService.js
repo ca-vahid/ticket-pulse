@@ -983,7 +983,8 @@ export function buildCategoryIntelligence({
     const identity = categoryIdentity(ticket, workspaceId);
     const row = ensureRow(identity);
     row.open += 1;
-    if (ticket.dueBy && new Date(ticket.dueBy) < now) row.overdue += 1;
+    // Parked tickets wait on purpose — never overdue (plans/PARKED_BUILD_PLAN.md).
+    if (ticket.dueBy && !ticket.parkedUntil && new Date(ticket.dueBy) < now) row.overdue += 1;
     if (identity.reviewNeeded) row.reviewTicketIds.add(ticket.id);
   }
 
@@ -1015,7 +1016,8 @@ export function buildCategoryIntelligence({
       totalCreated,
       totalAssigned: assignedTickets.length,
       open: openTickets.length,
-      overdue: openTickets.filter((ticket) => ticket.dueBy && new Date(ticket.dueBy) < now).length,
+      overdue: openTickets.filter((ticket) => ticket.dueBy && !ticket.parkedUntil && new Date(ticket.dueBy) < now).length,
+      parked: openTickets.filter((ticket) => ticket.parkedUntil).length,
       reviewNeeded: rows.reduce((sum, row) => sum + (row.reviewNeeded || 0), 0),
       unmapped: rows.reduce((sum, row) => sum + (row.unmapped || 0), 0),
       automationRuns: rows.reduce((sum, row) => sum + (row.automationRuns || 0), 0),
@@ -1206,6 +1208,7 @@ async function _fetchOpenTicketsUncached(workspaceId, excludeNoise, categoryWher
       createdAt: true,
       firstAssignedAt: true,
       dueBy: true,
+      parkedUntil: true,
       frDueBy: true,
       ticketCategory: true,
       tpSkill: true,
@@ -1684,6 +1687,9 @@ export async function getTeamBalance(workspaceId, query = {}) {
       // chart labeled the combined number "Open", which misread badly for techs
       // with big pending queues (QA 07-27 #1: 59 pending + 15 open shown as 74 open).
       pendingNow: 0,
+      // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose — its own band,
+      // neither open work nor pending follow-up.
+      parkedNow: 0,
       rejected: 0,
       reassignedAway: 0,
       availableDays: rangeBusinessDays,
@@ -1777,7 +1783,8 @@ export async function getTeamBalance(workspaceId, query = {}) {
       const id = ticket.assignedTech?.id;
       if (!id || !byTech.has(id)) continue;
       const row = byTech.get(id);
-      if (teamOpenBaseSet.has(ticket.status)) row.openNow += 1;
+      if (ticket.parkedUntil) row.parkedNow += 1;
+      else if (teamOpenBaseSet.has(ticket.status)) row.openNow += 1;
       else row.pendingNow += 1; // Pending-base statuses and 'Waiting on Customer'
     }
     for (const episode of episodes) {
@@ -2311,8 +2318,33 @@ export async function getAutomationOps(workspaceId, query = {}) {
         })),
       },
       routingAccuracy,
+      // Parked (plans/PARKED_BUILD_PLAN.md): how parking is used in the range.
+      // "Parked 3+ times" is a coaching signal about a ticket, never a ranking.
+      parks: await parkStatsForRange(workspaceId, rangeInfo),
     };
   });
+}
+
+async function parkStatsForRange(workspaceId, rangeInfo) {
+  try {
+    const where = { workspaceId, parkedAt: { gte: rangeInfo.start, lte: rangeInfo.end } };
+    const [created, byEnd, repeat] = await Promise.all([
+      prisma.ticketPark.count({ where }),
+      prisma.ticketPark.groupBy({ by: ['endReason'], where: { workspaceId, endedAt: { gte: rangeInfo.start, lte: rangeInfo.end } }, _count: { _all: true } }),
+      prisma.ticketPark.groupBy({ by: ['ticketId'], where: { workspaceId }, _count: { _all: true }, having: { ticketId: { _count: { gte: 3 } } } }),
+    ]);
+    const ended = Object.fromEntries(byEnd.map((r) => [r.endReason || 'unknown', r._count._all]));
+    return {
+      created,
+      woke: ended.woke || 0,
+      extended: ended.extended || 0,
+      endedEarly: (ended.requester_replied || 0) + (ended.status_changed || 0) + (ended.unparked || 0),
+      closedWhileParked: ended.closed || 0,
+      parkedThreePlusTickets: repeat.length,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getInsights(workspaceId, query = {}) {

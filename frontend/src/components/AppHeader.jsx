@@ -607,7 +607,7 @@ export default function AppHeader({
       {
         id: 'notifications',
         label: 'Mail & alerts',
-        description: 'Notifications, my alerts & signature',
+        description: 'Notifications & my alerts',
         path: '/mail-alerts',
         Icon: Bell,
       },
@@ -655,7 +655,7 @@ export default function AppHeader({
             >
               <p className="truncate text-sm font-semibold text-foreground">{displayUserName}</p>
               <p className="truncate text-xs text-muted-foreground">{user?.email || user?.username || wsRole}</p>
-              <p className="mt-0.5 text-[11px] font-medium text-primary">Profile &amp; photo</p>
+              <p className="mt-0.5 text-[11px] font-medium text-primary">Profile, photo &amp; signature</p>
             </button>
 
             {menuItems.map(({ id, label, description, path, Icon }) => (

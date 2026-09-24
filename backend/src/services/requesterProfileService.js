@@ -255,7 +255,7 @@ export async function fetchEntraProfile(email) {
   return null;
 }
 
-async function refreshRequesterEntraProfile(requester) {
+export async function refreshRequesterEntraProfile(requester) {
   if (!requester?.id || !requester?.email || hasFreshEntraProfile(requester)) {
     return requester;
   }

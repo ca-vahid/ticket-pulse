@@ -112,3 +112,24 @@ describe('mirrorService._applyLatestChangeWins', () => {
     expect(client.fetchTicketActivities).not.toHaveBeenCalled();
   });
 });
+
+describe('mirrorService.reconcile — recently closed tickets rotate', () => {
+  test('each pass takes the NEXT slice, so every recently closed ticket is reached (TP-1597 was 15th of 23)', async () => {
+    jest.clearAllMocks();
+    mirrorService._recentClosedOffset = new Map();
+    jest.spyOn(mirrorService, '_getClient').mockResolvedValue({});
+    const seen = jest.spyOn(mirrorService, '_reconcileTicketAgainstFs').mockResolvedValue({ imported: 0, conflicts: 0 });
+    const closed = Array.from({ length: 23 }, (_, i) => ({ id: 1000 + i }));
+    prismaMock.ticket.findMany.mockImplementation(async ({ where, skip = 0, take }) => (
+      where.status?.in?.includes('Closed') ? closed.slice(skip, skip + take) : []
+    ));
+    const reached = new Set();
+    for (let pass = 0; pass < 3; pass++) {
+      seen.mockClear();
+      await mirrorService.reconcile(1, { activeOnly: true, limit: 30 });
+      for (const [t] of seen.mock.calls) reached.add(t.id);
+    }
+    expect(reached.size).toBe(23);
+    expect(mirrorService._recentClosedOffset.get(1)).toBe(0); // wrapped round after the short last slice
+  });
+});

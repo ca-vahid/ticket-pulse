@@ -2039,6 +2039,31 @@ async function executeNode({
     });
   }
 
+  if (node.type === 'park_ticket') {
+    // Parked (plans/PARKED_BUILD_PLAN.md): park for N days with a reason, or
+    // end the park. Observe-only / preview runs only report what they would do.
+    const ticketId = eventContext?.ticket?.id;
+    const workspaceId = eventContext?.ticket?.workspaceId ?? eventContext?.workspace?.id;
+    const mode = node.data?.mode === 'unpark' ? 'unpark' : 'park';
+    const days = Math.max(1, Math.min(184, Number(node.data?.days) || 7));
+    const reason = (await renderLiquid(node.data?.reasonTemplate || 'Parked by a workflow', scope)).trim();
+    const until = new Date(Date.now() + days * 86400e3);
+    if (dryRun === true || executionMode === 'mock' || executionMode === 'preview') {
+      return { skipped: true, reason: 'observe-only', would: mode === 'unpark' ? { unpark: true } : { park: { kind: node.data?.kind || 'until_date', until: until.toISOString(), reason } } };
+    }
+    if (!ticketId) return { skipped: true, reason: 'no ticket' };
+    const { default: ticketParkService } = await import('./ticketParkService.js');
+    const actor = { name: `Workflow: ${workflow?.name || workflow?.id || 'unknown'}`, role: 'workflow' };
+    if (mode === 'unpark') {
+      return ticketParkService.unpark(ticketId, workspaceId, { reason: 'unparked', reopen: true }, actor);
+    }
+    return ticketParkService.park(ticketId, workspaceId, {
+      kind: ['until_date', 'eta'].includes(node.data?.kind) ? node.data.kind : 'until_date',
+      until,
+      reason: reason || 'Parked by workflow',
+    }, actor, { source: 'workflow' });
+  }
+
   if (node.type === 'add_note') {
     // Run-level cap: a branching graph (or a copy-paste mistake) must not be
     // able to spray unlimited system notes onto one ticket in a single run.
@@ -4044,6 +4069,60 @@ export async function fieldsUpdatedGate(workflow, workflowContext) {
   return { parkMinutes: workflow.mockModeEnabled === true ? 0 : triggerOptions.coalesceMinutes, triggerOptions };
 }
 
+// QA 09-23 #8 — one e-mail per ticket change, not one per trigger.
+// A Power Apps resubmission reopens AND edits a ticket: 'ticket.reopened' and
+// 'ticket.fields_updated' fired two workflows and three e-mails (TP-1526).
+// A workflow flagged "stop other workflows for this ticket change" that has
+// run (or is running / parked) for the ticket within the window silences every
+// OTHER workflow of equal or lower priority (routingPriority, lower number =
+// first) for that ticket — checked when a workflow starts AND when a parked
+// run resumes. First to run wins among equals.
+export const STOP_FURTHER_WINDOW_MS = Number(process.env.WORKFLOW_STOP_FURTHER_WINDOW_MS || 5 * 60 * 1000);
+
+export async function findStoppingWorkflowRun(workflow, ticketId, { excludeRunId = null, now = new Date() } = {}) {
+  const tid = Number(ticketId);
+  if (!workflow?.id || !Number.isFinite(tid) || tid <= 0) return null;
+  try {
+    const row = await prisma.notificationWorkflowRun.findFirst({
+      where: {
+        ticketId: tid,
+        workflowId: { not: workflow.id },
+        executionMode: EXECUTION_MODE_LIVE,
+        status: { in: ['running', 'completed', 'waiting'] },
+        startedAt: { gte: new Date(now.getTime() - STOP_FURTHER_WINDOW_MS) },
+        ...(excludeRunId ? { id: { not: Number(excludeRunId) } } : {}),
+        workflow: { is: { stopFurtherWorkflows: true, routingPriority: { lte: Number(workflow.routingPriority ?? 100) } } },
+      },
+      orderBy: { startedAt: 'asc' },
+      select: { id: true, workflowId: true, workflow: { select: { name: true } } },
+    });
+    // Only a run of ANOTHER workflow can stop this one.
+    return row && Number.isFinite(Number(row.workflowId)) && Number(row.workflowId) !== Number(workflow.id) ? row : null;
+  } catch (error) {
+    logger.warn(`Stop-further lookup failed (running normally): ${error.message}`);
+    return null;
+  }
+}
+
+// Coalesce race (QA 09-23 #8, TP-1526): two fields_updated events 49 ms apart
+// both found no waiting run and parked two runs → two e-mails. One chain per
+// workflow+ticket serialises the gate and the park.
+const coalesceChains = new Map();
+async function withCoalesceLock(key, fn) {
+  const prev = coalesceChains.get(key) || Promise.resolve();
+  let release;
+  const next = new Promise((resolve) => { release = resolve; });
+  const chain = prev.then(() => next);
+  coalesceChains.set(key, chain);
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    release();
+    if (coalesceChains.get(key) === chain) coalesceChains.delete(key);
+  }
+}
+
 export async function executeForEvent(eventContext, options = {}) {
   let routedContext = await enrichEventContextWithNotificationPolicy(eventContext);
   routedContext = await enrichEventContextWithRequesterProfile(routedContext);
@@ -4080,27 +4159,35 @@ export async function executeForEvent(eventContext, options = {}) {
       },
       notificationRouting: routingResult,
     };
-    let parkMinutes = 0;
-    if (eventType === 'ticket.fields_updated') {
-      const gate = await fieldsUpdatedGate(workflow, workflowContext);
-      if (gate.skip) {
-        results.push({ status: 'skipped', reason: gate.reason, workflowId: workflow.id, ...(gate.runId ? { runId: gate.runId } : {}) });
-        continue;
-      }
-      if (gate.coalescedRunId) {
-        results.push({ status: 'coalesced', reason: gate.reason, workflowId: workflow.id, runId: gate.coalescedRunId });
-        continue;
-      }
-      parkMinutes = gate.parkMinutes;
-      workflowContext.event.triggerOptions = gate.triggerOptions;
+    // QA 09-23 #8: a higher-priority "stop other workflows" workflow already
+    // handled this ticket change.
+    const stopper = workflow.mockModeEnabled === true ? null : await findStoppingWorkflowRun(workflow, routedContext.ticket?.id);
+    if (stopper) {
+      const reason = `Stopped by "${stopper.workflow?.name || stopper.workflowId}" (stop other workflows for this ticket change)`;
+      results.push({ status: 'skipped', reason, workflowId: workflow.id, stoppedByRunId: stopper.id });
+      Promise.resolve(notificationWorkflowRepository.recordSuppressionDecisions?.([{ id: workflow.id, reason: 'stopped_by_higher_priority' }])).catch(() => {});
+      continue;
     }
     try {
-      results.push(await executeWorkflow(workflow, routedContext, {
-        eventContext: workflowContext,
-        routingResult,
-        triggerSource: options.triggerSource || routedContext.event?.source || null,
-        parkMinutes,
-      }));
+      const run = async () => {
+        let parkMinutes = 0;
+        if (eventType === 'ticket.fields_updated') {
+          const gate = await fieldsUpdatedGate(workflow, workflowContext);
+          if (gate.skip) return { status: 'skipped', reason: gate.reason, workflowId: workflow.id, ...(gate.runId ? { runId: gate.runId } : {}) };
+          if (gate.coalescedRunId) return { status: 'coalesced', reason: gate.reason, workflowId: workflow.id, runId: gate.coalescedRunId };
+          parkMinutes = gate.parkMinutes;
+          workflowContext.event.triggerOptions = gate.triggerOptions;
+        }
+        return executeWorkflow(workflow, routedContext, {
+          eventContext: workflowContext,
+          routingResult,
+          triggerSource: options.triggerSource || routedContext.event?.source || null,
+          parkMinutes,
+        });
+      };
+      results.push(eventType === 'ticket.fields_updated'
+        ? await withCoalesceLock(`${workflow.id}:${routedContext.ticket?.id ?? 'none'}`, run)
+        : await run());
     } catch (error) {
       logger.warn('Notification workflow execution failed', {
         workspaceId,
@@ -4191,6 +4278,26 @@ async function resumeRun(run) {
     eventContext = (await restoreRedactedEventContext(run.eventContext, hints)) || run.eventContext;
   } catch (error) {
     logger.warn('Workflow resume: context rehydrate failed, using the stored copy', { runId: run.id, error: error.message });
+  }
+
+  // QA 09-23 #8: a parked run (fields_updated waits out its coalesce window)
+  // is re-checked when it wakes — a stop-flagged workflow may have handled
+  // this ticket change meanwhile.
+  if (run.executionMode !== 'mock' && run.dryRun !== true) {
+    const stopper = await findStoppingWorkflowRun(workflow, run.ticketId, { excludeRunId: run.id });
+    if (stopper) {
+      await prisma.notificationWorkflowRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'skipped',
+          resumeAt: null,
+          resumeNodeId: null,
+          error: `Stopped by "${stopper.workflow?.name || stopper.workflowId}" (stop other workflows for this ticket change)`,
+          completedAt: new Date(),
+        },
+      });
+      return { status: 'skipped', stoppedByRunId: stopper.id };
+    }
   }
 
   // Back to running before continuing so a crashed resume is visible.

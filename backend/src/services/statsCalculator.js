@@ -26,6 +26,10 @@ const CANONICAL_STATUS_SETS = {
   terminal: new Set(['Resolved', 'Closed']),
 };
 const setsOf = (statusSets) => statusSets || CANONICAL_STATUS_SETS;
+// Parked tickets (plans/PARKED_BUILD_PLAN.md) wait on purpose: not open
+// work, not load. They are counted separately as parkedTicketCount.
+const isOpenWork = (sets, ticket) => sets.openLike.has(ticket.status) && !ticket.parkedUntil;
+const parkedCountOf = (sets, tickets) => (tickets || []).filter((t) => t.parkedUntil && sets.openLike.has(t.status)).length;
 
 /**
  * Calculate statistics for a single technician for a given date range
@@ -46,7 +50,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
   if (isViewingToday) {
     // All currently open tickets
     openTickets = tech.tickets.filter(ticket =>
-      sets.openLike.has(ticket.status),
+      isOpenWork(sets, ticket),
     );
   } else {
     // Historical approximation: tickets assigned before/on date that are still open
@@ -59,7 +63,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     });
 
     const stillOpen = ticketsAssignedBeforeOrOnDate.filter(ticket =>
-      sets.openLike.has(ticket.status),
+      isOpenWork(sets, ticket),
     );
 
     const assignedOnDateNowClosed = tech.tickets.filter(ticket => {
@@ -151,6 +155,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
 
   return {
     openTicketCount: openTickets.length,
+    parkedTicketCount: parkedCountOf(sets, tech.tickets),
     openOnlyCount,
     pendingCount,
     totalTicketsToday: ticketsToday.length,
@@ -181,7 +186,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
 
   // Current open tickets (snapshot, not time-bound)
   const openTickets = tech.tickets.filter(ticket =>
-    sets.openLike.has(ticket.status),
+    isOpenWork(sets, ticket),
   );
 
   const openOnlyCount = openTickets.filter(t => sets.open.has(t.status)).length;
@@ -321,6 +326,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
   return {
     // Current snapshot
     openTicketCount: openTickets.length,
+    parkedTicketCount: parkedCountOf(sets, tech.tickets),
     openOnlyCount,
     pendingCount,
 
@@ -369,7 +375,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
 
   // Current open tickets (snapshot, not time-bound)
   const openTickets = tech.tickets.filter(ticket =>
-    sets.openLike.has(ticket.status),
+    isOpenWork(sets, ticket),
   );
 
   const openOnlyCount = openTickets.filter(t => sets.open.has(t.status)).length;
@@ -494,6 +500,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
   return {
     // Current snapshot
     openTicketCount: openTickets.length,
+    parkedTicketCount: parkedCountOf(sets, tech.tickets),
     openOnlyCount,
     pendingCount,
 
@@ -646,7 +653,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
 
   // All currently open tickets (regardless of viewing mode)
   const openTickets = technician.tickets.filter(ticket =>
-    sets.openLike.has(ticket.status),
+    isOpenWork(sets, ticket),
   );
 
   // Tickets assigned on the selected date (use firstAssignedAt)

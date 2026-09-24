@@ -287,6 +287,10 @@ export const METRICS_GLOSSARY = {
     label: 'Routing accuracy',
     definition: 'Percentage of auto-assigned tickets still with the AI’s pick after 7 days. A ticket counts against accuracy when a human reassigned it away within 7 days of the AI’s decision.',
   },
+  parks: {
+    label: 'Parked',
+    definition: 'Tickets parked in this range — waiting on purpose until a date (a transfer, a return from leave, a colleague, an ETA). "Woke" = reached their date; "ended early" = the requester replied, someone changed the status, or it was unparked by hand. "Parked 3+ times" counts tickets whose date keeps moving — a coaching prompt to look at, never a ranking of people.',
+  },
   rebounds: {
     label: 'Rebounds',
     definition: 'Unique tickets that bounced back and re-entered the assignment pipeline at least once in this range. Multiple rebounds on the same ticket count once — the same definition Assignment Review uses.',

@@ -28,9 +28,10 @@ describe('Notifications page', () => {
     // Dedicated "Notifications" heading, not "My Competencies" (QA 07-21 #3).
     expect(screen.getAllByText('Mail & alerts').length).toBeGreaterThan(0);
     expect(screen.queryByText('My Competencies')).not.toBeInTheDocument();
-    // All three sections stacked on one page (QA 07-21 #4, #5 + Phase D).
+    // Notifications + alerts on one page (QA 07-21 #4, #5). The signature
+    // moved to the Profile page (QA 09-23 #5).
     expect(screen.getByText('Delivery preferences panel')).toBeInTheDocument();
     expect(screen.getByText('My alerts panel')).toBeInTheDocument();
-    expect(screen.getByText('My signature panel')).toBeInTheDocument();
+    expect(screen.queryByText('My signature panel')).not.toBeInTheDocument();
   });
 });

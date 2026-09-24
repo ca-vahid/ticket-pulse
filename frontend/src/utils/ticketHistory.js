@@ -128,6 +128,15 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'task', verb: 'updated a task', detail: d.note || null });
     } else if (t === 'resubmitted') {
       item = baseItem({ event: 'field', verb: 'resubmitted the record', detail: d.note || null });
+    } else if (t === 'ticket_parked' || t === 'ticket_park_extended') {
+      // Parked (plans/PARKED_BUILD_PLAN.md)
+      const until = d.until ? fmtDay(d.until) : null;
+      item = baseItem({ event: 'status', verb: t === 'ticket_parked' ? `parked this until ${until || 'a date'}` : `moved the park to ${until || 'a new date'}`, detail: [d.kindLabel, d.reason].filter(Boolean).join(' · ') || null });
+    } else if (t === 'ticket_unparked') {
+      const why = { requester_replied: 'the requester replied', status_changed: 'the status changed', closed: 'it was closed', unparked: null }[d.reason];
+      item = baseItem({ event: 'status', verb: 'ended the park', detail: why || d.note || null });
+    } else if (t === 'ticket_woke') {
+      item = baseItem({ event: 'status', verb: 'woke — the park date came', detail: d.reason || null, machine: true });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

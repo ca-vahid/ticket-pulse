@@ -416,6 +416,15 @@ async function initialize() {
       logger.warn('Scheduled-ticket worker failed to start (non-fatal):', e.message);
     }
 
+    // Parked tickets: wakes due parks, ends parks whose ticket moved off
+    // Pending, announces parks due within a day (plans/PARKED_BUILD_PLAN.md).
+    try {
+      const { default: ticketParkService } = await import('./services/ticketParkService.js');
+      ticketParkService.start();
+    } catch (e) {
+      logger.warn('Park sweep failed to start (non-fatal):', e.message);
+    }
+
     // Time-based workflow triggers: ticket.aging / sla_pre_breach / sla_breach.
     try {
       const { default: notificationTimeTriggerService } = await import('./services/notificationTimeTriggerService.js');

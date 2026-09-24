@@ -794,6 +794,8 @@ export const ticketsAPI = {
 
   // Admin-chosen quick filter cards (Phase FC) — reads ride meta.queueCards.
   updateQueueCards: (cards) => api.put('/tickets/queue-cards', { cards }),
+  // QA 09-23 #4: default status filter for the list ([] = every status).
+  updateDefaultStatuses: (statuses) => api.put('/tickets/default-statuses', { statuses }),
 
   // Saved filter views (per-user, workspace-scoped)
   listSavedViews: () => api.get('/tickets/saved-views'),
@@ -1026,6 +1028,14 @@ export const ticketsAPI = {
   related: async (id) => {
     return await api.get(`/tickets/${id}/related`);
   },
+
+  // Parked (plans/PARKED_BUILD_PLAN.md)
+  getPark: async (id) => api.get(`/tickets/${id}/park`),
+  park: async (id, data) => api.post(`/tickets/${id}/park`, data),
+  unpark: async (id) => api.delete(`/tickets/${id}/park`),
+  parkSuggestion: async (id) => api.get(`/tickets/${id}/park-suggestion`),
+  bulkPark: async (ids, data) => api.post('/tickets/bulk-park', { ids, ...data }),
+  bulkUnpark: async (ids) => api.post('/tickets/bulk-park', { ids, unpark: true }),
 
   // Verified solutions (QA 09-22 #6)
   setSolution: async (id, { verified = true, note = null } = {}) => {
