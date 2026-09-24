@@ -36,10 +36,12 @@
 | Tag | `monitoring-alert` (id 18) | `monitoring-alert` (id 19) |
 | Requester | `sentinel@bgcengineering.ca` ("Microsoft Sentinel"). It is unattended, so Ticket Pulse never e-mails it | same |
 | Arrival channel shown in the queue | **Monitoring Alert** (source 106), set automatically | same |
-| IP allowlist | none | **none yet.** Please send the Logic Apps outbound IP ranges for West US and we will lock the production client to them |
+| IP allowlist | none | **none, and optional.** See the note below |
 | API reference | `GET /api/v1/openapi.json` (OpenAPI 3) and `GET /api/v1/docs` | same |
 
 **How the secrets reach you.** The two client secrets were generated once and are held by the Ticket Pulse team. Contact Vahid, and we'll add them to your Key Vault through the temporary write access you offered. Nothing goes by e-mail or Teams. Each secret can be rotated at any time from Ticket Pulse's Settings → API keys & webhooks, and the old one stops working immediately. There's no automatic expiry, so we suggest rotating yearly and after any staff change.
+
+**The IP allowlist is optional.** The credential is protected by its secret, which lives in your Key Vault and can be rotated at any time. It only works in the IT workspace, and it can't merge, split or re-link tickets it didn't create. Locking it to your Logic Apps' outbound IP addresses would add a second layer, in case the secret ever leaked. The trade-off is upkeep: if the addresses change (a Microsoft range update, or moving the Logic App to another plan or region), calls fail with `403 ip_not_allowed` until the list is updated. We're going live without it. If you want it later, send the addresses from the Logic App's **Properties → Outbound IP addresses** and we'll add them.
 
 **The `sentinel` tag is not yours.** A tag with that name already exists, and Simorgh uses it for security tickets. Your tickets use `monitoring-alert` so the two stay apart.
 
@@ -155,7 +157,7 @@ on ticket.status_changed with data.ticket.status Resolved/Closed (only monitorin
 |---|---|
 | Q1 | Yes. REST, `/api/v1`, OpenAPI 3 at `GET /api/v1/openapi.json`, readable docs at `GET /api/v1/docs`. |
 | Q2 | Both use `https://ticket-pulse-app.azurewebsites.net/api/v1`. Sandbox and production differ by **credential**: each client is bound to its workspace. |
-| Q3 | Yes, it's on the public internet with TLS 1.2+ and a public CA certificate. Send us the Logic Apps outbound ranges and we'll add an IP allowlist to the production client. |
+| Q3 | Yes, it's on the public internet with TLS 1.2+ and a public CA certificate. No allow-list is needed. It's available if you want one later (section 2). |
 | Q4 | Not yet. For now, OAuth 2.0 client credentials (section 2). Entra managed identity is planned for later. |
 | Q5 | `POST /api/v1/alert-occurrences` (section 3). For creating an ordinary ticket, `POST /api/v1/tickets` is also available. |
 | Q6 | Yes. The fingerprint is the ticket's `externalRef`. Look it up with `GET /tickets?externalRef=<fingerprint>`, which returns `status`, `resolvedAt`, `closedAt`, `occurrenceCount` and `lastOccurrenceAt`. With the single call you rarely need to. |
@@ -215,7 +217,7 @@ For availability alerts we suggest **TruePositive** as the default: the alert wa
 ## 9. Before go-live, from your side
 
 1. **E-mail overlap.** While e-mail notifications stay on as a fallback, check whether those e-mails reach the IT helpdesk mailbox. If they do, Ticket Pulse turns them into tickets too, and you'd get two tickets per alert. Either stop the e-mail for each detection as it moves to the API, or tell us the sender address and we'll make Ticket Pulse ignore it for those alerts.
-2. **Allowlist.** Send the Logic Apps outbound IP ranges for West US, and we'll lock the production client.
+2. **Allowlist (optional).** Not needed for go-live. Send the outbound addresses only if you want the production client locked to them.
 3. **Callback URL.** Send it if you want R11. We create the webhook subscription and hand over its signing secret.
 4. **Dry run first**, as you planned, then run your acceptance list against the **sandbox** credential.
 
