@@ -39,7 +39,23 @@
 | IP allowlist | none | **none, and optional.** See the note below |
 | API reference | `GET /api/v1/openapi.json` (OpenAPI 3) and `GET /api/v1/docs` | same |
 
-**How the secrets reach you.** The two client secrets were generated once and are held by the Ticket Pulse team. Contact Vahid, and we'll add them to your Key Vault through the temporary write access you offered. Nothing goes by e-mail or Teams. Each secret can be rotated at any time from Ticket Pulse's Settings → API keys & webhooks, and the old one stops working immediately. There's no automatic expiry, so we suggest rotating yearly and after any staff change.
+**Where the secrets are: your Key Vault.** You hadn't set up a vault yet, so we created one for you, next to your Sentinel resources:
+
+| | |
+|---|---|
+| Vault | **`kv-ticketpulse-sentinel`** (`https://kv-ticketpulse-sentinel.vault.azure.net/`) |
+| Subscription / resource group / region | IT Services / `bgc-sentinel` / West US, the same as your Sentinel workspace and Logic Apps |
+| Access model | Azure role-based access (RBAC); soft delete on, 90-day retention |
+| Secrets | `TicketPulse-Sandbox-ClientId`, `TicketPulse-Sandbox-ClientSecret`, `TicketPulse-Prod-ClientId`, `TicketPulse-Prod-ClientSecret` |
+| Who has access | **adm_MAbbaspour**: Key Vault Administrator (the vault is yours to manage). **adm_VHaeri**: Key Vault Secrets Officer (used to load the secrets; remove it whenever you like) |
+| Verified | 24 Sep 2026: both stored pairs obtain a token from Ticket Pulse |
+
+**To let the Logic Apps read the vault:**
+1. Turn on the system-assigned managed identity on each Logic App (Identity → System assigned → On).
+2. Give each identity the **Key Vault Secrets User** role on `kv-ticketpulse-sentinel`. This needs Owner or User Access Administrator on the vault or resource group. If you'd rather, tell Vahid the Logic App names and we'll assign it.
+3. In the playbook, read the two secrets with the Azure Key Vault connector (managed identity), or an HTTP GET with managed-identity auth to `https://kv-ticketpulse-sentinel.vault.azure.net/secrets/<name>?api-version=7.4`. Then call our token endpoint. Mark those actions' inputs and outputs **secure**, so the values never show in run history.
+
+Nothing was sent by e-mail or Teams, and this document contains no secret values. To rotate, create a new secret in Ticket Pulse's Settings → API keys & webhooks (the old one stops working immediately) and update the vault. There's no automatic expiry; we suggest rotating yearly and after any staff change.
 
 **The IP allowlist is optional.** The credential is protected by its secret, which lives in your Key Vault and can be rotated at any time. It only works in the IT workspace, and it can't merge, split or re-link tickets it didn't create. Locking it to your Logic Apps' outbound IP addresses would add a second layer, in case the secret ever leaked. The trade-off is upkeep: if the addresses change (a Microsoft range update, or moving the Logic App to another plan or region), calls fail with `403 ip_not_allowed` until the list is updated. We're going live without it. If you want it later, send the addresses from the Logic App's **Properties → Outbound IP addresses** and we'll add them.
 
@@ -174,7 +190,7 @@ on ticket.status_changed with data.ticket.status Resolved/Closed (only monitorin
 | Q17 | Yes. Standard Webhooks signing (an HMAC-SHA256 `webhook-signature` over `id.timestamp.body` with a `whsec_` secret), with retries and backoff. We suggest the `ticket.status_changed` event, which covers resolved, closed and reopened, limited to `monitoring-alert` tickets. Send us the Logic App HTTPS URL and we create the subscription and hand over the signing secret the same way as the client secrets. The payload carries the ticket id, `externalRef` (your fingerprint), status, priority and `actor`. For the reference list, call `GET /tickets/{id}/references`. |
 | Q18 | Tickets have an optional `resolutionReason`. Section 7 has the mapping to Sentinel's four classifications. |
 | Q19 | Yes. Agents are keyed by their BGC e-mail (UPN). `GET /agents` lists them, and `PATCH /tickets/{id} { "assignedTechEmail": "…" }` assigns one. |
-| Q20 | No automatic expiry. Rotate on demand in Settings. We suggest yearly and after any staff change. |
+| Q20 | No automatic expiry. Rotate on demand in Settings. We suggest yearly and after any staff change. The secrets are already in your new Key Vault, `kv-ticketpulse-sentinel` (section 2). |
 | Q21 | Built into the ticket model: fingerprint, occurrences and references. No separate table is needed on your side. |
 | Q22 | Vahid Haeri (Ticket Pulse). |
 | Q23 | Nothing on the Must list is missing. Everything is live in 3.9.79. |
@@ -219,7 +235,8 @@ For availability alerts we suggest **TruePositive** as the default: the alert wa
 1. **E-mail overlap.** While e-mail notifications stay on as a fallback, check whether those e-mails reach the IT helpdesk mailbox. If they do, Ticket Pulse turns them into tickets too, and you'd get two tickets per alert. Either stop the e-mail for each detection as it moves to the API, or tell us the sender address and we'll make Ticket Pulse ignore it for those alerts.
 2. **Allowlist (optional).** Not needed for go-live. Send the outbound addresses only if you want the production client locked to them.
 3. **Callback URL.** Send it if you want R11. We create the webhook subscription and hand over its signing secret.
-4. **Dry run first**, as you planned, then run your acceptance list against the **sandbox** credential.
+4. **Key Vault access for the Logic Apps**: managed identity plus Key Vault Secrets User on `kv-ticketpulse-sentinel` (section 2).
+5. **Dry run first**, as you planned, then run your acceptance list against the **sandbox** credential.
 
 ## 10. Later, not now
 
