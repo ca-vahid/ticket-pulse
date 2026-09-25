@@ -33,7 +33,11 @@ const DEBOUNCE_MS = 90 * 1000;
 const TICK_MS = 30 * 1000;
 const PULLS_PER_TICK = 5;
 const PULLS_PER_TICK_QUIET = 10; // 20:00–05:59 PT and weekends: the budget is free
-const BUSY_QUEUE_DEPTH = 30;
+const BUSY_QUEUE_DEPTH = 30; // above this: a trickle of one ticket a tick
+const HARD_BUSY_QUEUE_DEPTH = 150; // above this: stand down completely
+// 25 Sep 2026: "stand down at 30" stalled the backfill for hours — the regular
+// background work keeps 30–100 low-priority requests queued most of the time,
+// and pulls wait their turn in that queue anyway. A trickle keeps it moving.
 const MAX_QUEUE = 20000;
 const MAX_ATTEMPTS = 6;
 const SWEEP_EVERY_TICKS = 2; // one sweep step a minute
@@ -74,7 +78,8 @@ class FsThreadPullService {
     this.timer = null;
     this.running = false;
     this.ticks = 0;
-    this.stats = { pulled: 0, entries: 0, requeued: 0, dropped: 0, deferred: 0, sweepQueued: 0 };
+    this.stats = { pulled: 0, entries: 0, requeued: 0, dropped: 0, deferred: 0, trickled: 0, sweepQueued: 0 };
+    this.lastStatusLogAt = 0;
     this.lastGapLogAt = Date.now() - 5.5 * 60 * 60 * 1000; // first gap line ~30 min after boot, not during the boot rush
   }
 
@@ -138,14 +143,17 @@ class FsThreadPullService {
     try {
       this.ticks += 1;
       const depth = await this._queueDepth(1);
-      if (depth >= BUSY_QUEUE_DEPTH) {
+      this._logStatus(now, depth);
+      if (depth >= HARD_BUSY_QUEUE_DEPTH) {
         this.stats.deferred += 1;
         return;
       }
+      const perTick = depth >= BUSY_QUEUE_DEPTH ? 1 : (isQuietHours(new Date(now)) ? PULLS_PER_TICK_QUIET : PULLS_PER_TICK);
+      if (depth >= BUSY_QUEUE_DEPTH) this.stats.trickled += 1;
       const due = [...this.queue.entries()]
         .filter(([, v]) => v.dueAt <= now)
         .sort((a, b) => a[1].dueAt - b[1].dueAt)
-        .slice(0, isQuietHours(new Date(now)) ? PULLS_PER_TICK_QUIET : PULLS_PER_TICK);
+        .slice(0, perTick);
       for (const [ticketId, item] of due) {
         this.queue.delete(ticketId);
         try {
@@ -177,6 +185,14 @@ class FsThreadPullService {
     } finally {
       this.running = false;
     }
+  }
+
+  /** One status line an hour, so the hourly review can see the worker move. */
+  _logStatus(now, depth) {
+    if (now - this.lastStatusLogAt < 60 * 60 * 1000) return;
+    this.lastStatusLogAt = now;
+    const s = this.stats;
+    logger.info(`FS thread pull: pulled ${s.pulled} (${s.entries} entries), queued ${this.queue.size}, requeued ${s.requeued}, dropped ${s.dropped}, trickle ticks ${s.trickled}, stood down ${s.deferred}, FS queue ${depth}`);
   }
 
   /** Pull one FS-born ticket's whole conversation (no 60-entry cap) and store it. */

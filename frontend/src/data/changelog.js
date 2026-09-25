@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.85-preview';
+export const APP_VERSION = '3.9.86-preview';
 
 export const changelog = [
+  {
+    version: '3.9.86-preview',
+    date: 'September 25, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The notes backfill keeps moving</strong> &mdash; the background pass that fills in notes and replies from FreshService stopped whenever FreshService had more than a few requests waiting, which was most of the time, so it stalled for hours. It now carries on one ticket at a time when FreshService is busy and only pauses when it is very busy.' },
+    ],
+  },
   {
     version: '3.9.85-preview',
     date: 'September 25, 2026',
