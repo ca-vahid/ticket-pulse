@@ -3692,6 +3692,11 @@ class SyncService {
       const filters = {
         updated_since: fetchStart.toISOString(),
         include: 'requester,stats',
+        // Oldest-first, stopping past the window: a window in 2023 no longer
+        // lists every ticket touched since (≈45k in IT) just to keep a month.
+        order_by: 'updated_at',
+        order_type: 'asc',
+        stopWhen: (t) => t?.updated_at && new Date(t.updated_at) > fetchEnd,
       };
       if (wsConfig.workspaceId) {
         filters.workspace_id = wsConfig.workspaceId;
@@ -3722,6 +3727,11 @@ class SyncService {
 
       if (totalTickets === 0) {
         this.runningWorkspaces.delete(backfillKey);
+        // Close the run row too — it used to stay 'running' for ever.
+        await prisma.backfillRun.update({
+          where: { id: runId },
+          data: { status: 'completed', progressPct: 100, progressStep: 'No tickets in range', ticketsTotal: 0, ticketsProcessed: 0, completedAt: new Date() },
+        }).catch(() => {});
         return { status: 'completed', ticketsFetched: 0, ticketsSynced: 0, activitiesAnalyzed: 0, skipped: 0, elapsed: `${((Date.now() - startTime) / 1000).toFixed(0)}s` };
       }
 

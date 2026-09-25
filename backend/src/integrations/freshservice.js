@@ -310,7 +310,7 @@ class FreshServiceClient {
    * Fetch all pages of a paginated API endpoint.
    * Rate limiting is handled centrally by `this.limiter` via `_get()`.
    */
-  async fetchAllPages(endpoint, params = {}, onProgress = null) {
+  async fetchAllPages(endpoint, params = {}, onProgress = null, { stopWhen = null } = {}) {
     const allResults = [];
     let page = 1;
     let hasMore = true;
@@ -336,6 +336,8 @@ class FreshServiceClient {
           }
 
           if (results.length < 100) hasMore = false;
+          // Ordered walks stop once the page has passed the caller's window.
+          if (hasMore && typeof stopWhen === 'function' && stopWhen(results[results.length - 1])) hasMore = false;
         } else {
           hasMore = false;
         }
@@ -433,7 +435,12 @@ class FreshServiceClient {
         params.include = filters.include;
       }
 
-      const tickets = await this.fetchAllPages('/tickets', params, onProgress);
+      // History backfill (24 Sep 2026): walk oldest-first and stop at the end
+      // of the window instead of listing everything updated since its start.
+      if (filters.order_by) params.order_by = filters.order_by;
+      if (filters.order_type) params.order_type = filters.order_type;
+
+      const tickets = await this.fetchAllPages('/tickets', params, onProgress, { stopWhen: filters.stopWhen || null });
       logger.info(`Fetched ${tickets.length} tickets`);
       return tickets;
     } catch (error) {

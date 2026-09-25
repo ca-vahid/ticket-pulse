@@ -425,6 +425,14 @@ async function initialize() {
       logger.warn('FS thread pull worker failed to start (non-fatal):', e.message);
     }
 
+    // IT history backfill to Sep 2023, one month a run in quiet hours (24 Sep 2026).
+    try {
+      const { default: historyBackfillService } = await import('./services/historyBackfillService.js');
+      historyBackfillService.start();
+    } catch (e) {
+      logger.warn('History backfill driver failed to start (non-fatal):', e.message);
+    }
+
     // Parked tickets: wakes due parks, ends parks whose ticket moved off
     // Pending, announces parks due within a day (plans/PARKED_BUILD_PLAN.md).
     try {

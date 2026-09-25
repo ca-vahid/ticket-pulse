@@ -1080,11 +1080,11 @@ describe('ticketService.listTickets sorting', () => {
   test('sort=status asc assembles the page Open-first (lifecycle rank, not alphabetical)', async () => {
     // Alphabetically Closed < Open < Pending — the ranked page must still
     // start with Open even though groupBy returns Closed first.
-    prismaMock.ticket.groupBy.mockResolvedValue([
+    prismaMock.ticket.groupBy.mockResolvedValueOnce([
       { status: 'Closed', _count: { _all: 2 } },
       { status: 'Open', _count: { _all: 1 } },
       { status: 'Pending', _count: { _all: 30 } },
-    ]);
+    ]).mockResolvedValueOnce([]); // nothing parked
 
     const result = await ticketService.listTickets(1, { sort: 'status', dir: 'asc', pageSize: 25 });
 
@@ -1105,11 +1105,11 @@ describe('ticketService.listTickets sorting', () => {
   });
 
   test('sort=status desc page 2 continues the reversed rank exactly where page 1 ended', async () => {
-    prismaMock.ticket.groupBy.mockResolvedValue([
+    prismaMock.ticket.groupBy.mockResolvedValueOnce([
       { status: 'Closed', _count: { _all: 2 } },
       { status: 'Open', _count: { _all: 1 } },
       { status: 'Pending', _count: { _all: 30 } },
-    ]);
+    ]).mockResolvedValueOnce([]); // nothing parked
 
     // desc rank: Closed(2), Pending(30), Open(1); page 2 skips the first 25.
     const result = await ticketService.listTickets(1, { sort: 'status', dir: 'desc', page: 2, pageSize: 25 });
@@ -1127,6 +1127,30 @@ describe('ticketService.listTickets sorting', () => {
       skip: 0,
       take: 1,
     }));
+  });
+});
+
+describe('ticketService.listTickets sort=status — parked after Pending (QA 09-24 #1)', () => {
+  beforeEach(() => { jest.clearAllMocks(); prismaMock.ticket.findMany.mockResolvedValue([]); });
+
+  test('parked Pending tickets form their own bucket after the Pending statuses, before Resolved', async () => {
+    prismaMock.ticket.groupBy.mockResolvedValueOnce([
+      { status: 'Open', _count: { _all: 2 } },
+      { status: 'Pending', _count: { _all: 5 } },
+      { status: 'Resolved', _count: { _all: 4 } },
+    ]).mockResolvedValueOnce([{ status: 'Pending', _count: { _all: 3 } }]);
+
+    const result = await ticketService.listTickets(1, { sort: 'status', dir: 'asc', pageSize: 25 });
+
+    expect(result.total).toBe(11);
+    const calls = prismaMock.ticket.findMany.mock.calls.map(([args]) => args);
+    expect(calls.map((c) => c.where.AND.slice(1))).toEqual([
+      [{ status: 'Open' }],
+      [{ status: 'Pending' }, { parkedUntil: null }],
+      [{ status: 'Pending' }, { parkedUntil: { not: null } }],
+      [{ status: 'Resolved' }],
+    ]);
+    expect(calls.map((c) => c.take)).toEqual([2, 2, 3, 4]);
   });
 });
 
@@ -1621,7 +1645,7 @@ describe('ticketService sort=status with custom statuses (Phase 8c)', () => {
   afterAll(() => invalidateStatusCache());
 
   test('customs bucket into their base stage; unknown legacy labels trail their heuristic base; Deleted sorts last', async () => {
-    prismaMock.ticket.groupBy.mockResolvedValue([
+    prismaMock.ticket.groupBy.mockResolvedValueOnce([
       { status: 'Deleted', _count: { _all: 1 } },
       { status: 'Fixed', _count: { _all: 1 } },
       { status: 'Closed', _count: { _all: 1 } },
@@ -1630,7 +1654,7 @@ describe('ticketService sort=status with custom statuses (Phase 8c)', () => {
       { status: 'Open', _count: { _all: 1 } },
       { status: 'Pending', _count: { _all: 1 } },
       { status: 'Resolved', _count: { _all: 1 } },
-    ]);
+    ]).mockResolvedValueOnce([]); // nothing parked
 
     await ticketService.listTickets(1, { sort: 'status', dir: 'asc', pageSize: 25 });
 

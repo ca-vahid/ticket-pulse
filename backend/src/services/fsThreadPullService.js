@@ -4,6 +4,7 @@ import settingsRepository from './settingsRepository.js';
 import mirrorService from './mirrorService.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
+import { isQuietHours } from '../utils/quietHours.js';
 
 /**
  * FreshService notes and replies on FS-born tickets (plans/FS_THREAD_SYNC_GAP_REPORT.md,
@@ -31,6 +32,7 @@ export const NOTE_ACTIVITY_RE = /(added a (?:private |public )?note|replied|forw
 const DEBOUNCE_MS = 90 * 1000;
 const TICK_MS = 30 * 1000;
 const PULLS_PER_TICK = 5;
+const PULLS_PER_TICK_QUIET = 10; // 20:00–05:59 PT and weekends: the budget is free
 const BUSY_QUEUE_DEPTH = 30;
 const MAX_QUEUE = 20000;
 const MAX_ATTEMPTS = 6;
@@ -143,7 +145,7 @@ class FsThreadPullService {
       const due = [...this.queue.entries()]
         .filter(([, v]) => v.dueAt <= now)
         .sort((a, b) => a[1].dueAt - b[1].dueAt)
-        .slice(0, PULLS_PER_TICK);
+        .slice(0, isQuietHours(new Date(now)) ? PULLS_PER_TICK_QUIET : PULLS_PER_TICK);
       for (const [ticketId, item] of due) {
         this.queue.delete(ticketId);
         try {
