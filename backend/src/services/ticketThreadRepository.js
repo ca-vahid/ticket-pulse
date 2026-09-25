@@ -279,6 +279,20 @@ class TicketThreadRepository {
       logger.warn('reply_received evaluation failed for FS thread batch (non-fatal)', { error: error.message });
     }
 
+    // FS thread gap (24 Sep 2026): the activity feed says "X added a private
+    // note" within a minute, the conversation itself used to wait for someone
+    // to open the ticket. A NEW note/reply/forward line queues a pull.
+    try {
+      const fresh = entries.filter((e) => e.source === 'freshservice_activity'
+        && !(e.externalEntryId && existingKeys.has(`${e.ticketId}:${e.externalEntryId}`)));
+      if (fresh.length) {
+        const { default: fsThreadPullService } = await import('./fsThreadPullService.js');
+        fsThreadPullService.noteActivityArrived(fresh);
+      }
+    } catch (error) {
+      logger.warn('FS thread pull hand-off failed (non-fatal)', { error: error.message });
+    }
+
     // GREATEST keeps re-syncs of old history from moving the timestamp back.
     for (const [ticketId, at] of latestRealByTicket) {
       try {

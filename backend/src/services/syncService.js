@@ -1802,6 +1802,14 @@ class SyncService {
       }
     }
 
+    // FS thread gap (24 Sep 2026): the fast sync records the close itself, so
+    // the reconcile's resolution hook never saw a first resolve. Queue the
+    // conversation pull here, on the transition, for every sync path.
+    const closedNow = Boolean(existingTicket)
+      && !statusHeldForWriteback
+      && ['Resolved', 'Closed'].includes(ticket.status)
+      && !['Resolved', 'Closed', 'Deleted', 'Spam'].includes(existingTicket.status);
+
     let upsertedTicket = await ticketRepository.upsert({
       ...ticket,
       workspaceId: ticketWorkspaceId,
@@ -1823,6 +1831,12 @@ class SyncService {
       firstAssignedAt,
       rejectionCount,
     });
+
+    if (closedNow && upsertedTicket?.id && (upsertedTicket.origin || 'freshservice') === 'freshservice') {
+      import('./fsThreadPullService.js')
+        .then((m) => m.default.enqueue(upsertedTicket.id, ticketWorkspaceId, 'resolved', { delayMs: 30 * 1000 }))
+        .catch((err) => logger.warn(`resolution thread pull not queued for ticket ${upsertedTicket.id}: ${err.message}`));
+    }
 
     if (options.allowNotificationWorkflows === true) {
       upsertedTicket = await this._ensureRequesterLinkedForNotification(
@@ -4438,9 +4452,11 @@ class SyncService {
             // FS-side closers look "silent" in every thread-based measurement.
             // Fire-and-forget on the low-priority lane; dynamic import avoids
             // a sync↔ticket service cycle.
-            import('./ticketService.js')
-              .then((m) => m.default.hydrateThreadOnResolution(ticket.id))
-              .catch((err) => logger.debug(`resolution thread hydration skipped for ticket ${ticket.id}: ${err.message}`));
+            // 24 Sep 2026: through the thread-pull queue (no 60-entry cap,
+            // re-queued on a busy FreshService queue instead of a silent debug).
+            import('./fsThreadPullService.js')
+              .then((m) => m.default.enqueue(ticket.id, workspaceId, 'resolved', { delayMs: 30 * 1000 }))
+              .catch((err) => logger.warn(`resolution thread pull not queued for ticket ${ticket.id}: ${err.message}`));
           }
           if (fsStatusName === 'Closed' && !current.closedAt) {
             patch.closedAt = fsTicket.stats?.closed_at ? new Date(fsTicket.stats.closed_at) : now;
