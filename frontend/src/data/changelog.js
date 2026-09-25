@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.82-preview';
+export const APP_VERSION = '3.9.83-preview';
 
 export const changelog = [
+  {
+    version: '3.9.83-preview',
+    date: 'September 24, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Notes and replies written in FreshService now reach Ticket Pulse on their own</strong> &mdash; for tickets born in FreshService, Ticket Pulse used to store the line &ldquo;X added a private note&rdquo; but often not the note itself, unless someone opened the ticket here. About 11,000 tickets were affected, which made every note-based number (closing notes, &ldquo;no update in 30 days&rdquo;, awaiting-reply clocks) undercount real work. Now a new note, reply or forward in FreshService is fetched within a few minutes, a ticket closed in FreshService has its whole conversation read, and a background pass is filling in the history at a gentle pace (IT\'s last 90 days first).' },
+    ],
+  },
   {
     version: '3.9.82-preview',
     date: 'September 24, 2026',

@@ -84,6 +84,23 @@ router.get(
 );
 
 /**
+ * GET /api/sync/fs-thread-gap?days=90
+ * FS-born notes gap per workspace (tickets whose activity feed shows more
+ * notes/replies than stored conversation rows) + the pull worker's queue,
+ * counters and backfill position (plans/FS_THREAD_SYNC_GAP_REPORT.md).
+ */
+router.get(
+  '/fs-thread-gap',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: fsThreadPullService } = await import('../services/fsThreadPullService.js');
+    const days = req.query.days === 'all' ? null : Math.min(3650, Math.max(1, Number(req.query.days) || 90));
+    const [gap, status] = await Promise.all([fsThreadPullService.gapReport({ days }), fsThreadPullService.status()]);
+    res.json({ success: true, data: { days, gap, ...status } });
+  }),
+);
+
+/**
  * GET /api/sync/logs
  * Get sync logs with pagination, filtering, and total count
  * Query params:

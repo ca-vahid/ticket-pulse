@@ -416,6 +416,15 @@ async function initialize() {
       logger.warn('Scheduled-ticket worker failed to start (non-fatal):', e.message);
     }
 
+    // FS-born notes and replies: pull on change / on close + the gap sweep
+    // (plans/FS_THREAD_SYNC_GAP_REPORT.md, 24 Sep 2026).
+    try {
+      const { default: fsThreadPullService } = await import('./services/fsThreadPullService.js');
+      fsThreadPullService.start();
+    } catch (e) {
+      logger.warn('FS thread pull worker failed to start (non-fatal):', e.message);
+    }
+
     // Parked tickets: wakes due parks, ends parks whose ticket moved off
     // Pending, announces parks due within a day (plans/PARKED_BUILD_PLAN.md).
     try {

@@ -1391,6 +1391,8 @@ model Ticket {
   // closed only, so a FreshService-side note on an otherwise-unchanged ticket —
   // a merge note on the merge TARGET, most visibly — was never read.
   conversationsSyncFreshserviceUpdatedAt DateTime? @map("conversations_sync_freshservice_updated_at")
+  // FS-born notes gap (24 Sep 2026): last full conversation read by fsThreadPullService.
+  fsThreadPulledAt          DateTime? @map("fs_thread_pulled_at")
   activitiesSyncError                 String?   @map("activities_sync_error") @db.Text
   activitiesSyncErrorAt               DateTime? @map("activities_sync_error_at")
 
