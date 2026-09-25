@@ -101,6 +101,19 @@ router.get(
 );
 
 /**
+ * GET /api/sync/history-backfill
+ * The nightly IT history backfill plan: next month, runs so far, done/failures.
+ */
+router.get(
+  '/history-backfill',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: historyBackfillService } = await import('../services/historyBackfillService.js');
+    res.json({ success: true, data: await historyBackfillService.state() });
+  }),
+);
+
+/**
  * GET /api/sync/logs
  * Get sync logs with pagination, filtering, and total count
  * Query params:

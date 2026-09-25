@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.83-preview';
+export const APP_VERSION = '3.9.84-preview';
 
 export const changelog = [
+  {
+    version: '3.9.84-preview',
+    date: 'September 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Parked tickets sort after Pending</strong> &mdash; sorting the Tickets list by status now puts parked tickets in their own group straight after the Pending ones, instead of mixed in among them.' },
+      { type: 'improved', html: '<strong>Three years of IT history</strong> &mdash; IT\'s FreshService tickets from September 2023 to December 2024 (about 14,000) are being brought into Ticket Pulse, one month at a time, in the evenings and at weekends so daytime syncing is not slowed. Notes and replies follow for each ticket. Analytics and requester histories fill out as it goes.' },
+      { type: 'improved', html: '<strong>Missing FreshService notes fill in faster overnight</strong> &mdash; the background pass that fetches notes and replies written in FreshService runs at twice the pace in the evenings and at weekends.' },
+    ],
+  },
   {
     version: '3.9.83-preview',
     date: 'September 24, 2026',

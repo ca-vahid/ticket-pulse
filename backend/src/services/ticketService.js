@@ -1451,6 +1451,13 @@ class TicketService {
    */
   async _statusRankedPage(workspaceId, where, { page, pageSize, sortDir }) {
     const grouped = await prisma.ticket.groupBy({ by: ['status'], where, _count: { _all: true } });
+    // QA 09-24 #1: parked tickets (a marker on a Pending ticket) read "Parked"
+    // and sort as their own bucket right after the Pending statuses, not mixed
+    // in among them. One extra groupBy over the parked subset.
+    const parkedGrouped = await Promise.resolve()
+      .then(() => prisma.ticket.groupBy({ by: ['status'], where: { AND: [where, { parkedUntil: { not: null } }] }, _count: { _all: true } }))
+      .catch(() => []);
+    const parkedByStatus = new Map((parkedGrouped || []).map((g) => [g.status, g._count._all]));
     // Registry-aware rank (Phase 8c): base rank, then the workspace's own
     // sortOrder within the base, then name. Labels the registry doesn't know
     // (legacy FS 'Waiting on Customer' rows) rank by heuristic base after the
@@ -1465,9 +1472,15 @@ class TicketService {
       // trail every registry row of the same base.
       return baseRank * 1000 + (def ? Math.min(Number(def.sortOrder) || 0, 998) : 999);
     };
-    const buckets = grouped
-      .map((g) => ({ status: g.status, count: g._count._all, rank: rankOf(g.status) }))
-      .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.status.localeCompare(b.status)));
+    const PARKED_RANK = (BASE_STATUS_RANK.Pending ?? 1) * 1000 + 999.5;
+    const buckets = [];
+    for (const g of grouped) {
+      const parked = Math.min(parkedByStatus.get(g.status) || 0, g._count._all);
+      const rest = g._count._all - parked;
+      if (rest > 0) buckets.push({ status: g.status, parked: parked > 0 ? false : undefined, count: rest, rank: rankOf(g.status) });
+      if (parked > 0) buckets.push({ status: g.status, parked: true, count: parked, rank: PARKED_RANK });
+    }
+    buckets.sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.status.localeCompare(b.status)));
     if (sortDir === 'desc') buckets.reverse();
 
     const total = buckets.reduce((sum, b) => sum + b.count, 0);
@@ -1479,12 +1492,12 @@ class TicketService {
       if (take <= 0) break;
       if (skip >= bucket.count) { skip -= bucket.count; continue; }
       const sliceTake = Math.min(take, bucket.count - skip);
-      slices.push({ status: bucket.status, skip, take: sliceTake });
+      slices.push({ status: bucket.status, parked: bucket.parked, skip, take: sliceTake });
       take -= sliceTake;
       skip = 0;
     }
     const rows = await Promise.all(slices.map((s) => prisma.ticket.findMany({
-      where: { AND: [where, { status: s.status }] },
+      where: { AND: [where, { status: s.status }, ...(s.parked === true ? [{ parkedUntil: { not: null } }] : s.parked === false ? [{ parkedUntil: null }] : [])] },
       include: TICKET_INCLUDE,
       orderBy: [{ id: 'desc' }],
       skip: s.skip,
