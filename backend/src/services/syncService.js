@@ -2952,7 +2952,17 @@ class SyncService {
       workspaceId,
     };
 
-    const syncLog = await syncLogRepository.createLog({ status: 'started', workspaceId });
+    // The lock is held from here on; a failure before the try below (the
+    // sync-log insert itself, 24 Sep 2026 15:14 PT during a 16-s pool squeeze)
+    // must release it, or every later cycle skips as "already in progress"
+    // until the 20-min stale-lock watchdog (Field Equipment lost 20 min).
+    let syncLog;
+    try {
+      syncLog = await syncLogRepository.createLog({ status: 'started', workspaceId });
+    } catch (err) {
+      this.runningWorkspaces.delete(workspaceId);
+      throw err;
+    }
 
     try {
       logger.info(`Starting full sync for workspace ${workspaceId}`);
@@ -3577,8 +3587,9 @@ class SyncService {
     this.runningWorkspaces.set(backfillKey, Date.now());
 
     // Create a DB row tracking this run — so the UI can rejoin after navigation
-    // and we have a permanent history of all backfills.
-    const runRow = await prisma.backfillRun.create({
+    // and we have a permanent history of all backfills. A failed insert must
+    // release the lock (same hole as performFullSync's sync-log insert).
+    const runRow = await Promise.resolve().then(() => prisma.backfillRun.create({
       data: {
         workspaceId,
         status: 'running',
@@ -3588,6 +3599,9 @@ class SyncService {
         activityConcurrency,
         triggeredByEmail,
       },
+    })).catch((err) => {
+      this.runningWorkspaces.delete(backfillKey);
+      throw err;
     });
     const runId = runRow.id;
 
