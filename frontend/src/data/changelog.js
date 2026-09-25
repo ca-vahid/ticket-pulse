@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.86-preview';
+export const APP_VERSION = '3.9.87-preview';
 
 export const changelog = [
+  {
+    version: '3.9.87-preview',
+    date: 'September 25, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>HR notices come back with time to prepare</strong> &mdash; a parked HR notice now wakes ahead of its date instead of on it: a new hire 14 days before the start, a departure or a return from leave on the Monday of that week, and a transfer 2 business days before it takes effect. Weekends and holidays move the wake to the business day before. The ticket still shows the real date in its reason.' },
+    ],
+  },
   {
     version: '3.9.86-preview',
     date: 'September 25, 2026',
