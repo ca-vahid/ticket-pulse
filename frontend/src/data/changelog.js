@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.81-preview';
+export const APP_VERSION = '3.9.82-preview';
 
 export const changelog = [
+  {
+    version: '3.9.82-preview',
+    date: 'September 24, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A failed sync start no longer pauses a workspace for 20 minutes</strong> &mdash; when the database was briefly too busy to record the start of a scheduled FreshService sync (Field Equipment, 24 September 15:14 PT), the workspace stayed marked as syncing and every sync after it was skipped until a 20-minute safety net cleared it. The mark is now cleared at once, so the next five-minute sync runs as normal. The same applies to historical backfills.' },
+    ],
+  },
   {
     version: '3.9.81-preview',
     date: 'September 24, 2026',

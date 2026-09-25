@@ -36,3 +36,19 @@ describe('performFullSync — sync-skipped broadcast', () => {
     );
   });
 });
+
+describe('performFullSync — lock released when the run cannot even start', () => {
+  afterEach(() => {
+    syncService.runningWorkspaces.clear();
+    jest.restoreAllMocks();
+  });
+
+  test('a failed sync-log insert releases the workspace lock (Field Equipment, 24 Sep 15:14 PT)', async () => {
+    const { default: syncLogRepository } = await import('../src/services/syncLogRepository.js');
+    jest.spyOn(syncLogRepository, 'createLog').mockRejectedValue(new Error('Failed to create sync log'));
+
+    await expect(syncService.performFullSync({ workspaceId: 4 })).rejects.toThrow(/Failed to create sync log/);
+    // The next cycle must run, not skip as "already in progress" for 20 minutes.
+    expect(syncService.runningWorkspaces.has(4)).toBe(false);
+  });
+});
