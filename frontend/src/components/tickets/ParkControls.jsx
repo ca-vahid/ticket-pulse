@@ -105,7 +105,7 @@ export default function ParkDialog({
     { label: 'Next Monday', date: nextMonday() },
     { label: 'In 2 weeks', date: addDays(14) },
     { label: 'In a month', date: addDays(30) },
-    ...(initial?.suggestedUntil ? [{ label: 'The date in the notice', date: new Date(initial.suggestedUntil) }] : []),
+    ...(initial?.suggestedUntil ? [{ label: 'From the HR notice', date: new Date(initial.suggestedUntil) }] : []),
   ]), [initial?.suggestedUntil]);
   const waitingOn = people.map((p) => p.trim()).filter(Boolean)
     .map((p) => (p.includes('@') ? { email: p.toLowerCase(), name: p } : { name: p }));

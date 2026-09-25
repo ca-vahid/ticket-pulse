@@ -13,7 +13,7 @@ import { ValidationError, NotFoundError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import statusService from './statusService.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
-import { readHrNoticeDate } from '../utils/hrNoticeDates.js';
+import { readHrNoticeDate, hrWakeDate } from '../utils/hrNoticeDates.js';
 import settingsRepository from './settingsRepository.js';
 
 export const PARK_KINDS = Object.freeze(['until_date', 'waiting_on', 'eta']);
@@ -457,10 +457,19 @@ class TicketParkService {
       createdAt: t.createdAt,
     });
     if (!read) return null;
-    const until = new Date(`${read.date}T15:00:00.000Z`);
+    // Lead time (25 Sep 2026): wake ahead of the notice's date — see hrWakeDate.
+    // If the lead window has already begun, the ticket needs work now: not usable.
+    let isBusinessDay = null;
+    try {
+      const { default: businessCalendarService } = await import('./businessCalendarService.js');
+      const cal = await businessCalendarService.loadCalendar(Number(workspaceId));
+      if (cal) isBusinessDay = (iso) => cal.byDay.has(new Date(`${iso}T00:00:00Z`).getUTCDay()) && !cal.isHolidayDate(iso);
+    } catch { /* Monday–Friday */ }
+    const wakeDate = hrWakeDate(read.kind, read.date, { isBusinessDay });
+    const until = new Date(`${wakeDate}T15:00:00.000Z`);
     const now = Date.now();
     const usable = until.getTime() > now + 3600e3 && until.getTime() <= now + MAX_PARK_DAYS * 86400e3;
-    return { ...read, until: until.toISOString(), usable };
+    return { ...read, wakeDate, until: until.toISOString(), usable };
   }
 
   async hrAutoParkEnabled(workspaceId) {
@@ -493,11 +502,11 @@ class TicketParkService {
     }).catch(() => []);
     for (const c of candidates) {
       const s = await this.hrSuggestion(c.id, workspaceId);
-      if (!s || !s.usable) { results.push({ id: c.id, subject: c.subject, parked: false, why: s ? `date ${s.date} is not in the next six months` : 'no clear date' }); continue; }
-      if (dryRun) { results.push({ id: c.id, subject: c.subject, parked: false, would: { until: s.date, reason: s.reason } }); continue; }
+      if (!s || !s.usable) { results.push({ id: c.id, subject: c.subject, parked: false, why: s ? `date ${s.date} (wake ${s.wakeDate}) is past or more than six months out` : 'no clear date' }); continue; }
+      if (dryRun) { results.push({ id: c.id, subject: c.subject, parked: false, would: { until: s.wakeDate, date: s.date, reason: s.reason } }); continue; }
       try {
         await this.park(c.id, workspaceId, { kind: 'until_date', until: s.until, reason: s.reason }, { name: 'Ticket Pulse (HR notice)', role: 'automation' }, { source: 'suggested_hr' });
-        results.push({ id: c.id, subject: c.subject, parked: true, until: s.date, reason: s.reason });
+        results.push({ id: c.id, subject: c.subject, parked: true, until: s.wakeDate, date: s.date, reason: s.reason });
       } catch (err) {
         results.push({ id: c.id, subject: c.subject, parked: false, why: err.message });
       }
