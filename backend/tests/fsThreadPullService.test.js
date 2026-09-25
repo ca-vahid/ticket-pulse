@@ -73,13 +73,24 @@ describe('noteActivityArrived — pull on change', () => {
 });
 
 describe('tick — pulls, stands down when busy, never drops on a busy queue', () => {
-  test('stands down while the shared FreshService queue is busy', async () => {
+  test('stands down only when the shared FreshService queue is very busy (> 150)', async () => {
     svc.enqueue(4273, 1, 'resolved', { delayMs: 0 });
-    limiter.queueDepth = 31;
+    limiter.queueDepth = 151;
     await svc.tick(Date.now() + 1000);
     expect(client.fetchTicketConversations).not.toHaveBeenCalled();
     expect(svc.queue.has(4273)).toBe(true);
     expect(svc.stats.deferred).toBe(1);
+  });
+
+  test('a merely busy queue (30–150) trickles one ticket a tick instead of stalling (25 Sep)', async () => {
+    prismaMock.ticket.findUnique.mockImplementation(async ({ where }) => ({ id: where.id, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 100000n + BigInt(where.id) }));
+    client.fetchTicketConversations.mockResolvedValue([]);
+    for (let i = 1; i <= 4; i++) svc.enqueue(i, 1, 'backfill', { delayMs: 0 });
+    limiter.queueDepth = 80;
+    await svc.tick(Date.now() + 1000);
+    expect(client.fetchTicketConversations).toHaveBeenCalledTimes(1);
+    expect(svc.queue.size).toBe(3);
+    expect(svc.stats.trickled).toBe(1);
   });
 
   test('pulls the whole conversation (no 60 cap), stores it and marks the ticket checked', async () => {
