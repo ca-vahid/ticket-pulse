@@ -11,6 +11,7 @@ import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import assetronReservationService from './assetronReservationService.js';
 const APPROVAL_EXPIRY_DAYS = 30;
 
 function newToken() {
@@ -179,7 +180,7 @@ class TicketApprovalService {
    * (sharing requestGroupId) — any one can approve. Each manager gets a personal
    * magic link. TP-only (no FreshService involvement).
    */
-  async request(ticketId, workspaceId, { approvalCategoryId, note: rawNote = null, noteHtml = null, notifyApprover = true, amount = null }, actor) {
+  async request(ticketId, workspaceId, { approvalCategoryId, note: rawNote = null, noteHtml = null, notifyApprover = true, amount = null, hardware: rawHardware = null }, actor) {
     const note = cleanPlainNote(rawNote);
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
@@ -242,34 +243,56 @@ class TicketApprovalService {
     if (open) throw new ValidationError(`There is already an open "${category.name}" approval on this ticket`);
 
     const requestGroupId = crypto.randomUUID();
-    const created = [];
-    for (const email of managers) {
-      const token = newToken();
-      const approval = await prisma.ticketApproval.create({
-        data: {
-          workspaceId,
-          ticketId,
-          approvalCategoryId: category.id,
-          requestGroupId,
-          approverEmail: email,
-          approverName: await this._resolvePersonName(email),
-          requestedBy: actor?.email || 'unknown',
-          requestNote: note?.trim() || null,
-          requestNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
-          tokenHash: hashToken(token),
-          expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
-          tier: startTier,
-          ...(autoStart ? { escalationLog: [autoStart] } : {}),
-          ...(amountValue !== null ? { amount: amountValue, amountCurrency: category.amountCurrency || 'CAD' } : {}),
-        },
-      });
-      if (notifyApprover !== false) {
-        const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
-        await this._emailApprover(ticket, approval, decisionUrl, category.name, null, autoStart ? {
-          handoff: { kind: 'auto_start', byName: actor?.name || requesterEmailLc, note: autoStart.reason, fromTierName: skippedTiers.join(' / '), toTierName: tiers[startTierIdx].name },
-        } : {});
+    // Assetron (24 Sep 2026): a hardware category may hold a laptop for this
+    // request. The hold comes FIRST — if Assetron refuses (laptop taken,
+    // recipient unknown) nothing is created and the agent sees why.
+    const hardware = assetronReservationService.normalizeHardware(rawHardware);
+    if (hardware && category.gatesHardware !== true) throw new ValidationError(`"${category.name}" is not a hardware category — a laptop cannot be reserved with it`);
+    const reserved = hardware ? await assetronReservationService.reserve({ ticket, requestGroupId, hardware, actor }) : null;
+    if (reserved) {
+      try {
+        await assetronReservationService.record({ ticket, requestGroupId, categoryId: category.id, hardware, reserved, actor });
+      } catch (err) {
+        await assetronReservationService.abandon(reserved.reservationId, actor);
+        throw err;
       }
-      created.push({ id: approval.id, approverEmail: email });
+    }
+    const created = [];
+    try {
+      for (const email of managers) {
+        const token = newToken();
+        const approval = await prisma.ticketApproval.create({
+          data: {
+            workspaceId,
+            ticketId,
+            approvalCategoryId: category.id,
+            requestGroupId,
+            approverEmail: email,
+            approverName: await this._resolvePersonName(email),
+            requestedBy: actor?.email || 'unknown',
+            requestNote: note?.trim() || null,
+            requestNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
+            tokenHash: hashToken(token),
+            expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+            tier: startTier,
+            ...(autoStart ? { escalationLog: [autoStart] } : {}),
+            ...(amountValue !== null ? { amount: amountValue, amountCurrency: category.amountCurrency || 'CAD' } : {}),
+          },
+        });
+        if (notifyApprover !== false) {
+          const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
+          await this._emailApprover(ticket, approval, decisionUrl, category.name, null, autoStart ? {
+            handoff: { kind: 'auto_start', byName: actor?.name || requesterEmailLc, note: autoStart.reason, fromTierName: skippedTiers.join(' / '), toTierName: tiers[startTierIdx].name },
+          } : {});
+        }
+        created.push({ id: approval.id, approverEmail: email });
+      }
+    } catch (err) {
+      if (reserved) {
+        await assetronReservationService.abandon(reserved.reservationId, actor);
+        await prisma.assetronReservation.deleteMany({ where: { requestGroupId } }).catch(() => {});
+      }
+      throw err;
     }
 
     await ticketActivityRepository.create({
@@ -326,6 +349,7 @@ class TicketApprovalService {
       startedAtTier: startTier,
       startedAtTierName: tiers[startTierIdx].name,
       skippedTiers,
+      hardware: reserved ? await assetronReservationService.forGroup(requestGroupId).catch(() => null) : null,
     };
   }
 
@@ -608,6 +632,8 @@ class TicketApprovalService {
         decisionNote: approval.decisionNote || null,
         decisionNoteHtml: approval.decisionNoteHtml || null,
         category: category ? { name: category.name, description: category.description || null } : null,
+        // Assetron: the laptop this request holds (24 Sep 2026), or null.
+        laptop: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => null) : null,
         clarificationLog,
         supersededBy,
         cancelledReason,
@@ -1318,6 +1344,7 @@ class TicketApprovalService {
       select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
     });
     if (ticket) this._broadcast(ticket, 'approval');
+    assetronReservationService.touch(approval.requestGroupId);
     return { cancelled: true, requestGroupId: approval.requestGroupId || null };
   }
 
@@ -1356,6 +1383,7 @@ class TicketApprovalService {
     });
     if (ticket) this._broadcast(ticket, 'approval');
     logger.info(`Approval request deleted on ticket ${ticketId} by ${actor?.email || 'unknown'} (${count} row${count === 1 ? '' : 's'})`);
+    assetronReservationService.touch(approval.requestGroupId);
     return { deleted: true, count, requestGroupId: approval.requestGroupId || null };
   }
 
@@ -1645,6 +1673,7 @@ class TicketApprovalService {
     }
 
     logger.info(`Approval ${normalized} (${via}) on ticket ${approval.ticketId} by ${actorLabel}`);
+    assetronReservationService.touch(approval.requestGroupId);
     return updated;
   }
 
@@ -1764,6 +1793,7 @@ class TicketApprovalService {
       decisionUrl,
       expiresAt: approval.expiresAt || null,
       reRequest: !!clarification?.answer,
+      laptop: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => null) : null,
     });
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');

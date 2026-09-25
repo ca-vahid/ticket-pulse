@@ -989,6 +989,8 @@ router.get('/tickets/:id/approval', S('approvals:read'), asyncHandler(async (req
 
   const verdict = await approvalVerdictService.verdict(resolved.id, req.workspaceId, {
     category,
+    // No category = the hardware verdict; `any` = every approval on the ticket.
+    scope: raw.toLowerCase() === 'any' ? 'any' : null,
     echo: ref || null,
   });
   if (!verdict) throw problems.notFound(`No ticket matching "${req.params.id}" in this workspace`);

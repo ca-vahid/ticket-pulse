@@ -450,6 +450,14 @@ async function initialize() {
       logger.warn('Notification time-trigger worker failed to start (non-fatal):', e.message);
     }
 
+    // Assetron laptop holds: sends every approval outcome to Assetron and retries until it lands.
+    try {
+      const { default: assetronReservationService } = await import('./services/assetronReservationService.js');
+      assetronReservationService.start();
+    } catch (e) {
+      logger.warn('Assetron reservation sweep failed to start (non-fatal):', e.message);
+    }
+
     // Alert correlation: 5-minute sweep pairing fired/cleared machine alerts and grouping storms.
     try {
       const { default: alertCorrelationService } = await import('./services/alertCorrelationService.js');

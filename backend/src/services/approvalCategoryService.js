@@ -88,12 +88,12 @@ class ApprovalCategoryService {
   async getActive(workspaceId) {
     return prisma.approvalCategory.findMany({
       where: { workspaceId, isActive: true },
-      select: { id: true, name: true, description: true, managerEmails: true, tiers: true, hasAmount: true, amountCurrency: true },
+      select: { id: true, name: true, description: true, managerEmails: true, tiers: true, hasAmount: true, amountCurrency: true, gatesHardware: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
   }
 
-  async create(workspaceId, { name, description = null, managerEmails = [], sortOrder = 0, tiers = undefined, hasAmount = false, amountCurrency = 'CAD' }) {
+  async create(workspaceId, { name, description = null, managerEmails = [], sortOrder = 0, tiers = undefined, hasAmount = false, amountCurrency = 'CAD', gatesHardware = false }) {
     const trimmed = String(name || '').trim();
     if (trimmed.length < 2) throw new ValidationError('A category name is required');
     const monetary = hasAmount === true;
@@ -111,6 +111,7 @@ class ApprovalCategoryService {
           ...(cleanTiers ? { tiers: cleanTiers } : {}),
           hasAmount: monetary,
           amountCurrency: this._cleanCurrency(amountCurrency),
+          gatesHardware: gatesHardware === true,
         },
       });
     } catch (error) {
@@ -136,6 +137,7 @@ class ApprovalCategoryService {
     if (patch.isActive !== undefined) data.isActive = patch.isActive === true;
     if (patch.sortOrder !== undefined) data.sortOrder = Number(patch.sortOrder) || 0;
     if (patch.hasAmount !== undefined) data.hasAmount = patch.hasAmount === true;
+    if (patch.gatesHardware !== undefined) data.gatesHardware = patch.gatesHardware === true;
     if (patch.amountCurrency !== undefined) data.amountCurrency = this._cleanCurrency(patch.amountCurrency);
     if (patch.tiers !== undefined) {
       const monetary = data.hasAmount !== undefined ? data.hasAmount : existing.hasAmount === true;

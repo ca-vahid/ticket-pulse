@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.84-preview';
+export const APP_VERSION = '3.9.85-preview';
 
 export const changelog = [
+  {
+    version: '3.9.85-preview',
+    date: 'September 25, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Reserve a new laptop with the approval</strong> — when an approval is requested in a laptop category (New Computer Upgrade), the agent can pick a new laptop from Assetron and who it is for. The laptop is held while the approval is open, assigned to that person the moment an approver says yes, and released if the request is rejected, cancelled, deleted or expires. The approver sees the exact laptop in the e-mail and on the decision page.' },
+      { type: 'added', html: '<strong>Laptop categories</strong> — approval categories have a new “This category approves laptops” setting (Settings → Approvals).' },
+      { type: 'fixed', html: '<strong>Assetron laptop check reads only laptop approvals</strong> — an approved request of another kind on the same ticket (a licence, a permission) no longer counts as a laptop approval.' },
+    ],
+  },
   {
     version: '3.9.84-preview',
     date: 'September 24, 2026',

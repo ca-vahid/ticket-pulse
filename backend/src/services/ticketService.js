@@ -2443,7 +2443,7 @@ class TicketService {
         // Approvals v2/v3: the tier chain and the amount flag drive the request
         // modal — without `tiers` here every category looked single-tier and a
         // tier-1 approver was told they were "the only approver on every tier".
-        select: { id: true, name: true, description: true, managerEmails: true, tiers: true, hasAmount: true, amountCurrency: true },
+        select: { id: true, name: true, description: true, managerEmails: true, tiers: true, hasAmount: true, amountCurrency: true, gatesHardware: true },
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       }),
       prisma.ticketTag.findMany({
@@ -2572,6 +2572,8 @@ class TicketService {
           tierCount: tiers.length,
           hasAmount: c.hasAmount === true,
           amountCurrency: c.amountCurrency || 'CAD',
+          // Assetron: a hardware category offers the laptop picker.
+          gatesHardware: c.gatesHardware === true,
         };
       }),
       tags,

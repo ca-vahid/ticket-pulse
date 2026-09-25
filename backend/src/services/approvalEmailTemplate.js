@@ -399,10 +399,24 @@ export function renderApproverRequestEmail(ctx) {
   }));
   rows.push(spacer(18));
 
+  // Assetron laptop held for this request (24 Sep 2026): the approver sees
+  // exactly which machine they are approving and for whom.
+  const laptopRow = ctx.laptop && ctx.laptop.asset ? (() => {
+    const a = ctx.laptop.asset;
+    const name = [a.make, a.model].filter(Boolean).join(' ') || 'Laptop';
+    const id = a.assetTag || (a.serialNumber ? `S/N ${a.serialNumber}` : '');
+    const spec = [a.cpu, a.ram, a.storage, a.screenSize].filter(Boolean).join(' · ');
+    const who = ctx.laptop.recipient?.name || ctx.laptop.recipient?.email || '—';
+    return '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
+      + `<tr>${factCell('Laptop (held in Assetron)', `${escapeHtml(name)}${id ? ` <span style="font-weight:normal;color:${MUTED};">· ${escapeHtml(id)}</span>` : ''}${spec ? `<div style="font-size:12.5px;line-height:18px;font-weight:normal;color:${MUTED};margin-top:2px;">${escapeHtml(spec)}</div>` : ''}`)}${factCell('Assigned to on approval', escapeHtml(who))}</tr>`
+      + '</table></td></tr>';
+  })() : null;
+
   // The category, front and centre — it is what the approver is deciding on.
   const catCard = categoryCard({ categoryName: ctx.categoryName, amountLabel: ctx.amountLabel || null, tierLabel: ctx.amountLabel ? (ctx.tierLabel || 'Tier 1') : (ctx.tierLabel || null) });
   if (catCard) {
     rows.push(`<tr><td>${catCard}</td></tr>`); rows.push(spacer(12));
+    if (laptopRow) { rows.push(laptopRow); rows.push(spacer(12)); }
   } else if (ctx.amountLabel || ctx.tierLabel) {
     // No category to hang the chips on — the amount and tier stay visible as facts.
     rows.push('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'

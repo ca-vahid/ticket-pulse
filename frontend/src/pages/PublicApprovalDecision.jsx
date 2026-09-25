@@ -571,6 +571,18 @@ export default function PublicApprovalDecision() {
             <h1 id="approval-subject" className="mb-1.5 mt-1 text-2xl font-bold leading-tight tracking-[-0.01em] text-foreground">
               {ticket.subject || '(no subject)'}
             </h1>
+            {approval.laptop?.asset && (
+              <div className="my-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="public-approval-laptop">
+                <p className="text-foreground">
+                  <span className="font-semibold">{[approval.laptop.asset.make, approval.laptop.asset.model].filter(Boolean).join(' ') || 'Laptop'}</span>
+                  {approval.laptop.asset.assetTag || approval.laptop.asset.serialNumber ? <span className="text-muted-foreground"> · {approval.laptop.asset.assetTag || `S/N ${approval.laptop.asset.serialNumber}`}</span> : null}
+                  <span className="text-muted-foreground"> — held in Assetron, assigned to </span>
+                  <span className="font-semibold">{approval.laptop.recipient?.name || approval.laptop.recipient?.email}</span>
+                  <span className="text-muted-foreground"> if you approve</span>
+                </p>
+                <p className="text-xs text-muted-foreground">{[approval.laptop.asset.cpu, approval.laptop.asset.ram, approval.laptop.asset.storage, approval.laptop.asset.screenSize].filter(Boolean).join(' · ')}</p>
+              </div>
+            )}
             <p className="text-[13px] text-muted-foreground">
               Requested for <span className="font-semibold text-foreground">{requester.name || 'unknown requester'}</span>
               {requesterMeta ? ` · ${requesterMeta}` : ''}

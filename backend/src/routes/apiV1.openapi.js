@@ -319,7 +319,7 @@ const T = {
           source: { type: 'string', enum: ['ticketpulse', 'freshservice'], nullable: true, description: 'Which system holds the decisive approval: a Ticket Pulse approval request, or the FreshService approval on the ticket (counted since 17 Sep 2026). Null when nobody asked anywhere.' },
           freshserviceStatus: { type: 'string', nullable: true, description: 'FreshService approval_status_name as last synced (Approved, Requested, Rejected, Cancelled, Not Requested), for the operator.' },
           requirement: { type: 'string', enum: ['NOT_MODELLED'], description: 'Ticket Pulse has no per-ticket-type approval requirement — approval is a manual request against a category. NOT_REQUESTED therefore means “nobody asked”, which is not the same as “not needed”.' },
-          scope: { type: 'string', enum: ['category', 'ticket'], description: 'Whether the verdict covers one approval category or the whole ticket (`category=any`).' },
+          scope: { type: 'string', enum: ['hardware', 'category', 'ticket'], description: 'hardware (no category sent — only approval categories flagged as laptop approvals, plus a FreshService approval) · category (one named category) · ticket (`category=any`).' },
           category: { type: 'string', nullable: true, example: 'New Computer Upgrade' },
           decidedAt: { type: 'string', format: 'date-time', nullable: true, description: 'When the decisive decision was made. A granted approval never expires here — apply your own age policy to this value.' },
           expiresAt: { type: 'string', format: 'date-time', nullable: true, description: 'Set only while a request is PENDING/EXPIRED (30 days from the request).' },
@@ -339,7 +339,7 @@ const T = {
         },
       },
       requester: { type: 'object', nullable: true, properties: { name: { type: 'string', nullable: true }, email: { type: 'string', nullable: true } } },
-      asset: { type: 'object', nullable: true, description: 'Always null — Ticket Pulse holds no serial numbers or asset tags. Present so the field never appears and disappears between responses.' },
+      asset: { type: 'object', nullable: true, description: 'The Assetron laptop held for (ON_HOLD) or assigned by (ASSIGNED) the approval on this ticket: { system: ASSETRON, assetId, reservationId, state, serialNumber, assetTag, make, model, recipient { email, name } }. null when none. Always present.' },
     },
   },
 };

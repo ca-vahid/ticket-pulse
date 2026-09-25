@@ -1,5 +1,11 @@
 import prisma from './prisma.js';
 import { refreshFsApprovalStatus } from './fsApprovalRefreshService.js';
+async function assetronVerdictAsset(ticketId, workspaceId) {
+  try {
+    const { default: svc } = await import('./assetronReservationService.js');
+    return await svc.verdictAsset(ticketId, workspaceId);
+  } catch { return null; }
+}
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 /**
@@ -14,11 +20,14 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
  *    invent DELEGATE_APPROVED / AUTO_APPROVED / PARTIALLY_APPROVED states for
  *    situations this product does not have — a consumer that hard-codes an
  *    enum is better served by a short honest one.
- *  - The verdict is scoped to an APPROVAL CATEGORY by default. A ticket can
- *    carry approvals from several categories ("New Computer Upgrade", "AI
- *    Premium License Request"...), and an approved licence must never open the
- *    laptop gate. `category=any` is the deliberate opt-in to a ticket-wide
- *    answer.
+ *  - The verdict is scoped. A ticket can carry approvals from several
+ *    categories ("New Computer Upgrade", "AI Premium License Request"...), and
+ *    an approved licence must never open the laptop gate. No `category` =
+ *    the HARDWARE verdict: only approval categories flagged `gatesHardware`
+ *    (plus a FreshService approval on the ticket). `category=<name>` = that
+ *    category. `category=any` is the deliberate opt-in to a ticket-wide
+ *    answer. (Until 25 Sep 2026 an omitted category meant ticket-wide — the
+ *    Assetron review caught it.)
  */
 
 // Every value this API can return. Stable within /api/v1 (contract, Sep 2026).
@@ -159,11 +168,13 @@ class ApprovalVerdictService {
   /**
    * @param {number} ticketId
    * @param {number} workspaceId
-   * @param {{category: {id:number,name:string}|null, echo: string|null}} opts
-   *   `category: null` = ticket-wide verdict (the `any` scope).
+   * @param {{category: {id:number,name:string}|null, scope: 'hardware'|'any'|null, echo: string|null}} opts
+   *   `category` set = that category; else `scope: 'any'` = ticket-wide;
+   *   else the hardware verdict (categories flagged gatesHardware).
    * @returns {Promise<object|null>} null when the ticket is not in the workspace.
    */
-  async verdict(ticketId, workspaceId, { category = null, echo = null } = {}) {
+  async verdict(ticketId, workspaceId, { category = null, scope = null, echo = null } = {}) {
+    const effectiveScope = category ? 'category' : (scope === 'any' ? 'ticket' : 'hardware');
     const now = new Date();
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
@@ -179,7 +190,11 @@ class ApprovalVerdictService {
     await refreshFsApprovalStatus(ticket);
 
     const rows = await prisma.ticketApproval.findMany({
-      where: { ticketId, workspaceId, ...(category ? { approvalCategoryId: category.id } : {}) },
+      where: {
+        ticketId, workspaceId,
+        ...(category ? { approvalCategoryId: category.id } : {}),
+        ...(effectiveScope === 'hardware' ? { approvalCategory: { gatesHardware: true } } : {}),
+      },
       select: {
         id: true, status: true, approverEmail: true, approverName: true,
         decidedAt: true, decidedVia: true, expiresAt: true, createdAt: true,
@@ -226,7 +241,8 @@ class ApprovalVerdictService {
         source,
         freshserviceStatus: ticket.fsApprovalStatusName || null,
         requirement: APPROVAL_REQUIREMENT,
-        scope: category ? 'category' : 'ticket',
+        // 'hardware' (default) | 'category' | 'ticket' (category=any).
+        scope: effectiveScope,
         category: category ? category.name : (group[0]?.approvalCategory?.name || null),
         decidedAt: decided?.decidedAt || null,
         // Only a PENDING/EXPIRED request carries an expiry. A GRANTED approval
@@ -240,9 +256,9 @@ class ApprovalVerdictService {
       requester: ticket.requester
         ? { name: ticket.requester.name || null, email: ticket.requester.email || null }
         : null,
-      // Ticket Pulse holds no serial numbers or asset tags. Always null —
-      // present so the field never appears or disappears between responses.
-      asset: null,
+      // The Assetron laptop held for / assigned by this ticket's approval
+      // (Assetron Part B, 25 Sep 2026), or null. Always present.
+      asset: await assetronVerdictAsset(ticket.id, workspaceId),
     };
   }
 }
