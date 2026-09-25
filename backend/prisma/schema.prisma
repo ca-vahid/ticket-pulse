@@ -608,6 +608,44 @@ model TicketExternalReference {
   @@map("ticket_external_references")
 }
 
+// One Assetron laptop held for one approval request (Assetron Part B, 24 Sep
+// 2026). Keyed by the approval request group, NOT the approval rows — a deleted
+// request still has a hold to release. Assetron never expires a hold: every
+// row must end with a PATCH (assigned / released), retried until it lands.
+model AssetronReservation {
+  id                 Int       @id @default(autoincrement())
+  workspaceId        Int       @map("workspace_id")
+  ticketId           Int       @map("ticket_id")
+  requestGroupId     String    @unique @map("request_group_id") @db.VarChar(64)
+  approvalCategoryId Int?      @map("approval_category_id")
+  reservationId      String    @map("reservation_id") @db.VarChar(80)
+  assetId            String    @map("asset_id") @db.VarChar(80)
+  asset              Json?
+  recipientEmail     String    @map("recipient_email") @db.VarChar(255)
+  recipientName      String?   @map("recipient_name") @db.VarChar(255)
+  recipientEntraId   String?   @map("recipient_entra_id") @db.VarChar(80)
+  requestedByEmail   String?   @map("requested_by_email") @db.VarChar(255)
+  // reserved | assigned | released | failed
+  state              String    @default("reserved") @db.VarChar(20)
+  // what must be sent next (APPROVED | REJECTED | CANCELLED) while state = reserved
+  pendingOutcome     String?   @map("pending_outcome") @db.VarChar(20)
+  outcome            String?   @db.VarChar(20)
+  outcomeWhy         String?   @map("outcome_why") @db.VarChar(40)
+  decidedByEmail     String?   @map("decided_by_email") @db.VarChar(255)
+  decidedByName      String?   @map("decided_by_name") @db.VarChar(255)
+  decidedAt          DateTime? @map("decided_at")
+  attempts           Int       @default(0)
+  nextAttemptAt      DateTime? @map("next_attempt_at")
+  lastError          String?   @map("last_error") @db.Text
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, state])
+  @@index([ticketId])
+  @@map("assetron_reservations")
+}
+
 model TicketTagLink {
   id        Int       @id @default(autoincrement())
   ticketId  Int       @map("ticket_id")
@@ -793,6 +831,10 @@ model ApprovalCategory {
   tiers         Json?
   hasAmount     Boolean          @default(false) @map("has_amount")
   amountCurrency String          @default("CAD") @map("amount_currency") @db.VarChar(8)
+  // Hardware (Assetron, 24 Sep 2026): this category approves laptops. It scopes
+  // the default /tickets/{ref}/approval verdict and offers the Assetron
+  // laptop picker when an approval is requested.
+  gatesHardware Boolean          @default(false) @map("gates_hardware")
   isActive      Boolean          @default(true) @map("is_active")
   sortOrder     Int              @default(0) @map("sort_order")
   createdAt     DateTime         @default(now()) @map("created_at")

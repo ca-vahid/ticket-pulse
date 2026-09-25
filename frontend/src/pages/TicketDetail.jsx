@@ -3258,6 +3258,8 @@ export default function TicketDetail() {
                         onForward={(apId, toEmail, note) => applyChange(`approval-${apId}`, () => ticketsAPI.forwardApproval(ticketId, apId, { toEmail, note }))}
                         onChangeDecision={(target) => { setChangeNote(''); setChangeApprovalTarget(target); }}
                         onDeleteRequest={(group) => setDeleteApprovalTarget(group)}
+                        canChangeHardware={(requestedBy) => isAdmin || (actorEmail && String(requestedBy || '').toLowerCase() === String(actorEmail).toLowerCase())}
+                        onChangeHardware={(apId, hardware) => applyChange(`approval-${apId}`, () => ticketsAPI.changeApprovalHardware(ticketId, apId, hardware))}
                       />
                     )}
 
@@ -4093,15 +4095,16 @@ export default function TicketDetail() {
           technicians={meta?.technicians || []}
           members={meta?.members || []}
           actorEmail={meta?.actor?.email || null}
+          requester={ticket?.requester ? { name: ticket.requester.name || null, email: ticket.requester.email || null } : null}
           busy={savingField === 'approval-request'}
           allowFiles={ticketingOn}
           onClose={() => setRequestApprovalOpen(false)}
-          onSubmit={({ approvalCategoryId, note, noteHtml, notifyApprover, amount, files }) => {
+          onSubmit={({ approvalCategoryId, note, noteHtml, notifyApprover, amount, files, hardware }) => {
             applyChange('approval-request', async () => {
               // Approvals v2: pasted / dropped files land on the ticket first so
               // the approver can open them; the note keeps its [Image: …] markers.
               if (files?.length) await ticketsAPI.uploadAttachments(ticketId, files);
-              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml, notifyApprover, amount });
+              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml, notifyApprover, amount, ...(hardware ? { hardware } : {}) });
               setRequestApprovalOpen(false);
             });
           }}

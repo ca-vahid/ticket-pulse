@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { settingsAPI, ticketsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
-  Stamp, Loader, Plus, Pencil, Trash2, Check, X, AlertCircle, CheckCircle2,
-  Search, UserPlus, Power, PowerOff, Ban, Lock, AtSign, BadgeDollarSign, Layers, ArrowRight,
+  AlertCircle, ArrowRight, AtSign, BadgeDollarSign, Ban, Check, CheckCircle2, Laptop, Layers, Loader, Lock, Pencil, Plus, Power, PowerOff, Search, Stamp, Trash2, UserPlus, X,
 } from 'lucide-react';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -214,14 +213,14 @@ function PersonName({ email, member, showEmails = false }) {
 
 const MAX_TIERS = 3;
 const emptyTier = (i) => ({ name: `Tier ${i + 1}`, managerEmails: [], limit: '' });
-const emptyForm = { name: '', description: '', hasAmount: false, amountCurrency: 'CAD', tiers: [emptyTier(0)] };
+const emptyForm = { name: '', description: '', hasAmount: false, amountCurrency: 'CAD', gatesHardware: false, tiers: [emptyTier(0)] };
 
 /** Category row → editable form shape (pre-v2 rows become a single tier). */
 function formFromCategory(c) {
   const tiers = Array.isArray(c.tiers) && c.tiers.length
     ? c.tiers.map((t, i) => ({ name: t.name || `Tier ${i + 1}`, managerEmails: t.managerEmails || [], limit: t.limit === null || t.limit === undefined ? '' : String(t.limit) }))
     : [{ name: 'Tier 1', managerEmails: c.managerEmails || [], limit: '' }];
-  return { name: c.name, description: c.description || '', hasAmount: c.hasAmount === true, amountCurrency: c.amountCurrency || 'CAD', tiers };
+  return { name: c.name, description: c.description || '', hasAmount: c.hasAmount === true, amountCurrency: c.amountCurrency || 'CAD', gatesHardware: c.gatesHardware === true, tiers };
 }
 
 /** Form shape → API payload (tier 1 also mirrored to managerEmails for pre-v2 readers). */
@@ -237,6 +236,7 @@ function payloadFromForm(form) {
     managerEmails: tiers[0].managerEmails,
     tiers,
     hasAmount: form.hasAmount === true,
+    gatesHardware: form.gatesHardware === true,
     amountCurrency: (form.amountCurrency || 'CAD').trim().toUpperCase(),
   };
 }
@@ -279,6 +279,17 @@ function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, savin
           className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
         />
       </div>
+
+      {/* Hardware toggle (Assetron, 24 Sep 2026) */}
+      <label className="flex items-start gap-2.5 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 cursor-pointer">
+        <input type="checkbox" checked={form.gatesHardware === true} onChange={(e) => setForm((f) => ({ ...f, gatesHardware: e.target.checked }))} className="tp-focus-ring mt-0.5" aria-label="This category approves laptops" />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground/85"><Laptop className="w-3.5 h-3.5 text-primary" aria-hidden="true" /> This category approves laptops</span>
+          <span className="block text-[11px] text-muted-foreground leading-relaxed mt-0.5">
+            Requests may hold a new laptop in Assetron, assigned when approved. Assetron’s laptop check counts only approvals in these categories.
+          </span>
+        </span>
+      </label>
 
       {/* Monetary toggle */}
       <label className="flex items-start gap-2.5 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 cursor-pointer">
@@ -577,6 +588,11 @@ export default function ApprovalCategoriesPanel() {
                     {/* Line 1: name · description, one line */}
                     <div className="flex items-baseline gap-2 min-w-0">
                       <span className={`text-sm font-semibold whitespace-nowrap ${c.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{c.name}</span>
+                      {c.gatesHardware && (
+                        <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-primary whitespace-nowrap" title="Approves laptops (Assetron)">
+                          <Laptop className="w-3 h-3" aria-hidden="true" /> laptops
+                        </span>
+                      )}
                       {c.hasAmount && (
                         <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap" title="Requests carry an amount">
                           <BadgeDollarSign className="w-3 h-3" aria-hidden="true" /> {c.amountCurrency || 'CAD'}

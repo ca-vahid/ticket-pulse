@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ApprovalLaptop from './ApprovalLaptop';
 import {
   Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, Trash2, XCircle,
 } from 'lucide-react';
@@ -96,7 +97,22 @@ export default function ApprovalTimeline({
   onEscalate, onForward,
   // Approvals v3
   ticketId = null, requester = null, onAsk, onAnswer,
+  // Assetron (24 Sep 2026)
+  canChangeHardware = () => false, onChangeHardware = null,
 }) {
+  // Assetron laptop holds for this ticket's requests — one read for the whole
+  // timeline, refreshed when the approvals change. Never breaks the timeline.
+  const [holds, setHolds] = useState({});
+  useEffect(() => {
+    let alive = true;
+    const hasGroups = (approvals || []).some((a) => a.requestGroupId);
+    if (!ticketId || !hasGroups || typeof ticketsAPI.assetronHolds !== 'function') { setHolds({}); return undefined; }
+    Promise.resolve()
+      .then(() => ticketsAPI.assetronHolds(ticketId))
+      .then((res) => { if (alive) setHolds(res?.data || {}); })
+      .catch(() => { if (alive) setHolds({}); });
+    return () => { alive = false; };
+  }, [ticketId, approvals]);
   const actorEmail = String(meta?.actor?.email || '').toLowerCase();
   const actorIsAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
   // Rows an admin chose to hand on (the forward composer stays folded until asked for).
@@ -179,6 +195,10 @@ export default function ApprovalTimeline({
                 {' · '}{timeAgo(head.createdAt)}
               </span>
             </div>
+
+            <ApprovalLaptop hold={head.requestGroupId ? holds[head.requestGroupId] || null : null} decided={decided}
+              canChange={!decided && Boolean(onChangeHardware) && canChangeHardware(head.requestedBy)}
+              onChange={(hardware) => onChangeHardware(head.id, hardware)} requester={requester} />
 
             {/* Decided → compact summary (who decided, when). No dated rail.
                 Actions sit on the RIGHT so they read as secondary to the verdict. */}

@@ -6,6 +6,7 @@ import { PersonAvatar } from './ticketUi';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import StagedFileChip from './StagedFileChip';
 import { formatMoney } from './ApprovalHandoff';
+import LaptopPicker from './LaptopPicker';
 
 const MAX_FILES = 5;
 
@@ -25,6 +26,7 @@ const MAX_FILES = 5;
  */
 export default function RequestApprovalModal({
   categories = [], technicians = [], members = [], busy = false, onSubmit, onClose, allowFiles = true, actorEmail = null,
+  requester = null,
 }) {
   const [categoryId, setCategoryId] = useState(categories.length === 1 ? categories[0].id : null);
   const [note, setNote] = useState('');
@@ -34,6 +36,11 @@ export default function RequestApprovalModal({
   const [dragging, setDragging] = useState(false);
   const [notifyApprover, setNotifyApprover] = useState(true);
   const [amountTouched, setAmountTouched] = useState(false);
+  // Assetron: optional laptop for a hardware category (chargers and batteries
+  // go through the same category, so a laptop is never forced).
+  const [wantLaptop, setWantLaptop] = useState(false);
+  const [laptop, setLaptop] = useState(null);
+  const [recipient, setRecipient] = useState(requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null } : null);
   const pasteCount = useRef(0);
   const fileInputRef = useRef(null);
 
@@ -60,6 +67,7 @@ export default function RequestApprovalModal({
   const selected = categories.find((c) => c.id === categoryId) || null;
   const tiers = selected ? (Array.isArray(selected.tiers) && selected.tiers.length ? selected.tiers : [{ name: 'Tier 1', managerEmails: selected.managerEmails || [], limit: null }]) : [];
   const monetary = Boolean(selected?.hasAmount);
+  const hardwareOn = Boolean(selected?.gatesHardware);
   const currency = selected?.amountCurrency || 'CAD';
   const amountNumber = amount.trim() === '' ? null : Number(String(amount).replace(/[^0-9.]/g, ''));
   const amountValid = !monetary || (amountNumber !== null && Number.isFinite(amountNumber) && amountNumber >= 0);
@@ -91,6 +99,7 @@ export default function RequestApprovalModal({
     e.preventDefault();
     if (!categoryId || busy) return;
     if (!amountValid) { setAmountTouched(true); return; }
+    if (hardwareOn && wantLaptop && (!laptop || !recipient?.email)) return;
     onSubmit({
       approvalCategoryId: Number(categoryId),
       note: note.trim() || null,
@@ -98,6 +107,7 @@ export default function RequestApprovalModal({
       notifyApprover,
       amount: monetary ? Math.round(amountNumber * 100) / 100 : null,
       files,
+      hardware: hardwareOn && wantLaptop && laptop && recipient?.email ? { assetId: laptop.id, recipient } : null,
     });
   };
 
@@ -140,6 +150,26 @@ export default function RequestApprovalModal({
               person={person}
             />
           </div>
+
+          {/* Laptop from Assetron (hardware categories) */}
+          {selected && hardwareOn && (
+            <div className="rounded-xl border border-border px-3.5 py-3">
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox" checked={wantLaptop} onChange={(e) => { setWantLaptop(e.target.checked); if (!e.target.checked) setLaptop(null); }}
+                  className="tp-focus-ring h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                />
+                Reserve a new laptop from Assetron
+              </label>
+              <p className="mt-0.5 ml-6 text-[11px] text-muted-foreground">It is held while the approval is open, assigned to the person when approved, and released if it is not.</p>
+              {wantLaptop && (
+                <div className="mt-3">
+                  <LaptopPicker recipient={recipient} onRecipient={setRecipient} value={laptop} onChange={setLaptop} />
+                  {!laptop && <p className="mt-2 text-[11px] text-muted-foreground">Pick one laptop to continue, or untick the box to request without one.</p>}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 2 · Amount (monetary categories) */}
           {selected && monetary && (

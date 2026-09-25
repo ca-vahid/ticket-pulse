@@ -1171,6 +1171,12 @@ export const ticketsAPI = {
   requestApproval: async (id, payload) => {
     return await api.post(`/tickets/${id}/approvals`, payload);
   },
+  // Assetron laptop picker + holds (24 Sep 2026)
+  assetronStatus: async () => await api.get('/tickets/assetron/status'),
+  assetronFilterOptions: async () => await api.get('/tickets/assetron/filter-options'),
+  assetronAssets: async (params) => await api.get('/tickets/assetron/assets', { params }),
+  assetronHolds: async (id) => await api.get(`/tickets/${id}/assetron-holds`),
+  changeApprovalHardware: async (id, approvalId, hardware) => await api.put(`/tickets/${id}/approvals/${approvalId}/hardware`, hardware),
 
   decideApproval: async (id, approvalId, decision, note = null, extra = {}) => {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/decide`, { decision, note, ...extra });

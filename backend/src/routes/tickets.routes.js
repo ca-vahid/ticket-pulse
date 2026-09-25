@@ -2020,6 +2020,52 @@ router.post('/:id/approvals', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: result });
 }));
 
+// Assetron (24 Sep 2026): the laptop picker talks to Assetron through us — the
+// browser never holds an Assetron token. New laptops only (status forced NEW).
+router.get('/assetron/status', asyncHandler(async (req, res) => {
+  const { default: svc } = await import('../services/assetronReservationService.js');
+  res.json({ success: true, data: { configured: svc.isConfigured() } });
+}));
+
+function assetronFail(err) {
+  if (err?.name === 'AssetronError') return new ValidationError(`Assetron: ${err.message}`);
+  return err;
+}
+
+router.get('/assetron/filter-options', asyncHandler(async (req, res) => {
+  const { default: assetronClient } = await import('../integrations/assetronClient.js');
+  try {
+    const options = await assetronClient.filterOptions();
+    delete options.status; // new laptops only for now
+    res.json({ success: true, data: options });
+  } catch (err) { throw assetronFail(err); }
+}));
+
+router.get('/assetron/assets', asyncHandler(async (req, res) => {
+  const { default: assetronClient } = await import('../integrations/assetronClient.js');
+  const filters = {};
+  for (const [k, v] of Object.entries(req.query || {})) {
+    if (['page', 'pageSize', 'sort', 'status'].includes(k)) continue;
+    filters[k] = String(v).split(',').map((x) => x.trim()).filter(Boolean);
+  }
+  try {
+    const result = await assetronClient.searchAssets(filters, { page: req.query.page, pageSize: req.query.pageSize, sort: req.query.sort || null });
+    res.json({ success: true, data: result });
+  } catch (err) { throw assetronFail(err); }
+}));
+
+router.get('/:id/assetron-holds', asyncHandler(async (req, res) => {
+  const { default: svc } = await import('../services/assetronReservationService.js');
+  res.json({ success: true, data: await svc.forTicket(parseTicketId(req), req.workspaceId) });
+}));
+
+router.put('/:id/approvals/:approvalId/hardware', asyncHandler(async (req, res) => {
+  const { default: svc } = await import('../services/assetronReservationService.js');
+  try {
+    res.json({ success: true, data: await svc.change(parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.body || {}, req.ticketActor) });
+  } catch (err) { throw assetronFail(err); }
+}));
+
 router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideInApp(
