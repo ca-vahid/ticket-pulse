@@ -2033,7 +2033,10 @@ router.post('/:id/approvals', asyncHandler(async (req, res) => {
 // browser never holds an Assetron token. New laptops only (status forced NEW).
 router.get('/assetron/status', asyncHandler(async (req, res) => {
   const { default: svc } = await import('../services/assetronReservationService.js');
-  res.json({ success: true, data: { configured: svc.isConfigured() } });
+  // ?check=1 (admins): actually call Assetron — token, role and URL in one go.
+  const check = req.query.check === '1' && svc.isConfigured() && (req.ticketActor?.role === 'admin' || req.ticketActor?.workspaceRole === 'admin')
+    ? await svc.checkConnection() : undefined;
+  res.json({ success: true, data: { configured: svc.isConfigured(), ...(check ? { check } : {}) } });
 }));
 
 function assetronFail(err) {

@@ -8,8 +8,10 @@ const notes = [];
 
 const prismaMock = {
   assetronReservation: {
-    findMany: jest.fn(async ({ where }) => holds.filter((h) => (where.requestGroupId ? h.requestGroupId === where.requestGroupId : where.state.in.includes(h.state)))),
-    findUnique: jest.fn(async ({ where }) => holds.find((h) => h.requestGroupId === where.requestGroupId) || null),
+    findMany: jest.fn(async ({ where }) => holds.filter((h) => (where.requestGroupId
+      ? h.requestGroupId === where.requestGroupId
+      : where.OR.some((c) => h.state === c.state && (!c.outcomeWhy || h.outcomeWhy === c.outcomeWhy))))),
+    findUnique: jest.fn(async ({ where }) => holds.find((h) => (where.id ? h.id === where.id : h.requestGroupId === where.requestGroupId)) || null),
     update: jest.fn(async ({ where, data }) => { const h = holds.find((x) => x.id === where.id); Object.assign(h, data); return h; }),
     create: jest.fn(async ({ data }) => { const h = { id: holds.length + 1, attempts: 0, ...data }; holds.push(h); return h; }),
   },
@@ -135,6 +137,55 @@ describe('reconcile', () => {
     expect(holds[0]).toMatchObject({ state: 'reserved', reservationId: 'res-2' });
   });
 
+  test('the sweep reads live holds and recently expired ones — never finished history', async () => {
+    holds = [
+      { ...HOLD(), id: 1, requestGroupId: 'done', state: 'released', outcome: 'REJECTED', outcomeWhy: 'rejected' },
+      { ...HOLD(), id: 2, requestGroupId: 'g1' },
+    ];
+    await svc.reconcile({});
+    const where = prismaMock.assetronReservation.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([
+      { state: 'reserved' },
+      { state: 'released', outcomeWhy: 'expired', updatedAt: { gte: expect.any(Date) } },
+    ]);
+    expect(prismaMock.ticketApproval.findMany).toHaveBeenCalledTimes(1); // only g1 was read
+  });
+
+  test('approved after it expired: the laptop is taken again and assigned in one pass', async () => {
+    Object.assign(holds[0], { state: 'released', outcome: 'CANCELLED', outcomeWhy: 'expired' });
+    approvalRows[0] = { ...approvalRows[0], status: 'approved', decidedAt: past };
+    await svc.reconcile({ requestGroupId: 'g1' });
+    expect(clientMock.createReservation).toHaveBeenCalledTimes(1);
+    expect(clientMock.decideReservation).toHaveBeenCalledWith('res-2', expect.objectContaining({ status: 'APPROVED' }));
+    expect(holds[0]).toMatchObject({ state: 'assigned', reservationId: 'res-2' });
+  });
+
+  test('a rejection changed to an approval takes the laptop again and assigns it', async () => {
+    Object.assign(holds[0], { state: 'released', outcome: 'REJECTED', outcomeWhy: 'rejected' });
+    approvalRows[0] = { ...approvalRows[0], status: 'approved', decidedAt: past };
+    await svc.reconcile({ requestGroupId: 'g1' });
+    expect(holds[0]).toMatchObject({ state: 'assigned', reservationId: 'res-2' });
+  });
+
+  test('laptop gone by then: no assignment, a note asks for another laptop', async () => {
+    Object.assign(holds[0], { state: 'released', outcome: 'REJECTED', outcomeWhy: 'rejected' });
+    approvalRows[0] = { ...approvalRows[0], status: 'approved', decidedAt: past };
+    clientMock.createReservation.mockRejectedValueOnce(new AssetronError({ status: 409, reason: 'ASSET_UNAVAILABLE', message: 'This laptop is Assigned to someone else.' }));
+    await svc.reconcile({ requestGroupId: 'g1' });
+    expect(clientMock.decideReservation).not.toHaveBeenCalled();
+    expect(holds[0]).toMatchObject({ state: 'released', outcomeWhy: 'not_rereserved' });
+    expect(notes.join('\n')).toMatch(/could not be held again/);
+  });
+
+  test('assigned, then the approval is changed to rejected: one note, no PATCH (Assetron cannot undo it)', async () => {
+    Object.assign(holds[0], { state: 'assigned', outcome: 'APPROVED', outcomeWhy: 'approved' });
+    approvalRows[0] = { ...approvalRows[0], status: 'rejected', decidedAt: past };
+    await svc.reconcile({ requestGroupId: 'g1' });
+    await svc.reconcile({ requestGroupId: 'g1' });
+    expect(clientMock.decideReservation).not.toHaveBeenCalled();
+    expect(notes.filter((n) => /cannot undo an assignment/.test(n))).toHaveLength(1);
+  });
+
   test('a rejected hold is never taken again', async () => {
     Object.assign(holds[0], { state: 'released', outcome: 'REJECTED', outcomeWhy: 'rejected' });
     await svc.reconcile({ requestGroupId: 'g1' });
@@ -171,6 +222,27 @@ describe('reserve / change', () => {
     expect(clientMock.createReservation).toHaveBeenCalledTimes(1);
     expect(clientMock.decideReservation).toHaveBeenCalledWith('res-1', expect.objectContaining({ status: 'CANCELLED' }));
     expect(holds[0]).toMatchObject({ reservationId: 'res-2', assetId: hw.assetId, recipientEmail: 'other@bgc.ca', state: 'reserved' });
+  });
+
+  test('change: same laptop, new person — the old reservation is closed FIRST (Assetron would return it unchanged)', async () => {
+    const order = [];
+    clientMock.decideReservation.mockImplementation(async () => { order.push('cancel'); return {}; });
+    clientMock.createReservation.mockImplementation(async () => { order.push('reserve'); return { status: 201, data: { reservationId: 'res-3', status: 'PENDING' } }; });
+    await svc.change(10, 1, 5, { assetId: ASSET.id, recipient: { email: 'rita@bgc.ca', name: 'Rita' } }, { email: 'agent@bgc.ca', role: 'agent' });
+    expect(order).toEqual(['cancel', 'reserve']);
+    expect(holds[0]).toMatchObject({ reservationId: 'res-3', recipientEmail: 'rita@bgc.ca', state: 'reserved' });
+  });
+
+  test('change: same laptop, same person → nothing to do', async () => {
+    await svc.change(10, 1, 5, { assetId: ASSET.id, recipient: { email: 'JSmith@bgc.ca' } }, { email: 'agent@bgc.ca', role: 'agent' });
+    expect(clientMock.createReservation).not.toHaveBeenCalled();
+    expect(clientMock.decideReservation).not.toHaveBeenCalled();
+  });
+
+  test('USER_NOT_FOUND: Assetron\'s sentence is not repeated when it already says what to do', async () => {
+    clientMock.createReservation.mockRejectedValueOnce(new AssetronError({ status: 404, reason: 'USER_NOT_FOUND', message: 'x@bgc.ca is not in Assetron. Run "Sync from Entra ID" in Assetron, then try again.' }));
+    const err = await svc.reserve({ ticket: tickets[0], requestGroupId: 'g9', hardware: svc.normalizeHardware({ assetId: ASSET.id, recipient: { email: 'x@bgc.ca' } }), actor: {} }).catch((e) => e);
+    expect(err.message.match(/Sync from Entra ID/g)).toHaveLength(1);
   });
 
   test('change is refused once the request is decided', async () => {

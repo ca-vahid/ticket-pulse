@@ -128,6 +128,13 @@ function RecipientField({ recipient, onRecipient }) {
   );
 }
 
+/** "2029-05-02" → "May 2029" (warranty end; the day adds nothing when picking). */
+export function warrantyLabel(d) {
+  const m = /^(\d{4})-(\d{2})/.exec(String(d || ''));
+  if (!m) return d || '—';
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 15)).toLocaleDateString('en-CA', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
 export default function LaptopPicker({ recipient, onRecipient, value, onChange }) {
   const [status, setStatus] = useState({ loading: true, configured: false, error: null });
   const [options, setOptions] = useState({});
@@ -209,10 +216,10 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange }
                 <tbody>
                   {results.map((a) => (
                     <tr key={a.id} className="border-t border-border/60 hover:bg-muted/40">
-                      <td className="px-2 py-1.5"><span className="font-medium text-foreground">{assetTitle(a)}</span><br /><span className="text-muted-foreground">{a.assetTag || (a.serialNumber ? `S/N ${a.serialNumber}` : '')}</span></td>
+                      <td className="px-2 py-1.5"><span className="whitespace-nowrap font-medium text-foreground">{assetTitle(a)}</span><br /><span className="whitespace-nowrap text-muted-foreground">{a.assetTag || (a.serialNumber ? `S/N ${a.serialNumber}` : '')}</span></td>
                       <td className="px-2 py-1.5 text-foreground/85">{assetSpec(a)}{a.touchScreen ? ' · touch' : ''}</td>
-                      <td className="px-2 py-1.5 text-foreground/85">{a.location || '—'}</td>
-                      <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{a.warrantyEndDate || '—'}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-foreground/85">{a.location || '—'}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-muted-foreground" title={a.warrantyEndDate || undefined}>{warrantyLabel(a.warrantyEndDate)}</td>
                       <td className="px-2 py-1.5 text-right">
                         <button type="button" onClick={() => onChange(a)} className="tp-focus-ring inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 font-medium text-primary hover:bg-primary/5">
                           <Check className="h-3 w-3" aria-hidden="true" /> Pick

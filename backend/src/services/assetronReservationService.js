@@ -27,6 +27,7 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 
 const SWEEP_MS = 2 * 60 * 1000;
+const REVIVE_DAYS = 30;
 const OPEN_STATUSES = ['pending', 'info_requested'];
 
 const bad = (msg) => new ValidationError(msg);
@@ -145,7 +146,10 @@ class AssetronReservationService {
       res = await assetronClient.createReservation(body);
     } catch (err) {
       if (err instanceof AssetronError) {
-        if (err.reason === 'USER_NOT_FOUND') throw bad(`${err.message} (Assetron needs "Sync from Entra ID" for ${hardware.recipient.email} before this laptop can be reserved.)`);
+        if (err.reason === 'USER_NOT_FOUND') {
+          // Assetron's own sentence usually says what to do; add it only when it does not.
+          throw bad(/sync from entra/i.test(err.message || '') ? err.message : `${err.message} (Assetron needs "Sync from Entra ID" for ${hardware.recipient.email} before this laptop can be reserved.)`);
+        }
         throw bad(`Assetron: ${err.message}`);
       }
       throw err;
@@ -190,11 +194,20 @@ class AssetronReservationService {
 
   /** Decide + send outcomes. `requestGroupId` limits it to one request. */
   async reconcile({ requestGroupId = null, now = new Date() } = {}) {
-    const where = requestGroupId ? { requestGroupId } : { state: { in: ['reserved', 'released'] } };
-    const holds = await prisma.assetronReservation.findMany({ where, take: 200, orderBy: { id: 'asc' } });
+    // The sweep reads live holds, plus holds released by EXPIRY in the last
+    // 30 days (a renewed or late-approved request takes its laptop back).
+    // Every other released row is finished and never read again — reading
+    // them all would push new holds past the page as history grows.
+    const where = requestGroupId ? { requestGroupId } : {
+      OR: [
+        { state: 'reserved' },
+        { state: 'released', outcomeWhy: 'expired', updatedAt: { gte: new Date(now.getTime() - REVIVE_DAYS * 24 * 60 * 60 * 1000) } },
+      ],
+    };
+    const holds = await prisma.assetronReservation.findMany({ where, take: 200, orderBy: { nextAttemptAt: { sort: 'asc', nulls: 'first' } } });
     let sent = 0;
     for (const hold of holds) {
-      if (hold.state === 'assigned' || hold.state === 'failed') continue;
+      if (hold.state === 'failed') continue;
       const rows = await prisma.ticketApproval.findMany({
         where: { requestGroupId: hold.requestGroupId },
         select: { status: true, expiresAt: true, approverEmail: true, approverName: true, decidedAt: true, decisionNote: true, conditionNote: true },
@@ -202,10 +215,26 @@ class AssetronReservationService {
       const ticketAlive = await prisma.ticket.findUnique({ where: { id: hold.ticketId }, select: { id: true } }).catch(() => ({ id: hold.ticketId }));
       const want = ticketAlive ? desiredOutcome(rows, now) : { outcome: 'CANCELLED', why: 'ticket_deleted' };
 
-      if (hold.state === 'released') {
-        // Only an EXPIRED hold comes back: the request was renewed and is live again.
-        if (hold.outcomeWhy === 'expired' && want === null) await this._rereserve(hold);
+      if (hold.state === 'assigned') {
+        // Assetron cannot take an assignment back through the API. A decision
+        // flipped to "rejected" after the laptop was assigned is flagged once.
+        if (want && want.outcome !== 'APPROVED' && hold.outcomeWhy !== 'assigned_then_changed') {
+          await prisma.assetronReservation.update({ where: { id: hold.id }, data: { outcomeWhy: 'assigned_then_changed' } });
+          await ticketNote(hold.ticketId, hold.workspaceId, `Assetron: the approval is no longer approved, but ${assetLabel(hold.asset)} was already assigned to ${hold.recipientName || hold.recipientEmail} in Assetron. Ticket Pulse cannot undo an assignment — return the laptop in Assetron if it should not go out.`);
+        }
         continue;
+      }
+      if (hold.state === 'released') {
+        // A released hold comes back when the request is live again after it
+        // expired (renewed), or when the request ends up APPROVED after all
+        // (approved late in the app, or a rejection changed to an approval).
+        const revive = want?.outcome === 'APPROVED' || (want === null && hold.outcomeWhy === 'expired');
+        if (!revive) continue;
+        if (!(await this._rereserve(hold))) continue;
+        if (!want) continue;
+        const fresh = await prisma.assetronReservation.findUnique({ where: { id: hold.id } });
+        if (!fresh || fresh.state !== 'reserved') continue;
+        Object.assign(hold, fresh);
       }
       if (!want) continue; // still undecided
       if (hold.pendingOutcome !== want.outcome) {
@@ -265,7 +294,7 @@ class AssetronReservationService {
 
   async _rereserve(hold) {
     const ticket = await prisma.ticket.findUnique({ where: { id: hold.ticketId }, select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true } });
-    if (!ticket) return;
+    if (!ticket) return false;
     try {
       const reserved = await this.reserve({
         ticket, requestGroupId: hold.requestGroupId,
@@ -277,9 +306,11 @@ class AssetronReservationService {
         data: { reservationId: reserved.reservationId, state: 'reserved', outcome: null, outcomeWhy: null, pendingOutcome: null, completedAt: null, attempts: 0, lastError: null },
       });
       await ticketNote(hold.ticketId, hold.workspaceId, `Assetron: the approval request is live again, so ${assetLabel(hold.asset)} is back on hold.`);
+      return true;
     } catch (err) {
-      await prisma.assetronReservation.update({ where: { id: hold.id }, data: { outcomeWhy: 'expired_not_rereserved', lastError: String(err.message).slice(0, 1000) } });
+      await prisma.assetronReservation.update({ where: { id: hold.id }, data: { outcomeWhy: 'not_rereserved', lastError: String(err.message).slice(0, 1000) } });
       await ticketNote(hold.ticketId, hold.workspaceId, `Assetron: the approval request is live again but ${assetLabel(hold.asset)} could not be held again (${err.message}). Pick another laptop on the approval.`);
+      return false;
     }
   }
 
@@ -300,8 +331,28 @@ class AssetronReservationService {
     if (!hardware) throw bad('Pick a laptop and who it is for');
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId }, select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true } });
     const existing = await prisma.assetronReservation.findUnique({ where: { requestGroupId: approval.requestGroupId } });
-    const reserved = await this.reserve({ ticket, requestGroupId: approval.requestGroupId, hardware, actor });
-    if (existing && existing.state === 'reserved' && existing.reservationId !== reserved.reservationId) {
+    const sameLaptop = existing && existing.state === 'reserved' && existing.assetId === hardware.assetId;
+    if (sameLaptop) {
+      if (String(existing.recipientEmail || '').toLowerCase() === hardware.recipient.email.toLowerCase()) return this.forGroup(approval.requestGroupId);
+      // Assetron answers a second POST for the same ticket + laptop with the
+      // EXISTING reservation (and its old recipient). A new person on the same
+      // laptop therefore needs the old reservation closed first.
+      await assetronClient.decideReservation(existing.reservationId, {
+        status: 'CANCELLED', decidedBy: { email: actor?.email || null, displayName: actor?.name || actor?.email || null }, decidedAt: new Date().toISOString(),
+        reason: 'Ticket Pulse: the laptop is now for someone else',
+      });
+      await prisma.assetronReservation.update({ where: { id: existing.id }, data: { state: 'released', outcome: 'CANCELLED', outcomeWhy: 'replaced', completedAt: new Date() } });
+    }
+    let reserved;
+    try {
+      reserved = await this.reserve({ ticket, requestGroupId: approval.requestGroupId, hardware, actor });
+    } catch (err) {
+      if (sameLaptop) {
+        await ticketNote(ticketId, workspaceId, `Assetron: ${assetLabel(existing.asset)} was released to change who it is for, but could not be held again for ${hardware.recipient.name || hardware.recipient.email} (${err.message}). Pick the laptop again on the approval.`);
+      }
+      throw err;
+    }
+    if (!sameLaptop && existing && existing.state === 'reserved' && existing.reservationId !== reserved.reservationId) {
       try {
         await assetronClient.decideReservation(existing.reservationId, {
           status: 'CANCELLED', decidedBy: { email: actor?.email || null, displayName: actor?.name || null }, decidedAt: new Date().toISOString(),
@@ -365,6 +416,27 @@ class AssetronReservationService {
       this.reconcile().catch((err) => logger.warn(`Assetron sweep failed (non-fatal): ${err.message}`)).finally(() => { this._running = false; });
     }, SWEEP_MS);
     if (this._timer.unref) this._timer.unref();
+    // One connection check after boot, so the log says straight away whether
+    // the token, the role grant and the base URL work (go-live, 26 Sep 2026).
+    if (this.isConfigured()) {
+      const t = setTimeout(() => { this.checkConnection().catch(() => {}); }, 20_000);
+      if (t.unref) t.unref();
+    }
+  }
+
+  /** Reads filter-options once; logs and returns what happened. */
+  async checkConnection() {
+    if (!this.isConfigured()) return { ok: false, error: 'not configured' };
+    try {
+      const options = await assetronClient.filterOptions();
+      const keys = Object.keys(options || {});
+      logger.info(`Assetron connected: filter-options answered with ${keys.length} filters (${keys.join(', ')})`);
+      return { ok: true, filters: keys };
+    } catch (err) {
+      const why = err instanceof AssetronError ? `${err.status ?? 'no answer'} ${err.code}${err.reason ? ` ${err.reason}` : ''}: ${err.message}` : err.message;
+      logger.warn(`Assetron connection check failed — ${why}`);
+      return { ok: false, error: why };
+    }
   }
 
   stop() { if (this._timer) clearInterval(this._timer); this._timer = null; }
