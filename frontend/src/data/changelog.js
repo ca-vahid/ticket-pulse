@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.87-preview';
+export const APP_VERSION = '3.9.88-preview';
 
 export const changelog = [
+  {
+    version: '3.9.88-preview',
+    date: 'September 25, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Ticket Pulse uses more of your FreshService allowance</strong> &mdash; the Enterprise plan allows 500 FreshService requests a minute; Ticket Pulse held itself to 110. It now starts at 200 and tunes itself up towards 300, backing off by itself if FreshService ever says slow down, and keeps each type of request under FreshService\'s own limit for it. Background work waits less, and the busy-hour queue timeouts should mostly disappear.' },
+      { type: 'improved', html: '<strong>Open tickets are re-checked once an hour</strong> &mdash; the background check that catches tickets deleted or quietly reassigned in FreshService re-read every open ticket every few minutes. It now checks each at most once an hour, which frees most of what it used; normal changes still arrive within five minutes.' },
+      { type: 'improved', html: '<strong>Missing FreshService notes fill in newest first, and faster at night</strong> &mdash; the background pass that fetches notes and replies written in FreshService now starts with the most recent tickets and keeps a faster pace in the evenings and at weekends.' },
+    ],
+  },
   {
     version: '3.9.87-preview',
     date: 'September 25, 2026',

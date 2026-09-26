@@ -11,15 +11,47 @@ import { FreshServiceRateLimiter } from './rateLimiter.js';
 export const FORBIDDEN_TICKET = Object.freeze({ __forbidden: true });
 
 // Shared per-process singleton rate limiter so ALL callsites and workspaces
-// share a single budget against FreshService. Enterprise per-minute cap is
-// typically 140/min on /agents — we cap at 110 to leave headroom and avoid
-// burst-detection 429s.
+// share a single budget against FreshService.
+//
+// 25 Sep 2026: the Enterprise plan allows 500 requests a minute account-wide,
+// with sub-limits per operation (list tickets 140, view/create/update ticket
+// 160, list agents/requesters 140) — the fixed 110/min we used before was about
+// a fifth of it. The cap now self-tunes between a floor and a ceiling (it
+// backs off 20% on each 429), stays at 60% of the account limit so other tools
+// on the account keep room, and each sub-limited operation has its own cap
+// under FreshService's. FS_RATE_CEILING / FS_RATE_START override in an emergency.
+export const FS_CLASS_CAPS = Object.freeze({
+  ticket_list: 110,
+  ticket_view: 130,
+  ticket_write: 130,
+  agent_list: 110,
+  requester_list: 110,
+});
+
+/** Which FreshService sub-limit a request counts against (null = only the account limit). */
+export function fsOperationClass(method, url) {
+  const m = String(method || '').toLowerCase();
+  const path = String(url || '').split('?')[0];
+  if (m === 'get' && (path === '/tickets' || path === '/tickets/filter')) return 'ticket_list';
+  if (m === 'get' && /^\/tickets\/\d+$/.test(path)) return 'ticket_view';
+  if ((m === 'post' && path === '/tickets') || (m === 'put' && /^\/tickets\/\d+$/.test(path))) return 'ticket_write';
+  if (m === 'get' && path === '/agents') return 'agent_list';
+  if (m === 'get' && path === '/requesters') return 'requester_list';
+  return null;
+}
+
 let SHARED_RATE_LIMITER = null;
 function getSharedRateLimiter() {
   if (!SHARED_RATE_LIMITER) {
+    const ceiling = Number(process.env.FS_RATE_CEILING) || 300;
+    const start = Math.min(Number(process.env.FS_RATE_START) || 200, ceiling);
     SHARED_RATE_LIMITER = new FreshServiceRateLimiter({
-      maxRequestsPerMinute: 110,
-      minDelayMs: 550,
+      maxRequestsPerMinute: start,
+      ceilingPerMinute: ceiling,
+      floorPerMinute: 100,
+      minDelayMs: 150,
+      maxConcurrent: 5,
+      classCaps: FS_CLASS_CAPS,
     });
   }
   return SHARED_RATE_LIMITER;
@@ -261,6 +293,7 @@ class FreshServiceClient {
         priority: this.rateLimitPriority,
         source: this.rateLimitSource,
         maxWaitMs: this.rateLimitMaxWaitMs,
+        opClass: fsOperationClass(method, url),
       },
     );
   }
