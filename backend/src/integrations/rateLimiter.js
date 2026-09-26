@@ -19,6 +19,13 @@ function normalizePriority(priority) {
  *  - Honors Retry-After on 429 via a global pause
  *  - Does NOT adapt based on x-ratelimit-remaining because that header is
  *    per-endpoint on Freshworks and caused a death spiral with /activities
+ *  - Self-tuning cap (25 Sep 2026): the Enterprise plan allows 500 requests a
+ *    minute account-wide, with per-operation sub-limits (list tickets 140,
+ *    view/create/update ticket 160). The old fixed 110 used a fifth of it.
+ *    The cap starts at `maxRequestsPerMinute`, drops 20% on every 429 (never
+ *    below `floorPerMinute`), and after 10 quiet minutes climbs 10/min at a
+ *    time back towards `ceilingPerMinute`. Per-operation caps (`classCaps`,
+ *    keyed by the request's opClass) keep each sub-limit under FreshService's.
  */
 export class FreshServiceRateLimiter {
   constructor({
@@ -26,8 +33,20 @@ export class FreshServiceRateLimiter {
     minDelayMs = 550,
     maxConcurrent = 3,
     highBurstLimit = 5,
+    ceilingPerMinute = null,
+    floorPerMinute = null,
+    classCaps = {},
   } = {}) {
     this.maxRequestsPerMinute = maxRequestsPerMinute;
+    this.ceilingPerMinute = ceilingPerMinute || maxRequestsPerMinute;
+    this.floorPerMinute = Math.min(floorPerMinute || maxRequestsPerMinute, maxRequestsPerMinute);
+    this.classCaps = { ...classCaps };
+    this.classLaunches = {};   // opClass -> [launch timestamps, last 60 s]
+    this.lastThrottleAt = 0;
+    this.lastRaiseAt = 0;
+    this.throttles = 0;        // 429s seen (total)
+    this.throttlesSinceSummary = 0;
+    this.lastSummaryAt = Date.now();
     this.minDelayMs = minDelayMs;
     this.maxConcurrent = maxConcurrent;
     this.highBurstLimit = Math.max(1, highBurstLimit);
@@ -53,26 +72,57 @@ export class FreshServiceRateLimiter {
     return this.queues.high.length + this.queues.normal.length + this.queues.low.length;
   }
 
+  /** Is another request of this operation class allowed in the current minute? */
+  _classOpen(opClass, now = Date.now()) {
+    const cap = opClass ? this.classCaps[opClass] : null;
+    if (!cap) return true;
+    const recent = (this.classLaunches[opClass] || []).filter((t) => now - t < 60000);
+    this.classLaunches[opClass] = recent;
+    return recent.length < cap;
+  }
+
+  /** First item in a queue whose operation class still has room (expired ones count as eligible — they are dropped). */
+  _takeEligible(queue, now) {
+    const idx = queue.findIndex((it) => it.expired || this._classOpen(it.opClass, now));
+    if (idx < 0) return null;
+    return queue.splice(idx, 1)[0];
+  }
+
   _dequeueNext() {
+    const now = Date.now();
     const hasHigh = this.queues.high.length > 0;
     const hasNormal = this.queues.normal.length > 0;
     const hasLow = this.queues.low.length > 0;
 
     if (hasHigh && (this.highBurstCount < this.highBurstLimit || (!hasNormal && !hasLow))) {
-      this.highBurstCount++;
-      return this.queues.high.shift();
+      const item = this._takeEligible(this.queues.high, now);
+      if (item) {
+        this.highBurstCount++;
+        return item;
+      }
     }
 
     if (hasNormal) {
-      this.highBurstCount = 0;
-      return this.queues.normal.shift();
+      const item = this._takeEligible(this.queues.normal, now);
+      if (item) {
+        this.highBurstCount = 0;
+        return item;
+      }
     }
 
     if (hasLow) {
-      this.highBurstCount = 0;
-      return this.queues.low.shift();
+      const item = this._takeEligible(this.queues.low, now);
+      if (item) {
+        this.highBurstCount = 0;
+        return item;
+      }
     }
 
+    // High items skipped for the burst limit still go when nothing else can.
+    if (hasHigh) {
+      const item = this._takeEligible(this.queues.high, now);
+      if (item) return item;
+    }
     return null;
   }
 
@@ -94,6 +144,7 @@ export class FreshServiceRateLimiter {
         reject,
         priority,
         source: options.source || null,
+        opClass: options.opClass || null,
         expired: false,
         expireTimer: null,
       };
@@ -130,9 +181,14 @@ export class FreshServiceRateLimiter {
         // Block here until we're allowed to launch the next request
         await this._waitForLaunchWindow();
 
-        // Still have an item? (someone could have drained us)
+        // Still have an item? (someone could have drained us, or every queued
+        // request is of an operation class that is at its per-minute cap)
         const item = this._dequeueNext();
-        if (!item) break;
+        if (!item) {
+          if (this._totalQueueDepth() === 0) break;
+          await this._sleep(250);
+          continue;
+        }
 
         // Queue-wait timeout already rejected this one — drop it without
         // burning a launch slot.
@@ -141,6 +197,7 @@ export class FreshServiceRateLimiter {
 
         const now = Date.now();
         this.recentLaunches.push(now);
+        if (item.opClass) (this.classLaunches[item.opClass] ||= []).push(now);
         this.lastLaunchAt = now;
         this.inFlight++;
 
@@ -177,6 +234,7 @@ export class FreshServiceRateLimiter {
 
       // Purge launches older than 60s
       this.recentLaunches = this.recentLaunches.filter((t) => now - t < 60000);
+      this._retune(now);
 
       // Gate 1: 429 pause
       if (this.slowdownUntil > now) {
@@ -212,6 +270,24 @@ export class FreshServiceRateLimiter {
     }
   }
 
+  /**
+   * Climb back towards the ceiling after 10 minutes without a 429, 10/min at a
+   * time; log a one-line summary an hour so the review can watch the cap.
+   */
+  _retune(now = Date.now()) {
+    if (this.maxRequestsPerMinute < this.ceilingPerMinute
+      && now - this.lastThrottleAt >= 10 * 60 * 1000
+      && now - this.lastRaiseAt >= 60 * 1000) {
+      this.maxRequestsPerMinute = Math.min(this.ceilingPerMinute, this.maxRequestsPerMinute + 10);
+      this.lastRaiseAt = now;
+    }
+    if (now - this.lastSummaryAt >= 60 * 60 * 1000) {
+      logger.info(`RateLimiter: cap ${this.maxRequestsPerMinute}/min (floor ${this.floorPerMinute}, ceiling ${this.ceilingPerMinute}), 429s this hour ${this.throttlesSinceSummary}, queue timeouts total ${this.queueTimeouts}, launched last minute ${this.recentLaunches.length}`);
+      this.lastSummaryAt = now;
+      this.throttlesSinceSummary = 0;
+    }
+  }
+
   /** Observational hook — kept for diagnostics but no longer adjusts pacing. */
   onResponse(_headers) { /* intentionally empty: per-endpoint sub-limits made this misleading */ }
 
@@ -219,8 +295,16 @@ export class FreshServiceRateLimiter {
   on429(headers) {
     const retryAfterSec = parseInt(headers?.['retry-after'], 10);
     const waitSec = !Number.isNaN(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec : 10;
-    this.slowdownUntil = Math.max(this.slowdownUntil, Date.now() + waitSec * 1000);
-    logger.warn(`RateLimiter: 429 — pausing queue for ${waitSec}s (Retry-After: ${retryAfterSec || 'default'}), ${this._totalQueueDepth()} queued, ${this.inFlight} in-flight`);
+    const now = Date.now();
+    this.slowdownUntil = Math.max(this.slowdownUntil, now + waitSec * 1000);
+    this.throttles += 1;
+    this.throttlesSinceSummary += 1;
+    // One cut per burst of 429s: several in-flight calls can bounce at once.
+    if (now - this.lastThrottleAt > 5000) {
+      this.maxRequestsPerMinute = Math.max(this.floorPerMinute, Math.floor(this.maxRequestsPerMinute * 0.8));
+    }
+    this.lastThrottleAt = now;
+    logger.warn(`RateLimiter: 429 — pausing queue for ${waitSec}s (Retry-After: ${retryAfterSec || 'default'}), ${this._totalQueueDepth()} queued, ${this.inFlight} in-flight; cap now ${this.maxRequestsPerMinute}/min`);
   }
 
   getStats() {
@@ -237,6 +321,9 @@ export class FreshServiceRateLimiter {
       queueDepth: this._totalQueueDepth(),
       queueDepthByPriority,
       maxRequestsPerMinute: this.maxRequestsPerMinute,
+      ceilingPerMinute: this.ceilingPerMinute,
+      floorPerMinute: this.floorPerMinute,
+      throttles: this.throttles,
       maxConcurrent: this.maxConcurrent,
       minDelayMs: this.minDelayMs,
       highBurstLimit: this.highBurstLimit,

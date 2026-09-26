@@ -136,6 +136,8 @@ const getSSEManager = async () => {
 // Exported: syncHealthService uses the same threshold to void the in-flight
 // "a sync is running" credit for hung runs.
 export const SYNC_LOCK_STALE_MS = 20 * 60 * 1000;
+// Open-ticket reconcile: re-check an open FS ticket at most this often.
+export const RECONCILE_RECHECK_MS = 60 * 60 * 1000;
 
 /**
  * Service for syncing data from FreshService
@@ -4645,6 +4647,14 @@ class SyncService {
         // pruning a TP-born ticket's mirror copy must not delete the original.
         origin: TICKET_ORIGIN.FRESHSERVICE,
         status: { notIn: TERMINAL_STATUSES },
+        // 25 Sep 2026 (Vahid): each open ticket at most once an hour. This
+        // check re-read every open ticket every few minutes — 60–78 of the
+        // old 110 calls a minute — only to catch deletions and silent
+        // reassignments, which the 5-minute sync cannot see.
+        OR: [
+          { lastReconciledAt: null },
+          { lastReconciledAt: { lt: new Date(Date.now() - RECONCILE_RECHECK_MS) } },
+        ],
       },
       select: { id: true, freshserviceTicketId: true, subject: true, status: true, assignedTechId: true },
       // Dedicated cursor (TU-3e): never-reconciled rows first, then the stalest

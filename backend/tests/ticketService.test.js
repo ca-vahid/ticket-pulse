@@ -99,7 +99,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
   MAX_ATTACHMENTS_PER_TICKET: 20,
 }));
 
-const { default: ticketService, deriveQueueState, deriveStateChip } = await import('../src/services/ticketService.js');
+const { default: ticketService, deriveQueueState, deriveStateChip, describeOversizeBody } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { ValidationError, ExternalAPIError } = await import('../src/utils/errors.js');
 
@@ -2562,5 +2562,26 @@ describe('ticketService.forwardTicket — two-lane delivery', () => {
 
   test('still refuses without a valid destination', async () => {
     await expect(ticketService.forwardTicket(501, 1, { to: ['not-an-email'] }, actor)).rejects.toThrow(/valid destination/);
+  });
+});
+
+describe('describeOversizeBody — what a "too long to send" body is made of (25 Sep 2026)', () => {
+  test('counts embedded pictures by type, VML images, style blocks and base64 runs', () => {
+    const b64 = 'A'.repeat(5000);
+    const html = `<style>p{margin:0}</style><p>Hi</p><img src="data:image/png;base64,${b64}"><img src='data:image/svg+xml;base64,${b64}'>`
+      + '<v:imagedata src="x"></v:imagedata><img src="cid:image001.png">';
+    const d = describeOversizeBody(html);
+    expect(d.length).toBe(html.length);
+    expect(d.imgTags).toBe(3);
+    expect(d.dataUris).toEqual({ 'image/png': 1, 'image/svg+xml': 1 });
+    expect(d.vmlImages).toBe(1);
+    expect(d.styleBytes).toBe('<style>p{margin:0}</style>'.length);
+    expect(d.base64Runs).toBe(2);
+    expect(d.longestBase64Run).toBeGreaterThanOrEqual(5000);
+  });
+
+  test('an ordinary body describes as small and harmless', () => {
+    expect(describeOversizeBody('<p>Thanks, done.</p>')).toMatchObject({ imgTags: 0, dataUris: {}, base64Runs: 0 });
+    expect(describeOversizeBody(null).length).toBe(0);
   });
 });

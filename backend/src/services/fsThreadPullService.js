@@ -61,7 +61,7 @@ const GAP_SQL = (days) => `
   WHERE t.workspace_id = $1
     AND t.origin = 'freshservice'
     AND t.freshservice_ticket_id IS NOT NULL
-    AND t.id > $2 AND t.id <= $3
+    AND t.id < $2 AND t.id >= $3
     ${days ? `AND t.created_at > now() - interval '${Number(days)} days'` : ''}
     AND (t.fs_thread_pulled_at IS NULL OR t.freshservice_updated_at > t.fs_thread_pulled_at)
     AND (SELECT count(*) FROM ticket_thread_entries a
@@ -69,7 +69,7 @@ const GAP_SQL = (days) => `
            AND a.content ~* '(added a (private |public )?note|replied|forwarded)')
       > (SELECT count(*) FROM ticket_thread_entries c
          WHERE c.ticket_id = t.id AND c.source = 'freshservice_conversation')
-  ORDER BY t.id
+  ORDER BY t.id DESC
   LIMIT 50`;
 
 class FsThreadPullService {
@@ -148,7 +148,11 @@ class FsThreadPullService {
         this.stats.deferred += 1;
         return;
       }
-      const perTick = depth >= BUSY_QUEUE_DEPTH ? 1 : (isQuietHours(new Date(now)) ? PULLS_PER_TICK_QUIET : PULLS_PER_TICK);
+      // Quiet hours (20:00–05:59 PT, weekends) open wider: the regular night
+      // load keeps 30–60 queued and the budget still has room (25 Sep 2026).
+      const perTick = isQuietHours(new Date(now))
+        ? (depth < 60 ? PULLS_PER_TICK_QUIET : 3)
+        : (depth < BUSY_QUEUE_DEPTH ? PULLS_PER_TICK : 1);
       if (depth >= BUSY_QUEUE_DEPTH) this.stats.trickled += 1;
       const due = [...this.queue.entries()]
         .filter(([, v]) => v.dueAt <= now)
@@ -243,7 +247,7 @@ class FsThreadPullService {
       const s = raw ? JSON.parse(raw) : null;
       if (s && Number.isInteger(s.phase)) return s;
     } catch { /* fresh start */ }
-    return { phase: 0, afterId: 0, queued: 0, startedAt: new Date().toISOString() };
+    return { phase: 0, beforeId: null, queued: 0, startedAt: new Date().toISOString() };
   }
 
   async _maxTicketId() {
@@ -254,8 +258,9 @@ class FsThreadPullService {
   /**
    * One step of the gap sweep: scan the next ticket-id range of the current
    * phase and queue the tickets whose stored conversation falls short of their
-   * activity feed. Wraps round after the last phase, so it keeps catching new
-   * gaps after the backfill is done.
+   * activity feed. Newest first (descending ids, 25 Sep 2026 — recent tickets
+   * matter most to briefs and follow-ups). Wraps round after the last phase,
+   * so it keeps catching new gaps after the backfill is done.
    */
   async sweepStep() {
     if (this.queue.size >= SWEEP_QUEUE_CEILING) return { skipped: 'queue_full' };
@@ -263,8 +268,10 @@ class FsThreadPullService {
     const state = await this._state();
     const phase = SWEEP_PHASES[state.phase % SWEEP_PHASES.length];
     const maxId = await this._maxTicketId();
-    const from = state.afterId || 0;
-    const to = from + SWEEP_SCAN_IDS;
+    // An old ascending state (afterId) restarts the phase from the top; ranges
+    // already swept are cheap to re-read (their tickets carry the marker).
+    const from = Number.isFinite(Number(state.beforeId)) && state.beforeId !== null ? Number(state.beforeId) : maxId + 1;
+    const to = Math.max(0, from - SWEEP_SCAN_IDS);
     const rows = await prisma.$queryRawUnsafe(GAP_SQL(phase.days), phase.workspaceId, from, to).catch((err) => {
       logger.warn(`FS thread gap sweep query failed (non-fatal): ${err.message}`);
       return null;
@@ -273,17 +280,19 @@ class FsThreadPullService {
     for (const r of rows) {
       if (this.enqueue(r.id, r.workspaceId, 'backfill', { delayMs: 0 })) this.stats.sweepQueued += 1;
     }
-    // A full page means more gaps inside this range: resume after the last one.
+    // A full page means more gaps inside this range: resume below the last one.
     let next = rows.length >= 50 ? Number(rows[rows.length - 1].id) : to;
     let nextPhase = state.phase;
-    if (next >= maxId) {
+    if (next <= 0) {
       logger.info(`FS thread gap sweep finished phase ${state.phase % SWEEP_PHASES.length} (ws${phase.workspaceId}${phase.days ? `, last ${phase.days} days` : ''})`);
       nextPhase = (state.phase + 1) % SWEEP_PHASES.length;
-      next = 0;
+      next = null;
     }
-    const newState = { ...state, phase: nextPhase, afterId: next, queued: (state.queued || 0) + rows.length, updatedAt: new Date().toISOString() };
+    const rest = { ...state };
+    delete rest.afterId;
+    const newState = { ...rest, phase: nextPhase, beforeId: next, queued: (state.queued || 0) + rows.length, updatedAt: new Date().toISOString() };
     await settingsRepository.set(STATE_KEY, JSON.stringify(newState)).catch(() => {});
-    return { queued: rows.length, phase: state.phase, afterId: next };
+    return { queued: rows.length, phase: state.phase, beforeId: next };
   }
 
   /** Notes gap per workspace: FS-born tickets whose activity shows more notes/replies than stored conversation rows. */

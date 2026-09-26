@@ -320,6 +320,36 @@ const updateTicketSchema = z.object({
 const fsSubjectSchema = z.string().trim().min(3).max(500);
 const fsDescriptionSchema = z.string().max(100000).nullable();
 
+// "This message is too long to send" (Marcus, 24 and 25 Sep 2026): the
+// composer's paste path turns embedded pictures into attachments, yet some
+// pastes still arrive over the limit and the rejected body is never stored.
+// Log what an oversize body is made of, so the next one names its cause.
+export function describeOversizeBody(html) {
+  const s = typeof html === 'string' ? html : '';
+  const dataUris = {};
+  for (const m of s.matchAll(/data:([a-z0-9.+/-]+)[;,]/gi)) {
+    const k = m[1].toLowerCase();
+    dataUris[k] = (dataUris[k] || 0) + 1;
+  }
+  const runs = s.match(/[A-Za-z0-9+/=]{2000,}/g) || [];
+  return {
+    length: s.length,
+    imgTags: (s.match(/<img\b/gi) || []).length,
+    dataUris,
+    vmlImages: (s.match(/<v:imagedata\b/gi) || []).length,
+    styleBytes: (s.match(/<style[\s\S]*?<\/style>/gi) || []).reduce((n, b) => n + b.length, 0),
+    base64Runs: runs.length,
+    longestBase64Run: runs.reduce((n, r) => Math.max(n, r.length), 0),
+  };
+}
+
+function logOversizeBody(html, context = {}) {
+  if (typeof html !== 'string' || html.length <= 200000) return;
+  try {
+    logger.warn('Oversize message body rejected', { ...context, ...describeOversizeBody(html) });
+  } catch { /* diagnostics only */ }
+}
+
 const threadBodySchema = z.object({
   bodyHtml: z.string().max(200000, 'This message is too long to send. If you pasted pictures into the text, attach them as files instead.').optional().nullable(),
   bodyText: z.string().max(200000, 'This message is too long to send.').optional().nullable(),
@@ -4261,6 +4291,7 @@ class TicketService {
       throw new ValidationError('This FreshService ticket has no FS id to reply through');
     }
 
+    logOversizeBody(input?.bodyHtml, { ticketId: ticket.id, kind: isPrivate ? 'note' : 'reply' });
     const parsed = threadBodySchema.safeParse(input || {});
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     // Public replies reach the ticket's "Also for" list ∪ the composer cc
@@ -4626,6 +4657,7 @@ class TicketService {
 
     // Same validation/derivation as the create path: zod-checked body, trimmed
     // html, plain-text derived via stripHtml when the client sent none.
+    logOversizeBody(input?.bodyHtml, { kind: 'note_edit' });
     const parsed = threadBodySchema.safeParse({ bodyHtml: input?.bodyHtml, bodyText: input?.bodyText });
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
