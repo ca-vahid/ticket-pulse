@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import GradientTabBar from '../components/common/GradientTabBar';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
 import { aiProviderAPI, assignmentAPI, workspaceAPI } from '../services/api';
@@ -5077,62 +5078,41 @@ export default function AssignmentReview() {
       activePage="assignments"
       headerProps={{ extraActions: activeTab === 'queue' ? assignmentHeaderAction : null }}
     >
-      {/* Purple gradient tab bar */}
-      <div className="flex-shrink-0 pb-3">
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-md px-1.5 sm:px-2 py-1 flex items-center gap-0.5 sm:gap-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            const badge = tab.id === 'competency-requests' ? competencyRequestCount : 0;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap touch-manipulation ${
-                  isActive
-                    ? 'bg-white/25 text-white shadow-sm'
-                    : 'text-white opacity-70 hover:bg-white/15 hover:opacity-100'
-                }`}
-              >
-                <Icon className="w-5 h-5 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">{tab.label}</span>
-                {badge > 0 && (
-                  <span className="ml-0.5 rounded-full bg-amber-300 px-1.5 py-0.5 text-[10px] font-bold leading-none text-amber-950 dark:text-amber-200">
-                    {badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-
-          {/* Time-range filter — visible on Ticket Queue tab, integrated into the purple header */}
-          {activeTab === 'queue' && (
-            <>
-              <div className="flex-1" />
-              <div className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-white/15 ring-1 ring-white/20 p-0.5">
-                {['24h', '7d', '30d', 'all'].map((range) => (
-                  <button
-                    key={range}
-                    type="button"
-                    onClick={() => setTimeRange(range)}
-                    title={range === '24h' ? 'Current Pacific day' : undefined}
-                    className={`rounded px-2 py-1 text-[11px] font-semibold transition-all touch-manipulation ${
-                      timeRange === range
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-white/80 hover:text-white hover:bg-white/10'
-                    }`}
-                  >
-                    {range === 'all' ? 'All' : range === '24h' ? 'Today' : range}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+      {/* Purple gradient tab bar (shared with Knowledge — components/common/GradientTabBar) */}
+      <GradientTabBar
+        tabs={TABS.map((tab) => ({ ...tab, badge: tab.id === 'competency-requests' ? competencyRequestCount : 0 }))}
+        activeId={activeTab}
+        onSelect={setActiveTab}
+        ariaLabel="Assignment sections"
+        idPrefix="assignment"
+      >
+        {/* Time-range filter — visible on Ticket Queue tab, integrated into the purple header */}
+        {activeTab === 'queue' && (
+          <>
+            <div className="flex-1" />
+            <div className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-white/15 ring-1 ring-white/20 p-0.5">
+              {['24h', '7d', '30d', 'all'].map((range) => (
+                <button
+                  key={range}
+                  type="button"
+                  onClick={() => setTimeRange(range)}
+                  title={range === '24h' ? 'Current Pacific day' : undefined}
+                  className={`rounded px-2 py-1 text-[11px] font-semibold transition-all touch-manipulation ${
+                    timeRange === range
+                      ? 'bg-card text-foreground shadow-sm'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {range === 'all' ? 'All' : range === '24h' ? 'Today' : range}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </GradientTabBar>
 
       {/* Content */}
-      <div>
+      <div role="tabpanel" id={`assignment-panel-${activeTab}`} aria-labelledby={`assignment-tab-${activeTab}`}>
         <div className="min-h-full bg-card rounded-xl border border-border shadow-sm">
           <div className="px-2 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}

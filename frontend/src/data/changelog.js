@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.90-preview';
+export const APP_VERSION = '3.9.91-preview';
 
 export const changelog = [
+  {
+    version: '3.9.91-preview',
+    date: 'September 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Knowledge has the same tab bar as Assignment, and its own Settings tab</strong> &mdash; the Articles, Playbooks, Waiting and Activity tabs now sit in the blue-to-purple bar used on the Assignment page, the page title row is gone (the header already says Knowledge), and the Auto-help switch and the automated-answer line moved to a new <em>Settings</em> tab, with the wording and a live preview of what requesters read.' },
+    ],
+  },
   {
     version: '3.9.90-preview',
     date: 'September 25, 2026',

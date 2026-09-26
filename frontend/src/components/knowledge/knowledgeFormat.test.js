@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, expect, test } from 'vitest';
 import { readableReason } from './knowledgeFormat';
-import { renderDisclosure } from './KnowledgeSettingsStrip';
+import { renderDisclosure } from './KnowledgeSettingsPanel';
 import { sanitizeRichHtml } from '../tickets/RichTextEditor';
 
 describe('Knowledge QA 09-25 helpers', () => {
