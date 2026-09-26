@@ -33,7 +33,7 @@ class AssetronError extends Error {
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
-jest.unstable_mockModule('../src/integrations/assetronClient.js', () => ({ default: clientMock, AssetronError }));
+jest.unstable_mockModule('../src/integrations/assetronClient.js', () => ({ default: clientMock, AssetronError, assetronConfig: () => ({ auth: 'entra' }) }));
 jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: { getUserProfile: jest.fn(async () => ({ id: 'entra-oid-1' })) } }));
 
 const { default: svc, desiredOutcome, assetLabel } = await import('../src/services/assetronReservationService.js');

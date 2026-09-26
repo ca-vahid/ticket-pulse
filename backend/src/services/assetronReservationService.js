@@ -21,7 +21,7 @@
 import crypto from 'node:crypto';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import assetronClient, { AssetronError } from '../integrations/assetronClient.js';
+import assetronClient, { AssetronError, assetronConfig } from '../integrations/assetronClient.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
@@ -430,8 +430,9 @@ class AssetronReservationService {
     try {
       const options = await assetronClient.filterOptions();
       const keys = Object.keys(options || {});
-      logger.info(`Assetron connected: filter-options answered with ${keys.length} filters (${keys.join(', ')})`);
-      return { ok: true, filters: keys };
+      const { auth } = assetronConfig();
+      logger.info(`Assetron connected (${auth === 'key' ? 'API key' : 'Entra'}): filter-options answered with ${keys.length} filters (${keys.join(', ')})`);
+      return { ok: true, auth, filters: keys };
     } catch (err) {
       const why = err instanceof AssetronError ? `${err.status ?? 'no answer'} ${err.code}${err.reason ? ` ${err.reason}` : ''}: ${err.message}` : err.message;
       logger.warn(`Assetron connection check failed — ${why}`);
