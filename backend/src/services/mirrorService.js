@@ -133,6 +133,17 @@ export function isGroupMembershipRejection(err) {
   return /member of the group/i.test(String(err?.message || ''));
 }
 
+// Refused assignees are re-asked at most every 6 h per ticket+assignee (and
+// once after a restart), so adding the person to the FS group heals the copy
+// by itself without a refused round trip on every sync in between.
+const GROUP_REFUSAL_RETRY_MS = 6 * 60 * 60 * 1000;
+const groupRefusalAsked = new Map();
+
+/** The note _mirrorFields leaves on a ticket when FS refuses its assignee for the copy's group. */
+export function groupRefusalNote(name) {
+  return `${name || 'The assignee'} isn't in the FreshService group on the FreshService copy, so the assignee wasn't copied there. Add them to that group in FreshService or change the copy's group.`;
+}
+
 function textToHtml(text) {
   if (!text) return '';
   return `<p>${String(text)
@@ -842,6 +853,16 @@ class MirrorService {
       cc_emails: mirrorCcEmails(ticket),
     };
     let assigneeNote = null;
+    // Already refused for this same assignee: don't ask again on every sync
+    // (26 Sep: 19 refused round trips an hour on four Sentinel tickets). A new
+    // assignee, or the note cleared by a later successful sync, asks again.
+    const refusalKey = `${ticket.id}:${ticket.assignedTech?.id ?? ''}`;
+    const lastAsked = groupRefusalAsked.get(refusalKey) || 0;
+    if (payload.responder_id && ticket.assignedTech && ticket.mirrorError === groupRefusalNote(ticket.assignedTech.name)
+      && Date.now() - lastAsked < GROUP_REFUSAL_RETRY_MS) {
+      payload.responder_id = undefined;
+      assigneeNote = ticket.mirrorError;
+    }
     try {
       await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
     } catch (err) {
@@ -852,10 +873,12 @@ class MirrorService {
         logger.warn(`Mirror: FreshService rejected cc_emails on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, cc_emails: undefined });
       } else if (payload.responder_id && isGroupMembershipRejection(err)) {
+        if (groupRefusalAsked.size >= 1000) groupRefusalAsked.clear(); // bounded (Jul 9 leak lesson)
+        groupRefusalAsked.set(`${ticket.id}:${ticket.assignedTech?.id ?? ''}`, Date.now());
         // Keep the rest of the sync (status, priority, due date…) and leave the
         // copy's assignee alone; say why on the ticket instead of retrying.
         const who = ticket.assignedTech?.name || 'The assignee';
-        assigneeNote = `${who} isn't in the FreshService group on the FreshService copy, so the assignee wasn't copied there. Add them to that group in FreshService or change the copy's group.`;
+        assigneeNote = groupRefusalNote(ticket.assignedTech?.name);
         logger.warn(`Mirror: FreshService refused assignee ${who} on #${ticket.freshserviceTicketId} (not in the copy's group) — synced the other fields without the assignee`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, responder_id: undefined });
       } else {

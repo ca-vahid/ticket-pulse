@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { readCache } from '../services/dashboardReadCache.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { AppError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { locateTicketWorkspaceForUser } from '../services/ticketWorkspaceLocator.js';
@@ -293,7 +294,11 @@ router.get('/meta', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...meta, actor: req.ticketActor, ...(replyGreeting ? { replyGreeting } : {}) } });
 }));
 
-router.get('/stats', asyncHandler(async (req, res) => {
+// Stat cards: several tabs (and the page + its refresh) asked at the same
+// moment and each ran 17 counts on the 9-connection pool — 2-3.5 s in the
+// slow-request log (26 Sep). Identical requests now share one computation;
+// the 2 s window keeps cards honest right after an assign or status change.
+router.get('/stats', readCache(2000), asyncHandler(async (req, res) => {
   const stats = await ticketService.getQueueStats(req.workspaceId);
   res.json({ success: true, data: stats });
 }));
