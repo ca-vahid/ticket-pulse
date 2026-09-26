@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.91-preview';
+export const APP_VERSION = '3.9.92-preview';
 
 export const changelog = [
+  {
+    version: '3.9.92-preview',
+    date: 'September 26, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Assetron: the same laptop for a different person</strong> — changing only who a held laptop is for now really moves the hold to the new person in Assetron (it used to keep the old person there).' },
+      { type: 'fixed', html: '<strong>Assetron: late approvals</strong> — an approval that lands after the request expired, or a rejection changed to an approval, now takes the laptop back and assigns it. An approval changed to a rejection after the laptop was assigned leaves a note to return it in Assetron.' },
+      { type: 'improved', html: '<strong>Laptop picker</strong> — results read on one line per laptop, with the warranty as month and year.' },
+    ],
+  },
   {
     version: '3.9.91-preview',
     date: 'September 26, 2026',

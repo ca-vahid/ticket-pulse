@@ -10,7 +10,7 @@ const api = {
 };
 vi.mock('../../services/api', () => ({ ticketsAPI: new Proxy({}, { get: (_t, k) => (...a) => api[k](...a) }) }));
 
-const { default: LaptopPicker } = await import('./LaptopPicker');
+const { default: LaptopPicker, warrantyLabel } = await import('./LaptopPicker');
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -44,6 +44,12 @@ describe('LaptopPicker (Assetron)', () => {
     await waitFor(() => expect(screen.getByText('Dell Latitude 7650')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /Pick/ }));
     expect(onChange).toHaveBeenCalledWith(LAPTOP);
+  });
+
+  test('warranty reads as month and year; odd values pass through', () => {
+    expect(warrantyLabel('2029-05-02')).toBe('May 2029');
+    expect(warrantyLabel(null)).toBe('—');
+    expect(warrantyLabel('soon')).toBe('soon');
   });
 
   test('an empty result says how to fix it', async () => {
