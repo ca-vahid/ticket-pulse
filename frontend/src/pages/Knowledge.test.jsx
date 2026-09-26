@@ -98,14 +98,26 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe('Knowledge page', () => {
-  test('renders the four tabs and the settings strip; /knowledge lands on Articles', async () => {
+  test('renders the five tabs with no page header; /knowledge lands on Articles; settings live on their own tab', async () => {
     renderAt('/knowledge');
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Playbooks', 'Waiting', 'Activity']);
+    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Playbooks', 'Waiting', 'Activity', 'Settings']);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByTestId('knowledge-settings')).toBeInTheDocument();
-    expect(screen.getByText(/Auto-help on for this workspace/)).toBeInTheDocument();
     expect(await screen.findByText('No articles yet')).toBeInTheDocument();
+    // 26 Sep 2026 (Vahid): no "Knowledge — Answers we can stand behind…" header, no settings above the tabs.
+    expect(screen.queryByText(/Answers we can stand behind/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('knowledge-settings')).not.toBeInTheDocument();
+  });
+
+  test('the Settings tab holds the Auto-help switch and the automated-answer line with a live preview', async () => {
+    renderAt('/knowledge/settings');
+    expect(await screen.findByTestId('knowledge-settings')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Settings/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/Auto-help on for this workspace/)).toBeInTheDocument();
+    const wording = screen.getByLabelText('Automated-answer wording');
+    fireEvent.change(wording, { target: { value: 'Automated reply from {{workspace}}.' } });
+    expect(screen.getByTestId('disclosure-preview')).toHaveTextContent(/Automated reply from/);
+    expect(screen.getByRole('button', { name: /Save wording/ })).toBeEnabled();
   });
 
   test('Waiting explains it fills once sending is on', async () => {
@@ -113,12 +125,17 @@ describe('Knowledge page', () => {
     expect(await screen.findByTestId('waiting-empty')).toHaveTextContent(/once sending is switched on/);
   });
 
-  test('people who cannot manage see a read-only line, not the switches', async () => {
-    api.getSettings.mockResolvedValueOnce({ success: true, data: { ...SETTINGS, canManage: false } });
+  test('people who cannot manage see read-only playbooks and read-only settings', async () => {
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, canManage: false } });
     renderAt('/knowledge/playbooks');
-    expect(await screen.findByTestId('knowledge-settings-readonly')).toHaveTextContent(/off for this workspace/);
     expect(await screen.findByText('Software installs')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /New playbook/ })).not.toBeInTheDocument();
+    cleanup();
+    renderAt('/knowledge/settings');
+    expect(await screen.findByTestId('knowledge-settings-readonly')).toHaveTextContent(/off for this workspace/);
+    expect(screen.getByRole('switch', { name: /Auto-help on for this workspace/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Save wording/ })).not.toBeInTheDocument();
+    api.getSettings.mockResolvedValue({ success: true, data: SETTINGS });
   });
 
   test('the playbook editor saves (mode stays shadow, keywords split)', async () => {
@@ -165,14 +182,14 @@ describe('Knowledge page', () => {
     expect(result).toHaveTextContent('Ticket is marked noise');
   });
 
-  test('slim unboxed header; tabs are a keyboard tablist with aria-controls and primary-blue selection', async () => {
+  test('no page header; the shared gradient tab bar is a keyboard tablist with aria-controls', async () => {
     renderAt('/knowledge/articles');
-    const h1 = await screen.findByRole('heading', { level: 1, name: 'Knowledge' });
-    expect(h1.closest('.tp-card')).toBeNull();
     const tabs = await screen.findAllByRole('tab');
+    expect(screen.queryByRole('heading', { level: 1, name: 'Knowledge' })).not.toBeInTheDocument();
     expect(tabs[0]).toHaveAttribute('aria-controls', 'knowledge-panel-articles');
-    expect(tabs[0].className).toMatch(/text-primary/);
-    expect(tabs[0].className).not.toMatch(/teal/);
+    // Same look as the Assignment page's bar: selected tab lifted on the blue→purple gradient.
+    expect(tabs[0].className).toMatch(/bg-white\/25/);
+    expect(tabs[0].closest('.bg-gradient-to-r')).not.toBeNull();
     expect(tabs[0]).toHaveAttribute('tabindex', '0');
     expect(tabs[1]).toHaveAttribute('tabindex', '-1');
     const panel = await screen.findByRole('tabpanel');
@@ -183,8 +200,8 @@ describe('Knowledge page', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: /Playbooks/ })).toHaveAttribute('aria-selected', 'true'));
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Playbooks/ }));
     fireEvent.keyDown(screen.getByRole('tab', { name: /Playbooks/ }), { key: 'End' });
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Activity/ })).toHaveAttribute('aria-selected', 'true'));
-    fireEvent.keyDown(screen.getByRole('tab', { name: /Activity/ }), { key: 'ArrowRight' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Settings/ })).toHaveAttribute('aria-selected', 'true'));
+    fireEvent.keyDown(screen.getByRole('tab', { name: /Settings/ }), { key: 'ArrowRight' });
     await waitFor(() => expect(screen.getByRole('tab', { name: /Articles/ })).toHaveAttribute('aria-selected', 'true'));
   });
 
