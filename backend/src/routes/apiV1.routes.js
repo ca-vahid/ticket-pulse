@@ -138,6 +138,10 @@ function ticketShape(t) {
     resolutionReason: t.resolutionReason || null,
     resolutionNote: t.resolutionNote || null,
     resolvedByKind: t.resolvedByKind || null,
+    // Auto-help integration W4: the first answer sent by automation (an
+    // auto-sent Auto-help answer). Kept apart from the first agent response,
+    // which only a person's reply stops. null until then.
+    firstAutomatedReplyAt: t.firstAutomatedReplyAt || null,
     // Roll-up (Simorgh B8): every child is done; a person closes the parent.
     readyToCloseAt: t.readyToCloseAt || null,
     // Alert occurrences (Sentinel integration): 0 = not an alert ticket.

@@ -80,3 +80,22 @@ describe('the update_ticket node is wired to it', () => {
     expect(src).toMatch(/statusService\.baseStatusOf\(ticket\.workspaceId, to\)/);
   });
 });
+
+describe('workflowResolvedByKind — a workflow only claims a close it made', () => {
+  test('open → Resolved/Closed by a workflow: "workflow"', async () => {
+    const { workflowResolvedByKind } = await import('../src/services/notificationWorkflowEngine.js');
+    expect(workflowResolvedByKind({ wasTerminal: false, current: null })).toBe('workflow');
+    expect(workflowResolvedByKind({ wasTerminal: false, current: 'auto_help' })).toBe('workflow');
+  });
+
+  test('Resolved → Closed by a workflow keeps who resolved it (Auto-help, a person)', async () => {
+    const { workflowResolvedByKind } = await import('../src/services/notificationWorkflowEngine.js');
+    expect(workflowResolvedByKind({ wasTerminal: true, current: 'auto_help' })).toBeUndefined();
+    expect(workflowResolvedByKind({ wasTerminal: true, current: 'human' })).toBeUndefined();
+    expect(workflowResolvedByKind({ wasTerminal: true, current: null })).toBe('workflow');
+  });
+
+  test('the update_ticket node uses it', () => {
+    expect(src).toMatch(/const kind = workflowResolvedByKind\(\{ wasTerminal, current: ticket\.resolvedByKind \}\);/);
+  });
+});

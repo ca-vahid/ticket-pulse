@@ -199,6 +199,17 @@ export async function noteTerminal(ticketId, at = new Date(), { workspaceId = nu
 }
 
 /**
+ * Auto-help (P1): a reopen within 7 days of an Auto-help resolution counts
+ * against the answer; a flip undone by the 10-minute rule restores it.
+ * Fire-and-forget, never throws.
+ */
+function notifyAutoHelp(what, ticketId, at) {
+  import('./autoHelpFollowUpService.js')
+    .then(({ default: followUp }) => (what === 'reopen' ? followUp.onReopened(ticketId, at) : followUp.onReopenUndone(ticketId, at)))
+    .catch((err) => logger.debug?.(`Auto-help reopen bookkeeping skipped for ticket ${ticketId}: ${err.message}`));
+}
+
+/**
  * Single entry for status writers: resolves both labels to their workspace
  * BASE (custom statuses included) and stamps or undoes. Never throws.
  * Returns 'reopen' | 'terminal' | null (what it acted on).
@@ -213,8 +224,20 @@ export async function observeStatusTransition({ ticketId, workspaceId, from, to,
       statusService.resolveBaseStatus(workspaceId, toName),
     ]);
     const kind = classifyTransition(fromBase, toBase);
-    if (kind === 'reopen') await stampReopen(ticketId, at);
-    else if (kind === 'terminal') await noteTerminal(ticketId, at, { workspaceId });
+    if (kind === 'reopen') {
+      // Every reopen path reports here (native, workflow update_ticket, FS
+      // sync, reconcile): an open ticket is resolved by no one — so an
+      // Auto-help close stops being counted as one (P1 audit).
+      await prisma.ticket.updateMany({
+        where: { id: Number(ticketId), resolvedByKind: { not: null } },
+        data: { resolvedByKind: null },
+      }).catch((err) => logger.debug?.(`resolvedByKind not cleared on reopen of ticket ${ticketId}: ${err.message}`));
+      await stampReopen(ticketId, at);
+      notifyAutoHelp('reopen', ticketId, at);
+    } else if (kind === 'terminal') {
+      const undone = await noteTerminal(ticketId, at, { workspaceId });
+      if (undone) notifyAutoHelp('undone', ticketId, at);
+    }
     return kind;
   } catch (err) {
     logger.warn(`reopen bookkeeping skipped for ticket ${ticketId}: ${err.message}`);

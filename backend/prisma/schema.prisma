@@ -866,6 +866,7 @@ model TicketProposedReply {
   decidedBy         String?   @map("decided_by") @db.VarChar(255)
   decidedAt         DateTime? @map("decided_at")
   sentThreadEntryId Int?      @map("sent_thread_entry_id")
+  autoHelpRunId     Int?      @map("auto_help_run_id") // source 'auto_help': the run that drafted it
   createdAt         DateTime  @default(now()) @map("created_at")
 
   @@index([ticketId, status])
@@ -1566,6 +1567,14 @@ model Ticket {
   // Closed to Open to Closed in seconds). Shown as the "Re-opened" state while open.
   reopenedAt         DateTime? @map("reopened_at") @db.Timestamptz(6)
   reopenCount        Int       @default(0) @map("reopen_count")
+  // Auto-help integration W2 (plans/AUTO_HELP_INTEGRATION_PLAN.md): who owns the
+  // FIRST reply — agent > auto_help (grounded answer) > workflow_draft. Taken
+  // under the per-ticket proposal advisory lock; ref = 'run:<id>' | 'proposal:<id>' | 'entry:<id>'.
+  replyOwner         String?   @map("reply_owner") @db.VarChar(20)
+  replyOwnerRef      String?   @map("reply_owner_ref") @db.VarChar(80)
+  // W4: first answer sent by automation (an auto-sent Auto-help answer). Never
+  // stops the first-response clock unless auto_help_settings.counts_as_first_response.
+  firstAutomatedReplyAt DateTime? @map("first_automated_reply_at") @db.Timestamptz(6)
 
   // Partial unique index in SQL (WHERE external_ref IS NOT NULL) — one
   // ticket per (workspace, ref); the P2002 on it is the concurrent-create
@@ -3958,9 +3967,50 @@ model KnowledgeArticle {
   reviewEveryDays Int       @default(180) @map("review_every_days")
   // Section chunks (R2): [{ heading, text, embedding }] split on h1-h4.
   sections        Json?
+  // Auto-help P1 "Knowledge that grows": FreshService import bookkeeping
+  // (fs_solution) and where a drafted article came from (tickets that fed it).
+  fsUpdatedAt     DateTime? @map("fs_updated_at") @db.Timestamptz(6)
+  sourceMeta      Json?     @map("source_meta")
 
   @@index([workspaceId, status], map: "idx_knowledge_articles_ws_status")
+  // Partial unique index in SQL only (Prisma cannot express WHERE):
+  // knowledge_articles_ws_source_external_id_key (workspace_id, source,
+  // external_id) WHERE external_id IS NOT NULL — migration 20260926030000.
   @@map("knowledge_articles")
+}
+
+// Auto-help P1: verified-solution vectors (subject + solution note only,
+// never internal notes), refreshed nightly by content hash
+// (solutionEmbeddingService). No FK: the job drops rows whose ticket lost
+// its verified mark.
+model TicketSolutionEmbedding {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  ticketId    Int      @unique @map("ticket_id")
+  categoryId  Int?     @map("category_id")
+  embedding   Float[]
+  model       String   @db.VarChar(80)
+  contentHash String   @map("content_hash") @db.VarChar(64)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, categoryId], map: "idx_ticket_solution_embeddings_ws_cat")
+  @@map("ticket_solution_embeddings")
+}
+
+// Auto-help P1: per-workspace Knowledge switches (FreshService solution
+// import, weekly review digest). Both default off.
+model KnowledgeSettings {
+  workspaceId         Int       @id @map("workspace_id")
+  fsImportEnabled     Boolean   @default(false) @map("fs_import_enabled")
+  fsFolderIds         String[]  @default([]) @map("fs_folder_ids")
+  fsImportState       Json?     @map("fs_import_state")
+  fsImportedAt        DateTime? @map("fs_imported_at") @db.Timestamptz(6)
+  reviewDigestEnabled Boolean   @default(false) @map("review_digest_enabled")
+  reviewDigestSentAt  DateTime? @map("review_digest_sent_at") @db.Timestamptz(6)
+  updatedBy           String?   @map("updated_by") @db.VarChar(255)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("knowledge_settings")
 }
 
 model AutoHelpPlaybook {
@@ -3981,6 +4031,11 @@ model AutoHelpPlaybook {
   minConfidence         Float    @default(0.8) @map("min_confidence")
   followUp              Json?    @map("follow_up") // { nudgeAfterBusinessDays, closeAfterBusinessDays, nudgeText, onSilence }
   onHelp                String   @default("assign_normally") @map("on_help") @db.VarChar(40)
+  // Password / MFA / access / security: approve-only, never auto (P1).
+  sensitive             Boolean  @default(false)
+  // "Stay quiet when" (26 Sep 2026): hard-stop conditions for this playbook, on
+  // top of the workspace's list (auto_help_settings.always_stay_quiet_when).
+  stayQuietWhen         String[] @default([]) @map("stay_quiet_when")
   priority              Int      @default(100)
   version               Int      @default(1)
   createdBy             String?  @map("created_by") @db.VarChar(255)
@@ -4026,12 +4081,96 @@ model AutoHelpRun {
   reviewNote      String?   @map("review_note") @db.Text
   reviewedBy      String?   @map("reviewed_by") @db.VarChar(255)
   reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  // P1: what the agent did with a staged answer, kept apart from the follow-up outcome.
+  decision        String?   @db.VarChar(30) // agent_sent | agent_edited_sent | agent_dismissed | auto_sent
+  decidedAt       DateTime? @map("decided_at") @db.Timestamptz(6)
+  decidedBy       String?   @map("decided_by") @db.VarChar(255)
+  editDistance    Float?    @map("edit_distance") // normalized 0..1 (agent_edited_sent)
+  dismissReason   String?   @map("dismiss_reason") @db.VarChar(40) // wrong_answer | not_needed | other
+  outcomeDetail   Json?     @map("outcome_detail") // { history: [{ at, step, ... }], parkId, nudgeEntryId, ... }
+  costUsd         Float?    @map("cost_usd")
+  inputTokens     Int?      @map("input_tokens")
+  outputTokens    Int?      @map("output_tokens")
+  // Loop safety (P1 audit): the follow-up promise frozen at send (nudge/close days,
+  // texts, onSilence/onHelp, the promised dates, assignee at send), and the atomic
+  // claims that keep the sweep and a requester reply from both acting.
+  followUpPlan       Json?     @map("follow_up_plan")
+  requesterRepliedAt DateTime? @map("requester_replied_at") @db.Timestamptz(6)
+  closeClaimedAt     DateTime? @map("close_claimed_at") @db.Timestamptz(6)
 
   @@index([workspaceId, createdAt], map: "idx_auto_help_runs_ws_created")
   @@index([ticketId], map: "idx_auto_help_runs_ticket")
   @@index([workspaceId, requesterId, createdAt], map: "idx_auto_help_runs_requester")
   @@index([status, createdAt], map: "idx_auto_help_runs_status_created")
+  // Partial indexes in SQL only (Prisma cannot express WHERE) - migration
+  // 20260926020000_auto_help_p1_core:
+  //   idx_auto_help_runs_reply_claim (requester_replied_at) WHERE outcome IS NULL AND requester_replied_at IS NOT NULL
+  //   idx_auto_help_runs_close_claim (close_claimed_at) WHERE outcome IS NULL AND close_claimed_at IS NOT NULL
+  //   idx_auto_help_runs_open_loops (decided_at) WHERE outcome IS NULL AND decision IS NOT NULL
   @@map("auto_help_runs")
+}
+
+/// Auto-help spend that happens after a run was created (reply classification),
+/// booked in the month it happened so the monthly cost cap sees it (P1 audit).
+model AutoHelpCostEntry {
+  id           Int      @id @default(autoincrement())
+  workspaceId  Int      @map("workspace_id")
+  runId        Int?     @map("run_id")
+  playbookId   Int?     @map("playbook_id")
+  kind         String   @db.VarChar(30) // reply_check
+  costUsd      Float    @map("cost_usd")
+  inputTokens  Int?     @map("input_tokens")
+  outputTokens Int?     @map("output_tokens")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_auto_help_cost_entries_ws_created")
+  @@index([runId], map: "idx_auto_help_cost_entries_run")
+  @@map("auto_help_cost_entries")
+}
+
+/// Durable Auto-help trigger queue (integration W5). One row per settle
+/// (dedupe_key), claimed with a conditional update, retried with backoff,
+/// never run once older than 6 h. Drained by the park sweep.
+model AutoHelpJob {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  ticketId    Int       @map("ticket_id")
+  trigger     String    @db.VarChar(30) // intake_settled
+  dedupeKey   String    @map("dedupe_key") @db.VarChar(120)
+  payload     Json?
+  status      String    @default("pending") @db.VarChar(20) // pending | running | done | failed | expired
+  attempts    Int       @default(0)
+  runAfter    DateTime  @default(now()) @map("run_after") @db.Timestamptz(6)
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz(6)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+  lastError   String?   @map("last_error") @db.Text
+  result      Json?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([dedupeKey], map: "uq_auto_help_jobs_dedupe")
+  @@index([status, runAfter], map: "idx_auto_help_jobs_status_run_after")
+  @@index([ticketId], map: "idx_auto_help_jobs_ticket")
+  @@map("auto_help_jobs")
+}
+
+/// "Ticket arrived" ack held back for an Auto-help answer (integration W3, ack
+/// merge). pending → merging (the answer is being sent) → consumed (the ack
+/// line rode on the answer), or → released (the workflow sent the ack itself).
+model AutoHelpPendingAck {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  ticketId      Int       @map("ticket_id")
+  workflowRunId Int?      @map("workflow_run_id")
+  nodeId        String?   @map("node_id") @db.VarChar(120)
+  ackText       String    @map("ack_text") @db.Text
+  status        String    @default("pending") @db.VarChar(20)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedRunId Int?      @map("consumed_run_id")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ticketId, status], map: "idx_auto_help_pending_acks_ticket_status")
+  @@map("auto_help_pending_acks")
 }
 
 model AutoHelpSettings {
@@ -4039,6 +4178,19 @@ model AutoHelpSettings {
   enabled           Boolean  @default(false)
   disclosureEnabled Boolean  @default(true) @map("disclosure_enabled")
   disclosureText    String?  @map("disclosure_text") @db.Text
+  // P1: approve mode switch, monthly model-cost cap (USD, null = none), thank-you on a confirmed fix.
+  approveModeEnabled Boolean @default(false) @map("approve_mode_enabled")
+  monthlyCostCapUsd  Float?  @map("monthly_cost_cap_usd")
+  thankOnConfirm     Boolean @default(false) @map("thank_on_confirm")
+  // W4: an auto-sent answer stops the first-response clock only when this is on.
+  countsAsFirstResponse Boolean @default(false) @map("counts_as_first_response")
+  // When Auto-help was last switched ON (off -> on). The catch-up sweeps never
+  // re-queue a settle from before it (audit, 26 Sep 2026).
+  enabledAt             DateTime? @map("enabled_at") @db.Timestamptz(6)
+  // "Always stay quiet when" (26 Sep 2026): hard-stop conditions for every
+  // playbook here. Seeded with three defaults; keep in step with the SQL
+  // default and autoHelpPlaybookService.DEFAULT_ALWAYS_STAY_QUIET.
+  alwaysStayQuietWhen String[] @default(["Any sign of a security incident or a possibly compromised account (phishing, suspicious sign-ins, hacked, breach)", "The requester is complaining about IT or is frustrated with a previous answer", "HR, legal, or personal matters"]) @map("always_stay_quiet_when")
   updatedBy         String?  @map("updated_by") @db.VarChar(255)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

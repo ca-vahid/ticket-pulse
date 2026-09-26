@@ -4381,6 +4381,11 @@ class SyncService {
           if (fsStatusName === 'Closed' && !current.closedAt) {
             patch.closedAt = fsTicket.stats?.closed_at ? new Date(fsTicket.stats.closed_at) : now;
           }
+          // Reopened in FreshService: no longer resolved by anyone (an
+          // Auto-help close included — Auto-help P1 audit).
+          if (!TERMINAL_STATUSES.includes(fsStatusName) && TERMINAL_STATUSES.includes(String(current.status))) {
+            patch.resolvedByKind = null;
+          }
         }
 
         // Priority

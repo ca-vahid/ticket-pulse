@@ -1,34 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { BookMarked, FileText, Hourglass, ListChecks, Settings2, X } from 'lucide-react';
+import { BookMarked, FileText, Hourglass, Lightbulb, ListChecks, Settings2, X } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import { knowledgeAPI } from '../services/api';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import KnowledgeSettingsPanel from '../components/knowledge/KnowledgeSettingsPanel';
-import GradientTabBar from '../components/common/GradientTabBar';
+import LightTabBar from '../components/common/LightTabBar';
 import ArticlesPanel from '../components/knowledge/ArticlesPanel';
 import PlaybooksPanel from '../components/knowledge/PlaybooksPanel';
 import WaitingPanel from '../components/knowledge/WaitingPanel';
 import ActivityPanel from '../components/knowledge/ActivityPanel';
+import GapsPanel from '../components/knowledge/GapsPanel';
 import { ConfirmDialog, KnowledgeGuardContext, Loading } from '../components/knowledge/knowledgeUi';
+import { TabActionsContext } from '../components/knowledge/builderUi';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): the articles we can
  * stand behind and the playbooks that use them to draft first answers.
- * Shadow mode only — nothing reaches a requester in this phase.
+ * Shadow and approve modes (P1) — nothing reaches a requester unless an agent sends it.
  *
- * Every tab has its own URL (/knowledge/articles, /playbooks, /waiting,
- * /activity, /settings) and an open article / playbook / run adds its id, so
- * F5 and shared links land where you were. The tab bar is the shared
- * GradientTabBar (the Assignment page's look, WAI-ARIA tabs: arrow keys,
- * Home/End, roving tabindex); the workspace switches live on the Settings tab
+ * Every tab has its own URL (/knowledge/articles, /gaps, /playbooks,
+ * /waiting, /activity, /settings) and an open article / playbook / run adds its id, so
+ * F5 and shared links land where you were. The tab bar is the light
+ * LightTabBar (Knowledge redesign, 26 Sep 2026: soft blue fill + underline on
+ * the selected tab; WAI-ARIA tabs: arrow keys, Home/End, roving tabindex);
+ * its right end carries the open tab's page actions (TabActions portals
+ * them there); the workspace switches live on the Settings tab
  * (26 Sep 2026, Vahid: no page header, settings out of the way). Editors with unsaved changes ask
  * before any in-section navigation (in-app dialog) and before the browser tab
  * closes (the browser's own prompt).
  */
 const TABS = [
   { id: 'articles', label: 'Articles', icon: FileText },
+  { id: 'gaps', label: 'Gaps', icon: Lightbulb },
   { id: 'playbooks', label: 'Playbooks', icon: BookMarked },
   { id: 'waiting', label: 'Waiting', icon: Hourglass },
   { id: 'activity', label: 'Activity', icon: ListChecks },
@@ -44,6 +49,7 @@ export default function Knowledge() {
   const [error, setError] = useState(null);
   const [dirty, setDirtyState] = useState(false);
   const [pendingNav, setPendingNav] = useState(null);
+  const [actionsNode, setActionsNode] = useState(null);
   const dirtyRef = useRef(false);
 
   useEffect(() => {
@@ -84,7 +90,9 @@ export default function Knowledge() {
       <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
         <AppHeader activePage="knowledge" />
         <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-          <GradientTabBar tabs={TABS} activeId={tab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge" />
+          <LightTabBar tabs={TABS} activeId={tab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
+            <div ref={setActionsNode} className="flex flex-wrap items-center justify-end gap-2" data-testid="knowledge-tab-actions" />
+          </LightTabBar>
 
           {error && (
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200" role="alert">
@@ -92,21 +100,24 @@ export default function Knowledge() {
             </div>
           )}
 
-          {!settings && !error ? <Loading label="Loading Knowledge…" /> : (
-            <section
-              role="tabpanel"
-              id={`knowledge-panel-${tab}`}
-              aria-labelledby={`knowledge-tab-${tab}`}
-              tabIndex={-1}
-              className="animate-fadeIn focus:outline-none"
-            >
-              {tab === 'articles' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canManage} />}
-              {tab === 'playbooks' && <PlaybooksPanel itemId={itemId} categories={categories} canManage={canManage} tools={settings?.tools || []} defaults={settings?.defaults || null} />}
-              {tab === 'waiting' && <WaitingPanel />}
-              {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} />}
-              {tab === 'settings' && <KnowledgeSettingsPanel settings={settings} onChange={setSettings} />}
-            </section>
-          )}
+          <TabActionsContext.Provider value={actionsNode}>
+            {!settings && !error ? <Loading label="Loading Knowledge…" /> : (
+              <section
+                role="tabpanel"
+                id={`knowledge-panel-${tab}`}
+                aria-labelledby={`knowledge-tab-${tab}`}
+                tabIndex={-1}
+                className="animate-fadeIn focus:outline-none"
+              >
+                {tab === 'articles' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canManage} />}
+                {tab === 'gaps' && <GapsPanel canManage={canManage} canRefresh={canManage || settings?.canReview === true} />}
+                {tab === 'playbooks' && <PlaybooksPanel itemId={itemId} categories={categories} canManage={canManage} tools={settings?.tools || []} defaults={settings?.defaults || null} />}
+                {tab === 'waiting' && <WaitingPanel />}
+                {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} />}
+                {tab === 'settings' && <KnowledgeSettingsPanel settings={settings} onChange={setSettings} />}
+              </section>
+            )}
+          </TabActionsContext.Provider>
         </main>
         <MobileTabBar />
         <ConfirmDialog

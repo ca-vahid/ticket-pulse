@@ -12,13 +12,14 @@ const prismaMock = {
   workspaceAccess: { findUnique: jest.fn() },
   competencyCategory: { findMany: jest.fn() },
   autoHelpPlaybook: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
-  autoHelpRun: { groupBy: jest.fn() },
+  autoHelpRun: { groupBy: jest.fn(), count: jest.fn(), findMany: jest.fn() },
   autoHelpSettings: { findUnique: jest.fn(), upsert: jest.fn() },
   knowledgeArticle: { findMany: jest.fn(), count: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
   ticket: { findFirst: jest.fn() },
 };
 const runnerMock = {
   runForTicket: jest.fn(), listRuns: jest.fn(), getRun: jest.fn(), latestForTicket: jest.fn(), waiting: jest.fn(), review: jest.fn(), summary: jest.fn(),
+  budgetState: jest.fn(async () => ({ capUsd: null, spentUsd: 0, exhausted: false })),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -29,6 +30,8 @@ jest.unstable_mockModule('../src/services/autoHelpRunner.js', () => ({
 }));
 jest.unstable_mockModule('../src/services/ticketEmbeddingService.js', () => ({
   isEmbeddingConfigured: () => false, embedQueryTexts: jest.fn(async () => null), cosineSimilarity: () => 0,
+  nearestVerifiedSolutions: jest.fn(async () => ({ cosById: new Map(), topIds: [] })),
+  solutionContentOf: () => '', solutionHashOf: () => 'h', EMBEDDING_MODEL: 'text-embedding-3-small',
 }));
 
 const { default: router, canManageKnowledge, _resetTestRateLimit, TEST_RATE_LIMIT } = await import('../src/routes/knowledge.routes.js');
@@ -100,13 +103,19 @@ describe('knowledge routes', () => {
     expect(prismaMock.autoHelpPlaybook.create.mock.calls[0][0].data.mode).toBe('shadow');
   });
 
-  test('approve / auto modes are refused with the next-phase message', async () => {
-    const res = await request(app(ADMIN)).put('/api/knowledge/playbooks/3').send({ mode: 'auto' });
+  test('P1 modes: approve needs the workspace switch, auto is locked in this build', async () => {
+    const res = await request(app(ADMIN)).put('/api/knowledge/playbooks/3').send({ mode: 'approve' });
     expect(res.status).toBe(400);
-    expect(res.body.message).toBe('Approve and auto modes come in the next phase');
+    expect(res.body.code).toBe('auto_help_approve_off');
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true });
+    const auto = await request(app(ADMIN)).put('/api/knowledge/playbooks/3').send({ mode: 'auto' });
+    expect(auto.status).toBe(400);
+    expect(auto.body.message).toBe('Auto sending is switched off in this build');
     const s = await request(app(ADMIN)).put('/api/knowledge/settings').send({ mode: 'approve' });
     expect(s.status).toBe(400);
     expect(prismaMock.autoHelpPlaybook.update).not.toHaveBeenCalled();
+    const settings = await request(app(ADMIN)).get('/api/knowledge/settings');
+    expect(settings.body.data).toMatchObject({ approveModeEnabled: true, modeLocked: false, autoModeAllowed: false, budget: { exhausted: false } });
   });
 
   test('test on a ticket resolves the ref and runs synchronously', async () => {
@@ -170,6 +179,23 @@ describe('knowledge routes', () => {
     expect(settings.body.data).toMatchObject({ canManage: false, canReview: true });
   });
 
+  test('P1 audit: members (agents) cannot delete a playbook; readiness is readable; a playbook with open loops is not deleted', async () => {
+    prismaMock.autoHelpPlaybook.findFirst.mockResolvedValue({ ...PB_ROW, version: 2 });
+    prismaMock.autoHelpRun.findMany.mockResolvedValue([]);
+    expect((await request(app(MEMBER)).delete('/api/knowledge/playbooks/3')).status).toBe(403);
+    const readiness = await request(app(MEMBER)).get('/api/knowledge/playbooks/3/readiness');
+    expect(readiness.status).toBe(200);
+    expect(readiness.body.data).toMatchObject({ met: false, backtest: { gating: false } });
+    prismaMock.autoHelpRun.count.mockResolvedValue(2);
+    const res = await request(app(WS_ADMIN)).delete('/api/knowledge/playbooks/3');
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ code: 'auto_help_playbook_in_use', message: expect.stringMatching(/2 answers from this playbook are still waiting on the requester/) });
+    expect(prismaMock.autoHelpPlaybook.delete).not.toHaveBeenCalled();
+    prismaMock.autoHelpRun.count.mockResolvedValue(0);
+    expect((await request(app(WS_ADMIN)).delete('/api/knowledge/playbooks/3')).status).toBe(200);
+    expect(prismaMock.autoHelpPlaybook.delete).toHaveBeenCalledTimes(1);
+  });
+
   test('R6 per-playbook summary is readable by members', async () => {
     runnerMock.summary.mockResolvedValue([{ playbookId: 3, runs: 4, reviewed: 1 }]);
     const res = await request(app(MEMBER)).get('/api/knowledge/runs-summary?from=2026-09-01');
@@ -185,5 +211,22 @@ describe('knowledge routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.lastVerifiedAt).toBeTruthy();
     expect((await request(app(REVIEWER)).post('/api/knowledge/articles/5/verify')).status).toBe(403);
+  });
+
+  test('"Preview answer" is readable by members; with no test run and no article there is no sample', async () => {
+    const res = await request(app(MEMBER)).get('/api/knowledge/playbooks/3/preview');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ latest: null, sample: null });
+  });
+
+  test('settings carry the default "Always stay quiet when" list for a Restore link, and save an edited list', async () => {
+    const res = await request(app(MEMBER)).get('/api/knowledge/settings');
+    expect(res.body.data.alwaysStayQuietWhen).toHaveLength(3);
+    expect(res.body.data.defaults.alwaysStayQuietWhen).toEqual(res.body.data.alwaysStayQuietWhen);
+    prismaMock.autoHelpSettings.upsert.mockResolvedValue({});
+    const put = await request(app(WS_ADMIN)).put('/api/knowledge/settings').send({ alwaysStayQuietWhen: ['HR matters'] });
+    expect(put.status).toBe(200);
+    expect(prismaMock.autoHelpSettings.upsert.mock.calls[0][0].update.alwaysStayQuietWhen).toEqual(['HR matters']);
+    expect((await request(app(MEMBER)).put('/api/knowledge/settings').send({ alwaysStayQuietWhen: [] })).status).toBe(403);
   });
 });

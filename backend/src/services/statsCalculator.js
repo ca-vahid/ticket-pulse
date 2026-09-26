@@ -8,6 +8,7 @@
 
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import { getLoadLevel } from '../config/constants.js';
+import { AUTO_HELP_RESOLVED_KIND, isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
 
 /**
  * Per-workspace status registry support (Phase 8b, QA 08-04 #12).
@@ -30,6 +31,12 @@ const setsOf = (statusSets) => statusSets || CANONICAL_STATUS_SETS;
 // work, not load. They are counted separately as parkedTicketCount.
 const isOpenWork = (sets, ticket) => sets.openLike.has(ticket.status) && !ticket.parkedUntil;
 const parkedCountOf = (sets, tickets) => (tickets || []).filter((t) => t.parkedUntil && sets.openLike.has(t.status)).length;
+// Auto-help (P1): a ticket Auto-help resolved (tickets.resolved_by_kind
+// 'auto_help') is not the agent's close — it is counted on its own line.
+// The rule lives in utils/autoHelpMetrics.js (one rule for every surface).
+export { AUTO_HELP_RESOLVED_KIND };
+const isAgentClose = (sets, ticket) => sets.terminal.has(ticket.status) && !isAutoHelpResolved(ticket);
+const isAutoHelpClose = (sets, ticket) => sets.terminal.has(ticket.status) && isAutoHelpResolved(ticket);
 
 /**
  * Calculate statistics for a single technician for a given date range
@@ -127,7 +134,16 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     const assignDate = ticket.firstAssignedAt
       ? new Date(ticket.firstAssignedAt)
       : new Date(ticket.createdAt);
-    return sets.terminal.has(ticket.status) &&
+    return isAgentClose(sets, ticket) &&
+           assignDate >= rangeStart &&
+           assignDate <= rangeEnd;
+  }).length;
+  // Resolved by Auto-help (not in closedToday), same assignment-date rule.
+  const autoHelpResolvedToday = tech.tickets.filter(ticket => {
+    const assignDate = ticket.firstAssignedAt
+      ? new Date(ticket.firstAssignedAt)
+      : new Date(ticket.createdAt);
+    return isAutoHelpClose(sets, ticket) &&
            assignDate >= rangeStart &&
            assignDate <= rangeEnd;
   }).length;
@@ -164,6 +180,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     assignedToday,
     assigners,
     closedToday,
+    autoHelpResolvedToday,
     loadLevel,
     openTickets,
     ticketsToday, // Tickets assigned on the selected date (for daily view filtering)
@@ -244,13 +261,16 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
   // Note: We filter by assignment date (consistent with daily view), not close date
   // because closedAt/resolvedAt fields may be null
   const weeklyClosed = weeklyTickets.filter(ticket =>
-    sets.terminal.has(ticket.status),
+    isAgentClose(sets, ticket),
   ).length;
+  // Resolved by Auto-help: not the agent's close (team line only).
+  const weeklyAutoHelpResolved = weeklyTickets.filter(ticket => isAutoHelpClose(sets, ticket)).length;
 
   // Weekly totals
   const weeklyTotalCreated = weeklyTickets.length;
   const weeklyNewTickets = weeklyTotalCreated;
-  const weeklyNetChange = weeklyNewTickets - weeklyClosed;
+  // Auto-help closes leave both sides (a closed ticket is not backlog).
+  const weeklyNetChange = weeklyNewTickets - weeklyAutoHelpResolved - weeklyClosed;
 
   // Daily averages (over 7 days)
   const avgTicketsPerDay = parseFloat((weeklyTotalCreated / 7).toFixed(1));
@@ -288,7 +308,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     ).length;
 
     const dayClosed = dayTickets.filter(ticket =>
-      sets.terminal.has(ticket.status),
+      isAgentClose(sets, ticket),
     ).length;
 
     // CSAT for this day
@@ -336,6 +356,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     weeklyAppAssigned,
     weeklyAssigned,
     weeklyClosed,
+    weeklyAutoHelpResolved,
     assigners, // Array of { name, count } for coordinators who assigned tickets
 
     // Weekly trends
@@ -426,11 +447,15 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     .sort((a, b) => b.count - a.count);
 
   const monthlyClosed = monthlyTickets.filter(ticket =>
-    sets.terminal.has(ticket.status),
+    isAgentClose(sets, ticket),
   ).length;
 
+  // Resolved by Auto-help: not the agent's close (team line only).
+  const monthlyAutoHelpResolved = monthlyTickets.filter(ticket => isAutoHelpClose(sets, ticket)).length;
+
   const monthlyTotalCreated = monthlyTickets.length;
-  const monthlyNetChange = monthlyTotalCreated - monthlyClosed;
+  // Auto-help closes leave both sides (a closed ticket is not backlog).
+  const monthlyNetChange = monthlyTotalCreated - monthlyAutoHelpResolved - monthlyClosed;
 
   // Number of days in the month
   const daysInMonth = Math.round((monthEnd.getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -471,7 +496,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     ).length;
 
     const dayClosed = dayTickets.filter(ticket =>
-      sets.terminal.has(ticket.status),
+      isAgentClose(sets, ticket),
     ).length;
 
     dailyBreakdown.push({
@@ -510,6 +535,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     monthlyAppAssigned,
     monthlyAssigned,
     monthlyClosed,
+    monthlyAutoHelpResolved,
     assigners,
     monthlyNetChange,
 
@@ -570,6 +596,8 @@ export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewi
     openOnlyCount: techsWithLoad.reduce((sum, t) => sum + (t.openOnlyCount || 0), 0),
     pendingCount: techsWithLoad.reduce((sum, t) => sum + (t.pendingCount || 0), 0),
     closedTicketsToday: techsWithLoad.reduce((sum, t) => sum + t.closedToday, 0),
+    // Team line, never per person (Auto-help P1).
+    autoHelpResolvedToday: techsWithLoad.reduce((sum, t) => sum + (t.autoHelpResolvedToday || 0), 0),
     selfPickedToday: techsWithLoad.reduce((sum, t) => sum + t.selfPickedToday, 0),
     appAssignedToday: techsWithLoad.reduce((sum, t) => sum + t.appAssignedToday, 0),
     lightLoad: techsWithLoad.filter(t => t.loadLevel === 'light').length,
@@ -621,6 +649,8 @@ export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezo
     weeklyOpenOnly: techsWithWeeklyStats.reduce((sum, t) => sum + t.openOnlyCount, 0),
     weeklyPending: techsWithWeeklyStats.reduce((sum, t) => sum + t.pendingCount, 0),
     weeklyClosed: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyClosed, 0),
+    // Team line, never per person (Auto-help P1).
+    weeklyAutoHelpResolved: techsWithWeeklyStats.reduce((sum, t) => sum + (t.weeklyAutoHelpResolved || 0), 0),
     weeklySelfPicked: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklySelfPicked, 0),
     weeklyAppAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyAppAssigned, 0),
     weeklyAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyAssigned, 0),
@@ -664,10 +694,10 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     return assignDate >= rangeStart && assignDate <= rangeEnd;
   });
 
-  // Closed tickets assigned on the selected date
-  const closedTicketsOnDate = ticketsOnDate.filter(ticket =>
-    sets.terminal.has(ticket.status),
-  );
+  // Closed tickets assigned on the selected date: the agent's closes only, so
+  // the list and its count agree; Auto-help resolutions get their own list.
+  const closedTicketsOnDate = ticketsOnDate.filter(ticket => isAgentClose(sets, ticket));
+  const autoHelpResolvedTicketsOnDate = ticketsOnDate.filter(ticket => isAutoHelpClose(sets, ticket));
 
   // Helper to check if a ticket was assigned by the app (service account)
   const isAppAssignment = (ticket) =>
@@ -709,6 +739,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     openTicketCount: stats.openTicketCount,
     totalTicketsOnDate: ticketsOnDate.length,
     closedTicketsOnDateCount: closedTicketsOnDate.length,
+    autoHelpResolvedOnDateCount: autoHelpResolvedTicketsOnDate.length,
     selfPickedOnDate: stats.selfPickedToday,
     appAssignedOnDate: stats.appAssignedToday,
     assignedOnDate: stats.assignedToday,
@@ -718,6 +749,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     openTickets,
     ticketsOnDate,
     closedTicketsOnDate,
+    autoHelpResolvedTicketsOnDate,
     selfPickedTickets: selfPickedTicketsToday,
     assignedTickets: assignedTicketsToday,
     selfPickedOpenTickets,
@@ -746,6 +778,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
   let monthAppAssigned = 0;
   let monthAssigned = 0;
   let monthClosed = 0;
+  let monthAutoHelpResolved = 0;
   let monthCSAT = 0;
 
   for (let dayOffset = 0; dayOffset < daysInMonth; dayOffset += 1) {
@@ -760,6 +793,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     let dayAppAssigned = 0;
     let dayAssigned = 0;
     let dayClosed = 0;
+    let dayAutoHelpResolved = 0;
     let dayCSAT = 0;
 
     const techniciansForDay = [];
@@ -785,6 +819,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
       dayAppAssigned += stats.appAssignedToday;
       dayAssigned += stats.assignedToday;
       dayClosed += stats.closedToday;
+      dayAutoHelpResolved += stats.autoHelpResolvedToday || 0;
       dayCSAT += stats.csatCount || 0;
     });
 
@@ -793,6 +828,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     monthAppAssigned += dayAppAssigned;
     monthAssigned += dayAssigned;
     monthClosed += dayClosed;
+    monthAutoHelpResolved += dayAutoHelpResolved;
     monthCSAT += dayCSAT;
 
     dailyBreakdown.push({
@@ -804,6 +840,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
       appAssigned: dayAppAssigned,
       assigned: dayAssigned,
       closed: dayClosed,
+      autoHelpResolved: dayAutoHelpResolved,
       csatCount: dayCSAT,
       technicians: techniciansForDay,
     });
@@ -815,6 +852,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     monthAppAssigned,
     monthAssigned,
     monthClosed,
+    // Team line, never per person (Auto-help P1).
+    monthAutoHelpResolved,
     monthCSAT,
   };
 

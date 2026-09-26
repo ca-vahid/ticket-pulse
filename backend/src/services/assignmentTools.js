@@ -12,6 +12,7 @@ import logger from '../utils/logger.js';
 import { normalizeFreshServiceGroupMemberIds } from './freshServiceGroupGuard.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
+import { countsForAgentMetrics, withAgentMetricTickets } from '../utils/autoHelpMetrics.js';
 
 // Workload scans historically match legacy row variants too (lowercase labels
 // and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
@@ -2205,7 +2206,7 @@ async function getTechTicketHistory(workspaceId, params) {
 
   if (!tech) return { error: `Technician ${tech_id} not found in this workspace` };
 
-  const [tickets, categoryBreakdown, resolutionStats] = await Promise.all([
+  const [tickets, categoryBreakdown, resolutionStats, totalTickets] = await Promise.all([
     prisma.ticket.findMany({
       where: { workspaceId, assignedTechId: tech_id, createdAt: { gte: since } },
       select: {
@@ -2228,6 +2229,7 @@ async function getTechTicketHistory(workspaceId, params) {
         rejectionCount: true,
         createdAt: true,
         resolvedAt: true,
+        resolvedByKind: true,
         isSelfPicked: true,
         internalCategory: { select: { id: true, name: true, parentId: true } },
         internalSubcategory: { select: { id: true, name: true, parentId: true } },
@@ -2241,15 +2243,16 @@ async function getTechTicketHistory(workspaceId, params) {
       _count: true,
       orderBy: { _count: { ticketCategory: 'desc' } },
     }),
+    // Auto-help closes are not the person's (utils/autoHelpMetrics.js): out of
+    // their resolution time and resolved count; the ticket count stays.
     prisma.ticket.aggregate({
-      where: { workspaceId, assignedTechId: tech_id, createdAt: { gte: since } },
-      _count: true,
+      where: withAgentMetricTickets({ workspaceId, assignedTechId: tech_id, createdAt: { gte: since } }),
       _avg: { resolutionTimeSeconds: true },
     }),
+    prisma.ticket.count({ where: { workspaceId, assignedTechId: tech_id, createdAt: { gte: since } } }),
   ]);
 
-  const totalTickets = resolutionStats._count;
-  const resolved = tickets.filter((t) => t.resolvedAt).length;
+  const resolved = tickets.filter((t) => t.resolvedAt && countsForAgentMetrics(t)).length;
   const selfPicked = tickets.filter((t) => t.isSelfPicked).length;
   const taxonomyReviewNeeded = tickets.filter((t) => t.taxonomyReviewNeeded).length;
   const rejectedSignals = tickets.reduce((sum, t) => sum + (t.rejectionCount || 0), 0);

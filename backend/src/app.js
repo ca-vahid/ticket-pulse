@@ -455,6 +455,15 @@ async function initialize() {
       logger.warn('Park sweep failed to start (non-fatal):', e.message);
     }
 
+    // Auto-help settle jobs: their own tick and running guard, never inside
+    // the park sweep (a drain runs model calls — audit S1, 26 Sep 2026).
+    try {
+      const { default: autoHelpIntakeService } = await import('./services/autoHelpIntakeService.js');
+      autoHelpIntakeService.start();
+    } catch (e) {
+      logger.warn('Auto-help job queue failed to start (non-fatal):', e.message);
+    }
+
     // Time-based workflow triggers: ticket.aging / sla_pre_breach / sla_breach.
     try {
       const { default: notificationTimeTriggerService } = await import('./services/notificationTimeTriggerService.js');
@@ -477,6 +486,15 @@ async function initialize() {
       alertCorrelationService.start();
     } catch (e) {
       logger.warn('Alert correlation sweep failed to start (non-fatal):', e.message);
+    }
+
+    // Knowledge growth (Auto-help P1): verified-solution embeddings + FreshService
+    // solution import in quiet hours, review-due digest Mondays 08:00 PT.
+    try {
+      const { default: knowledgeGrowthWorker } = await import('./services/knowledgeGrowthWorker.js');
+      knowledgeGrowthWorker.start();
+    } catch (e) {
+      logger.warn('Knowledge growth worker failed to start (non-fatal):', e.message);
     }
 
     // Custom agent alerts: coalescing flush worker (storm protection).

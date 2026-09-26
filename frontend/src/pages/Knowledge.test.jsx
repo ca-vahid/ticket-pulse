@@ -45,6 +45,9 @@ const api = {
   listPlaybooks: vi.fn(() => Promise.resolve({ success: true, data: [PLAYBOOK] })),
   getPlaybook: vi.fn(() => Promise.resolve({ success: true, data: PLAYBOOK })),
   updatePlaybook: vi.fn((id, data) => Promise.resolve({ success: true, data: { ...PLAYBOOK, ...data, version: 3 } })),
+  createPlaybook: vi.fn((data) => Promise.resolve({ success: true, data: { ...PLAYBOOK, ...data, id: 44, version: 1 } })),
+  deletePlaybook: vi.fn(() => Promise.resolve({ success: true, data: { id: 3, deleted: true } })),
+  playbookPreview: vi.fn(() => Promise.resolve({ success: true, data: { latest: null, sample: null } })),
   testPlaybook: vi.fn(() => Promise.resolve({
     success: true,
     data: {
@@ -64,9 +67,30 @@ const api = {
   verifyArticle: vi.fn(() => Promise.resolve({ success: true, data: { id: 7, lastVerifiedAt: new Date().toISOString(), needsReview: false } })),
   reviewRun: vi.fn((id, data) => Promise.resolve({ success: true, data: { ...RUN_5, reviewVerdict: data.verdict, reviewNote: data.note, reviewedAt: new Date().toISOString(), reviewedBy: 'rev@example.com', reviewedByPerson: { name: 'Rae Viewer' } } })),
   runsSummary: vi.fn(() => Promise.resolve({ success: true, data: [
-    { playbookId: 3, playbookName: 'Software installs', runs: 40, drafted: 30, draftedPct: 75, reviewed: 12, good: 11, goodPct: 92, wrong: 1, readyForApprove: false, bar: { minReviewed: 30, minGoodPct: 85 } },
+    {
+      playbookId: 3, playbookName: 'Software installs', mode: 'approve', sensitive: false, runs: 40, drafted: 30, draftedPct: 75, reviewed: 12, good: 11, goodPct: 92, wrong: 1, readyForApprove: false, bar: { minReviewed: 30, minGoodPct: 85 },
+      // P1 metrics
+      staged: 14, sent: 10, waiting: 2,
+      outcomes: {
+        resolved_silence: { n: 4, pct: 40 }, resolved_confirmed: { n: 2, pct: 20 }, help_requested: { n: 1, pct: 10 },
+        reopened: { n: 1, pct: 10 }, agent_took_over: { n: 0, pct: 0 }, no_reply_left_open: { n: 0, pct: 0 },
+      },
+      approve: { decided: 12, unchanged: { n: 7, pct: 58.3 }, edited: { n: 3, pct: 25, medianEditDistance: 0.12 }, dismissed: { n: 2, pct: 16.7, reasons: { wrong_answer: 1, not_needed: 1, other: 0 } } },
+      csat: { n: 3, avg: 3.7, outOf: 4 },
+      cost: { runsWithCost: 40, totalUsd: 0.8, perRunUsd: 0.02, monthUsd: 0.3, monthRuns: 15, inputTokens: 1, outputTokens: 1 },
+      readiness: {
+        met: false,
+        criteria: [
+          { key: 'reviewed', label: 'At least 30 reviewed shadow drafts', value: 12, target: 30, n: 12, met: false },
+          { key: 'good', label: 'At least 85 % of them good', value: 91.7, target: 85, n: 12, met: true },
+          { key: 'not_sensitive', label: 'Not a sensitive playbook (password, MFA, access, security)', value: 'not sensitive', target: 'not sensitive', n: null, met: true },
+        ],
+      },
+    },
   ] })),
+  playbookReadiness: vi.fn(() => Promise.resolve({ success: true, data: { met: false, autoModeAllowed: false, criteria: [{ key: 'reviewed', label: 'At least 30 reviewed shadow drafts', value: 12, target: 30, n: 12, met: false }] } })),
   waiting: vi.fn(() => Promise.resolve({ success: true, data: [] })),
+  updateSettings: vi.fn((patch) => Promise.resolve({ success: true, data: patch })),
 };
 // Getter: vi.mock is hoisted above `api`, so resolve it lazily.
 // The article Owner picker lists the workspace team (avatar + name).
@@ -74,7 +98,17 @@ const ticketsMeta = vi.hoisted(() => vi.fn(async () => ({ data: { technicians: [
   { id: 1, name: 'Kim Lee', email: 'kim@example.com', photoUrl: null },
   { id: 2, name: 'Sam Agent', email: 'sam@example.com', photoUrl: null },
 ] } })));
-vi.mock('../services/api', () => ({ get knowledgeAPI() { return api; }, ticketsAPI: { meta: ticketsMeta } }));
+// Knowledge that grows (P1): quiet defaults so the P0 tests stay about P0.
+const growthApi = {
+  reviewDigest: vi.fn(() => Promise.resolve({ success: true, data: { count: 0, groups: [] } })),
+  gaps: vi.fn(() => Promise.resolve({ success: true, data: { playbooks: [], totals: { tickets: 0, clusters: 0 } } })),
+  backtestStatus: vi.fn(() => Promise.resolve({ success: true, data: null })),
+  backtestResults: vi.fn(() => Promise.resolve({ success: true, data: { counts: { total: 0 }, runs: [] } })),
+  getSettings: vi.fn(() => Promise.resolve({ success: true, data: { fsImportEnabled: false, fsFolderIds: ['7'], fsImportState: null, reviewDigestEnabled: true, fsCallsAllowed: false } })),
+  updateSettings: vi.fn((patch) => Promise.resolve({ success: true, data: { fsImportEnabled: false, fsFolderIds: ['7'], reviewDigestEnabled: true, fsCallsAllowed: false, ...patch } })),
+  fsFolders: vi.fn(() => Promise.resolve({ success: true, data: { categories: [{ id: '3', name: 'IT how-tos', folders: [{ id: '7', name: 'VPN', description: null }] }] } })),
+};
+vi.mock('../services/api', () => ({ get knowledgeAPI() { return api; }, get knowledgeGrowthAPI() { return growthApi; }, ticketsAPI: { meta: ticketsMeta } }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../components/nav/MobileTabBar', () => ({ default: () => null }));
 vi.mock('../components/tickets/RichTextEditor', () => ({
@@ -98,10 +132,10 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe('Knowledge page', () => {
-  test('renders the five tabs with no page header; /knowledge lands on Articles; settings live on their own tab', async () => {
+  test('renders the six tabs with no page header; /knowledge lands on Articles; settings live on their own tab', async () => {
     renderAt('/knowledge');
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Playbooks', 'Waiting', 'Activity', 'Settings']);
+    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Gaps', 'Playbooks', 'Waiting', 'Activity', 'Settings']);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('No articles yet')).toBeInTheDocument();
     // 26 Sep 2026 (Vahid): no "Knowledge — Answers we can stand behind…" header, no settings above the tabs.
@@ -120,9 +154,61 @@ describe('Knowledge page', () => {
     expect(screen.getByRole('button', { name: /Save wording/ })).toBeEnabled();
   });
 
-  test('Waiting explains it fills once sending is on', async () => {
+  test('P1 settings moved to the Settings tab: approve mode, thank-you, cost cap with spend, auto lock, sources, reviews', async () => {
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, enabled: true, approveModeEnabled: false, thankOnConfirm: false, monthlyCostCapUsd: 50, autoModeAllowed: false, autoModeLockedMessage: 'Auto sending is switched off in this build', budget: { capUsd: 50, spentUsd: 1.25, exhausted: false } } });
+    renderAt('/knowledge/settings');
+    const panel = await screen.findByTestId('knowledge-settings');
+    expect(within(panel).getByRole('heading', { name: 'Auto-help' })).toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: 'Automated-answer line' })).toBeInTheDocument();
+    expect(await within(panel).findByRole('heading', { name: 'Knowledge sources' })).toBeInTheDocument();
+    expect(await within(panel).findByRole('heading', { name: 'Reviews' })).toBeInTheDocument();
+    expect(screen.getByTestId('autohelp-state')).toHaveTextContent('On · shadow');
+    expect(screen.getByTestId('cost-spent')).toHaveTextContent(/1\.25 spent this month/);
+    expect(screen.getByTestId('auto-locked')).toHaveTextContent('Auto sending is switched off in this build');
+    fireEvent.click(screen.getByRole('switch', { name: /Approve mode/ }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ approveModeEnabled: true }));
+    fireEvent.click(screen.getByRole('switch', { name: /Thank the requester/ }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ thankOnConfirm: true }));
+    // First response: editable even while auto mode is locked, and says it only matters for auto mode.
+    expect(screen.getByTestId('first-response-setting')).toHaveTextContent('Only matters for auto mode (not in this build)');
+    fireEvent.click(screen.getByRole('switch', { name: /Count an automated answer as the first response/ }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ countsAsFirstResponse: true }));
+    const cap = screen.getByLabelText('Monthly cost cap');
+    fireEvent.change(cap, { target: { value: '80' } });
+    fireEvent.blur(cap);
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ monthlyCostCapUsd: 80 }));
+    // The FS import folder picker and the review e-mail switch are here too (managers).
+    expect(await screen.findByTestId('fs-folder-picker')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Weekly review e-mail/ })).toBeChecked();
+    expect(screen.getByRole('button', { name: /Import now/ })).toBeInTheDocument();
+    api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
+  });
+
+  test('the workspace switch tells screen readers the real mode, not a stale "(shadow)"', async () => {
+    renderAt('/knowledge/settings');
+    await screen.findByTestId('knowledge-settings');
+    expect(document.getElementById('kh-enabled')).toHaveAttribute('aria-label', expect.stringMatching(/shadow — answers are drafted, never sent/));
+    cleanup();
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, approveModeEnabled: true } });
+    renderAt('/knowledge/settings');
+    await screen.findByTestId('knowledge-settings');
+    await waitFor(() => expect(document.getElementById('kh-enabled').getAttribute('aria-label')).toMatch(/approve mode allowed/));
+    expect(document.getElementById('kh-enabled').getAttribute('aria-label')).not.toMatch(/shadow/);
+    api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
+  });
+
+  test('Waiting explains what waits there', async () => {
     renderAt('/knowledge/waiting');
-    expect(await screen.findByTestId('waiting-empty')).toHaveTextContent(/once sending is switched on/);
+    expect(await screen.findByTestId('waiting-empty')).toHaveTextContent(/answer was sent wait here for the requester/);
+  });
+
+  test('P1 Waiting: next step and when, with the requester as a person', async () => {
+    api.waiting.mockResolvedValueOnce({ success: true, data: [
+      { parkId: 1, ticketId: 55, ticketRef: 'TP-12', subject: 'Install Bluebeam', requesterName: 'Pat Requester', requesterEmail: 'pat@example.com', until: '2026-10-14T17:00:00Z', playbookName: 'Software installs', sentAt: '2026-10-09T17:00:00Z', nudgedAt: null, nextStep: 'nudge' },
+    ] });
+    renderAt('/knowledge/waiting');
+    expect(await screen.findByTestId('waiting-next')).toHaveTextContent(/^Checks in/);
+    expect(screen.getByText('Pat Requester')).toBeInTheDocument();
   });
 
   test('people who cannot manage see read-only playbooks and read-only settings', async () => {
@@ -134,22 +220,65 @@ describe('Knowledge page', () => {
     renderAt('/knowledge/settings');
     expect(await screen.findByTestId('knowledge-settings-readonly')).toHaveTextContent(/off for this workspace/);
     expect(screen.getByRole('switch', { name: /Auto-help on for this workspace/ })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /Approve mode/ })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /Thank the requester/ })).toBeDisabled();
+    expect(screen.getByLabelText('Monthly cost cap')).toBeDisabled();
     expect(screen.queryByRole('button', { name: /Save wording/ })).not.toBeInTheDocument();
+    // Sources + reviews read-only: no folder list call, no Import now.
+    expect(await screen.findByTestId('fs-import-readonly')).toHaveTextContent('1 folder picked.');
+    expect(screen.getByRole('switch', { name: /Weekly review e-mail/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Import now/ })).not.toBeInTheDocument();
+    expect(growthApi.fsFolders).not.toHaveBeenCalled();
     api.getSettings.mockResolvedValue({ success: true, data: SETTINGS });
   });
 
-  test('the playbook editor saves (mode stays shadow, keywords split)', async () => {
+  test('the playbook editor saves (mode stays shadow, keywords as chips)', async () => {
     renderAt('/knowledge/playbooks/3');
     const name = await screen.findByLabelText('Name');
     fireEvent.change(name, { target: { value: 'Software installs v2' } });
-    fireEvent.change(screen.getByLabelText('Only when it mentions any of'), { target: { value: 'install, download' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    const kw = screen.getByLabelText('Only when it mentions any of these terms');
+    fireEvent.change(kw, { target: { value: 'download' } });
+    fireEvent.keyDown(kw, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
     await waitFor(() => expect(api.updatePlaybook).toHaveBeenCalled());
     const [id, payload] = api.updatePlaybook.mock.calls[0];
     expect(id).toBe('3');
     expect(payload).toMatchObject({ name: 'Software installs v2', categoryId: 10, subcategoryIds: [101], match: { keywords: ['install', 'download'] } });
-    expect(payload.mode).toBeUndefined();
-    expect(screen.getByText(/Mode:/)).toHaveTextContent('Shadow');
+    expect(payload).toMatchObject({ mode: 'shadow', sensitive: false, onHelp: 'assign_normally' });
+  });
+
+  test('P1 mode control: approve needs the workspace switch; auto is locked "not in this build"; sensitive is a tick', async () => {
+    renderAt('/knowledge/playbooks/3');
+    fireEvent.click(await screen.findByTestId('mode-control'));
+    const menu = await screen.findByRole('menu', { name: /Mode: Shadow/ });
+    const item = (name) => within(menu).getByRole('menuitemradio', { name: new RegExp(`^${name}`) });
+    expect(item('Shadow')).toHaveAttribute('aria-checked', 'true');
+    expect(item('Approve')).toHaveAttribute('aria-disabled', 'true');
+    expect(item('Auto')).toHaveAttribute('aria-disabled', 'true');
+    expect(menu).toHaveTextContent('Switch approve mode on for the workspace first');
+    expect(item('Auto')).toHaveTextContent('Locked — not in this build');
+    expect(screen.getByTestId('mode-line')).toHaveTextContent('Answers are drafted and recorded, never sent');
+
+    cleanup();
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, approveModeEnabled: true, autoModeAllowed: false, autoModeLockedMessage: 'Auto sending is switched off in this build' } });
+    renderAt('/knowledge/playbooks/3');
+    await screen.findByTestId('mode-control');
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('mode-control'));
+    const menu2 = await screen.findByRole('menu');
+    await waitFor(() => expect(within(menu2).getByRole('menuitemradio', { name: /^Approve/ })).not.toHaveAttribute('aria-disabled'));
+    expect(within(menu2).getByRole('menuitemradio', { name: /^Auto/ })).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(within(menu2).getByRole('menuitemradio', { name: /^Approve/ }));
+    expect(screen.getByTestId('mode-control')).toHaveTextContent('Mode: Approve');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sensitive topic/ }));
+    expect(screen.getByTestId('playbook-header')).toHaveTextContent('Sensitive · approve only');
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
+    await waitFor(() => expect(api.updatePlaybook).toHaveBeenCalled());
+    expect(api.updatePlaybook.mock.calls.at(-1)[1]).toMatchObject({ mode: 'approve', sensitive: true });
+    // The readiness gate lives on the panel's Backtest tab.
+    fireEvent.click(screen.getByRole('tab', { name: /Backtest/ }));
+    expect(await screen.findByTestId('playbook-readiness')).toHaveTextContent('At least 30 reviewed shadow drafts');
+    api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
   });
 
   test('test on a ticket shows the draft, confidence and cited sources', async () => {
@@ -182,14 +311,18 @@ describe('Knowledge page', () => {
     expect(result).toHaveTextContent('Ticket is marked noise');
   });
 
-  test('no page header; the shared gradient tab bar is a keyboard tablist with aria-controls', async () => {
+  test('no page header; the light tab bar is a keyboard tablist with aria-controls and page actions on the right', async () => {
     renderAt('/knowledge/articles');
     const tabs = await screen.findAllByRole('tab');
     expect(screen.queryByRole('heading', { level: 1, name: 'Knowledge' })).not.toBeInTheDocument();
     expect(tabs[0]).toHaveAttribute('aria-controls', 'knowledge-panel-articles');
-    // Same look as the Assignment page's bar: selected tab lifted on the blue→purple gradient.
-    expect(tabs[0].className).toMatch(/bg-white\/25/);
-    expect(tabs[0].closest('.bg-gradient-to-r')).not.toBeNull();
+    // 26 Sep 2026 redesign: light tabs (soft blue fill + underline), not the Assignment gradient.
+    expect(tabs[0].className).toMatch(/border-primary/);
+    expect(tabs[0].className).toMatch(/bg-primary/);
+    expect(tabs[0].closest('[data-testid="light-tab-bar"]')).not.toBeNull();
+    expect(tabs[0].closest('.bg-gradient-to-r')).toBeNull();
+    // The open tab's actions sit in the tab row.
+    expect(within(screen.getByTestId('knowledge-tab-actions')).getByRole('button', { name: /New article/ })).toBeInTheDocument();
     expect(tabs[0]).toHaveAttribute('tabindex', '0');
     expect(tabs[1]).toHaveAttribute('tabindex', '-1');
     const panel = await screen.findByRole('tabpanel');
@@ -197,9 +330,9 @@ describe('Knowledge page', () => {
     expect(panel).toHaveAttribute('aria-labelledby', 'knowledge-tab-articles');
 
     fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Playbooks/ })).toHaveAttribute('aria-selected', 'true'));
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Playbooks/ }));
-    fireEvent.keyDown(screen.getByRole('tab', { name: /Playbooks/ }), { key: 'End' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Gaps/ })).toHaveAttribute('aria-selected', 'true'));
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Gaps/ }));
+    fireEvent.keyDown(screen.getByRole('tab', { name: /Gaps/ }), { key: 'End' });
     await waitFor(() => expect(screen.getByRole('tab', { name: /Settings/ })).toHaveAttribute('aria-selected', 'true'));
     fireEvent.keyDown(screen.getByRole('tab', { name: /Settings/ }), { key: 'ArrowRight' });
     await waitFor(() => expect(screen.getByRole('tab', { name: /Articles/ })).toHaveAttribute('aria-selected', 'true'));
@@ -222,13 +355,16 @@ describe('Knowledge page', () => {
     const detail = await screen.findByTestId('run-detail');
     expect(within(detail).getAllByTestId('person-line')[0]).toHaveTextContent('Jane Roe');
     expect(detail).not.toHaveTextContent('jane.roe@example.com');
+    // A run that did not draft explains itself; it is not "what the requester would get".
+    expect(detail).toHaveTextContent('Why Auto-help didn’t answer');
+    expect(detail).not.toHaveTextContent('What the requester would get');
   });
 
   test('unsaved article edits: switching tabs asks in-app first; Keep editing stays, Discard leaves', async () => {
     renderAt('/knowledge/articles/7');
     const title = await screen.findByLabelText('Title');
     fireEvent.change(title, { target: { value: 'VPN setup (new)' } });
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    expect(screen.getAllByText('Unsaved changes').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('tab', { name: /Playbooks/ }));
     const dialog = await screen.findByRole('alertdialog');
@@ -247,7 +383,8 @@ describe('Knowledge page', () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
     renderAt('/knowledge/articles/7');
     await screen.findByLabelText('Title');
-    fireEvent.click(screen.getByRole('button', { name: /Archive/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Article actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Archive/ }));
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Archive' }));
     await waitFor(() => expect(api.deleteArticle).toHaveBeenCalledWith('7'));
@@ -277,7 +414,7 @@ describe('Knowledge page', () => {
     expect(nudge.value).toMatch(/close this ticket in \{\{days\}\}/);
     expect(screen.getByText(/close this ticket in 3 business days/)).toBeInTheDocument();
     fireEvent.click(optIn);
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
     await waitFor(() => expect(api.updatePlaybook).toHaveBeenCalled());
     expect(api.updatePlaybook.mock.calls[0][1].instructionsAreSource).toBe(true);
   });
@@ -308,13 +445,18 @@ describe('Knowledge page', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Sam Agent' }));
     expect(owner).toHaveAttribute('data-value', 'sam@example.com');
     expect(screen.getByTestId('verify-row')).toHaveTextContent('Never verified · Review due');
-    expect(screen.getByTestId('section-headings')).toHaveTextContent('Install · Uninstall');
+    // "How Auto-help reads it" (the editor's right panel) lists the sections.
+    fireEvent.click(screen.getByRole('tab', { name: /How Auto-help reads it/ }));
+    const sections = screen.getByTestId('section-headings');
+    expect(sections).toHaveTextContent('Install');
+    expect(sections).toHaveTextContent('Uninstall');
+    expect(sections).toHaveAttribute('aria-label', 'Auto-help reads it in sections: Install · Uninstall');
     fireEvent.click(screen.getByRole('button', { name: /Mark as verified/ }));
     await waitFor(() => expect(api.verifyArticle).toHaveBeenCalledWith('7'));
     await waitFor(() => expect(screen.getByTestId('verify-row')).toHaveTextContent('Verified today'));
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Install software from Company Portal' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
     const warn = await screen.findByTestId('similar-titles');
     expect(warn).toHaveTextContent('Install software via the Company Portal');
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -353,9 +495,28 @@ describe('Knowledge page', () => {
     renderAt('/knowledge/activity');
     const strip = await screen.findByTestId('runs-summary');
     expect(strip).toHaveTextContent('Software installs');
-    expect(strip).toHaveTextContent('drafted 75% (N=40)');
-    expect(strip).toHaveTextContent('good 92% (N=12)');
+    expect(strip).toHaveTextContent('drafted 75 % (N=40)');
+    expect(strip).toHaveTextContent('good 92 % (N=12)');
     expect(strip).toHaveTextContent('wrong 1');
-    expect(strip).toHaveTextContent('Ready for approve mode when ≥30 reviewed and ≥85 % good — not met yet');
+    expect(strip).toHaveTextContent('Approve-mode bar (≥30 reviewed, ≥85 % good): not met yet');
+  });
+
+  test('P1 metrics: outcomes and decisions with N, CSAT with N, cost, and the readiness gate line by line', async () => {
+    renderAt('/knowledge/activity');
+    const block = await screen.findByTestId('playbook-metrics');
+    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('Sent answers (N=10)');
+    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('Closed after no reply 4 (40 %)');
+    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('Reopened within 7 days 1 (10 %)');
+    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('still waiting 2');
+    expect(within(block).getByTestId('stat-decisions')).toHaveTextContent('Unchanged 7 (58 %) · edited 3 (25 %) (median change 12 %) · dismissed 2 (17 %) (N=12)');
+    expect(within(block).getByTestId('stat-csat')).toHaveTextContent('Average 3.7 out of 4 across 3 survey answers (N = 3)');
+    expect(within(block).getByTestId('stat-cost')).toHaveTextContent('US$0.0200 per run (N=40) · US$0.30 this month');
+    const gate = within(block).getByRole('button', { name: /2 of 3 lines met/ });
+    expect(gate).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(gate);
+    const list = await within(block).findByTestId('readiness-list');
+    expect(list).toHaveTextContent('At least 30 reviewed shadow drafts');
+    expect(list).toHaveTextContent('not met: 12');
+    expect(list).toHaveTextContent('Auto sending is switched off in this build');
   });
 });

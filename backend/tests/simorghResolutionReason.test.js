@@ -182,7 +182,7 @@ describe('the reason travels everywhere it must', () => {
   });
 
   test('a workflow that resolves stamps its reason and is marked as the resolver', () => {
-    expect(engine).toMatch(/patch\.resolvedByKind = 'workflow'/);
+    expect(engine).toMatch(/const kind = workflowResolvedByKind\(\{ wasTerminal, current: ticket\.resolvedByKind \}\);\s*if \(kind\) patch\.resolvedByKind = kind;/);
     expect(engine).toMatch(/node\.data\?\.resolutionReason/);
   });
 

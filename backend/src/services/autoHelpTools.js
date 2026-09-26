@@ -51,6 +51,17 @@ export const SUBMIT_AUTO_HELP_TOOL = Object.freeze({
       outro: { type: 'string', maxLength: 1000, description: 'An optional closing sentence (not the "reply if you need help" line — that is added for you).' },
       confidence: { type: 'number', minimum: 0, maximum: 1, description: 'How sure you are this fully answers the request (0..1).' },
       reason: { type: 'string', description: 'When not answerable: one line on why (internal, never shown to the requester).' },
+      stayQuiet: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['matched'],
+        description: 'Whether one of the numbered STAY QUIET conditions applies to this request. When matched=true, also set answerable=false and leave steps empty.',
+        properties: {
+          matched: { type: 'boolean', description: 'True when any STAY QUIET condition applies (even partly or possibly).' },
+          conditionIndex: { type: 'integer', minimum: 1, description: 'The number of the condition that applies (as numbered in the rules).' },
+          reason: { type: 'string', maxLength: 300, description: 'One line: what in the request made the condition apply (internal).' },
+        },
+      },
     },
   },
 });

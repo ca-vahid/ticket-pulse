@@ -80,6 +80,74 @@ export async function embedQueryTexts(texts) {
   return embedTexts(texts);
 }
 
+// ---------- verified-solution vectors (Auto-help P1) ----------
+
+const SOLUTION_SCAN_PAGE = 500;
+const SOLUTION_SCAN_MAX = 3000;
+
+/**
+ * What a verified solution is embedded from: the ticket subject and the
+ * agent-verified solution note. Never the description (the question, not the
+ * answer) and never internal notes. Empty string when there is no note.
+ */
+export function solutionContentOf(ticket) {
+  const note = String(ticket?.solutionNote || '').trim();
+  if (!note) return '';
+  return [String(ticket?.subject || '').trim(), note].filter(Boolean).join('\n').slice(0, MAX_CONTENT_CHARS);
+}
+
+export function solutionHashOf(text) {
+  return hashOf(`solution:${text}`);
+}
+
+/**
+ * Verified solutions nearest to a query vector, by cosine over the stored
+ * solution vectors (ticket_solution_embeddings, filled nightly by
+ * solutionEmbeddingService). Bounded: pages of 500 up to 3000 rows, within
+ * the category when one is given. Never throws — a missing table or any
+ * error returns empty results and retrieval stays keyword + content-vector.
+ *
+ * @returns {Promise<{ cosById: Map<number, number>, topIds: number[] }>}
+ *   cosById: every scanned solution's cosine; topIds: the best `limit`.
+ */
+export async function nearestVerifiedSolutions(workspaceId, queryVec, {
+  categoryId = null, excludeTicketId = null, limit = 20, scanMax = SOLUTION_SCAN_MAX,
+} = {}) {
+  const empty = { cosById: new Map(), topIds: [] };
+  if (!Array.isArray(queryVec) || !queryVec.length) return empty;
+  const cosById = new Map();
+  try {
+    let cursor = 0;
+    let scanned = 0;
+    while (scanned < scanMax) {
+      const page = await prisma.ticketSolutionEmbedding.findMany({
+        where: {
+          workspaceId: Number(workspaceId),
+          model: EMBEDDING_MODEL,
+          id: { gt: cursor },
+          ...(categoryId ? { categoryId: Number(categoryId) } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: SOLUTION_SCAN_PAGE,
+        select: { id: true, ticketId: true, embedding: true },
+      });
+      if (!page?.length) break;
+      for (const row of page) {
+        if (excludeTicketId && row.ticketId === Number(excludeTicketId)) continue;
+        if (Array.isArray(row.embedding) && row.embedding.length) cosById.set(row.ticketId, cosineSimilarity(queryVec, row.embedding));
+      }
+      scanned += page.length;
+      cursor = page[page.length - 1].id;
+      if (page.length < SOLUTION_SCAN_PAGE) break;
+    }
+  } catch (err) {
+    logger.warn(`Verified-solution vectors unavailable (ws ${workspaceId}) — keyword + ticket vectors only: ${err.message}`);
+    return empty;
+  }
+  const topIds = [...cosById.entries()].sort((a, b) => b[1] - a[1]).slice(0, Math.max(1, limit)).map(([id]) => id);
+  return { cosById, topIds };
+}
+
 class TicketEmbeddingService {
   /**
    * (Re)generate the embedding for one ticket. Skips silently when the

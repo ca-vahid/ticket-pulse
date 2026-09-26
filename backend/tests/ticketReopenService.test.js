@@ -153,8 +153,10 @@ describe('live stamp / undo', () => {
   test('observeStatusTransition resolves custom statuses to bases', async () => {
     expect(await observeStatusTransition({ ticketId: 5, workspaceId: 1, from: 'Done', to: 'Waiting on Customer' })).toBe('reopen');
     expect(prismaMock.ticket.update).toHaveBeenCalledTimes(1);
+    // A reopen clears the resolution kind (an Auto-help close no longer counts as one).
+    expect(prismaMock.ticket.updateMany).toHaveBeenCalledWith({ where: { id: 5, resolvedByKind: { not: null } }, data: { resolvedByKind: null } });
     expect(await observeStatusTransition({ ticketId: 5, workspaceId: 1, from: 'Open', to: 'Closed' })).toBe('terminal');
-    expect(prismaMock.ticket.updateMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.ticket.updateMany).toHaveBeenCalledTimes(2);
     expect(await observeStatusTransition({ ticketId: 5, workspaceId: 1, from: 'Open', to: 'Pending' })).toBeNull();
     expect(await observeStatusTransition({ ticketId: 5, workspaceId: 1, from: 'Closed', to: 'Closed' })).toBeNull();
   });

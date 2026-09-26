@@ -2110,10 +2110,12 @@ router.delete(
 router.get(
   '/templates',
   asyncHandler(async (_req, res) => {
-    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
+    // Retired templates (e.g. the AI first-reply draft, replaced by Auto-help)
+    // stay defined for copies already installed, but are no longer offered.
+    const { installableWorkflowTemplates } = await import('../services/notificationWorkflowDefinition.js');
     res.json({
       success: true,
-      data: WORKFLOW_TEMPLATES.map(({ key, name, description, triggerType }) => ({ key, name, description, triggerType })),
+      data: installableWorkflowTemplates().map(({ key, name, description, triggerType }) => ({ key, name, description, triggerType })),
     });
   }),
 );
@@ -2124,6 +2126,7 @@ router.post(
     const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
     const template = WORKFLOW_TEMPLATES.find((t) => t.key === req.params.key);
     if (!template) throw new NotFoundError('Unknown workflow template');
+    if (template.deprecated === true) throw new ValidationError(template.deprecatedNote || 'This template was retired');
     const workflow = await notificationWorkflowRepository.createWorkflowVariant(req.workspaceId, {
       triggerType: template.triggerType,
       name: template.name,

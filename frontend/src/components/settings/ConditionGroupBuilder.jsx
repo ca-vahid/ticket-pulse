@@ -40,7 +40,14 @@ export const CG_FIELDS = [
   { value: 'ticket.sentiment', label: 'Requester sentiment', type: 'enum', options: ['positive', 'neutral', 'frustrated'] },
   { value: 'ticket.isNoise', label: 'Is noise/spam', type: 'boolean' },
   { value: 'ticket.isParked', label: 'Is parked', type: 'boolean' },
-  { value: 'ticket.parkKind', label: 'Park kind', type: 'enum', options: ['until_date', 'waiting_on', 'eta'] },
+  { value: 'ticket.parkKind', label: 'Park kind', type: 'enum', options: ['until_date', 'waiting_on', 'eta', 'auto_help'] },
+  // Auto-help integration W3 (plans/AUTO_HELP_INTEGRATION_PLAN.md D).
+  { value: 'ticket.resolvedByKind', label: 'Resolved by (kind)', type: 'enum', options: ['agent', 'workflow', 'api', 'automation', 'auto_help'] },
+  { value: 'ticket.autoHelp.state', label: 'Auto-help state', type: 'enum', options: ['off', 'pending', 'skipped', 'no_match', 'not_answerable', 'drafted', 'staged', 'sent', 'dismissed', 'withdrawn', 'superseded', 'failed'] },
+  { value: 'ticket.autoHelp.expected', label: 'Auto-help will answer by itself', type: 'boolean' },
+  { value: 'ticket.autoHelp.mode', label: 'Auto-help mode', type: 'enum', options: ['shadow', 'approve', 'auto'] },
+  { value: 'ticket.autoHelp.playbook', label: 'Auto-help playbook', type: 'string' },
+  { value: 'ticket.autoHelp.outcome', label: 'Auto-help outcome', type: 'enum', options: ['resolved_silence', 'resolved_confirmed', 'help_requested', 'reopened', 'agent_took_over', 'no_reply_left_open', 'loop_stopped', 'withdrawn', 'superseded_by'] },
   { value: 'ticket.ageMinutes', label: 'Ticket age (minutes)', type: 'duration' },
   { value: 'ticket.dueInMinutes', label: 'Minutes until due (negative = overdue)', type: 'duration' },
   { value: 'ticket.frDueInMinutes', label: 'Minutes until first-response due', type: 'duration' },
@@ -58,6 +65,12 @@ export const CG_FIELDS = [
   { value: 'event.statusTo', label: 'Status changed to', type: 'string' },
   // Event provenance flags (MEGA 09-01) — absent counts as false.
   { value: 'event.systemNote', label: 'Note was written by the system', type: 'boolean' },
+  // "Ticket intake settled" (Auto-help integration W1) + the reopen guard (W3).
+  { value: 'event.intakeProvisional', label: 'Intake verdict is provisional (night run)', type: 'boolean' },
+  { value: 'event.intakeDecision', label: 'Intake decision', type: 'enum', options: ['pending_review', 'auto_assigned', 'classified_only', 'priority_only', 'noise_dismissed'] },
+  { value: 'event.intakeNonActionable', label: 'Intake judged not actionable', type: 'boolean' },
+  { value: 'event.intakeSource', label: 'Intake settled by', type: 'enum', options: ['pipeline', 'manual'] },
+  { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', type: 'enum', options: ['confirmed', 'help', 'auto_reply'] },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', type: 'boolean' },
   { value: 'event.isSurveyResponse', label: 'Reply is a survey response', type: 'boolean' },
   // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7). The server

@@ -87,6 +87,15 @@ function hashOf(title, text) {
   return crypto.createHash('sha256').update(`${title}\n${text}`).digest('hex');
 }
 
+/** The article content hash (title + plain text): the FreshService import compares with it. */
+export const articleContentHash = hashOf;
+
+/** FreshService solution articles are edited in FreshService; the import keeps them in step. */
+export const FS_READ_ONLY_MESSAGE = 'This article comes from FreshService — edit it there; the nightly import brings the change in.';
+function assertEditable(row) {
+  if (row?.source === 'fs_solution') throw new ValidationError(FS_READ_ONLY_MESSAGE);
+}
+
 /** Lower-case, de-stopworded words of 3+ characters (keyword scoring). */
 export function queryTokens(text) {
   const words = String(text || '').toLowerCase().match(/[a-z0-9][a-z0-9+#.-]{1,}/g) || [];
@@ -223,6 +232,7 @@ export function articleView(row, { withBody = true, now = Date.now() } = {}) {
     sectionsEmbedded: list.length > 0 && list.every((x) => Array.isArray(x?.embedding) && x.embedding.length > 0),
     reviewDueAt: reviewDueAt(row),
     needsReview: isReviewOverdue(row, now),
+    readOnly: row.source === 'fs_solution',
   };
 }
 
@@ -325,7 +335,12 @@ class KnowledgeArticleService {
     return articleView(row);
   }
 
-  async create(workspaceId, input, actor = null) {
+  /**
+   * @param {object} [options]
+   * @param {object} [options.sourceMeta] server-side provenance only (drafted
+   *   from tickets, FreshService folder) - never taken from a request body.
+   */
+  async create(workspaceId, input, actor = null, { sourceMeta = null } = {}) {
     const data = normalizeInput(input);
     const now = new Date();
     const row = await prisma.knowledgeArticle.create({
@@ -335,6 +350,7 @@ class KnowledgeArticleService {
         ownerEmail: data.ownerEmail || cleanEmail(actor?.email) || null,
         ...(data.status === 'published' ? { lastVerifiedAt: now } : {}),
         contentHash: hashOf(data.title, data.bodyText),
+        ...(sourceMeta && typeof sourceMeta === 'object' ? { sourceMeta } : {}),
         createdBy: actor?.email || actor?.name || null,
         updatedBy: actor?.email || actor?.name || null,
       },
@@ -349,6 +365,7 @@ class KnowledgeArticleService {
       .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) } }))
       .catch(() => null);
     if (!existing) throw new NotFoundError('Article not found');
+    assertEditable(existing);
     const data = normalizeInput(input, { partial: true });
     const title = data.title ?? existing.title;
     const bodyText = data.bodyText ?? existing.bodyText;
@@ -379,9 +396,10 @@ class KnowledgeArticleService {
   /** "Mark as verified": someone checked it is still right today. */
   async verify(workspaceId, id, actor = null) {
     const existing = await Promise.resolve()
-      .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) }, select: { id: true } }))
+      .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) }, select: { id: true, source: true } }))
       .catch(() => null);
     if (!existing) throw new NotFoundError('Article not found');
+    assertEditable(existing);
     const row = await prisma.knowledgeArticle.update({
       where: { id: existing.id },
       data: { lastVerifiedAt: new Date(), updatedBy: actor?.email || actor?.name || null },
@@ -418,13 +436,21 @@ class KnowledgeArticleService {
    */
   async remove(workspaceId, id, actor = null) {
     const existing = await Promise.resolve()
-      .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) }, select: { id: true, status: true } }))
+      .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) }, select: { id: true, status: true, source: true, sourceMeta: true } }))
       .catch(() => null);
     if (!existing) throw new NotFoundError('Article not found');
     if (existing.status !== 'archived') {
       await prisma.knowledgeArticle.update({
         where: { id: existing.id },
-        data: { status: 'archived', updatedBy: actor?.email || actor?.name || null },
+        data: {
+          status: 'archived',
+          updatedBy: actor?.email || actor?.name || null,
+          // An imported FreshService article archived here stays archived:
+          // the nightly import does not bring it back.
+          ...(existing.source === 'fs_solution'
+            ? { sourceMeta: { ...(existing.sourceMeta && typeof existing.sourceMeta === 'object' ? existing.sourceMeta : {}), archivedInTp: true } }
+            : {}),
+        },
       });
     }
     return { id: existing.id, archived: true, status: 'archived' };

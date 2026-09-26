@@ -1774,7 +1774,7 @@ router.post('/:id/proposed-replies/:proposalId/send', asyncHandler(async (req, r
   const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
   const result = await ticketProposedReplyService.send(
     parseTicketId(req), req.workspaceId, req.params.proposalId,
-    { bodyHtml: req.body?.bodyHtml, bodyText: req.body?.bodyText },
+    { bodyHtml: req.body?.bodyHtml, bodyText: req.body?.bodyText, confirmResend: req.body?.confirmResend === true },
     req.ticketActor,
   );
   res.json({ success: true, data: result });
@@ -1784,6 +1784,7 @@ router.post('/:id/proposed-replies/:proposalId/dismiss', asyncHandler(async (req
   const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
   const proposal = await ticketProposedReplyService.dismiss(
     parseTicketId(req), req.workspaceId, req.params.proposalId, req.ticketActor,
+    { reason: req.body?.reason ?? null },
   );
   res.json({ success: true, data: proposal });
 }));

@@ -51,6 +51,7 @@ jest.unstable_mockModule('../src/services/ticketEmbeddingService.js', () => ({
   isEmbeddingConfigured: () => false,
   embedQueryTexts: jest.fn(async () => null),
   cosineSimilarity: () => 0,
+  nearestVerifiedSolutions: jest.fn(async () => ({ cosById: new Map(), topIds: [] })),
 }));
 
 const {
@@ -90,9 +91,11 @@ const GOOD = {
   intro: 'You can install it yourself:',
   steps: steps(['Open Company Portal.', 'article:12'], ['Search for Bluebeam Revu and choose Install.', 'article:12']),
   confidence: 0.9,
+  // The workspace's default stay-quiet list is always in force: the model says none applies.
+  stayQuiet: { matched: false },
 };
 const oneStep = (text, ...ids) => ({ ...GOOD, steps: steps([text, ...(ids.length ? ids : ['article:12'])]) });
-const CHECK_YES = { parsed: { sufficient: 'yes', unsupportedSteps: [] }, provider: 'anthropic', model: 'claude-haiku-4-5' };
+const CHECK_YES = { parsed: { sufficient: 'yes', unsupportedSteps: [], stayQuiet: { matched: false } }, provider: 'anthropic', model: 'claude-haiku-4-5' };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -388,6 +391,9 @@ describe('skips (categorized) persist a row; test runs warn', () => {
     ['agent_requester', {}, () => prismaMock.technician.findFirst.mockResolvedValue({ id: 3 })],
     ['always_human', {}, () => prismaMock.notificationWorkflow.findMany.mockResolvedValue([{ publishedDefinition: { nodes: [{ type: 'send_email', data: { alwaysHumanRecipients: ['@example.com'] } }] } }])],
     ['requester_daily_cap', {}, () => prismaMock.autoHelpRun.count.mockResolvedValue(2)],
+    // P1 re-audit: an answer nobody can receive must never start a loop.
+    ['requester_unattended', { requester: { id: 7, name: 'Alerts', email: 'alerts@example.com', unattended: true } }, null],
+    ['requester_no_email', { requester: { id: 7, name: 'Walk-in', email: null } }, null],
     ['resolved', { status: 'Resolved' }, null],
     ['already_ran', {}, () => prismaMock.autoHelpRun.findFirst.mockResolvedValue({ id: 1 })],
   ];
@@ -468,16 +474,11 @@ describe('preview + listener', () => {
     expect(followUpFooter(null)).toMatch(/check in after 2 business days/);
   });
 
-  test('only the first categorization queues a run', async () => {
-    const spy = jest.spyOn(runner, 'runForTicket').mockResolvedValue({ skipped: true });
-    expect(runner.onTicketCategorized(77, 1, { first: false })).toBe(false);
-    expect(runner.onTicketCategorized(77, 1, { first: true })).toBe(true);
-    expect(runner.onTicketCategorized(77, 1, { first: true })).toBe(false); // already in flight
-    for (let i = 0; i < 20 && (runner.active > 0 || runner.inflight.size > 0); i += 1) {
-      await new Promise((r) => setImmediate(r));
-    }
-    expect(spy).toHaveBeenCalledWith(77, { trigger: 'categorized', workspaceId: 1 });
-    spy.mockRestore();
+  test('integration W1/W5: the runner no longer listens to ticket.categorized nor keeps an in-memory queue', () => {
+    // Auto-help starts from ticket.intake_settled via autoHelpIntakeService's durable job queue.
+    expect(runner.onTicketCategorized).toBeUndefined();
+    expect(runner.queue).toBeUndefined();
+    expect(runner.inflight).toBeUndefined();
   });
 });
 
@@ -500,7 +501,7 @@ describe('R4b answerability check', () => {
   });
 
   test('"no" → not_answerable insufficient_context, whatever the drafting model said; the check is stored', async () => {
-    gatewayMock.sendJson.mockResolvedValueOnce({ parsed: { sufficient: 'no', unsupportedSteps: [], reason: 'Article is about a different app' } });
+    gatewayMock.sendJson.mockResolvedValueOnce({ parsed: { sufficient: 'no', unsupportedSteps: [], stayQuiet: { matched: false }, reason: 'Article is about a different app' } });
     gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.status).toBe('not_answerable');
@@ -510,7 +511,7 @@ describe('R4b answerability check', () => {
   });
 
   test('any unsupported step → insufficient_context even when sufficient is "yes"', async () => {
-    gatewayMock.sendJson.mockResolvedValueOnce({ content: JSON.stringify({ sufficient: 'yes', unsupportedSteps: [2, 9] }) });
+    gatewayMock.sendJson.mockResolvedValueOnce({ content: JSON.stringify({ sufficient: 'yes', unsupportedSteps: [2, 9], stayQuiet: { matched: false } }) });
     gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.gateDecision).toBe('insufficient_context');
@@ -519,7 +520,7 @@ describe('R4b answerability check', () => {
   });
 
   test('"partial" → drafted under partial_context, never auto-send eligible', async () => {
-    gatewayMock.sendJson.mockResolvedValueOnce({ parsed: { sufficient: 'partial', unsupportedSteps: [] } });
+    gatewayMock.sendJson.mockResolvedValueOnce({ parsed: { sufficient: 'partial', unsupportedSteps: [], stayQuiet: { matched: false } } });
     gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.status).toBe('drafted');
@@ -695,5 +696,39 @@ describe('R6 shadow review', () => {
     expect(READY_MIN_REVIEWED).toBe(30);
     const where = prismaMock.autoHelpRun.groupBy.mock.calls[0][0].where;
     expect(where.status.notIn).toEqual(expect.arrayContaining(['skipped', 'no_match']));
+  });
+});
+
+describe('audit S2: the "already ran" check and the run row are one step', () => {
+  afterEach(() => { delete prismaMock.$transaction; delete prismaMock.$queryRaw; });
+
+  test('another settle created a run between the check and the insert → already_ran under the lock, no model call', async () => {
+    let inTx = false;
+    prismaMock.$transaction = jest.fn(async (fn) => { inTx = true; try { return await fn(prismaMock); } finally { inTx = false; } });
+    prismaMock.$queryRaw = jest.fn(async () => [{ locked: 1 }]);
+    // Outside the lock (skipReasons) nothing has run yet; inside it, run 77 exists.
+    prismaMock.autoHelpRun.findFirst.mockImplementation(async () => (inTx ? { id: 77 } : null));
+    const out = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(out).toMatchObject({ skipped: true, gateDecision: 'already_ran' });
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(gatewayMock.runToolTurn).not.toHaveBeenCalled();
+    // Only the skip row: no 'running' row was created.
+    expect(prismaMock.autoHelpRun.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.autoHelpRun.create.mock.calls[0][0].data).toMatchObject({ status: 'skipped', gateDecision: 'already_ran' });
+  });
+
+  test('the first run creates its row inside the lock; the morning re-run (allowRerun) and test runs do not take it', async () => {
+    prismaMock.$transaction = jest.fn(async (fn) => fn(prismaMock));
+    prismaMock.$queryRaw = jest.fn(async () => [{ locked: 1 }]);
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
+    await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.autoHelpRun.create.mock.calls[0][0].data).toMatchObject({ status: 'running' });
+    prismaMock.$transaction.mockClear();
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
+    await runner.runForTicket(55, { trigger: 'categorized', allowRerun: true });
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
+    await runner.runForTicket(55, { trigger: 'test', playbookId: 3 });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });

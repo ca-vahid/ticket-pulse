@@ -16,6 +16,11 @@ import { ValidationError } from '../utils/errors.js';
  *   ticket.public_reply_added → ticketService._addThreadEntry (agent public replies)
  *   approval.requested / .decided / .clarification_requested
  *     → ticketApprovalService.emitApprovalEvent
+ *   ticket.intake_settled   → assignmentPipelineService._emitIntakeSettled (after
+ *     the run record update; provisional at night, final in the morning) and
+ *     ticketService._emitManualIntakeSettled (category set with no run open)
+ *   auto_help.staged / .answered / .nudged / .help_requested / .resolved
+ *     → autoHelpEvents.emitAutoHelpEvent (delivery + follow-up services)
  */
 export const NOTIFICATION_EVENT_TYPES = [
   'ticket.created',
@@ -37,6 +42,18 @@ export const NOTIFICATION_EVENT_TYPES = [
   // QA 09-23 #1: the category was set (by the AI pipeline or a person) — the
   // moment a "received" mail can name the category.
   'ticket.categorized',
+  // Auto-help integration W1: the pipeline saved category, priority, noise and
+  // its decision (provisional at night, final in the morning), or a person set
+  // the category with no pipeline run open. Carries event.extra { category,
+  // subcategory, decision, nonActionable, noiseVeto, afterHours, provisional,
+  // fullRunPending, source }.
+  'ticket.intake_settled',
+  // Auto-help integration W3: what Auto-help did (plans/AUTO_HELP_INTEGRATION_PLAN.md D).
+  'auto_help.staged',
+  'auto_help.answered',
+  'auto_help.nudged',
+  'auto_help.help_requested',
+  'auto_help.resolved',
   // Field edits (MEGA 09-01 Phase TU, TU-5): priority / category / due dates /
   // custom fields… by a human in TP, the public API (incl. Power Apps), an
   // API resubmission, the workflow update_ticket node, or (opt-in per
@@ -92,6 +109,30 @@ function templateNodes(nodes, edges) {
     nodes: nodes.map((node, i) => ({ position: { x: 80 + i * 240, y: 80 }, ...node })),
     edges,
   };
+}
+
+/**
+ * Seeded-template guards (Auto-help integration W3). Exported so the one-off
+ * script (backend/scripts/auto-help-workflow-guards.mjs) adds exactly these to
+ * copies installed before the guards existed.
+ */
+export const AUTO_HELP_NUDGE_GUARD_ROW = Object.freeze({ field: 'ticket.parkKind', operator: 'is_not', value: 'auto_help' });
+/** …and never after Auto-help closed the ticket (the run resumes with the CURRENT park + resolver). */
+export const AUTO_HELP_NUDGE_CLOSED_GUARD_ROW = Object.freeze({ field: 'ticket.resolvedByKind', operator: 'is_not', value: 'auto_help' });
+export const AUTO_HELP_CLOSE_GUARD_NODE = Object.freeze({
+  id: 'not-auto-help-close',
+  type: 'condition',
+  data: {
+    label: 'Not closed by Auto-help?',
+    conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.resolvedByKind', operator: 'is_not', value: 'auto_help' }] },
+  },
+});
+/** Reopen-on-reply: a reply that reads as thanks (or an out-of-office) after an Auto-help close does not reopen. */
+export const AUTO_HELP_REOPEN_GUARD_RULE = Object.freeze({ '!': { in: [{ var: 'event.extra.autoHelpReplyVerdict' }, ['confirmed', 'auto_reply']] } });
+
+/** Templates the gallery offers (retired ones stay defined for installed copies). */
+export function installableWorkflowTemplates() {
+  return WORKFLOW_TEMPLATES.filter((t) => t.deprecated !== true);
 }
 
 export const WORKFLOW_TEMPLATES = [
@@ -192,6 +233,11 @@ export const WORKFLOW_TEMPLATES = [
     key: 'ai_first_reply_draft',
     name: 'AI first-reply draft (human approves)',
     description: 'On new tickets, the LLM drafts a grounded first reply and stages it on the ticket for an agent to approve, edit, or dismiss. Nothing sends automatically.',
+    // Retired 26 Sep 2026 (Vahid, Auto-help integration W2): Auto-help is the
+    // one source of AI first answers. Hidden from the gallery and not
+    // installable; the definition stays so copies installed earlier still load.
+    deprecated: true,
+    deprecatedNote: 'Retired — AI first answers now come from Knowledge → Playbooks (Auto-help). A propose_reply step still works in custom workflows, but it never replaces an Auto-help answer or an agent\'s reply.',
     triggerType: 'ticket.created',
     build: () => templateNodes([
       { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
@@ -222,6 +268,8 @@ export const WORKFLOW_TEMPLATES = [
     triggerType: 'ticket.resolved_closed',
     build: () => templateNodes([
       { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.resolved_closed' } },
+      // Auto-help integration W3: an Auto-help close already told the requester.
+      JSON.parse(JSON.stringify(AUTO_HELP_CLOSE_GUARD_NODE)),
       { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
       {
         id: 'summary',
@@ -251,8 +299,11 @@ export const WORKFLOW_TEMPLATES = [
         type: 'send_email',
         data: { label: 'Send (gated)', provider: 'sendgrid', minLlmConfidence: 'high', includeFooter: true, includeHeader: false },
       },
+      { id: 'skip-auto-help', type: 'stop', data: { reason: 'Auto-help closed this ticket' } },
     ], [
-      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e1', source: 'trigger', target: 'not-auto-help-close' },
+      { id: 'e1b', source: 'not-auto-help-close', sourceHandle: 'true', target: 'recipients' },
+      { id: 'e1c', source: 'not-auto-help-close', sourceHandle: 'false', target: 'skip-auto-help' },
       { id: 'e2', source: 'recipients', target: 'summary' },
       { id: 'e3', source: 'summary', target: 'template' },
       { id: 'e4', source: 'template', target: 'send' },
@@ -314,7 +365,13 @@ export const WORKFLOW_TEMPLATES = [
         data: {
           conditionGroup: {
             logic: 'all',
-            conditions: [{ field: 'ticket.status', operator: 'in', value: ['Open', 'Pending'] }],
+            conditions: [
+              { field: 'ticket.status', operator: 'in', value: ['Open', 'Pending'] },
+              // Auto-help integration W3: Auto-help checks in itself while it
+              // waits (park kind auto_help) — never a second nudge.
+              { ...AUTO_HELP_NUDGE_GUARD_ROW },
+              { ...AUTO_HELP_NUDGE_CLOSED_GUARD_ROW },
+            ],
           },
         },
       },
@@ -1376,6 +1433,12 @@ function eventLabel(triggerType) {
     'ticket.woke': 'Parked ticket woke',
     'ticket.park_due_soon': 'Parked ticket wakes within a day',
     'ticket.categorized': 'Ticket categorized',
+    'ticket.intake_settled': 'Ticket intake settled',
+    'auto_help.staged': 'Auto-help suggested an answer',
+    'auto_help.answered': 'Auto-help answer sent',
+    'auto_help.nudged': 'Auto-help checked in',
+    'auto_help.help_requested': 'Requester still needs help (after Auto-help)',
+    'auto_help.resolved': 'Auto-help closed the ticket',
     'ticket.fields_updated': 'Ticket updated (fields)',
     'ticket.public_reply_added': 'Agent replied to requester',
     'approval.requested': 'Approval requested',
@@ -1526,8 +1589,10 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
           type: 'condition',
           position: { x: 260, y: 60 },
           data: {
-            label: 'Ticket already resolved or closed?',
-            rule: { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] },
+            label: 'Ticket already resolved or closed (and not a "thanks" to an Auto-help close)?',
+            // Auto-help integration W3: within 7 days of an Auto-help close the
+            // reply is read first — thanks / an out-of-office leaves it closed.
+            rule: { and: [{ in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] }, JSON.parse(JSON.stringify(AUTO_HELP_REOPEN_GUARD_RULE))] },
           },
         },
         {
@@ -1772,6 +1837,10 @@ export function sampleEventContext(triggerType = 'ticket.created') {
       internalCategory: { name: 'Network' },
       internalSubcategory: { name: 'VPN' },
       isNoise: false,
+      isParked: false,
+      parkKind: null,
+      resolvedByKind: null,
+      autoHelp: { state: 'staged', expected: false, playbook: 'VPN basics', mode: 'approve', sentAt: null, outcome: null },
       sentiment: 'neutral',
       createdAt: '2026-05-29T18:30:00.000Z',
       assignedAt: '2026-05-29T18:42:00.000Z',
@@ -1932,6 +2001,18 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('ticket.sourceLabel', 'Arrival channel', 'Ticket', 'How the request arrived (Email, Portal, Phone, API, Agent, ...).', 'Email'),
     variable('ticket.tags', 'Tags', 'Ticket', 'Ticket tag names (lowercased).', 'vpn, urgent-review'),
     variable('ticket.dueBy', 'Due by', 'Ticket', 'Resolution due timestamp (SLA or manually set), blank when none.', '2026-08-08T17:00:00.000Z'),
+    // Parked + Auto-help (integration W3)
+    variable('ticket.parkKind', 'Park kind', 'Ticket', 'Why the ticket is parked: until_date, waiting_on, eta, or auto_help (Auto-help is waiting on the requester). Blank when not parked.', 'auto_help'),
+    variable('ticket.resolvedByKind', 'Resolved by (kind)', 'Ticket', 'Who resolved it: agent, workflow, api, auto_help … Blank while open.', 'auto_help'),
+    variable('ticket.autoHelp.state', 'Auto-help state', 'Auto-help', 'off, pending, skipped, no_match, not_answerable, drafted (shadow), staged (waiting for an agent), sent, dismissed, withdrawn, superseded or failed.', 'staged'),
+    variable('ticket.autoHelp.expected', 'Auto-help will answer by itself', 'Auto-help', 'True only when Auto-help is expected to SEND an answer without a person (auto mode — locked in this build, so false today).', 'false'),
+    variable('ticket.autoHelp.playbook', 'Auto-help playbook', 'Auto-help', 'The playbook behind the latest Auto-help answer.', 'Software installs'),
+    variable('ticket.autoHelp.mode', 'Auto-help mode', 'Auto-help', 'shadow, approve or auto for the latest run.', 'approve'),
+    variable('ticket.autoHelp.sentAt', 'Auto-help answer sent at', 'Auto-help', 'When the Auto-help answer went out; blank when it has not.', '2026-09-26T16:05:00.000Z'),
+    variable('ticket.autoHelp.outcome', 'Auto-help outcome', 'Auto-help', 'How the follow-up ended: resolved_silence, resolved_confirmed, help_requested, reopened, agent_took_over, no_reply_left_open, loop_stopped, withdrawn or superseded_by.', 'resolved_confirmed'),
+    variable('event.extra.provisional', 'Intake settle is provisional', 'Intake', 'Ticket intake settled: true for the after-hours (night) verdict, false for the business-hours one.', 'false'),
+    variable('event.extra.decision', 'Intake decision', 'Intake', 'Ticket intake settled: the pipeline decision (pending_review, auto_assigned, noise_dismissed, priority_only, …).', 'pending_review'),
+    variable('event.extra.source', 'Intake settled by', 'Intake', 'Ticket intake settled: pipeline, or manual (a person / API / workflow set the category).', 'pipeline'),
     variable('ticket.category', 'Category', 'Ticket', 'FreshService category.', 'Access'),
     variable('ticket.subCategory', 'Subcategory', 'Ticket', 'FreshService subcategory.', 'VPN'),
     variable('ticket.ticketCategory', 'Ticket category', 'Ticket', 'Configured custom category field.', 'IT'),

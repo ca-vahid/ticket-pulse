@@ -798,6 +798,15 @@ export async function emitTicketLifecycleNotifications({
   // Re-opened bookkeeping (QA 09-25 #1) runs for EVERY observed status move —
   // before the workflow gate, so syncs that don't run workflows still count.
   await trackReopenState(existingTicket, upsertedTicket);
+  // Auto-help (P1 audit): a reassignment to someone else while Auto-help
+  // waits on the requester means that person owns it now — the loop ends.
+  const ahNewTech = asNumber(upsertedTicket?.assignedTechId);
+  if (ahNewTech && existingTicket && ahNewTech !== asNumber(existingTicket.assignedTechId)
+    && (upsertedTicket?.parkKind === 'auto_help' || existingTicket?.parkKind === 'auto_help')) {
+    import('./autoHelpFollowUpService.js')
+      .then(({ default: followUp }) => followUp.onReassigned(asNumber(upsertedTicket.id) || asNumber(existingTicket.id), asNumber(upsertedTicket.workspaceId) || asNumber(existingTicket.workspaceId), ahNewTech))
+      .catch((err) => logger.warn(`Auto-help reassignment check skipped: ${err.message}`));
+  }
   if (!allowNotificationWorkflows) {
     return { status: 'skipped', reason: 'Notification workflows disabled for this ingest path' };
   }
@@ -921,13 +930,38 @@ export async function emitTicketEvent(eventType, ticketId, {
       .then(({ default: ticketParkService }) => ticketParkService.afterRequesterReply(ticket.id, ticket.workspaceId))
       .catch((err) => logger.warn(`Park wake on requester reply skipped for ticket ${ticket.id}: ${err.message}`));
   }
-  // Auto-help (plans/AUTO_HELP_PLAN.md): the FIRST categorization, from the
-  // AI pipeline or a person, may start a playbook run. Fire-and-forget; the
-  // runner checks the workspace switch (off by default) before doing work.
-  if (eventType === 'ticket.categorized' && extra?.first === true) {
-    import('./autoHelpRunner.js')
-      .then(({ default: autoHelpRunner }) => autoHelpRunner.onTicketCategorized(ticket.id, ticket.workspaceId, extra))
-      .catch((err) => logger.warn(`Auto-help trigger skipped for ticket ${ticket.id}: ${err.message}`));
+  // Auto-help follow-up (P1): a person replying while Auto-help waits on the
+  // requester takes the ticket over (the park ends, outcome agent_took_over).
+  if (eventType === 'ticket.public_reply_added' && ticket.parkedUntil && extra?.entryId) {
+    import('./autoHelpFollowUpService.js')
+      .then(({ default: followUp }) => followUp.onAgentReply(ticket.id, ticket.workspaceId, extra.entryId))
+      .catch((err) => logger.warn(`Auto-help took-over check skipped for ticket ${ticket.id}: ${err.message}`));
+  }
+  // Auto-help (integration W1/W5, plans/AUTO_HELP_INTEGRATION_PLAN.md): the
+  // intake settled — the pipeline saved category, priority, noise and its
+  // decision (it queued the job itself: `enqueued`), or a person / the API /
+  // a workflow set the category with no pipeline run open. The job queue is
+  // durable; the intake service checks the workspace switch first.
+  // ticket.categorized no longer starts Auto-help (it stays a workflow trigger).
+  if (eventType === 'ticket.intake_settled' && extra && extra.enqueued !== true && extra.autoHelpOff !== true) {
+    import('./autoHelpIntakeService.js')
+      .then(({ default: intake }) => intake.onIntakeSettled(ticket.id, ticket.workspaceId, { ...extra, stamp: extra.stamp || stamp }))
+      .catch((err) => logger.warn(`Auto-help intake settle not queued for ticket ${ticket.id}: ${err.message}`));
+  }
+  // W3 reopen-on-reply guard: a reply to a ticket Auto-help closed in the last
+  // 7 days is read first (the P1 reply classifier); "thanks, that worked"
+  // rides on the event as autoHelpReplyVerdict='confirmed' and the seeded
+  // reopen workflow leaves the ticket closed. Anything else reopens as before.
+  if (eventType === 'ticket.reply_received' && ticket.resolvedByKind === 'auto_help') {
+    try {
+      const { default: followUp } = await import('./autoHelpFollowUpService.js');
+      const read = await followUp.classifyPostCloseReply(ticket, extra || {});
+      if (read?.verdict) {
+        eventContext.event.extra = { ...(eventContext.event.extra || {}), autoHelpReplyVerdict: read.verdict };
+      }
+    } catch (err) {
+      logger.warn(`Auto-help post-close reply check skipped for ticket ${ticket.id}: ${err.message}`);
+    }
   }
 
   try {

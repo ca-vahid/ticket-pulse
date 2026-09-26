@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildHistoryItems, foldBursts, groupByActor, parseFsFeedLine, countMachine } from './ticketHistory';
+import { buildHistoryItems, foldBursts, groupByActor, parseFsFeedLine, countMachine, friendlyDays } from './ticketHistory';
 
 const T0 = Date.parse('2026-09-14T11:37:50Z');
 const iso = (ms) => new Date(T0 + ms).toISOString();
@@ -137,5 +137,31 @@ describe('groupByActor — one run per person, machine rows absorbed only mid-ru
     expect(inside[0].items.map((i) => i.key)).toEqual(['a', 'm', 'b']);
     const between = groupByActor([mk('a', 30, 'Ann', false), mk('m', 20, 'Ticket Workflow', true), mk('b', 10, 'Bob', false)]);
     expect(between.map((r) => `${r.actor}|${r.machine}`)).toEqual(['Ann|false', 'Ticket Workflow|true', 'Bob|false']);
+  });
+});
+
+describe('Auto-help P1 lines', () => {
+  test('every step of the answer → check-in → close loop reads as a visible sentence', () => {
+    const rows = [
+      { id: 61, activityType: 'auto_help_sent', performedBy: 'Dana Agent', performedAt: iso(0), details: { decision: 'agent_edited_sent', note: 'Sent the Auto-help answer, edited first' } },
+      { id: 62, activityType: 'auto_help_nudged', performedBy: 'Ticket Pulse (Auto-help)', performedAt: iso(2 * 86400e3), details: { note: 'Auto-help checked in with the requester — closing 2026-10-16 if there is no reply' } },
+      { id: 63, activityType: 'auto_help_closed', performedBy: 'Ticket Pulse (Auto-help)', performedAt: iso(4 * 86400e3), details: { note: 'Resolved after no reply to the Auto-help answer' } },
+    ];
+    const items = buildHistoryItems({ activities: rows });
+    const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+    expect(byKey['a-61']).toMatchObject({ event: 'autohelp', verb: 'sent the Auto-help answer, edited', machine: false });
+    expect(byKey['a-62']).toMatchObject({ event: 'autohelp', verb: 'checked in with the requester', machine: false });
+    expect(byKey['a-63']).toMatchObject({ event: 'autohelp', verb: 'resolved it after no reply', detail: 'Resolved after no reply to the Auto-help answer' });
+    // Machine dates in the note read as days, never ISO.
+    expect(byKey['a-62'].detail).toBe('Auto-help checked in with the requester — closing Fri 16 Oct if there is no reply');
+  });
+});
+
+describe('friendlyDays', () => {
+  test('bare ISO days become short days; full stamps too; other text untouched', () => {
+    expect(friendlyDays('closing 2026-10-16 if there is no reply')).toBe('closing Fri 16 Oct if there is no reply');
+    expect(friendlyDays('until 2026-10-14T17:00:00.000Z')).toMatch(/^until (Wed|Thu) 1[45] Oct$/);
+    expect(friendlyDays('No dates here, ref 12-34')).toBe('No dates here, ref 12-34');
+    expect(friendlyDays(null)).toBeNull();
   });
 });

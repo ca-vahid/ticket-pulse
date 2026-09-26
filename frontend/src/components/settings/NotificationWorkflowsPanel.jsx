@@ -94,6 +94,12 @@ const EVENT_LABELS = {
   'ticket.woke': 'Parked ticket woke',
   'ticket.park_due_soon': 'Parked ticket wakes within a day',
   'ticket.categorized': 'Ticket categorized',
+  'ticket.intake_settled': 'Ticket intake settled',
+  'auto_help.staged': 'Auto-help suggested an answer',
+  'auto_help.answered': 'Auto-help answer sent',
+  'auto_help.nudged': 'Auto-help checked in',
+  'auto_help.help_requested': 'Requester still needs help (after Auto-help)',
+  'auto_help.resolved': 'Auto-help closed the ticket',
   'ticket.fields_updated': 'Ticket updated (fields)',
   'ticket.public_reply_added': 'Agent replied to requester',
   'approval.requested': 'Approval requested',
@@ -124,6 +130,8 @@ export const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.reopened', hint: 'A resolved or closed ticket goes back to an open state — by a requester reply, an agent, or the API' },
       // QA 09-23 #1: the moment a "received" mail can name the category.
       { value: 'ticket.categorized', hint: 'The category is set — by the AI (about a minute after arrival) or by a person. Use it for mail that should name the category' },
+      // Auto-help integration W1: after category, priority, noise and the decision are all saved.
+      { value: 'ticket.intake_settled', hint: 'The AI has finished sorting the ticket — category, priority, noise and its decision are saved. Fires at night (provisional) and again in the morning; also when a person sets the category' },
       // Parked (plans/PARKED_BUILD_PLAN.md)
       { value: 'ticket.parked', hint: 'Someone parked the ticket until a date (or parked it again)' },
       { value: 'ticket.woke', hint: 'A parked ticket reached its date and is back in the queue' },
@@ -136,6 +144,16 @@ export const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.reply_received', hint: 'The requester replies' },
       { value: 'ticket.public_reply_added', hint: 'An agent replies to the requester' },
       { value: 'ticket.note_added', hint: 'An internal note is added' },
+    ],
+  },
+  {
+    label: 'Auto-help',
+    triggers: [
+      { value: 'auto_help.staged', hint: 'Auto-help put a suggested answer on the ticket for an agent to send' },
+      { value: 'auto_help.answered', hint: 'The Auto-help answer went out to the requester' },
+      { value: 'auto_help.nudged', hint: 'Auto-help checked in with a requester who went quiet' },
+      { value: 'auto_help.help_requested', hint: 'The requester replied that they still need a person' },
+      { value: 'auto_help.resolved', hint: 'Auto-help closed the ticket (no reply, or the requester confirmed it worked)' },
     ],
   },
   {
@@ -580,7 +598,14 @@ export const CONDITION_FIELD_OPTIONS = [
   { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
   { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
   { value: 'ticket.isParked', label: 'Ticket is parked', example: 'false' },
-  { value: 'ticket.parkKind', label: 'Park kind', example: 'until_date' },
+  { value: 'ticket.parkKind', label: 'Park kind (until_date / waiting_on / eta / auto_help)', example: 'until_date' },
+  // Auto-help integration W3.
+  { value: 'ticket.resolvedByKind', label: 'Resolved by (kind)', example: 'auto_help' },
+  { value: 'ticket.autoHelp.state', label: 'Auto-help state', example: 'staged' },
+  { value: 'ticket.autoHelp.expected', label: 'Auto-help will answer by itself', example: 'false' },
+  { value: 'ticket.autoHelp.outcome', label: 'Auto-help outcome', example: 'resolved_confirmed' },
+  { value: 'event.intakeProvisional', label: 'Intake verdict is provisional (night run)', example: 'false' },
+  { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', example: 'confirmed' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
   { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', example: 'false' },
@@ -11381,6 +11406,43 @@ export default function NotificationWorkflowsPanel({
               />
             </label>
             <p className="text-[11px] text-muted-foreground normal-case">Gates apply only when the email content came from the LLM. A blocked send is staged on the ticket as an AI proposed reply — never silently dropped.</p>
+          </div>
+
+          {/* Auto-help integration W3 (Vahid: merge). When Auto-help will send
+              an answer by itself, the ack waits and rides on top of it — one
+              e-mail. Never waits for a draft that needs an agent's click. */}
+          <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2.5" data-testid="autohelp-merge-controls">
+            <label className="flex items-start gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                className="mt-0.5 tp-focus-ring"
+                checked={selectedNode.data?.autoHelpMerge?.enabled === true}
+                onChange={(event) => updateNodeData({
+                  autoHelpMerge: { ...(selectedNode.data?.autoHelpMerge || {}), enabled: event.target.checked, waitMinutes: selectedNode.data?.autoHelpMerge?.waitMinutes || 5 },
+                })}
+              />
+              <span>
+                <span className="block font-medium">When Auto-help will answer: merge</span>
+                <span className="block text-xs leading-relaxed text-muted-foreground">
+                  If Auto-help is going to send its own answer, wait for it and put this message on top of the answer, so the requester gets one e-mail. Otherwise this sends as usual. Answers waiting for an agent never hold this back.
+                </span>
+              </span>
+            </label>
+            {selectedNode.data?.autoHelpMerge?.enabled === true && (
+              <label className="block text-xs font-medium text-muted-foreground">
+                Wait up to (minutes, 1–15)
+                <input
+                  type="number"
+                  min="1"
+                  max="15"
+                  value={selectedNode.data?.autoHelpMerge?.waitMinutes || 5}
+                  onChange={(event) => updateNodeData({
+                    autoHelpMerge: { ...(selectedNode.data?.autoHelpMerge || {}), enabled: true, waitMinutes: Math.min(15, Math.max(1, Number(event.target.value) || 5)) },
+                  })}
+                  className="mt-1 w-24 rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground tp-focus-ring"
+                />
+              </label>
+            )}
           </div>
         </div>
       );

@@ -48,3 +48,12 @@ export function readableReason(text, sources = []) {
     return s?.title ? `“${s.title}”` : noun[type.toLowerCase()];
   });
 }
+
+/** System tags shown with a friendly label (the tag itself stays as stored). */
+export const TAG_LABELS = Object.freeze({ 'drafted-from-tickets': 'Drafted from tickets' });
+
+/** A tag as people read it: a known system slug gets its label, anything else is shown as typed. */
+export function tagLabel(tag) {
+  const t = String(tag ?? '');
+  return TAG_LABELS[t.toLowerCase()] || t;
+}

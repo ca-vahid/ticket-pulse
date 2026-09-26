@@ -37,6 +37,8 @@ import {
 import { normalizeSubmitRecommendationPayload } from './assignmentRecommendationValidation.js';
 
 const MAX_TURNS = 20;
+/** Re-assessments of an open ticket - never an intake settle (Auto-help integration W1). */
+const NON_INTAKE_SETTLE_TRIGGERS = Object.freeze(['priority_assessment_only', 'priority_changed']);
 const PRIORITY_ASSESSMENT_DISABLED_REASON = 'priority_assessment_disabled';
 const PRIORITY_WRITEBACK_DISABLED_REASON = 'priority_writeback_disabled';
 
@@ -1013,8 +1015,12 @@ class AssignmentPipelineService {
     // rejecter via the previouslyRejectedThisTicket flag from
     // find_matching_agents, and (b) knows to acknowledge the re-routing in
     // agentBriefingHtml without naming the previous assignee.
+    // Auto-help integration W4: what Auto-help did on this ticket (state, the
+    // staged / sent answer, a requester reply to it) goes into the evidence,
+    // and a sent answer blocks a noise close below. null = nothing to say.
+    const autoHelpContext = await this._autoHelpContext(ticketId, workspaceId);
     const messages = [
-      { role: 'user', content: buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, wsTz, reboundFrom }) },
+      { role: 'user', content: buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, wsTz, reboundFrom, autoHelp: autoHelpContext }) },
     ];
 
     const toolAllowlist = promptVersion.toolConfig?.allowedTools || null;
@@ -1437,9 +1443,42 @@ class AssignmentPipelineService {
         });
       }
 
+      // Auto-help integration W4: never noise-close a ticket whose requester
+      // got an Auto-help answer (or wrote back to one) - a person looks.
+      let autoHelpGuardApplied = false;
+      if (decision === 'noise_dismissed' && (autoHelpContext?.sent || autoHelpContext?.requesterReplied)) {
+        decision = 'pending_review';
+        autoHelpGuardApplied = true;
+        const guardMessage = autoHelpContext.requesterReplied
+          ? 'Auto-help answered this ticket and the requester replied to it - held for a person instead of a noise close.'
+          : 'Auto-help already answered this requester - held for a person instead of a noise close.';
+        stepCounter++;
+        await assignmentRepository.createPipelineStep({
+          pipelineRunId: runId,
+          stepNumber: stepCounter,
+          stepName: 'auto_help_guard',
+          status: 'completed',
+          durationMs: 0,
+          output: {
+            kind: 'auto_help_guard',
+            llmVerdict: 'noise',
+            forcedDecision: 'pending_review',
+            autoHelpRunId: autoHelpContext.runId,
+            requesterReplied: autoHelpContext.requesterReplied === true,
+            message: guardMessage,
+          },
+        }).catch((stepError) => {
+          logger.warn('Pipeline: failed to record auto_help_guard step', { runId, error: stepError.message });
+        });
+        emit({ type: 'auto_help_guard', message: guardMessage });
+        logger.info('Pipeline noise dismissal held - Auto-help answered this ticket', { runId, ticketId, workspaceId, autoHelpRunId: autoHelpContext.runId });
+      }
+
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
-      if (noiseVetoApplied) {
+      if (autoHelpGuardApplied) {
+        errorMessage = 'Auto-help guard: the requester got an Auto-help answer, so the AI noise verdict was held for a person.';
+      } else if (noiseVetoApplied) {
         // The "Noise veto:" prefix is what the run detail page keys on to
         // render the veto strip — keep this format stable.
         errorMessage = `Noise veto: rule "${noiseVeto.ruleName}" — this ticket can never be auto-dismissed. The AI marked it as noise, but the run was held for manual review.`;
@@ -1540,6 +1579,23 @@ class AssignmentPipelineService {
         ...(pipelineDidDecide ? { decidedAt: new Date() } : {}),
         ...(willTriggerSync ? { syncStatus: 'pending' } : {}),
       });
+
+      // Auto-help integration W1: the intake settled - category, priority,
+      // noise and the decision are saved and the run is recorded. Night
+      // (after-hours priority-only) runs settle provisionally; the
+      // business-hours run settles finally. Durable job first, then the
+      // "Ticket intake settled" workflow trigger. Never fails the run.
+      if (recommendation && finalStatus === 'completed' && !NON_INTAKE_SETTLE_TRIGGERS.includes(triggerSource)) {
+        await this._emitIntakeSettled({
+          ticketId,
+          workspaceId,
+          runId,
+          triggerSource,
+          decision,
+          nonActionable: flaggedNonActionable,
+          noiseVeto: noiseVetoApplied,
+        }).catch((err) => logger.warn('Pipeline: intake settle not emitted', { runId, ticketId, error: err.message }));
+      }
 
       if (recommendation) {
         emit({ type: 'recommendation', data: recommendation, decision, totalDurationMs: Date.now() - pipelineStart, totalTokens });
@@ -1697,6 +1753,90 @@ class AssignmentPipelineService {
       this._broadcastRunUpdate(workspaceId, ticketId, runId, 'failed');
       return await assignmentRepository.getPipelineRun(runId);
     }
+  }
+
+  /**
+   * Auto-help integration W4: the Auto-help block for the evidence and the
+   * noise-close guard (autoHelpContextService.pipelineContextFor). Never
+   * throws; null when Auto-help never drafted anything on the ticket.
+   * Audit nice-to-have 1: no query at all in a workspace where Auto-help has
+   * never been switched on (cached 60 s). A workspace that switched it OFF
+   * after answering keeps the block, so the noise-close guard still protects
+   * tickets whose requester got an answer.
+   */
+  async _autoHelpContext(ticketId, workspaceId = null) {
+    try {
+      if (workspaceId) {
+        const { default: autoHelpPlaybookService } = await import('./autoHelpPlaybookService.js');
+        const state = await autoHelpPlaybookService.enabledState(workspaceId);
+        if (!state.enabled && !state.enabledAt) return null;
+      }
+      const { pipelineContextFor } = await import('./autoHelpContextService.js');
+      return await pipelineContextFor(ticketId);
+    } catch (err) {
+      logger.debug('Auto-help context unavailable for pipeline run', { ticketId, error: err.message });
+      return null;
+    }
+  }
+
+  /**
+   * Auto-help integration W1: emit `ticket.intake_settled` once per settle
+   * (provisional at night, final in the morning; deduped per ticket + kind).
+   * The Auto-help job is queued first (durable, awaited); the workflow event
+   * is fire-and-forget like ticket.categorized.
+   */
+  async _emitIntakeSettled({ ticketId, workspaceId, runId, triggerSource, decision, nonActionable = false, noiseVeto = false }) {
+    const provisional = triggerSource === 'priority_assessment_after_hours';
+    const ticket = await Promise.resolve().then(() => prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        internalCategoryId: true,
+        internalSubcategoryId: true,
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+      },
+    })).catch(() => null);
+    const extra = {
+      category: ticket?.internalCategory?.name || null,
+      subcategory: ticket?.internalSubcategory?.name || null,
+      categoryId: ticket?.internalCategoryId ?? null,
+      subcategoryId: ticket?.internalSubcategoryId ?? null,
+      decision: decision || null,
+      nonActionable: nonActionable === true,
+      noiseVeto: noiseVeto === true,
+      afterHours: provisional,
+      provisional,
+      // The night run queues the business-hours run unless it closed the ticket as noise.
+      fullRunPending: provisional && decision !== 'noise_dismissed',
+      source: 'pipeline',
+      pipelineRunId: runId,
+      triggerSource,
+    };
+    let enqueued = false;
+    let autoHelpOff = false;
+    try {
+      // Audit nice-to-have 1: a workspace without Auto-help (cached 60 s) skips
+      // the job path and its settings read; the workflow event still goes.
+      const { default: autoHelpPlaybookService } = await import('./autoHelpPlaybookService.js');
+      const state = await autoHelpPlaybookService.enabledState(workspaceId);
+      if (!state.enabled) {
+        autoHelpOff = true;
+      } else {
+        const { default: autoHelpIntakeService } = await import('./autoHelpIntakeService.js');
+        const job = await autoHelpIntakeService.onIntakeSettled(ticketId, workspaceId, extra);
+        enqueued = Boolean(job?.id || job?.duplicate || job?.skipped);
+      }
+    } catch (err) {
+      logger.warn('Pipeline: Auto-help settle job not queued (the catch-up sweep recovers it)', { runId, ticketId, error: err.message });
+    }
+    import('./ticketLifecycleNotificationService.js')
+      .then(({ emitTicketEvent }) => emitTicketEvent('ticket.intake_settled', ticketId, {
+        source: 'assignment_pipeline',
+        dedupeStamp: `intake_settled:${ticketId}:${provisional ? 'provisional' : 'final'}`,
+        extra: { ...extra, enqueued, ...(autoHelpOff ? { autoHelpOff: true } : {}) },
+      }))
+      .catch((err) => logger.warn('Pipeline: ticket.intake_settled not dispatched', { runId, ticketId, error: err.message }));
+    return extra;
   }
 
   /**

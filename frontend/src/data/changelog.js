@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.9.93-preview';
+export const APP_VERSION = '3.9.94-preview';
 
 export const changelog = [
+  {
+    version: '3.9.94-preview',
+    date: 'September 26, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Knowledge has a new look, and playbooks became a step-by-step builder</strong> &mdash; light tabs; each playbook has a header with its state (on/off, mode, version, last updated) and six numbered steps: ticket matching (keyword chips to include or exclude), answer instructions, the tools the AI may use, the knowledge it may quote, confidence and priority, and follow-up. A panel on the right tests the playbook on any ticket, previews the answer, and backtests it on past tickets.' },
+      { type: 'new', html: '<strong>&ldquo;Stay quiet when&rdquo; rules</strong> &mdash; list the situations where Auto-help must not answer (for example a possibly compromised account, or an app that needs a licence), per playbook and for the whole workspace (Knowledge &rarr; Settings). Runs that hit one show as &ldquo;Stayed quiet&rdquo; in Activity.' },
+      { type: 'new', html: '<strong>Approve mode for Auto-help (off until a workspace switches it on)</strong> &mdash; a playbook in approve mode puts &ldquo;Auto-help suggests&hellip;&rdquo; on the ticket; an agent sends it with one click, edits it first, or dismisses it with a reason. A sent answer checks in after two business days of silence and closes the ticket two days later; any reply that isn\'t a clear &ldquo;that worked&rdquo; goes straight back to a person. Nothing is ever sent without an agent in this version.' },
+      { type: 'new', html: '<strong>Knowledge grows from real tickets</strong> &mdash; a Gaps tab groups the questions Auto-help couldn\'t answer; draft an article from how the team solved them (names and personal details removed, never published automatically), turn a ticket\'s verified solution into an article, import FreshService solution articles, and see which articles are due for review.' },
+      { type: 'improved', html: '<strong>Auto-help waits for the full picture</strong> &mdash; it now starts only after a new ticket\'s category, noise check and assignment decision are all saved, redoes a night-time draft if the morning run changes the category, and never competes with a person\'s reply. Workflows can see Auto-help\'s state, and Auto-help\'s closes don\'t count against an agent\'s close rate.' },
+      { type: 'fixed', html: '<strong>Workflows that wait now check the ticket as it is</strong> &mdash; a workflow with a wait step (or a coalesced &ldquo;Ticket updated&rdquo;) used to read the ticket as it was when it started, so a &ldquo;still open?&rdquo; check after a 24-hour wait could e-mail about a ticket already resolved. It now re-reads status, priority, assignee, noise, parking and dates before it continues.' },
+    ],
+  },
   {
     version: '3.9.93-preview',
     date: 'September 26, 2026',

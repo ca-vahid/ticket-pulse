@@ -41,7 +41,8 @@ describe('ticketProposedReplyService', () => {
     });
     expect(proposal.id).toBe(77);
     expect(prismaMock.ticketProposedReply.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { ticketId: 501, status: 'proposed' },
+      // Integration W2: never an Auto-help answer waiting for an agent.
+      where: { ticketId: 501, status: 'proposed', source: { not: 'auto_help' } },
       data: expect.objectContaining({ status: 'dismissed', decidedBy: 'superseded' }),
     }));
   });

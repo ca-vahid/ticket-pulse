@@ -4,8 +4,9 @@
  * (explicit `details.actorKind` or the server-side legacy heuristic); the
  * client fallback below only covers responses from an older backend.
  *
- * Kinds: human | api | freshservice_sync | ai | workflow | system | reconcile | mirror
+ * Kinds: human | api | freshservice_sync | ai | workflow | system | reconcile | mirror | auto_help
  */
+import { BookOpen } from 'lucide-react';
 
 export const ACTOR_KIND_META = {
   human: {
@@ -56,6 +57,13 @@ export const ACTOR_KIND_META = {
     tone: 'bg-muted text-muted-foreground border-border',
     machine: true,
   },
+  // Auto-help's follow-up loop (P1): automated, but part of the ticket's story — shown by default.
+  auto_help: {
+    label: 'Auto-help',
+    title: 'Done by Auto-help (check-in, close, hand-back)',
+    tone: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/30',
+    machine: false,
+  },
 };
 
 const MACHINE_NAMES = new Set([
@@ -72,6 +80,7 @@ export function activityActorKind(a) {
   if (d.actorKind && ACTOR_KIND_META[d.actorKind]) return d.actorKind;
   const by = String(a.performedBy || '').trim().toLowerCase();
   const email = String(d.actorEmail || '').toLowerCase();
+  if (by === 'ticket pulse (auto-help)') return 'auto_help';
   if (email.startsWith('apikey:') || by.startsWith('apikey:')) return 'api';
   if (a.activityType === 'mirror_conflict' || by === 'mirror reconciliation') return 'mirror';
   if (a.activityType === 'workflow_updated_ticket' || by === 'notification workflow' || by === 'ticket workflow') return 'workflow';
@@ -107,6 +116,21 @@ export function isMachineActivity(a) {
 export function ActorKindChip({ kind, className = '' }) {
   const meta = ACTOR_KIND_META[kind];
   if (!meta) return null;
+  // Auto-help is part of the ticket's story, not a machine badge: plain text
+  // with its book icon, never a pill (Vahid's no-pills rule).
+  if (kind === 'auto_help') {
+    return (
+      <span
+        data-testid="actor-kind-chip"
+        data-kind={kind}
+        title={meta.title}
+        className={`inline-flex items-center gap-1 text-[11px] font-medium leading-4 whitespace-nowrap text-primary ${className}`}
+      >
+        <BookOpen className="h-3 w-3" aria-hidden="true" />
+        {meta.label}
+      </span>
+    );
+  }
   return (
     <span
       data-testid="actor-kind-chip"

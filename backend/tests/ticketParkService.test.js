@@ -13,6 +13,9 @@ const prismaMock = {
   ticket: { findFirst: jest.fn(), update: jest.fn(), findMany: jest.fn().mockResolvedValue([]), count: jest.fn() },
   ticketPark: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn(), update: jest.fn(), create: jest.fn() },
   workspace: { findMany: jest.fn().mockResolvedValue([]) },
+  // Audit S1: the sweep no longer touches the Auto-help job queue at all.
+  autoHelpJob: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+  autoHelpSettings: { findMany: jest.fn().mockResolvedValue([]) },
   $transaction: jest.fn(async (fn) => fn(tx)),
 };
 const changeStatus = jest.fn().mockResolvedValue({ changed: true });
@@ -22,6 +25,11 @@ const emitTicketEvent = jest.fn().mockResolvedValue({});
 const sendTransactionalEmail = jest.fn().mockResolvedValue({ sent: true });
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
+// Audit S1: a drain that never finishes (model calls, 45 s each) - the park
+// sweep must neither call it nor wait for it.
+const neverEnds = () => new Promise(() => {});
+const intakeQueueMock = { drain: jest.fn(neverEnds), catchUp: jest.fn(neverEnds), tick: jest.fn(neverEnds), kick: jest.fn() };
+jest.unstable_mockModule('../src/services/autoHelpIntakeService.js', () => ({ default: intakeQueueMock }));
 const loggerWarn = jest.fn();
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: loggerWarn, error: jest.fn(), debug: jest.fn() } }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: { create: activityCreate } }));
@@ -174,5 +182,55 @@ describe('sweep', () => {
     const out = await parks.sweep();
     expect(out.ended).toBe(1);
     expect(changeStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('audit S1: park wakes never wait on Auto-help', () => {
+  test('with an Auto-help drain stuck mid-flight, a due park still wakes at once and the sweep never calls the queue', async () => {
+    intakeQueueMock.drain(); // the queue's own tick is busy with a slow model run
+    const parkedAt = new Date(Date.now() - 2 * 86400e3);
+    prismaMock.ticketPark.findMany
+      .mockResolvedValueOnce([{ id: 9, ticketId: 45000, workspaceId: 1, kind: 'until_date', until: new Date(), parkedAt, parkedBy: 'Andrii', reason: 'Back Monday', statusBefore: 'Open' }])
+      .mockResolvedValueOnce([]);
+    prismaMock.ticketPark.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, status: 'Pending', parkedUntil: new Date() });
+    const timeout = new Promise((_r, reject) => { const t = setTimeout(() => reject(new Error('sweep waited on Auto-help')), 2000); t.unref?.(); });
+    const out = await Promise.race([parks.sweep(), timeout]);
+    expect(out.woke).toBe(1);
+    expect(changeStatus).toHaveBeenCalledWith(45000, 1, 'Open', expect.objectContaining({ _parkChange: true }), {});
+    expect(intakeQueueMock.drain).toHaveBeenCalledTimes(1); // only the call above
+    expect(intakeQueueMock.catchUp).not.toHaveBeenCalled();
+    expect(intakeQueueMock.tick).not.toHaveBeenCalled();
+  });
+});
+
+describe('audit nice-to-have 9: the reordered sweep with an HR park (behaviour unchanged)', () => {
+  const HR_PARK = { id: 12, ticketId: 45000, workspaceId: 1, kind: 'until_date', until: new Date(Date.now() - 60e3), parkedAt: new Date(Date.now() - 5 * 86400e3), parkedBy: 'Ticket Pulse (HR notice)', reason: 'Leave until Oct 5', statusBefore: 'Open' };
+
+  test('an HR park whose ticket a sync already reopened ends as a status change FIRST and is not woken again', async () => {
+    prismaMock.ticket.findMany.mockResolvedValueOnce([{ id: 45000, workspaceId: 1, status: 'Open' }]);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, status: 'Open', parkedUntil: HR_PARK.until, parkKind: 'until_date' });
+    prismaMock.ticketPark.findFirst.mockResolvedValue({ ...HR_PARK });
+    // The safety net's claim wins; the due loop then sees the park already ended.
+    prismaMock.ticketPark.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+    prismaMock.ticketPark.findMany.mockResolvedValueOnce([{ ...HR_PARK }]).mockResolvedValueOnce([]);
+    const out = await parks.sweep();
+    expect(out).toMatchObject({ ended: 1, woke: 0 });
+    const driftQuery = prismaMock.ticket.findMany.mock.invocationCallOrder[0];
+    const dueQuery = prismaMock.ticketPark.findMany.mock.invocationCallOrder[0];
+    expect(driftQuery).toBeLessThan(dueQuery);
+    expect(prismaMock.ticketPark.updateMany.mock.calls[0][0].data).toMatchObject({ endReason: 'status_changed' });
+    expect(changeStatus).not.toHaveBeenCalled();
+    expect(sendTransactionalEmail).not.toHaveBeenCalled();
+  });
+
+  test('an HR park still Pending wakes as before: reopened, assignee told', async () => {
+    prismaMock.ticketPark.findMany.mockResolvedValueOnce([{ ...HR_PARK }]).mockResolvedValueOnce([]);
+    prismaMock.ticketPark.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, status: 'Pending', parkedUntil: HR_PARK.until, parkKind: 'until_date' });
+    const out = await parks.sweep();
+    expect(out).toMatchObject({ woke: 1, ended: 0 });
+    expect(changeStatus).toHaveBeenCalledWith(45000, 1, 'Open', expect.objectContaining({ _parkChange: true }), {});
+    expect(sendTransactionalEmail).toHaveBeenCalledWith(expect.objectContaining({ label: 'park wake' }));
   });
 });

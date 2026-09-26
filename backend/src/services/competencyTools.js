@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import graphMailClient from '../integrations/graphMailClient.js';
+import { countsForAgentMetrics } from '../utils/autoHelpMetrics.js';
 // Flag-split assignment (Phase PA): CANONICAL set — canonicalMode here only
 // changes evidence SEMANTICS (canonical taxonomy = skill evidence, raw FS
 // category fields = context-only); it never talks to FreshService.
@@ -98,7 +99,8 @@ function summarizeCanonicalEvidenceRows(rows = [], totalTickets = 0) {
     } else {
       existing.cautionTicketCount += 1;
     }
-    if (row.resolvedAt) existing.resolvedCount += 1;
+    // Auto-help closes are not the person's evidence (utils/autoHelpMetrics.js).
+    if (row.resolvedAt && countsForAgentMetrics(row)) existing.resolvedCount += 1;
     if (row.isSelfPicked) existing.selfPickedCount += 1;
     if ((row.rejectionCount || 0) > 0) existing.rejectedTicketCount += 1;
 
@@ -490,6 +492,7 @@ async function getTechnicianCanonicalCategoryEvidence(workspaceId, technicianId,
         rejectionCount: true,
         createdAt: true,
         resolvedAt: true,
+        resolvedByKind: true,
         isSelfPicked: true,
       },
       orderBy: { createdAt: 'desc' },

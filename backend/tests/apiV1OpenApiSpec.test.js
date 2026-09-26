@@ -191,3 +191,11 @@ describe('OpenAPI spec — monitoring alerts (Sentinel, 24 Sep 2026)', () => {
     expect(schemas.Ticket.properties.occurrenceCount).toBeDefined();
   });
 });
+
+describe('OpenAPI spec — Auto-help integration W4', () => {
+  test('Ticket documents firstAutomatedReplyAt (nullable date-time, apart from the agent first response)', () => {
+    const f = schemas.Ticket.properties.firstAutomatedReplyAt;
+    expect(f).toEqual(expect.objectContaining({ type: 'string', format: 'date-time', nullable: true }));
+    expect(f.description).toMatch(/Auto-help/);
+  });
+});
