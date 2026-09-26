@@ -1000,8 +1000,9 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/send`, body);
   },
 
-  dismissProposedReply: async (id, proposalId) => {
-    return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/dismiss`);
+  // Auto-help suggestions need a one-tap reason (wrong_answer | not_needed | other).
+  dismissProposedReply: async (id, proposalId, body = undefined) => {
+    return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/dismiss`, body);
   },
 
   requesterSearch: async (q) => {
@@ -1347,6 +1348,9 @@ export const knowledgeAPI = {
   createPlaybook: (data) => api.post('/knowledge/playbooks', data),
   updatePlaybook: (id, data) => api.put(`/knowledge/playbooks/${id}`, data),
   deletePlaybook: (id) => api.delete(`/knowledge/playbooks/${id}`),
+  playbookReadiness: (id) => api.get(`/knowledge/playbooks/${id}/readiness`),
+  // "Preview answer": the newest drafted test run, or a labelled sample (no model call).
+  playbookPreview: (id) => api.get(`/knowledge/playbooks/${id}/preview`),
   // Synchronous model run (≤45 s budget server-side) — long client timeout.
   testPlaybook: (id, ticketRef) => apiLongTimeout.post(`/knowledge/playbooks/${id}/test`, { ticketRef }, { timeout: 90000 }),
   listRuns: (params = {}) => api.get('/knowledge/runs', { params }),
@@ -1355,6 +1359,30 @@ export const knowledgeAPI = {
   runsSummary: (params = {}) => api.get('/knowledge/runs-summary', { params }),
   ticketAutoHelp: (ticketId) => api.get(`/knowledge/tickets/${ticketId}/auto-help`, { _speculative: true }),
   waiting: () => api.get('/knowledge/waiting'),
+};
+
+/**
+ * Knowledge that grows (Auto-help P1, plans/AUTO_HELP_P1_PLAN.md §4-§5): gaps,
+ * articles drafted from solved tickets, FreshService solution import, the
+ * review digest and playbook backtests. Drafting waits on a model call.
+ */
+export const knowledgeGrowthAPI = {
+  gaps: (params = {}) => api.get('/knowledge/gaps', { params }),
+  draftFromTickets: (data) => apiLongTimeout.post('/knowledge/drafts', data, { timeout: 120000 }),
+  draftFromTicket: (ticketId) => apiLongTimeout.post(`/knowledge/drafts/from-ticket/${ticketId}`, {}, { timeout: 120000 }),
+  getSettings: () => api.get('/knowledge/growth-settings'),
+  updateSettings: (data) => api.put('/knowledge/growth-settings', data),
+  fsFolders: (params = {}) => apiLongTimeout.get('/knowledge/fs-import/folders', { params, timeout: 90000 }),
+  // "Import now" answers at once with a job id (202); progress comes from fsImportJob.
+  fsImportNow: (data = {}) => api.post('/knowledge/fs-import/run', data),
+  fsImportStatus: () => api.get('/knowledge/fs-import/status'),
+  fsImportJob: (jobId) => api.get(`/knowledge/fs-import/jobs/${encodeURIComponent(jobId)}`),
+  reviewDigest: () => api.get('/knowledge/review-digest', { _speculative: true }),
+  backtestEstimate: (playbookId, n) => api.get(`/knowledge/playbooks/${playbookId}/backtest`, { params: { n } }),
+  startBacktest: (playbookId, n) => api.post(`/knowledge/playbooks/${playbookId}/backtest`, { n, confirm: true }),
+  backtestStatus: () => api.get('/knowledge/backtest'),
+  cancelBacktest: () => api.delete('/knowledge/backtest'),
+  backtestResults: (playbookId) => api.get(`/knowledge/playbooks/${playbookId}/backtest-results`),
 };
 
 export const uiPreferencesAPI = {

@@ -5,11 +5,14 @@ import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 import knowledgeArticleService from '../services/knowledgeArticleService.js';
 import autoHelpPlaybookService, {
-  DEFAULT_DISCLOSURE_TEXT, DEFAULT_FOLLOW_UP, MODE_LOCKED_MESSAGE, P0_MODE,
+  APPROVE_OFF_MESSAGE, AUTO_HELP_MODES, DEFAULT_ALWAYS_STAY_QUIET, DEFAULT_DISCLOSURE_TEXT, DEFAULT_FOLLOW_UP, DEFAULT_MODE,
 } from '../services/autoHelpPlaybookService.js';
+import { DISMISS_REASONS, READINESS } from '../services/autoHelpOutcomes.js';
 import autoHelpRunner, { disclosureLine } from '../services/autoHelpRunner.js';
 import { toolCatalog } from '../services/autoHelpTools.js';
+import autoHelpPreviewService from '../services/autoHelpPreviewService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
+import knowledgeGrowthRoutes from './knowledgeGrowth.routes.js';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): articles, playbooks,
@@ -84,7 +87,10 @@ router.get('/settings', asyncHandler(async (req, res) => {
     canManageKnowledge(sessionUser(req), req.workspaceId),
     knowledgeCapability(sessionUser(req), req.workspaceId, 'review'),
   ]);
-  const preview = await disclosurePreviewFor(req.workspaceId, settings);
+  const [preview, budget] = await Promise.all([
+    disclosurePreviewFor(req.workspaceId, settings),
+    autoHelpRunner.budgetState(req.workspaceId, settings),
+  ]);
   res.json({
     success: true,
     data: {
@@ -92,9 +98,14 @@ router.get('/settings', asyncHandler(async (req, res) => {
       ...preview,
       canManage,
       canReview,
-      modeLocked: true,
-      modeLockedMessage: MODE_LOCKED_MESSAGE,
-      defaults: { disclosureText: DEFAULT_DISCLOSURE_TEXT, followUp: DEFAULT_FOLLOW_UP, mode: P0_MODE },
+      // P1: approve needs the workspace switch; auto is locked by the build.
+      modes: AUTO_HELP_MODES,
+      modeLocked: !settings.approveModeEnabled,
+      modeLockedMessage: settings.approveModeEnabled ? null : APPROVE_OFF_MESSAGE,
+      budget,
+      readinessBar: READINESS,
+      dismissReasons: DISMISS_REASONS,
+      defaults: { disclosureText: DEFAULT_DISCLOSURE_TEXT, followUp: DEFAULT_FOLLOW_UP, mode: DEFAULT_MODE, alwaysStayQuietWhen: DEFAULT_ALWAYS_STAY_QUIET },
       tools: toolCatalog(),
     },
   });
@@ -102,9 +113,19 @@ router.get('/settings', asyncHandler(async (req, res) => {
 
 router.put('/settings', requireKnowledgeManager, asyncHandler(async (req, res) => {
   const settings = await autoHelpPlaybookService.updateSettings(req.workspaceId, req.body || {}, actorOf(req));
-  logger.info(`Auto-help settings updated (ws ${req.workspaceId}): enabled=${settings.enabled}`);
-  const preview = await disclosurePreviewFor(req.workspaceId, settings);
-  res.json({ success: true, data: { ...settings, ...preview, canManage: true } });
+  logger.info(`Auto-help settings updated (ws ${req.workspaceId}): enabled=${settings.enabled} approve=${settings.approveModeEnabled} cap=${settings.monthlyCostCapUsd ?? 'none'}`);
+  const [preview, budget] = await Promise.all([
+    disclosurePreviewFor(req.workspaceId, settings),
+    autoHelpRunner.budgetState(req.workspaceId, settings),
+  ]);
+  res.json({
+    success: true,
+    data: {
+      ...settings, ...preview, canManage: true, budget,
+      modeLocked: !settings.approveModeEnabled,
+      modeLockedMessage: settings.approveModeEnabled ? null : APPROVE_OFF_MESSAGE,
+    },
+  });
 }));
 
 /** Internal category tree for the editors' selects (lighter than /tickets/meta). */
@@ -178,6 +199,22 @@ router.post('/playbooks', requireKnowledgeManager, asyncHandler(async (req, res)
 
 router.put('/playbooks/:id', requireKnowledgeManager, asyncHandler(async (req, res) => {
   res.json({ success: true, data: await autoHelpPlaybookService.update(req.workspaceId, req.params.id, req.body || {}, actorOf(req)) });
+}));
+
+/** The auto-mode readiness gate for one playbook, criterion by criterion (P1). */
+router.get('/playbooks/:id/readiness', asyncHandler(async (req, res) => {
+  const playbook = await autoHelpPlaybookService.get(req.workspaceId, req.params.id);
+  const readiness = await autoHelpPlaybookService.readiness(req.workspaceId, playbook.id, { sensitive: playbook.sensitive === true });
+  res.json({ success: true, data: { ...readiness, autoModeAllowed: autoHelpPlaybookService.autoModeAllowed() } });
+}));
+
+/**
+ * "Preview answer" (playbook builder): the newest drafted test run as the
+ * requester would read it, or — with none yet — a labelled SAMPLE built from
+ * the best-matching published article without any model call.
+ */
+router.get('/playbooks/:id/preview', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await autoHelpPreviewService.forPlaybook(req.workspaceId, req.params.id) });
 }));
 
 router.delete('/playbooks/:id', requireKnowledgeManager, asyncHandler(async (req, res) => {
@@ -260,5 +297,9 @@ router.get('/tickets/:ticketId/auto-help', asyncHandler(async (req, res) => {
 router.get('/waiting', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await autoHelpRunner.waiting(req.workspaceId) });
 }));
+
+// Knowledge that grows (P1): gaps, drafts from tickets, FreshService import,
+// review digest, backtests — behind the same role gates as everything above.
+router.use(knowledgeGrowthRoutes({ requireKnowledgeManager, requireKnowledgeReviewer, sessionUser, actorOf }));
 
 export default router;

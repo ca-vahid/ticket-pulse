@@ -19,8 +19,10 @@ import settingsRepository from './settingsRepository.js';
 export const PARK_KINDS = Object.freeze(['until_date', 'waiting_on', 'eta']);
 // System kinds (Auto-help, plans/AUTO_HELP_PLAN.md): only the owning service
 // may park with them (park(..., { source: 'auto_help' })); the agent, API and
-// bulk paths keep validating against PARK_KINDS. Nothing parks with
-// 'auto_help' in P0 (shadow mode) — P1 parks after an Auto-help answer is sent.
+// bulk paths keep validating against PARK_KINDS. P1: an Auto-help answer that
+// was sent parks the ticket until its check-in; the sweep, a requester reply
+// and any other end of an 'auto_help' park are handed to
+// autoHelpFollowUpService (check-in, close, classify the reply, took over).
 export const AUTO_HELP_PARK_KIND = 'auto_help';
 export const SYSTEM_PARK_KINDS = Object.freeze([AUTO_HELP_PARK_KIND]);
 export const PARK_KIND_LABELS = Object.freeze({
@@ -271,6 +273,14 @@ class TicketParkService {
     });
     if (!claimed.count) return { unparked: false };
     await prisma.ticket.update({ where: { id: ticket.id }, data: { parkedUntil: null, parkKind: null } });
+    // Auto-help's loop records how it ended (someone took over, or a
+    // requester reply FreshService turned into a status change). Auto-help's
+    // own endings never come through here (it ends its parks directly).
+    if (park.kind === AUTO_HELP_PARK_KIND) {
+      import('./autoHelpFollowUpService.js')
+        .then(({ default: followUp }) => followUp.onParkEnded(park, reason, actor))
+        .catch((err) => logger.warn(`Auto-help park-end hook failed for ticket ${ticket.id}: ${err.message}`));
+    }
     if (reopen && ticket.status === PARKED_STATUS) {
       await this._setStatus(ticket, this._wakeStatus(park), actor).catch((err) => {
         logger.warn(`Unpark of ${ticketDisplayRef(ticket)}: status not reopened (${err.message})`);
@@ -293,8 +303,17 @@ class TicketParkService {
     return before && before !== PARKED_STATUS && !/pending/i.test(before) ? before : 'Open';
   }
 
-  /** The date came: back to the assignee. Called by the sweep after it claimed the park. */
-  async _wake(park) {
+  /**
+   * The date came: back to the assignee. Called by the sweep after it claimed
+   * the park. An 'auto_help' park is Auto-help's check-in / close instead
+   * (autoHelpFollowUpService.onParkDue), unless `plain` (its fallback).
+   */
+  async _wake(park, { plain = false } = {}) {
+    if (park.kind === AUTO_HELP_PARK_KIND && !plain) {
+      const { default: followUp } = await import('./autoHelpFollowUpService.js');
+      await followUp.onParkDue(park);
+      return;
+    }
     const ticket = await this._loadTicket(park.ticketId, park.workspaceId).catch(() => null);
     if (!ticket) return;
     await prisma.ticket.update({ where: { id: ticket.id }, data: { parkedUntil: null, parkKind: null } });
@@ -363,10 +382,23 @@ class TicketParkService {
     return this.unpark(ticketId, workspaceId, { reason, reopen: false, note: `Status set to ${newStatus}` }, actor);
   }
 
-  /** A requester reply wakes the ticket early: back to Open with the reply. */
+  /**
+   * A requester reply wakes the ticket early: back to Open with the reply.
+   * An 'auto_help' park reads the reply first ("it works" resolves it).
+   */
   async afterRequesterReply(ticketId, workspaceId) {
     const park = await this.activePark(ticketId);
-    if (!park) return { unparked: false };
+    if (!park) {
+      // The sweep may hold an auto_help park right now (claimed, mid check-in
+      // or close): the reply must still reach the loop.
+      const { default: followUp } = await import('./autoHelpFollowUpService.js');
+      const res = await followUp.onRequesterReplyWithoutPark(ticketId, workspaceId).catch(() => ({ handled: false }));
+      return res?.handled ? res : { unparked: false };
+    }
+    if (park.kind === AUTO_HELP_PARK_KIND) {
+      const { default: followUp } = await import('./autoHelpFollowUpService.js');
+      return followUp.onRequesterReply(park);
+    }
     return this.unpark(ticketId, workspaceId, { reason: 'requester_replied', reopen: true, note: 'The requester replied' }, { name: 'Ticket Pulse (requester replied)', role: 'automation' });
   }
 
@@ -394,6 +426,22 @@ class TicketParkService {
     this._running = true;
     const out = { woke: 0, ended: 0, dueSoon: 0 };
     try {
+      // Safety net FIRST: parked tickets that are no longer Pending (a sync,
+      // workflow or API moved them) end as a status change before any due
+      // park is acted on — so Auto-help never checks in on / closes a ticket
+      // somebody already moved.
+      const drifted = await prisma.ticket.findMany({
+        where: { parkedUntil: { not: null }, NOT: { status: PARKED_STATUS } },
+        select: { id: true, workspaceId: true, status: true },
+        take: SWEEP_BATCH,
+      });
+      for (const t of drifted) {
+        const base = await statusService.resolveBaseStatus(t.workspaceId, t.status).catch(() => null);
+        const reason = base === 'Resolved' || base === 'Closed' || ['Deleted', 'Spam'].includes(t.status) ? 'closed' : 'status_changed';
+        await this.unpark(t.id, t.workspaceId, { reason, reopen: false, note: `Status is now ${t.status}` }, { name: 'Ticket Pulse', role: 'automation' }).catch(() => {});
+        out.ended += 1;
+      }
+
       const due = await prisma.ticketPark.findMany({
         where: { endedAt: null, until: { lte: now } },
         orderBy: { until: 'asc' },
@@ -409,21 +457,24 @@ class TicketParkService {
         out.woke += 1;
       }
 
-      // Safety net: parked tickets that are no longer Pending.
-      const drifted = await prisma.ticket.findMany({
-        where: { parkedUntil: { not: null }, NOT: { status: PARKED_STATUS } },
-        select: { id: true, workspaceId: true, status: true },
-        take: SWEEP_BATCH,
-      });
-      for (const t of drifted) {
-        const base = await statusService.resolveBaseStatus(t.workspaceId, t.status).catch(() => null);
-        const reason = base === 'Resolved' || base === 'Closed' || ['Deleted', 'Spam'].includes(t.status) ? 'closed' : 'status_changed';
-        await this.unpark(t.id, t.workspaceId, { reason, reopen: false, note: `Status is now ${t.status}` }, { name: 'Ticket Pulse', role: 'automation' }).catch(() => {});
-        out.ended += 1;
+      // Half-done Auto-help steps (stuck 'sending' suggestions, unanswered
+      // reply claims) and park markers with no park behind them.
+      try {
+        const { default: followUp } = await import('./autoHelpFollowUpService.js');
+        const recovered = await followUp.recoverStale({ now });
+        if (Object.values(recovered || {}).some(Boolean)) out.recovered = recovered;
+      } catch (err) {
+        logger.warn(`Park sweep: stale-claim recovery failed: ${err.message}`);
       }
 
+      // The durable Auto-help trigger queue is NOT drained here (audit S1,
+      // 26 Sep 2026): a drain runs model calls (up to 45 s each) and would
+      // hold park wakes and due-soon notices in every workspace. It has its
+      // own tick and running guard (autoHelpIntakeService.start / tick).
+
+      // "Due soon" is for people's parks; Auto-help's own dates need no warning.
       const soon = await prisma.ticketPark.findMany({
-        where: { endedAt: null, dueSoonNotifiedAt: null, until: { gt: now, lte: new Date(now.getTime() + DUE_SOON_HOURS * 3600e3) } },
+        where: { endedAt: null, dueSoonNotifiedAt: null, kind: { not: AUTO_HELP_PARK_KIND }, until: { gt: now, lte: new Date(now.getTime() + DUE_SOON_HOURS * 3600e3) } },
         take: SWEEP_BATCH,
       });
       for (const park of soon) {

@@ -2,7 +2,9 @@
 /**
  * Auto-help P0 (plans/AUTO_HELP_PLAN.md): seed three DISABLED shadow-mode
  * playbooks for workspace 1 (IT). Idempotent by (workspace, name): an
- * existing playbook of the same name is left untouched.
+ * existing playbook of the same name is left untouched — except the P1
+ * `sensitive` flag (password / MFA / access = approve-only, never auto),
+ * which a re-run sets on an existing playbook that should carry it.
  *
  * Categories are resolved by name at run time and printed; anything not found
  * is left null (a playbook without a category never matches and cannot be
@@ -46,6 +48,11 @@ const PLAYBOOKS = [
       excludeKeywords: ['license', 'licence', 'purchase', 'quote', 'renewal', 'invoice', 'error', 'crash', 'not working', 'uninstall'],
     },
     allowedTools: ['search_knowledge', 'get_article', 'find_similar_resolved_tickets', 'get_ticket_details'],
+    // "Stay quiet when" (26 Sep 2026): hard stops, on top of the workspace's own list.
+    stayQuietWhen: [
+      "The app needs a licence, a purchase or a manager's approval before it can be installed",
+      'The app is not in Company Portal',
+    ],
     minConfidence: 0.8,
     priority: 120,
     instructions: [
@@ -76,6 +83,7 @@ const PLAYBOOKS = [
       excludeKeywords: ['lost', 'stolen', 'broken', 'cracked', 'new phone', 'replacement'],
     },
     allowedTools: ['search_knowledge', 'get_article', 'get_ticket_details', 'get_requester_profile'],
+    stayQuietWhen: ['Travel plan changes or billing disputes'],
     minConfidence: 0.8,
     priority: 110,
     instructions: [
@@ -96,6 +104,8 @@ const PLAYBOOKS = [
   },
   {
     name: 'Password, MFA & access',
+    // P1: approve-only forever — never sends on its own.
+    sensitive: true,
     category: ['Accounts & Access', 'Account & Access', 'Access', 'Identity & Access', 'Accounts'],
     subcategories: ['Password', 'Password Reset', 'MFA', 'Multi-factor Authentication', 'Authenticator', 'Sign-in'],
     match: {
@@ -103,6 +113,8 @@ const PLAYBOOKS = [
       excludeKeywords: ['phishing', 'suspicious', 'hacked', 'compromised', 'breach', 'new hire', 'terminated', 'departure'],
     },
     allowedTools: ['search_knowledge', 'get_article', 'get_ticket_details'],
+    // The compromise line is on the workspace-wide list already (DEFAULT_ALWAYS_STAY_QUIET).
+    stayQuietWhen: ["The request is for someone else's account"],
     minConfidence: 0.85,
     priority: 130,
     instructions: [
@@ -148,9 +160,28 @@ async function main() {
     console.log(`  category: ${top ? `${top.name} (#${top.id})` : 'NOT FOUND — left empty'}`);
     console.log(`  subcategories: ${subIds.length ? subs.filter((s) => subIds.includes(s.id)).map((s) => `${s.name} (#${s.id})`).join(', ') : 'none found — covers the whole category'}`);
 
-    const existing = await prisma.autoHelpPlaybook.findFirst({ where: { workspaceId: WORKSPACE_ID, name: pb.name }, select: { id: true } });
+    const existing = await prisma.autoHelpPlaybook.findFirst({ where: { workspaceId: WORKSPACE_ID, name: pb.name }, select: { id: true, sensitive: true, stayQuietWhen: true } });
+    if (existing && !(existing.stayQuietWhen || []).length && pb.stayQuietWhen?.length) {
+      // "Stay quiet when" defaults land on a playbook whose list is still empty
+      // (never over a list someone edited).
+      if (APPLY) {
+        await prisma.autoHelpPlaybook.update({ where: { id: existing.id }, data: { stayQuietWhen: pb.stayQuietWhen, updatedBy: 'seed-auto-help-playbooks' } });
+        console.log(`  exists as #${existing.id} — "stay quiet when" defaults added (${pb.stayQuietWhen.length})`);
+      } else {
+        console.log(`  exists as #${existing.id} — would add ${pb.stayQuietWhen.length} "stay quiet when" default(s)`);
+      }
+    }
     if (existing) {
-      console.log(`  exists as #${existing.id} — left untouched`);
+      if (pb.sensitive === true && existing.sensitive !== true) {
+        if (APPLY) {
+          await prisma.autoHelpPlaybook.update({ where: { id: existing.id }, data: { sensitive: true, updatedBy: 'seed-auto-help-playbooks' } });
+          console.log(`  exists as #${existing.id} — marked sensitive (approve-only)`);
+        } else {
+          console.log(`  exists as #${existing.id} — would mark it sensitive (approve-only)`);
+        }
+      } else {
+        console.log(`  exists as #${existing.id} — left untouched`);
+      }
       continue;
     }
     if (!APPLY) {
@@ -170,11 +201,13 @@ async function main() {
         // Off: answers must cite an article or verified solution. An admin can opt a
         // playbook in (Knowledge → Playbooks) once its instructions are a vetted how-to.
         instructionsAreSource: false,
+        stayQuietWhen: pb.stayQuietWhen || [],
         allowedTools: pb.allowedTools,
         kbScope: KB_ALL,
         minConfidence: pb.minConfidence,
         followUp: FOLLOW_UP,
         onHelp: 'assign_normally',
+        sensitive: pb.sensitive === true,
         priority: pb.priority,
         version: 1,
         createdBy: 'seed-auto-help-playbooks',

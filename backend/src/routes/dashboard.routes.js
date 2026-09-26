@@ -6,6 +6,7 @@ import ticketRepository from '../services/ticketRepository.js';
 import prisma from '../services/prisma.js';
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
+import { isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateTechnicianMonthlyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
 import { readCache } from '../services/dashboardReadCache.js';
 import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
@@ -576,6 +577,7 @@ router.get(
         openTickets: technicianData.openTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         ticketsOnDate: technicianData.ticketsOnDate.map((ticket) => transformTicket(ticket, req.workspaceId)),
         closedTicketsOnDate: technicianData.closedTicketsOnDate.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        autoHelpResolvedTicketsOnDate: technicianData.autoHelpResolvedTicketsOnDate.map((ticket) => transformTicket(ticket, req.workspaceId)),
         selfPickedTickets: technicianData.selfPickedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         assignedTickets: technicianData.assignedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         selfPickedOpenTickets: technicianData.selfPickedOpenTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
@@ -682,8 +684,13 @@ router.get(
 
     // Closed tickets = tickets ASSIGNED during the week that are now closed
     // Note: Filter by assignment date + status (not close date) because closedAt/resolvedAt may be null
+    // Auto-help resolutions are not the agent's closes (utils/autoHelpMetrics.js):
+    // own list, so the list matches weeklyClosed.
     const closedTickets = weeklyTickets.filter(ticket =>
-      statusSets.terminal.has(ticket.status),
+      statusSets.terminal.has(ticket.status) && !isAutoHelpResolved(ticket),
+    );
+    const autoHelpResolvedTickets = weeklyTickets.filter(ticket =>
+      statusSets.terminal.has(ticket.status) && isAutoHelpResolved(ticket),
     );
 
     // Currently open tickets (snapshot)
@@ -731,6 +738,7 @@ router.get(
         selfPickedTickets: selfPickedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         assignedTickets: assignedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         closedTickets: closedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        autoHelpResolvedTickets: autoHelpResolvedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         avoidance,
         rejectedThisPeriod: w_rP[techId] || 0,
         rejected7d: w_r7[techId] || 0,
@@ -816,7 +824,10 @@ router.get(
       !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
     );
     const closedTickets = monthlyTickets.filter(ticket =>
-      statusSets.terminal.has(ticket.status),
+      statusSets.terminal.has(ticket.status) && !isAutoHelpResolved(ticket),
+    );
+    const autoHelpResolvedTickets = monthlyTickets.filter(ticket =>
+      statusSets.terminal.has(ticket.status) && isAutoHelpResolved(ticket),
     );
     const openTickets = technician.tickets.filter(ticket =>
       statusSets.openLike.has(ticket.status),
@@ -865,6 +876,7 @@ router.get(
         selfPickedTickets: selfPickedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         assignedTickets: assignedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         closedTickets: closedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
+        autoHelpResolvedTickets: autoHelpResolvedTickets.map((ticket) => transformTicket(ticket, req.workspaceId)),
         avoidance,
         rejectedThisPeriod: m_rP[techId] || 0,
         rejected7d: m_r7[techId] || 0,

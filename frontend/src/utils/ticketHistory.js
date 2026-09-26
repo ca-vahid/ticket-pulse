@@ -27,6 +27,19 @@ const NEAR_MS = 3 * 60 * 1000;
 const BURST_GAP_MS = 5 * 60 * 1000;
 
 const humanize = (s) => String(s || '').replace(/_/g, ' ');
+
+// Auto-help notes carry machine dates ("closing 2026-10-16", full ISO stamps):
+// shown as a short day ("Fri 16 Oct"). A bare day is a calendar day (no zone
+// shift); a full timestamp is shown in the viewer's zone.
+const ISO_DAY_RE = /\b(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g;
+export function friendlyDays(text) {
+  if (!text) return text;
+  return String(text).replace(ISO_DAY_RE, (m, y, mo, d, time) => {
+    const date = time ? new Date(m) : new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), 12));
+    if (Number.isNaN(date.getTime())) return m;
+    return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...(time ? {} : { timeZone: 'UTC' }) }).replace(',', '');
+  });
+}
 const norm = (s) => String(s || '').trim().toLowerCase();
 const MACHINE_ACTORS = new Set(['', 'system', 'freshservice', 'ticket pulse', 'ticket workflow', 'notification workflow', 'mirror reconciliation', 'ticket pulse ai', 'ticket pulse mail', 'ticket pulse duplicate guard']);
 const isPersonName = (name) => !MACHINE_ACTORS.has(norm(name)) && !/\(freshservice\)$/i.test(String(name || '')) && !/^apikey:/i.test(String(name || ''));
@@ -137,6 +150,29 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'status', verb: 'ended the park', detail: why || d.note || null });
     } else if (t === 'ticket_woke') {
       item = baseItem({ event: 'status', verb: 'woke — the park date came', detail: d.reason || null, machine: true });
+    } else if (String(t || '').startsWith('auto_help_')) {
+      // Auto-help P1: every step of the answer → check-in → close loop.
+      const verbs = {
+        auto_help_staged: 'suggested an answer for an agent to send',
+        auto_help_sent: d.decision === 'agent_edited_sent' ? 'sent the Auto-help answer, edited' : d.decision === 'auto_sent' ? 'sent its answer' : 'sent the Auto-help answer',
+        auto_help_dismissed: 'dismissed the Auto-help suggestion',
+        auto_help_nudged: 'checked in with the requester',
+        auto_help_closed: 'resolved it after no reply',
+        auto_help_confirmed: 'resolved it — the requester said it worked',
+        auto_help_help_requested: 'handed it to a person — the requester still needs help',
+        auto_help_took_over: 'stepped back — a person took over',
+        auto_help_reopened: 'counted a reopen against its answer',
+        auto_help_left_open: 'handed it back to a person',
+        auto_help_loop_stopped: 'stopped its follow-up — nothing sent or closed',
+        auto_help_recovered: 'tidied up an unfinished send',
+        // Integration W1-W3.
+        auto_help_withdrawn: 'withdrew its suggestion',
+        auto_help_superseded: 'set its suggestion aside (an agent replied)',
+        auto_help_post_close_reply: 'read the reply after its close; the ticket stays closed',
+        auto_help_settle_changed: 'noted the category changed after its answer',
+        auto_help_manual_settle: 'will look again (the category was set by hand)',
+      };
+      item = baseItem({ event: 'autohelp', verb: verbs[t] || humanize(t.replace(/^auto_help_/, '')), detail: friendlyDays(d.note) || null, importance: 2 });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

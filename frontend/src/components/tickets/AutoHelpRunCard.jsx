@@ -4,6 +4,7 @@ import { ArrowUpRight, BookOpen, ChevronDown } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import { Confidence, DraftPreview, RunStatus } from '../knowledge/knowledgeUi';
 import { readableReason } from '../knowledge/knowledgeFormat';
+import { runLifeLine } from '../knowledge/autoHelpWords';
 
 /**
  * "Auto-help (shadow)" on the ticket's AI & Routing tab: the newest
@@ -27,13 +28,19 @@ export default function AutoHelpRunCard({ ticketId }) {
   }, [ticketId]);
 
   if (!run) return null;
-  const drafted = run.status === 'drafted';
+  const drafted = ['drafted', 'staged', 'sent'].includes(run.status);
+  // P1: what happened to it — shadow, waiting for an agent, or sent and how it ended.
+  const where = run.status === 'staged' ? 'suggested — waiting for an agent'
+    : run.status === 'sent' ? 'sent'
+      : run.decision === 'agent_dismissed' ? 'dismissed'
+        : run.mode === 'shadow' || !run.mode ? 'shadow — not sent' : 'not sent';
+  const life = runLifeLine(run);
 
   return (
-    <section className="tp-card mb-4 rounded-xl p-4" aria-label="Auto-help (shadow)" data-testid="auto-help-card">
+    <section className="tp-card mb-4 rounded-xl p-4" aria-label="Auto-help" data-testid="auto-help-card">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <BookOpen className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-sm font-bold text-foreground">Auto-help <span className="font-normal text-muted-foreground">(shadow — not sent)</span></h2>
+        <h2 className="text-sm font-bold text-foreground">Auto-help <span className="font-normal text-muted-foreground">({where})</span></h2>
         <RunStatus status={run.status} />
         <Confidence value={run.confidence} min={run.minConfidence} />
         {run.id && (
@@ -45,6 +52,7 @@ export default function AutoHelpRunCard({ ticketId }) {
       <p className="mt-1 text-xs text-muted-foreground">
         {run.playbookName ? `Playbook “${run.playbookName}”` : 'Playbook removed'}
         {!drafted && ` · ${run.status === 'failed' ? (run.error || 'the run failed') : (readableReason(run.transcript?.reason, run.sources) || 'the playbook stayed quiet')}`}
+        {life && ` · ${life}`}
       </p>
       {drafted && (
         <>

@@ -303,6 +303,26 @@ export function TranscriptSteps({ transcript }) {
   );
 }
 
+/**
+ * Knowledge → Settings layout (26 Sep 2026): one tp-card per topic, a small
+ * heading, then divide-y rows. Shared by the Auto-help and sources sections.
+ */
+export function SettingsSection({ id, title, hint = null, children, testId = undefined }) {
+  return (
+    <section className="tp-card divide-y divide-border overflow-hidden" aria-labelledby={id} data-testid={testId}>
+      <div className="px-4 pb-3 pt-4 sm:px-5">
+        <h2 id={id} className="text-sm font-semibold text-foreground">{title}</h2>
+        {hint && <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{hint}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function SettingsRow({ children, className = '' }) {
+  return <div className={`flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-6 sm:px-5 ${className}`}>{children}</div>;
+}
+
 export const inputClass = 'tp-focus-ring h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground/75';
 export const textareaClass = 'tp-focus-ring w-full rounded-lg border border-input bg-card px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/75';
 export const labelClass = 'mb-1 block text-xs font-medium text-foreground/85';

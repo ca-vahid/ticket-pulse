@@ -15,14 +15,18 @@
  *   reconcile        — the periodic / on-open reconcile sweeps
  *   mirror           — TP-born fallback-mirror bookkeeping (mirror_conflict…)
  *   ai               — the assignment / triage pipeline
+ *   auto_help        — Auto-help's follow-up loop (check-ins, closes); shown,
+ *                      not hidden with machine chatter (P1)
  *
  * Pure module (no imports) so sync, mirror, pipeline and ticket services can all
  * share it without import cycles.
  */
 
 export const ACTOR_KINDS = Object.freeze([
-  'human', 'api', 'system', 'workflow', 'freshservice_sync', 'reconcile', 'mirror', 'ai',
+  'human', 'api', 'system', 'workflow', 'freshservice_sync', 'reconcile', 'mirror', 'ai', 'auto_help',
 ]);
+/** The actor name Auto-help writes as (autoHelpDeliveryService.AUTO_HELP_ACTOR). */
+export const AUTO_HELP_ACTOR_NAME = 'ticket pulse (auto-help)';
 
 /** Machine kinds — hidden by the History tab's default "Hide machine activity". */
 export const MACHINE_ACTOR_KINDS = Object.freeze(['system', 'workflow', 'freshservice_sync', 'reconcile', 'mirror', 'ai']);
@@ -52,6 +56,7 @@ export function actorKindOf(actor) {
   const email = lower(actor.email);
   const name = lower(actor.name);
   if (actor.actorKind && ACTOR_KINDS.includes(actor.actorKind)) return actor.actorKind;
+  if (name === AUTO_HELP_ACTOR_NAME && !email) return 'auto_help';
   if (role === 'api' || email.startsWith('apikey:')) return 'api';
   if (role === 'workflow' || WORKFLOW_ACTOR_NAMES.has(name)) return 'workflow';
   if (role === 'system' || email.endsWith('@ticketpulse.internal') || SYSTEM_ACTOR_NAMES.has(name)) return 'system';
@@ -75,6 +80,7 @@ export function deriveActorKind(row) {
   const source = lower(details.source);
   const via = lower(details.via);
 
+  if (performedBy === AUTO_HELP_ACTOR_NAME) return 'auto_help';
   if (actorEmail.startsWith('apikey:') || performedBy.startsWith('apikey:') || via === 'api_v1') return 'api';
   if (performedBy === 'mirror reconciliation' || row.activityType === 'mirror_conflict') return 'mirror';
   if (WORKFLOW_ACTOR_NAMES.has(performedBy) || row.activityType === 'workflow_updated_ticket') return 'workflow';

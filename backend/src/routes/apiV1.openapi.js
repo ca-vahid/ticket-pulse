@@ -37,6 +37,7 @@ const T = {
       source: { type: 'integer', nullable: true, description: 'Arrival channel code; GET /meta → sources lists the labels (105 = Office Check-in).' },
       dueBy: { type: 'string', format: 'date-time', nullable: true, description: 'The due date as stored. Echoes what a trusted-intake caller sent on create/PATCH, or the SLA clock’s date.' },
       dueBySetBy: { type: 'string', nullable: true, enum: ['manual', 'sla', null], description: 'manual = a person or a trusted integration set it (never overwritten by the SLA clock); sla = the workspace SLA policy.' },
+      firstAutomatedReplyAt: { type: 'string', format: 'date-time', nullable: true, description: 'When automation (an auto-sent Auto-help answer) first answered the requester. Separate from the first agent response, which only a person’s reply sets; null until then.' },
       occurrenceCount: { type: 'integer', description: 'How often the monitoring alert behind this ticket fired (POST /alert-occurrences). 0 = not an alert ticket.' },
       lastOccurrenceAt: { type: 'string', format: 'date-time', nullable: true },
       parked: { type: 'object', nullable: true, description: 'Set while the ticket is parked: waiting on purpose until a date. The ticket is Pending (FreshService sees Pending) and wakes back to Open on `until`; a requester reply or any status change ends it early. Filter the list with ?parked=any|none|until_date|waiting_on|eta|waking7.', properties: { kind: { type: 'string', enum: ['until_date', 'waiting_on', 'eta'] }, until: { type: 'string', format: 'date-time' } } },

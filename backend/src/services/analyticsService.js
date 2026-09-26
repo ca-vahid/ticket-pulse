@@ -1,5 +1,6 @@
 import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
+import { agentCloseRatePct, isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
 import competencyRepository from './competencyRepository.js';
 import statusService from './statusService.js';
 import { getTodayRange } from '../utils/timezone.js';
@@ -107,6 +108,9 @@ const CATEGORY_TICKET_SELECT = {
   internalSubcategoryFit: true,
   taxonomyReviewNeeded: true,
   resolutionTimeSeconds: true,
+  // Auto-help P1: 'auto_help' resolutions are not an agent's close
+  // (utils/autoHelpMetrics.js) — Team Balance per-agent rows leave them out.
+  resolvedByKind: true,
   csatScore: true,
   csatTotalScore: true,
   csatSubmittedAt: true,
@@ -1244,7 +1248,7 @@ async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'curr
     prisma.ticket.count({ where: ticketBaseWhere(workspaceId, target, excludeNoise, 'createdAt', categoryWhere) }),
     prisma.ticket.findMany({
       where: assignmentRangeWhere(workspaceId, target, excludeNoise, categoryWhere),
-      select: { status: true, resolutionTimeSeconds: true },
+      select: { status: true, resolutionTimeSeconds: true, resolvedByKind: true },
     }),
     prisma.ticket.findMany({
       where: withCategoryWhere({
@@ -1258,11 +1262,13 @@ async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'curr
   ]);
   const closedSet = new Set(await closedStatusesFor(workspaceId));
   const resolved = assignedTickets.filter((t) => closedSet.has(t.status)).length;
+  // Team total keeps Auto-help closes; how many were "by Auto-help" is its own line.
+  const resolvedByAutoHelp = assignedTickets.filter((t) => closedSet.has(t.status) && isAutoHelpResolved(t)).length;
   const resolutionSeconds = summarizeNumeric(assignedTickets.map((t) => t.resolutionTimeSeconds).filter((v) => v !== null));
   const csatAverage = csatTickets.length
     ? Number((csatTickets.reduce((sum, t) => sum + (t.csatScore || 0), 0) / csatTickets.length).toFixed(2))
     : null;
-  return { created, resolved, netChange: created - resolved, resolutionSeconds, csatCount: csatTickets.length, csatAverage };
+  return { created, resolved, resolvedByAutoHelp, netChange: created - resolved, resolutionSeconds, csatCount: csatTickets.length, csatAverage };
 }
 
 export async function getOverview(workspaceId, query = {}) {
@@ -1334,6 +1340,8 @@ export async function getOverview(workspaceId, query = {}) {
       cards: {
         created: rangeInfo.compare === 'none' ? { current: current.created } : calculateDelta(current.created, previous.created),
         resolved: rangeInfo.compare === 'none' ? { current: current.resolved } : calculateDelta(current.resolved, previous.resolved),
+        // Of those, resolved by Auto-help (team line, never per person).
+        resolvedByAutoHelp: { current: current.resolvedByAutoHelp },
         netChange: rangeInfo.compare === 'none' ? { current: current.netChange } : calculateDelta(current.netChange, previous.netChange),
         openBacklog: { current: openTickets.length },
         overdue: { current: overdueTickets.length, sample: overdueTickets.slice(0, 10).map((ticket) => compactTicket(ticket, workspaceId)) },
@@ -1518,12 +1526,18 @@ export async function getDemandFlow(workspaceId, query = {}) {
     }
 
     const demandClosedSet = new Set(await closedStatusesFor(workspaceId));
+    let resolvedByAutoHelp = 0;
     for (const ticket of assignedTickets) {
       if (!demandClosedSet.has(ticket.status)) continue;
       const key = groupKey(assignedAt(ticket), rangeInfo);
       const row = trendMap.get(key) || { date: key, created: 0, resolved: 0, net: 0 };
       row.resolved += 1;
       row.net -= 1;
+      // Team demand keeps counting Auto-help closes as resolved; own line too.
+      if (isAutoHelpResolved(ticket)) {
+        row.resolvedByAutoHelp = (row.resolvedByAutoHelp || 0) + 1;
+        resolvedByAutoHelp += 1;
+      }
       trendMap.set(key, row);
     }
     const categoryBreakdown = categoryBreakdownFromTickets(createdTickets, 10, workspaceId);
@@ -1532,6 +1546,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
     return {
       metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       trend: Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
+      resolvedByAutoHelp,
       heatmap: Array.from(heatmap.entries()).map(([key, count]) => {
         const [day, hour] = key.split('|');
         return { day, hour: Number(hour), count };
@@ -1736,8 +1751,10 @@ export async function getTeamBalance(workspaceId, query = {}) {
     }
     const resolutionByTech = new Map();
     const csatByTech = new Map();
+    const autoHelpClosedByTech = new Map();
     let unassignedTickets = 0;
     let hiddenAssignedTickets = 0;
+    let autoHelpResolved = 0;
 
     // Phase 8b: base-aware Sets resolved once, outside the per-ticket loops.
     const teamClosedSet = new Set(await closedStatusesFor(workspaceId));
@@ -1761,6 +1778,18 @@ export async function getTeamBalance(workspaceId, query = {}) {
       if (timelineRow) {
         timelineRow.assigned += 1;
         timelineRow[source] += 1;
+      }
+      // Auto-help closes (utils/autoHelpMetrics.js) are not the agent's: out of
+      // their closes, close-rate denominator, resolution time and CSAT; the
+      // team summary counts them on their own line. Assignment counts stay.
+      if (isAutoHelpResolved(ticket)) {
+        if (teamClosedSet.has(ticket.status)) {
+          autoHelpResolved += 1;
+          autoHelpClosedByTech.set(ticket.assignedTechId, (autoHelpClosedByTech.get(ticket.assignedTechId) || 0) + 1);
+        }
+        const category = canonicalSkillLabel(ticket, workspaceId);
+        row.topCategories[category] = (row.topCategories[category] || 0) + 1;
+        continue;
       }
       if (teamClosedSet.has(ticket.status)) {
         row.closed += 1;
@@ -1841,7 +1870,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
       row.assignedPerAvailableDay = row.availableDays > 0
         ? Number((row.assigned / row.availableDays).toFixed(1))
         : null;
-      row.closeRatePct = row.assigned ? Number(((row.closed / row.assigned) * 100).toFixed(1)) : 0;
+      row.closeRatePct = agentCloseRatePct(row.closed, row.assigned, autoHelpClosedByTech.get(row.technicianId) || 0);
       row.selfPickRatePct = row.assigned ? Number(((row.selfPicked / row.assigned) * 100).toFixed(1)) : 0;
       row.rejectionRatePct = row.assigned ? Number(((row.rejected / row.assigned) * 100).toFixed(1)) : 0;
       row.topCategories = Object.entries(row.topCategories)
@@ -1903,6 +1932,8 @@ export async function getTeamBalance(workspaceId, query = {}) {
         spread: assignedCounts.length ? Math.max(...assignedCounts) - Math.min(...assignedCounts) : 0,
         availableDayRateSpread: rateValues.length ? Number((Math.max(...rateValues) - Math.min(...rateValues)).toFixed(1)) : 0,
         openAgeBuckets: ageBuckets,
+        // Resolved by Auto-help in range (team line, never per person).
+        autoHelpResolved,
       },
       technicians: rows.sort((a, b) => a.name.localeCompare(b.name)),
       timeline: Array.from(timelineMap.values()).sort((a, b) => a.period.localeCompare(b.period) || a.name.localeCompare(b.name)),
@@ -2061,6 +2092,8 @@ export async function getQuality(workspaceId, query = {}) {
           p90: resolution.p90 === null ? null : Number((resolution.p90 / 3600).toFixed(1)),
         },
         buckets: resolutionBuckets,
+        // Team resolution keeps Auto-help closes; how many there were is its own line.
+        autoHelpResolved: tickets.filter((t) => t.resolutionTimeSeconds !== null && t.resolutionTimeSeconds !== undefined && isAutoHelpResolved(t)).length,
       },
       openAging: agingBuckets,
       csat: {

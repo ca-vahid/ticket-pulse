@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Loader2, PencilLine, Sparkles, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
+import AutoHelpSuggestion from './AutoHelpSuggestion';
+import { followUpPromise } from '../knowledge/autoHelpWords';
 
 const CONFIDENCE_STYLE = {
   high: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200',
@@ -13,6 +15,9 @@ const CONFIDENCE_STYLE = {
  * above the conversation for the agent to approve & send, copy into the
  * composer to edit, or dismiss. Sending goes through the normal reply path so
  * the thread, mirror and events behave exactly like a hand-written reply.
+ * Auto-help suggestions (source 'auto_help') render as AutoHelpSuggestion:
+ * sources, the automated-answer line, the follow-up promise, inline
+ * Edit & send and a one-tap dismiss reason.
  */
 export default function ProposedReplyCard({ ticketId, refreshToken = null, canWrite = false, onSent, onEditInComposer }) {
   const [proposal, setProposal] = useState(null);
@@ -30,6 +35,25 @@ export default function ProposedReplyCard({ ticketId, refreshToken = null, canWr
 
   if (!proposal || !canWrite) return null;
   const confidence = String(proposal.confidence || '').toLowerCase();
+
+  if (proposal.source === 'auto_help' && proposal.autoHelp) {
+    return (
+      <AutoHelpSuggestion
+        key={proposal.id}
+        proposal={proposal}
+        onSend={async (body) => {
+          await ticketsAPI.sendProposedReply(ticketId, proposal.id, body);
+          const promise = followUpPromise(proposal.autoHelp.followUp);
+          setProposal(null);
+          onSent?.(promise ? `Sent. ${promise.replace(/^If they don't reply, /, 'If there is no reply, ')}` : 'Reply sent');
+        }}
+        onDismiss={async (reason) => {
+          await ticketsAPI.dismissProposedReply(ticketId, proposal.id, { reason });
+          setProposal(null);
+        }}
+      />
+    );
+  }
 
   const send = async () => {
     if (busy) return;

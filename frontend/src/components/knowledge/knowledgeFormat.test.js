@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, test } from 'vitest';
-import { readableReason } from './knowledgeFormat';
+import { readableReason, tagLabel } from './knowledgeFormat';
 import { renderDisclosure } from './KnowledgeSettingsPanel';
 import { sanitizeRichHtml } from '../tickets/RichTextEditor';
 
@@ -22,5 +22,13 @@ describe('Knowledge QA 09-25 helpers', () => {
     const html = '<h2>Install</h2><p>Open it.</p><h3>Sub</h3>';
     expect(sanitizeRichHtml(html, { headings: true })).toBe(html);
     expect(sanitizeRichHtml(html)).toBe('Install<p>Open it.</p>Sub');
+  });
+});
+
+describe('tag labels (audit, 26 Sep 2026)', () => {
+  test('the drafted-from-tickets slug reads as "Drafted from tickets"; other tags are shown as typed', () => {
+    expect(tagLabel('drafted-from-tickets')).toBe('Drafted from tickets');
+    expect(tagLabel('company portal')).toBe('company portal');
+    expect(tagLabel(null)).toBe('');
   });
 });

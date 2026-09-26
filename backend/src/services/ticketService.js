@@ -762,6 +762,61 @@ class TicketService {
    * changesList, changesTableHtml, changesText, auditRowId, workflowId?
    * Dedupe stamp `fields:<ticketId>:<auditRowId>` keeps retries idempotent.
    */
+  /**
+   * Auto-help integration W1: `ticket.intake_settled` with source 'manual'
+   * when the category was set by a person / the API / a workflow and no
+   * pipeline run is open for the ticket (an open run settles it itself).
+   */
+  async _emitManualIntakeSettled(ticketId, stamp, actorKind = 'human') {
+    const { default: assignmentRepository } = await import('./assignmentRepository.js');
+    const open = await assignmentRepository.getOpenPipelineRun(ticketId);
+    if (open) return { skipped: 'pipeline_run_open', runId: open.id };
+    const row = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        workspaceId: true,
+        internalCategoryId: true,
+        internalSubcategoryId: true,
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+      },
+    });
+    if (!row?.internalCategoryId) return { skipped: 'no_category' };
+    const settleStamp = `manual:${stamp}`;
+    const extra = {
+      category: row.internalCategory?.name || null,
+      subcategory: row.internalSubcategory?.name || null,
+      categoryId: row.internalCategoryId,
+      subcategoryId: row.internalSubcategoryId ?? null,
+      decision: null,
+      nonActionable: false,
+      noiseVeto: false,
+      afterHours: false,
+      provisional: false,
+      fullRunPending: false,
+      source: 'manual',
+      by: actorKind,
+      stamp: settleStamp,
+    };
+    // Durable first, in this code path: a marker row + the Auto-help job
+    // (retried); the catch-up sweep re-queues from the marker if the job
+    // never landed. Then the workflow event (enqueued: the listener skips it).
+    let enqueued = false;
+    try {
+      const { default: autoHelpIntakeService } = await import('./autoHelpIntakeService.js');
+      const job = await autoHelpIntakeService.onManualSettle(ticketId, row.workspaceId, extra);
+      enqueued = Boolean(job?.id || job?.duplicate || job?.skipped);
+    } catch (err) {
+      logger.warn(`Auto-help manual settle not queued for ticket ${ticketId} (the catch-up sweep retries): ${err.message}`);
+    }
+    await ticketLifecycleNotificationService.emitTicketEvent?.('ticket.intake_settled', ticketId, {
+      source: 'ticketpulse_native',
+      dedupeStamp: `intake_settled:${ticketId}:${settleStamp}`,
+      extra: { ...extra, enqueued },
+    });
+    return { emitted: true, enqueued };
+  }
+
   async _emitFieldsUpdated({
     ticket, changes, actor = null, source = null, auditRowId = null, reopened = false,
     workflowId = null, actorKind = null, actorName = null,
@@ -794,6 +849,12 @@ class TicketService {
           dedupeStamp: `categorized:${ticket.id}:${stamp}`,
           extra: { first: !changes[categoryKey]?.from, by: extra.actorKind || 'human', changes: changes[categoryKey] },
         })).catch(() => {});
+        // Auto-help integration W1: with no pipeline run open, a person / the
+        // API / a workflow setting the category settles the intake (source
+        // 'manual'). With a run open, that run settles it when it finishes.
+        this._emitManualIntakeSettled(ticket.id, stamp, extra.actorKind || 'human').catch((err) => {
+          logger.warn(`ticket.intake_settled (manual) not emitted for ticket ${ticket.id}: ${err.message}`);
+        });
       }
       return { dispatched: true, dedupeStamp: stamp, changedFields: extra.changedFields };
     } catch (err) {
@@ -3829,6 +3890,8 @@ class TicketService {
         localPatch.resolvedAt = null;
         localPatch.closedAt = null;
         localPatch.resolutionTimeSeconds = null;
+        // Not resolved any more — by anyone (an Auto-help close included).
+        localPatch.resolvedByKind = null;
         reopened = true;
       }
     }
@@ -4471,8 +4534,30 @@ class TicketService {
 
   // ------------------------------------------------------------ conversation
 
-  async addReply(ticketId, workspaceId, input, actor, files = []) {
-    return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate: false, files });
+  /**
+   * `options` (Auto-help integration W2/W4, all optional):
+   *   replyOwner      { kind, ref } — who owns this first reply when it is not
+   *                   the acting agent's own words (an Auto-help answer an agent
+   *                   sent with one click: kind 'auto_help'). Absent → a person's
+   *                   public reply takes the first reply (agent) and sets aside
+   *                   a staged Auto-help suggestion nobody sent.
+   *   automatedReply  { kind: 'answer' | 'follow_up', countsAsFirstResponse }
+   *                   — written by automation, not a person: never stamps
+   *                   firstPublicAgentReplyAt unless countsAsFirstResponse; an
+   *                   'answer' stamps firstAutomatedReplyAt (first one only).
+   */
+  async addReply(ticketId, workspaceId, input, actor, files = [], options = {}) {
+    return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate: false, files, replyOptions: options || {} });
+  }
+
+  /** W2: who owns the first reply after this public reply. Never throws to the caller (caught there). */
+  async _recordReplyOwner(ticket, entry, actor, replyOptions = {}, automated = null) {
+    const { claimReplyOwner, claimForAgentReply, REPLY_OWNERS } = await import('./autoHelpReplyOwner.js');
+    const explicit = replyOptions?.replyOwner && typeof replyOptions.replyOwner === 'object' ? replyOptions.replyOwner : null;
+    if (explicit?.kind) return claimReplyOwner(ticket.id, explicit.kind, explicit.ref || null);
+    if (automated || actor?.role === 'automation') return null;
+    if (ticket.replyOwner === REPLY_OWNERS.AGENT) return null;
+    return claimForAgentReply(ticket.id, { entryId: entry?.id ?? null, actor });
   }
 
   /**
@@ -4489,7 +4574,7 @@ class TicketService {
     });
   }
 
-  async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files = [], systemNote = false }) {
+  async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files = [], systemNote = false, replyOptions = {} }) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -4706,10 +4791,28 @@ class TicketService {
     }
 
     const ticketPatch = { updatedAt: now, lastRealActivityAt: now };
-    if (!isPrivate && !ticket.firstPublicAgentReplyAt) {
+    // First response (Auto-help integration W4, Vahid 26 Sep 2026): it counts
+    // only when a person sends it. An automated answer gets its own stamp and
+    // stops the first-response clock only where the workspace opted in.
+    const automated = !isPrivate && replyOptions?.automatedReply && typeof replyOptions.automatedReply === 'object'
+      ? replyOptions.automatedReply : null;
+    if (!isPrivate && !ticket.firstPublicAgentReplyAt && (!automated || automated.countsAsFirstResponse === true)) {
       ticketPatch.firstPublicAgentReplyAt = now;
     }
+    if (automated && automated.kind === 'answer' && !ticket.firstAutomatedReplyAt) {
+      ticketPatch.firstAutomatedReplyAt = now;
+    }
     await prisma.ticket.update({ where: { id: ticket.id }, data: ticketPatch });
+
+    // Reply ownership (W2): a person's own public reply takes the first reply
+    // and sets aside a staged Auto-help suggestion nobody sent (its run records
+    // 'superseded_by'). Automation and a one-click Auto-help send say who owns
+    // it instead. Bookkeeping only — never fails the reply.
+    if (!isPrivate) {
+      await this._recordReplyOwner(ticket, entry, actor, replyOptions, automated).catch((err) => {
+        logger.warn(`Reply owner not recorded for ticket ${ticket.id} (non-fatal): ${err.message}`);
+      });
+    }
 
     let email = { sent: false };
     if (isNative) {

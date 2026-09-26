@@ -205,6 +205,14 @@ describe('B1 read-back — the stored due date is echoed (their acceptance run, 
     expect(res.body.data.dueBySetBy).toBe('manual');
   });
 
+  test('Auto-help integration W4: firstAutomatedReplyAt is echoed (null until automation answered)', async () => {
+    const none = await request(app()).get('/api/v1/tickets/901').expect(200);
+    expect(none.body.data).toHaveProperty('firstAutomatedReplyAt', null);
+    ticketServiceMock.getTicket.mockResolvedValue({ ...TICKET, firstAutomatedReplyAt: new Date('2026-09-26T16:05:00Z') });
+    const res = await request(app()).get('/api/v1/tickets/901').expect(200);
+    expect(res.body.data.firstAutomatedReplyAt).toBe('2026-09-26T16:05:00.000Z');
+  });
+
   test('a ticket without a due date says null, not "key missing"', async () => {
     ticketServiceMock.getTicket.mockResolvedValue({ ...TICKET, dueBy: null, dueBySetBy: null });
     const res = await request(app()).get('/api/v1/tickets/901').expect(200);

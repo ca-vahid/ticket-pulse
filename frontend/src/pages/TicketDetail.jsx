@@ -35,6 +35,7 @@ import RecipientsLine, { seedReplyCc, ccSourceForReply } from '../components/tic
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import RichTextEditor, { htmlToPlainText, isRichContent } from '../components/tickets/RichTextEditor';
 import SolutionNoteModal from '../components/tickets/SolutionNoteModal';
+import TurnIntoArticleButton from '../components/knowledge/TurnIntoArticleButton';
 import ComposerSignatureStrip from '../components/tickets/ComposerSignatureStrip';
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
@@ -2330,6 +2331,7 @@ export default function TicketDetail() {
                       {savingField === 'solution' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" />}
                       {ticket.solutionVerifiedAt ? 'Verified solution' : 'Mark as solution'}
                     </button>
+                    {ticket.solutionVerifiedAt && <TurnIntoArticleButton ticketId={ticketId} />}
                     {teamForward && (
                       <TeamForwardDialog
                         ticketId={ticketId}
@@ -2902,7 +2904,7 @@ export default function TicketDetail() {
                         ticketId={ticketId}
                         refreshToken={ticket?.updatedAt}
                         canWrite={canConverse}
-                        onSent={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reply sent'); }}
+                        onSent={(message) => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', typeof message === 'string' && message ? message : 'Reply sent'); }}
                         onEditInComposer={(proposal) => {
                           const html = proposal.bodyHtml || String(proposal.bodyText || '').replace(/\n/g, '<br>');
                           switchComposerMode('reply');

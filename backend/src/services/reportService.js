@@ -9,6 +9,7 @@
 //      renders it under an explicit "AI narrative" banner.
 // Snapshots are immutable rows — regenerate for fresh numbers.
 import prisma from './prisma.js';
+import { isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { toZonedTime, fromZonedTime, formatInTimeZone } from 'date-fns-tz';
@@ -112,7 +113,7 @@ class ReportService {
       prisma.ticket.findMany({
         where: inWindow,
         select: {
-          id: true, subject: true, status: true, createdAt: true, resolvedAt: true,
+          id: true, subject: true, status: true, createdAt: true, resolvedAt: true, resolvedByKind: true,
           freshserviceTicketId: true, nativeNumber: true, origin: true, isNoise: true,
           internalCategory: { select: { name: true } },
           internalSubcategory: { select: { name: true } },
@@ -129,6 +130,7 @@ class ReportService {
     const byDomain = {};
     const byRequester = {};
     let resolvedCount = 0;
+    let resolvedByAutoHelp = 0;
     let resolutionMsSum = 0;
     for (const t of rows) {
       const day = formatInTimeZone(t.createdAt, tz, 'yyyy-MM-dd');
@@ -143,6 +145,7 @@ class ReportService {
       byRequester[req] = (byRequester[req] || 0) + 1;
       if (t.resolvedAt) {
         resolvedCount += 1;
+        if (isAutoHelpResolved(t)) resolvedByAutoHelp += 1;
         resolutionMsSum += (t.resolvedAt.getTime() - t.createdAt.getTime());
       }
     }
@@ -162,6 +165,8 @@ class ReportService {
         previousPeriod: prevTotal,
         deltaPct: prevTotal > 0 ? Math.round(((total - prevTotal) / prevTotal) * 100) : null,
         resolvedInWindow: resolvedCount,
+        // Of those, resolved by Auto-help (team line; utils/autoHelpMetrics.js).
+        resolvedByAutoHelp,
         avgResolutionHours: resolvedCount ? Math.round(resolutionMsSum / resolvedCount / 3600000 * 10) / 10 : null,
       },
       byDay: days_,

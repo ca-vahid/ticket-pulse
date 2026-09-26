@@ -30,7 +30,7 @@ function hasVerifiedReboundContext(reboundFrom) {
   );
 }
 
-export function buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, wsTz, reboundFrom }) {
+export function buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, wsTz, reboundFrom, autoHelp = null }) {
   let userMessage = `Current date/time: ${dayOfWeek}, ${localDate} at ${localTime} (${wsTz})\n\nAnalyze ticket ID ${ticketId} (use get_ticket_details to read it) and recommend the best technician for assignment. When you have completed your analysis, you MUST call the submit_recommendation tool with your final recommendation.`;
 
   if (hasVerifiedReboundContext(reboundFrom)) {
@@ -48,7 +48,45 @@ export function buildUserMessage({ ticketId, dayOfWeek, localDate, localTime, ws
     userMessage += buildHandBackReasonBlock(reboundFrom.reason);
   }
 
+  userMessage += buildAutoHelpBlock(autoHelp);
   return userMessage;
+}
+
+const AUTO_HELP_STATE_WORDS = {
+  pending: 'Auto-help is still working on a draft',
+  drafted: 'Auto-help drafted an answer (shadow only - nobody received it)',
+  not_answerable: 'Auto-help looked but had no grounded answer',
+  staged: 'Auto-help staged an answer on the ticket; it waits for an agent to send it - the requester has NOT received it',
+  sent: 'Auto-help ANSWERED the requester',
+  dismissed: 'An agent dismissed the Auto-help suggestion',
+  withdrawn: 'Auto-help withdrew its suggestion (the ticket was recategorized)',
+  superseded: 'An agent replied themselves; the Auto-help suggestion was set aside',
+  failed: 'Auto-help failed to draft an answer',
+};
+
+/**
+ * Auto-help integration W4: what Auto-help did on this ticket, as evidence.
+ * Empty when Auto-help never drafted anything here, so existing prompts are
+ * byte-for-byte unchanged. The answer text is requester-facing content we
+ * wrote; it is fenced as data like any other ticket text.
+ */
+export function buildAutoHelpBlock(autoHelp) {
+  if (!autoHelp || !autoHelp.state) return '';
+  const lines = ['', '', '## Auto-help Context'];
+  lines.push(`${AUTO_HELP_STATE_WORDS[autoHelp.state] || `Auto-help state: ${autoHelp.state}`}.`);
+  if (autoHelp.sent && autoHelp.sentAt) lines.push(`Answer sent at ${autoHelp.sentAt}.`);
+  if (autoHelp.requesterReplied) lines.push('The requester has replied to that answer since.');
+  if (autoHelp.outcome) lines.push(`Follow-up outcome so far: ${autoHelp.outcome}.`);
+  if (autoHelp.answerSummary && ['staged', 'sent'].includes(autoHelp.state)) {
+    const summary = String(autoHelp.answerSummary).replace(/<\/?auto_help_answer[^>]*>/gi, ' ').slice(0, 400);
+    lines.push('<auto_help_answer>', summary, '</auto_help_answer>');
+  }
+  if (autoHelp.sent || autoHelp.requesterReplied) {
+    lines.push('Because the requester is engaging with an automated answer, do NOT treat this ticket as noise - route it so a person can follow up.');
+  } else {
+    lines.push('Treat this as context only; route the ticket as usual.');
+  }
+  return lines.join('\n');
 }
 
 const HAND_BACK_LABELS = {

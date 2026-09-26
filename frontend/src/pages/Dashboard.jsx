@@ -1034,7 +1034,9 @@ export default function Dashboard() {
       totalTicketsToday: allFilteredTickets.length,
       openOnlyCount: allFilteredTickets.filter(t => t.status === 'Open').length,
       pendingCount: allFilteredTickets.filter(t => t.status === 'Pending').length,
-      closedTicketsToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
+      // Auto-help resolutions are not an agent's close (their own team line).
+      closedTicketsToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status) && t.resolvedByKind !== 'auto_help').length,
+      autoHelpResolvedToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status) && t.resolvedByKind === 'auto_help').length,
       selfPickedToday: allFilteredTickets.filter(t => t.isSelfPicked).length,
       appAssignedToday: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
 
@@ -1254,6 +1256,13 @@ export default function Dashboard() {
       label: 'App',
       value: appAssignedTotal,
       dot: 'bg-sky-500',
+    }] : []),
+    // Auto-help P1: closed by Auto-help (not in anyone's "Closed"). Team line only.
+    ...(viewMode === 'daily' && (displayStats.autoHelpResolvedToday || 0) > 0 ? [{
+      key: 'autohelp',
+      label: 'Auto-help',
+      value: displayStats.autoHelpResolvedToday,
+      dot: 'bg-primary',
     }] : []),
   ];
   const maxDayCount = Math.max(1, ...(weeklyStats || []).map((d) => d?.count || 0));

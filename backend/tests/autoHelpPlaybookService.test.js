@@ -7,7 +7,7 @@ import { jest } from '@jest/globals';
  */
 const prismaMock = {
   autoHelpPlaybook: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
-  autoHelpRun: { groupBy: jest.fn() },
+  autoHelpRun: { groupBy: jest.fn(), findMany: jest.fn(async () => []) },
   autoHelpSettings: { findUnique: jest.fn(), upsert: jest.fn() },
 };
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -21,7 +21,9 @@ const {
   normalizeFollowUp,
   DEFAULT_FOLLOW_UP,
   DEFAULT_DISCLOSURE_TEXT,
-  MODE_LOCKED_MESSAGE,
+  AUTO_MODE_LOCKED_MESSAGE,
+  APPROVE_OFF_MESSAGE,
+  SENSITIVE_AUTO_MESSAGE,
   renderNudgeText,
   playbookView,
 } = await import('../src/services/autoHelpPlaybookService.js');
@@ -99,10 +101,14 @@ describe('matchPlaybook', () => {
 });
 
 describe('normalizePlaybookInput', () => {
-  test('mode is forced to shadow; approve/auto are refused with the P0 message', () => {
+  test('mode defaults to shadow and is only shape-checked here (P1: the service enforces the rules)', () => {
     expect(normalizePlaybookInput({ name: 'x' }).mode).toBe('shadow');
-    expect(() => normalizePlaybookInput({ name: 'x', mode: 'approve' })).toThrow(MODE_LOCKED_MESSAGE);
-    expect(() => normalizePlaybookInput({ name: 'x', mode: 'auto' })).toThrow(MODE_LOCKED_MESSAGE);
+    expect(normalizePlaybookInput({ name: 'x', mode: 'approve' }).mode).toBe('approve');
+    expect(normalizePlaybookInput({ name: 'x', mode: 'auto' }).mode).toBe('auto');
+    expect(() => normalizePlaybookInput({ name: 'x', mode: 'yolo' })).toThrow(/mode must be one of/);
+    expect(normalizePlaybookInput({ name: 'x', sensitive: true }).sensitive).toBe(true);
+    // A partial update without a mode leaves the mode alone.
+    expect(normalizePlaybookInput({ enabled: true, categoryId: 10 }, { partial: true }).mode).toBeUndefined();
   });
 
   test('follow-up defaults: 2 + 2 business days, resolve on silence', () => {
@@ -151,8 +157,114 @@ describe('service', () => {
     expect(s).toMatchObject({ enabled: false, disclosureEnabled: true, disclosureText: DEFAULT_DISCLOSURE_TEXT, mode: 'shadow' });
   });
 
-  test('settings refuse a non-shadow mode', async () => {
-    await expect(service.updateSettings(1, { mode: 'auto' })).rejects.toThrow(MODE_LOCKED_MESSAGE);
+  test('settings: modes are per playbook, and auto cannot be switched on from the API', async () => {
+    await expect(service.updateSettings(1, { mode: 'auto' })).rejects.toThrow(/per playbook/);
+    await expect(service.updateSettings(1, { autoModeAllowed: true })).rejects.toThrow(AUTO_MODE_LOCKED_MESSAGE);
     expect(prismaMock.autoHelpSettings.upsert).not.toHaveBeenCalled();
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue(null);
+    const s = await service.getSettings(1);
+    expect(s).toMatchObject({ approveModeEnabled: false, monthlyCostCapUsd: null, thankOnConfirm: false, autoModeAllowed: false, autoModeLockedMessage: AUTO_MODE_LOCKED_MESSAGE });
+  });
+
+  test('settings: approve switch, cost cap (validated, rounded) and thank-you are saved', async () => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true, monthlyCostCapUsd: 25.5, thankOnConfirm: true });
+    await service.updateSettings(1, { approveModeEnabled: true, monthlyCostCapUsd: '25.499', thankOnConfirm: true }, { email: 'a@x' });
+    expect(prismaMock.autoHelpSettings.upsert.mock.calls[0][0].update).toMatchObject({ approveModeEnabled: true, monthlyCostCapUsd: 25.5, thankOnConfirm: true });
+    await service.updateSettings(1, { monthlyCostCapUsd: '' });
+    expect(prismaMock.autoHelpSettings.upsert.mock.calls[1][0].update.monthlyCostCapUsd).toBeNull();
+    await expect(service.updateSettings(1, { monthlyCostCapUsd: -1 })).rejects.toThrow(/cost cap/);
+  });
+});
+
+describe('mode rules (P1)', () => {
+  const row = { id: 4, workspaceId: 1, name: 'A', enabled: false, mode: 'shadow', sensitive: false, categoryId: 10, subcategoryIds: [], match: null, instructions: 'x', allowedTools: [], kbScope: null, minConfidence: 0.8, followUp: null, onHelp: 'assign_normally', priority: 100, version: 1 };
+  beforeEach(() => {
+    prismaMock.autoHelpPlaybook.findFirst.mockResolvedValue(row);
+    prismaMock.autoHelpPlaybook.update.mockImplementation(async ({ data }) => ({ ...row, ...data }));
+    prismaMock.autoHelpPlaybook.create.mockImplementation(async ({ data }) => ({ id: 9, ...data }));
+  });
+
+  test('approve needs the workspace approve switch', async () => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: false });
+    await expect(service.update(1, 4, { mode: 'approve' })).rejects.toThrow(APPROVE_OFF_MESSAGE);
+    await expect(service.create(1, { name: 'B', mode: 'approve' })).rejects.toThrow(APPROVE_OFF_MESSAGE);
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true });
+    const saved = await service.update(1, 4, { mode: 'approve' });
+    expect(saved.mode).toBe('approve');
+  });
+
+  test('auto is refused in this build even when everything else is fine', async () => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true });
+    await expect(service.update(1, 4, { mode: 'auto' })).rejects.toThrow(AUTO_MODE_LOCKED_MESSAGE);
+    expect(prismaMock.autoHelpPlaybook.update).not.toHaveBeenCalled();
+  });
+
+  test('sensitive blocks auto first, and a sensitive playbook can never sit in auto', async () => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true });
+    await expect(service.update(1, 4, { mode: 'auto', sensitive: true })).rejects.toThrow(SENSITIVE_AUTO_MESSAGE);
+    prismaMock.autoHelpPlaybook.findFirst.mockResolvedValue({ ...row, mode: 'auto' });
+    await expect(service.update(1, 4, { sensitive: true })).rejects.toThrow(SENSITIVE_AUTO_MESSAGE);
+  });
+
+  test('with the build switch stubbed on, auto still needs the readiness gate', async () => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true });
+    const spy = jest.spyOn(service, 'autoModeAllowed').mockReturnValue(true);
+    try {
+      prismaMock.autoHelpRun.findMany.mockResolvedValue([]);
+      await expect(service.update(1, 4, { mode: 'auto' })).rejects.toMatchObject({ code: 'auto_help_not_ready' });
+      // 30 good reviews, 20 unchanged approve sends, no reopen → met.
+      const at = (i) => new Date(Date.UTC(2026, 8, 1, 0, i));
+      prismaMock.autoHelpRun.findMany.mockResolvedValue([
+        // Evidence of the playbook's CURRENT version from real (categorized) runs.
+        ...Array.from({ length: 30 }, (_, i) => ({ reviewVerdict: 'good', reviewedAt: at(i), decision: null, outcome: null, trigger: 'categorized', playbookVersion: row.version ?? 1 })),
+        ...Array.from({ length: 20 }, () => ({ reviewVerdict: null, reviewedAt: null, decision: 'agent_sent', outcome: 'resolved_silence', trigger: 'categorized', playbookVersion: row.version ?? 1 })),
+      ]);
+      const saved = await service.update(1, 4, { mode: 'auto' });
+      expect(saved.mode).toBe('auto');
+      // The runtime mode follows the same rules; sensitive falls back to approve.
+      expect(await service.effectiveMode(1, { ...row, mode: 'auto' })).toBe('auto');
+      expect(await service.effectiveMode(1, { ...row, mode: 'auto', sensitive: true })).toBe('approve');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('effective mode: approve switch off → shadow; auto locked → approve', async () => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: false });
+    expect(await service.effectiveMode(1, { ...row, mode: 'approve' })).toBe('shadow');
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, approveModeEnabled: true });
+    expect(await service.effectiveMode(1, { ...row, mode: 'approve' })).toBe('approve');
+    expect(await service.effectiveMode(1, { ...row, mode: 'auto' })).toBe('approve');
+    expect(await service.effectiveMode(1, { ...row, mode: 'shadow' })).toBe('shadow');
+  });
+});
+
+describe('enabled_at + the cached switch (audit, 26 Sep 2026)', () => {
+  test('switching Auto-help ON stamps enabledAt; saving other settings (or re-saving on) does not move it', async () => {
+    service._enabledCache.clear();
+    prismaMock.autoHelpSettings.upsert.mockClear();
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: false });
+    await service.updateSettings(1, { enabled: true });
+    expect(prismaMock.autoHelpSettings.upsert.mock.calls[0][0].update.enabledAt).toBeInstanceOf(Date);
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, enabledAt: new Date('2026-09-20T00:00:00Z') });
+    await service.updateSettings(1, { enabled: true });
+    await service.updateSettings(1, { thankOnConfirm: true });
+    expect(prismaMock.autoHelpSettings.upsert.mock.calls[1][0].update).not.toHaveProperty('enabledAt');
+    expect(prismaMock.autoHelpSettings.upsert.mock.calls[2][0].update).not.toHaveProperty('enabledAt');
+  });
+
+  test('enabledState is cached for 60 s and dropped when the settings change', async () => {
+    service._enabledCache.clear();
+    prismaMock.autoHelpSettings.findUnique.mockClear();
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: true, enabledAt: new Date('2026-09-20T00:00:00Z') });
+    const t0 = Date.now();
+    expect(await service.enabledState(1, { now: t0 })).toMatchObject({ enabled: true });
+    await service.enabledState(1, { now: t0 + 59e3 });
+    expect(prismaMock.autoHelpSettings.findUnique).toHaveBeenCalledTimes(1);
+    await service.enabledState(1, { now: t0 + 61e3 });
+    expect(prismaMock.autoHelpSettings.findUnique).toHaveBeenCalledTimes(2);
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, enabled: false, enabledAt: new Date('2026-09-20T00:00:00Z') });
+    await service.updateSettings(1, { enabled: false });
+    expect(await service.enabledState(1, { now: t0 + 62e3 })).toMatchObject({ enabled: false });
   });
 });

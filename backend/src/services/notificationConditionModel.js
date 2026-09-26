@@ -62,7 +62,15 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.isNoise': { label: 'Is noise/spam', type: 'boolean', path: 'ticket.isNoise' },
   // Parked (plans/PARKED_BUILD_PLAN.md)
   'ticket.isParked': { label: 'Is parked', type: 'boolean', path: 'ticket.isParked' },
-  'ticket.parkKind': { label: 'Park kind', type: 'enum', path: 'ticket.parkKind', options: ['until_date', 'waiting_on', 'eta'] },
+  'ticket.parkKind': { label: 'Park kind', type: 'enum', path: 'ticket.parkKind', options: ['until_date', 'waiting_on', 'eta', 'auto_help'] },
+  // Auto-help integration W3 (plans/AUTO_HELP_INTEGRATION_PLAN.md D). The
+  // engine looks ticket.autoHelp up only for workflows that name it.
+  'ticket.resolvedByKind': { label: 'Resolved by (kind)', type: 'enum', path: 'ticket.resolvedByKind', options: ['agent', 'workflow', 'api', 'automation', 'auto_help'] },
+  'ticket.autoHelp.state': { label: 'Auto-help state', type: 'enum', path: 'ticket.autoHelp.state', options: ['off', 'pending', 'skipped', 'no_match', 'not_answerable', 'drafted', 'staged', 'sent', 'dismissed', 'withdrawn', 'superseded', 'failed'] },
+  'ticket.autoHelp.expected': { label: 'Auto-help will answer by itself', type: 'boolean', path: 'ticket.autoHelp.expected' },
+  'ticket.autoHelp.mode': { label: 'Auto-help mode', type: 'enum', path: 'ticket.autoHelp.mode', options: ['shadow', 'approve', 'auto'] },
+  'ticket.autoHelp.playbook': { label: 'Auto-help playbook', type: 'string', path: 'ticket.autoHelp.playbook' },
+  'ticket.autoHelp.outcome': { label: 'Auto-help outcome', type: 'enum', path: 'ticket.autoHelp.outcome', options: ['resolved_silence', 'resolved_confirmed', 'help_requested', 'reopened', 'agent_took_over', 'no_reply_left_open', 'loop_stopped', 'withdrawn', 'superseded_by'] },
   'ticket.ageMinutes': { label: 'Ticket age', type: 'duration', path: 'ticket.ageMinutes' },
   'ticket.dueInMinutes': { label: 'Time until due', type: 'duration', path: 'ticket.dueInMinutes' },
   'ticket.frDueInMinutes': { label: 'Time until first-response due', type: 'duration', path: 'ticket.frDueInMinutes' },
@@ -98,6 +106,13 @@ export const CONDITION_FIELDS = Object.freeze({
   'event.reopened': { label: 'Reopened by this update', type: 'boolean', path: 'event.extra.reopened' },
   'event.senderIsAgent': { label: 'Reply sender is an agent', type: 'boolean', path: 'event.extra.senderIsAgent' },
   'event.isSurveyResponse': { label: 'Reply is a survey response', type: 'boolean', path: 'event.extra.isSurveyResponse' },
+  // "Ticket intake settled" payload (Auto-help integration W1).
+  'event.intakeProvisional': { label: 'Intake verdict is provisional (night run)', type: 'boolean', path: 'event.extra.provisional' },
+  'event.intakeDecision': { label: 'Intake decision', type: 'enum', path: 'event.extra.decision', options: ['pending_review', 'auto_assigned', 'classified_only', 'priority_only', 'noise_dismissed'] },
+  'event.intakeNonActionable': { label: 'Intake judged not actionable', type: 'boolean', path: 'event.extra.nonActionable' },
+  'event.intakeSource': { label: 'Intake settled by', type: 'enum', path: 'event.extra.source', options: ['pipeline', 'manual'] },
+  // Reopen-on-reply guard (W3): how a reply after an Auto-help close read.
+  'event.autoHelpReplyVerdict': { label: 'Reply after an Auto-help close reads as', type: 'enum', path: 'event.extra.autoHelpReplyVerdict', options: ['confirmed', 'help', 'auto_reply'] },
   'availability.isBusinessHours': { label: 'During business hours', type: 'boolean', path: 'availability.isBusinessHours' },
   'availability.isAfterHours': { label: 'After hours', type: 'boolean', path: 'availability.isAfterHours' },
   'availability.isHoliday': { label: 'On a holiday', type: 'boolean', path: 'availability.isHoliday' },

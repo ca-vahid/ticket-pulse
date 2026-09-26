@@ -38,7 +38,14 @@ describe('Phase 5: generalized workflow events + update_ticket action', () => {
     const updateNode = definition.nodes.find((n) => n.type === 'update_ticket');
     expect(updateNode.data.setStatus).toBe('Open');
     const condition = definition.nodes.find((n) => n.type === 'condition');
-    expect(condition.data.rule).toEqual({ in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] });
+    // Auto-help integration W3: a reply that reads as thanks (or an
+    // out-of-office) within 7 days of an Auto-help close does not reopen.
+    expect(condition.data.rule).toEqual({
+      and: [
+        { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] },
+        { '!': { in: [{ var: 'event.extra.autoHelpReplyVerdict' }, ['confirmed', 'auto_reply']] } },
+      ],
+    });
   });
 
   test('action-only workflows (update_ticket, no send_email) are valid now', () => {

@@ -78,6 +78,9 @@ export function validateResolution({ resolutionReason = null, resolutionNote = n
 
 /** Who resolved it, as a kind — the same vocabulary the lifecycle events use. */
 export function resolvedByKindFromActor(actor) {
+  // Auto-help's closes name themselves, so the status write, the lifecycle
+  // event and the webhook all say 'auto_help' in one step (P1 audit).
+  if (actor?.resolvedByKind === 'auto_help') return 'auto_help';
   const role = String(actor?.role || '').toLowerCase();
   if (role === 'api') return 'api';
   if (role === 'workflow') return 'workflow';

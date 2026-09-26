@@ -111,6 +111,10 @@ for (const mod of [
 }
 jest.unstable_mockModule('../src/services/emailPollingService.js', () => ({ default: {}, emailPollingService: {} }));
 jest.unstable_mockModule('../src/services/aiProviders/providerGateway.js', () => ({ default: {}, providerGateway: {} }));
+// Knowledge routes (Auto-help P1 backtests) import the model resolver for cost estimates.
+jest.unstable_mockModule('../src/services/aiProviders/providerModelResolver.js', () => ({
+  default: { resolveAttempts: jest.fn(async () => []) }, isProviderConfigured: jest.fn(() => false), ProviderModelResolver: class {},
+}));
 jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: {}, createGraphMailClient: jest.fn() }));
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({ createFreshServiceClient: jest.fn() }));
 jest.unstable_mockModule('../src/integrations/freshserviceTransformer.js', () => ({ analyzeTicketActivities: jest.fn() }));

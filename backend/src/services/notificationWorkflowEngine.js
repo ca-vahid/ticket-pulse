@@ -227,6 +227,150 @@ async function enrichEventContextWithStatusBase(context) {
   }
 }
 
+/**
+ * Auto-help integration W3: `ticket.autoHelp` ({ state, expected, playbook,
+ * mode, sentAt, outcome }) for workflows that read it — looked up only when a
+ * selected workflow's definition names it, so ordinary events cost nothing.
+ * Fails soft: an unreadable Auto-help reads as { state: 'off' }.
+ */
+async function enrichEventContextWithAutoHelp(context, workflows = []) {
+  const ticketId = Number(context?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return context;
+  try {
+    const { contextFor, definitionReadsAutoHelp } = await import('./autoHelpContextService.js');
+    const needed = (workflows || []).some((w) => definitionReadsAutoHelp(w?.publishedDefinition || w?.draftDefinition || w?.definition));
+    if (!needed) return context;
+    const autoHelp = await contextFor(ticketId, Number(context.workspace?.id) || 0);
+    return { ...context, ticket: { ...context.ticket, autoHelp } };
+  } catch (err) {
+    logger.warn(`Auto-help context unavailable for ticket ${ticketId} (conditions see "off"): ${err.message}`);
+    return { ...context, ticket: { ...context.ticket, autoHelp: { state: 'off', expected: false, playbook: null, mode: null, sentAt: null, outcome: null } } };
+  }
+}
+
+const RESUME_PRIORITY_LABELS = Object.freeze({ 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' });
+const resumeIso = (d) => {
+  if (!d) return null;
+  const t = new Date(d);
+  return Number.isNaN(t.getTime()) ? null : t.toISOString();
+};
+
+/**
+ * A run resumed after a delay continues on the ticket AS IT IS NOW, not as it
+ * was when the workflow started (Vahid, 26 Sep 2026): a "wait a day → still
+ * open? → e-mail" workflow must not mail a ticket that was resolved during the
+ * wait. Refreshed from the database: status + base status, priority, assignee
+ * (id / name / email), group, noise flag, park, resolver, internal category /
+ * subcategory, resolvedAt / closedAt / dueBy / frDueBy (audit S4: a template
+ * must not print a status that contradicts its own dates) — and
+ * ticket.autoHelp for workflows that name it. Everything else in the stored
+ * (audit) context is kept as it was, and event.* (incl. a coalesced
+ * fields_updated run's event.extra.changes) stays the trigger-time record.
+ * Fails soft: an unreadable ticket keeps the stored copy.
+ */
+export async function refreshLiveTicketFields(eventContext, definition) {
+  const ticketId = Number(eventContext?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return eventContext;
+  let next = eventContext;
+  try {
+    const row = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        workspaceId: true, status: true, priority: true, assessedPriority: true, groupId: true, isNoise: true,
+        parkedUntil: true, parkKind: true, resolvedByKind: true,
+        resolvedAt: true, closedAt: true, dueBy: true, frDueBy: true,
+        assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } },
+        internalCategory: { select: { id: true, name: true } },
+        internalSubcategory: { select: { id: true, name: true } },
+      },
+    });
+    if (row) {
+      let statusBase = next.ticket?.statusBase ?? null;
+      try {
+        const { default: statusService } = await import('./statusService.js');
+        statusBase = await statusService.resolveBaseStatus(Number(row.workspaceId || next.workspace?.id) || 0, row.status);
+      } catch { /* keep the stored base */ }
+      next = {
+        ...next,
+        ticket: {
+          ...next.ticket,
+          status: row.status,
+          statusBase,
+          priority: row.priority,
+          priorityLabel: row.assessedPriority || RESUME_PRIORITY_LABELS[Number(row.priority)] || String(row.priority ?? ''),
+          assessedPriority: row.assessedPriority || null,
+          groupId: row.groupId === null || row.groupId === undefined ? null : String(row.groupId),
+          isNoise: row.isNoise === true,
+          isParked: Boolean(row.parkedUntil),
+          parkKind: row.parkKind || null,
+          parkedUntil: row.parkedUntil ? new Date(row.parkedUntil).toISOString() : null,
+          resolvedByKind: row.resolvedByKind || null,
+          resolvedAt: resumeIso(row.resolvedAt),
+          closedAt: resumeIso(row.closedAt),
+          dueBy: resumeIso(row.dueBy),
+          frDueBy: resumeIso(row.frDueBy),
+          internalCategory: row.internalCategory ? { id: row.internalCategory.id, name: row.internalCategory.name } : null,
+          internalSubcategory: row.internalSubcategory ? { id: row.internalSubcategory.id, name: row.internalSubcategory.name } : null,
+        },
+        assignedAgent: row.assignedTech ? { id: row.assignedTech.id, name: row.assignedTech.name, email: row.assignedTech.email } : null,
+      };
+    }
+  } catch { /* the stored copy stays */ }
+  return enrichEventContextWithAutoHelp(next, [{ definition }]);
+}
+
+/**
+ * Auto-help integration W3, ack merge. A send-email node with
+ * `autoHelpMerge.enabled` waits (a durable delay, re-running this node) when
+ * Auto-help is expected to SEND an answer on its own; if the answer goes out
+ * in the window, the ack rides on top of it and this node sends nothing.
+ * Returns null to send as usual, or a node output (wait / merged).
+ */
+async function autoHelpAckMergeStep({ node, state, eventContext, workflow, run, baseEmail, executionMode, dryRun }) {
+  const { normalizeMergeOption, ackTextFrom, default: ackMerge } = await import('./autoHelpAckMergeService.js');
+  const option = normalizeMergeOption(node.data?.autoHelpMerge);
+  if (!option.enabled) return null;
+  const ticketId = Number(eventContext?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return null;
+  if (dryRun || executionMode !== EXECUTION_MODE_LIVE) {
+    state.autoHelpMerge = { ...(state.autoHelpMerge || {}), [node.id]: { preview: true, waitMinutes: option.waitMinutes } };
+    return null;
+  }
+  const mine = state.autoHelpMerge?.[node.id] || null;
+  if (!mine) {
+    const { expectedFor } = await import('./autoHelpContextService.js');
+    const expected = await expectedFor(ticketId, workflow.workspaceId).catch(() => false);
+    if (!expected) {
+      state.autoHelpMerge = { ...(state.autoHelpMerge || {}), [node.id]: { held: false, reason: 'auto_help_not_expected' } };
+      return null;
+    }
+    const pending = await ackMerge.hold({
+      workspaceId: workflow.workspaceId,
+      ticketId,
+      workflowRunId: run?.id || null,
+      nodeId: node.id,
+      ackText: ackTextFrom(baseEmail),
+      waitMinutes: option.waitMinutes,
+    });
+    state.autoHelpMerge = { ...(state.autoHelpMerge || {}), [node.id]: { held: true, pendingAckId: pending.id, rechecks: 0 } };
+    return { __waitMinutes: option.waitMinutes, __retryNodeId: node.id, autoHelpMergeWait: true, pendingAckId: pending.id };
+  }
+  if (!mine.held || !mine.pendingAckId) return null;
+  if (mine.done) return mine.merged ? { skipped: true, mergedIntoAutoHelp: true, reason: mine.reason } : null;
+  const outcome = await ackMerge.settle(mine.pendingAckId);
+  if (outcome.wait && (mine.rechecks || 0) < 12) {
+    state.autoHelpMerge[node.id] = { ...mine, rechecks: (mine.rechecks || 0) + 1 };
+    return { __waitMinutes: 1, __retryNodeId: node.id, autoHelpMergeWait: true, pendingAckId: mine.pendingAckId };
+  }
+  if (outcome.merged) {
+    const reason = `Sent as part of the Auto-help answer${outcome.runId ? ` (run ${outcome.runId})` : ''} — one e-mail`;
+    state.autoHelpMerge[node.id] = { ...mine, done: true, merged: true, reason };
+    return { skipped: true, mergedIntoAutoHelp: true, autoHelpRunId: outcome.runId ?? null, reason };
+  }
+  state.autoHelpMerge[node.id] = { ...mine, done: true, merged: false, reason: outcome.reason || 'window_passed' };
+  return null;
+}
+
 const MAX_NODE_EXECUTIONS = 60;
 const MAX_EMAIL_RECIPIENTS = 25;
 const DEFAULT_LLM_MAX_TOKENS = 10000;
@@ -2438,6 +2582,12 @@ async function executeNode({
         issues: addressedLlm.guard.issues || [],
       }) : null,
     });
+    // Reply ownership (Auto-help integration W2): a workflow draft yields to
+    // an Auto-help answer waiting for an agent, or to a first reply an agent
+    // or Auto-help already owns — recorded, never forced.
+    if (!proposal) {
+      return { skipped: true, yieldedToHigherOwner: true, reason: 'Not staged: an Auto-help answer or an agent owns the first reply on this ticket', confidence, draftSource: usingTemplate ? 'template' : 'llm' };
+    }
     return { proposedReplyId: proposal.id, confidence, draftSource: usingTemplate ? 'template' : 'llm', ...(contentFrom ? { contentFrom } : {}) };
   }
 
@@ -2949,6 +3099,9 @@ async function executeNode({
             bodyText: baseEmail.text || null,
             confidence: sendGate.confidence || null,
           });
+          if (!proposal) {
+            return { skipped: true, yieldedToHigherOwner: true, reason: `${sendGate.reason} (not staged: an Auto-help answer or an agent owns the first reply)` };
+          }
           return { skipped: true, downgradedToProposal: true, proposedReplyId: proposal.id, reason: sendGate.reason };
         } catch (error) {
           logger.warn(`Auto-send downgrade failed to stage a proposal: ${error.message}`);
@@ -2957,6 +3110,11 @@ async function executeNode({
       }
       return { skipped: true, reason: sendGate.reason };
     }
+
+    // Auto-help integration W3: hold the ack for an Auto-help answer that will
+    // go out on its own (never for a draft waiting on an agent).
+    const merge = await autoHelpAckMergeStep({ node, state, eventContext, workflow, run, baseEmail, executionMode, dryRun });
+    if (merge) return merge;
 
     const email = await finalizeWorkflowSendEmail({
       workflow,
@@ -3312,9 +3470,11 @@ export async function executeDefinition({
           const waitOutput = {
             waiting: true,
             waitMinutes: output.__waitMinutes,
-            ...(output.__retryNodeId
-              ? { retry: true, attempt: output.attempt, maxAttempts: output.maxAttempts, error: output.error }
-              : {}),
+            ...(output.autoHelpMergeWait
+              ? { autoHelpMerge: true, pendingAckId: output.pendingAckId ?? null }
+              : output.__retryNodeId
+                ? { retry: true, attempt: output.attempt, maxAttempts: output.maxAttempts, error: output.error }
+                : {}),
           };
           await finishStep(step, 'completed', waitOutput);
           executed.push({ nodeId: node.id, nodeType: node.type, output: waitOutput });
@@ -3624,6 +3784,16 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
  * executeForEvent can skip the workflow that made the change (loop guard).
  * Status is excluded (status_changed has its own trigger).
  */
+/**
+ * The resolved_by_kind a workflow's terminal status write records: 'workflow'
+ * when the workflow is the one closing the ticket, or nobody is recorded yet;
+ * otherwise undefined (keep who resolved it — e.g. Auto-help or a person —
+ * when a workflow only moves Resolved → Closed).
+ */
+export function workflowResolvedByKind({ wasTerminal, current } = {}) {
+  return !wasTerminal || !current ? 'workflow' : undefined;
+}
+
 /**
  * Pure: did this status write take the ticket from a closed state back to an
  * open one? Bases, not names — a workspace's custom "Signed off" maps to
@@ -3958,7 +4128,11 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
         patch.resolutionReason = reason;
         patch.resolutionNote = String(node.data?.resolutionNote || node.data?.note || '').trim() || null;
       }
-      patch.resolvedByKind = 'workflow';
+      // Who resolved it: the workflow — only when it is the one closing the
+      // ticket (Resolved → Closed by a workflow keeps an Auto-help / person
+      // resolution) or no one is recorded yet.
+      const kind = workflowResolvedByKind({ wasTerminal, current: ticket.resolvedByKind });
+      if (kind) patch.resolvedByKind = kind;
     }
   }
   if (setPriority && setPriority >= 1 && setPriority <= 4 && setPriority !== ticket.priority) {
@@ -4363,6 +4537,8 @@ export async function executeForEvent(eventContext, options = {}) {
       .catch(() => {});
   } catch { /* bookkeeping only — never fails the event */ }
   const selectedWorkflows = variantSelection.selected || [];
+  // Auto-help integration W3: ticket.autoHelp, only for workflows that read it.
+  if (selectedWorkflows.length) routedContext = await enrichEventContextWithAutoHelp(routedContext, selectedWorkflows);
   const results = [];
   for (const workflow of selectedWorkflows) {
     const routingResult = routingResultForWorkflow({ workflow, timing, variantSelection });
@@ -4503,6 +4679,11 @@ async function resumeRun(run) {
       if (row?.sentiment) eventContext = { ...eventContext, ticket: { ...eventContext.ticket, sentiment: row.sentiment } };
     } catch { /* stored value stays */ }
   }
+
+  // Live ticket fields, not the trigger-time copy: a wait → "still open?" →
+  // e-mail workflow must see a ticket resolved during the wait (and the
+  // Follow-up nudge guard reads the park Auto-help started since).
+  if (eventContext?.ticket?.id) eventContext = await refreshLiveTicketFields(eventContext, definition);
 
   // QA 09-23 #8: a parked run (fields_updated waits out its coalesce window)
   // is re-checked when it wakes — a stop-flagged workflow may have handled
