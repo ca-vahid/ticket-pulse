@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.92-preview';
+export const APP_VERSION = '3.9.93-preview';
 
 export const changelog = [
+  {
+    version: '3.9.93-preview',
+    date: 'September 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Assetron sign-in</strong> — Ticket Pulse can also sign in to Assetron with an API key, as a fallback to the Microsoft Entra app-to-app sign-in. No change for agents.' },
+    ],
+  },
   {
     version: '3.9.92-preview',
     date: 'September 26, 2026',

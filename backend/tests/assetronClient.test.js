@@ -17,9 +17,28 @@ beforeEach(() => {
 });
 afterAll(() => client._reset());
 
-test('not configured without both settings', () => {
+test('not configured without a base URL and a way to sign in', () => {
   delete process.env.ASSETRON_API_SCOPE;
   expect(isConfigured()).toBe(false);
+  process.env.ASSETRON_API_KEY = 'k-1';
+  expect(isConfigured()).toBe(true);
+  delete process.env.ASSETRON_API_BASE_URL;
+  expect(isConfigured()).toBe(false);
+  delete process.env.ASSETRON_API_KEY;
+});
+
+test('API key: sent in x-api-key by default, no Entra token requested; wins over a scope', async () => {
+  process.env.ASSETRON_API_KEY = 'k-1';
+  client._setFetch(async (url, init) => { calls.push({ url, init }); return respond(200, { data: {} }); });
+  await client.filterOptions();
+  expect(getToken).not.toHaveBeenCalled();
+  expect(calls[0].init.headers['x-api-key']).toBe('k-1');
+  expect(calls[0].init.headers.authorization).toBeUndefined();
+  process.env.ASSETRON_API_KEY_HEADER = 'Authorization';
+  await client.filterOptions();
+  expect(calls[1].init.headers.authorization).toBe('Bearer k-1');
+  delete process.env.ASSETRON_API_KEY;
+  delete process.env.ASSETRON_API_KEY_HEADER;
 });
 
 test('token for the configured scope, Bearer on the call, cached between calls', async () => {

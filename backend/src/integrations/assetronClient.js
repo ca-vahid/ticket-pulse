@@ -7,9 +7,14 @@
  * No secret exists. Tokens are cached until ~5 minutes before expiry.
  *
  * Config (App Service settings):
- *   ASSETRON_API_BASE_URL  e.g. https://assetron-api-…azurewebsites.net/api/v1
- *   ASSETRON_API_SCOPE     api://<client id>/.default   (sent by Assetron with the role grant)
- * Both unset → isConfigured() false and every caller degrades gracefully.
+ *   ASSETRON_API_BASE_URL     e.g. https://assetron-api-…azurewebsites.net/api/v1
+ * and ONE way to sign in:
+ *   ASSETRON_API_KEY          a key Assetron issues to us (26 Sep 2026, Vahid:
+ *                             "Entra auth can come later"); sent in
+ *   ASSETRON_API_KEY_HEADER   default x-api-key; "authorization" sends "Bearer <key>"
+ *   ASSETRON_API_SCOPE        api://<client id>/.default — Entra app-to-app via the
+ *                             managed identity (Sam's guide). Used when no key is set.
+ * No base URL, or neither sign-in → isConfigured() false; every caller degrades.
  *
  * Errors: Assetron's envelope { error: { code, message, details[] } } becomes
  * AssetronError { status, code, reason (details[0].message), field, message }.
@@ -42,12 +47,21 @@ export class AssetronError extends Error {
 export function assetronConfig() {
   const baseUrl = String(process.env.ASSETRON_API_BASE_URL || '').trim().replace(/\/+$/, '');
   const scope = String(process.env.ASSETRON_API_SCOPE || '').trim();
-  return { baseUrl, scope };
+  const apiKey = String(process.env.ASSETRON_API_KEY || '').trim();
+  const keyHeader = String(process.env.ASSETRON_API_KEY_HEADER || 'x-api-key').trim().toLowerCase();
+  return { baseUrl, scope, apiKey, keyHeader, auth: apiKey ? 'key' : (scope ? 'entra' : null) };
 }
 
 export function isConfigured() {
-  const { baseUrl, scope } = assetronConfig();
-  return Boolean(baseUrl && scope);
+  const { baseUrl, auth } = assetronConfig();
+  return Boolean(baseUrl && auth);
+}
+
+/** The sign-in header for one call: the API key when set, else an Entra token. */
+async function authHeaders() {
+  const { apiKey, keyHeader } = assetronConfig();
+  if (apiKey) return { [keyHeader]: keyHeader === 'authorization' ? `Bearer ${apiKey}` : apiKey };
+  return { authorization: `Bearer ${await getToken()}` };
 }
 
 async function getToken() {
@@ -77,10 +91,9 @@ async function request(method, path, { query = null, body = null, retries = 0 } 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      const token = await getToken();
       const res = await fetchImpl(`${baseUrl}${path}${qs}`, {
         method,
-        headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
+        headers: { ...(await authHeaders()), accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
