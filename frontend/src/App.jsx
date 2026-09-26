@@ -30,6 +30,7 @@ import Tickets from './pages/Tickets';
 import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
+import Knowledge from './pages/Knowledge';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import PublicApprovalReply from './pages/PublicApprovalReply';
 import RequesterDetail from './pages/RequesterDetail';
@@ -276,6 +277,24 @@ function App() {
                           <TicketsRoute>
                             <TicketDetail />
                           </TicketsRoute>
+                        }
+                      />
+
+                      {/* Knowledge + Auto-help: each tab (and an open article/playbook/run) has its own URL. */}
+                      <Route
+                        path="/knowledge"
+                        element={
+                          <ViewRoute>
+                            <Knowledge />
+                          </ViewRoute>
+                        }
+                      />
+                      <Route
+                        path="/knowledge/:tab/:itemId?"
+                        element={
+                          <ViewRoute>
+                            <Knowledge />
+                          </ViewRoute>
                         }
                       />
 

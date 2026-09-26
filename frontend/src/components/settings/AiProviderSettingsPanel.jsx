@@ -19,6 +19,8 @@ const AI_OPERATION_OPTIONS = [
   { value: 'analytics_report', label: 'Analytics Report' },
   // Phase AF (v3.8.14): TicketCreate → Autofill (vision-capable models only).
   { value: 'ticket_intake_extract', label: 'Autofill Intake' },
+  // Auto-help (Knowledge → Playbooks): shadow-mode first answers.
+  { value: 'auto_help', label: 'Auto-help' },
 ];
 
 function ConfigToggle({ label, description, checked, onChange }) {

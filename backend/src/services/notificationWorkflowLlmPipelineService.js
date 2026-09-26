@@ -103,7 +103,10 @@ function createTimeoutSignal({ parentSignal = null, timeoutMs = null, message } 
   };
 }
 
-function systemPromptForTools(basePrompt, policy) {
+const TOOL_MODE_STYLE_LINE = 'Warm, relaxed wording is allowed when it fits the workflow tone and ticket risk; never let style override factual, privacy, or security requirements.';
+const TOOL_MODE_STYLE_LINE_OVERRIDE = 'Follow the requester-specific tone note above; never let style override factual, privacy, or security requirements.';
+
+function systemPromptForTools(basePrompt, policy, { toneOverride = false } = {}) {
   return [
     basePrompt,
     '',
@@ -113,7 +116,7 @@ function systemPromptForTools(basePrompt, policy) {
     'Do not attempt to send email, update tickets, change workflow settings, or expose internal tool/provider/audit names.',
     'Only use outage-like public wording from outageSignals.allowedPublicPhrases. Never claim a global, company-wide, or confirmed outage unless an allowed phrase explicitly says that.',
     'Private/internal notes, if present, are internal evidence only and must not be quoted or mentioned in requester-facing fields.',
-    'Warm, relaxed wording is allowed when it fits the workflow tone and ticket risk; never let style override factual, privacy, or security requirements.',
+    toneOverride ? TOOL_MODE_STYLE_LINE_OVERRIDE : TOOL_MODE_STYLE_LINE,
     'Do not invent response-time or resolution-time estimates; use neutral follow-up language unless deterministic SLA or historical timing evidence is supplied.',
     'Do not place raw email addresses, phone numbers, or direct contact details in requester-facing subject, html, or text; use role names or approved action links instead.',
     'When ready, call submit_notification_email exactly once with subject, html, text, and any citedSignals.',
@@ -136,6 +139,7 @@ export async function runNotificationWorkflowLlmPipeline({
   providerAttemptTimeoutMs = null,
   recordToolEvent = null,
   guardOptions = {},
+  toneOverride = false,
 }) {
   const startedAt = Date.now();
   const totalTimeoutAt = startedAt + Math.max(policy.totalTimeoutMs || 20000, 1000);
@@ -168,7 +172,7 @@ export async function runNotificationWorkflowLlmPipeline({
         operation: 'notification_workflow_generation',
         workspaceId: workflow.workspaceId,
         runLinks: run?.id ? { notificationWorkflowRunId: run.id } : {},
-        systemPrompt: systemPromptForTools(systemPrompt, policy),
+        systemPrompt: systemPromptForTools(systemPrompt, policy, { toneOverride }),
         messages,
         tools,
         maxTokens,

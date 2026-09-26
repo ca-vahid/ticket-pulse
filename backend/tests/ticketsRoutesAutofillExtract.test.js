@@ -263,7 +263,7 @@ describe('AF2 — intake run persistence + linking', () => {
       7,
       { subject: 'ChatGPT account', requesterEmail: 's@example.com' },
       expect.objectContaining({ email: 'ari@example.com' }),
-      { enforceRequired: true, intakeRunId: 77 },
+      { enforceRequired: true, allowAssignableOnly: true, intakeRunId: 77 },
     );
   });
 
@@ -282,6 +282,6 @@ describe('AF2 — intake run persistence + linking', () => {
     createTicketMock.mockResolvedValue({ id: 901 });
     await request(buildApp()).post('/api/tickets').send({ subject: 'Plain', requesterEmail: 's@example.com' }).expect(201);
     expect(runServiceMock.assertLinkable).not.toHaveBeenCalled();
-    expect(createTicketMock).toHaveBeenCalledWith(7, { subject: 'Plain', requesterEmail: 's@example.com' }, expect.any(Object), { enforceRequired: true });
+    expect(createTicketMock).toHaveBeenCalledWith(7, { subject: 'Plain', requesterEmail: 's@example.com' }, expect.any(Object), { enforceRequired: true, allowAssignableOnly: true });
   });
 });

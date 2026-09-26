@@ -310,4 +310,25 @@ describe('notification workflow LLM pipeline service', () => {
       maxTokens: 1000,
     })).rejects.toThrow('global/company-wide/confirmed outage');
   });
+  test.each([
+    [false, 'Warm, relaxed wording is allowed when it fits the workflow tone and ticket risk'],
+    [true, 'Follow the requester-specific tone note above'],
+  ])('tool-mode style line (toneOverride=%s)', async (toneOverride, expected) => {
+    runToolTurnMock.mockResolvedValueOnce(toolTurn([
+      {
+        type: 'tool_use',
+        id: 'toolu_submit',
+        name: 'submit_notification_email',
+        input: { subject: 'Ticket update', html: '<p>On it.</p>', text: 'On it.', citedSignals: [] },
+      },
+    ]));
+    await runNotificationWorkflowLlmPipeline({
+      workflow, node, eventContext: { event: { type: 'ticket.created' } }, state: {},
+      policy: basePolicy, contextBundle, systemPrompt: 'Write an email.', userMessage: 'Generate.', maxTokens: 1000,
+      toneOverride,
+    });
+    const { systemPrompt } = runToolTurnMock.mock.calls[0][0];
+    expect(systemPrompt).toContain(expected);
+    expect(systemPrompt).not.toContain('voice set above');
+  });
 });

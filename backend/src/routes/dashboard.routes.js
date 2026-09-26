@@ -99,6 +99,12 @@ const transformTicket = (ticket, workspaceId) => {
   return transformed;
 };
 
+// `?include=avoidance` opts a technician detail request into the coverage
+// analysis. The agent page never renders it (Timeline Explorer has its own
+// endpoint), and it loads every workspace ticket of the period (QA 09-25).
+const wantsAvoidance = (req) => String(req.query.include || '')
+  .split(',').map((s) => s.trim()).includes('avoidance');
+
 const TIMELINE_EVENT_TYPES = [
   'self_picked',
   'coordinator_assigned',
@@ -503,23 +509,6 @@ router.get(
       });
     }
 
-    // Fetch technician and service account names in parallel
-    const [technician, serviceAccountNames] = await Promise.all([
-      technicianRepository.getById(techId, { excludeNoise }),
-      settingsRepository.getServiceAccountNames(),
-    ]);
-
-    if (!technician) {
-      return res.status(404).json({
-        success: false,
-        message: 'Technician not found',
-      });
-    }
-
-    if (technician.workspaceId !== req.workspaceId) {
-      return res.status(404).json({ success: false, message: 'Technician not found' });
-    }
-
     // Get date range for filtering (if viewing historical date)
     let todayStart, todayEnd;
     if (dateParam) {
@@ -534,9 +523,25 @@ router.get(
       todayEnd = result.end;
     }
 
-    // Use statsCalculator for consistent calculations (statusSets: Phase 8b —
-    // resolved once per request so custom statuses count under their base)
-    const statusSets = await statusService.baseStatusSets(req.workspaceId);
+    // statusSets: Phase 8b — resolved once per request so custom statuses
+    // count under their base. Needed BEFORE the ticket load: the scoped query
+    // pulls the open-like backlog by these names.
+    const [statusSets, serviceAccountNames] = await Promise.all([
+      statusService.baseStatusSets(req.workspaceId),
+      settingsRepository.getServiceAccountNames(),
+    ]);
+
+    // Only the day's tickets + the open backlog (+ the day's CSAT) — not
+    // every lifetime ticket (QA 09-25 slow agent page).
+    const technician = await technicianRepository.getByIdScoped(techId, {
+      start: todayStart, end: todayEnd, openStatuses: statusSets.openLike, excludeNoise,
+    });
+
+    if (!technician || technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
+    // Use statsCalculator for consistent calculations
     const technicianData = calculateTechnicianDetail(
       technician,
       todayStart,
@@ -546,12 +551,14 @@ router.get(
       statusSets,
     );
 
-    // Compute avoidance analysis for this technician
+    // Compute avoidance analysis for this technician (opt-in, see wantsAvoidance)
     let avoidance = null;
-    try {
-      avoidance = await computeTechnicianAvoidanceDetail(technician, todayStart, todayEnd, req.workspaceId, { excludeNoise });
-    } catch (err) {
-      logger.error(`Avoidance analysis failed for technician ${techId}:`, err);
+    if (wantsAvoidance(req)) {
+      try {
+        avoidance = await computeTechnicianAvoidanceDetail(technician, todayStart, todayEnd, req.workspaceId, { excludeNoise });
+      } catch (err) {
+        logger.error(`Avoidance analysis failed for technician ${techId}:`, err);
+      }
     }
 
     // Per-tech rejection counts — rolling windows for BouncedTab pills AND
@@ -609,23 +616,6 @@ router.get(
 
     logger.debug(`Fetching weekly stats for technician ${techId}, weekStart: ${weekStartParam || 'current week'}`);
 
-    // Fetch technician and service account names in parallel
-    const [technician, serviceAccountNames] = await Promise.all([
-      technicianRepository.getById(techId, { excludeNoise }),
-      settingsRepository.getServiceAccountNames(),
-    ]);
-
-    if (!technician) {
-      return res.status(404).json({
-        success: false,
-        message: 'Technician not found',
-      });
-    }
-
-    if (technician.workspaceId !== req.workspaceId) {
-      return res.status(404).json({ success: false, message: 'Technician not found' });
-    }
-
     // Calculate week start (Monday) and end (Sunday)
     let weekStartDate;
     if (weekStartParam) {
@@ -645,8 +635,23 @@ router.get(
 
     logger.debug(`Week range for technician: ${formatDateInTimezone(weekStartDate, timezone)} to ${formatDateInTimezone(weekEndDate, timezone)}`);
 
-    // Use statsCalculator for weekly stats (statusSets: Phase 8b, once per request)
-    const statusSets = await statusService.baseStatusSets(req.workspaceId);
+    // statusSets: Phase 8b, once per request — resolved before the load so the
+    // scoped query can pull the open-like backlog by name.
+    const [statusSets, serviceAccountNames] = await Promise.all([
+      statusService.baseStatusSets(req.workspaceId),
+      settingsRepository.getServiceAccountNames(),
+    ]);
+
+    // The week's tickets + open backlog + the week's CSAT only (QA 09-25).
+    const technician = await technicianRepository.getByIdScoped(techId, {
+      start: weekStartDate, end: weekEndDate, openStatuses: statusSets.openLike, excludeNoise,
+    });
+
+    if (!technician || technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
+    // Use statsCalculator for weekly stats
     const weeklyStats = calculateTechnicianWeeklyStats(
       technician,
       weekStartDate,
@@ -686,14 +691,16 @@ router.get(
       statusSets.openLike.has(ticket.status),
     );
 
-    // Compute avoidance analysis for this technician's week
+    // Compute avoidance analysis for this technician's week (opt-in)
     let avoidance = null;
-    try {
-      avoidance = await computeTechnicianAvoidanceWeeklyDetail(
-        technician, weekStartDate, weekEndDate, timezone, req.workspaceId, { excludeNoise },
-      );
-    } catch (err) {
-      logger.error(`Weekly avoidance analysis failed for technician ${techId}:`, err);
+    if (wantsAvoidance(req)) {
+      try {
+        avoidance = await computeTechnicianAvoidanceWeeklyDetail(
+          technician, weekStartDate, weekEndDate, timezone, req.workspaceId, { excludeNoise },
+        );
+      } catch (err) {
+        logger.error(`Weekly avoidance analysis failed for technician ${techId}:`, err);
+      }
     }
 
     // Per-tech rejection counts: rolling windows + period-scoped for selected week
@@ -768,21 +775,21 @@ router.get(
     }
     const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 12, 0, 0);
 
-    // Fetch technician and service account names in parallel
-    const [technician, serviceAccountNames] = await Promise.all([
-      technicianRepository.getById(techId, { excludeNoise }),
+    // statusSets: Phase 8b, once per request — before the scoped load.
+    const [statusSets, serviceAccountNames] = await Promise.all([
+      statusService.baseStatusSets(req.workspaceId),
       settingsRepository.getServiceAccountNames(),
     ]);
-    if (!technician) {
+
+    // The month's tickets + open backlog + the month's CSAT only (QA 09-25).
+    const technician = await technicianRepository.getByIdScoped(techId, {
+      start: monthStartDate, end: monthEndDate, openStatuses: statusSets.openLike, excludeNoise,
+    });
+    if (!technician || technician.workspaceId !== req.workspaceId) {
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
 
-    if (technician.workspaceId !== req.workspaceId) {
-      return res.status(404).json({ success: false, message: 'Technician not found' });
-    }
-
-    // Calculate monthly stats (statusSets: Phase 8b, once per request)
-    const statusSets = await statusService.baseStatusSets(req.workspaceId);
+    // Calculate monthly stats
     const monthlyStats = calculateTechnicianMonthlyStats(
       technician,
       monthStartDate,
@@ -815,14 +822,16 @@ router.get(
       statusSets.openLike.has(ticket.status),
     );
 
-    // Compute avoidance analysis for the month
+    // Compute avoidance analysis for the month (opt-in)
     let avoidance = null;
-    try {
-      avoidance = await computeTechnicianAvoidanceMonthlyDetail(
-        technician, monthStartDate, monthEndDate, timezone, req.workspaceId, { excludeNoise },
-      );
-    } catch (err) {
-      logger.error(`Monthly avoidance analysis failed for technician ${techId}:`, err);
+    if (wantsAvoidance(req)) {
+      try {
+        avoidance = await computeTechnicianAvoidanceMonthlyDetail(
+          technician, monthStartDate, monthEndDate, timezone, req.workspaceId, { excludeNoise },
+        );
+      } catch (err) {
+        logger.error(`Monthly avoidance analysis failed for technician ${techId}:`, err);
+      }
     }
 
     const monthStr = monthStartDate.toLocaleDateString('en-CA').slice(0, 7); // "YYYY-MM"
@@ -861,6 +870,37 @@ router.get(
         rejected7d: m_r7[techId] || 0,
         rejected30d: m_r30[techId] || 0,
         rejectedLifetime: m_rL[techId] || 0,
+      },
+    });
+  }),
+);
+
+/**
+ * GET /api/dashboard/technicians
+ * Light list of the workspace's active technicians (identity only, no
+ * tickets) for pickers such as the Timeline Explorer, which used to pull the
+ * whole daily dashboard just to get names (QA 09-25). One photo per person,
+ * never per ticket.
+ */
+router.get(
+  '/technicians',
+  readCache(60_000),
+  asyncHandler(async (req, res) => {
+    const techs = await technicianRepository.getAllActive(req.workspaceId, { lite: true });
+    res.json({
+      success: true,
+      data: {
+        technicians: techs.map((t) => ({
+          id: t.id,
+          name: t.name,
+          email: t.email,
+          photoUrl: t.photoUrl,
+          isActive: t.isActive,
+          timezone: t.timezone,
+          location: t.location,
+          workStartTime: t.workStartTime || null,
+          workEndTime: t.workEndTime || null,
+        })),
       },
     });
   }),
@@ -924,7 +964,10 @@ router.get(
     // Fetch avoidance data for all techs in parallel
     const techResults = await Promise.all(
       techIds.map(async (techId) => {
-        const tech = await technicianRepository.getById(techId, { excludeNoise });
+        // Identity only — the avoidance analysis reads tech.id and loads the
+        // period's workspace tickets itself; the lifetime ticket include that
+        // getById carried was never read here (QA 09-25).
+        const tech = await technicianRepository.getIdentityById(techId);
         if (!tech) {
           logger.warn(`Timeline: technician ${techId} not found`);
           return null;
@@ -1117,17 +1160,12 @@ router.get(
       });
     }
 
-    // Fetch technician
-    const technician = await technicianRepository.getById(techId);
-
-    if (!technician) {
-      return res.status(404).json({
-        success: false,
-        message: 'Technician not found',
-      });
-    }
-
-    if (technician.workspaceId !== req.workspaceId) {
+    // Lightweight ownership check (same reason as activity-calendar below).
+    const technician = await prisma.technician.findUnique({
+      where: { id: techId },
+      select: { id: true, name: true, email: true, workspaceId: true },
+    });
+    if (!technician || technician.workspaceId !== req.workspaceId) {
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
 
@@ -1165,7 +1203,10 @@ router.get(
     if (isNaN(techId)) {
       return res.status(400).json({ success: false, message: 'Invalid technician ID' });
     }
-    const technician = await technicianRepository.getById(techId);
+    const technician = await prisma.technician.findUnique({
+      where: { id: techId },
+      select: { id: true, name: true, email: true, workspaceId: true },
+    });
     if (!technician || technician.workspaceId !== req.workspaceId) {
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
@@ -1246,6 +1287,9 @@ router.get(
  */
 router.get(
   '/technician/:id/bounced',
+  // Short TTL: the agent page, its prefetch and a re-mount ask for the same
+  // range within seconds (QA 09-25). Rejections are rare, 15 s staleness is fine.
+  readCache(15_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
     const { start, end } = req.query;
@@ -1294,12 +1338,25 @@ router.get(
             internalSubcategory: { select: { id: true, name: true, parentId: true } },
             taxonomyReviewNeeded: true,
             assignedTechId: true,
-            assignedTech: { select: { id: true, name: true, photoUrl: true } },
+            // No photoUrl per row (each can be ~11 KB) — the current holders'
+            // photos travel once in `holderPhotos` below.
+            assignedTech: { select: { id: true, name: true } },
             requester: { select: { name: true, email: true } },
           },
         },
       },
     });
+
+    const holderIds = [...new Set(rejections.map((r) => r.ticket?.assignedTechId).filter(Boolean))];
+    const holders = holderIds.length
+      ? await prisma.technician.findMany({
+        where: { id: { in: holderIds } },
+        select: { id: true, photoUrl: true },
+      })
+      : [];
+    const holderPhotos = Object.fromEntries(
+      holders.filter((h) => h.photoUrl).map((h) => [h.id, h.photoUrl]),
+    );
 
     const rows = rejections.map((r) => ({
       episodeId: r.id,
@@ -1320,6 +1377,7 @@ router.get(
         rangeStart: start || null,
         rangeEnd: end || null,
         rejections: rows,
+        holderPhotos,
       },
     });
   }),

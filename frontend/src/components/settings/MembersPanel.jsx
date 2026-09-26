@@ -8,7 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   Users, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
   AlertCircle, CheckCircle2, MapPin, Search, UserPlus, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, KeyRound, Camera,
+  ArrowUpDown, ArrowUp, ArrowDown, KeyRound, Camera, UserCheck, Activity,
 } from 'lucide-react';
 import PhotoUploadDialog from './PhotoUploadDialog';
 
@@ -354,6 +354,21 @@ export default function MembersPanel() {
     finally { setSaving(false); }
   }, [editForm, load]);
 
+  // QA 09-25 item 6: another team's people (e.g. Digital Solutions in IT) can
+  // own tickets without joining the team numbers. Only meaningful when disabled.
+  const [assignableBusyId, setAssignableBusyId] = useState(null);
+  const toggleAssignableOnly = useCallback(async (t) => {
+    setAssignableBusyId(t.id); setError(null);
+    try {
+      await settingsAPI.setTechnicianAssignableOnly(t.id, !t.assignableOnly);
+      flash(t.assignableOnly
+        ? `${t.name} can no longer be assigned tickets.`
+        : `${t.name} can now own tickets — still not counted in team numbers.`);
+      await load();
+    } catch (err) { setError(err.response?.data?.message || err.message || 'Failed to change assignable-only'); }
+    finally { setAssignableBusyId(null); }
+  }, [load]);
+
   const toggleActive = useCallback(async (t) => {
     setTogglingId(t.id); setError(null);
     try {
@@ -430,7 +445,7 @@ export default function MembersPanel() {
         const t = row.original;
         return (
           <div className="flex items-center gap-2.5 min-w-0">
-            <Avatar name={t.name} photoUrl={t.photoUrl} dim={!t.isActive} />
+            <Avatar name={t.name} photoUrl={t.photoUrl} dim={!t.isActive && !t.assignableOnly} />
             <div className="min-w-0">
               <div className={`text-sm font-medium truncate ${t.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>
                 {t.name}
@@ -476,6 +491,13 @@ export default function MembersPanel() {
       cell: ({ row }) => (row.original.isActive ? (
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-200">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" /> Active
+        </span>
+      ) : row.original.assignableOnly ? (
+        <span
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+          title="Can own tickets here, but not counted in the dashboard, analytics or AI assignment"
+        >
+          <UserCheck className="w-3.5 h-3.5 text-primary" aria-hidden="true" /> Assignable only
         </span>
       ) : (
         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground border border-border">
@@ -718,6 +740,8 @@ export default function MembersPanel() {
                       onSaveEdit={() => saveEdit(t.id)}
                       saving={saving}
                       onToggle={() => toggleActive(t)}
+                      onToggleAssignable={() => toggleAssignableOnly(t)}
+                      assignableBusy={assignableBusyId === t.id}
                       onPhoto={() => setPhotoFor(t)}
                       toggling={togglingId === t.id}
                       onRevoke={t.origin === 'app' ? () => changeAccess(t, '') : null}
@@ -776,12 +800,12 @@ export default function MembersPanel() {
 function MemberTableRow({
   row, t, colSpanAll, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, saving,
   onToggle, toggling, guidanceOpen, guidanceDraft, setGuidanceDraft, onOpenGuidance, onCloseGuidance, onSaveGuidance, guidanceSaving,
-  onRevoke = null, revoking = false, onPhoto = null,
+  onRevoke = null, revoking = false, onPhoto = null, onToggleAssignable = null, assignableBusy = false,
 }) {
   const appOnly = t.origin === 'app';
   return (
     <>
-      <tr className={`transition-colors hover:bg-muted/35 ${t.isActive ? '' : 'opacity-70'}`}>
+      <tr className={`transition-colors hover:bg-muted/35 ${t.isActive || t.assignableOnly ? '' : 'opacity-70'}`}>
         {row.getVisibleCells().map((cell) => {
           const hideOnMobile = cell.column.id === 'type' ? 'hidden md:table-cell'
             : cell.column.id === 'location' ? 'hidden lg:table-cell' : '';
@@ -814,6 +838,20 @@ function MemberTableRow({
             {!appOnly && onStartEdit && t.isActive && !editing && (
               <button onClick={onStartEdit} title="Edit name / location / timezone" className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring">
                 <Pencil className="w-4 h-4" />
+              </button>
+            )}
+            {!appOnly && !t.isActive && onToggleAssignable && (
+              <button
+                onClick={onToggleAssignable}
+                disabled={assignableBusy}
+                aria-pressed={t.assignableOnly === true}
+                aria-label={`Assignable only for ${t.name}`}
+                title={t.assignableOnly
+                  ? 'Assignable only is on — can own tickets, not counted in team numbers. Click to turn off.'
+                  : 'Assignable only — can own tickets, not counted in team numbers'}
+                className={`p-1.5 rounded-lg tp-focus-ring ${t.assignableOnly ? 'text-primary hover:bg-primary/10' : 'text-muted-foreground/75 hover:text-primary'}`}
+              >
+                {assignableBusy ? <Activity className="w-4 h-4 animate-spin" aria-hidden="true" /> : <UserCheck className="w-4 h-4" aria-hidden="true" />}
               </button>
             )}
             {!appOnly && <button onClick={onToggle} disabled={toggling} title={t.isActive ? 'Disable' : 'Re-enable'}

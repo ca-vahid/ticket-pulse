@@ -120,6 +120,19 @@ function isCcEmailsRejection(err) {
   return /cc_emails/i.test(String(err?.message || ''));
 }
 
+// "Assigned agent isn't a member of the group." FreshService checks the
+// assignee against the group on ITS copy (set there by an FS rule), even when
+// the Ticket Pulse ticket has no group. The whole field sync failed, so status
+// and priority never reached the copy either, and the job retried 8 times
+// (TP-1674/1678/1679/1680, Sentinel alerts owned by Anton, 25 Sep 2026).
+export function isGroupMembershipRejection(err) {
+  const detail = err?.freshserviceDetail;
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
+  if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'agent_group_id'
+    || /member of the group/i.test(String(fe.message || '')))) return true;
+  return /member of the group/i.test(String(err?.message || ''));
+}
+
 function textToHtml(text) {
   if (!text) return '';
   return `<p>${String(text)
@@ -828,6 +841,7 @@ class MirrorService {
       // it got at create time).
       cc_emails: mirrorCcEmails(ticket),
     };
+    let assigneeNote = null;
     try {
       await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
     } catch (err) {
@@ -837,6 +851,13 @@ class MirrorService {
       } else if (payload.cc_emails !== undefined && isCcEmailsRejection(err)) {
         logger.warn(`Mirror: FreshService rejected cc_emails on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, cc_emails: undefined });
+      } else if (payload.responder_id && isGroupMembershipRejection(err)) {
+        // Keep the rest of the sync (status, priority, due date…) and leave the
+        // copy's assignee alone; say why on the ticket instead of retrying.
+        const who = ticket.assignedTech?.name || 'The assignee';
+        assigneeNote = `${who} isn't in the FreshService group on the FreshService copy, so the assignee wasn't copied there. Add them to that group in FreshService or change the copy's group.`;
+        logger.warn(`Mirror: FreshService refused assignee ${who} on #${ticket.freshserviceTicketId} (not in the copy's group) — synced the other fields without the assignee`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, responder_id: undefined });
       } else {
         throw err;
       }
@@ -844,7 +865,7 @@ class MirrorService {
 
     await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { mirrorState: 'mirrored', mirroredAt: new Date(), mirrorError: null },
+      data: { mirrorState: 'mirrored', mirroredAt: new Date(), mirrorError: assigneeNote },
     });
     this._broadcast(ticket, 'mirror');
   }

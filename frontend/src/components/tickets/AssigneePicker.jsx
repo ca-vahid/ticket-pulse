@@ -1,9 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
 import { AgentFirstName, PersonAvatar, UnassignedBadge } from './ticketUi';
 import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
+import HandBackReasonDialog from './HandBackReasonDialog';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
+import { useCurrentIdentity } from '../../utils/currentIdentity';
+import { isSignedInAs, splitTeams } from '../../utils/handBack';
 
 /**
  * Rich assignee dropdown shared by the queue rows, peek drawer, and detail
@@ -29,6 +32,7 @@ export default function AssigneePicker({
   aiSuggestion = null, // { runId, state: 'suggested'|'analyzing'|'queued', techId, techName, score }
   ticketOrigin = null, // 'ticketpulse' | 'freshservice' — hides local agents on FS-born tickets
   currentTech = null, // the ticket's own assignee object {id,name,photoUrl,isActive,origin} — used when the assignee isn't in the active team list (deactivated / FS-only agents)
+  askHandBack = true, // false = clearing the assignee never asks why (forms that aren't a real ticket yet)
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -39,6 +43,7 @@ export default function AssigneePicker({
   const overridePrompt = useOverridePrompt();
   const [selectedAiTechId, setSelectedAiTechId] = useState(null); // which AI candidate is picked for Approve
   const rootRef = useRef(null);
+  const triggerRef = useRef(null);
   const panelRef = useRef(null);
   const inputRef = useRef(null);
   // The panel renders in a body portal (fixed), so queue-row overflow-hidden
@@ -54,6 +59,11 @@ export default function AssigneePicker({
   // The assignee exists but isn't an assignable active member: show them, tag
   // as read-only (they can only be (re)assigned in FreshService).
   const currentReadOnly = Boolean(current) && !activeMatch;
+  // Hand-back reason (QA 09-25 item 3): clearing the current assignee asks why.
+  const me = useCurrentIdentity();
+  const [handBack, setHandBack] = useState(null); // null | { error }
+  const [handBackBusy, setHandBackBusy] = useState(false);
+  const selfHandBack = isSignedInAs(me, current);
 
   const placePanel = () => {
     const rect = rootRef.current?.getBoundingClientRect();
@@ -112,12 +122,46 @@ export default function AssigneePicker({
     if (q) list = list.filter((t) => t.name.toLowerCase().includes(q));
     return list;
   }, [technicians, query, ticketOrigin]);
+  const { team: teamList, others: otherTeams } = useMemo(() => splitTeams(filtered), [filtered]);
+
+  const write = (techId, extra) => {
+    if (assignFn) return extra ? assignFn(techId, extra) : assignFn(techId);
+    return extra ? ticketsAPI.assign(ticketId, techId, extra) : ticketsAPI.assign(ticketId, techId);
+  };
+
+  // "Unassigned" with someone on the ticket → ask why first.
+  // No real ticket yet (the split form passes ticketId null) or the caller
+  // opted out → nothing to hand back, just clear the pick.
+  const pickUnassigned = () => {
+    if (value == null || ticketId == null || !askHandBack) { assign(null); return; }
+    setOpen(false);
+    setHandBack({ error: null });
+  };
+
+  const submitHandBack = async (reason) => {
+    if (handBackBusy) return;
+    setHandBackBusy(true);
+    // Close first: an FS-born ticket shows its own FreshService confirmation next.
+    setHandBack(null);
+    setBusy(true);
+    try {
+      await write(null, { handBack: reason });
+      onAssigned?.(null);
+    } catch (err) {
+      // A cancelled FS confirmation ends quietly; a refusal reopens with the message.
+      if (err?.message !== 'cancelled') {
+        setHandBack({ error: err?.response?.data?.message || err?.message || 'Could not unassign' });
+      }
+    }
+    setBusy(false);
+    setHandBackBusy(false);
+  };
 
   const assign = async (techId) => {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await (assignFn ? assignFn(techId) : ticketsAPI.assign(ticketId, techId));
+      const res = await write(techId);
       setOpen(false);
       // The interceptor unwraps to the {success, data} envelope; the assign
       // payload flags manual picks that override a completed AI decision.
@@ -203,6 +247,7 @@ export default function AssigneePicker({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <button
+        ref={triggerRef}
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
         aria-haspopup="listbox"
@@ -388,7 +433,7 @@ export default function AssigneePicker({
             <button
               role="option"
               aria-selected={value === null}
-              onClick={() => assign(null)}
+              onClick={pickUnassigned}
               className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 text-left"
             >
               <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
@@ -397,21 +442,25 @@ export default function AssigneePicker({
               <span className="text-sm text-muted-foreground italic">Unassigned</span>
               {value === null && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto" aria-hidden="true" />}
             </button>
-            {filtered.map((t) => (
-              <button
-                key={t.id}
-                role="option"
-                aria-selected={t.id === value}
-                onClick={() => assign(t.id)}
-                className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 ${t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
-              >
-                <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                <span className="text-sm text-foreground/85 truncate">{t.name}</span>
-                {t.origin === 'local' && (
-                  <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
+            {[...teamList, ...otherTeams].map((t, i) => (
+              <Fragment key={t.id}>
+                {otherTeams.length > 0 && i === teamList.length && (
+                  <span role="presentation" className="block px-2 pt-2 pb-0.5 text-[10px] font-medium text-muted-foreground">Other teams</span>
                 )}
-                {t.id === value && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto flex-shrink-0" aria-hidden="true" />}
-              </button>
+                <button
+                  role="option"
+                  aria-selected={t.id === value}
+                  onClick={() => assign(t.id)}
+                  className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 ${t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
+                >
+                  <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                  <span className="text-sm text-foreground/85 truncate">{t.name}</span>
+                  {t.origin === 'local' && (
+                    <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
+                  )}
+                  {t.id === value && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto flex-shrink-0" aria-hidden="true" />}
+                </button>
+              </Fragment>
             ))}
             {filtered.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No member matches “{query}”.</p>}
           </div>
@@ -442,6 +491,17 @@ export default function AssigneePicker({
         </div>,
         document.body,
       )}
+
+      <HandBackReasonDialog
+        open={Boolean(handBack)}
+        requireReason={selfHandBack}
+        personName={current?.name || null}
+        busy={handBackBusy}
+        error={handBack?.error || null}
+        returnFocusRef={triggerRef}
+        onSubmit={submitHandBack}
+        onCancel={() => { if (!handBackBusy) setHandBack(null); }}
+      />
 
       <OverridePromptToast
         prompt={overridePrompt.prompt}

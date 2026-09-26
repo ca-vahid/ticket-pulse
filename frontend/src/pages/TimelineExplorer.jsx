@@ -401,10 +401,11 @@ export default function TimelineExplorer() {
     })()
     : false;
 
-  // ── Load tech list from dashboard API ──
+  // ── Load tech list (light identity list — not the whole daily dashboard,
+  // which computed every tech's workload just to read names; QA 09-25) ──
   useEffect(() => {
     setTechListLoading(true);
-    dashboardAPI.getDashboard('America/Los_Angeles', null).then((res) => {
+    dashboardAPI.getTechnicianList().then((res) => {
       if (res?.success && res.data?.technicians) {
         const list = res.data.technicians.filter((t) => t.isActive !== false);
         setTechList(list);

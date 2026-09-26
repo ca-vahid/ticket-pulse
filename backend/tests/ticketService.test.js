@@ -2585,3 +2585,75 @@ describe('describeOversizeBody — what a "too long to send" body is made of (25
     expect(describeOversizeBody(null).length).toBe(0);
   });
 });
+
+describe('Re-opened state + filter + sort (QA 09-25 #1)', () => {
+  const reopenedAt = new Date('2026-09-20T10:00:00Z');
+  const before = new Date('2026-09-19T10:00:00Z');
+  const after = new Date('2026-09-21T10:00:00Z');
+  const future = new Date(Date.now() + 3600 * 1000);
+  const tp = (over = {}) => ({
+    origin: 'ticketpulse', status: 'Open', assignedTechId: 7, firstPublicAgentReplyAt: null,
+    frDueBy: null, activitiesSyncedAt: null, activitiesSyncError: null, reopenedAt, reopenCount: 1, ...over,
+  });
+
+  test.each([
+    ['stuck reopen, no reply since → reopened', tp(), false, {}, 'reopened'],
+    ['requester reply beats reopened', tp(), true, {}, 'requester_responded'],
+    ['reopened beats response_due', tp({ frDueBy: future }), false, {}, 'reopened'],
+    ['reopened beats new', tp({ assignedTechId: null }), false, {}, 'reopened'],
+    ['agent replied before the reopen → still reopened', tp(), false, { lastAgentReplyAt: before }, 'reopened'],
+    ['agent replied after the reopen → no longer reopened', tp(), false, { lastAgentReplyAt: after }, null],
+    ['first reply after the reopen counts too', tp({ firstPublicAgentReplyAt: after }), false, {}, null],
+    ['Pending-base reopened ticket still shows', tp({ status: 'Pending' }), false, {}, 'reopened'],
+    ['terminal again → null', tp({ status: 'Closed' }), false, {}, null],
+    ['never reopened → falls through to the old rules', tp({ reopenedAt: null, reopenCount: 0, assignedTechId: null }), false, {}, 'new'],
+    ['FS-born with unknowable history still shows reopened', tp({ origin: 'freshservice' }), false, {}, 'reopened'],
+  ])('%s', (_label, ticket, awaiting, opts, expected) => {
+    expect(deriveQueueState(ticket, awaiting, null, opts)).toBe(expected);
+  });
+
+  test('?reopened=1 → reopenedAt not null, scoped to Open/Pending bases unless statuses were picked', async () => {
+    const where = await ticketService.buildListWhere(1, { reopened: '1' });
+    expect(where.reopenedAt).toEqual({ not: null });
+    // Registry-resolved (custom Open/Pending-base names ride along); never terminal.
+    expect(where.status.in).toEqual(expect.arrayContaining(['Open', 'Pending']));
+    expect(where.status.in).not.toEqual(expect.arrayContaining(['Closed']));
+    expect(where.status.in).not.toEqual(expect.arrayContaining(['Resolved']));
+    const picked = await ticketService.buildListWhere(1, { reopened: 'true', status: 'Closed' });
+    expect(picked.status).toEqual({ in: ['Closed'] });
+    expect(picked.reopenedAt).toEqual({ not: null });
+    expect((await ticketService.buildListWhere(1, { reopened: '0' })).reopenedAt).toBeUndefined();
+  });
+
+  test('sort=reopenedAt orders by the latest stuck reopen, never-reopened last', async () => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    await ticketService.listTickets(1, { sort: 'reopenedAt', dir: 'desc' });
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ reopenedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+    }));
+  });
+
+  test('list rows: an outgoing last entry after the reopen clears the state (same single query)', async () => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+    prismaMock.ticket.count.mockResolvedValue(2);
+    prismaMock.ticket.findMany.mockResolvedValue([
+      { ...tp(), id: 1, requester: null, tagLinks: [] },
+      { ...tp(), id: 2, requester: null, tagLinks: [] },
+    ]);
+    prismaMock.$queryRaw.mockResolvedValue([
+      { ticket_id: 1, incoming: false, author_type: 'agent', occurred_at: after },
+      { ticket_id: 2, incoming: false, author_type: 'agent', occurred_at: before },
+    ]);
+    prismaMock.assignmentPipelineRun.findMany = jest.fn().mockResolvedValue([]);
+    prismaMock.ticketProposedReply = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.ticketAssignmentEpisode.findMany = jest.fn().mockResolvedValue([]);
+    const { items } = await ticketService.listTickets(1, {});
+    expect(items.map((t) => t.state)).toEqual([null, 'reopened']);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+});

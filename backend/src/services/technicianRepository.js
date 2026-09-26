@@ -27,6 +27,58 @@ const dashboardTicketOmit = {
   mirrorError: true,
 };
 
+// Technician-detail variant (QA 09-25 slow agent page). Same idea as
+// dashboardTicketOmit, but keeps `descriptionText` and `csatFeedback`: the
+// agent page's export menu writes both columns (utils/exportUtils.js).
+export const techDetailTicketOmit = {
+  description: true,
+  priorityRationale: true,
+  priorityEvidence: true,
+  ticketTypeRationale: true,
+  internalCategoryRationale: true,
+  activitiesSyncError: true,
+  mirrorError: true,
+};
+
+// Requester fields the per-tech views actually render (transformTicket
+// flattens name + email). Never the requester's photo or profile blob.
+const slimRequesterSelect = { select: { id: true, name: true, email: true } };
+
+const techDetailTicketInclude = {
+  requester: slimRequesterSelect,
+  internalCategory: { select: { id: true, name: true } },
+  internalSubcategory: { select: { id: true, name: true, parentId: true } },
+};
+
+// DB window padding around a period. The in-memory calculators apply the
+// exact timezone-aware boundaries; the query only needs a SUPERSET, so two
+// days either side covers every timezone offset and DST edge.
+const SCOPE_PAD_MS = 2 * 24 * 60 * 60 * 1000;
+
+/**
+ * Build the ticket `where` for a period-scoped technician load. Mirrors every
+ * filter the per-tech calculators run (statsCalculator.js):
+ *  - assigned in the period (firstAssignedAt, or createdAt when never assigned)
+ *  - currently open-like (open snapshot, parked count, historical daily view)
+ *  - CSAT submitted in the period
+ * Exported so the parity test can evaluate the same predicate in memory.
+ */
+export function buildTechnicianScopeWhere({ start, end, openStatuses, workspaceId = null, excludeNoise = false }) {
+  const gte = new Date(new Date(start).getTime() - SCOPE_PAD_MS);
+  const lte = new Date(new Date(end).getTime() + SCOPE_PAD_MS);
+  const where = {
+    OR: [
+      { firstAssignedAt: { gte, lte } },
+      { firstAssignedAt: null, createdAt: { gte, lte } },
+      { status: { in: [...openStatuses] } },
+      { csatSubmittedAt: { gte, lte } },
+    ],
+  };
+  if (workspaceId) where.workspaceId = workspaceId;
+  if (excludeNoise) where.isNoise = false;
+  return where;
+}
+
 /**
  * Repository for Technician operations
  */
@@ -165,6 +217,69 @@ class TechnicianRepository {
       });
     } catch (error) {
       logger.error(`Error fetching technician by ID ${id}:`, error);
+      throw new DatabaseError(`Failed to fetch technician ${id}`, error);
+    }
+  }
+
+  /**
+   * Identity-only technician read (no tickets) — ownership checks and pages
+   * that only need who the person is.
+   * @param {number} id
+   * @returns {Promise<Object|null>}
+   */
+  async getIdentityById(id) {
+    try {
+      return await prisma.technician.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          photoUrl: true,
+          timezone: true,
+          location: true,
+          workStartTime: true,
+          workEndTime: true,
+          isActive: true,
+          workspaceId: true,
+        },
+      });
+    } catch (error) {
+      logger.error(`Error fetching technician identity ${id}:`, error);
+      throw new DatabaseError(`Failed to fetch technician ${id}`, error);
+    }
+  }
+
+  /**
+   * Technician with ONLY the tickets a period view can touch (QA 09-25):
+   * assigned in [start, end] (padded), currently open-like, or CSAT in range.
+   * Replaces getById (every lifetime ticket, full width) on the agent page.
+   * Heavy columns are omitted and the requester is id/name/email only.
+   *
+   * @param {number} id
+   * @param {object} opts
+   * @param {Date} opts.start - period start (any time inside the first day is fine)
+   * @param {Date} opts.end - period end
+   * @param {Iterable<string>} opts.openStatuses - the workspace's open-like status names
+   * @param {boolean} [opts.excludeNoise]
+   */
+  async getByIdScoped(id, { start, end, openStatuses, excludeNoise = false }) {
+    try {
+      const tech = await prisma.technician.findUnique({ where: { id } });
+      if (!tech) return null;
+      const tickets = await prisma.ticket.findMany({
+        where: {
+          assignedTechId: id,
+          ...buildTechnicianScopeWhere({
+            start, end, openStatuses, workspaceId: tech.workspaceId, excludeNoise,
+          }),
+        },
+        include: techDetailTicketInclude,
+        omit: techDetailTicketOmit,
+      });
+      return { ...tech, tickets };
+    } catch (error) {
+      logger.error(`Error fetching scoped technician ${id}:`, error);
       throw new DatabaseError(`Failed to fetch technician ${id}`, error);
     }
   }

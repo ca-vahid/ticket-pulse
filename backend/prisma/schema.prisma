@@ -1254,6 +1254,10 @@ model Technician {
   // candidate (e.g. "Reduced ticket capacity — only recommend for a
   // significantly stronger skill match or their specialty categories").
   routingGuidance String?   @map("routing_guidance") @db.Text
+  // Assignable but not counted (QA 09-25): people from another team (e.g.
+  // Digital Solutions in IT) who can own tickets but stay out of the
+  // dashboard, analytics and AI candidate lists. isActive stays false.
+  assignableOnly  Boolean   @default(false) @map("assignable_only")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -1557,6 +1561,11 @@ model Ticket {
   // queue filters and counts. The park itself lives in ticket_parks.
   parkedUntil        DateTime? @map("parked_until") @db.Timestamptz(6)
   parkKind           String?   @map("park_kind") @db.VarChar(20)
+  // Re-opened (QA 09-25): the last move out of Resolved/Closed that stuck (a
+  // flip back within 10 min undoes it; FreshService automation flips tickets
+  // Closed to Open to Closed in seconds). Shown as the "Re-opened" state while open.
+  reopenedAt         DateTime? @map("reopened_at") @db.Timestamptz(6)
+  reopenCount        Int       @default(0) @map("reopen_count")
 
   // Partial unique index in SQL (WHERE external_ref IS NOT NULL) — one
   // ticket per (workspace, ref); the P2002 on it is the concurrent-create
@@ -3859,4 +3868,179 @@ model TicketPark {
 
   @@index([ticketId, endedAt], map: "idx_ticket_parks_ticket")
   @@map("ticket_parks")
+}
+
+// Hand-backs (QA 09-25 item 3): why an agent gave a ticket back. One row per
+// unassign done in Ticket Pulse (both origins). FS-born rows are matched to the
+// rejected episode + rebound run when sync sees the FreshService activity.
+model TicketHandBack {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  ticketId      Int      @map("ticket_id")
+  technicianId  Int?     @map("technician_id") // who had the ticket
+  actorTechId   Int?     @map("actor_tech_id") // who cleared it
+  actorName     String?  @map("actor_name") @db.VarChar(255)
+  selfHandBack  Boolean  @default(true) @map("self_hand_back")
+  reasonCode    String?  @map("reason_code") @db.VarChar(30) // location | capacity | competency | other | skipped
+  reasonNote    String?  @map("reason_note") @db.Text
+  origin        String   @db.VarChar(20) // ticketpulse | freshservice
+  episodeId     Int?     @map("episode_id")
+  pipelineRunId Int?     @map("pipeline_run_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_hand_backs_ws_created")
+  @@index([ticketId], map: "idx_hand_backs_ticket")
+  @@map("ticket_hand_backs")
+}
+
+// Tone (QA 09-25 item 5): per-workspace Straight-Talk List and tone text.
+model ToneSettings {
+  workspaceId           Int      @id @map("workspace_id")
+  defaultVoice          String   @default("friendly") @map("default_voice") @db.VarChar(20) // friendly | professional
+  seriousToneText       String?  @map("serious_tone_text") @db.Text
+  seriousWhenFrustrated Boolean  @default(true) @map("serious_when_frustrated")
+  updatedBy             String?  @map("updated_by") @db.VarChar(255)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("tone_settings")
+}
+
+model ToneOverrideContact {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  email       String   @db.VarChar(255)
+  name        String?  @db.VarChar(255)
+  requesterId Int?     @map("requester_id")
+  note        String?  @db.Text
+  addedBy     String?  @map("added_by") @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, email], map: "uq_tone_contacts_ws_email")
+  @@map("tone_override_contacts")
+}
+
+// Team forwards (QA 09-25 item 6): "Forward to <team>" destinations per workspace.
+model TeamForward {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  label       String   @db.VarChar(120)
+  email       String?  @db.VarChar(255)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId], map: "idx_team_forwards_ws")
+  @@map("team_forwards")
+}
+
+// Knowledge + Auto-help (QA 09-25 item 7, plans/AUTO_HELP_PLAN.md).
+model KnowledgeArticle {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  source        String   @default("tp") @db.VarChar(20) // tp | fs_solution | verified_ticket
+  externalId    String?  @map("external_id") @db.VarChar(100)
+  title         String   @db.VarChar(300)
+  bodyHtml      String   @default("") @map("body_html") @db.Text
+  bodyText      String   @default("") @map("body_text") @db.Text
+  categoryId    Int?     @map("category_id")
+  subcategoryId Int?     @map("subcategory_id")
+  tags          String[] @default([])
+  status        String   @default("draft") @db.VarChar(20) // draft | published | archived
+  embedding     Float[]  @default([])
+  contentHash   String?  @map("content_hash") @db.VarChar(64)
+  createdBy     String?  @map("created_by") @db.VarChar(255)
+  updatedBy     String?  @map("updated_by") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  // Governance (R1): who keeps it true, when it was last checked, how often.
+  ownerEmail      String?   @map("owner_email") @db.VarChar(255)
+  lastVerifiedAt  DateTime? @map("last_verified_at") @db.Timestamptz(6)
+  reviewEveryDays Int       @default(180) @map("review_every_days")
+  // Section chunks (R2): [{ heading, text, embedding }] split on h1-h4.
+  sections        Json?
+
+  @@index([workspaceId, status], map: "idx_knowledge_articles_ws_status")
+  @@map("knowledge_articles")
+}
+
+model AutoHelpPlaybook {
+  id                    Int      @id @default(autoincrement())
+  workspaceId           Int      @map("workspace_id")
+  name                  String   @db.VarChar(200)
+  enabled               Boolean  @default(false)
+  mode                  String   @default("shadow") @db.VarChar(20) // shadow | approve | auto
+  categoryId            Int?     @map("category_id")
+  subcategoryIds        Int[]    @default([]) @map("subcategory_ids")
+  match                 Json?
+  instructions          String   @default("") @db.Text
+  // Opt-in: the instructions themselves are a citeable source (a standard how-to).
+  // Off = a drafted answer must cite an article or verified solution it actually saw.
+  instructionsAreSource Boolean  @default(false) @map("instructions_are_source")
+  allowedTools          String[] @default([]) @map("allowed_tools")
+  kbScope               Json?    @map("kb_scope")
+  minConfidence         Float    @default(0.8) @map("min_confidence")
+  followUp              Json?    @map("follow_up") // { nudgeAfterBusinessDays, closeAfterBusinessDays, nudgeText, onSilence }
+  onHelp                String   @default("assign_normally") @map("on_help") @db.VarChar(40)
+  priority              Int      @default(100)
+  version               Int      @default(1)
+  createdBy             String?  @map("created_by") @db.VarChar(255)
+  updatedBy             String?  @map("updated_by") @db.VarChar(255)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, enabled], map: "idx_auto_help_playbooks_ws")
+  @@map("auto_help_playbooks")
+}
+
+model AutoHelpRun {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  ticketId        Int       @map("ticket_id")
+  playbookId      Int?      @map("playbook_id")
+  playbookVersion Int?      @map("playbook_version")
+  requesterId     Int?      @map("requester_id") // per-requester daily cap
+  mode            String    @db.VarChar(20)
+  trigger         String    @default("categorized") @db.VarChar(20) // categorized | test | manual
+  status          String    @db.VarChar(20) // running | skipped | no_match | not_answerable | drafted | staged | sent | failed
+  confidence      Float?
+  draftSubject    String?   @map("draft_subject") @db.VarChar(300)
+  draftHtml       String?   @map("draft_html") @db.Text
+  draftText       String?   @map("draft_text") @db.Text
+  sources         Json?
+  transcript      Json?
+  gateDecision    String?   @map("gate_decision") @db.VarChar(60)
+  proposedReplyId Int?      @map("proposed_reply_id")
+  sentEntryId     Int?      @map("sent_entry_id")
+  nudgedAt        DateTime? @map("nudged_at") @db.Timestamptz(6)
+  outcome         String?   @db.VarChar(30)
+  outcomeAt       DateTime? @map("outcome_at") @db.Timestamptz(6)
+  error           String?   @db.Text
+  durationMs      Int?      @map("duration_ms")
+  createdBy       String?   @map("created_by") @db.VarChar(255)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  // Answerability check and other post-draft checks (R4b).
+  checks          Json?
+  // Shadow review vs what people did (R6).
+  reviewVerdict   String?   @map("review_verdict") @db.VarChar(30) // good | partial | wrong | should_not_answer
+  reviewNote      String?   @map("review_note") @db.Text
+  reviewedBy      String?   @map("reviewed_by") @db.VarChar(255)
+  reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_auto_help_runs_ws_created")
+  @@index([ticketId], map: "idx_auto_help_runs_ticket")
+  @@index([workspaceId, requesterId, createdAt], map: "idx_auto_help_runs_requester")
+  @@index([status, createdAt], map: "idx_auto_help_runs_status_created")
+  @@map("auto_help_runs")
+}
+
+model AutoHelpSettings {
+  workspaceId       Int      @id @map("workspace_id")
+  enabled           Boolean  @default(false)
+  disclosureEnabled Boolean  @default(true) @map("disclosure_enabled")
+  disclosureText    String?  @map("disclosure_text") @db.Text
+  updatedBy         String?  @map("updated_by") @db.VarChar(255)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("auto_help_settings")
 }

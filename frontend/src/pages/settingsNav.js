@@ -16,6 +16,7 @@ import {
   KeyRound,
   LayoutDashboard,
   MessageSquare,
+  MessageSquareQuote,
   PenLine,
   Plug,
   RefreshCw,
@@ -53,6 +54,7 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'alert-correlation', label: 'Alert correlation', Icon: Radar, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
+  { id: 'tone-of-voice', label: 'Tone of Voice', Icon: MessageSquareQuote, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
   // Notifications & Public
   { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin', group: 'Notifications & Public' },

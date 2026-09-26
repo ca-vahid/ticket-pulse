@@ -76,6 +76,8 @@ export const CONDITION_FIELDS = Object.freeze({
   'requester.department': { label: 'Requester department', type: 'string', path: 'requester.department' },
   'requester.officeLocation': { label: 'Requester office', type: 'string', path: 'requester.officeLocation' },
   'requester.city': { label: 'Requester city', type: 'string', path: 'requester.city' },
+  // Tone of voice (QA 09-25 #5): the workspace Straight-Talk List.
+  'requester.onStraightTalkList': { label: 'Requester is on the Straight-Talk List', type: 'boolean', path: 'requester.onStraightTalkList' },
   'event.statusFrom': { label: 'Status changed from', type: 'string', path: 'event.extra.from' },
   'event.statusTo': { label: 'Status changed to', type: 'string', path: 'event.extra.to' },
   // Event provenance flags (MEGA 09-01). Absent = false ("is false" passes),

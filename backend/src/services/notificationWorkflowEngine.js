@@ -43,6 +43,8 @@ import {
   guardNotificationEmailPayload,
 } from './notificationWorkflowOutputGuard.js';
 import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
+import toneService from './toneService.js';
+import ticketSentimentService from './ticketSentimentService.js';
 import { mergeChangeSets, renderChangeViews } from './ticketChangeRenderer.js';
 import {
   NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE,
@@ -462,7 +464,168 @@ function isKnownDefaultLlmSystemPrompt(value) {
     || LEGACY_DEFAULT_LLM_SYSTEM_PROMPTS.has(normalized);
 }
 
-function requesterGuardrailSettings(node, { customPrompt = false, strictCitations = false, executionMode = EXECUTION_MODE_LIVE } = {}) {
+// The voice line every AI e-mail prompt carries (QA 09-25 #5): the node's
+// Voice / Tone mode used to reach only the output guard, never the model.
+export const VOICE_INSTRUCTIONS = Object.freeze({
+  friendly: 'Voice for this e-mail: friendly - warm, relaxed and human; a light touch of humour is fine on low-risk tickets. Keep it short.',
+  playful: 'Voice for this e-mail: playful - upbeat and casual; a light joke or a single emoji is fine on low-risk tickets. Never joke about outages, security, money or anything that sounds stressful for the requester.',
+  professional: 'Voice for this e-mail: professional - courteous, plain and direct. No jokes, emoji, puns, playful metaphors or slang.',
+  custom: 'Voice for this e-mail: follow the tone these instructions describe; stay courteous.',
+});
+
+// A custom system prompt owns its own voice; only a requester-level override
+// (Straight-Talk List, frustrated requester, professional workspace floor)
+// adds a line, phrased as a fact about this requester rather than a rule that
+// trumps the author's prompt.
+export const PROFESSIONAL_REQUESTER_INSTRUCTION = 'For this requester: keep it professional - courteous, plain and direct. No jokes, emoji, puns, playful metaphors or slang.';
+
+function voiceInstruction(voice) {
+  return VOICE_INSTRUCTIONS[voice] || VOICE_INSTRUCTIONS.friendly;
+}
+
+async function resolveToneForRun(workflow, eventContext) {
+  try {
+    return await toneService.resolveToneForTicket({
+      workspaceId: workflow?.workspaceId || eventContext?.workspace?.id,
+      requesterEmail: eventContext?.requester?.email || null,
+      sentiment: eventContext?.ticket?.sentiment || null,
+    });
+  } catch {
+    return { voice: 'friendly', override: null, onStraightTalkList: false };
+  }
+}
+
+/**
+ * Workflow-facing tone facts (QA 09-25 #5), filled once per event AFTER
+ * timing + variant selection, and only for the workflows that will actually
+ * run (review B2 - a quiet-hours-suppressed or unmatched workflow never makes
+ * the event wait on a classifier):
+ *   - ticket.sentiment: on ticket.created / ticket.reply_received, a fresh
+ *     classification of THIS message (2 s cap, previous value on timeout) -
+ *     only when a selected workflow writes with AI (llm_generate) or has a
+ *     condition on ticket.sentiment;
+ *   - requester.onStraightTalkList: the workspace's Straight-Talk List (a
+ *     cheap cached read) - when a selected workflow writes with AI or has a
+ *     condition on requester.onStraightTalkList.
+ */
+export const WORKFLOW_SENTIMENT_AWAIT_CAP_MS = 2000;
+
+function definitionText(value) {
+  try {
+    return value ? JSON.stringify(value) : '';
+  } catch {
+    return '';
+  }
+}
+
+function nodeReadsSentiment(node) {
+  return node?.type === 'llm_generate' || definitionText(node?.data).includes('ticket.sentiment');
+}
+
+// Nodes a run reaches before its first delay (a delay parks the run, so the
+// event itself never waits on what comes after it).
+function nodesBeforeFirstDelay(definition) {
+  const nodes = Array.isArray(definition?.nodes) ? definition.nodes : [];
+  const edges = Array.isArray(definition?.edges) ? definition.edges : [];
+  const byId = new Map(nodes.map((node) => [node?.id, node]));
+  const targets = new Set(edges.map((edge) => edge?.target));
+  const starts = nodes.filter((node) => node?.type === 'trigger');
+  const queue = (starts.length ? starts : nodes.filter((node) => !targets.has(node?.id))).map((node) => node.id);
+  const seen = new Set();
+  while (queue.length) {
+    const id = queue.shift();
+    if (seen.has(id) || !byId.has(id)) continue;
+    seen.add(id);
+    if (byId.get(id)?.type === 'delay') continue;
+    for (const edge of edges) if (edge?.source === id) queue.push(edge.target);
+  }
+  return nodes.filter((node) => seen.has(node?.id));
+}
+
+export function workflowToneNeeds(workflow) {
+  const definition = workflow?.publishedDefinition;
+  const nodes = Array.isArray(definition?.nodes) ? definition.nodes : [];
+  const writesWithAi = nodes.some((node) => node?.type === 'llm_generate');
+  const routingText = definitionText(workflow?.routingRule);
+  const text = definitionText(definition) + routingText;
+  const sentiment = writesWithAi || text.includes('ticket.sentiment');
+  return {
+    writesWithAi,
+    sentiment,
+    // Only a reader the run reaches before a delay is worth a live await;
+    // a delayed reader picks the stored value up when the run resumes.
+    sentimentNow: sentiment && (routingText.includes('ticket.sentiment')
+      || nodesBeforeFirstDelay(definition).some(nodeReadsSentiment)),
+    straightTalk: writesWithAi || text.includes('requester.onStraightTalkList'),
+  };
+}
+
+// A routing rule that tests the tone facts has to see them BEFORE the
+// variant choice (otherwise it would route on the stored value).
+function routingRuleReadsTone(workflow) {
+  const text = definitionText(workflow?.routingRule);
+  return text.includes('ticket.sentiment') || text.includes('requester.onStraightTalkList');
+}
+
+export function workflowReadsSentiment(workflow) {
+  return workflowToneNeeds(workflow).sentiment;
+}
+
+export async function enrichEventContextWithTone(context, workflows = []) {
+  if (!context || typeof context !== 'object' || !Array.isArray(workflows) || workflows.length === 0) return context;
+  const needs = workflows.map(workflowToneNeeds);
+  const wantsSentiment = needs.some((n) => n.sentimentNow);
+  const wantsList = needs.some((n) => n.straightTalk);
+  if (!wantsSentiment && !wantsList) return context;
+  let next = context;
+  const eventType = context.event?.type;
+  const ticketId = Number(context.ticket?.id);
+  const workspaceId = Number(context.workspace?.id);
+  if (wantsSentiment && (eventType === 'ticket.created' || eventType === 'ticket.reply_received')
+    && ticketId && workspaceId) {
+    try {
+      const sentiment = await ticketSentimentService.refreshWithCap(ticketId, workspaceId, {
+        capMs: WORKFLOW_SENTIMENT_AWAIT_CAP_MS,
+        fallback: context.ticket?.sentiment || null,
+      });
+      next = { ...next, ticket: { ...next.ticket, sentiment: sentiment || null } };
+    } catch { /* previous value stays */ }
+  }
+  if (wantsList && next.requester && typeof next.requester === 'object') {
+    const onStraightTalkList = await toneService.isOnStraightTalkList(workspaceId, next.requester.email).catch(() => false);
+    next = { ...next, requester: { ...next.requester, onStraightTalkList } };
+  }
+  return next;
+}
+
+// N2: the lifecycle service only schedules a background classification of a
+// NEW ticket when some enabled ticket.created workflow would read it. Cached
+// per workspace for a minute; any error = "no" (sentiment is an annotation).
+const SENTIMENT_READER_CACHE_MS = 60 * 1000;
+const sentimentReaderCache = new Map();
+
+export async function workspaceHasSentimentReader(workspaceId, eventType = 'ticket.created') {
+  const id = Number(workspaceId);
+  if (!id) return false;
+  const key = `${id}:${eventType}`;
+  const cached = sentimentReaderCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  try {
+    const workflows = await notificationWorkflowRepository.listEnabledForEvent(id, eventType);
+    const value = (workflows || []).some(workflowReadsSentiment);
+    sentimentReaderCache.set(key, { value, expiresAt: Date.now() + SENTIMENT_READER_CACHE_MS });
+    if (sentimentReaderCache.size > 200) sentimentReaderCache.delete(sentimentReaderCache.keys().next().value);
+    return value;
+  } catch {
+    return false;
+  }
+}
+
+export function resetSentimentReaderCache() {
+  sentimentReaderCache.clear();
+}
+
+function requesterGuardrailSettings(node, { customPrompt = false, strictCitations = false, executionMode = EXECUTION_MODE_LIVE, forceProfessional = false } = {}) {
   const settings = node.data?.requesterGuardrails && typeof node.data.requesterGuardrails === 'object'
     ? node.data.requesterGuardrails
     : {};
@@ -470,7 +633,10 @@ function requesterGuardrailSettings(node, { customPrompt = false, strictCitation
   const previewDisableApplied = executionMode === EXECUTION_MODE_PREVIEW && previewDisableRequested;
   const guardrailsEnabled = !previewDisableApplied;
   const toneModeCandidate = String(settings.toneMode || (customPrompt ? 'custom' : 'friendly')).trim().toLowerCase();
-  const toneMode = WORKFLOW_TONE_MODES.has(toneModeCandidate) ? toneModeCandidate : (customPrompt ? 'custom' : 'friendly');
+  const nodeToneMode = WORKFLOW_TONE_MODES.has(toneModeCandidate) ? toneModeCandidate : (customPrompt ? 'custom' : 'friendly');
+  // Straight-Talk List / frustrated requester / professional workspace
+  // default: the guard runs the professional tier whatever the node says.
+  const toneMode = forceProfessional ? 'professional' : nodeToneMode;
   const hardBlocksEnabled = guardrailsEnabled && settings.hardBlocks !== false;
   const autoRepairEnabled = guardrailsEnabled && settings.autoRepair !== false;
   const auditOnlyEnabled = guardrailsEnabled && settings.auditOnly !== false;
@@ -514,6 +680,7 @@ function requesterGuardrailSettings(node, { customPrompt = false, strictCitation
     autoRepairEnabled,
     auditOnlyEnabled,
     toneMode,
+    nodeToneMode,
     toneStyleAction: toneMode === 'professional' ? 'repair' : (auditOnlyEnabled ? 'audit' : 'ignore'),
     disabledGroups,
     disabledGuardrails: [...disabledSet],
@@ -525,10 +692,13 @@ function requesterGuardrailSettings(node, { customPrompt = false, strictCitation
   };
 }
 
-function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = false, executionMode = EXECUTION_MODE_LIVE } = {}) {
+function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = false, executionMode = EXECUTION_MODE_LIVE, tone = null } = {}) {
   const suppliedSystemPrompt = String(node.data?.systemPrompt || '').trim();
   const usesDefaultPrompt = isKnownDefaultLlmSystemPrompt(suppliedSystemPrompt);
-  const systemPrompt = usesDefaultPrompt ? DEFAULT_LLM_SYSTEM_PROMPT : suppliedSystemPrompt;
+  const basePrompt = usesDefaultPrompt ? DEFAULT_LLM_SYSTEM_PROMPT : suppliedSystemPrompt;
+  const toneOverride = tone?.override && tone.override.reason ? tone.override : null;
+  const workspaceProfessional = tone?.voice === 'professional';
+  const forceProfessional = Boolean(toneOverride) || workspaceProfessional;
   const source = usesDefaultPrompt
     ? (suppliedSystemPrompt ? 'stored_default_system_prompt' : 'backend_default_system_prompt')
     : 'custom_system_prompt';
@@ -542,12 +712,31 @@ function llmPromptRuntimeProfile(node, { toolMode = false, strictCitations = fal
     customSystemPromptUsed: customPrompt,
     storedPromptMatchedKnownDefault: Boolean(suppliedSystemPrompt && usesDefaultPrompt),
     toolMode,
-    systemPromptDigest: promptDigest(systemPrompt),
+    systemPromptDigest: null,
     suppliedSystemPromptDigest: suppliedSystemPrompt ? promptDigest(suppliedSystemPrompt) : null,
     appliedDefaultHardening: customPrompt ? [] : DEFAULT_PROMPT_HARDENING_CONTROLS,
     relaxedControls: customPrompt ? ['emoji', 'playful_tone'] : [],
   };
-  const guardrailSettings = requesterGuardrailSettings(node, { customPrompt, strictCitations, executionMode });
+  const guardrailSettings = requesterGuardrailSettings(node, { customPrompt, strictCitations, executionMode, forceProfessional });
+  const voice = guardrailSettings.toneMode;
+  const overrideText = toneOverride ? String(toneOverride.text || '').trim() : '';
+  const overrideApplies = Boolean(toneOverride)
+    || (workspaceProfessional && guardrailSettings.nodeToneMode !== 'professional');
+  const toneLines = customPrompt
+    ? (overrideApplies ? [PROFESSIONAL_REQUESTER_INSTRUCTION] : [])
+    : [voiceInstruction(voice)];
+  if (overrideText) toneLines.push(`For this requester: ${overrideText}`);
+  const systemPrompt = [basePrompt, ...toneLines].filter(Boolean).join('\n\n');
+  // basePromptDigest = what systemPromptDigest meant before tone lines were
+  // appended, so audits of existing workflows stay comparable.
+  promptPolicy.basePromptDigest = promptDigest(basePrompt);
+  promptPolicy.systemPromptDigest = promptDigest(systemPrompt);
+  promptPolicy.voice = voice;
+  promptPolicy.nodeToneMode = guardrailSettings.nodeToneMode;
+  promptPolicy.workspaceVoice = tone?.voice || null;
+  promptPolicy.toneOverride = toneOverride
+    ? { reason: toneOverride.reason }
+    : (workspaceProfessional && guardrailSettings.nodeToneMode !== 'professional' ? { reason: 'workspace_default' } : null);
   const guardPolicy = {
     mode: guardrailSettings.guardrailsEnabled
       ? `${guardrailSettings.toneMode}_tiered_policy`
@@ -2434,16 +2623,21 @@ async function executeNode({
     const contextSummary = summarizeNotificationLlmContext(llmContext);
     const toolPolicy = llmContext?.policy || null;
     const useToolMode = toolPolicy?.mode === 'tools_enabled' && node.data?.useWorkspaceToolPolicy !== false;
+    // Tone of voice (QA 09-25 #5): Straight-Talk List, frustrated requester,
+    // professional workspace default.
+    const tone = await resolveToneForRun(workflow, eventContext);
     const directPromptRuntime = llmPromptRuntimeProfile(node, {
       toolMode: useToolMode,
       strictCitations: false,
       executionMode,
+      tone,
     });
     const toolPromptRuntime = useToolMode
       ? llmPromptRuntimeProfile(node, {
         toolMode: true,
         strictCitations: true,
         executionMode,
+        tone,
       })
       : null;
     const previewRuntime = toolPromptRuntime || directPromptRuntime;
@@ -2496,6 +2690,7 @@ async function executeNode({
           signal: llmAbort.signal,
           providerAttemptTimeoutMs,
           guardOptions: runtime.guardOptions,
+          toneOverride: Boolean(runtime.promptPolicy?.toneOverride),
           recordToolEvent: (event) => recordNotificationToolEvent({ workflow, run, event }),
         });
         const generatedEmail = {
@@ -3883,6 +4078,15 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   // deliberately still NOT emitted from workflow writes: that is a standing
   // decision to keep status-setting workflows from cascading into each other.
   await emitWorkflowReopened({ ticket, patch, workflowId });
+  // Re-opened counter (QA 09-25 #1): same bypass — this write never reaches
+  // the lifecycle service, so feed the counter here. Never throws.
+  if (patch.status && patch.status !== ticket.status) {
+    await import('./ticketReopenService.js')
+      .then(({ default: svc }) => svc.observeStatusTransition({
+        ticketId: ticket.id, workspaceId: ticket.workspaceId, from: ticket.status, to: patch.status, at: new Date(),
+      }))
+      .catch(() => {});
+  }
 
   try {
     const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
@@ -4138,9 +4342,20 @@ export async function executeForEvent(eventContext, options = {}) {
     workflows = workflows.filter((w) => w.id === Number(options.onlyWorkflowId));
   }
   const timing = selectWorkflowsForNotificationTiming(workflows, routedContext);
-  const variantSelection = selectWorkflowVariants(timing.selected || [], routedContext, {
+  // Tone facts (review B2): after timing, so suppressed workflows never wait
+  // on the classifier. A routing rule that tests them needs them first;
+  // otherwise only the variant-selected workflows count.
+  const timingSelected = timing.selected || [];
+  const toneBeforeVariants = timingSelected.some(routingRuleReadsTone);
+  if (toneBeforeVariants) {
+    routedContext = await enrichEventContextWithTone(routedContext, timingSelected);
+  }
+  const variantSelection = selectWorkflowVariants(timingSelected, routedContext, {
     baseSuppressed: timing.suppressed || [],
   });
+  if (!toneBeforeVariants) {
+    routedContext = await enrichEventContextWithTone(routedContext, variantSelection.selected || []);
+  }
   // Record "last skipped" per suppressed workflow (QA 08-06 #6) so the editor
   // can explain silence. Fire-and-forget bookkeeping — never blocks the event.
   try {
@@ -4280,6 +4495,15 @@ async function resumeRun(run) {
     logger.warn('Workflow resume: context rehydrate failed, using the stored copy', { runId: run.id, error: error.message });
   }
 
+  // Review B2: a delayed sentiment reader did not wait for a classification
+  // at event time - pick up whatever the background classifier stored since.
+  if (eventContext?.ticket?.id && workflowToneNeeds({ publishedDefinition: definition }).sentiment) {
+    try {
+      const row = await prisma.ticket.findUnique({ where: { id: Number(eventContext.ticket.id) }, select: { sentiment: true } });
+      if (row?.sentiment) eventContext = { ...eventContext, ticket: { ...eventContext.ticket, sentiment: row.sentiment } };
+    } catch { /* stored value stays */ }
+  }
+
   // QA 09-23 #8: a parked run (fields_updated waits out its coalesce window)
   // is re-checked when it wakes — a stop-flagged workflow may have handled
   // this ticket change meanwhile.
@@ -4347,4 +4571,5 @@ export default {
   executeForEvent,
   executePreview,
   resumeWaitingRuns,
+  workspaceHasSentimentReader,
 };

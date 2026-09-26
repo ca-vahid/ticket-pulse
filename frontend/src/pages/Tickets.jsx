@@ -18,6 +18,7 @@ import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
+import HandBackReasonDialog from '../components/tickets/HandBackReasonDialog';
 import BulkSelectionPanel from '../components/tickets/BulkSelectionPanel';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import { mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
@@ -305,8 +306,12 @@ export default function Tickets() {
   const due = searchParams.get('due') || '';
   const noise = searchParams.get('noise') || '';
   const solution = searchParams.get('solution') || '';
+  // Re-opened view (QA 09-25 #1): ?reopened=1
+  const reopenedFilter = searchParams.get('reopened') || '';
   // Parked filter (plans/PARKED_BUILD_PLAN.md): any|none|until_date|waiting_on|eta|waking7
   const parkedFilter = searchParams.get('parked') || '';
+  // "Auto-help waiting" view: ?parkKind=auto_help (active auto_help parks).
+  const parkKindFilter = searchParams.get('parkKind') || '';
   const tag = searchParams.get('tag') || '';
   const tagMode = searchParams.get('tagMode') || '';
   const impactFilter = searchParams.get('impact') || '';
@@ -469,7 +474,8 @@ export default function Tickets() {
     approval: ['approval', 'approvalCategory'],
     requester: ['requesterId', 'requesterName'],
     noise: ['noise'],
-    parked: ['parked'],
+    parked: ['parked', 'parkKind'],
+    reopened: ['reopened'],
   };
 
   // FR 09-09: drop one filter group, keeping the typed text. For Status we ADD
@@ -526,6 +532,8 @@ export default function Tickets() {
     if (noise) params.noise = noise;
     if (solution) params.solution = solution;
     if (parkedFilter) params.parked = parkedFilter;
+    if (parkKindFilter) params.parkKind = parkKindFilter;
+    if (reopenedFilter) params.reopened = reopenedFilter;
     if (tag) {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
@@ -540,7 +548,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, solution, parkedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,
@@ -967,7 +975,7 @@ export default function Tickets() {
   const [fsConfirm, setFsConfirm] = useState(null); // { ticketId, fsRef, changes, payload, resolve, reject }
   const [fsBusy, setFsBusy] = useState(false);
   const [fsError, setFsError] = useState(null);
-  const fsAssign = useCallback((ticket, techId) => {
+  const fsAssign = useCallback((ticket, techId, extra = null) => {
     const tech = techId ? (meta?.technicians || []).find((t) => t.id === techId) : null;
     return new Promise((resolve, reject) => {
       setFsError(null);
@@ -975,7 +983,7 @@ export default function Tickets() {
         ticketId: ticket.id,
         fsRef: String(ticket.freshserviceTicketId),
         changes: [{ field: 'Assignee', from: ticket.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
-        payload: { assignedTechId: techId },
+        payload: { assignedTechId: techId, ...(extra?.handBack ? { handBack: extra.handBack } : {}) },
         resolve,
         reject,
       });
@@ -1144,9 +1152,16 @@ export default function Tickets() {
       : null;
   const canBulkEdit = meta?.actor?.kind !== 'agent';
 
-  const runBulk = async () => {
+  // Bulk release asks for ONE hand-back reason for all (QA 09-25 item 3).
+  const [bulkHandBackOpen, setBulkHandBackOpen] = useState(false);
+  const runBulk = async (handBackArg = null) => {
     if (!bulkAction || bulkBusy) return;
     if (!queryScope && editableSelected.length === 0) return;
+    const handBack = handBackArg && typeof handBackArg.code === 'string' ? handBackArg : null; // onConfirm passes the click event
+    const releasing = bulkAction.type === 'assign' && bulkAction.value == null;
+    const releasesSomeone = Boolean(queryScope) || editableSelected.some((t) => t.assignedTechId);
+    if (releasing && releasesSomeone && !handBack) { setBulkHandBackOpen(true); return; }
+    setBulkHandBackOpen(false);
     setBulkBusy(true);
     lastLocalMutationRef.current = Date.now();
 
@@ -1155,7 +1170,7 @@ export default function Tickets() {
       try {
         const res = await ticketsAPI.bulkByQuery({
           query: bulkQueryParams,
-          action: { type: bulkAction.type, value: bulkAction.value },
+          action: { type: bulkAction.type, value: bulkAction.value, ...(releasing && handBack ? { handBack } : {}) },
           expectedTotal: queryScope.total,
         });
         setBulkResult({
@@ -1180,7 +1195,11 @@ export default function Tickets() {
     const tagAction = bulkAction.type === 'add_tags' || bulkAction.type === 'remove_tags';
     const targets = tagAction ? selectedTickets : editableSelected;
     const results = await Promise.allSettled(targets.map((t) => {
-      if (bulkAction.type === 'assign') return ticketsAPI.assign(t.id, bulkAction.value);
+      if (bulkAction.type === 'assign') {
+        return releasing && handBack && t.assignedTechId
+          ? ticketsAPI.assign(t.id, bulkAction.value, { handBack })
+          : ticketsAPI.assign(t.id, bulkAction.value);
+      }
       if (bulkAction.type === 'status') return ticketsAPI.setStatus(t.id, bulkAction.value);
       if (tagAction) {
         const current = (t.tags || []).map((x) => x.id);
@@ -1392,12 +1411,40 @@ export default function Tickets() {
   // Dense (16 Sep 2026): one line per ticket, so the list keeps its column
   // floors and scrolls sideways instead of wrapping — same wrapper as pinned
   // widths, plus a scrollbar that sticks to the bottom of the viewport.
-  const widthsPinned = Object.keys(colWidths).length > 0 || dense;
+  // Too many columns for the card (QA 09-25: Priority + State + Reopened on a
+  // 1440 screen crushed the Subject track to 0 and its header ran into
+  // Requester): the same scroll wrapper, with every column at its own floor.
+  const floorMinWidth = useMemo(
+    () => buildQueueGridMinWidth(columnKeys, { roomy, widths: colWidths, force: true }),
+    [columnKeys, roomy, colWidths],
+  );
+  const [listCardWidth, setListCardWidth] = useState(0);
+  const listOverflows = listCardWidth > 0 && floorMinWidth + 36 > listCardWidth;
+  const widthsPinned = Object.keys(colWidths).length > 0 || dense || listOverflows;
+  const listMinWidth = Math.max(gridMinWidth, listOverflows ? floorMinWidth : 0);
   const scrollWrapRef = useRef(null);
   // Live drag preview (QR2): write the recomputed template straight onto the
   // list card's CSS vars — zero React renders per pointermove; the commit on
   // pointerup re-renders once with the identical values.
   const listCardRef = useRef(null);
+  // Width of the list card (it mounts/unmounts with the board view and the
+  // loading states), for the column-overflow check above.
+  const observedCardRef = useRef(null);
+  const cardObserverRef = useRef(null);
+  useEffect(() => {
+    const el = listCardRef.current;
+    if (el === observedCardRef.current) return;
+    cardObserverRef.current?.disconnect();
+    observedCardRef.current = el;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect?.width || 0);
+      setListCardWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+    });
+    ro.observe(el);
+    cardObserverRef.current = ro;
+  });
+  useEffect(() => () => cardObserverRef.current?.disconnect(), []);
   const previewColumnWidth = useCallback((key, px) => {
     const el = listCardRef.current;
     if (!el) return;
@@ -1807,7 +1854,7 @@ export default function Tickets() {
                     <div
                       ref={listCardRef}
                       className="tp-card rounded-xl overflow-hidden"
-                      style={{ '--tp-q-grid': gridTemplate, '--tp-q-minw': `${gridMinWidth + 36}px` }}
+                      style={{ '--tp-q-grid': gridTemplate, '--tp-q-minw': `${listMinWidth + 36}px` }}
                     >
                       {/* Overflow wrapper (QR3): only once widths are pinned —
                           header + rows share ONE horizontal scroll container
@@ -2344,7 +2391,7 @@ export default function Tickets() {
         onClose={() => setAssignSheetTicket(null)}
         technicians={meta?.technicians || []}
         assignFn={assignSheetTicket && assignSheetTicket.origin !== 'ticketpulse' && assignSheetTicket.freshserviceTicketId
-          ? ((techId) => fsAssign(assignSheetTicket, techId))
+          ? ((techId, extra) => fsAssign(assignSheetTicket, techId, extra))
           : null}
         onAssigned={(techId) => assignSheetTicket && onManualAssigned(assignSheetTicket.id, techId)}
         canReview={canReview}
@@ -2414,6 +2461,15 @@ export default function Tickets() {
           onDismissResult={() => setBulkResult(null)}
         />
       )}
+      <HandBackReasonDialog
+        open={bulkHandBackOpen}
+        count={queryScope ? queryScope.editable : editableSelected.filter((t) => t.assignedTechId).length}
+        requireReason={!queryScope && Boolean(meta?.actor?.technicianId)
+          && editableSelected.some((t) => t.assignedTechId === meta.actor.technicianId)}
+        busy={bulkBusy}
+        onSubmit={(reason) => runBulk(reason)}
+        onCancel={() => setBulkHandBackOpen(false)}
+      />
       {bulkPark && (
         <ParkDialog
           bulkCount={selectedIds.size}

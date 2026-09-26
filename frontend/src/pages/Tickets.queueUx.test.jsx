@@ -677,7 +677,7 @@ describe('Priority + State columns (Mega 08-30 Phase QX)', () => {
     // No sort button — a plain header whose tooltip carries the derivation.
     expect(screen.queryByRole('button', { name: /^State/ })).not.toBeInTheDocument();
     const header = screen.getByText('State', { selector: 'span.cursor-help' });
-    expect(header.title).toMatch(/Requester replied › Response due › New/);
+    expect(header.title).toMatch(/Requester replied › Re-opened › Response due › New/);
     expect(header.title).toMatch(/First-response history is incomplete/);
   });
 });

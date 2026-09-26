@@ -10,6 +10,7 @@ import config from './config/index.js';
 import logger from './utils/logger.js';
 import { setupBigIntSerialization } from './utils/bigIntSerializer.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { slowRequestLog } from './middleware/slowRequestLog.js';
 import routes from './routes/index.js';
 import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
@@ -84,6 +85,10 @@ app.use(
     },
   }),
 );
+
+// Slow-request warn line (> 1.5 s, route path only, streams skipped) — the
+// http-level access log below is dropped in production (QA 09-25).
+app.use(slowRequestLog());
 
 // Request logging middleware (exclude polling endpoints to reduce log spam)
 app.use((req, res, next) => {
@@ -431,6 +436,14 @@ async function initialize() {
       historyBackfillService.start();
     } catch (e) {
       logger.warn('History backfill driver failed to start (non-fatal):', e.message);
+    }
+
+    // Entra lookup for requesters that sync or the history import created (QA 09-25 #2).
+    try {
+      const { default: requesterEntraSweepService } = await import('./services/requesterEntraSweepService.js');
+      requesterEntraSweepService.start();
+    } catch (e) {
+      logger.warn('Requester Entra sweep failed to start (non-fatal):', e.message);
     }
 
     // Parked tickets: wakes due parks, ends parks whose ticket moved off

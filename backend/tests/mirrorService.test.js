@@ -492,6 +492,26 @@ describe('mirrorService — "Also for" additional requesters → cc_emails (Phas
     expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('rejected cc_emails'));
   });
 
+  test('update_fields: assignee not in the FS copy\'s group → the rest syncs without the assignee, and the ticket says why', async () => {
+    // TP-1674/1678/1679/1680 (25 Sep): Sentinel alerts owned by Anton failed every field sync.
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Pending', ccEmails: [],
+      assignedTech: { id: 7, name: 'Anton Kuzmychev', freshserviceId: BigInt(5550001) },
+    });
+    const rejection = new Error("Validation failed (agent_group_id: Assigned agent isn't a member of the group.)");
+    rejection.freshserviceDetail = { errors: [{ field: 'agent_group_id', message: "Assigned agent isn't a member of the group." }] };
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValueOnce({ id: 90001 });
+
+    expect(await mirrorService._processJob({ id: 16, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.updateTicket.mock.calls[0][1].responder_id).toBe(5550001);
+    expect(clientMock.updateTicket.mock.calls[1][1].responder_id).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1].status).toBe(3);
+    const saved = prismaMock.ticket.update.mock.calls.at(-1)[0].data;
+    expect(saved.mirrorState).toBe('mirrored');
+    expect(saved.mirrorError).toMatch(/Anton Kuzmychev isn't in the FreshService group/);
+  });
+
   test('update_fields: any OTHER FS error still fails the job (no blind retry)', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({
       ...baseTicket, freshserviceTicketId: BigInt(90001), ccEmails: ['assistant@example.com'],

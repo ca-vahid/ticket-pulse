@@ -53,6 +53,7 @@ export const CG_FIELDS = [
   { value: 'requester.department', label: 'Requester department', type: 'string' },
   { value: 'requester.officeLocation', label: 'Requester office', type: 'string' },
   { value: 'requester.city', label: 'Requester city', type: 'string' },
+  { value: 'requester.onStraightTalkList', label: 'Requester is on the Straight-Talk List', type: 'boolean' },
   { value: 'event.statusFrom', label: 'Status changed from', type: 'string' },
   { value: 'event.statusTo', label: 'Status changed to', type: 'string' },
   // Event provenance flags (MEGA 09-01) — absent counts as false.

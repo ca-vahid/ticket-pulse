@@ -465,6 +465,30 @@ code {
     overflow-x: auto;
     white-space: pre-wrap;
   }
+  /* Headings (Knowledge articles split on them; mail bodies carry them too):
+     Preflight flattens h1-h4 to body text, so give them a quiet hierarchy.
+     Inline author styles still win. */
+  .tp-rich-body h1,
+  .tp-rich-body h2 {
+    margin: 1rem 0 0.35rem;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: hsl(var(--foreground));
+  }
+  .tp-rich-body h3 {
+    margin: 0.8rem 0 0.25rem;
+    font-size: 14px;
+    font-weight: 600;
+    color: hsl(var(--foreground));
+  }
+  .tp-rich-body h4 {
+    margin: 0.6rem 0 0.2rem;
+    font-weight: 600;
+  }
+  .tp-rich-body > :first-child {
+    margin-top: 0;
+  }
   /* Dark mode (Phase DW — QA 08-31 #5 overrules the v3.8.02 white-well
      convention; neutraliser v2 in QA 09-01 #6): email/note HTML renders
      CONDITIONALLY. SafeHtml (ticketUi.jsx) sanitizes with a theme-gated
@@ -516,6 +540,16 @@ code {
        chips and the CollapsibleBody fade gradient). */
     box-shadow: inset 0 0 0 9999px rgb(15 23 42 / 0.04);
   }
+  /* Already inside a white e-mail well (`.tp-light`, e.g. the Auto-help draft
+     preview): no dimmed paper panel inside the white one (QA 09-25). */
+  .dark .tp-light .tp-rich-body--paper {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+  .dark .tp-light .tp-rich-body--themed { color-scheme: light; }
   .dark .tp-rich-body--paper a { color: #1d4ed8; }
   .dark .tp-rich-body--paper blockquote { border-color: #94a3b8; color: #475569; }
   /* The light th tint (hsl(210 40% 97%), below) is near-white — too glarey

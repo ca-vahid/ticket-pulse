@@ -5,6 +5,21 @@ import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
 import { stripNulDeep } from '../utils/textEncoding.js';
 import prisma from './prisma.js';
 
+// Wide columns the per-technician satisfaction lists never render.
+const SATISFACTION_TICKET_OMIT = {
+  description: true,
+  descriptionText: true,
+  priorityRationale: true,
+  priorityEvidence: true,
+  ticketTypeRationale: true,
+  internalCategoryRationale: true,
+  activitiesSyncError: true,
+  mirrorError: true,
+  resolutionNote: true,
+  solutionNote: true,
+  customFields: true,
+};
+
 /**
  * Repository for Ticket operations
  */
@@ -673,9 +688,13 @@ class TicketRepository {
           workspaceId,
           csatScore: { not: null }, // Has CSAT response
         },
+        // Slim rows (QA 09-25): the satisfaction panel renders score, comment,
+        // requester name and the ticket ref — no bodies, AI rationales or the
+        // requester's profile/photo. csatFeedback stays (it IS the comment).
         include: {
-          requester: true,
+          requester: { select: { id: true, name: true, email: true } },
         },
+        omit: SATISFACTION_TICKET_OMIT,
         orderBy: [
           { csatScore: 'asc' }, // Lowest scores first (problem tickets)
           { csatSubmittedAt: 'desc' }, // Then by most recent
@@ -698,7 +717,12 @@ class TicketRepository {
       const records = await prisma.ticketFeedback.findMany({
         where: { workspaceId, ticket: { assignedTechId: technicianId } },
         orderBy: [{ score: 'asc' }, { submittedAt: 'desc' }],
-        include: { ticket: { include: { requester: true } } },
+        include: {
+          ticket: {
+            include: { requester: { select: { id: true, name: true, email: true } } },
+            omit: { ...SATISFACTION_TICKET_OMIT, csatFeedback: true },
+          },
+        },
       });
       return records.map((r) => ({
         ...r.ticket,

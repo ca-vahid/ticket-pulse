@@ -89,9 +89,19 @@ vi.mock('../services/api', () => ({
   },
 }));
 
-vi.mock('../contexts/DashboardContext', () => ({
-  useDashboard: () => ({ getTechnicianCSAT: vi.fn(() => Promise.resolve(CSAT)) }),
-}));
+// Stable getter identities (the real context's are useCallback-stable; a new
+// fn per render would re-run the page's fetch effect forever). Daily/weekly
+// go through the cache-aware getters, which delegate to the API mocks here.
+const dashboardGetters = vi.hoisted(() => ({}));
+vi.mock('../contexts/DashboardContext', async () => {
+  const { dashboardAPI } = await import('../services/api');
+  Object.assign(dashboardGetters, {
+    getTechnicianCSAT: vi.fn(() => Promise.resolve(CSAT)),
+    getTechnician: vi.fn((...args) => dashboardAPI.getTechnician(...args)),
+    getTechnicianWeekly: vi.fn((...args) => dashboardAPI.getTechnicianWeekly(...args)),
+  });
+  return { useDashboard: () => dashboardGetters };
+});
 
 vi.mock('../contexts/WorkspaceContext', () => ({
   useWorkspace: () => ({
@@ -180,6 +190,27 @@ describe('TechnicianDetailNew (agent page rebuild)', () => {
     await waitFor(() => {
       expect(screen.getByText(/Bounced tickets/)).toBeInTheDocument();
     });
+  });
+
+  test('renders progressively: live load progress + bounced panel before the period payload lands', async () => {
+    const { dashboardAPI } = await import('../services/api');
+    let release;
+    dashboardAPI.getTechnician.mockImplementationOnce(() => new Promise((r) => { release = () => r(TECH_DAILY); }));
+    renderPage('/technician/7?tab=bounced');
+
+    // No full-screen spinner: the progress bar counts the page's own requests…
+    const bar = await screen.findByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuetext', expect.stringMatching(/^Loading \d+ of \d+ · \d+%$/));
+    // …and the bounced drill-in mounts from the route id, not the tech payload.
+    await waitFor(() => expect(dashboardAPI.getTechnicianBounced).toHaveBeenCalledWith(7, expect.any(Object)));
+    expect(screen.getByText(/Bounced tickets/)).toBeInTheDocument();
+    // Chips hold a placeholder instead of a misleading 0.
+    expect(screen.getByRole('button', { name: 'Bounced: —' })).toBeInTheDocument();
+
+    release();
+    await mounted();
+    expect(screen.getByRole('button', { name: 'Bounced: 0' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument());
   });
 
   test('canonical ?view=&date=&bucket= params bootstrap period + chip (Back round-trip)', async () => {

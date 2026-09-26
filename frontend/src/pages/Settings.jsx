@@ -30,6 +30,7 @@ import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
 import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
 import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookCard';
 import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPanel';
+import ToneOfVoicePanel from '../components/settings/ToneOfVoicePanel';
 import EmailHealthCard from '../components/settings/EmailHealthCard';
 import SyncHealthCard from '../components/settings/SyncHealthCard';
 import RealtimeHealthCard from '../components/settings/RealtimeHealthCard';
@@ -1521,6 +1522,8 @@ export default function Settings() {
                 {activeSectionId === 'urgent-escalation' && (
                   <UrgentEscalationPanel />
                 )}
+
+                {activeSectionId === 'tone-of-voice' && <div className="p-6"><ToneOfVoicePanel /></div>}
 
                 {activeSectionId === 'ai-providers' && (
                   <div className="p-6">

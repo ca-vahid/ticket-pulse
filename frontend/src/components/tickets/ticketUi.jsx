@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, RotateCcw, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -461,7 +461,7 @@ export function StateChip({ state, className = '' }) {
 /**
  * Queue "State" column (Mega 08-30 Phase QX — QA 08-27 #3): the FS-style
  * "who acts next" state, computed server-side as `state` with the precedence
- * requester_responded > response_due > new (see ticketService
+ * requester_responded > reopened > response_due > new (see ticketService
  * deriveQueueState — NOT the SLA-clock precedence of `stateChip` above).
  * Tones stay in the STATE_CHIP_STYLES family so the dot and the pill agree.
  */
@@ -469,6 +469,9 @@ export const QUEUE_STATE_STYLES = {
   new: { label: 'New', tone: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200', hint: 'unassigned and no agent reply yet' },
   response_due: { label: 'Response due', tone: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200', hint: 'a first response is still owed to the requester' },
   requester_responded: { label: 'Requester replied', tone: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200', hint: 'the last public message came from the requester' },
+  // Re-opened (QA 09-25 #1): plain amber text + a small icon, no tinted
+  // capsule. Quick automation flips (closed again inside 10 min) never count.
+  reopened: { label: 'Re-opened', tone: 'text-amber-700 dark:text-amber-300', icon: RotateCcw, hint: 'it was resolved or closed, came back, and no agent has replied since' },
 };
 export const QUEUE_STATE_NOTE = 'First-response history is incomplete for some older FreshService tickets — those show "—" rather than a guess.';
 
@@ -492,9 +495,10 @@ export function QueueStatePill({ state, className = '' }) {
   }
   return (
     <span
-      className={`inline-flex max-w-full min-w-0 items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${def.tone} ${className}`}
+      className={`inline-flex max-w-full min-w-0 items-center ${def.icon ? 'gap-1 py-0.5' : 'px-2 py-0.5 rounded-full'} text-[11px] font-semibold whitespace-nowrap ${def.tone} ${className}`}
       title={`${def.label} — ${def.hint}. ${QUEUE_STATE_NOTE}`}
     >
+      {def.icon && <def.icon className="w-3 h-3 flex-shrink-0" aria-hidden="true" />}
       <span className="truncate">{def.label}</span>
     </span>
   );

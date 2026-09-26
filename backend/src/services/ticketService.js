@@ -42,6 +42,9 @@ import { appendSignatureToEmail, getEnabledSignatureForSend } from './userSignat
 import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
+import ticketHandBackService, {
+  normalizeHandBack, isRealReason as isRealHandBackReason, handBackLabel, reasonForRebound as reasonForHandBackRebound,
+} from './ticketHandBackService.js';
 
 // Actor-kind attribution (MEGA 09-01 RO-1/TU-1) — pure helpers, re-exported so
 // callers that already import ticketService need no second import.
@@ -146,6 +149,17 @@ function fsValidationError(err) {
     return missing ? `${label} is required but not set` : `${label}: ${fe.message || fe.code || 'rejected'}`;
   });
   return new ValidationError(`FreshService rejected the change — ${parts.join('; ')}. Nothing was changed in Ticket Pulse.`);
+}
+
+// FreshService refuses a responder outside the ticket's group with
+// "Assigned agent isn't a member of the group." (field responder_id).
+function isFsGroupMembershipError(err) {
+  const detail = getFreshServiceDetail(err);
+  const texts = [
+    detail?.description, detail?.message, err?.message,
+    ...(Array.isArray(detail?.errors) ? detail.errors.map((fe) => fe?.message) : []),
+  ].filter(Boolean).map(String);
+  return texts.some((t) => /isn['’]?t a member of the group|is not a member of the group/i.test(t));
 }
 
 // The FS client wraps limiter rejections in plain Errors, so match on the
@@ -530,7 +544,7 @@ export function deriveStateChip(ticket, awaitingReply = false, statusSets = null
  *
  *   stateChip ("SLA State"): overdue > response_due > requester_responded > new
  *                            — "is the clock bleeding?"
- *   state     ("State"):     requester_responded > response_due > new
+ *   state     ("State"):     requester_responded > reopened > response_due > new
  *                            — "who acts next?" (FS's State column)
  *
  * Rules:
@@ -553,12 +567,25 @@ export function deriveStateChip(ticket, awaitingReply = false, statusSets = null
  * No server-side sort for this column: it is derived per page, not stored.
  * If a sort is demanded, follow the `_statusRankedPage` bucket pattern.
  */
-export function deriveQueueState(ticket, awaitingReply = false, statusSets = null) {
+export function deriveQueueState(ticket, awaitingReply = false, statusSets = null, { lastAgentReplyAt = null } = {}) {
   const isTerminal = statusSets
     ? statusSets.terminal.has(ticket.status)
     : ['Resolved', 'Closed'].includes(ticket.status);
   if (isTerminal || ['Deleted', 'Spam'].includes(ticket.status)) return null;
   if (awaitingReply) return 'requester_responded';
+  // Re-opened (QA 09-25 #1): came back from Resolved/Closed and stuck there
+  // (ticketReopenService — 10-min automation flips never stamp), and no
+  // public agent reply since. `lastAgentReplyAt` = the latest public entry's
+  // time when that entry is outgoing (same one lookup as awaitingReply).
+  // Priority: requester_responded > reopened > response_due > new.
+  if (ticket.reopenedAt) {
+    const reopenedMs = new Date(ticket.reopenedAt).getTime();
+    const repliedMs = Math.max(
+      lastAgentReplyAt ? new Date(lastAgentReplyAt).getTime() || 0 : 0,
+      ticket.firstPublicAgentReplyAt ? new Date(ticket.firstPublicAgentReplyAt).getTime() || 0 : 0,
+    );
+    if (Number.isFinite(reopenedMs) && repliedMs <= reopenedMs) return 'reopened';
+  }
   const noFirstReply = !ticket.firstPublicAgentReplyAt;
   if (!noFirstReply) return null;
   const fsBorn = ticket.origin !== 'ticketpulse';
@@ -880,13 +907,25 @@ class TicketService {
     return group.id;
   }
 
-  async _validateTechnician(workspaceId, technicianId) {
+  async _validateTechnician(workspaceId, technicianId, { allowAssignableOnly = false } = {}) {
     const tech = await prisma.technician.findFirst({
       where: { id: technicianId, workspaceId, isActive: true },
       select: { id: true, name: true, freshserviceId: true, origin: true },
     });
-    if (!tech) throw new ValidationError('Technician not found in this workspace');
-    return tech;
+    if (tech) return tech;
+    // Assignable-only people (QA 09-25 item 6): another team's members who may
+    // own tickets here but stay out of the dashboard, analytics and AI lists.
+    // Only a person picking in the app may choose them (review N1): workflow
+    // nodes, macros, API v1 and the pipeline stay on the active team.
+    if (!allowAssignableOnly) throw new ValidationError('Technician not found in this workspace');
+    const assignableOnly = await Promise.resolve()
+      .then(() => prisma.technician.findFirst({
+        where: { id: technicianId, workspaceId, assignableOnly: true },
+        select: { id: true, name: true, freshserviceId: true, origin: true },
+      }))
+      .catch(() => null);
+    if (!assignableOnly) throw new ValidationError('Technician not found in this workspace');
+    return assignableOnly;
   }
 
   /**
@@ -1036,6 +1075,7 @@ class TicketService {
           until_date: byKind.until_date || 0,
           waiting_on: byKind.waiting_on || 0,
           eta: byKind.eta || 0,
+          auto_help: byKind.auto_help || 0,
           waking7,
         };
       }
@@ -1057,10 +1097,23 @@ class TicketService {
       if (p === 'any') where.parkedUntil = { not: null };
       else if (p === 'none') where.parkedUntil = null;
       else if (p === 'waking7') where.parkedUntil = { not: null, lte: new Date(Date.now() + 7 * 86400e3) };
-      else if (['until_date', 'waiting_on', 'eta'].includes(p)) where.parkKind = p;
+      else if (['until_date', 'waiting_on', 'eta', 'auto_help'].includes(p)) where.parkKind = p;
+    }
+    // "Auto-help waiting" view (plans/AUTO_HELP_PLAN.md): ?parkKind=auto_help —
+    // tickets with an ACTIVE park of that kind (system kinds included).
+    if (query.parkKind && ['until_date', 'waiting_on', 'eta', 'auto_help'].includes(String(query.parkKind))) {
+      where.parkKind = String(query.parkKind);
+      where.parkedUntil = { not: null };
     }
     if (query.priority) where.priority = { in: asList(query.priority).map(Number).filter(Number.isFinite) };
     if (query.origin) where.origin = String(query.origin);
+    // Re-opened (QA 09-25 #1): ?reopened=1 — tickets that came back from
+    // Resolved/Closed and stuck (ticketReopenService). Scoped to Open/Pending
+    // bases unless the caller picked statuses itself.
+    if (['1', 'true', 'yes'].includes(String(query.reopened ?? '').toLowerCase())) {
+      where.reopenedAt = { not: null };
+      if (!query.status) where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
+    }
     // Verified solutions (QA 09-22 #6): the "Verified solutions" view.
     if (String(query.solution || '') === 'verified') where.solutionVerifiedAt = { not: null };
     if (query.requesterId) {
@@ -1371,7 +1424,7 @@ class TicketService {
           lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
           isExternal: isExternalRequester(t.requester?.email, internalDomains),
           stateChip: deriveStateChip(t, incoming.get(t.id) === true, statusSets),
-          state: deriveQueueState(t, incoming.get(t.id) === true, statusSets),
+          state: deriveQueueState(t, incoming.get(t.id) === true, statusSets, { lastAgentReplyAt: incoming.lastAgentReplyAt?.get(t.id) }),
           ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
           hasProposedReply: proposed.has(t.id),
         })),
@@ -1379,7 +1432,7 @@ class TicketService {
       };
     }
 
-    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department', 'parkedUntil'].includes(query.sort) ? query.sort : 'createdAt';
+    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department', 'parkedUntil', 'reopenedAt'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
 
     let total;
@@ -1402,6 +1455,9 @@ class TicketService {
         orderBy = [{ dueBy: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else if (sortField === 'requester') {
         orderBy = [{ requester: { name: sortDir } }, { id: 'desc' }];
+      } else if (sortField === 'reopenedAt') {
+        // Reopened column (QA 09-25 #1): latest stuck reopen; never-reopened rows trail.
+        orderBy = [{ reopenedAt: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else if (sortField === 'parkedUntil') {
         // Parked view: soonest wake first; unparked rows trail.
         orderBy = [{ parkedUntil: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
@@ -1455,7 +1511,7 @@ class TicketService {
         isExternal: isExternalRequester(t.requester?.email, internalDomains),
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true, statusSets),
         // Queue "State" (Phase QX): FS-style "who acts next" — see deriveQueueState.
-        state: deriveQueueState(t, incomingByTicket.get(t.id) === true, statusSets),
+        state: deriveQueueState(t, incomingByTicket.get(t.id) === true, statusSets, { lastAgentReplyAt: incomingByTicket.lastAgentReplyAt?.get(t.id) }),
         ai: hideAi ? null : (aiByTicket.get(t.id) || null),
         aiBypass: hideAi ? null : (bypassByTicket.get(t.id) || null),
         // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
@@ -1684,12 +1740,20 @@ class TicketService {
     }
   }
 
+  /**
+   * Map<ticketId, boolean> (last public entry inbound). The same one query
+   * also records, on `map.lastAgentReplyAt` (Map<ticketId, Date>), the time
+   * of the last public entry when it was OUTGOING — deriveQueueState's
+   * "agent replied since the reopen" test, with zero extra round trips.
+   */
   async _lastPublicEntryIncoming(ticketIds) {
     const map = new Map();
+    const lastAgentReplyAt = new Map();
+    Object.defineProperty(map, 'lastAgentReplyAt', { value: lastAgentReplyAt, enumerable: false });
     if (!ticketIds.length) return map;
     try {
       const rows = await prisma.$queryRaw`
-        SELECT DISTINCT ON (ticket_id) ticket_id, incoming, author_type
+        SELECT DISTINCT ON (ticket_id) ticket_id, incoming, author_type, occurred_at
         FROM ticket_thread_entries
         WHERE ticket_id = ANY(${ticketIds})
           AND (is_private = false OR is_private IS NULL)
@@ -1697,7 +1761,9 @@ class TicketService {
           AND (event_type IS NULL OR event_type <> 'original_email')
         ORDER BY ticket_id, occurred_at DESC, id DESC`;
       for (const r of rows) {
-        map.set(Number(r.ticket_id), r.incoming === true || r.author_type === 'requester');
+        const inbound = r.incoming === true || r.author_type === 'requester';
+        map.set(Number(r.ticket_id), inbound);
+        if (!inbound && r.occurred_at) lastAgentReplyAt.set(Number(r.ticket_id), r.occurred_at);
       }
     } catch (err) {
       logger.warn(`last-entry lookup failed (non-fatal): ${err.message}`);
@@ -2099,7 +2165,7 @@ class TicketService {
       latestPipelineRun: ticket.pipelineRuns?.[0] || null,
       stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true, detailStatusSets),
       // Queue "State" (Phase QX): FS-style "who acts next" — see deriveQueueState.
-      state: deriveQueueState(ticket, incomingByTicket.get(ticket.id) === true, detailStatusSets),
+      state: deriveQueueState(ticket, incomingByTicket.get(ticket.id) === true, detailStatusSets, { lastAgentReplyAt: incomingByTicket.lastAgentReplyAt?.get(ticket.id) }),
       lastActivityAt: ticket.lastRealActivityAt || ticket.freshserviceUpdatedAt || ticket.updatedAt,
     };
   }
@@ -2396,6 +2462,8 @@ class TicketService {
     if (!['assign', 'status', 'add_tags', 'remove_tags', 'set_category'].includes(type)) {
       throw new ValidationError('Bulk action must be assign, status, add_tags, remove_tags, or set_category');
     }
+    // One hand-back reason for a bulk release — reject a bad one up front, not per ticket.
+    if (type === 'assign' && !action.value && action.handBack) normalizeHandBack(action.handBack);
     // Tags are TP-side (both origins); field mutations are TP-born only.
     const TAG_ACTIONS = new Set(['add_tags', 'remove_tags']);
     const editable = TAG_ACTIONS.has(type) ? matching : matching.filter((t) => t.origin === TICKET_ORIGIN.TICKETPULSE);
@@ -2413,7 +2481,10 @@ class TicketService {
     for (const t of editable) {
       try {
         if (type === 'assign') {
-          await this.assignTicket(t.id, workspaceId, action.value ? Number(action.value) : null, actor);
+          await this.assignTicket(t.id, workspaceId, action.value ? Number(action.value) : null, actor, {
+            handBack: action.value ? null : (action.handBack || null),
+            allowAssignableOnly: true,
+          });
         } else if (type === 'status') {
           await this.changeStatus(t.id, workspaceId, String(action.value), actor);
         } else if (type === 'add_tags' || type === 'remove_tags') {
@@ -2501,6 +2572,26 @@ class TicketService {
       Promise.resolve().then(() => prisma.assignmentConfig.findUnique({ where: { workspaceId }, select: { aiSuggestionsForBasic: true } })).catch(() => null),
     ]);
 
+    // QA 09-25 item 6: assignable-only people (another team — e.g. Digital
+    // Solutions in IT) join the pickers after the team, flagged so the UI can
+    // group them. Dashboard/analytics/AI lists never read this.
+    const [assignableOnlyTechs, teamForwards] = await Promise.all([
+      Promise.resolve()
+        .then(() => prisma.technician.findMany({
+          where: { workspaceId, isActive: false, assignableOnly: true },
+          select: { id: true, name: true, email: true, photoUrl: true, origin: true },
+          orderBy: { name: 'asc' },
+        }))
+        .then((rows) => (Array.isArray(rows) ? rows : []))
+        .catch(() => []),
+      import('./teamForwardService.js')
+        .then(({ default: teamForwardService }) => teamForwardService.listForMeta(workspaceId))
+        .catch(() => []),
+    ]);
+    const pickerTechnicians = assignableOnlyTechs.length
+      ? [...technicians, ...assignableOnlyTechs.map((t) => ({ ...t, assignableOnly: true }))]
+      : technicians;
+
     const tops = categories.filter((c) => c.parentId === null);
     const categoryTree = tops.map((top) => ({
       id: top.id,
@@ -2582,7 +2673,9 @@ class TicketService {
         { value: 4, label: 'Urgent' },
       ],
       groups,
-      technicians,
+      technicians: pickerTechnicians,
+      // "Forward to <team>" destinations with an address (QA 09-25 item 6).
+      teamForwards,
       categoryTree,
       sources,
       // Active approval categories for the ticket Approvals tab request picker.
@@ -2845,6 +2938,8 @@ class TicketService {
   // `notifyRequester:false` (which suppresses EVERY ticket.created workflow).
   async createTicket(workspaceId, input, actor, {
     sourceChannel = TICKET_SOURCE.AGENT, enforceRequired = false, createdVia = null, suppressRequesterAck = false,
+    // Review N1: the interactive composer's assignee picker only.
+    allowAssignableOnly = false,
     // AF2: a validated TicketIntakeRun id (the route checks it belongs to the
     // workspace) — stamped on the created audit and linked after the insert.
     intakeRunId = null,
@@ -2911,7 +3006,7 @@ class TicketService {
       }
     }
     const assignee = data.assignedTechId
-      ? await this._validateTechnician(workspaceId, data.assignedTechId)
+      ? await this._validateTechnician(workspaceId, data.assignedTechId, { allowAssignableOnly })
       : null;
 
     // Custom-field intake (FR 08-05 #1): known keys validate/coerce against
@@ -3427,7 +3522,7 @@ class TicketService {
    * our row — an FS failure (or silent non-acceptance) changes NOTHING
    * locally, so the two systems can never diverge through this path.
    */
-  async updateFsTicket(ticketId, workspaceId, input, actor) {
+  async updateFsTicket(ticketId, workspaceId, input, actor, { allowAssignableOnly = false } = {}) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -3480,12 +3575,17 @@ class TicketService {
     }
 
     let assignee = null;
+    // Hand-back reason (QA 09-25 item 3): validated before FreshService is
+    // touched; recorded once the write-back succeeds. Sync later ties it to
+    // the rejected episode + rebound run it sees in FS activity.
+    let fsHandBack = null;
     if (input.assignedTechId !== undefined) {
       if (input.assignedTechId === null) {
         fsPayload.responder_id = null;
         localPatch.assignedTechId = null;
+        if (ticket.assignedTechId) fsHandBack = normalizeHandBack(input.handBack);
       } else {
-        assignee = await this._validateTechnician(workspaceId, Number(input.assignedTechId));
+        assignee = await this._validateTechnician(workspaceId, Number(input.assignedTechId), { allowAssignableOnly });
         if (!assignee.freshserviceId || assignee.origin === 'local') {
           throw new ValidationError(`${assignee.name} is a local member (no FreshService license) and can only be assigned Ticket Pulse tickets, not FreshService tickets.`);
         }
@@ -3658,6 +3758,13 @@ class TicketService {
             .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
             .catch((e) => logger.debug(`Post-405 reconcile skipped (non-fatal): ${e.message}`));
         }
+        // QA 09-25 item 6: "Assigned agent isn't a member of the group" —
+        // name the person and the group instead of a generic rejection. We
+        // never change the group for them.
+        if (assignee && isFsGroupMembershipError(err)) {
+          const groupName = await this._fsGroupName(workspaceId, ticket.groupId).catch(() => null);
+          throw new ValidationError(`${assignee.name} isn't in FreshService group ${groupName ? `"${groupName}"` : 'on this ticket'}; add them to that group in FreshService or change the ticket's group. Nothing was changed in Ticket Pulse.`);
+        }
         throw fsValidationError(err);
       }
     }
@@ -3795,7 +3902,28 @@ class TicketService {
     const aiOverride = typeof localPatch.assignedTechId === 'number'
       ? await this._isAiOverride(ticket.id, workspaceId, localPatch.assignedTechId)
       : false;
+    if (fsHandBack) {
+      await ticketHandBackService.record({
+        workspaceId,
+        ticketId: ticket.id,
+        technicianId: ticket.assignedTechId,
+        actor,
+        handBack: fsHandBack,
+        selfHandBack: Boolean(actor?.technicianId) && Number(actor.technicianId) === Number(ticket.assignedTechId),
+        origin: TICKET_ORIGIN.FRESHSERVICE,
+      });
+    }
     return { ...updated, displayRef: ticketDisplayRef(updated), synced: Object.keys(changes), aiOverride };
+  }
+
+  /** FS group display name for the membership error (best-effort). */
+  async _fsGroupName(workspaceId, fsGroupId) {
+    if (!fsGroupId) return null;
+    const group = await prisma.group.findFirst({
+      where: { workspaceId, freshserviceId: BigInt(fsGroupId) },
+      select: { name: true },
+    });
+    return group?.name || null;
   }
 
   /**
@@ -4087,27 +4215,38 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
-  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false } = {}) {
+  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false, handBack: handBackInput = null, allowAssignableOnly = false } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const targetId = technicianId === null || technicianId === undefined ? null : Number(technicianId);
-    if (targetId !== null) await this._validateTechnician(workspaceId, targetId);
+    // Hand-back reason (QA 09-25 item 3) — validated before anything changes.
+    const handBack = targetId === null ? normalizeHandBack(handBackInput) : null;
+    // An assignment FreshService already made (mirror echo) is a fact, not a
+    // pick — it may name an assignable-only person too.
+    if (targetId !== null) await this._validateTechnician(workspaceId, targetId, { allowAssignableOnly: allowAssignableOnly || fromFreshService });
     if (ticket.assignedTechId === targetId) {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), changed: false };
     }
 
     const now = new Date();
     const isSelfPicked = Boolean(targetId && actor?.technicianId && actor.technicianId === targetId);
+    // A hand-back = the assignee cleared in Ticket Pulse either by the assignee
+    // themselves, or by someone who gave a real reason. A coordinator clearing
+    // someone else with "Skip" stays a plain 'reassigned' release (no rebound,
+    // no rejection count) but the skipped row is still kept for review.
+    const clearing = targetId === null && Boolean(ticket.assignedTechId) && !fromFreshService;
+    const selfHandBack = clearing && Boolean(actor?.technicianId) && Number(actor.technicianId) === Number(ticket.assignedTechId);
+    const isHandBack = clearing && (selfHandBack || isRealHandBackReason(handBack?.code));
 
     if (ticket.assignedTechId) {
       await prisma.ticketAssignmentEpisode.updateMany({
         where: { ticketId: ticket.id, technicianId: ticket.assignedTechId, endedAt: null },
-        data: { endedAt: now, endMethod: 'reassigned', endActorName: actor?.name || null },
+        data: { endedAt: now, endMethod: isHandBack ? 'rejected' : 'reassigned', endActorName: actor?.name || null },
       });
     }
 
     const mirrorState = fromFreshService ? 'mirrored' : 'pending';
     const patch = targetId === null
-      ? { assignedTechId: null, mirrorState }
+      ? { assignedTechId: null, mirrorState, ...(isHandBack ? { rejectionCount: { increment: 1 } } : {}) }
       : {
         assignedTechId: targetId,
         assignedAt: now,
@@ -4141,8 +4280,11 @@ class TicketService {
       toTechId: targetId,
       note: fromFreshService
         ? `Reassigned in FreshService by ${String(actor?.name || '').replace(/ \(in FreshService\)$/, '')}`
-        : (targetId === null ? 'Unassigned' : 'Ticket reassigned'),
+        : (targetId === null
+          ? (isHandBack ? `Handed back${isRealHandBackReason(handBack?.code) ? ` — ${handBackLabel(handBack.code)}` : ''}` : 'Unassigned')
+          : 'Ticket reassigned'),
       ...(fromFreshService ? { via: 'freshservice' } : {}),
+      ...(clearing && handBack ? { handBack: { code: handBack.code, label: handBackLabel(handBack.code), note: handBack.note } } : {}),
     });
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
@@ -4153,8 +4295,75 @@ class TicketService {
         .then(({ default: ticketTaskService }) => ticketTaskService.notifyOwnerOfOpenTasks(ticket.id, workspaceId, updated.assignedTech))
         .catch((err) => logger.warn(`Open-task handover skipped for ticket ${ticket.id}: ${err.message}`));
     }
+    if (clearing && (handBack || isHandBack)) {
+      await this._afterTpHandBack({ ticket, updated, workspaceId, actor, handBack, selfHandBack, isHandBack, now })
+        .catch((err) => logger.warn(`Hand-back follow-up failed for ticket ${ticket.id}: ${err.message}`));
+    }
     const aiOverride = targetId === null ? false : await this._isAiOverride(ticket.id, workspaceId, targetId);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true, aiOverride };
+  }
+
+  /**
+   * TP-born hand-back follow-up (QA 09-25 item 3): keep the reason row, and —
+   * for a real hand-back on a live ticket — queue the same rebound pipeline run
+   * FS-born tickets get from sync, carrying the reason for the AI.
+   */
+  async _afterTpHandBack({ ticket, updated, workspaceId, actor, handBack, selfHandBack, isHandBack, now }) {
+    const prevTechId = ticket.assignedTechId;
+    const episode = isHandBack
+      ? await Promise.resolve().then(() => prisma.ticketAssignmentEpisode.findFirst({
+        where: { ticketId: ticket.id, technicianId: prevTechId, endMethod: 'rejected' },
+        orderBy: { endedAt: 'desc' },
+        select: { id: true, startMethod: true },
+      })).catch(() => null)
+      : null;
+    const row = handBack
+      ? await ticketHandBackService.record({
+        workspaceId,
+        ticketId: ticket.id,
+        technicianId: prevTechId,
+        actor,
+        handBack,
+        selfHandBack,
+        origin: TICKET_ORIGIN.TICKETPULSE,
+        episodeId: episode?.id || null,
+      })
+      : null;
+    if (!isHandBack) return;
+
+    let live = false;
+    try {
+      const liveNames = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
+      live = liveNames.includes(updated.status) && updated.isNoise !== true;
+    } catch { live = false; }
+    if (!live) return;
+
+    const rejectionCount = Math.max(1, await Promise.resolve()
+      .then(() => prisma.ticketAssignmentEpisode.count({ where: { ticketId: ticket.id, endMethod: 'rejected' } }))
+      .catch(() => 1));
+    const prevTechName = ticket.assignedTech?.name || 'The previous assignee';
+    const reason = reasonForHandBackRebound(handBack);
+    const reboundFrom = {
+      previousTechId: prevTechId,
+      previousTechName: prevTechName,
+      unassignedAt: now.toISOString(),
+      unassignedByName: actor?.name || actor?.email || null,
+      reboundCount: rejectionCount,
+      source: 'ticketpulse',
+      ...(reason ? { reason } : {}),
+    };
+    const selfPicked = episode?.startMethod === 'self_picked';
+    const returnedPhrase = `${prevTechName} ${selfPicked
+      ? 'picked this ticket up themselves and later handed it back'
+      : 'was assigned this ticket and handed it back'} on ${reboundFrom.unassignedAt.slice(0, 10)}`;
+    const { queueReboundRun } = await import('./reboundRunService.js');
+    await queueReboundRun({
+      ticketId: ticket.id,
+      workspaceId,
+      reboundFrom,
+      returnedPhrase,
+      onRun: row?.id ? (run) => ticketHandBackService.attach(row.id, { pipelineRunId: run.id }) : null,
+    });
   }
 
   // Correction-loop eligibility: this manual pick overrode a completed AI

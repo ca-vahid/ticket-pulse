@@ -1739,6 +1739,7 @@ router.get(
         location: t.location,
         timezone: t.timezone,
         routingGuidance: t.routingGuidance || null,
+        assignableOnly: t.assignableOnly === true, // QA 09-25 item 6
       })),
     });
   }),

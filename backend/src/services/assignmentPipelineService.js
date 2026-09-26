@@ -716,6 +716,13 @@ class AssignmentPipelineService {
         source: 'assignment_pipeline',
       },
     });
+    // Re-opened counter (QA 09-25 #1): this writer bypasses the lifecycle
+    // service. Never throws.
+    await import('./ticketReopenService.js')
+      .then(({ default: svc }) => svc.observeStatusTransition({
+        ticketId: ticket.id, workspaceId: ticket.workspaceId, from: ticket.status, to: status, at: new Date(),
+      }))
+      .catch(() => {});
   }
 
   async _markTicketAssignedFromFreshService(ticket, freshserviceResponderId) {

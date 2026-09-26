@@ -148,7 +148,9 @@ export default function BulkActionBar({
 
   const techOptions = useMemo(() => [
     { value: 'unassign', label: 'Unassigned', hint: 'release' },
-    ...technicians.map((t) => ({ value: String(t.id), label: t.name })),
+    ...technicians.filter((t) => !t.assignableOnly).map((t) => ({ value: String(t.id), label: t.name })),
+    // Assignable-only people from other teams come last, under their own heading (QA 09-25 item 6).
+    ...technicians.filter((t) => t.assignableOnly).map((t) => ({ value: String(t.id), label: t.name, group: 'Other teams' })),
   ], [technicians]);
   const statusOptions = useMemo(() => statuses.map((s) => ({ value: s, label: s })), [statuses]);
   const tagOptions = useMemo(() => [

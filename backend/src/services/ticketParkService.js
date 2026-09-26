@@ -17,12 +17,19 @@ import { readHrNoticeDate, hrWakeDate } from '../utils/hrNoticeDates.js';
 import settingsRepository from './settingsRepository.js';
 
 export const PARK_KINDS = Object.freeze(['until_date', 'waiting_on', 'eta']);
+// System kinds (Auto-help, plans/AUTO_HELP_PLAN.md): only the owning service
+// may park with them (park(..., { source: 'auto_help' })); the agent, API and
+// bulk paths keep validating against PARK_KINDS. Nothing parks with
+// 'auto_help' in P0 (shadow mode) — P1 parks after an Auto-help answer is sent.
+export const AUTO_HELP_PARK_KIND = 'auto_help';
+export const SYSTEM_PARK_KINDS = Object.freeze([AUTO_HELP_PARK_KIND]);
 export const PARK_KIND_LABELS = Object.freeze({
   until_date: 'Waiting until a date',
   waiting_on: 'Waiting on someone',
   eta: 'In progress, with an ETA',
+  auto_help: 'Auto-help waiting',
 });
-export const PARK_SOURCES = Object.freeze(['agent', 'suggested_hr', 'api', 'workflow', 'bulk']);
+export const PARK_SOURCES = Object.freeze(['agent', 'suggested_hr', 'api', 'workflow', 'bulk', 'auto_help']);
 // Vahid, 23 Sep 2026: up to six months; past that, park again with a new date.
 export const MAX_PARK_DAYS = 184;
 const PARKED_STATUS = 'Pending';
@@ -80,8 +87,8 @@ function cleanWaitingOn(list) {
 }
 
 /** Validation shared by the API, the UI routes, workflows and bulk. */
-export function validatePark({ kind, until, reason, waitingOn } = {}, { now = new Date(), requesterEmail = null } = {}) {
-  if (!PARK_KINDS.includes(kind)) {
+export function validatePark({ kind, until, reason, waitingOn } = {}, { now = new Date(), requesterEmail = null, allowSystemKinds = false } = {}) {
+  if (!PARK_KINDS.includes(kind) && !(allowSystemKinds && SYSTEM_PARK_KINDS.includes(kind))) {
     throw new ValidationError(`kind must be one of: ${PARK_KINDS.join(', ')}`);
   }
   const date = parseUntil(until);
@@ -187,7 +194,7 @@ class TicketParkService {
     if (['Deleted', 'Spam'].includes(ticket.status)) throw new ValidationError('A deleted ticket cannot be parked');
     const base = await statusService.resolveBaseStatus(workspaceId, ticket.status);
     if (base === 'Resolved' || base === 'Closed') throw new ValidationError('A resolved or closed ticket cannot be parked — reopen it first');
-    const clean = validatePark(input, { requesterEmail: ticket.requester?.email || null });
+    const clean = validatePark(input, { requesterEmail: ticket.requester?.email || null, allowSystemKinds: source === 'auto_help' });
     const existing = await this.activePark(ticket.id);
 
     // Status first: if FreshService refuses Pending, nothing is parked.

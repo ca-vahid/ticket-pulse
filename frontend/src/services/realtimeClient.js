@@ -147,6 +147,17 @@ export class RealtimeClient {
     this._listenersBound = false;
     this._boundCheck = () => this._checkDeadlines('event');
     this._boundOnline = () => this._onOnline();
+    this._pausedForPageHide = false;
+    this._boundPageHide = () => this._onPageHide();
+    this._boundPageShow = (e) => this._onPageShow(e);
+    // iOS Safari can fire pagehide when the app is backgrounded without ever
+    // unloading, and then no pageshow on return: resume when the page is
+    // visible again instead of staying silent until a reload.
+    this._boundResumeVisible = () => {
+      if (this._pausedForPageHide && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        this._onPageShow({ persisted: true });
+      }
+    };
   }
 
   _perfNow() {
@@ -827,6 +838,31 @@ export class RealtimeClient {
     document.addEventListener('visibilitychange', this._boundCheck);
     window.addEventListener('focus', this._boundCheck);
     window.addEventListener('online', this._boundOnline);
+    window.addEventListener('pagehide', this._boundPageHide);
+    window.addEventListener('pageshow', this._boundPageShow);
+    document.addEventListener('visibilitychange', this._boundResumeVisible);
+  }
+
+  /**
+   * Leaving the page (reload, link, or into the back/forward cache): close the
+   * stream NOW. A bfcached document keeps its open fetch stream alive, and on
+   * an HTTP/1.1 origin (local dev, some proxies) five navigations then use up
+   * Chrome's 6-connections-per-host budget and the next page's API calls
+   * queue forever (QA 09-25: "Loading Knowledge…" that never finished).
+   */
+  _onPageHide() {
+    if (!this._running) return;
+    this._pausedForPageHide = true;
+    this._stop('idle');
+  }
+
+  /** Restored from the back/forward cache: reconnect and refetch what was missed. */
+  _onPageShow(e) {
+    if (!this._pausedForPageHide) return;
+    this._pausedForPageHide = false;
+    if (!e?.persisted) return;
+    this._evaluate();
+    if (this._running) this._emitResync('page-restore');
   }
 
   _startWatchdog() {
