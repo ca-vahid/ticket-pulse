@@ -466,7 +466,8 @@ class SyncService {
    *    "needs manual review" run instead of auto-rerouting forever
    */
   async _handleTicketRebound(upsertedTicket, existingTicket, analysis, workspaceId) {
-    const MAX_AUTO_REBOUNDS_PER_TICKET = 3;
+    // Run creation + guards live in reboundRunService (shared with TP-born
+    // hand-backs, QA 09-25 item 3).
     try {
       if (!hasActivityBackedRebound(analysis)) {
         logger.warn('Bounce detection skipped: no FreshService rejection activity evidence', {
@@ -499,36 +500,11 @@ class SyncService {
       }
       const rejectionKey = new Date(unassignedAt).toISOString();
 
-      // Skip if assignment pipeline isn't enabled
-      const { default: assignmentRepository } = await import('./assignmentRepository.js');
-      const cfg = await assignmentRepository.getConfig(workspaceId);
-      if (!cfg?.isEnabled) return;
-
-      // ONE run per rejection event: a prior run carrying this exact event
-      // timestamp (any status — superseded, approved, exhausted) means this
-      // sync pass is a re-detection, not a new bounce.
-      const alreadyHandled = await prisma.assignmentPipelineRun.findFirst({
-        where: {
-          ticketId: upsertedTicket.id,
-          reboundFrom: { path: ['unassignedAt'], equals: rejectionKey },
-        },
-        select: { id: true, status: true, triggerSource: true },
-      });
-      if (alreadyHandled) {
-        logger.debug('Bounce detection: rejection event already handled, skipping re-detection', {
-          ticketId: upsertedTicket.id, existingRunId: alreadyHandled.id, rejectionKey,
-        });
-        return;
-      }
-
-      // Skip if there's already an in-flight (queued/running) pipeline run.
-      const openRun = await assignmentRepository.getOpenPipelineRun(upsertedTicket.id);
-      if (openRun) {
-        logger.debug('Bounce detection: in-flight run already exists, skipping', {
-          ticketId: upsertedTicket.id, existingRunId: openRun.id, status: openRun.status,
-        });
-        return;
-      }
+      // Cheap early exits first (pipeline off / event already handled): the
+      // rebound STATE stays true on every sync pass.
+      const { reboundPrecheck, queueReboundRun } = await import('./reboundRunService.js');
+      const pre = await reboundPrecheck({ ticketId: upsertedTicket.id, workspaceId, rejectionKey });
+      if (pre) return;
 
       // The REAL bounce count: distinct rejected episodes — never run rows,
       // which historically duplicated per sync pass and inflated the story
@@ -560,14 +536,23 @@ class SyncService {
         }
       }
 
+      // Hand-back reason (QA 09-25 item 3): the unassign was done in Ticket
+      // Pulse and the agent said why — FreshService only shows the API user.
+      const { default: ticketHandBackService, reasonForRebound } = await import('./ticketHandBackService.js');
+      const pendingHandBack = await ticketHandBackService.findPendingForRebound({
+        ticketId: upsertedTicket.id, technicianId: prevTechId, unassignedAt: rejectionKey,
+      });
+      const handBackReason = reasonForRebound(pendingHandBack);
+
       const reboundFrom = {
         previousTechId: prevTechId,
         previousTechName: prevTechName || 'Unknown',
         unassignedAt: rejectionKey,
-        unassignedByName: unassignedByName || null,
+        unassignedByName: pendingHandBack?.actorName || unassignedByName || null,
         reboundCount: rejectionCount,
         verifiedByFreshserviceActivity: true,
         source: 'freshservice_activity',
+        ...(handBackReason ? { reason: handBackReason } : {}),
       };
       // Honest phrasing: a self-picked assignment that was returned is a very
       // different story than an auto-assignment that bounced.
@@ -576,100 +561,23 @@ class SyncService {
         ? 'picked this ticket up themselves and later returned it to the queue'
         : 'was assigned this ticket and returned it to the queue'} on ${rejectionKey.slice(0, 10)}`;
 
-      if (rejectionCount > MAX_AUTO_REBOUNDS_PER_TICKET) {
-        // Too many real returns — park ONE "needs manual review" row instead
-        // of auto-rerouting forever. The extra guard covers legacy duplicates
-        // that predate event-level dedupe.
-        const existingExhausted = await prisma.assignmentPipelineRun.findFirst({
-          where: {
-            ticketId: upsertedTicket.id,
-            triggerSource: 'rebound_exhausted',
-            status: 'completed',
-            decision: 'pending_review',
-          },
+      if (pendingHandBack) {
+        const episode = await Promise.resolve().then(() => prisma.ticketAssignmentEpisode.findFirst({
+          where: { ticketId: upsertedTicket.id, endMethod: 'rejected', ...(prevTechId ? { technicianId: prevTechId } : {}) },
+          orderBy: { endedAt: 'desc' },
           select: { id: true },
-        });
-        if (existingExhausted) {
-          logger.debug('Bounce detection: an exhausted run is already awaiting review, skipping', {
-            ticketId: upsertedTicket.id, existingRunId: existingExhausted.id,
-          });
-          return;
-        }
-
-        logger.warn('Bounce detection: max auto-rebounds reached, materializing pending_review run', {
-          ticketId: upsertedTicket.id, rejectionCount,
-        });
-        try {
-          await prisma.assignmentPipelineRun.create({
-            data: {
-              ticketId: upsertedTicket.id,
-              workspaceId,
-              status: 'completed',
-              decision: 'pending_review',
-              triggerSource: 'rebound_exhausted',
-              errorMessage: `Returned to the queue ${rejectionCount} times — automatic re-routing stopped; assign manually`,
-              reboundFrom,
-              // Synthesized empty recommendation so the Awaiting Decision UI
-              // renders this as a "no candidates left to try" run rather than
-              // crashing on null fields.
-              recommendation: {
-                recommendations: [],
-                overallReasoning: `${returnedPhrase}. This ticket has been returned to the queue ${rejectionCount} times — past the automatic re-routing limit of ${MAX_AUTO_REBOUNDS_PER_TICKET} — so no further automatic assignment will happen. Assign it manually or dismiss.`,
-                ticketClassification: 'needs_manual_review',
-                confidence: 'low',
-              },
-            },
-          });
-        } catch (err) {
-          logger.error('Bounce detection: failed to materialize rebound_exhausted run', {
-            ticketId: upsertedTicket.id, error: err.message,
-          });
-        }
-        return;
+        })).catch(() => null);
+        if (episode?.id) await ticketHandBackService.attach(pendingHandBack.id, { episodeId: episode.id });
       }
 
-      // Supersede any existing pending_review runs. Their recommendation is
-      // now stale (likely names the agent who just rejected) and the user
-      // should only see the rebound run going forward — otherwise the ticket
-      // shows up multiple times in the Awaiting Decision queue.
-      const superseded = await prisma.assignmentPipelineRun.updateMany({
-        where: {
-          ticketId: upsertedTicket.id,
-          status: 'completed',
-          decision: 'pending_review',
-        },
-        data: {
-          status: 'superseded',
-          errorMessage: 'Superseded by a newer rebound run after ticket was returned to the queue',
-          updatedAt: new Date(),
-        },
-      });
-      if (superseded.count > 0) {
-        logger.info('Bounce detection: superseded prior pending_review runs', {
-          ticketId: upsertedTicket.id, count: superseded.count,
-        });
-      }
-
-      logger.info('Bounce detection: queueing rebound pipeline run', {
+      await queueReboundRun({
         ticketId: upsertedTicket.id,
-        freshserviceTicketId: upsertedTicket.freshserviceTicketId?.toString(),
-        ...reboundFrom,
-      });
-
-      // Trigger a fresh pipeline run. runPipeline will queue (outside business
-      // hours) or run immediately. We deliberately don't await onEvent updates.
-      const { default: assignmentPipelineService } = await import('./assignmentPipelineService.js');
-      assignmentPipelineService.runPipeline(
-        upsertedTicket.id,
         workspaceId,
-        'rebound',
-        null,
-        null,
-        { reboundFrom },
-      ).catch((err) => {
-        logger.warn('Rebound pipeline trigger failed', {
-          ticketId: upsertedTicket.id, error: err.message,
-        });
+        reboundFrom,
+        returnedPhrase,
+        prechecked: true,
+        freshserviceTicketId: upsertedTicket.freshserviceTicketId,
+        onRun: pendingHandBack ? (run) => ticketHandBackService.attach(pendingHandBack.id, { pipelineRunId: run.id }) : null,
       });
     } catch (error) {
       logger.error(`Bounce detection failed for ticket ${upsertedTicket.id}:`, error);
@@ -4516,6 +4424,13 @@ class SyncService {
               ...this._fsActorDetails(fsActor, fsActor ? 'freshservice_sync' : 'reconcile'),
             },
           });
+          // Re-opened counter (QA 09-25 #1): this writer bypasses the
+          // lifecycle service. Never throws.
+          await import('./ticketReopenService.js')
+            .then(({ default: svc }) => svc.observeStatusTransition({
+              ticketId: ticket.id, workspaceId, from: current.status, to: fsStatusName, at: now,
+            }))
+            .catch(() => {});
           if (TERMINAL_STATUSES.includes(fsStatusName)) {
             await prisma.assignmentPipelineRun.updateMany({
               where: { ticketId: ticket.id, status: 'queued' },

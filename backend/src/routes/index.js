@@ -29,6 +29,10 @@ import statusesRoutes from './statuses.routes.js';
 import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
 import backupRoutes from './backup.routes.js';
+import knowledgeRoutes from './knowledge.routes.js';
+import toneRoutes from './tone.routes.js';
+import handBacksRoutes from './handBacks.routes.js';
+import teamRoutingSettingsRoutes from './teamRoutingSettings.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAdmin, requireAdminOrObserver, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
@@ -93,6 +97,7 @@ router.use('/search', searchRoutes);
 // Settings has both global app configuration and a few workspace-specific
 // helpers. Mount it before global workspace enforcement so one-time global
 // settings are not blocked by a stale selected workspace.
+router.use('/settings', teamRoutingSettingsRoutes); // QA 09-25 item 6 (own paths)
 router.use('/settings', settingsRoutes);
 // Cross-workspace AI usage/cost report: super-admin gated inside the router,
 // deliberately NOT behind workspace enforcement (it spans all workspaces).
@@ -135,5 +140,10 @@ router.use('/assignment', assignmentRoutes);
 router.use('/analytics', requireAdminOrObserver, analyticsRoutes);
 router.use('/summit', requireAdmin, summitRoutes);
 router.use('/backup', backupRoutes);
+// Knowledge + Auto-help (plans/AUTO_HELP_PLAN.md): member reads, one
+// canManageKnowledge gate for writes inside the router.
+router.use('/knowledge', knowledgeRoutes);
+router.use('/tone', toneRoutes);
+router.use('/hand-backs', handBacksRoutes); // QA 09-25 item 3
 
 export default router;

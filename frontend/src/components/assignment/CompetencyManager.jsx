@@ -712,6 +712,10 @@ function MatrixTab({ onAnalyze }) {
   const [matrixMaxScrollLeft, setMatrixMaxScrollLeft] = useState(0);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(() => new Set());
   const matrixScrollRef = useRef(null);
+  // ?tech=<id> deep link (Hand-backs → "Review skills matrix", QA 09-25 item 3):
+  // focus that person's column once the matrix has loaded.
+  const [matrixSearchParams] = useSearchParams();
+  const deepTechId = Number(matrixSearchParams.get('tech')) || null;
 
   const fetchData = useCallback(async () => {
     try {
@@ -733,6 +737,9 @@ function MatrixTab({ onAnalyze }) {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (deepTechId && technicians.some((t) => t.id === deepTechId)) setFocusedTechId(deepTechId);
+  }, [deepTechId, technicians]);
 
   const mappingMap = {};
   // Competencies minted by the assignment-feedback learner (notes stamped

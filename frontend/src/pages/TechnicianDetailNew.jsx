@@ -14,6 +14,7 @@ import DayEventStrip from '../components/tech-detail/DayEventStrip';
 import EvidenceTable from '../components/tech-detail/EvidenceTable';
 import SatisfactionPanel, { mergeSatisfaction } from '../components/tech-detail/SatisfactionPanel';
 import BouncedTab from '../components/tech-detail/BouncedTab';
+import PageLoadProgress from '../components/PageLoadProgress';
 import { getInitials, formatDateLocal } from '../components/tech-detail/utils';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,11 +36,16 @@ export default function TechnicianDetailNew() {
   const navigate = useNavigate();
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
-  const { getTechnicianCSAT } = useDashboard();
+  // Cache-aware getters: hovering a tech on the dashboard warms these keys
+  // (usePrefetch.prefetchTechDetail), so the page can open instantly.
+  const { getTechnicianCSAT, getTechnician, getTechnicianWeekly } = useDashboard();
 
   // ── State ──────────────────────────────────────────────────────────────────
 
-  const [technician, setTechnician] = useState(null);
+  // Period payload (null until the first response). The page renders
+  // progressively around it — header, heatmap, satisfaction and bounced load
+  // on their own (QA 09-25: no more full-screen spinner).
+  const [techData, setTechnician] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const fetchSeqRef = useRef(0);
   const [error, setError] = useState(null);
@@ -59,11 +65,15 @@ export default function TechnicianDetailNew() {
 
   // CSAT (FreshService surveys, usually /4)
   const [csatTickets, setCSATTickets] = useState([]);
-  const [csatLoading, setCSATLoading] = useState(false);
+  const [csatLoading, setCSATLoading] = useState(true);
 
   // First-party feedback (Ticket Pulse, /5)
   const [feedbackTickets, setFeedbackTickets] = useState([]);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState(true);
+
+  // Bounced drill-in request (reported by BouncedTab for the progress bar)
+  const [bouncedLoading, setBouncedLoading] = useState(false);
+  const handleBouncedLoading = useCallback((v) => setBouncedLoading(Boolean(v)), []);
 
   // Activity heatmap data (one fetch per tech — the only new request)
   const [calendarDays, setCalendarDays] = useState([]);
@@ -230,18 +240,24 @@ export default function TechnicianDetailNew() {
   // Fetch technician data per period
   useEffect(() => {
     const mySeq = ++fetchSeqRef.current;
+    const techId = parseInt(id, 10);
     setIsLoading(true);
-    // Keep stale data visible during navigation so the layout never flashes.
+    // Keep stale data visible during period navigation so the layout never
+    // flashes — but never another person's data when the route id changes.
+    setTechnician((prev) => (prev && prev.id !== techId ? null : prev));
     setError(null);
+
+    // Hover prefetch stores the raw { success, data } envelope under the same
+    // cache key the getters use; accept either shape.
+    const unwrap = (d) => (d && d.success !== undefined && d.data ? d.data : d);
 
     const fetchData = async () => {
       try {
         let data;
         if (viewMode === 'weekly') {
           const weekStart = selectedWeek ? formatDateLocal(selectedWeek) : null;
-          const res = await dashboardAPI.getTechnicianWeekly(parseInt(id, 10), weekStart, 'America/Los_Angeles');
-          if (!res.success || !res.data) throw new Error('Failed to fetch weekly technician data');
-          data = res.data;
+          data = unwrap(await getTechnicianWeekly(techId, weekStart, 'America/Los_Angeles'));
+          if (!data) throw new Error('Failed to fetch weekly technician data');
         } else if (viewMode === 'monthly') {
           const monthStr = selectedMonth
             ? `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`
@@ -253,9 +269,8 @@ export default function TechnicianDetailNew() {
           const dateStr = selectedDate
             ? (typeof selectedDate === 'string' ? selectedDate : formatDateLocal(selectedDate))
             : null;
-          const res = await dashboardAPI.getTechnician(parseInt(id, 10), 'America/Los_Angeles', dateStr);
-          if (!res.success || !res.data) throw new Error('Failed to fetch technician data');
-          data = res.data;
+          data = unwrap(await getTechnician(techId, 'America/Los_Angeles', dateStr));
+          if (!data) throw new Error('Failed to fetch technician data');
         }
         if (mySeq !== fetchSeqRef.current) return;
         setTechnician(data);
@@ -268,7 +283,7 @@ export default function TechnicianDetailNew() {
       }
     };
     fetchData();
-  }, [id, selectedDate, viewMode, selectedWeek, selectedMonth]);
+  }, [id, selectedDate, viewMode, selectedWeek, selectedMonth, getTechnician, getTechnicianWeekly]);
 
   // ── Navigation handlers ────────────────────────────────────────────────────
 
@@ -366,15 +381,17 @@ export default function TechnicianDetailNew() {
     }
   };
 
-  // ── Loading / error states ─────────────────────────────────────────────────
+  // ── Load progress (the page's own requests) ────────────────────────────────
 
-  if (!technician) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/50">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 motion-off:animate-none" />
-      </div>
-    );
-  }
+  const loadSteps = [
+    { key: 'period', loading: isLoading },
+    { key: 'calendar', loading: calendarLoading },
+    { key: 'csat', loading: csatLoading },
+    { key: 'feedback', loading: feedbackLoading },
+    { key: 'bounced', loading: bouncedLoading },
+  ];
+
+  // ── Error state ────────────────────────────────────────────────────────────
 
   if (error) {
     return (
@@ -393,6 +410,11 @@ export default function TechnicianDetailNew() {
   }
 
   // ── Derived data (ALL period-scoped — the badge-integrity rule) ────────────
+
+  // Until the period payload lands, render against a placeholder so the
+  // layout, heatmap, satisfaction and bounced panels can fill in on their own.
+  const ready = Boolean(techData);
+  const technician = techData || { id: parseInt(id, 10) };
 
   const displayDate = selectedDate ? new Date(selectedDate + 'T12:00:00') : new Date();
 
@@ -551,12 +573,8 @@ export default function TechnicianDetailNew() {
 
   return (
     <div className="min-h-screen bg-muted/50">
-      {/* Thin progress bar while re-fetching (navigation between periods) */}
-      {isLoading && (
-        <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-blue-100 dark:bg-blue-500/20 overflow-hidden">
-          <div className="h-full bg-blue-500 animate-pulse w-full motion-off:animate-none" />
-        </div>
-      )}
+      {/* Live load progress across the page's own requests */}
+      <PageLoadProgress steps={loadSteps} />
 
       <TechDetailHeader
         technician={technician}
@@ -592,16 +610,27 @@ export default function TechnicianDetailNew() {
                   alt={technician.name}
                   className="h-12 w-12 flex-shrink-0 rounded-full border border-border object-cover"
                 />
+              ) : !ready ? (
+                <div className="h-12 w-12 flex-shrink-0 animate-pulse rounded-full bg-muted motion-off:animate-none" aria-hidden="true" />
               ) : (
                 <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600">
                   <span className="text-sm font-bold text-white">{getInitials(technician.name)}</span>
                 </div>
               )}
               <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-foreground">{technician.name}</div>
-                <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${loadTone.cls}`}>
-                  {loadTone.text}
-                </span>
+                {ready ? (
+                  <>
+                    <div className="truncate text-sm font-bold text-foreground">{technician.name}</div>
+                    <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${loadTone.cls}`}>
+                      {loadTone.text}
+                    </span>
+                  </>
+                ) : (
+                  <div className="space-y-1.5" aria-hidden="true">
+                    <div className="h-3.5 w-32 animate-pulse rounded bg-muted motion-off:animate-none" />
+                    <div className="h-3 w-20 animate-pulse rounded bg-muted motion-off:animate-none" />
+                  </div>
+                )}
               </div>
             </div>
             <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
@@ -630,8 +659,13 @@ export default function TechnicianDetailNew() {
               {periodLabel}
             </div>
             <div className="space-y-0.5">
-              {chips.map(({ key, label, value, valueSuffix, sub, tone, Icon }) => {
+              {chips.map(({ key, label, value: rawValue, valueSuffix: rawSuffix, sub: rawSub, tone, Icon }) => {
                 const active = activeChip === key;
+                // Satisfaction has its own requests; every other chip waits on the period payload.
+                const pending = key === 'satisfaction' ? (csatLoading || feedbackLoading) : !ready;
+                const value = pending ? '—' : rawValue;
+                const valueSuffix = pending ? null : rawSuffix;
+                const sub = pending ? null : rawSub;
                 return (
                   <button
                     key={key}
@@ -697,7 +731,7 @@ export default function TechnicianDetailNew() {
         {/* ── MAIN COLUMN ───────────────────────────────────────────────────── */}
         <div className="min-w-0 space-y-4">
           {/* Drill-context chip — the dashboard click travels with you */}
-          {drillContext && (
+          {drillContext && ready && (
             <div className="flex items-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 font-semibold text-blue-700 dark:text-blue-200">
                 Arrived from Dashboard:
@@ -726,7 +760,7 @@ export default function TechnicianDetailNew() {
           />
 
           {/* Daily only: event-marker strip (weekly+ hides it entirely) */}
-          {viewMode === 'daily' && (
+          {viewMode === 'daily' && ready && (
             <DayEventStrip
               ticketsOnDate={handledTickets}
               dayLabel={periodLabel}
@@ -738,13 +772,24 @@ export default function TechnicianDetailNew() {
               chip filters the one ticket table */}
           {activeChip === 'bounced' ? (
             <section className="tp-card rounded-xl p-4" aria-label="Bounced tickets">
+              {/* Mounts from the route id — no wait on the period payload. */}
               <BouncedTab
                 technician={technician}
                 viewMode={viewMode}
                 selectedDate={selectedDate}
                 selectedWeek={selectedWeek}
                 selectedMonth={selectedMonth}
+                onLoadingChange={handleBouncedLoading}
               />
+            </section>
+          ) : !ready ? (
+            <section className="tp-card rounded-xl p-4" aria-busy="true" aria-label="Loading tickets">
+              <div className="mb-3 h-4 w-48 animate-pulse rounded bg-muted motion-off:animate-none" />
+              <div className="space-y-2">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-9 animate-pulse rounded-lg bg-muted/70 motion-off:animate-none" />
+                ))}
+              </div>
             </section>
           ) : (
             <EvidenceTable

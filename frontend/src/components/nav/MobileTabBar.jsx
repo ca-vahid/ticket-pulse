@@ -28,6 +28,7 @@ const SHORT_LABEL = {
   dashboard: 'Dashboard',
   timeline: 'Timeline',
   analytics: 'Analytics',
+  knowledge: 'Knowledge',
   assignments: 'Assign',
   workflows: 'Workflows',
   map: 'Map',

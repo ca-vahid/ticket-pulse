@@ -9,8 +9,9 @@ import { Check, ChevronDown } from 'lucide-react';
  *
  * Same contract as a controlled <select>: `value`, `onChange(nextValue)` with
  * the option's value (a string, like the DOM), `disabled`, `aria-label`.
- * Options: [{ value, label, group?, disabled?, hint?, dot? }] — `group` renders
- * an optgroup-style heading; `dot` a coloured swatch (status / priority).
+ * Options: [{ value, label, group?, disabled?, hint?, dot?, icon? }] — `group` renders
+ * an optgroup-style heading; `dot` a coloured swatch (status / priority);
+ * `icon` a small leading node (e.g. a person's avatar).
  * Keyboard: Enter / Space / ArrowDown open, arrows move, Enter picks, Escape
  * closes, type-ahead on the first letters. Portal-positioned so it escapes
  * overflow-hidden cards, flips above when the viewport runs out.
@@ -149,6 +150,7 @@ export default function FancySelect({
         className={`tp-focus-ring group/fs flex w-full items-center gap-2 text-left text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85 transition-colors hover:border-blue-300 dark:hover:border-blue-500/40 disabled:bg-muted/50 disabled:text-muted-foreground/75 disabled:cursor-not-allowed disabled:hover:border-input ${open ? 'border-blue-400 dark:border-blue-500/60 ring-2 ring-blue-100 dark:ring-blue-500/20' : ''} ${className}`}
       >
         {current?.dot && <span aria-hidden="true" className={`h-2 w-2 flex-shrink-0 rounded-full ${current.dot}`} />}
+        {current?.icon && !renderValue && <span aria-hidden="true" className="flex flex-shrink-0 items-center">{current.icon}</span>}
         <span className={`min-w-0 flex-1 truncate ${current ? '' : 'text-muted-foreground/75'}`}>
           {renderValue ? renderValue(current) : (current?.label ?? placeholder)}
         </span>
@@ -187,6 +189,7 @@ export default function FancySelect({
               }`}
             >
               {r.option.dot && <span aria-hidden="true" className={`h-2 w-2 flex-shrink-0 rounded-full ${r.option.dot}`} />}
+              {r.option.icon && <span aria-hidden="true" className="flex flex-shrink-0 items-center">{r.option.icon}</span>}
               <span className="min-w-0 flex-1 truncate">{r.option.label}</span>
               {current === r.option && <Check className="h-3.5 w-3.5 flex-shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />}
             </li>

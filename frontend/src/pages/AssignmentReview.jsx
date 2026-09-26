@@ -10,6 +10,7 @@ import CompetencyManager from '../components/assignment/CompetencyManager';
 import CompetencyRequestsTab from '../components/assignment/CompetencyRequestsTab';
 import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
+import HandBacksTab from '../components/assignment/HandBacksTab';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
 import FilterDropdown from '../components/FilterDropdown';
@@ -28,6 +29,8 @@ import {
 const ALL_TABS = [
   { id: 'queue', label: 'Ticket Queue', icon: Inbox, minRole: 'reviewer' },
   { id: 'history', label: 'Ticket History', icon: History, minRole: 'reviewer' },
+  // QA 09-25 item 3: why tickets were handed back (process signal).
+  { id: 'hand-backs', label: 'Hand-backs', icon: RotateCcw, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Improvements', icon: Sparkles, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: MessageSquare, minRole: 'admin' },
@@ -4360,6 +4363,8 @@ const AI_OPERATION_OPTIONS = [
   { value: 'analytics_report', label: 'Analytics Report' },
   // Phase AF (v3.8.14): TicketCreate → Autofill (vision-capable models only).
   { value: 'ticket_intake_extract', label: 'Autofill Intake' },
+  // Auto-help (Knowledge → Playbooks): shadow-mode first answers.
+  { value: 'auto_help', label: 'Auto-help' },
 ];
 
 export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
@@ -5132,6 +5137,7 @@ export default function AssignmentReview() {
           <div className="px-2 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'hand-backs' && <HandBacksTab isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}

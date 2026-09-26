@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { User, RotateCcw, ArrowRight, Clock, Loader2 } from 'lucide-react';
-import { dashboardAPI } from '../../services/api';
+import { dashboardAPI, handBacksAPI } from '../../services/api';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 
 /**
@@ -13,6 +13,24 @@ import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, workspaceTimezone = 'America/Los_Angeles' }) {
   const [episodes, setEpisodes] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Stated hand-back reasons for this ticket (QA 09-25 item 3).
+  const [handBacks, setHandBacks] = useState([]);
+
+  useEffect(() => {
+    if (!ticketId) return;
+    Promise.resolve().then(() => handBacksAPI.forTicket(ticketId))
+      .then((res) => setHandBacks(Array.isArray(res?.data) ? res.data.filter((h) => h.reasonCode && h.reasonCode !== 'skipped') : []))
+      .catch(() => setHandBacks([]));
+  }, [ticketId]);
+
+  const reasonFor = (ep) => {
+    if (!handBacks.length || ep.endMethod !== 'rejected') return null;
+    const byId = handBacks.find((h) => h.episodeId && h.episodeId === ep.id);
+    if (byId) return byId;
+    const endedAt = ep.endedAt ? new Date(ep.endedAt).getTime() : NaN;
+    return handBacks.find((h) => (!ep.techId || h.technicianId === ep.techId)
+      && Number.isFinite(endedAt) && Math.abs(new Date(h.createdAt).getTime() - endedAt) < 15 * 60 * 1000) || null;
+  };
 
   useEffect(() => {
     const idToFetch = ticketId || freshserviceTicketId;
@@ -56,6 +74,7 @@ export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, wo
           const wasRejected = ep.endMethod === 'rejected';
           const isNext = i < episodes.length - 1;
           const nextTransition = isNext ? (wasRejected ? 'rejected' : 'reassigned') : null;
+          const stated = wasRejected ? reasonFor(ep) : null;
 
           return (
             <div key={ep.id} className="flex items-center gap-1.5">
@@ -72,7 +91,8 @@ export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, wo
                   `Started: ${ep.startMethod.replace('_', '-')} at ${formatDateTimeInTimezone(ep.startedAt, workspaceTimezone)}\n` +
                   (ep.endedAt
                     ? `Ended: ${ep.endMethod} at ${formatDateTimeInTimezone(ep.endedAt, workspaceTimezone)}` +
-                      (ep.endActorName ? ` by ${ep.endActorName}` : '')
+                      (ep.endActorName ? ` by ${ep.endActorName}` : '') +
+                      (stated ? `\nReason: ${stated.reasonLabel}${stated.reasonNote ? ` — ${stated.reasonNote}` : ''}` : '')
                     : 'Current holder')
                 }
               >
@@ -94,6 +114,7 @@ export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, wo
                   <ArrowRight className="w-3 h-3" />
                   <span className="whitespace-nowrap">
                     {nextTransition === 'rejected' ? 'rejected' : 'reassigned'}
+                    {stated && <span className="font-normal text-foreground/80"> · {stated.reasonLabel}</span>}
                   </span>
                 </div>
               )}

@@ -11,6 +11,11 @@ const DashboardContext = createContext(null);
 
 const TZ = 'America/Los_Angeles';
 const DASHBOARD_REFRESH_SSE_ROUTES = ['/dashboard', '/technician', '/timeline', '/analytics', '/visuals'];
+// Cold-load cache warming (weekly + daily dashboard + week stats). The agent
+// page (/technician/:id) never reads those payloads — warming them there
+// only competed with its own requests (QA 09-25) — so it keeps the SSE
+// refresh wiring above but is left out of the speculative prefetch.
+const DASHBOARD_PREFETCH_ROUTES = DASHBOARD_REFRESH_SSE_ROUTES.filter((r) => r !== '/technician');
 // Routes where THIS provider listens on the shared realtime client (it stamps
 // lastFreshAt / refetches dashboards on sync-completed). This list no longer
 // drives the header pill — AppHeader reads the shared client's own status via
@@ -111,7 +116,7 @@ export function DashboardProvider({ children }) {
     // Only warm the cache when the page being loaded IS a dashboard route
     // (v3.7.02): /api/dashboard is admin-only now, and viewers/reviewers land
     // on /tickets — three speculative 403s per page load would be noise.
-    if (!matchesRoute(window.location.pathname, DASHBOARD_REFRESH_SSE_ROUTES)) return;
+    if (!matchesRoute(window.location.pathname, DASHBOARD_PREFETCH_ROUTES)) return;
     // A browser that last resolved a viewer/reviewer/agent role would only earn
     // three 403s here (Neville, 17 Sep 2026) — ViewRoute bounces them anyway.
     if (!canPrefetchOps(readRoleHint())) return;
@@ -516,6 +521,10 @@ export function DashboardProvider({ children }) {
     invalidateToday();
     invalidateCurrentWeek();
     invalidateCurrentMonth();
+
+    // The agent page reads its own endpoints (invalidated above); refetching
+    // the whole-team dashboard behind it on every sync was pure load (QA 09-25).
+    if (!matchesRoute(pathnameRef.current, DASHBOARD_PREFETCH_ROUTES)) return;
 
     // Re-fetch whatever view the user is currently looking at
     const { viewMode, date, weekStart, monthStart } = currentViewRef.current;

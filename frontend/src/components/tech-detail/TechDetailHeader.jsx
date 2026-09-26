@@ -108,7 +108,10 @@ export default function TechDetailHeader({
 
           {/* Identity */}
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            {technician.photoUrl ? (
+            {!technician.name ? (
+              // Identity still loading (the agent page renders progressively).
+              <div className="w-10 h-10 flex-shrink-0 animate-pulse rounded-full bg-muted motion-off:animate-none" aria-hidden="true" />
+            ) : technician.photoUrl ? (
               <img
                 src={technician.photoUrl}
                 alt={technician.name}
@@ -120,7 +123,13 @@ export default function TechDetailHeader({
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="truncate text-base font-bold leading-tight text-foreground">{technician.name}</h1>
+              {technician.name ? (
+                <h1 className="truncate text-base font-bold leading-tight text-foreground">{technician.name}</h1>
+              ) : (
+                <h1 className="h-4 w-40 animate-pulse rounded bg-muted motion-off:animate-none">
+                  <span className="sr-only">Loading technician</span>
+                </h1>
+              )}
               <div className="flex items-center gap-2 text-xs text-muted-foreground/75 mt-0.5 flex-wrap">
                 {location && (
                   <span className="flex min-w-0 items-center gap-1">

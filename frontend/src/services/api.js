@@ -429,6 +429,14 @@ export const dashboardAPI = {
   },
 
   /**
+   * Light list of active technicians (identity only, no tickets) for pickers.
+   * Returns { technicians: [{ id, name, email, photoUrl, timezone, ... }] }.
+   */
+  getTechnicianList: async () => {
+    return await api.get('/dashboard/technicians');
+  },
+
+  /**
    * Per-day handled counts for the agent page's activity heatmap.
    * Returns { days: [{ date: 'YYYY-MM-DD', count }] } (non-zero days only).
    */
@@ -520,6 +528,10 @@ export const settingsAPI = {
   updateSignature: (email, data) => api.put(`/settings/signatures/${encodeURIComponent(email)}`, data),
   massApplySignatures: (data) => api.post('/settings/signatures/mass-apply', data),
   setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
+  // QA 09-25 item 6: can own tickets, not counted in team numbers.
+  setTechnicianAssignableOnly: (id, assignableOnly) => api.put(`/settings/technicians/${id}/assignable-only`, { assignableOnly }),
+  getTeamForwards: () => api.get('/settings/team-forwards'),
+  saveTeamForwards: (items) => api.put('/settings/team-forwards', { items }),
   searchDirectory: (q) => api.get('/settings/directory/search', { params: { q } }),
   createLocalAgent: (data) => api.post('/settings/technicians', data),
   updateTechnician: (id, data) => api.patch(`/settings/technicians/${id}`, data),
@@ -837,8 +849,9 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/status`, { status, ...extra });
   },
 
-  assign: async (id, technicianId) => {
-    return await api.post(`/tickets/${id}/assign`, { technicianId });
+  // extra: { handBack: { code, note } } when clearing the assignee (QA 09-25 item 3).
+  assign: async (id, technicianId, extra = {}) => {
+    return await api.post(`/tickets/${id}/assign`, { technicianId, ...extra });
   },
 
   // Reply/note bodies: plain JSON normally; multipart when files ride along.
@@ -1313,6 +1326,37 @@ export const alertCorrelationAPI = {
   activity: (days) => api.get('/alert-correlation/activity', { params: { days } }),
 };
 
+/**
+ * Knowledge + Auto-help (plans/AUTO_HELP_PLAN.md, P0 shadow mode): articles,
+ * playbooks, the waiting queue and run activity. Writes need canManage
+ * (returned by getSettings); the server refuses approve/auto modes in P0.
+ */
+export const knowledgeAPI = {
+  getSettings: () => api.get('/knowledge/settings'),
+  updateSettings: (data) => api.put('/knowledge/settings', data),
+  categories: () => api.get('/knowledge/categories'),
+  listArticles: (params = {}) => api.get('/knowledge/articles', { params }),
+  getArticle: (id) => api.get(`/knowledge/articles/${id}`),
+  createArticle: (data) => api.post('/knowledge/articles', data),
+  updateArticle: (id, data) => api.put(`/knowledge/articles/${id}`, data),
+  deleteArticle: (id) => api.delete(`/knowledge/articles/${id}`),
+  verifyArticle: (id) => api.post(`/knowledge/articles/${id}/verify`),
+  search: (q, params = {}) => api.get('/knowledge/search', { params: { ...params, q } }),
+  listPlaybooks: () => api.get('/knowledge/playbooks'),
+  getPlaybook: (id) => api.get(`/knowledge/playbooks/${id}`),
+  createPlaybook: (data) => api.post('/knowledge/playbooks', data),
+  updatePlaybook: (id, data) => api.put(`/knowledge/playbooks/${id}`, data),
+  deletePlaybook: (id) => api.delete(`/knowledge/playbooks/${id}`),
+  // Synchronous model run (≤45 s budget server-side) — long client timeout.
+  testPlaybook: (id, ticketRef) => apiLongTimeout.post(`/knowledge/playbooks/${id}/test`, { ticketRef }, { timeout: 90000 }),
+  listRuns: (params = {}) => api.get('/knowledge/runs', { params }),
+  getRun: (id) => api.get(`/knowledge/runs/${id}`),
+  reviewRun: (id, data) => api.post(`/knowledge/runs/${id}/review`, data),
+  runsSummary: (params = {}) => api.get('/knowledge/runs-summary', { params }),
+  ticketAutoHelp: (ticketId) => api.get(`/knowledge/tickets/${ticketId}/auto-help`, { _speculative: true }),
+  waiting: () => api.get('/knowledge/waiting'),
+};
+
 export const uiPreferencesAPI = {
   get: (key) => api.get(`/tickets/preferences/${encodeURIComponent(key)}`, { _speculative: true }),
   set: (key, value) => api.put(`/tickets/preferences/${encodeURIComponent(key)}`, { value }, { _speculative: true }),
@@ -1596,6 +1640,12 @@ export const calendarLeaveAPI = {
 /**
  * Assignment Pipeline API
  */
+/** Hand-back reasons (QA 09-25 item 3): the review list and per-ticket reasons. */
+export const handBacksAPI = {
+  list: async (params = {}) => await api.get('/hand-backs', { params }),
+  forTicket: async (ticketId) => await api.get(`/hand-backs/ticket/${ticketId}`),
+};
+
 export const assignmentAPI = {
   getConfig: () => api.get('/assignment/config'),
   updateConfig: (data) => api.put('/assignment/config', data),

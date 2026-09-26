@@ -1535,6 +1535,7 @@ router.post('/', requireNativeTicketing, asyncHandler(async (req, res) => {
   // (contract in ticketFormConfigService).
   const ticket = await ticketService.createTicket(req.workspaceId, body, req.ticketActor, {
     enforceRequired: true,
+    allowAssignableOnly: true,
     ...(linkRunId ? { intakeRunId: linkRunId } : {}),
   });
   res.status(201).json({ success: true, data: ticket });
@@ -1578,6 +1579,8 @@ router.post('/:id/assign', requireNativeTicketing, asyncHandler(async (req, res)
   const technicianId = req.body?.technicianId ?? null;
   const ticket = await ticketService.assignTicket(
     parseTicketId(req), req.workspaceId, technicianId, req.ticketActor,
+    // Review N1: the manual picker may choose assignable-only people.
+    { handBack: req.body?.handBack ?? null, allowAssignableOnly: true },
   );
   res.json({ success: true, data: ticket });
 }));
@@ -1588,6 +1591,7 @@ router.post('/:id/assign', requireNativeTicketing, asyncHandler(async (req, res)
 router.post('/:id/fs-update', asyncHandler(async (req, res) => {
   const ticket = await ticketService.updateFsTicket(
     parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor,
+    { allowAssignableOnly: true },
   );
   res.json({ success: true, data: ticket });
 }));

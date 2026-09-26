@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { Bold, Italic, Link2, List, ListOrdered, RemoveFormatting, Underline } from 'lucide-react';
+import { Bold, Heading2, Heading3, Italic, Link2, List, ListOrdered, Pilcrow, RemoveFormatting, Underline } from 'lucide-react';
 
 const ALLOWED = {
   ALLOWED_TAGS: [
@@ -78,8 +78,13 @@ purifier.addHook('afterSanitizeAttributes', (node) => {
   }
 });
 
-export function sanitizeRichHtml(html) {
-  return purifier.sanitize(String(html || ''), ALLOWED);
+// Knowledge articles (QA 09-25 K1): section headings are the structure
+// Auto-help splits on, so the article editor keeps h2-h4. The ticket reply
+// composer never passes `headings` and keeps the exact reply vocabulary.
+const ALLOWED_WITH_HEADINGS = { ...ALLOWED, ALLOWED_TAGS: [...ALLOWED.ALLOWED_TAGS, 'h2', 'h3', 'h4'] };
+
+export function sanitizeRichHtml(html, { headings = false } = {}) {
+  return purifier.sanitize(String(html || ''), headings ? ALLOWED_WITH_HEADINGS : ALLOWED);
 }
 
 /**
@@ -265,6 +270,8 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   className = 'border-input bg-card',
   minHeight = 170,
   onImagePaste,
+  // Article editor only: Normal / Section heading / Subheading block controls.
+  headings = false,
 }, ref) {
   const editorRef = useRef(null);
   const lastEmittedRef = useRef(null);
@@ -272,6 +279,27 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   const [isEmpty, setIsEmpty] = useState(true);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
+  const [block, setBlock] = useState('p');
+  const sanitize = (html) => sanitizeRichHtml(html, { headings });
+
+  // Which block the caret sits in, so the heading buttons show their state.
+  useEffect(() => {
+    if (!headings) return undefined;
+    const onSelection = () => {
+      const el = editorRef.current;
+      const sel = window.getSelection();
+      if (!el || !sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) return;
+      let node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      let tag = 'p';
+      while (node && node !== el) {
+        if (/^H[2-4]$/.test(node.tagName)) { tag = node.tagName.toLowerCase(); break; }
+        node = node.parentElement;
+      }
+      setBlock(tag);
+    };
+    document.addEventListener('selectionchange', onSelection);
+    return () => document.removeEventListener('selectionchange', onSelection);
+  }, [headings]);
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
@@ -282,7 +310,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     if (value === lastEmittedRef.current) return;
     const el = editorRef.current;
     if (!el) return;
-    const html = /<[a-z][\s\S]*>/i.test(value) ? sanitizeRichHtml(value) : textToHtml(value);
+    const html = /<[a-z][\s\S]*>/i.test(value) ? sanitize(value) : textToHtml(value);
     el.innerHTML = html;
     lastEmittedRef.current = value;
     setIsEmpty(!el.textContent.trim());
@@ -291,7 +319,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   const emit = () => {
     const el = editorRef.current;
     if (!el) return;
-    const html = sanitizeRichHtml(el.innerHTML);
+    const html = sanitize(el.innerHTML);
     const text = htmlToPlainText(html);
     lastEmittedRef.current = html;
     setIsEmpty(!el.textContent.trim());
@@ -302,6 +330,13 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     editorRef.current?.focus();
     document.execCommand(command, false, arg);
     emit();
+  };
+
+  // Pressing the active heading again turns the line back into a paragraph.
+  const setBlockTag = (tag) => {
+    const next = tag !== 'p' && block === tag ? 'p' : tag;
+    exec('formatBlock', `<${next}>`);
+    setBlock(next);
   };
 
   const openLink = () => {
@@ -331,10 +366,19 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   };
 
   const toolBtn = 'tp-focus-ring p-1.5 rounded-md text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15';
+  const blockOn = 'bg-muted text-foreground';
 
   return (
     <div className={`border rounded-lg transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/30 ${className}`}>
       <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-border/60 relative" role="toolbar" aria-label="Formatting">
+        {headings && (
+          <>
+            <button type="button" onClick={() => setBlockTag('p')} title="Normal text" aria-label="Normal text" aria-pressed={block === 'p'} className={`${toolBtn} ${block === 'p' ? blockOn : ''}`}><Pilcrow className="w-3.5 h-3.5" aria-hidden="true" /></button>
+            <button type="button" onClick={() => setBlockTag('h2')} title="Section heading (Auto-help reads each section on its own)" aria-label="Section heading" aria-pressed={block === 'h2'} className={`${toolBtn} ${block === 'h2' ? blockOn : ''}`}><Heading2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
+            <button type="button" onClick={() => setBlockTag('h3')} title="Subheading" aria-label="Subheading" aria-pressed={block === 'h3'} className={`${toolBtn} ${block === 'h3' ? blockOn : ''}`}><Heading3 className="w-3.5 h-3.5" aria-hidden="true" /></button>
+            <span className="w-px h-4 bg-secondary mx-1" aria-hidden="true" />
+          </>
+        )}
         <button type="button" onClick={() => exec('bold')} title="Bold (Ctrl+B)" aria-label="Bold" className={toolBtn}><Bold className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('italic')} title="Italic (Ctrl+I)" aria-label="Italic" className={toolBtn}><Italic className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('underline')} title="Underline (Ctrl+U)" aria-label="Underline" className={toolBtn}><Underline className="w-3.5 h-3.5" aria-hidden="true" /></button>
@@ -395,7 +439,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             if (images.length && onImagePaste) {
               e.preventDefault();
               // Keep any text the clipboard also carried, first.
-              const insert = htmlData ? sanitizeRichHtml(cleanPastedHtml(htmlData)) : textToHtml(textData);
+              const insert = htmlData ? sanitize(cleanPastedHtml(htmlData)) : textToHtml(textData);
               if (insert) document.execCommand('insertHTML', false, insert);
               // Stage each image and drop a lightweight reference at the caret so
               // the tech can anchor where the picture belongs in their write-up.
@@ -417,7 +461,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             if (htmlData) {
               // Embedded pictures leave the markup and become attachments.
               const { html: withoutImages, images: embedded } = extractInlineImages(cleanPastedHtml(htmlData));
-              insert = sanitizeRichHtml(withoutImages);
+              insert = sanitize(withoutImages);
               embedded.forEach((image, i) => {
                 let replacement;
                 const label = onImagePaste ? onImagePaste(inlineImageToFile(image, i)) : null;
@@ -438,7 +482,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             document.execCommand('insertHTML', false, insert);
             emit();
           }}
-          className="tp-rich-editor tp-focus-ring w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          className="tp-rich-editor tp-focus-ring w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0"
           style={{ minHeight, maxHeight: 460 }}
         />
       </div>

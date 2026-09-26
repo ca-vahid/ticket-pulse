@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2 } from 'lucide-react';
-import { dashboardAPI } from '../../services/api';
+import { dashboardAPI, handBacksAPI } from '../../services/api';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { FRESHSERVICE_DOMAIN } from './constants';
 import { TicketRefLink } from '../tickets/ticketUi';
@@ -119,7 +119,7 @@ function Owner({ name, photoUrl }) {
   );
 }
 
-export default function BouncedTab({ technician, viewMode = 'daily', selectedDate, selectedWeek, selectedMonth }) {
+export default function BouncedTab({ technician, viewMode = 'daily', selectedDate, selectedWeek, selectedMonth, onLoadingChange }) {
   const location = useLocation();
   // Return address so /tickets/:id's Back control comes back to this drill-in.
   const backState = { from: `${location.pathname}${location.search}` };
@@ -129,8 +129,39 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
   );
 
   const [rows, setRows] = useState([]);
+  // Current holders' photos, sent once per person instead of per row (QA 09-25).
+  const [holderPhotos, setHolderPhotos] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // Lets the page's load-progress bar count this request.
+  useEffect(() => {
+    onLoadingChange?.(loading);
+  }, [loading, onLoadingChange]);
+  useEffect(() => () => onLoadingChange?.(false), [onLoadingChange]);
   const [error, setError] = useState(null);
+  // Stated hand-back reasons (QA 09-25 item 3), fetched beside the bounce list.
+  const [reasons, setReasons] = useState({ byEpisode: new Map(), byTicket: new Map() });
+
+  useEffect(() => {
+    if (!technician?.id) return;
+    Promise.resolve().then(() => handBacksAPI.list({
+      technicianId: technician.id,
+      ...(range?.start ? { from: range.start } : {}),
+      ...(range?.end ? { to: range.end } : {}),
+    }))
+      .then((res) => {
+        const byEpisode = new Map();
+        const byTicket = new Map();
+        for (const it of res?.data?.items || []) {
+          if (it.reasonCode === 'skipped') continue;
+          if (it.episodeId && !byEpisode.has(it.episodeId)) byEpisode.set(it.episodeId, it);
+          if (it.ticket?.id && !byTicket.has(it.ticket.id)) byTicket.set(it.ticket.id, it);
+        }
+        setReasons({ byEpisode, byTicket });
+      })
+      .catch(() => setReasons({ byEpisode: new Map(), byTicket: new Map() }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [technician?.id, range?.start, range?.end]);
 
   useEffect(() => {
     if (!technician?.id) return;
@@ -145,7 +176,10 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
       : { window: '7d' };
 
     dashboardAPI.getTechnicianBounced(technician.id, opts)
-      .then((res) => setRows(res?.data?.rejections || []))
+      .then((res) => {
+        setRows(res?.data?.rejections || []);
+        setHolderPhotos(res?.data?.holderPhotos || {});
+      })
       .catch((err) => setError(err.message || 'Failed to load bounced tickets'))
       .finally(() => setLoading(false));
     // Intentionally depend on the primitive start/end — the `range` object
@@ -204,17 +238,17 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
       )}
 
       {!loading && !error && rows.length > 0 && (
-        <div className="border border-border rounded-lg overflow-hidden bg-card">
+        <div className="border border-border rounded-lg overflow-hidden bg-card md:overflow-x-auto settings-scrollbar">
           {/* Column header — pure presentational, mirrors the row grid below.
               Hidden on narrow screens (rows still read fine without it because
               each cell is intrinsically labelled by content/icon). */}
-          <div className="hidden md:grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 bg-muted/50 border-b border-border text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">
+          <div className="hidden md:grid grid-cols-[96px_minmax(160px,1fr)_64px_120px_52px_minmax(0,140px)_minmax(0,140px)_48px] items-center gap-2 px-3 py-2 bg-muted/50 border-b border-border text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">
             <span>Ticket</span>
             <span>Title</span>
             <span>Priority</span>
             <span>Category</span>
             <span>Held</span>
-            <span>Rejected</span>
+            <span>Handed back · why</span>
             <span>Now with</span>
             <span className="text-right">Actions</span>
           </div>
@@ -227,16 +261,18 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                 : null;
               const held = durationBetween(row.startedAt, row.endedAt);
               const currentHolder = ticket?.assignedTech?.name;
-              const currentHolderPhoto = ticket?.assignedTech?.photoUrl;
+              const currentHolderPhoto = ticket?.assignedTech?.photoUrl
+                || (ticket?.assignedTech?.id != null ? holderPhotos[ticket.assignedTech.id] : null);
               const isSelfPick = row.startMethod === 'self_picked';
               const priLabel = PRIORITY_LABELS[ticket?.priority];
               const priClass = PRIORITY_PILL[ticket?.priority] || 'bg-muted text-muted-foreground';
               const categoryLabel = getTicketCategoryLabel(ticket);
+              const stated = reasons.byEpisode.get(row.episodeId) || (ticket?.id ? reasons.byTicket.get(ticket.id) : null);
 
               return (
                 <div
                   key={row.episodeId}
-                  className="grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 text-[12px] hover:bg-muted/35 transition-colors"
+                  className="grid grid-cols-[96px_minmax(160px,1fr)_64px_120px_52px_minmax(0,140px)_minmax(0,140px)_48px] items-center gap-2 px-3 py-2 text-[12px] hover:bg-muted/35 transition-colors"
                 >
                   {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
                   <div className="flex flex-col gap-0.5 min-w-0">
@@ -292,8 +328,13 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                   </span>
 
                   {/* Rejected timestamp — short format */}
-                  <span className="text-muted-foreground text-[11px] truncate" title={row.endedAt ? new Date(row.endedAt).toLocaleString() : ''}>
-                    {formatWhen(row.endedAt)}
+                  <span className="min-w-0 text-muted-foreground text-[11px]" title={row.endedAt ? new Date(row.endedAt).toLocaleString() : ''}>
+                    <span className="block truncate">{formatWhen(row.endedAt)}</span>
+                    {stated && (
+                      <span className="block truncate text-foreground/85" title={stated.reasonNote ? `${stated.reasonLabel} — ${stated.reasonNote}` : stated.reasonLabel}>
+                        {stated.reasonLabel}
+                      </span>
+                    )}
                   </span>
 
                   {/* Owner — avatar + name (or "Back in queue") */}

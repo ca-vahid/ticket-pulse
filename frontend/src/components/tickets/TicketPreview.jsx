@@ -220,11 +220,12 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
     }
   };
   const cancelFsSync = () => { fsConfirm?.reject?.(new Error('cancelled')); setFsConfirm(null); setFsError(null); };
-  const fsAssign = useCallback((techId) => {
+  // extra.handBack (QA 09-25 item 3) rides the write-back so the reason is kept.
+  const fsAssign = useCallback((techId, extra = null) => {
     const tech = techId ? (meta?.technicians || []).find((t) => t.id === techId) : null;
     return requestFsSync(
       [{ field: 'Assignee', from: ticket?.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
-      { assignedTechId: techId },
+      { assignedTechId: techId, ...(extra?.handBack ? { handBack: extra.handBack } : {}) },
     );
   }, [requestFsSync, meta?.technicians, ticket?.assignedTech?.name]);
 

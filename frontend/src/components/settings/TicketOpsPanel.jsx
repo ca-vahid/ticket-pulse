@@ -8,6 +8,7 @@ import { DEFAULT_QUEUE_CARDS, QUEUE_CARD_KEYS, QUEUE_CARD_REGISTRY, normalizeQue
 import { statusDefsFromMeta } from '../tickets/statusDefs';
 import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
 import TicketStatusesSection from './TicketStatusesSection';
+import TeamForwardsSection from './TeamForwardsSection';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
@@ -2331,6 +2332,7 @@ export default function TicketOpsPanel() {
       <DefaultStatusesSection />
       <SlaSection />
       <TrustedDomainsSection />
+      <TeamForwardsSection />
       <TagsSection />
       <CategoryGroupSection />
       <MacrosSection />

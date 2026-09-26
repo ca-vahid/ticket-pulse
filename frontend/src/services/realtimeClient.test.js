@@ -420,6 +420,37 @@ describe('RealtimeClient — workspace re-key + lifecycle', () => {
     expect(h.sseHandles[0].close).toHaveBeenCalled();
   });
 
+  test('pagehide closes the stream at once; a bfcache restore reconnects and resyncs', async () => {
+    const h = makeHarness();
+    const a = makeSubscriber(h.client);
+    h.lastSse().emit('hello', { epoch: 'e1', workspaceId: 1, lastEventId: 'e1:0' });
+    window.dispatchEvent(new Event('pagehide'));
+    // No grace period: a bfcached page must not hold a connection (QA 09-25).
+    expect(h.sseHandles[0].close).toHaveBeenCalled();
+    expect(h.client.state).toBe('idle');
+
+    const show = new Event('pageshow');
+    show.persisted = true;
+    window.dispatchEvent(show);
+    expect(h.deps.openSse).toHaveBeenCalledTimes(2);
+    expect(a.record.calls.onResync.at(-1)).toMatchObject({ resync: true, reason: 'page-restore' });
+  });
+
+  test('pagehide without a pageshow (iOS backgrounding) resumes when the page is visible again', async () => {
+    const h = makeHarness();
+    const a = makeSubscriber(h.client);
+    h.lastSse().emit('hello', { epoch: 'e1', workspaceId: 1, lastEventId: 'e1:0' });
+    window.dispatchEvent(new Event('pagehide'));
+    expect(h.client.state).toBe('idle');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(h.deps.openSse).toHaveBeenCalledTimes(2);
+    expect(a.record.calls.onResync.at(-1)).toMatchObject({ resync: true, reason: 'page-restore' });
+    // A second visibility event doesn't reconnect again.
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(h.deps.openSse).toHaveBeenCalledTimes(2);
+  });
+
   test('a new subscriber inside the grace window keeps the connection alive', async () => {
     const h = makeHarness();
     const a = makeSubscriber(h.client);

@@ -44,6 +44,19 @@ function trim(text) {
 // into one classification; in-memory is fine — a lost timer just means the
 // next requester reply triggers the refresh instead.
 const pendingRefresh = new Map();
+// ticketId -> Promise. A workflow run that awaits a fresh classification and
+// the lifecycle fire-and-forget share one provider call.
+const inFlight = new Map();
+// ticketId -> ms of the last completed classification (bounded). A debounced
+// timer that fires right after an awaited refresh has nothing new to read.
+const lastRefreshedAt = new Map();
+const LAST_REFRESHED_MAX = 500;
+export const FRESH_SENTIMENT_CAP_MS = 2000;
+
+function noteRefreshed(ticketId) {
+  if (lastRefreshedAt.size >= LAST_REFRESHED_MAX) lastRefreshedAt.delete(lastRefreshedAt.keys().next().value);
+  lastRefreshedAt.set(ticketId, Date.now());
+}
 import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('sentiment.pending', () => pendingRefresh.size)).catch(() => {});
 
 class TicketSentimentService {
@@ -112,15 +125,56 @@ class TicketSentimentService {
   }
 
   /**
+   * Classify now, sharing an in-flight call for the same ticket, and wait at
+   * most `capMs` for it (QA 09-25 #5: workflows on ticket.created and
+   * ticket.reply_received read the requester's CURRENT mood, not the one
+   * from before this message). On timeout / failure / nothing to classify
+   * the caller gets `fallback` (the previous stored value); the call keeps
+   * running in the background and still persists its answer.
+   */
+  async refreshWithCap(ticketId, workspaceId, { capMs = FRESH_SENTIMENT_CAP_MS, fallback = null } = {}) {
+    const id = Number(ticketId);
+    if (!id || !workspaceId) return fallback;
+    const pending = pendingRefresh.get(id);
+    if (pending) {
+      clearTimeout(pending);
+      pendingRefresh.delete(id);
+    }
+    let promise = inFlight.get(id);
+    if (!promise) {
+      promise = this.refreshSentiment(id, workspaceId)
+        .then((value) => { noteRefreshed(id); return value; })
+        .finally(() => inFlight.delete(id));
+      inFlight.set(id, promise);
+    }
+    let timer = null;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(undefined), Math.max(0, Number(capMs) || 0));
+      timer.unref?.();
+    });
+    try {
+      const value = await Promise.race([promise.catch(() => null), timeout]);
+      return value || fallback;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * Debounced refresh — call on every new requester reply; a burst collapses
    * into one classification a minute later.
    */
   scheduleRefresh(ticketId, workspaceId, delayMs = REFRESH_DEBOUNCE_MS) {
     const existing = pendingRefresh.get(ticketId);
     if (existing) clearTimeout(existing);
+    const scheduledAt = Date.now();
     const timer = setTimeout(() => {
       pendingRefresh.delete(ticketId);
-      this.refreshSentiment(ticketId, workspaceId).catch(() => {});
+      // An awaited refresh (workflow run) already read these messages.
+      if (inFlight.has(Number(ticketId)) || (lastRefreshedAt.get(Number(ticketId)) || 0) >= scheduledAt) return;
+      this.refreshSentiment(ticketId, workspaceId)
+        .then(() => noteRefreshed(Number(ticketId)))
+        .catch(() => {});
     }, delayMs);
     timer.unref?.();
     pendingRefresh.set(ticketId, timer);
@@ -130,6 +184,8 @@ class TicketSentimentService {
   _clearPending() {
     for (const timer of pendingRefresh.values()) clearTimeout(timer);
     pendingRefresh.clear();
+    inFlight.clear();
+    lastRefreshedAt.clear();
   }
 
   _pendingCount() {

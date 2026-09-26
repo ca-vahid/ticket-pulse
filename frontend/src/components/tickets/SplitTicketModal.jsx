@@ -362,6 +362,7 @@ export default function SplitTicketModal({ ticket, onClose, onSplit, technicians
             <span className="text-xs font-medium text-muted-foreground/75 flex-shrink-0">Assign to</span>
             <AssigneePicker
               ticketId={null}
+              askHandBack={false}
               value={assignedTechId}
               technicians={technicians}
               size="sm"

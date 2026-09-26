@@ -16,6 +16,12 @@ const prismaMock = {
   },
   ticketAssignmentEpisode: {
     count: jest.fn().mockResolvedValue(1),
+    findFirst: jest.fn().mockResolvedValue({ id: 555 }),
+  },
+  // QA 09-25 item 3: FS-born hand-back rows waiting for sync.
+  ticketHandBack: {
+    findFirst: jest.fn().mockResolvedValue(null),
+    update: jest.fn().mockResolvedValue({}),
   },
   technician: {
     findUnique: jest.fn().mockResolvedValue(null),
@@ -188,5 +194,32 @@ describe('_handleTicketRebound event dedupe', () => {
       where: { ticketId: TICKET.id, endMethod: 'rejected' },
     });
     expect(runPipelineMock.mock.calls[0][5].reboundFrom.reboundCount).toBe(2);
+  });
+});
+
+describe('_handleTicketRebound — FS-born hand-back reason (QA 09-25 item 3)', () => {
+  test('a pending TP-side reason within 15 min rides the rebound run and gets the episode + run attached', async () => {
+    prismaMock.ticketHandBack.findFirst.mockResolvedValueOnce({
+      id: 71, ticketId: TICKET.id, technicianId: 42, reasonCode: 'competency', reasonNote: 'Never touched SAP',
+      actorName: 'Isabella Jimenez', origin: 'freshservice', episodeId: null,
+    });
+    runPipelineMock.mockResolvedValueOnce({ id: 4242 });
+
+    await syncService._handleTicketRebound(TICKET, null, rejectionAnalysis(), 2);
+
+    const where = prismaMock.ticketHandBack.findFirst.mock.calls[0][0].where;
+    expect(where).toEqual(expect.objectContaining({ ticketId: TICKET.id, origin: 'freshservice', episodeId: null, technicianId: 42 }));
+    expect(where.createdAt.gte.getTime()).toBe(new Date(REJECTED_AT).getTime() - 15 * 60 * 1000);
+    const opts = runPipelineMock.mock.calls[0][5];
+    expect(opts.reboundFrom.reason).toEqual({ code: 'competency', label: 'Competency mismatch', note: 'Never touched SAP' });
+    expect(prismaMock.ticketHandBack.update).toHaveBeenCalledWith({ where: { id: 71 }, data: { episodeId: 555 } });
+    await new Promise((r) => setImmediate(r));
+    expect(prismaMock.ticketHandBack.update).toHaveBeenCalledWith({ where: { id: 71 }, data: { pipelineRunId: 4242 } });
+  });
+
+  test('no pending row → reboundFrom carries no reason (unchanged behaviour)', async () => {
+    await syncService._handleTicketRebound(TICKET, null, rejectionAnalysis(), 2);
+    expect(runPipelineMock.mock.calls[0][5].reboundFrom.reason).toBeUndefined();
+    expect(prismaMock.ticketHandBack.update).not.toHaveBeenCalled();
   });
 });

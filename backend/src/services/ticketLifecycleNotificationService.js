@@ -509,12 +509,29 @@ async function dispatchLifecycleWebhook(eventContext) {
 }
 
 // A new requester reply may shift their tone — re-classify sentiment
-// (debounced; gap plan 2 P5.1). Fire-and-forget like the webhook dispatch.
-async function maybeRefreshSentiment(eventContext) {
-  if (eventContext.event?.type !== 'ticket.reply_received') return;
+// (debounced; gap plan 2 P5.1). A new ticket is classified too (QA 09-25 #5)
+// on a short delay: a workflow that needs the value (AI e-mail, sentiment
+// condition) awaits a fresh classification itself and cancels this timer.
+// Fire-and-forget like the webhook dispatch.
+const NEW_TICKET_SENTIMENT_DELAY_MS = 5_000;
+export async function maybeRefreshSentiment(eventContext) {
+  const type = eventContext.event?.type;
+  if (type !== 'ticket.reply_received' && type !== 'ticket.created') return;
+  if (type === 'ticket.created' && eventContext.ticket?.isNoise === true) return;
   try {
+    // Review N2: classify a NEW ticket only when an enabled ticket.created
+    // workflow reads sentiment or writes with AI (cached; error = no).
+    if (type === 'ticket.created') {
+      const needed = await Promise.resolve(notificationWorkflowEngine.workspaceHasSentimentReader?.(eventContext.workspace?.id, 'ticket.created'))
+        .catch(() => false);
+      if (needed !== true) return;
+    }
     const { default: ticketSentimentService } = await import('./ticketSentimentService.js');
-    ticketSentimentService.scheduleRefresh(eventContext.ticket?.id, eventContext.workspace?.id);
+    if (type === 'ticket.created') {
+      ticketSentimentService.scheduleRefresh(eventContext.ticket?.id, eventContext.workspace?.id, NEW_TICKET_SENTIMENT_DELAY_MS);
+    } else {
+      ticketSentimentService.scheduleRefresh(eventContext.ticket?.id, eventContext.workspace?.id);
+    }
   } catch { /* sentiment is an annotation, never a pipeline step */ }
 }
 
@@ -736,6 +753,31 @@ export async function restoreRedactedEventContext(storedContext, hints = {}) {
   };
 }
 
+/**
+ * Every status writer that reports here (native edits, FS sync, mirror-back,
+ * pipeline close/assign) feeds the reopen counter. ticketReopenService applies
+ * the 10-minute flip rule; this never throws and never blocks the caller on a
+ * bookkeeping failure.
+ */
+async function trackReopenState(existingTicket, upsertedTicket) {
+  try {
+    const from = String(existingTicket?.status || '').trim();
+    const to = String(upsertedTicket?.status || '').trim();
+    const ticketId = asNumber(upsertedTicket?.id) || asNumber(existingTicket?.id);
+    if (!existingTicket || !from || !to || from === to || !ticketId) return;
+    const { default: ticketReopenService } = await import('./ticketReopenService.js');
+    await ticketReopenService.observeStatusTransition({
+      ticketId,
+      workspaceId: asNumber(upsertedTicket?.workspaceId) || asNumber(existingTicket?.workspaceId),
+      from,
+      to,
+      at: new Date(),
+    });
+  } catch (err) {
+    logger.warn(`Reopen tracking skipped (non-fatal): ${err.message}`);
+  }
+}
+
 export async function emitTicketLifecycleNotifications({
   existingTicket,
   upsertedTicket,
@@ -753,6 +795,9 @@ export async function emitTicketLifecycleNotifications({
   // status-family events and on the webhook payload.
   actor = null,
 } = {}) {
+  // Re-opened bookkeeping (QA 09-25 #1) runs for EVERY observed status move —
+  // before the workflow gate, so syncs that don't run workflows still count.
+  await trackReopenState(existingTicket, upsertedTicket);
   if (!allowNotificationWorkflows) {
     return { status: 'skipped', reason: 'Notification workflows disabled for this ingest path' };
   }
@@ -875,6 +920,14 @@ export async function emitTicketEvent(eventType, ticketId, {
     import('./ticketParkService.js')
       .then(({ default: ticketParkService }) => ticketParkService.afterRequesterReply(ticket.id, ticket.workspaceId))
       .catch((err) => logger.warn(`Park wake on requester reply skipped for ticket ${ticket.id}: ${err.message}`));
+  }
+  // Auto-help (plans/AUTO_HELP_PLAN.md): the FIRST categorization, from the
+  // AI pipeline or a person, may start a playbook run. Fire-and-forget; the
+  // runner checks the workspace switch (off by default) before doing work.
+  if (eventType === 'ticket.categorized' && extra?.first === true) {
+    import('./autoHelpRunner.js')
+      .then(({ default: autoHelpRunner }) => autoHelpRunner.onTicketCategorized(ticket.id, ticket.workspaceId, extra))
+      .catch((err) => logger.warn(`Auto-help trigger skipped for ticket ${ticket.id}: ${err.message}`));
   }
 
   try {

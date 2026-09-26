@@ -1,5 +1,6 @@
 // eslint-disable-next-line no-unused-vars
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import FancySelect from '../common/FancySelect';
 import { Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, MiniMap, Position, ReactFlow, getSmoothStepPath } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -468,6 +469,13 @@ const DEFAULT_LLM_OUTPUT_SCHEMA = {
       items: { type: 'string' },
     },
   },
+};
+
+// Run audit wording for promptPolicy.toneOverride.reason (QA 09-25 #5).
+export const TONE_OVERRIDE_REASON_TEXT = {
+  straight_talk_list: 'on the Straight-Talk List',
+  frustrated: 'requester seemed frustrated',
+  workspace_default: 'workspace default voice is Professional',
 };
 
 const DEFAULT_REQUESTER_GUARDRAILS = {
@@ -3231,6 +3239,11 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
                   Timing claims<br /><strong>{timingGuardStatus}</strong>
                 </div>
               </div>
+            )}
+            {promptPolicy.toneOverride?.reason && (
+              <p className="mt-2 text-xs text-foreground/85" data-testid="llm-tone-override">
+                Professional tone used — {TONE_OVERRIDE_REASON_TEXT[promptPolicy.toneOverride.reason] || promptPolicy.toneOverride.reason}
+              </p>
             )}
             {llm.tokenDiagnostics && (
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
@@ -10809,95 +10822,105 @@ export default function NotificationWorkflowsPanel({
                   </div>
                 ))}
               </div>
-              <div className="rounded-md border border-border bg-muted/50 px-3 py-3 text-sm">
-                <div className="mb-2 flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Requester guardrails</div>
-                    <div className="mt-1 text-xs leading-4 text-muted-foreground">
-                      Policy findings are tagged in audit by tier. Relaxed tone is allowed by default; factual, privacy, contact, and internal leaks still stay protected.
+              {/* Voice (QA 09-25 #5): one select; the model is told the voice and
+                  the guard follows it. Straight-Talk List / frustrated
+                  requesters override it to Professional at run time. */}
+              <div className="space-y-1.5" data-testid="llm-voice-block">
+                <span className="block text-xs font-medium uppercase text-muted-foreground">Voice</span>
+                <FancySelect
+                  value={requesterGuardrails.toneMode || 'friendly'}
+                  onChange={(value) => updateRequesterGuardrail('toneMode', value)}
+                  aria-label="Voice"
+                  data-testid={`llm-voice-${selectedNode.id}`}
+                  options={[
+                    { value: 'friendly', label: 'Friendly', hint: 'Warm and plain' },
+                    { value: 'playful', label: 'Playful', hint: 'Light touch of personality' },
+                    { value: 'professional', label: 'Professional', hint: 'Strictly business' },
+                    ...(requesterGuardrails.toneMode === 'custom' ? [{ value: 'custom', label: 'Custom prompt (legacy)' }] : []),
+                  ]}
+                />
+                <p className="text-xs leading-4 text-muted-foreground">
+                  Switches to professional automatically for people on the Straight-Talk List and for frustrated requesters
+                  {' '}(<a href="/settings#tone-of-voice" className="tp-focus-ring rounded text-primary hover:underline">Settings → Tone of voice</a>).
+                </p>
+                <details className="rounded-md border border-border bg-muted/50">
+                  <summary className="tp-focus-ring cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground">Advanced — requester guardrails</summary>
+                  <div className="px-3 pb-3 pt-1 text-sm">
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Requester guardrails</div>
+                        <div className="mt-1 text-xs leading-4 text-muted-foreground">
+                          Policy findings are tagged in audit by tier. Relaxed tone is allowed by default; factual, privacy, contact, and internal leaks still stay protected.
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-semibold text-foreground/85">
+                        <input
+                          type="checkbox"
+                          checked={requesterGuardrails.disableInPreview === true || requesterGuardrails.enabled === false}
+                          onChange={(event) => updateNodeData({
+                            requesterGuardrails: {
+                              ...requesterGuardrails,
+                              enabled: true,
+                              disableInPreview: event.target.checked,
+                            },
+                          })}
+                          className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                        />
+                        Disable in preview
+                      </label>
+                    </div>
+                    <div className="mb-2 rounded-md border border-border bg-card px-3 py-2 text-xs leading-4 text-muted-foreground">
+                      Preview disable affects preview/manual testing only. Live and mock runs still record the policy tier, action taken, and rule IDs in audit.
+                    </div>
+                    <div className="mb-2 grid gap-2 md:grid-cols-3">
+                      {[
+                        ['hardBlocks', 'Hard block', 'Privacy, phone, internal, provider, audit, and unsafe HTML leaks.'],
+                        ['autoRepair', 'Auto repair', 'Generated email-address leaks plus unsupported timing, outage, similar-report, and citation issues.'],
+                        ['auditOnly', 'Audit only', 'Emoji, playful metaphors, and harmless personality markers.'],
+                      ].map(([field, label, description]) => (
+                        <label key={field} className="flex min-w-0 items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-foreground/85">
+                          <input
+                            type="checkbox"
+                            checked={requesterGuardrails[field] !== false}
+                            onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
+                            className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                          />
+                          <span>
+                            <span className="block font-medium text-foreground">{label}</span>
+                            <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{description}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {[
+                        ['internalReferences', 'Internal references', 'Blocks tool names, provider/model plumbing, audit IDs, and private/internal notes.'],
+                        ['outageClaims', 'Outage/similar wording', 'Repairs unsupported outage and multiple-similar-report wording unless evidence allows it.'],
+                        ['timingClaims', 'Timing claims', 'Repairs unsupported response or resolution-time promises unless SLA due-by or qualified historical evidence supports them.'],
+                        ['tone', 'Tone findings', 'Friendly and playful tone is audit-only by default; Professional tone repairs style markers.'],
+                      ].map(([field, label, description]) => (
+                        <label
+                          key={field}
+                          className={cls(
+                            'flex min-w-0 items-start gap-2 rounded-md border px-3 py-2',
+                            'border-border bg-card text-foreground/85',
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={requesterGuardrails[field] !== false}
+                            onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
+                            className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                          />
+                          <span>
+                            <span className="block font-medium text-foreground">{label}</span>
+                            <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{description}</span>
+                          </span>
+                        </label>
+                      ))}
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-xs font-semibold text-foreground/85">
-                    <input
-                      type="checkbox"
-                      checked={requesterGuardrails.disableInPreview === true || requesterGuardrails.enabled === false}
-                      onChange={(event) => updateNodeData({
-                        requesterGuardrails: {
-                          ...requesterGuardrails,
-                          enabled: true,
-                          disableInPreview: event.target.checked,
-                        },
-                      })}
-                      className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
-                    />
-                    Disable in preview
-                  </label>
-                </div>
-                <div className="mb-2 grid gap-2 md:grid-cols-2">
-                  <label className="text-xs font-medium uppercase text-muted-foreground">
-                    Tone mode
-                    <select
-                      value={requesterGuardrails.toneMode || 'friendly'}
-                      onChange={(event) => updateRequesterGuardrail('toneMode', event.target.value)}
-                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
-                    >
-                      <option value="friendly">Friendly</option>
-                      <option value="playful">Playful</option>
-                      <option value="professional">Professional</option>
-                      <option value="custom">Custom prompt</option>
-                    </select>
-                  </label>
-                  <div className="rounded-md border border-border bg-card px-3 py-2 text-xs leading-4 text-muted-foreground">
-                    Preview disable affects preview/manual testing only. Live and mock runs still record the policy tier, action taken, and rule IDs in audit.
-                  </div>
-                </div>
-                <div className="mb-2 grid gap-2 md:grid-cols-3">
-                  {[
-                    ['hardBlocks', 'Hard block', 'Privacy, phone, internal, provider, audit, and unsafe HTML leaks.'],
-                    ['autoRepair', 'Auto repair', 'Generated email-address leaks plus unsupported timing, outage, similar-report, and citation issues.'],
-                    ['auditOnly', 'Audit only', 'Emoji, playful metaphors, and harmless personality markers.'],
-                  ].map(([field, label, description]) => (
-                    <label key={field} className="flex min-w-0 items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-foreground/85">
-                      <input
-                        type="checkbox"
-                        checked={requesterGuardrails[field] !== false}
-                        onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
-                      />
-                      <span>
-                        <span className="block font-medium text-foreground">{label}</span>
-                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{description}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {[
-                    ['internalReferences', 'Internal references', 'Blocks tool names, provider/model plumbing, audit IDs, and private/internal notes.'],
-                    ['outageClaims', 'Outage/similar wording', 'Repairs unsupported outage and multiple-similar-report wording unless evidence allows it.'],
-                    ['timingClaims', 'Timing claims', 'Repairs unsupported response or resolution-time promises unless SLA due-by or qualified historical evidence supports them.'],
-                    ['tone', 'Tone findings', 'Friendly and playful tone is audit-only by default; Professional tone repairs style markers.'],
-                  ].map(([field, label, description]) => (
-                    <label
-                      key={field}
-                      className={cls(
-                        'flex min-w-0 items-start gap-2 rounded-md border px-3 py-2',
-                        'border-border bg-card text-foreground/85',
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={requesterGuardrails[field] !== false}
-                        onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
-                      />
-                      <span>
-                        <span className="block font-medium text-foreground">{label}</span>
-                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{description}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                </details>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

@@ -114,3 +114,33 @@ describe('buildUserMessage — rebound runs', () => {
     expect(briefingSection).not.toContain('Andrew');
   });
 });
+
+describe('buildUserMessage — hand-back reason (QA 09-25 item 3)', () => {
+  const rebound = {
+    previousTechName: 'Andrew Smith',
+    unassignedAt: '2026-09-25T17:00:00.000Z',
+    reboundCount: 1,
+    source: 'ticketpulse',
+  };
+
+  test('shows the reason and the location guidance', () => {
+    const msg = buildUserMessage({ ...baseArgs, reboundFrom: { ...rebound, reason: { code: 'location', label: 'Location issue', note: 'Needs on-site in Calgary' } } });
+    expect(msg).toContain('## Rebound Context');
+    expect(msg).toContain('Reason given: Location issue — "Needs on-site in Calgary"');
+    expect(msg).toMatch(/requester location/);
+  });
+
+  test('competency and capacity get their own guidance lines', () => {
+    expect(buildUserMessage({ ...baseArgs, reboundFrom: { ...rebound, reason: { code: 'competency' } } }))
+      .toMatch(/Reason given: Competency mismatch[\s\S]*category/);
+    expect(buildUserMessage({ ...baseArgs, reboundFrom: { ...rebound, reason: { code: 'capacity' } } }))
+      .toMatch(/Reason given: Capacity full[\s\S]*workload/);
+  });
+
+  test('a TP-born hand-back counts as verified context even without FS activity', () => {
+    const msg = buildUserMessage({ ...baseArgs, reboundFrom: { source: 'ticketpulse', unassignedAt: rebound.unassignedAt, reboundCount: 1 } });
+    expect(msg).toContain('## Rebound Context');
+    expect(msg).not.toContain('Reason given');
+  });
+});
+

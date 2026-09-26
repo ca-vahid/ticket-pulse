@@ -99,3 +99,64 @@ describe('requester sentiment', () => {
     });
   });
 });
+
+describe('fresh sentiment for workflow runs (QA 09-25 #5)', () => {
+  test('refreshWithCap returns the fresh value and cancels a pending debounce', async () => {
+    jest.useFakeTimers();
+    sendJsonMock.mockResolvedValue({ parsed: { sentiment: 'frustrated' } });
+    ticketSentimentService.scheduleRefresh(5, 1);
+    const value = await ticketSentimentService.refreshWithCap(5, 1, { fallback: 'neutral' });
+    expect(value).toBe('frustrated');
+    expect(ticketSentimentService._pendingCount()).toBe(0);
+    await jest.advanceTimersByTimeAsync(61_000);
+    jest.useRealTimers();
+    expect(sendJsonMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('a slow classifier falls back to the previous value after the cap', async () => {
+    sendJsonMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ parsed: { sentiment: 'positive' } }), 200)));
+    const value = await ticketSentimentService.refreshWithCap(5, 1, { capMs: 20, fallback: 'neutral' });
+    expect(value).toBe('neutral');
+  });
+
+  test('the default cap is 2 s (review B2)', async () => {
+    jest.useFakeTimers();
+    try {
+      sendJsonMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ parsed: { sentiment: 'positive' } }), 10_000)));
+      const pending = ticketSentimentService.refreshWithCap(9, 1, { fallback: 'neutral' });
+      await jest.advanceTimersByTimeAsync(2_001);
+      await expect(pending).resolves.toBe('neutral');
+      await jest.advanceTimersByTimeAsync(10_000);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('concurrent callers share one provider call', async () => {
+    sendJsonMock.mockResolvedValue({ parsed: { sentiment: 'neutral' } });
+    const [a, b] = await Promise.all([
+      ticketSentimentService.refreshWithCap(5, 1),
+      ticketSentimentService.refreshWithCap(5, 1),
+    ]);
+    expect(a).toBe('neutral');
+    expect(b).toBe('neutral');
+    expect(sendJsonMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('a debounced timer set before an awaited refresh does not classify again', async () => {
+    jest.useFakeTimers();
+    sendJsonMock.mockResolvedValue({ parsed: { sentiment: 'neutral' } });
+    ticketSentimentService.scheduleRefresh(6, 1, 5000);
+    // A second ticket-level timer re-armed while the awaited refresh runs.
+    const pending = ticketSentimentService.refreshWithCap(6, 1);
+    ticketSentimentService.scheduleRefresh(6, 1, 5000);
+    await pending;
+    await jest.advanceTimersByTimeAsync(6000);
+    jest.useRealTimers();
+    expect(sendJsonMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('requester.onStraightTalkList is a boolean condition field', () => {
+    expect(CONDITION_FIELDS['requester.onStraightTalkList']).toEqual(expect.objectContaining({ type: 'boolean', path: 'requester.onStraightTalkList' }));
+  });
+});

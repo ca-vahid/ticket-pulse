@@ -7,7 +7,7 @@ import {
 } from 'date-fns';
 import {
   BadgeCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
-  GripVertical, LayoutList, ListFilter, PauseCircle, Plus, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
+  GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
 import { statusDefsFromMeta, statusDotClass, statusNamesForBase } from './statusDefs';
@@ -477,6 +477,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
     categories.length, subcategories.length, groups.length, sources.length, tags.length, impacts.length, urgencies.length, due.length,
     origin, createdFrom || createdTo, noise, view, aiState, get('q'), approval || approvalCats.length,
+    get('reopened'), // Re-opened view (QA 09-25 #1)
+    get('parkKind'), // Auto-help waiting view
     ...cfActiveKeys, // each cf_ param counts like the URL param it is
   ].filter(Boolean).length;
 
@@ -573,6 +575,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
     { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
     { key: 'awaiting', label: 'Awaiting reply', params: { segment: 'awaiting' } },
+    // Re-opened (QA 09-25 #1): open tickets that came back from Resolved/Closed
+    // and stayed open (10-minute automation flips never count).
+    { key: 'reopened', label: 'Re-opened', params: { reopened: '1' }, icon: RotateCcw },
     { key: 'noise', label: 'Noise & spam', params: { noise: 'only', status: 'any' }, icon: VolumeX },
     { key: 'deleted', label: 'Deleted', params: { segment: 'deleted', status: 'any' }, icon: Trash2 },
     { key: 'resolved', label: 'Recently resolved', params: { segment: 'resolved' } },
@@ -580,6 +585,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     { key: 'scheduled', label: 'Scheduled', params: { view: 'scheduled' }, icon: CalendarClock },
     // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose, soonest wake first.
     { key: 'parked', label: 'Parked', params: { segment: 'parked', status: 'any', sort: 'parkedUntil', dir: 'asc' }, icon: PauseCircle },
+    // Auto-help (plans/AUTO_HELP_PLAN.md): tickets an automatic answer is
+    // waiting on (active park of kind auto_help). Empty while P0 is shadow-only.
+    { key: 'auto_help_waiting', label: 'Auto-help waiting', params: { parkKind: 'auto_help', status: 'any' }, icon: Hourglass },
   ];
   const applyView = (v) => {
     setSearchParams((prev) => {
@@ -597,7 +605,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'solution', 'parked', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }

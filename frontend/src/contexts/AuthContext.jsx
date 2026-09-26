@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { setCurrentIdentity } from '../utils/currentIdentity';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { authAPI, setAuthToken, clearAuthToken, registerAuthTokenRefresher } from '../services/api';
@@ -226,6 +227,9 @@ export function AuthProvider({ children }) {
       }
     }
   };
+
+  // Mirror the signed-in person for shared widgets (utils/currentIdentity).
+  useEffect(() => { setCurrentIdentity(user); }, [user]);
 
   const value = {
     user,

@@ -23,6 +23,9 @@ export const AI_OPERATIONS = [
   // → proposed ticket fields. Requires a vision-capable model (see
   // supportsVision / modelSupportsVision); deliberately NOT on the Haiku tier.
   'ticket_intake_extract',
+  // Auto-help (plans/AUTO_HELP_PLAN.md): playbook-grounded first answers,
+  // tool loop over knowledge articles / resolved tickets. Shadow-only in P0.
+  'auto_help',
 ];
 
 // Sonnet 5 (launched 2026-06-30) is the default; Sonnet 4.6 stays selectable

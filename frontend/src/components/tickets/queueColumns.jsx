@@ -219,7 +219,7 @@ function renderAssignee(ticket, ctx) {
             currentTech={ticket.assignedTech}
             technicians={technicians}
             ticketOrigin={ticket.origin}
-            assignFn={fsRowEditable ? ((techId) => ctx.fsAssign(ticket, techId)) : undefined}
+            assignFn={fsRowEditable ? ((techId, extra) => ctx.fsAssign(ticket, techId, extra)) : undefined}
             onAssigned={(techId) => ctx.onManualAssigned(ticket.id, techId)}
             size="sm"
             align="right"
@@ -660,11 +660,41 @@ function renderPriority(ticket, ctx) {
 // tooltip; the header repeats the precedence. No server sort: it is derived
 // per page from thread + SLA data, not stored — if a sort is ever demanded,
 // follow the `_statusRankedPage` bucket pattern in ticketService.
-export const STATE_COLUMN_TITLE = `Who acts next — Requester replied › Response due › New. Resolved, closed and paused (Pending) tickets show "—". ${QUEUE_STATE_NOTE}`;
+export const STATE_COLUMN_TITLE = `Who acts next — Requester replied › Re-opened › Response due › New. Resolved and closed tickets show "—"; a paused (Pending) ticket shows "—" too unless it was re-opened and no agent has replied since, which still reads "Re-opened". ${QUEUE_STATE_NOTE}`;
 function renderState(ticket, ctx) {
   return (
     <span className={`${ctx.cell('state')} py-1`} style={ctx.cellStyle('state')}>
       <QueueStatePill state={ticket.state} />
+    </span>
+  );
+}
+
+// Reopened column (QA 09-25 #1): how many times the ticket came back from
+// Resolved/Closed and stayed back (automation flips closed again inside 10
+// minutes never count — ticketReopenService), plus how long ago the latest
+// one was. Plain text, blank for never-reopened rows.
+export const REOPENED_COLUMN_TITLE = 'Times reopened after being resolved or closed, and when it last happened — counted whatever status the ticket moved back to, Pending included. Automatic close-reopen-close flips within 10 minutes are not counted.';
+export function reopenedLabel(ticket) {
+  const count = Number(ticket?.reopenCount) || 0;
+  if (count <= 0) return null;
+  const ago = ticket.reopenedAt ? timeAgoShort(ticket.reopenedAt) : null;
+  return ago && ago !== '—' ? `${count}× · ${ago}` : `${count}×`;
+}
+function renderReopened(ticket, ctx) {
+  const label = reopenedLabel(ticket);
+  const at = ticket.reopenedAt ? new Date(ticket.reopenedAt) : null;
+  return (
+    <span
+      className={`${ctx.cell('reopened')} ${ctx.cellPad}`}
+      style={ctx.cellStyle('reopened')}
+      title={label ? `Reopened ${ticket.reopenCount} time${ticket.reopenCount === 1 ? '' : 's'}${at && !Number.isNaN(at.getTime()) ? ` — last on ${at.toLocaleString()}` : ''}` : undefined}
+    >
+      {label ? (
+        <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+          <RotateCcw className="w-3 h-3 flex-shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+          <span className="truncate">{label}</span>
+        </span>
+      ) : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
 }
@@ -702,6 +732,8 @@ export const QUEUE_COLUMNS = [
   // cell padding — at the planned 124px it truncated to "Requester repl…" in
   // the dev-stack screenshots. Users can still drag it down to minPx.
   { key: 'state', label: 'State', defaultOn: false, sortField: null, headerTitle: STATE_COLUMN_TITLE, track: '148px', minPx: 96, render: renderState },
+  // Re-opened (QA 09-25 #1): opt-in; sorts on the latest stuck reopen, blanks last.
+  { key: 'reopened', label: 'Reopened', defaultOn: false, sortField: 'reopenedAt', headerTitle: REOPENED_COLUMN_TITLE, track: '108px', minPx: 80, render: renderReopened },
   { key: 'due', label: 'Due', defaultOn: true, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '88px', minPx: 70, mdEssential: true, render: renderDue },
   { key: 'dueDate', label: 'Due date', defaultOn: false, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '132px', minPx: 104, render: renderDueDate },
   { key: 'lastActivity', label: 'Updated', defaultOn: true, sortField: 'updatedAt', track: '74px', minPx: 60, headerClass: 'justify-end', render: renderLastActivity },
@@ -1104,7 +1136,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
             {coarsePointer ? 'Use the arrows to reorder' : 'Drag a row to reorder'} · applies on large screens (smaller screens keep the essentials)
           </p>
-          <ul className="max-h-72 overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
+          <ul className="max-h-[min(60vh,26rem)] overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
             {order.map((key) => {
               const col = QUEUE_COLUMN_MAP.get(key);
               if (!col) return null;

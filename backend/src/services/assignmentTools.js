@@ -1555,6 +1555,19 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
 
   let reasonEntriesByTicket = new Map();
   const rejectionTicketIds = Array.from(new Set(episodes.map((episode) => episode.ticketId)));
+  // Reasons the agents actually gave in Ticket Pulse (QA 09-25 item 3) — used
+  // before the note-text guess below. Degrades to none on any failure.
+  let storedHandBacks = new Map();
+  if (rejectionTicketIds.length) {
+    try {
+      const { default: ticketHandBackService } = await import('./ticketHandBackService.js');
+      storedHandBacks = await ticketHandBackService.latestByTicketTech(workspaceId, {
+        ticketIds: rejectionTicketIds, technicianIds: candidateIds, since,
+      });
+    } catch (error) {
+      logger.debug('Risk signal hand-back lookup failed', { workspaceId, ticketId, error: error.message });
+    }
+  }
   if (rejectionTicketIds.length) {
     try {
       const entries = await prisma.ticketThreadEntry.findMany({
@@ -1598,13 +1611,26 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     const sameSubcategoryEpisodes = classificationMatches.filter((row) => row.sameSubcategory);
     const sameCategoryEpisodes = classificationMatches.filter((row) => row.sameCategory || row.sameLegacyCategory);
     const recentReasons = [];
+    const recentHandBackReasons = [];
+    let storedCapacityReason = null;
     for (const episode of techEpisodes) {
-      const reason = findRiskReasonForEpisode(episode, reasonEntriesByTicket);
+      const stored = storedHandBacks.get(`${episode.ticketId}:${episode.technicianId}`);
+      let reason = null;
+      if (stored && stored.reasonCode && stored.reasonCode !== 'skipped') {
+        reason = `Handed back: ${stored.reasonLabel || stored.reasonCode}${stored.reasonNote ? ` — ${truncateText(stored.reasonNote, 140)}` : ''}`;
+        if (recentHandBackReasons.length < 3) {
+          recentHandBackReasons.push({ ticketId: episode.ticketId, code: stored.reasonCode, label: stored.reasonLabel, note: stored.reasonNote || null });
+        }
+        const sameDay = episode.endedAt && episode.endedAt >= todayStart && episode.endedAt <= todayEnd;
+        if (stored.reasonCode === 'capacity' && sameDay && !storedCapacityReason) storedCapacityReason = reason;
+      } else {
+        reason = findRiskReasonForEpisode(episode, reasonEntriesByTicket);
+      }
       if (reason && !recentReasons.includes(reason)) recentReasons.push(reason);
       if (recentReasons.length >= 3) break;
     }
 
-    const busyReason = recentReasons.find((reason) => RISK_REASON_PATTERN.test(reason));
+    const busyReason = storedCapacityReason || recentReasons.find((reason) => RISK_REASON_PATTERN.test(reason));
     const techLeaves = leaveMap.get(tech.id) || [];
     const fullDayOff = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'OFF');
     const fullDayWfh = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'WFH');
@@ -1645,6 +1671,9 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
       sameSubcategoryRejectedCount: sameSubcategoryEpisodes.length,
       lastRejectedAt: techEpisodes[0]?.endedAt?.toISOString?.() || null,
       recentRejectionReasons: recentReasons,
+      // Stated reasons (location | capacity | competency | other) — preferred
+      // over the note-text guesses in recentRejectionReasons.
+      recentHandBackReasons,
       availability: {
         fullDayOff,
         fullDayWfh,

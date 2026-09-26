@@ -80,7 +80,8 @@ describe('NAV_DESTINATIONS gates', () => {
     expect(open).toEqual(['approvals', 'tickets']);
     // 'view' = admins AND the read-only observer grant (watch, don't touch).
     const viewGated = NAV_DESTINATIONS.filter((d) => d.gate === 'view').map((d) => d.id).sort();
-    expect(viewGated).toEqual(['analytics', 'dashboard', 'timeline']);
+    // Knowledge (Auto-help P0) joins the watch tier; its edits are canManage-gated server-side.
+    expect(viewGated).toEqual(['analytics', 'dashboard', 'knowledge', 'timeline']);
     // Everything operational stays admin-only.
     const manageGated = NAV_DESTINATIONS.filter((d) => d.gate === 'manage').map((d) => d.id).sort();
     expect(manageGated).toEqual(['assignments', 'map', 'workflows']);

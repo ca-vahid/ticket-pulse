@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { writeRoleHint } from '../../utils/roleHint';
-import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
+import { BarChart3, BookOpen, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
@@ -68,6 +68,18 @@ export const NAV_DESTINATIONS = [
     tile: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200',
     hover: 'hover:border-emerald-300 hover:bg-emerald-100',
     bar: 'bg-emerald-600',
+    gate: 'view',
+  },
+  {
+    // Knowledge + Auto-help (plans/AUTO_HELP_PLAN.md): articles, playbooks,
+    // waiting queue, activity. Watch tier sees it; editing is canManage-gated.
+    id: 'knowledge',
+    label: 'Knowledge',
+    path: '/knowledge',
+    Icon: BookOpen,
+    tile: 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-400/30 dark:bg-teal-500/15 dark:text-teal-200',
+    hover: 'hover:border-teal-300 hover:bg-teal-100',
+    bar: 'bg-teal-600',
     gate: 'view',
   },
   {

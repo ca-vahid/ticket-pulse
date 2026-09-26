@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Drawer } from 'vaul';
 import { Check, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
 import { PersonAvatar, TagChip, ticketCategoryLabels } from './ticketUi';
 import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
+import HandBackReasonDialog from './HandBackReasonDialog';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
+import { useCurrentIdentity } from '../../utils/currentIdentity';
+import { isSignedInAs, splitTeams } from '../../utils/handBack';
 
 /**
  * Touch-first assignment for the mobile Tickets queue: a bottom sheet (vaul)
@@ -42,6 +45,11 @@ export default function MobileAssignSheet({
   const activeMatch = technicians.find((t) => t.id === value) || null;
   const current = activeMatch || (value != null ? ticket?.assignedTech || null : null);
   const currentReadOnly = Boolean(current) && !activeMatch;
+  // Hand-back reason (QA 09-25 item 3). The sheet closes first (its drawer
+  // traps focus), so everything the write needs is captured at tap time.
+  const me = useCurrentIdentity();
+  const [handBack, setHandBack] = useState(null); // { ticketId, assignFn, onAssigned, current, requireReason, error }
+  const [handBackBusy, setHandBackBusy] = useState(false);
 
   const aiCandidates = useMemo(() => {
     if (ai?.state !== 'suggested') return [];
@@ -63,6 +71,32 @@ export default function MobileAssignSheet({
   }, [technicians, query, ticketOrigin]);
 
   const done = (techId) => { onClose?.(); onAssigned?.(techId); };
+  const { team: teamMembers, others: otherTeams } = useMemo(() => splitTeams(members), [members]);
+
+  const pickUnassigned = () => {
+    if (busy) return;
+    if (value == null) { assign(null); return; }
+    setHandBack({
+      ticketId, assignFn, onAssigned, current, requireReason: isSignedInAs(me, current), error: null,
+    });
+    onClose?.();
+  };
+
+  const submitHandBack = async (reason) => {
+    if (!handBack || handBackBusy) return;
+    const ctx = handBack;
+    setHandBackBusy(true);
+    setHandBack(null);
+    try {
+      await (ctx.assignFn ? ctx.assignFn(null, { handBack: reason }) : ticketsAPI.assign(ctx.ticketId, null, { handBack: reason }));
+      ctx.onAssigned?.(null);
+    } catch (err) {
+      if (err?.message !== 'cancelled') {
+        setHandBack({ ...ctx, error: err?.response?.data?.message || err?.message || 'Could not unassign' });
+      }
+    }
+    setHandBackBusy(false);
+  };
 
   const assign = async (techId) => {
     if (busy) return;
@@ -108,6 +142,15 @@ export default function MobileAssignSheet({
     <>
       {/* Outside the drawer portal so the toast survives the sheet closing
           right after a successful assign (the component stays mounted). */}
+      <HandBackReasonDialog
+        open={Boolean(handBack)}
+        requireReason={handBack?.requireReason !== false}
+        personName={handBack?.current?.name || null}
+        busy={handBackBusy}
+        error={handBack?.error || null}
+        onSubmit={submitHandBack}
+        onCancel={() => { if (!handBackBusy) setHandBack(null); }}
+      />
       <OverridePromptToast
         prompt={overridePrompt.prompt}
         state={overridePrompt.state}
@@ -167,7 +210,7 @@ export default function MobileAssignSheet({
                     </span>
                   </span>
                   <button
-                    onClick={() => assign(null)}
+                    onClick={pickUnassigned}
                     disabled={busy}
                     className="tp-focus-ring shrink-0 text-xs font-medium text-muted-foreground px-2.5 py-2 rounded-lg hover:bg-muted disabled:opacity-60"
                   >
@@ -287,7 +330,7 @@ export default function MobileAssignSheet({
 
               <div className="pb-1">
                 <button
-                  onClick={() => assign(null)}
+                  onClick={pickUnassigned}
                   className="tp-focus-ring w-full flex items-center gap-2.5 px-2 py-2.5 rounded-lg active:bg-muted text-left"
                 >
                   <span className="h-8 w-8 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
@@ -296,20 +339,24 @@ export default function MobileAssignSheet({
                   <span className="text-sm text-muted-foreground italic flex-1">Unassigned</span>
                   {value === null && <Check className="w-4 h-4 text-blue-600 dark:text-blue-300 flex-shrink-0" aria-hidden="true" />}
                 </button>
-                {members.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => assign(t.id)}
-                    disabled={busy}
-                    className={`tp-focus-ring w-full flex items-center gap-2.5 px-2 py-2.5 rounded-lg text-left active:bg-blue-50 dark:active:bg-blue-500/15 disabled:opacity-60 ${t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
-                  >
-                    <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-8 w-8" textSize="text-[10px]" />
-                    <span className="text-sm text-foreground/85 truncate flex-1">{t.name}</span>
-                    {t.origin === 'local' && (
-                      <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
+                {[...teamMembers, ...otherTeams].map((t, i) => (
+                  <Fragment key={t.id}>
+                    {otherTeams.length > 0 && i === teamMembers.length && (
+                      <p className="px-2 pt-3 pb-1 text-[11px] font-medium text-muted-foreground">Other teams</p>
                     )}
-                    {t.id === value && <Check className="w-4 h-4 text-blue-600 dark:text-blue-300 flex-shrink-0" aria-hidden="true" />}
-                  </button>
+                    <button
+                      onClick={() => assign(t.id)}
+                      disabled={busy}
+                      className={`tp-focus-ring w-full flex items-center gap-2.5 px-2 py-2.5 rounded-lg text-left active:bg-blue-50 dark:active:bg-blue-500/15 disabled:opacity-60 ${t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
+                    >
+                      <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-8 w-8" textSize="text-[10px]" />
+                      <span className="text-sm text-foreground/85 truncate flex-1">{t.name}</span>
+                      {t.origin === 'local' && (
+                        <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
+                      )}
+                      {t.id === value && <Check className="w-4 h-4 text-blue-600 dark:text-blue-300 flex-shrink-0" aria-hidden="true" />}
+                    </button>
+                  </Fragment>
                 ))}
                 {members.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground/75">No member matches “{query}”.</p>}
               </div>

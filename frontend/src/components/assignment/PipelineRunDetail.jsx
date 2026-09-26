@@ -1631,6 +1631,10 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               {run.reboundFrom.unassignedByName && run.reboundFrom.unassignedByName !== run.reboundFrom.previousTechName && (
                 <> Unassigned by <span className="font-semibold">{run.reboundFrom.unassignedByName}</span>.</>
               )}
+              {/* QA 09-25 item 3: the reason given in Ticket Pulse, which the AI also read. */}
+              {run.reboundFrom.reason?.label && (
+                <> Reason given: <span className="font-semibold">{run.reboundFrom.reason.label}</span>{run.reboundFrom.reason.note ? <> — &ldquo;{run.reboundFrom.reason.note}&rdquo;</> : null}.</>
+              )}
             </p>
           </div>
         </div>

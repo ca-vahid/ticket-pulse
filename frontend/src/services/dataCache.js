@@ -1,5 +1,5 @@
 import { formatDateLocal } from '../utils/dateHelpers';
-import { getWorkspaceId } from './api';
+import { getGlobalExcludeNoise, getWorkspaceId } from './api';
 
 // ---------------------------------------------------------------------------
 // Cache Key Factory
@@ -16,6 +16,17 @@ function wsPrefix() {
   return wsId ? `ws${wsId}:` : '';
 }
 
+// The dashboard's "exclude noise" toggle changes what the technician endpoints
+// return (applyNoiseParam), so it must be part of their cache keys — otherwise
+// the agent page serves the other setting's numbers until the TTL runs out.
+function noiseSuffix() {
+  try {
+    return getGlobalExcludeNoise() ? ':noise=excluded' : '';
+  } catch {
+    return ''; // partial api mocks in tests
+  }
+}
+
 export const cacheKeys = {
   dailyDashboard: (tz, date) =>
     `${wsPrefix()}dashboard:daily:tz=${tz}:date=${normalizeDateParam(date)}`,
@@ -30,10 +41,10 @@ export const cacheKeys = {
     `${wsPrefix()}dashboard:monthly:tz=${tz}:monthStart=${normalizeDateParam(monthStart)}`,
 
   techDaily: (id, tz, date) =>
-    `${wsPrefix()}tech:daily:id=${id}:tz=${tz}:date=${normalizeDateParam(date)}`,
+    `${wsPrefix()}tech:daily:id=${id}:tz=${tz}:date=${normalizeDateParam(date)}${noiseSuffix()}`,
 
   techWeekly: (id, tz, weekStart) =>
-    `${wsPrefix()}tech:weekly:id=${id}:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}`,
+    `${wsPrefix()}tech:weekly:id=${id}:tz=${tz}:weekStart=${normalizeDateParam(weekStart)}${noiseSuffix()}`,
 
   techCSAT: (id) =>
     `${wsPrefix()}tech:csat:id=${id}`,

@@ -39,6 +39,7 @@ import ComposerSignatureStrip from '../components/tickets/ComposerSignatureStrip
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
+import AutoHelpRunCard from '../components/tickets/AutoHelpRunCard';
 import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
@@ -70,6 +71,7 @@ import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
 import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
 import EditTicketModal from '../components/tickets/EditTicketModal';
+import TeamForwardDialog from '../components/tickets/TeamForwardDialog';
 import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
 
@@ -1174,6 +1176,12 @@ export default function TicketDetail() {
   // mailbox the server refuses (400). meta.forwardAvailable tells us up front;
   // an older backend (no flag) keeps the old behaviour.
   const forwardAvailable = meta?.forwardAvailable !== false;
+  // "Forward to <team>" (QA 09-25 item 6): enabled teams with an address only.
+  const teamForwards = useMemo(
+    () => (Array.isArray(meta?.teamForwards) ? meta.teamForwards.filter((t) => t && t.email) : []),
+    [meta?.teamForwards],
+  );
+  const [teamForward, setTeamForward] = useState(null);
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
   // Why this ticket cannot RECEIVE a merge (Phase MB1) — null when it can.
@@ -1233,11 +1241,12 @@ export default function TicketDetail() {
     setFsConfirm(null);
     setFsError(null);
   };
-  const fsAssign = useCallback((techId) => {
+  // extra.handBack (QA 09-25 item 3) rides the write-back so the reason is kept.
+  const fsAssign = useCallback((techId, extra = null) => {
     const tech = techId ? (meta?.technicians || []).find((t) => t.id === techId) : null;
     return requestFsSync(
       [{ field: 'Assignee', from: ticket?.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
-      { assignedTechId: techId },
+      { assignedTechId: techId, ...(extra?.handBack ? { handBack: extra.handBack } : {}) },
     );
   }, [requestFsSync, meta?.technicians, ticket?.assignedTech?.name]);
 
@@ -1409,8 +1418,10 @@ export default function TicketDetail() {
   const applyChange = useCallback(async (field, fn, { undo = null, label = 'Saved' } = {}) => {
     setSavingField(field);
     lastLocalMutationRef.current = Date.now(); // own change — no self-flash
+    let ok = false;
     try {
       await fn();
+      ok = true;
       await fetchTicket({ silent: true });
       // Instant saves get an Undo (QA 07-06 #3): the toast holds the previous
       // value for ~5s and re-applies it through the same API on click.
@@ -1427,10 +1438,11 @@ export default function TicketDetail() {
         },
       } : {});
     } catch (err) {
-      showToast('red', err.response?.data?.message || err.message || 'Change failed');
+      if (!ok) showToast('red', err.response?.data?.message || err.message || 'Change failed');
     } finally {
       setSavingField(null);
     }
+    return ok; // true once the write itself landed (callers chain follow-ups on it)
   }, [fetchTicket, showToast]);
 
   // "Also for" additional requesters (Phase MR2): optimistic chip edit →
@@ -1826,23 +1838,29 @@ export default function TicketDetail() {
   // Resolution reason (Simorgh C4): a Security-category ticket moving to a
   // Resolved/Closed-base status asks why first; everything else is unchanged.
   const [resolvePrompt, setResolvePrompt] = useState(null); // { next, prev, field }
-  const changeStatusGated = (next, prev, field = 'status') => {
+  // `onDone(ok)` (optional) learns whether the status change actually landed —
+  // false when the resolution-reason prompt is cancelled or the write fails.
+  const changeStatusGated = (next, prev, field = 'status', { onDone = null } = {}) => {
     if (isTerminalStatus(statusDefs, next) && ticketNeedsResolutionReason(ticket)) {
-      setResolvePrompt({ next, prev, field });
+      setResolvePrompt({ next, prev, field, onDone });
       return;
     }
     applyChange(field, () => ticketsAPI.setStatus(ticketId, next), {
       label: `Status → ${next}`,
       undo: () => ticketsAPI.setStatus(ticketId, prev),
-    });
+    }).then((ok) => onDone?.(ok));
+  };
+  const cancelResolveReason = () => {
+    resolvePrompt?.onDone?.(false);
+    setResolvePrompt(null);
   };
   const confirmResolveReason = ({ resolutionReason, resolutionNote, verifiedSolution = false }) => {
-    const { next, prev, field } = resolvePrompt;
+    const { next, prev, field, onDone } = resolvePrompt;
     setResolvePrompt(null);
     applyChange(field, () => ticketsAPI.setStatus(ticketId, next, { resolutionReason, resolutionNote }), {
       label: `Status → ${next} · ${reasonLabel(resolutionReason)}`,
       undo: () => ticketsAPI.setStatus(ticketId, prev),
-    });
+    }).then((ok) => onDone?.(ok));
     // "Mark as a verified solution" on the resolve dialog (QA 09-22 #6): the
     // note doubles as "what fixed it".
     if (verifiedSolution) {
@@ -1852,6 +1870,11 @@ export default function TicketDetail() {
     }
   };
   const resolveTicket = () => changeStatusGated('Resolved', ticket?.status, 'resolve');
+  // Team forward's "Resolve as forwarded": resolves true only once the ticket
+  // really is resolved (reason prompt confirmed + write landed).
+  const resolveTicketConfirmed = () => new Promise((done) => {
+    changeStatusGated('Resolved', ticket?.status, 'resolve', { onDone: done });
+  });
 
   const startSubjectEdit = () => {
     setSubjectDraft(ticket.subject || '');
@@ -2307,6 +2330,18 @@ export default function TicketDetail() {
                       {savingField === 'solution' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" />}
                       {ticket.solutionVerifiedAt ? 'Verified solution' : 'Mark as solution'}
                     </button>
+                    {teamForward && (
+                      <TeamForwardDialog
+                        ticketId={ticketId}
+                        ticketRef={ticket.displayRef || null}
+                        team={teamForward}
+                        canResolve={canWrite && !ticketTerminal}
+                        onResolve={resolveTicketConfirmed}
+                        suspended={Boolean(resolvePrompt)}
+                        onSent={() => fetchTicket({ silent: true })}
+                        onClose={() => setTeamForward(null)}
+                      />
+                    )}
                     {parkDialog && (
                       <ParkDialog
                         ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
@@ -2378,6 +2413,23 @@ export default function TicketDetail() {
                             <button onClick={() => { unparkTicket(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
                               <Play className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Unpark
                             </button>
+                          )}
+                          {canConverse && forwardAvailable && teamForwards.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
+                            <>
+                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                              {teamForwards.map((tf) => (
+                                <button
+                                  key={tf.id}
+                                  onClick={() => { setTeamForward(tf); setNoiseMenuOpen(false); }}
+                                  role="menuitem"
+                                  data-testid="team-forward-item"
+                                  title={`Forward the ticket to ${tf.email}`}
+                                  className={moreItemClass}
+                                >
+                                  <Forward className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Forward to {tf.label}
+                                </button>
+                              ))}
+                            </>
                           )}
                           {ticketingOn && (
                             <>
@@ -3285,6 +3337,8 @@ export default function TicketDetail() {
                   <>
                     {/* Autofill v2: the intake run that drafted this ticket (renders nothing when there is none). */}
                     <AutofillRunCard ticketId={ticketId} showAdminLink={wsRole === 'admin'} />
+                    {/* Auto-help (shadow): the drafted first answer, when a playbook ran (renders nothing otherwise). */}
+                    <AutoHelpRunCard ticketId={ticketId} />
                     <TicketAiTab
                       ticket={ticket}
                       technicians={meta?.technicians || []}
@@ -3355,7 +3409,7 @@ export default function TicketDetail() {
                         targetStatus={resolvePrompt.next}
                         busy={savingField === resolvePrompt.field}
                         onConfirm={confirmResolveReason}
-                        onClose={() => setResolvePrompt(null)}
+                        onClose={cancelResolveReason}
                       />
                     )}
                   </SidebarField>

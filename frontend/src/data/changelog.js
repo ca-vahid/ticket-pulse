@@ -1,6 +1,19 @@
-export const APP_VERSION = '3.9.88-preview';
+export const APP_VERSION = '3.9.89-preview';
 
 export const changelog = [
+  {
+    version: '3.9.89-preview',
+    date: 'September 25, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Knowledge</strong> &mdash; a new section in the side rail. Write short how-to articles (with headings and numbered steps), and set up <em>playbooks</em>: for a category and the subcategories you tick, Auto-help drafts a first answer from those articles. In this first phase it only drafts and records (&ldquo;shadow&rdquo;): nothing is sent to anyone. Try a playbook on any ticket with <em>Test on a ticket</em>, and rate each draft in <em>Activity</em> next to what the team actually replied. Off in every workspace until an admin switches it on.' },
+      { type: 'new', html: '<strong>Why a ticket was handed back</strong> &mdash; when someone takes themselves off a ticket (ticket page, queue, preview, mobile, or bulk release) Ticket Pulse asks why: location, capacity, skills, or another reason. The AI sees the reason when it picks the next person, and <em>Assignment Review &rarr; Hand-backs</em> lists them by reason and category.' },
+      { type: 'new', html: '<strong>Re-opened tickets</strong> &mdash; a ticket that was resolved or closed and came back now shows &ldquo;Re-opened&rdquo; in the State column, and there\'s an optional <em>Reopened</em> column (how many times, how recently) and a <em>Re-opened</em> view. Quick automatic close-and-reopen flips from FreshService don\'t count.' },
+      { type: 'new', html: '<strong>Straight-Talk List and a real tone setting</strong> &mdash; <em>Settings &rarr; Tone of Voice</em>: people on the Straight-Talk List always get a plain, professional AI e-mail, with wording you can edit, and so can requesters who seem frustrated. The Voice setting on AI e-mail steps now actually tells the AI how to write (it used to only filter emoji afterwards), and the mood check happens in time for the first e-mail.' },
+      { type: 'new', html: '<strong>People from other teams can own tickets</strong> &mdash; mark someone <em>Assignable only</em> in Members: they appear under &ldquo;Other teams&rdquo; in the assignee pickers without counting in the team\'s dashboard, analytics or AI suggestions. Plus <em>Forward to &lt;team&gt;</em> on the ticket page once a team address is set in Ticket Ops.' },
+      { type: 'improved', html: '<strong>Technician pages load in a second or two</strong> &mdash; the page used to read every ticket the person ever had; it now reads only the period it shows, draws each part as it arrives, and shows a loading bar with progress. Slow requests are now logged so we can find the next one.' },
+      { type: 'fixed', html: '<strong>Office and department for people added in bulk</strong> &mdash; people who arrived through the history import or a sync were never looked up in the company directory. They are now, every half hour.' },
+    ],
+  },
   {
     version: '3.9.88-preview',
     date: 'September 25, 2026',
