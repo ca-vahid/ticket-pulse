@@ -512,6 +512,45 @@ describe('mirrorService — "Also for" additional requesters → cc_emails (Phas
     expect(saved.mirrorError).toMatch(/Anton Kuzmychev isn't in the FreshService group/);
   });
 
+  test('update_fields: a refused assignee is not re-asked on every sync, only after 6 h', async () => {
+    // 26 Sep: 19 refused round trips an hour on four Sentinel tickets after the first fix.
+    const { groupRefusalNote } = await import('../src/services/mirrorService.js');
+    const tech = { id: 77, name: 'Refused Person', freshserviceId: BigInt(5550077) };
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, id: 777, freshserviceTicketId: BigInt(90077), status: 'Open', ccEmails: [], assignedTech: tech, mirrorError: null,
+    });
+    const rejection = new Error("Validation failed (agent_group_id: Assigned agent isn't a member of the group.)");
+    rejection.freshserviceDetail = { errors: [{ field: 'agent_group_id', message: "Assigned agent isn't a member of the group." }] };
+    clientMock.updateTicket.mockReset();
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValue({ id: 90077 });
+    const t0 = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      expect(await mirrorService._processJob({ id: 71, ticketId: 777, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+      expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+
+      // Next sync: the ticket now carries the note → one call, no assignee.
+      prismaMock.ticket.findUnique.mockResolvedValue({
+        ...baseTicket, id: 777, freshserviceTicketId: BigInt(90077), status: 'Open', ccEmails: [], assignedTech: tech, mirrorError: groupRefusalNote(tech.name),
+      });
+      clientMock.updateTicket.mockClear();
+      now.mockReturnValue(t0 + 60 * 60 * 1000);
+      expect(await mirrorService._processJob({ id: 72, ticketId: 777, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+      expect(clientMock.updateTicket).toHaveBeenCalledTimes(1);
+      expect(clientMock.updateTicket.mock.calls[0][1].responder_id).toBeUndefined();
+      expect(prismaMock.ticket.update.mock.calls.at(-1)[0].data.mirrorError).toBe(groupRefusalNote(tech.name));
+
+      // After 6 h it asks again (the person may have been added to the group).
+      clientMock.updateTicket.mockClear();
+      now.mockReturnValue(t0 + 7 * 60 * 60 * 1000);
+      expect(await mirrorService._processJob({ id: 73, ticketId: 777, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+      expect(clientMock.updateTicket.mock.calls[0][1].responder_id).toBe(5550077);
+      expect(prismaMock.ticket.update.mock.calls.at(-1)[0].data.mirrorError).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   test('update_fields: any OTHER FS error still fails the job (no blind retry)', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({
       ...baseTicket, freshserviceTicketId: BigInt(90001), ccEmails: ['assistant@example.com'],

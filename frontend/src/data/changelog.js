@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.9.89-preview';
+export const APP_VERSION = '3.9.90-preview';
 
 export const changelog = [
+  {
+    version: '3.9.90-preview',
+    date: 'September 25, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Tickets FreshService won\'t assign stop retrying all night</strong> &mdash; when FreshService refuses a Ticket Pulse assignee for the group on its copy, the other changes still go through and the ticket says why. Ticket Pulse now stops asking FreshService for that same assignee on every update and tries again every six hours, so adding the person to the group fixes it by itself.' },
+      { type: 'improved', html: '<strong>Ticket count cards load faster when several tabs are open</strong> &mdash; tabs asking for the Tickets page counts at the same moment now share one calculation instead of each running seventeen counts.' },
+    ],
+  },
   {
     version: '3.9.89-preview',
     date: 'September 25, 2026',
