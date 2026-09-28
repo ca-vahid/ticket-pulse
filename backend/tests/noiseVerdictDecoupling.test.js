@@ -99,8 +99,10 @@ describe('noise verdict decoupling — the prompt instruction', () => {
 
   test('the label is read from its own field, never inferred from the array', () => {
     expect(src).toContain('recommendation?.nonActionable === true');
-    // isNoise keeps its original definition.
-    expect(src).toContain('!recommendation.recommendations || recommendation.recommendations.length === 0');
+    // isNoise keeps its original definition for ordinary runs (deriveIsNoise).
+    const rules = readFileSync(new URL('../src/services/assignmentDecisionRules.js', import.meta.url), 'utf8');
+    expect(rules).toContain('!recommendation.recommendations || recommendation.recommendations.length === 0');
+    expect(src).toContain('const isNoise = deriveIsNoise({ recommendation, isPriorityAssessmentOnly });');
   });
 
   test('priority-only and classification-only runs are left alone', () => {

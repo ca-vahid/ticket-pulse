@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import { readFileSync } from 'node:fs';
-import { resolvePipelineDecision } from '../src/services/assignmentDecisionRules.js';
+import { deriveIsNoise as deriveIsNoiseRule, resolvePipelineDecision } from '../src/services/assignmentDecisionRules.js';
 
 /**
  * Sep 10 2026 — after-hours priority passes were auto-closing live tickets.
@@ -22,17 +22,15 @@ import { resolvePipelineDecision } from '../src/services/assignmentDecisionRules
  * dismiss noise — that is deliberate and covered below) and instead stops the
  * empty array from being read as a verdict for those runs. The model must say
  * noise positively via `nonActionable`.
+ *
+ * 27 Sep 2026: even that was too much. An explicit nonActionable on a
+ * priority pass still closed real work overnight (HR notices, a Darktrace
+ * review) and skipped the business-hours run that would have routed it. A
+ * priority pass now NEVER closes; nonActionable is only a label there.
  */
 
-// Mirrors the derivation in assignmentPipelineService._executeRun.
-function deriveIsNoise(recommendation, isPriorityAssessmentOnly) {
-  const empty = Boolean(
-    recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0),
-  );
-  return isPriorityAssessmentOnly
-    ? empty && recommendation?.nonActionable === true
-    : empty;
-}
+// The derivation assignmentPipelineService._executeRun uses.
+const deriveIsNoise = (recommendation, isPriorityAssessmentOnly) => deriveIsNoiseRule({ recommendation, isPriorityAssessmentOnly });
 
 const decide = (recommendation, { isPriorityAssessmentOnly = false, ...rest } = {}) =>
   resolvePipelineDecision({
@@ -65,12 +63,24 @@ describe('the tickets that were auto-closed', () => {
   });
 });
 
-describe('after-hours passes can still dismiss noise — but only when they say so', () => {
-  test('an explicit nonActionable verdict still finalizes as noise', () => {
+describe('priority passes never dismiss noise (27 Sep 2026)', () => {
+  test('an explicit nonActionable verdict is a label, not a close', () => {
     expect(decide(
       { recommendations: [], nonActionable: true, nonActionableReason: 'Automated backup success notice' },
       { isPriorityAssessmentOnly: true },
-    )).toBe('noise_dismissed');
+    )).toBe('priority_only');
+  });
+
+  test('priority_changed and priority_assessment_only behave the same way', () => {
+    for (const triggerSource of ['priority_changed', 'priority_assessment_only']) {
+      expect(resolvePipelineDecision({
+        recommendation: { recommendations: [], nonActionable: true },
+        triggerSource,
+        isPriorityAssessmentOnly: true,
+        isNoise: deriveIsNoise({ recommendations: [], nonActionable: true }, true),
+        autoAssign: true,
+      })).toBe('priority_only');
+    }
   });
 
   test('nonActionable: false is not a noise verdict', () => {
@@ -115,7 +125,9 @@ describe('ordinary runs are completely unaffected', () => {
 describe('the source still reads the way this test assumes', () => {
   test('the derivation in the pipeline is gated on isPriorityAssessmentOnly', () => {
     const src = readFileSync(new URL('../src/services/assignmentPipelineService.js', import.meta.url), 'utf8');
-    expect(src).toMatch(/const isNoise = isPriorityAssessmentOnly/);
-    expect(src).toMatch(/emptyRecommendations && recommendation\?\.nonActionable === true/);
+    expect(src).toMatch(/const isNoise = deriveIsNoise\(\{ recommendation, isPriorityAssessmentOnly \}\)/);
+    // The priority-only prompt no longer invites an empty-array noise verdict.
+    expect(src).not.toMatch(/If the ticket is non-actionable noise\/FYI, submit an empty recommendations array/);
+    expect(src).toMatch(/This run never closes a ticket\./);
   });
 });

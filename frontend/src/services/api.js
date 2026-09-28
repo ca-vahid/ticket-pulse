@@ -1707,6 +1707,7 @@ export const assignmentAPI = {
   syncPreview: (id) => api.post(`/assignment/runs/${id}/sync-preview`),
   getRunFreshness: (id) => api.get(`/assignment/runs/${id}/freshness`),
   rerunPipeline: (id) => api.post(`/assignment/runs/${id}/rerun`),
+  reopenAndRoute: (id) => api.post(`/assignment/runs/${id}/reopen-and-route`),
   triggerPipeline: (ticketId) => api.post(`/assignment/trigger/${ticketId}`),
   priorityAssessmentBackfill: (data = {}) => api.post('/assignment/priority-assessment/backfill', data),
   syncNow: (data = {}) => apiLongTimeout.post('/assignment/sync-now', data),

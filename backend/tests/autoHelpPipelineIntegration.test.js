@@ -45,6 +45,14 @@ const emitTicketEventMock = jest.fn(async () => { order.push('event'); return {}
 const autoHelpContextMock = { pipelineContextFor: jest.fn(async () => null) };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
+// The close guard (27 Sep 2026) has its own suite; open here.
+const noiseCloseGuardMock = {
+  evaluateNoiseCloseGuard: jest.fn().mockResolvedValue({ hold: false, reason: null, message: null }),
+  parkHeldHrNotice: jest.fn().mockResolvedValue(null),
+  holdMessage: jest.fn(() => 'held'),
+  NOISE_CLOSE_HOLD_REASONS: { HR_NOTICE: 'hr_notice' },
+};
+jest.unstable_mockModule('../src/services/noiseCloseGuard.js', () => noiseCloseGuardMock);
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 jest.unstable_mockModule('@anthropic-ai/sdk', () => ({ default: jest.fn() }));
 jest.unstable_mockModule('../src/config/index.js', () => ({ default: { anthropic: { apiKey: 'test-key' } } }));
@@ -150,11 +158,11 @@ describe('W1: ticket.intake_settled from the pipeline', () => {
     expect(emitTicketEventMock.mock.calls[0][2].dedupeStamp).toBe(`intake_settled:${TICKET_ID}:provisional`);
   });
 
-  test('a night run that closes the ticket as noise settles provisionally with no full run to come', async () => {
+  test('a night run never closes as noise (27 Sep 2026): it settles provisionally, labelled, with the full run to come', async () => {
     submit({ ...NOISE, nonActionable: true });
     await pipeline._executeRun(RUN_ID, TICKET_ID, WS_ID, 'priority_assessment_after_hours', Date.now(), () => {}, null);
     await flush();
-    expect(intakeMock.onIntakeSettled.mock.calls[0][2]).toMatchObject({ provisional: true, fullRunPending: false, decision: 'noise_dismissed', nonActionable: true });
+    expect(intakeMock.onIntakeSettled.mock.calls[0][2]).toMatchObject({ provisional: true, fullRunPending: true, decision: 'priority_only', nonActionable: true });
   });
 
   test('priority re-assessments are not an intake settle', async () => {

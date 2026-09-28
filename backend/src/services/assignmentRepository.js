@@ -282,6 +282,7 @@ class AssignmentRepository {
               description: true,
               descriptionText: true,
               status: true,
+              isNoise: true,
               priority: true,
               assessedPriority: true,
               assessedPriorityId: true,

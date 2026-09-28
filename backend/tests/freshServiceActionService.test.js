@@ -170,6 +170,18 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
     expect(prismaMock.workspace.findUnique).not.toHaveBeenCalled();
   });
 
+  test('never closes a noise-dismissed ticket an agent owns (27 Sep 2026, #240367)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ assignedTechId: 9 });
+    const result = await freshServiceActionService.buildAction(run({
+      decision: 'noise_dismissed',
+      assignedTechId: null,
+      recommendation: { closureNoticeHtml: '<p>No action needed.</p>', recommendations: [] },
+    }));
+    expect(result.actions).toEqual([]);
+    expect(result.error).toBeNull();
+    expect(result.preview).toMatch(/assigned to an agent/);
+  });
+
   test('skips closing noise-dismissed tickets when workspace auto-close is disabled', async () => {
     prismaMock.assignmentConfig.findUnique.mockResolvedValue({ autoCloseNoise: false });
     prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(run({

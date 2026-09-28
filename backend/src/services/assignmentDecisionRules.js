@@ -41,6 +41,20 @@ export function isPipelineFinalDecision(decision) {
   return decision === 'auto_assigned' || decision === 'noise_dismissed' || decision === 'classified_only' || decision === 'priority_only';
 }
 
+/**
+ * Is this run's verdict "close it as noise"? An empty recommendations array is
+ * the verdict for an ordinary run. A priority-assessment-only pass (after
+ * hours, priority_assessment_only, priority_changed) never closes a ticket:
+ * it returns an empty array by design, and on 27 Sep 2026 its explicit
+ * nonActionable flag had closed real work too (#241481, #239966) and skipped
+ * the business-hours run that would have routed it. Its nonActionable flag
+ * stays a label; the business-hours run makes the call.
+ */
+export function deriveIsNoise({ recommendation, isPriorityAssessmentOnly = false } = {}) {
+  if (!recommendation || isPriorityAssessmentOnly) return false;
+  return !recommendation.recommendations || recommendation.recommendations.length === 0;
+}
+
 export function resolvePipelineDecision({
   recommendation,
   triggerSource,

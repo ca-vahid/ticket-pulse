@@ -329,6 +329,22 @@ class FreshServiceActionService {
         return { actions: [], preview: 'Skipped: run had valid recommendations — admin dismissed the pipeline run, not the ticket', error: null };
       }
 
+      // Never close a ticket an agent owns (27 Sep 2026). Read live, not from
+      // the run: the close can execute minutes after the verdict, and a rule
+      // dismissal (#240367) closed a ticket someone had already picked up.
+      const owner = await Promise.resolve()
+        .then(() => prisma.ticket.findUnique({
+          where: { id: run.ticketId },
+          select: { assignedTechId: true },
+        }))
+        .catch(() => null);
+      if (owner?.assignedTechId) {
+        logger.info('FreshService sync: skipping noise close — the ticket is assigned to an agent', {
+          runId: run.id, ticketId: run.ticketId, assignedTechId: owner.assignedTechId,
+        });
+        return { actions: [], preview: 'Skipped: the ticket is assigned to an agent — a noise verdict never closes an owned ticket', error: null };
+      }
+
       // Prefer the LLM's sanitized closure notice. Fall back to a generic line
       // (NOT the internal reasoning) for legacy runs without the new field.
       const closureNotice = run.recommendation?.closureNoticeHtml;

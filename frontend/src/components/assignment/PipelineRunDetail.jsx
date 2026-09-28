@@ -117,12 +117,14 @@ const STEP_ICONS = {
   workload: BarChart3,
   recommendation: MessageSquare,
   noise_veto: ShieldCheck,
+  noise_close_guard: ShieldCheck,
 };
 
 // Per-step icon tint. Unknown step types fall back to the neutral default,
 // so new pipeline steps render gracefully without a code change.
 const STEP_ICON_CLASSES = {
   noise_veto: 'text-emerald-600 dark:text-emerald-300',
+  noise_close_guard: 'text-emerald-600 dark:text-emerald-300',
 };
 
 const STATUS_STYLES = {
@@ -1165,6 +1167,9 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const [freshness, setFreshness] = useState(null);
   const [freshnessLoading, setFreshnessLoading] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [reopenError, setReopenError] = useState(null);
+  const reopenBannerRef = useRef(null);
   const [showReassignModal, setShowReassignModal] = useState(false);
 
   useEffect(() => {
@@ -1319,28 +1324,61 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
     setRerunning(true);
     try {
       await assignmentAPI.rerunPipeline(run.id);
-      // Point the user at the new run: poll until a run newer than this one
-      // appears (the run row is created early, well before the LLM finishes).
-      const ticketId = run.ticketId ?? ticket?.id;
-      const base = location.pathname.includes('/assignments/history') ? '/assignments/history' : '/assignments/run';
-      for (let attempt = 0; attempt < 15; attempt += 1) {
-        if (!mountedRef.current) return;
-        try {
-          const res = await assignmentAPI.getLatestRunForTicket(ticketId);
-          const latest = res?.data;
-          if (latest?.id && latest.id !== run.id) {
-            if (mountedRef.current) {
-              setRerunning(false);
-              navigate(`${base}/${latest.id}`);
-            }
-            return;
-          }
-        } catch { /* transient — keep polling */ }
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-      if (mountedRef.current) window.location.reload();
+      await followNewRun(() => setRerunning(false));
     } catch {
       if (mountedRef.current) setRerunning(false);
+    }
+  };
+
+  // Point the user at the new run: poll until a run newer than this one
+  // appears (the run row is created early, well before the LLM finishes).
+  const followNewRun = async (onFound) => {
+    const ticketId = run.ticketId ?? ticket?.id;
+    const base = location.pathname.includes('/assignments/history') ? '/assignments/history' : '/assignments/run';
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      if (!mountedRef.current) return;
+      try {
+        const res = await assignmentAPI.getLatestRunForTicket(ticketId);
+        const latest = res?.data;
+        if (latest?.id && latest.id !== run.id) {
+          if (mountedRef.current) {
+            onFound();
+            navigate(`${base}/${latest.id}`);
+          }
+          return;
+        }
+      } catch { /* transient — keep polling */ }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    if (mountedRef.current) window.location.reload();
+  };
+
+  // Reopen & route (27 Sep 2026): a ticket closed as noise that needed a
+  // person. The noise digest e-mail links here with ?reopen=1.
+  const closedAsNoise = run?.decision === 'noise_dismissed' && ticket?.isNoise === true;
+  const canReopen = closedAsNoise && (isAdmin || typeof onDecide === 'function');
+  const reopenRequested = new URLSearchParams(location.search).get('reopen') === '1';
+  // Callback ref, not an effect: this component returns early above, so no
+  // hook may live down here. Scrolls once to the banner on arrival from the digest.
+  const attachReopenBanner = (el) => {
+    if (el && reopenRequested && !reopenBannerRef.current) {
+      reopenBannerRef.current = el;
+      el.scrollIntoView?.({ block: 'center' });
+    }
+  };
+
+  const handleReopen = async () => {
+    if (reopening) return;
+    setReopening(true);
+    setReopenError(null);
+    try {
+      await assignmentAPI.reopenAndRoute(run.id);
+      await followNewRun(() => setReopening(false));
+    } catch (err) {
+      if (mountedRef.current) {
+        setReopening(false);
+        setReopenError(err?.response?.data?.message || err?.message || 'Could not reopen the ticket');
+      }
     }
   };
 
@@ -1534,6 +1572,33 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
                 {rerunning ? 'Starting new run…' : 'Re-run with current prompt'}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {closedAsNoise && (
+        <div
+          ref={attachReopenBanner}
+          className={`bg-card border rounded-lg p-3 flex items-start gap-2.5 ${reopenRequested ? 'border-primary ring-2 ring-primary/30' : 'border-border'}`}
+        >
+          <XCircle className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground">This ticket was closed as noise.</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              If it needed a person, reopen it: the ticket goes back to Open, the noise flag is cleared so no later run closes it again, and it is routed like a new ticket.
+            </p>
+            {canReopen && (
+              <button
+                type="button"
+                onClick={handleReopen}
+                disabled={reopening}
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 tp-focus-ring"
+              >
+                {reopening ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                {reopening ? 'Reopening…' : 'Reopen & route'}
+              </button>
+            )}
+            {reopenError && <p role="alert" className="text-xs text-destructive mt-2">{reopenError}</p>}
           </div>
         </div>
       )}

@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.9.95-preview';
+export const APP_VERSION = '3.9.96-preview';
 
 export const changelog = [
+  {
+    version: '3.9.96-preview',
+    date: 'September 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The AI no longer closes mail from our own people as noise</strong> &mdash; a ticket from a colleague, a forwarded or replied-to mail, or one an agent already owns is held for a person instead, with the AI&rsquo;s &ldquo;looks like noise&rdquo; kept as a label. Vendor newsletters and automated alerts still close as before.' },
+      { type: 'fixed', html: '<strong>Overnight priority checks never close a ticket</strong> &mdash; the after-hours pass used to be able to close a ticket as noise and skip the morning run that would have routed it (an HR notice and a licence request were closed this way). It now only labels; the morning run decides.' },
+      { type: 'fixed', html: '<strong>HR notices are parked, not closed</strong> &mdash; an &ldquo;On Leave&rdquo;, departure, transfer or new-hire notice that the AI thinks is noise is parked until its date instead.' },
+      { type: 'fixed', html: '<strong>A noise close never touches an assigned ticket</strong> &mdash; checked again at the moment of closing, for rules and the AI alike.' },
+      { type: 'new', html: '<strong>Daily &ldquo;closed as noise&rdquo; digest</strong> &mdash; weekday mornings, workspace admins get what the AI closed since the last digest (Monday covers the weekend), what was held back and why, and a count per noise rule. Each ticket links to its run, where <strong>Reopen &amp; route</strong> reopens it, clears the noise flag so it can&rsquo;t be closed again, and routes it like a new ticket.' },
+      { type: 'fixed', html: '<strong>Auto-help catch-up</strong> &mdash; tickets closed by a noise rule are no longer re-queued (and logged) by the catch-up sweep.' },
+    ],
+  },
   {
     version: '3.9.95-preview',
     date: 'September 27, 2026',

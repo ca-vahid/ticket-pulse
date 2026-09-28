@@ -35,6 +35,7 @@ import appConfig from '../config/index.js';
 // set ships alongside as `canonicalCategoriesEnabled` for canonical-only
 // surfaces (e.g. the Reclassify batch UI).
 import { isCanonicalCategoryWorkspace, isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
+import noiseCloseDigestService from '../services/noiseCloseDigestService.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -1397,6 +1398,17 @@ router.post('/runs/:id/rerun', requireAdmin, asyncHandler(async (req, res) => {
   assignmentPipelineService.runPipeline(run.ticketId, req.workspaceId, 'manual').catch((error) => {
     logger.error('Pipeline rerun failed', { runId, ticketId: run.ticketId, error: error.message });
   });
+}));
+
+// Reopen & route (27 Sep 2026): a ticket closed as noise that needed a
+// person. Reopens it (through FreshService for an FS-born ticket), clears the
+// noise flag - which stops any later AI run from closing it again - and
+// starts a routing run. The noise digest e-mail links here.
+router.post('/runs/:id/reopen-and-route', requireReviewer, asyncHandler(async (req, res) => {
+  const user = req.session?.user ?? req.user ?? {};
+  const actor = { name: user.name || user.email || 'Ticket Pulse user', email: user.email || null, role: user.role || null };
+  const result = await noiseCloseDigestService.reopenAndRoute(parseInt(req.params.id), req.workspaceId, actor);
+  res.json({ success: true, data: result });
 }));
 
 // Correction feedback loop: a coordinator reassigned a ticket away from an AI
