@@ -85,6 +85,16 @@ describe('ticketTaskService.create', () => {
     expect(emailMock.sendTransactionalEmail).not.toHaveBeenCalled();
   });
 
+  test('Simorgh Phase C: description keeps its line breaks (CRLF becomes LF) and over 4,000 characters is refused, never cut', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(TP_TICKET);
+    prismaMock.technician.findFirst.mockResolvedValue(AGENT_FS);
+    const crlf = String.fromCharCode(13, 10);
+    const lf = String.fromCharCode(10);
+    const task = await ticketTaskService.create(1, 1, { title: 'Remove KB entries', description: ['Why: Rostam asked.', '1. Open the console', '2. Remove both'].join(crlf) }, { email: 'c@x.io' });
+    expect(task.description).toBe(['Why: Rostam asked.', '1. Open the console', '2. Remove both'].join(lf));
+    await expect(ticketTaskService.create(1, 1, { title: 'Too long', description: 'x'.repeat(4001) }, {})).rejects.toThrow('at most 4000 characters (this one is 4001)');
+  });
+
   test('rejects an empty title', async () => {
     prismaMock.ticket.findFirst.mockResolvedValue(TP_TICKET);
     await expect(ticketTaskService.create(1, 1, { title: '   ' }, {})).rejects.toThrow(/title is required/i);

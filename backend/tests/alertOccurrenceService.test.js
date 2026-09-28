@@ -106,6 +106,30 @@ test('a more severe repeat raises priority; a milder one never lowers it', async
   expect(tickets[0].priority).toBe(3);
 });
 
+test('Simorgh Phase C: note:false counts + records the reference without a note; a reopen still writes one', async () => {
+  await svc.record(1, alert({ note: false }), ACTOR);
+  const r = await svc.record(1, alert({ note: false, reference: { incidentId: 'inc-2', alertId: 'a2' } }), ACTOR);
+  expect(r).toMatchObject({ action: 'occurrence', occurrenceCount: 2 });
+  expect(refsRows).toHaveLength(2);
+  expect(ticketServiceMock.addPrivateNote).not.toHaveBeenCalled();
+  Object.assign(tickets[0], { status: 'Resolved', resolvedAt: new Date(Date.now() - DAY) });
+  await svc.record(1, alert({ note: false, reference: { incidentId: 'inc-3', alertId: 'a3' } }), ACTOR);
+  expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledTimes(1);
+  expect(ticketServiceMock.addPrivateNote.mock.calls[0][2].bodyText).toMatch(/^Reopened/);
+});
+
+test('Simorgh Phase C: summary is stored and returned, kept when a later call sends none, and capped at 300', async () => {
+  const first = await svc.record(1, alert({ summary: '  same persistence rule,\n signed IT tooling on bgc2744 ' }), ACTOR);
+  expect(first.lastOccurrenceSummary).toBe('same persistence rule, signed IT tooling on bgc2744');
+  expect(tickets[0].lastOccurrenceSummary).toBe('same persistence rule, signed IT tooling on bgc2744');
+  const second = await svc.record(1, alert({ reference: { incidentId: 'inc-2', alertId: 'a2' } }), ACTOR);
+  expect(second.lastOccurrenceSummary).toBe('same persistence rule, signed IT tooling on bgc2744');
+  await svc.record(1, alert({ lastEvidence: 'new reason', reference: { incidentId: 'inc-3', alertId: 'a3' } }), ACTOR);
+  expect(tickets[0].lastOccurrenceSummary).toBe('new reason');
+  expect(ticketServiceMock.addPrivateNote.mock.calls.at(-1)[2].bodyText).toContain('new reason');
+  expect(() => normalizeAlertBody(alert({ summary: 'x'.repeat(301) }))).toThrow(/at most 300/);
+});
+
 test('retrying the same alert id changes nothing (duplicate)', async () => {
   await svc.record(1, alert(), ACTOR);
   const again = await svc.record(1, alert(), ACTOR);

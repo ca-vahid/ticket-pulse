@@ -77,6 +77,31 @@ function isOverdue(task) {
  * a "Notify before" due reminder, and a full row-edit popover (title,
  * description, assignee, status, due, reminder) behind the pencil.
  */
+// Simorgh Phase C (27 Sep 2026): a task can carry the "why" and the console
+// steps (plain text, up to 4,000 characters). Keep its line breaks, make links
+// clickable, and fold long ones behind "Show all".
+const URL_SPLIT = /(https?:\/\/[^\s<>"]+)/g;
+const LONG_TASK_TEXT = 280;
+export function TaskDescription({ text }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > LONG_TASK_TEXT || text.split('\n').length > 4;
+  const parts = text.split(URL_SPLIT);
+  return (
+    <span className="block text-xs text-muted-foreground" data-testid="task-description">
+      <span className={`block whitespace-pre-line break-words ${long && !open ? 'line-clamp-4' : ''}`}>
+        {parts.map((part, i) => (i % 2 === 1
+          ? <a key={i} href={part} target="_blank" rel="noreferrer" className="tp-focus-ring text-primary hover:underline" onClick={(e) => e.stopPropagation()}>{part}</a>
+          : <span key={i}>{part}</span>))}
+      </span>
+      {long && (
+        <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} className="tp-focus-ring mt-0.5 text-[11px] font-medium text-primary hover:underline">
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      )}
+    </span>
+  );
+}
+
 export default function TicketTasksTab({ ticketId, technicians = [], canWrite = false, ticketOrigin, onCountChange }) {
   const [tasks, setTasks] = useState(null);
   const [error, setError] = useState(null);
@@ -238,7 +263,7 @@ export default function TicketTasksTab({ ticketId, technicians = [], canWrite = 
                 </button>
                 <span className="min-w-0 flex-1">
                   <span className={`block text-sm font-medium ${task.status === 'done' ? 'text-muted-foreground/75 line-through' : 'text-foreground'}`}>{task.title}</span>
-                  {task.description && <span className="block text-xs text-muted-foreground">{task.description}</span>}
+                  {task.description && <TaskDescription text={task.description} />}
                   <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/75">
                     <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-semibold ${sm.cls}`}>
                       <sm.Icon className="h-3 w-3" aria-hidden="true" />{sm.label}
@@ -324,8 +349,9 @@ export default function TicketTasksTab({ ticketId, technicians = [], canWrite = 
                           id={`task-edit-desc-${task.id}`}
                           value={editDraft.description}
                           onChange={(e) => setEditDraft((d) => ({ ...d, description: e.target.value }))}
-                          rows={2}
-                          className={`${fieldInput} resize-none`}
+                          rows={4}
+                          maxLength={4000}
+                          className={`${fieldInput} resize-y`}
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-2">

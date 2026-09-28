@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.9.94-preview';
+export const APP_VERSION = '3.9.95-preview';
 
 export const changelog = [
+  {
+    version: '3.9.95-preview',
+    date: 'September 27, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Most occurrences</strong> — the queue can sort alert and rule-tuning tickets by how often they fired, and a repeated alert shows a quiet “14×” beside its subject. An optional Occurrences column shows the count and when it last fired.' },
+      { type: 'added', html: '<strong>Why it fired</strong> — an alert ticket can carry a one-line reason for its latest occurrence (sent by Simorgh), shown under the count on the ticket.' },
+      { type: 'improved', html: '<strong>Task descriptions</strong> — keep their line breaks, make links clickable and fold long ones behind “Show all”; up to 4,000 characters.' },
+      { type: 'added', html: '<strong>“Detection tuned”</strong> — a new resolution reason for security tickets closed because the detection rule was changed.' },
+    ],
+  },
   {
     version: '3.9.94-preview',
     date: 'September 26, 2026',

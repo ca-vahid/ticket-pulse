@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Columns3, CornerUpRight, GripVertical, Loader2, MoveHorizontal, RotateCcw, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Columns3, CornerUpRight, GripVertical, Loader2, MoveHorizontal, Repeat, RotateCcw, Sparkles } from 'lucide-react';
 import AssigneePicker from './AssigneePicker';
 import StatusPicker from './StatusPicker';
 import {
@@ -699,6 +699,49 @@ function renderReopened(ticket, ctx) {
   );
 }
 
+// Occurrences (Simorgh Phase C, 27 Sep 2026): how often the alert or rule
+// behind a ticket fired — tickets made by POST /alert-occurrences. Blank for
+// ordinary tickets.
+export const OCCURRENCES_COLUMN_TITLE = 'How often the monitoring alert or detection rule behind this ticket fired, and when it last did. Blank for ordinary tickets.';
+export function occurrenceTitle(ticket) {
+  const count = Number(ticket?.occurrenceCount) || 0;
+  if (count <= 0) return undefined;
+  const at = ticket.lastOccurrenceAt ? new Date(ticket.lastOccurrenceAt) : null;
+  return [
+    `Fired ${count} time${count === 1 ? '' : 's'}${at && !Number.isNaN(at.getTime()) ? ` — last on ${at.toLocaleString()}` : ''}`,
+    ticket.lastOccurrenceSummary || null,
+  ].filter(Boolean).join('\n');
+}
+export function occurrencesLabel(ticket) {
+  const count = Number(ticket?.occurrenceCount) || 0;
+  if (count <= 0) return null;
+  const ago = ticket.lastOccurrenceAt ? timeAgoShort(ticket.lastOccurrenceAt) : null;
+  return ago && ago !== '—' ? `${count}× · ${ago}` : `${count}×`;
+}
+/** Beside the subject: a quiet ×N once an alert ticket has repeated. */
+export function OccurrenceMark({ ticket }) {
+  const count = Number(ticket?.occurrenceCount) || 0;
+  if (count < 2) return null;
+  return (
+    <span className="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium tabular-nums text-amber-700 dark:text-amber-300" title={occurrenceTitle(ticket)} data-testid="occurrence-mark">
+      <Repeat className="h-3 w-3" aria-hidden="true" />{count}×
+    </span>
+  );
+}
+function renderOccurrences(ticket, ctx) {
+  const label = occurrencesLabel(ticket);
+  return (
+    <span className={`${ctx.cell('occurrences')} ${ctx.cellPad}`} style={ctx.cellStyle('occurrences')} title={occurrenceTitle(ticket)}>
+      {label ? (
+        <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+          <Repeat className="w-3 h-3 flex-shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+          <span className="truncate tabular-nums">{label}</span>
+        </span>
+      ) : <span className="text-xs text-muted-foreground/50">—</span>}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------- registry
 
 /**
@@ -734,6 +777,8 @@ export const QUEUE_COLUMNS = [
   { key: 'state', label: 'State', defaultOn: false, sortField: null, headerTitle: STATE_COLUMN_TITLE, track: '148px', minPx: 96, render: renderState },
   // Re-opened (QA 09-25 #1): opt-in; sorts on the latest stuck reopen, blanks last.
   { key: 'reopened', label: 'Reopened', defaultOn: false, sortField: 'reopenedAt', headerTitle: REOPENED_COLUMN_TITLE, track: '108px', minPx: 80, render: renderReopened },
+  // Occurrences (Simorgh Phase C): opt-in; noisiest first.
+  { key: 'occurrences', label: 'Occurrences', defaultOn: false, sortField: 'occurrences', headerTitle: OCCURRENCES_COLUMN_TITLE, track: '104px', minPx: 80, render: renderOccurrences },
   { key: 'due', label: 'Due', defaultOn: true, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '88px', minPx: 70, mdEssential: true, render: renderDue },
   { key: 'dueDate', label: 'Due date', defaultOn: false, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '132px', minPx: 104, render: renderDueDate },
   { key: 'lastActivity', label: 'Updated', defaultOn: true, sortField: 'updatedAt', track: '74px', minPx: 60, headerClass: 'justify-end', render: renderLastActivity },

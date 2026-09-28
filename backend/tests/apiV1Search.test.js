@@ -203,7 +203,7 @@ describe('POST /alert-occurrences (Sentinel, 24 Sep 2026)', () => {
     expect(res.body.action).toBe('created');
     expect(res.body.data).toMatchObject({ id: 45790, ref: 'TP-1700', occurrenceCount: 3 });
     expect(res.body.data.url).toMatch(/\/tickets\/45790$/);
-    expect(res.body.occurrence).toEqual({ count: 1, lastSeenAt: '2026-09-24T17:00:00Z' });
+    expect(res.body.occurrence).toEqual({ count: 1, lastSeenAt: '2026-09-24T17:00:00Z', summary: null });
   });
 
   test('occurrence / reopened / duplicate → 200', async () => {

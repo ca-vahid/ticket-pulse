@@ -1493,7 +1493,7 @@ class TicketService {
       };
     }
 
-    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department', 'parkedUntil', 'reopenedAt'].includes(query.sort) ? query.sort : 'createdAt';
+    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department', 'parkedUntil', 'reopenedAt', 'occurrences'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
 
     let total;
@@ -1519,6 +1519,9 @@ class TicketService {
       } else if (sortField === 'reopenedAt') {
         // Reopened column (QA 09-25 #1): latest stuck reopen; never-reopened rows trail.
         orderBy = [{ reopenedAt: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
+      } else if (sortField === 'occurrences') {
+        // Noisiest first (Simorgh Phase C); ties by the latest occurrence.
+        orderBy = [{ occurrenceCount: sortDir }, { lastOccurrenceAt: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else if (sortField === 'parkedUntil') {
         // Parked view: soonest wake first; unparked rows trail.
         orderBy = [{ parkedUntil: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];

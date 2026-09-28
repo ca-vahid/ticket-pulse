@@ -236,6 +236,17 @@ describe('GET /api/v1/tickets — cf_* filter inheritance', () => {
     expect(res.body.data.pagination.limit).toBe(100);
   });
 
+  test('sort=occurrences (Simorgh Phase C) pages by offset: page 1, no cursor', async () => {
+    ticketServiceMock.listTickets.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
+    await request(buildApp())
+      .get('/api/v1/tickets?sort=occurrences&externalRefPrefix=simorgh:tuning:')
+      .set('Authorization', 'Bearer tp_live_x')
+      .expect(200);
+    const q = ticketServiceMock.listTickets.mock.calls.at(-1)[1];
+    expect(q).toMatchObject({ sort: 'occurrences', page: 1, externalRefPrefix: 'simorgh:tuning:' });
+    expect(q.useCursor).toBeUndefined();
+  });
+
   test('cf_* query params reach listTickets untouched', async () => {
     ticketServiceMock.listTickets.mockResolvedValue({ items: [], nextCursor: null, pageSize: 25, total: 0 });
     await request(buildApp())

@@ -77,6 +77,11 @@ export function normalizeAlertBody(body = {}) {
     title: title.slice(0, 500),
     description: body.description === undefined || body.description === null ? null : String(body.description).slice(0, 100000),
     occurrenceNote: body.occurrenceNote ? String(body.occurrenceNote).slice(0, 20000) : null,
+    // Simorgh Phase C: `note: false` records the count + reference only (a
+    // tuning ticket would otherwise collect one private note per incident).
+    writeNote: body.note !== false,
+    // One line on why this occurrence happened, shown on the ticket (≤ 300).
+    summary: normalizeSummary(body.summary ?? body.lastEvidence),
     priority,
     severityLabel: severity ? severity.charAt(0).toUpperCase() + severity.slice(1) : null,
     reopenWithinDays,
@@ -92,6 +97,13 @@ export function normalizeAlertBody(body = {}) {
     tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [],
     occurredAt: reference?.occurredAt || (body.time ? new Date(body.time) : new Date()),
   };
+}
+
+function normalizeSummary(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).replace(/\s+/g, ' ').trim();
+  if (s.length > 300) throw bad('summary', 'summary must be at most 300 characters');
+  return s || null;
 }
 
 async function tagIdsFor(workspaceId, names) {
@@ -124,11 +136,12 @@ function noteBody({ kind, count, input, tz, previousPriority, raisedTo }) {
   const ref = input.reference;
   const refText = ref ? `${ref.system === 'sentinel' ? 'Sentinel incident' : `${ref.system} record`} ${ref.number ? `#${ref.number}` : ref.externalId}` : null;
   const sev = raisedTo ? `Priority raised from ${previousPriority} to ${raisedTo}.` : (input.severityLabel ? `Severity: ${input.severityLabel}.` : null);
-  const textLines = [head, refText ? `${refText}${ref.url ? ` (${ref.url})` : ''}.` : null, sev, input.occurrenceNote ? input.occurrenceNote.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : null].filter(Boolean);
+  const textLines = [head, refText ? `${refText}${ref.url ? ` (${ref.url})` : ''}.` : null, sev, input.summary || null, input.occurrenceNote ? input.occurrenceNote.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : null].filter(Boolean);
   const html = [
     `<p><strong>${esc(head)}</strong></p>`,
     refText ? `<p>${ref.url ? `<a href="${esc(ref.url)}">${esc(refText)}</a>` : esc(refText)}</p>` : '',
     sev ? `<p>${esc(sev)}</p>` : '',
+    input.summary ? `<p>${esc(input.summary)}</p>` : '',
     input.occurrenceNote ? `<div>${input.occurrenceNote}</div>` : '',
   ].join('');
   return { bodyText: textLines.join('\n'), bodyHtml: html };
@@ -215,7 +228,10 @@ class AlertOccurrenceService {
       throw err;
     }
     const now = input.occurredAt;
-    await prisma.ticket.update({ where: { id: created.id }, data: { occurrenceCount: 1, lastOccurrenceAt: now } });
+    await prisma.ticket.update({
+      where: { id: created.id },
+      data: { occurrenceCount: 1, lastOccurrenceAt: now, ...(input.summary !== undefined ? { lastOccurrenceSummary: input.summary } : {}) },
+    });
     if (input.reference) await ticketExternalReferenceService.addReferences(created.id, workspaceId, [input.reference], actor?.email || null);
     if (previous) {
       await Promise.resolve()
@@ -225,7 +241,7 @@ class AlertOccurrenceService {
         })
         .catch((err) => logger.warn(`Alert occurrence: could not link ${created.id} to earlier ticket ${previous.id}: ${err.message}`));
     }
-    return { action: 'created', ticketId: created.id, previousTicketId: previous?.id ?? null, occurrenceCount: 1, lastOccurrenceAt: now, priorityRaised: false };
+    return { action: 'created', ticketId: created.id, previousTicketId: previous?.id ?? null, occurrenceCount: 1, lastOccurrenceAt: now, lastOccurrenceSummary: input.summary ?? null, priorityRaised: false };
   }
 
   async _occurrence(workspaceId, input, actor, ticket, kind) {
@@ -238,19 +254,24 @@ class AlertOccurrenceService {
     }
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { occurrenceCount: { increment: 1 }, lastOccurrenceAt: input.occurredAt },
-      select: { occurrenceCount: true, lastOccurrenceAt: true },
+      // An occurrence without a summary keeps the last one: "why" stays readable.
+      data: { occurrenceCount: { increment: 1 }, lastOccurrenceAt: input.occurredAt, ...(input.summary !== undefined ? { lastOccurrenceSummary: input.summary } : {}) },
+      select: { occurrenceCount: true, lastOccurrenceAt: true, lastOccurrenceSummary: true },
     });
     if (input.reference) await ticketExternalReferenceService.addReferences(ticket.id, workspaceId, [input.reference], actor?.email || null);
-    const body = noteBody({
-      kind, count: updated.occurrenceCount, input, tz,
-      previousPriority: PRIORITY_LABEL[ticket.priority] || ticket.priority,
-      raisedTo: priorityRaised ? PRIORITY_LABEL[input.priority] : null,
-    });
-    await Promise.resolve()
-      .then(() => ticketService.addPrivateNote(ticket.id, workspaceId, { ...body, agent: 'Occurrence' }, actor))
-      .catch((err) => logger.warn(`Alert occurrence note failed on ticket ${ticket.id} (non-fatal): ${err.message}`));
-    return { action: kind, ticketId: ticket.id, previousTicketId: null, occurrenceCount: updated.occurrenceCount, lastOccurrenceAt: updated.lastOccurrenceAt, priorityRaised };
+    // A reopen always leaves a note — the ticket's story must say why it came
+    // back. `note: false` only quiets plain repeat occurrences.
+    if (input.writeNote || kind === 'reopened') {
+      const body = noteBody({
+        kind, count: updated.occurrenceCount, input, tz,
+        previousPriority: PRIORITY_LABEL[ticket.priority] || ticket.priority,
+        raisedTo: priorityRaised ? PRIORITY_LABEL[input.priority] : null,
+      });
+      await Promise.resolve()
+        .then(() => ticketService.addPrivateNote(ticket.id, workspaceId, { ...body, agent: 'Occurrence' }, actor))
+        .catch((err) => logger.warn(`Alert occurrence note failed on ticket ${ticket.id} (non-fatal): ${err.message}`));
+    }
+    return { action: kind, ticketId: ticket.id, previousTicketId: null, occurrenceCount: updated.occurrenceCount, lastOccurrenceAt: updated.lastOccurrenceAt, lastOccurrenceSummary: updated.lastOccurrenceSummary ?? null, priorityRaised };
   }
 }
 
