@@ -33,6 +33,7 @@ import MotionControl from './nav/MotionControl';
 import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
 import HeaderSearch from './nav/HeaderSearch';
 import ChangelogModal from './ChangelogModal';
+import { openV4Splash } from './v4/V4Splash';
 
 // Slim top bar for desktop. Primary navigation lives in the fixed left
 // SideRail (rendered here so every AppHeader page gets it); the bar itself
@@ -685,6 +686,21 @@ export default function AppHeader({
               >
                 <Settings className="h-4 w-4 text-muted-foreground" />
                 <span className="font-semibold">Settings</span>
+              </button>
+            )}
+
+            {showSettingsMenuItem && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setUserMenuOpen(false); openV4Splash(); }}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+              >
+                <img src="/brand/v4/emblem-128.png" alt="" className="h-4 w-4 object-contain" />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">Ticket Pulse 4</span>
+                  <span className="block truncate text-xs text-muted-foreground">Now with Knowledge</span>
+                </span>
               </button>
             )}
 

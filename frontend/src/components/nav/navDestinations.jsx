@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { writeRoleHint } from '../../utils/roleHint';
-import { BarChart3, BookOpen, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
+import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
-import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
+import { AssignmentNavIcon, KnowledgeNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
 
 // Single source of truth for the primary navigation destinations, shared by the
 // desktop header rail (AppHeader) and the mobile bottom tab bar (MobileTabBar).
@@ -76,7 +76,7 @@ export const NAV_DESTINATIONS = [
     id: 'knowledge',
     label: 'Knowledge',
     path: '/knowledge',
-    Icon: BookOpen,
+    Icon: KnowledgeNavIcon,
     tile: 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-400/30 dark:bg-teal-500/15 dark:text-teal-200',
     hover: 'hover:border-teal-300 hover:bg-teal-100',
     bar: 'bg-teal-600',

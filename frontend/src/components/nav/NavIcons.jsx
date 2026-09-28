@@ -71,3 +71,25 @@ export function MapNavIcon({ className = BASE }) {
     </svg>
   );
 }
+
+// Knowledge — an open book with the Ticket Pulse heartbeat across its pages
+// (v4.0.01, 27 Sep 2026: the pulse becomes knowledge).
+export function KnowledgeNavIcon({ className = BASE }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 7.2C10.2 5.7 7.6 5 4.5 5.2v12.3c3.1-.2 5.7.5 7.5 2" />
+      <path d="M12 7.2c1.8-1.5 4.4-2.2 7.5-2v12.3c-3.1-.2-5.7.5-7.5 2" />
+      <path d="M12 7.2v12.3" />
+      <path d="M2.5 12.2h3.4l1.2-2.2 1.6 4.4 1.2-2.2H12" />
+    </svg>
+  );
+}
