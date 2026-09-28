@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.96-preview';
+export const APP_VERSION = '3.9.97-preview';
 
 export const changelog = [
+  {
+    version: '3.9.97-preview',
+    date: 'September 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>FreshService notes for tickets never opened in Ticket Pulse</strong> &mdash; about 15,000 older FreshService tickets (mostly IT, 2025&ndash;2026) had never had their notes and replies fetched, and the notes backfill could not see them. They are now fetched once each, overnight and at weekends, faster while FreshService is quiet.' },
+    ],
+  },
   {
     version: '3.9.96-preview',
     date: 'September 27, 2026',

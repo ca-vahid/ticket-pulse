@@ -33,6 +33,10 @@ const DEBOUNCE_MS = 90 * 1000;
 const TICK_MS = 30 * 1000;
 const PULLS_PER_TICK = 5;
 const PULLS_PER_TICK_QUIET = 10; // 20:00–05:59 PT and weekends: the budget is free
+// Quiet hours with a short FS queue (under BUSY_QUEUE_DEPTH): ~40 pulls a minute,
+// one conversation call each - about 150 of the 240-300/min cap with the
+// regular night load (~110/min, 27 Sep 2026).
+const PULLS_PER_TICK_QUIET_OPEN = 20;
 const BUSY_QUEUE_DEPTH = 30; // above this: a trickle of one ticket a tick
 const HARD_BUSY_QUEUE_DEPTH = 150; // above this: stand down completely
 // 25 Sep 2026: "stand down at 30" stalled the backfill for hours — the regular
@@ -53,7 +57,30 @@ export const SWEEP_PHASES = [
   { workspaceId: 3, days: null },
   { workspaceId: 4, days: null },
   { workspaceId: 5, days: null },
+  // Never fetched (27 Sep 2026): ~14k IT tickets of 2025-2026 (and ~900
+  // elsewhere) had no activity rows and no conversation rows at all, so the
+  // gap test above - notes in the activity feed vs notes stored - could never
+  // see them. These phases pull any such ticket once. Noise is left out.
+  { workspaceId: 1, days: null, unseen: true },
+  { workspaceId: 2, days: null, unseen: true },
+  { workspaceId: 3, days: null, unseen: true },
+  { workspaceId: 4, days: null, unseen: true },
+  { workspaceId: 5, days: null, unseen: true },
 ];
+
+const UNSEEN_SQL = `
+  SELECT t.id, t.workspace_id AS "workspaceId"
+  FROM tickets t
+  WHERE t.workspace_id = $1
+    AND t.origin = 'freshservice'
+    AND t.freshservice_ticket_id IS NOT NULL
+    AND t.id < $2 AND t.id >= $3
+    AND t.fs_thread_pulled_at IS NULL
+    AND t.is_noise IS NOT TRUE
+    AND NOT EXISTS (SELECT 1 FROM ticket_thread_entries a WHERE a.ticket_id = t.id AND a.source = 'freshservice_activity')
+    AND NOT EXISTS (SELECT 1 FROM ticket_thread_entries c WHERE c.ticket_id = t.id AND c.source = 'freshservice_conversation')
+  ORDER BY t.id DESC
+  LIMIT 50`;
 
 const GAP_SQL = (days) => `
   SELECT t.id, t.workspace_id AS "workspaceId"
@@ -151,7 +178,7 @@ class FsThreadPullService {
       // Quiet hours (20:00–05:59 PT, weekends) open wider: the regular night
       // load keeps 30–60 queued and the budget still has room (25 Sep 2026).
       const perTick = isQuietHours(new Date(now))
-        ? (depth < 60 ? PULLS_PER_TICK_QUIET : 3)
+        ? (depth < BUSY_QUEUE_DEPTH ? PULLS_PER_TICK_QUIET_OPEN : depth < 60 ? PULLS_PER_TICK_QUIET : 3)
         : (depth < BUSY_QUEUE_DEPTH ? PULLS_PER_TICK : 1);
       if (depth >= BUSY_QUEUE_DEPTH) this.stats.trickled += 1;
       const due = [...this.queue.entries()]
@@ -184,7 +211,8 @@ class FsThreadPullService {
       if (!this.lastGapLogAt || now - this.lastGapLogAt >= 6 * 60 * 60 * 1000) {
         this.lastGapLogAt = now;
         const gap = await this.gapReport({ days: 90 }).catch(() => null);
-        if (gap) logger.info(`FS notes gap (last 90 days, tickets): ${Object.entries(gap).map(([k, v]) => `${k}=${v}`).join(' ')} · pulled ${this.stats.pulled}, queued ${this.queue.size}`);
+        const unseen = await this.unseenReport().catch(() => null);
+        if (gap) logger.info(`FS notes gap (last 90 days, tickets): ${Object.entries(gap).map(([k, v]) => `${k}=${v}`).join(' ')}${unseen ? ` · never fetched: ${Object.entries(unseen).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''} · pulled ${this.stats.pulled}, queued ${this.queue.size}`);
       }
     } finally {
       this.running = false;
@@ -272,7 +300,7 @@ class FsThreadPullService {
     // already swept are cheap to re-read (their tickets carry the marker).
     const from = Number.isFinite(Number(state.beforeId)) && state.beforeId !== null ? Number(state.beforeId) : maxId + 1;
     const to = Math.max(0, from - SWEEP_SCAN_IDS);
-    const rows = await prisma.$queryRawUnsafe(GAP_SQL(phase.days), phase.workspaceId, from, to).catch((err) => {
+    const rows = await prisma.$queryRawUnsafe(phase.unseen ? UNSEEN_SQL : GAP_SQL(phase.days), phase.workspaceId, from, to).catch((err) => {
       logger.warn(`FS thread gap sweep query failed (non-fatal): ${err.message}`);
       return null;
     });
@@ -284,7 +312,7 @@ class FsThreadPullService {
     let next = rows.length >= 50 ? Number(rows[rows.length - 1].id) : to;
     let nextPhase = state.phase;
     if (next <= 0) {
-      logger.info(`FS thread gap sweep finished phase ${state.phase % SWEEP_PHASES.length} (ws${phase.workspaceId}${phase.days ? `, last ${phase.days} days` : ''})`);
+      logger.info(`FS thread gap sweep finished phase ${state.phase % SWEEP_PHASES.length} (ws${phase.workspaceId}${phase.days ? `, last ${phase.days} days` : ''}${phase.unseen ? ', never fetched' : ''})`);
       nextPhase = (state.phase + 1) % SWEEP_PHASES.length;
       next = null;
     }
@@ -311,6 +339,20 @@ class FsThreadPullService {
                WHERE c.ticket_id = t.id AND c.source = 'freshservice_conversation')`, ws).catch(() => null);
       out[`ws${ws}`] = rows?.[0]?.n ?? null;
     }
+    return out;
+  }
+
+  /** FS-born, non-noise tickets whose thread was never fetched at all (the UNSEEN_SQL phases). */
+  async unseenReport() {
+    const rows = await prisma.$queryRawUnsafe(`
+      SELECT t.workspace_id AS ws, count(*)::int AS n FROM tickets t
+      WHERE t.workspace_id IN (1, 2, 3, 4, 5) AND t.origin = 'freshservice' AND t.freshservice_ticket_id IS NOT NULL
+        AND t.fs_thread_pulled_at IS NULL AND t.is_noise IS NOT TRUE
+        AND NOT EXISTS (SELECT 1 FROM ticket_thread_entries a WHERE a.ticket_id = t.id AND a.source = 'freshservice_activity')
+        AND NOT EXISTS (SELECT 1 FROM ticket_thread_entries c WHERE c.ticket_id = t.id AND c.source = 'freshservice_conversation')
+      GROUP BY t.workspace_id`);
+    const out = {};
+    for (const ws of [1, 2, 3, 4, 5]) out[`ws${ws}`] = Number(rows.find((r) => Number(r.ws) === ws)?.n || 0);
     return out;
   }
 
