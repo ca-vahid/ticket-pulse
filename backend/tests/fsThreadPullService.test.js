@@ -106,6 +106,15 @@ describe('tick — pulls, stands down when busy, never drops on a busy queue', (
     expect(client.fetchTicketConversations).toHaveBeenCalledTimes(13);
   });
 
+  test('quiet hours with a short FS queue open to 20 a tick (27 Sep 2026)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 1, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 1n });
+    client.fetchTicketConversations.mockResolvedValue([]);
+    for (let i = 0; i < 30; i++) svc.enqueue(5000 + i, 1, 'backfill', { delayMs: 0 });
+    limiter.queueDepth = 5;
+    await svc.tick(Date.parse('2030-01-03T06:00:00Z') + 5000);
+    expect(client.fetchTicketConversations).toHaveBeenCalledTimes(20);
+  });
+
   test('pulls the whole conversation (no 60 cap), stores it and marks the ticket checked', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ id: 4273, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 176019n, freshserviceUpdatedAt: new Date('2026-09-24T06:34:04Z') });
     client.fetchTicketConversations.mockResolvedValue([{ id: 1043130568 }, { id: 1039158321 }]);
@@ -177,6 +186,30 @@ describe('sweepStep — the backfill and the net under the live feeds', () => {
     await svc.sweepStep();
     expect(JSON.parse(settings.get('fs_thread_backfill_state'))).toMatchObject({ phase: 1, beforeId: null });
     expect(SWEEP_PHASES[1]).toEqual({ workspaceId: 1, days: null });
+  });
+
+  test('never-fetched phases (27 Sep 2026) follow the gap phases and use their own test', async () => {
+    const unseen = SWEEP_PHASES.filter((p) => p.unseen).map((p) => p.workspaceId);
+    expect(unseen).toEqual([1, 2, 3, 4, 5]);
+    expect(SWEEP_PHASES.findIndex((p) => p.unseen)).toBe(6);
+    settings.set('fs_thread_backfill_state', JSON.stringify({ phase: 6, beforeId: 30000 }));
+    prismaMock.ticket.aggregate.mockResolvedValue({ _max: { id: 46678 } });
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 29990, workspaceId: 1 }]);
+    await svc.sweepStep();
+    const [sql, ws, from, to] = prismaMock.$queryRawUnsafe.mock.calls[0];
+    expect([ws, from, to]).toEqual([1, 30000, 27500]);
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM ticket_thread_entries a/);
+    expect(sql).toMatch(/is_noise IS NOT TRUE/);
+    expect(sql).toMatch(/fs_thread_pulled_at IS NULL/);
+    expect([...svc.queue.keys()]).toEqual([29990]);
+  });
+
+  test('after the last phase it wraps round to the IT 90-day gap', async () => {
+    settings.set('fs_thread_backfill_state', JSON.stringify({ phase: SWEEP_PHASES.length - 1, beforeId: 100 }));
+    prismaMock.ticket.aggregate.mockResolvedValue({ _max: { id: 46678 } });
+    prismaMock.$queryRawUnsafe.mockResolvedValue([]);
+    await svc.sweepStep();
+    expect(JSON.parse(settings.get('fs_thread_backfill_state'))).toMatchObject({ phase: 0, beforeId: null });
   });
 
   test('can be switched off, and never floods a busy queue', async () => {
