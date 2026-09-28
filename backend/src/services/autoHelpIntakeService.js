@@ -85,6 +85,13 @@ export const MANUAL_ENQUEUE_RETRY_MS = Object.freeze([250, 1000]);
 export const MAX_RUNS_PER_TICKET = 3;
 /** Pipeline triggers that re-assess an open ticket — never an intake settle. */
 export const NON_INTAKE_TRIGGERS = Object.freeze(['priority_assessment_only', 'priority_changed']);
+/**
+ * Runs the catch-up never re-queues: the re-assessments above, plus a noise
+ * rule's dismissal - syncService records it as a run but it is not an intake
+ * settle (the ticket is closed as noise), so re-queueing it only logged a
+ * warning per rule close (ws1 shadow trial, 27 Sep 2026).
+ */
+export const CATCH_UP_EXCLUDED_TRIGGERS = Object.freeze([...NON_INTAKE_TRIGGERS, 'noise_rule']);
 const REAL_RUN_EXCLUDED = ['skipped', 'no_match'];
 const NOTE_ACTOR = Object.freeze({ name: 'Ticket Pulse (Auto-help)', email: null, role: 'automation' });
 
@@ -434,7 +441,7 @@ class AutoHelpIntakeService {
               id: { gt: cursor },
               status: 'completed',
               decision: { not: null },
-              triggerSource: { notIn: [...NON_INTAKE_TRIGGERS] },
+              triggerSource: { notIn: [...CATCH_UP_EXCLUDED_TRIGGERS] },
               createdAt: { gte: since },
               updatedAt: { gte: new Date(now.getTime() - CATCH_UP_WINDOW_MS) },
             },

@@ -232,6 +232,8 @@ describe('W5 durable queue', () => {
       { id: 700, ticketId: 55, workspaceId: 1, triggerSource: 'webhook', status: 'completed', decision: 'pending_review', nonActionable: false, errorMessage: null, createdAt: new Date(now - 3600e3), updatedAt: new Date(now - 600e3) },
       // not an intake settle, and one too old: ignored
       { id: 701, ticketId: 55, workspaceId: 1, triggerSource: 'priority_changed', status: 'completed', decision: 'priority_only', createdAt: new Date(now - 3600e3), updatedAt: new Date(now - 600e3) },
+      // a noise rule's dismissal is not an intake settle either (27 Sep 2026)
+      { id: 703, ticketId: 56, workspaceId: 1, triggerSource: 'noise_rule', status: 'completed', decision: 'noise_dismissed', createdAt: new Date(now - 3600e3), updatedAt: new Date(now - 600e3) },
       { id: 702, ticketId: 55, workspaceId: 1, triggerSource: 'webhook', status: 'completed', decision: 'pending_review', createdAt: new Date(now - 30 * 3600e3), updatedAt: new Date(now - 8 * 3600e3) },
     );
     const first = await intake.catchUp({ now });

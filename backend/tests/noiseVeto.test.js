@@ -45,6 +45,14 @@ const freshServiceActionServiceMock = {
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
+// The close guard (27 Sep 2026) has its own suite; open here so the veto is tested alone.
+const noiseCloseGuardMock = {
+  evaluateNoiseCloseGuard: jest.fn().mockResolvedValue({ hold: false, reason: null, message: null }),
+  parkHeldHrNotice: jest.fn().mockResolvedValue(null),
+  holdMessage: jest.fn(() => 'held'),
+  NOISE_CLOSE_HOLD_REASONS: { HR_NOTICE: 'hr_notice' },
+};
+jest.unstable_mockModule('../src/services/noiseCloseGuard.js', () => noiseCloseGuardMock);
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
@@ -317,6 +325,47 @@ describe('assignmentPipelineService noise veto (NT-1 pipeline touchpoints)', () 
     // auto_close_noise must never fire, and the ticket is never flagged noise
     expect(freshServiceActionServiceMock.execute).not.toHaveBeenCalled();
     expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('close guard (27 Sep 2026): mail from one of our people is held, labelled, never closed', async () => {
+    prismaMock.noiseRule.findMany.mockResolvedValue([NOISE_RULE]);
+    noiseCloseGuardMock.evaluateNoiseCloseGuard.mockResolvedValueOnce({
+      hold: true, reason: 'person_requester', message: 'it came from one of our people',
+    });
+    const events = [];
+    await assignmentPipelineService._executeRun(
+      RUN_ID, TICKET_ID, WS_ID, 'manual', Date.now(), (e) => events.push(e), null,
+    );
+    const update = finalRunUpdate();
+    expect(update.decision).toBe('pending_review');
+    expect(update.nonActionable).toBe(true);
+    expect(update.errorMessage).toBe('Noise close held: it came from one of our people');
+    expect(update.syncStatus).toBeUndefined();
+    expect(freshServiceActionServiceMock.execute).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isNoise: true }) }));
+    expect(assignmentRepositoryMock.createPipelineStep).toHaveBeenCalledWith(expect.objectContaining({
+      stepName: 'noise_close_guard',
+      output: expect.objectContaining({ reason: 'person_requester', forcedDecision: 'pending_review' }),
+    }));
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'noise_close_guard' })]));
+  });
+
+  test('close guard: an HR notice is parked until its date instead of closed', async () => {
+    prismaMock.noiseRule.findMany.mockResolvedValue([NOISE_RULE]);
+    noiseCloseGuardMock.evaluateNoiseCloseGuard.mockResolvedValueOnce({ hold: true, reason: 'hr_notice', message: 'HR', hrNotice: true });
+    noiseCloseGuardMock.parkHeldHrNotice.mockResolvedValueOnce('2026-10-05');
+    noiseCloseGuardMock.holdMessage.mockReturnValueOnce('HR notice - parked until 2026-10-05 instead of closed.');
+    await assignmentPipelineService._executeRun(RUN_ID, TICKET_ID, WS_ID, 'manual', Date.now(), () => {}, null);
+    expect(noiseCloseGuardMock.parkHeldHrNotice).toHaveBeenCalledWith({ ticketId: TICKET_ID, workspaceId: WS_ID });
+    expect(finalRunUpdate().errorMessage).toBe('Noise close held: HR notice - parked until 2026-10-05 instead of closed.');
+    expect(freshServiceActionServiceMock.execute).not.toHaveBeenCalled();
+  });
+
+  test('close guard is not consulted when the never_noise veto already held the ticket', async () => {
+    prismaMock.noiseRule.findMany.mockResolvedValue([VETO_RULE]);
+    await assignmentPipelineService._executeRun(RUN_ID, TICKET_ID, WS_ID, 'manual', Date.now(), () => {}, null);
+    expect(finalRunUpdate().decision).toBe('pending_review');
+    expect(noiseCloseGuardMock.evaluateNoiseCloseGuard).not.toHaveBeenCalled();
   });
 
   test('without a matching never_noise rule the noise dismissal proceeds unchanged', async () => {

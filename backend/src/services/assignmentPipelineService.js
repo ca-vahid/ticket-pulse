@@ -21,7 +21,8 @@ import statusService from './statusService.js';
 // rebound-context user-message logic and the auto-assign decision rules
 // without pulling in Prisma/Anthropic.
 import { buildUserMessage } from './assignmentUserMessage.js';
-import { isGroupExcluded, isPipelineFinalDecision, resolvePipelineDecision } from './assignmentDecisionRules.js';
+import { deriveIsNoise, isGroupExcluded, isPipelineFinalDecision, resolvePipelineDecision } from './assignmentDecisionRules.js';
+import { evaluateNoiseCloseGuard, parkHeldHrNotice, holdMessage, NOISE_CLOSE_HOLD_REASONS } from './noiseCloseGuard.js';
 import {
   getFreshServiceTicketQueueBlocker,
   getLocalTicketQueueBlocker,
@@ -944,7 +945,7 @@ class AssignmentPipelineService {
     if (triggerSource === 'classification_only') {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category/subcategory, priority, and FreshService ticket type. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory, assessed priority, and ticket type are saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields plus allowed priority/type fields.';
     } else if (isPriorityAssessmentOnly) {
-      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. If the ticket is non-actionable noise/FYI, submit an empty recommendations array with closureNoticeHtml; the system will apply the workspace noise-dismissal policy. Do not call get_agent_availability, find_matching_agents, get_assignment_risk_signals, get_routing_boundary_context, get_requester_site_context, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved for Ticket Pulse priority handling.';
+      systemPrompt += '\n\n## Priority-assessment-only Mode\nThis run exists to assess and persist Ticket Pulse priority for an active ticket. Still inspect and classify the ticket enough to produce valid structured output, but do not change the assignee and do not write an assignment recommendation as an action request. This run never closes a ticket. If the ticket looks like non-actionable noise/FYI, set `nonActionable: true` with a one-line `nonActionableReason`; that is recorded as a label and the business-hours run decides. Do not call get_agent_availability, find_matching_agents, get_assignment_risk_signals, get_routing_boundary_context, get_requester_site_context, get_workload_stats, get_tech_ticket_history, or get_technician_ad_profile unless one of those tools is directly needed as evidence for priority or classification. Call submit_recommendation so assessedPriority, priorityRationale, priorityConfidence, and optional prioritySignals are saved for Ticket Pulse priority handling.';
       if (triggerSource === 'priority_changed') {
         systemPrompt += '\n\nFreshService priority changed outside Ticket Pulse. Treat that change as an escalation signal to consider, but still assess priority from the ticket evidence and explain whether the evidence supports the new FreshService priority. This reassessment is audit-only for FreshService native priority: the system will not write the assessed priority back to FreshService from this trigger.';
       }
@@ -1288,22 +1289,17 @@ class AssignmentPipelineService {
       // — not noise — but full assignment ranking is deferred to the
       // business-hours run". Both had to be reopened by hand.
       //
-      // For those runs the model must say noise POSITIVELY via nonActionable
-      // (the explicit label added in v3.8.42). Absent that, the run defers and
-      // the business-hours pass makes the call — noise is closed a few hours
+      // Since 27 Sep 2026 those runs never close at all: even an explicit
+      // nonActionable verdict is only a label (deriveIsNoise). The
+      // business-hours pass makes the call — noise is closed a few hours
       // later instead of never, which is the safe direction to be wrong in.
-      const emptyRecommendations = Boolean(
-        recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0),
-      );
-      const isNoise = isPriorityAssessmentOnly
-        ? emptyRecommendations && recommendation?.nonActionable === true
-        : emptyRecommendations;
+      const isNoise = deriveIsNoise({ recommendation, isPriorityAssessmentOnly });
       // QA 09-05 option 3: the label, decoupled from routing. A run can now
       // carry "this looks non-actionable" AND a ranked recommendation, so in a
       // workspace that does not auto-close, being wrong costs a label instead
       // of an unrouted ticket. Deliberately NOT folded into isNoise: nothing
       // about the auto-close path may move.
-      const flaggedNonActionable = recommendation?.nonActionable === true;
+      let flaggedNonActionable = recommendation?.nonActionable === true;
       const nonActionableReason = flaggedNonActionable
         ? String(recommendation?.nonActionableReason || '').trim().slice(0, 500) || null
         : null;
@@ -1474,9 +1470,52 @@ class AssignmentPipelineService {
         logger.info('Pipeline noise dismissal held - Auto-help answered this ticket', { runId, ticketId, workspaceId, autoHelpRunId: autoHelpContext.runId });
       }
 
+      // Noise-close guard (27 Sep 2026): the AI's noise verdict closes a
+      // ticket only when nothing says a person is waiting on it - no agent
+      // owns it, it is not an HR notice (those are parked until their date),
+      // and it did not come from one of our people. The verdict stays as a
+      // label on a held run. noiseCloseGuard.js has the order and reasons.
+      let closeGuard = null;
+      if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise) {
+        closeGuard = await evaluateNoiseCloseGuard({ ticketId, workspaceId });
+        if (closeGuard?.hold) {
+          decision = 'pending_review';
+          flaggedNonActionable = true;
+          if (closeGuard.reason === NOISE_CLOSE_HOLD_REASONS.HR_NOTICE) {
+            const parkedUntil = await parkHeldHrNotice({ ticketId, workspaceId });
+            closeGuard.message = holdMessage(closeGuard.reason, { parkedUntil });
+            closeGuard.parkedUntil = parkedUntil;
+          }
+          stepCounter++;
+          await assignmentRepository.createPipelineStep({
+            pipelineRunId: runId,
+            stepNumber: stepCounter,
+            stepName: 'noise_close_guard',
+            status: 'completed',
+            durationMs: 0,
+            output: {
+              kind: 'noise_close_guard',
+              reason: closeGuard.reason,
+              llmVerdict: 'noise',
+              forcedDecision: 'pending_review',
+              parkedUntil: closeGuard.parkedUntil || null,
+              message: closeGuard.message,
+            },
+          }).catch((stepError) => {
+            logger.warn('Pipeline: failed to record noise_close_guard step', { runId, error: stepError.message });
+          });
+          emit({ type: 'noise_close_guard', reason: closeGuard.reason, message: closeGuard.message });
+          logger.info('Pipeline noise dismissal held by the close guard', {
+            runId, ticketId, workspaceId, reason: closeGuard.reason, parkedUntil: closeGuard.parkedUntil || null,
+          });
+        }
+      }
+
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
-      if (autoHelpGuardApplied) {
+      if (closeGuard?.hold) {
+        errorMessage = `Noise close held: ${closeGuard.message}`;
+      } else if (autoHelpGuardApplied) {
         errorMessage = 'Auto-help guard: the requester got an Auto-help answer, so the AI noise verdict was held for a person.';
       } else if (noiseVetoApplied) {
         // The "Noise veto:" prefix is what the run detail page keys on to

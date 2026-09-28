@@ -59,6 +59,7 @@ class ScheduledSyncService {
       this.startHolidayAutoload();
       this.startGraphSubscriptionMaintenance();
       this.startMailboxHoldDigest();
+      this.startNoiseCloseDigest();
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
@@ -460,6 +461,34 @@ class ScheduledSyncService {
     }, { scheduled: true, timezone: 'America/Los_Angeles' });
   }
 
+  /**
+   * Noise auto-close digest (27 Sep 2026): weekdays at 08:05 Pacific, what the
+   * AI closed as noise since the last digest (Monday covers the weekend), to
+   * the admins of each workspace that auto-closes noise. Quiet when there is
+   * nothing to report. Kill switch: NOISE_CLOSE_DIGEST=false.
+   */
+  startNoiseCloseDigest() {
+    this.stopNoiseCloseDigest();
+    if (process.env.NOISE_CLOSE_DIGEST === 'false') return;
+    this.noiseCloseDigestJob = cron.schedule('5 8 * * 1,2,3,4,5', async () => {
+      try {
+        const { default: noiseCloseDigestService } = await import('./noiseCloseDigestService.js');
+        const result = await noiseCloseDigestService.sendDigests();
+        const sent = result.filter((r) => r.sent);
+        if (sent.length) logger.info(`Noise close digest: ${sent.length} workspace digest(s) sent`);
+      } catch (error) {
+        logger.warn(`Noise close digest tick failed (non-fatal): ${error.message}`);
+      }
+    }, { scheduled: true, timezone: 'America/Los_Angeles' });
+  }
+
+  stopNoiseCloseDigest() {
+    if (this.noiseCloseDigestJob) {
+      this.noiseCloseDigestJob.stop();
+      this.noiseCloseDigestJob = null;
+    }
+  }
+
   stopMailboxHoldDigest() {
     if (this.mailboxHoldDigestJob) {
       this.mailboxHoldDigestJob.stop();
@@ -471,6 +500,7 @@ class ScheduledSyncService {
     this.stopHolidayAutoload();
     this.stopGraphSubscriptionMaintenance();
     this.stopMailboxHoldDigest();
+    this.stopNoiseCloseDigest();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {
