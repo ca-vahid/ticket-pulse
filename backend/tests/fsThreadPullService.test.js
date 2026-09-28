@@ -115,6 +115,29 @@ describe('tick — pulls, stands down when busy, never drops on a busy queue', (
     expect(client.fetchTicketConversations).toHaveBeenCalledTimes(20);
   });
 
+  test('a ticket deleted in FreshService (404) is marked checked, not retried (28 Sep 2026)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 11449, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 215684n });
+    client.fetchTicketConversations.mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 404'), { response: { status: 404 } }));
+    svc.enqueue(11449, 1, 'backfill', { delayMs: 0 });
+    await svc.tick(Date.now() + 1000);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({ where: { id: 11449 }, data: { fsThreadPulledAt: expect.any(Date) } });
+    expect(svc.queue.has(11449)).toBe(false);
+    expect(svc.stats.requeued).toBe(0);
+    expect(svc.stats.gone).toBe(1);
+  });
+
+  test('a wrapped 404 (ExternalAPIError.originalError) counts too; other errors still retry', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 7, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 1n });
+    client.fetchTicketConversations.mockRejectedValueOnce(Object.assign(new Error('wrapped'), { originalError: { response: { status: 404 } } }));
+    svc.enqueue(7, 1, 'backfill', { delayMs: 0 });
+    await svc.tick(Date.now() + 1000);
+    expect(svc.queue.has(7)).toBe(false);
+    client.fetchTicketConversations.mockRejectedValueOnce(Object.assign(new Error('boom'), { response: { status: 500 } }));
+    svc.enqueue(8, 1, 'backfill', { delayMs: 0 });
+    await svc.tick(Date.now() + 2000);
+    expect(svc.queue.has(8)).toBe(true);
+  });
+
   test('pulls the whole conversation (no 60 cap), stores it and marks the ticket checked', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ id: 4273, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 176019n, freshserviceUpdatedAt: new Date('2026-09-24T06:34:04Z') });
     client.fetchTicketConversations.mockResolvedValue([{ id: 1043130568 }, { id: 1039158321 }]);

@@ -224,7 +224,7 @@ class FsThreadPullService {
     if (now - this.lastStatusLogAt < 60 * 60 * 1000) return;
     this.lastStatusLogAt = now;
     const s = this.stats;
-    logger.info(`FS thread pull: pulled ${s.pulled} (${s.entries} entries), queued ${this.queue.size}, requeued ${s.requeued}, dropped ${s.dropped}, trickle ticks ${s.trickled}, stood down ${s.deferred}, FS queue ${depth}`);
+    logger.info(`FS thread pull: pulled ${s.pulled} (${s.entries} entries), queued ${this.queue.size}, requeued ${s.requeued}, dropped ${s.dropped}, gone in FS ${s.gone || 0}, trickle ticks ${s.trickled}, stood down ${s.deferred}, FS queue ${depth}`);
   }
 
   /** Pull one FS-born ticket's whole conversation (no 60-entry cap) and store it. */
@@ -237,7 +237,20 @@ class FsThreadPullService {
     const client = await mirrorService.getClient(ticket.workspaceId);
     if (!client) return 0;
     const fsId = Number(ticket.freshserviceTicketId);
-    const conversations = await client.fetchTicketConversations(fsId);
+    let conversations;
+    try {
+      conversations = await client.fetchTicketConversations(fsId);
+    } catch (err) {
+      // Deleted in FreshService (404): nothing will ever come back, so mark the
+      // ticket checked instead of retrying six times and re-queueing it on the
+      // next lap (28 Sep 2026: 133 deleted IT tickets from 2025).
+      const status = err?.response?.status || err?.freshserviceStatus || err?.originalError?.response?.status;
+      if (Number(status) !== 404) throw err;
+      this.stats.gone = (this.stats.gone || 0) + 1;
+      logger.info(`FS thread pull: FreshService #${fsId} no longer exists (404) — marked checked`);
+      await prisma.ticket.update({ where: { id: ticket.id }, data: { fsThreadPulledAt: new Date() } }).catch(() => {});
+      return 0;
+    }
     let upserted = 0;
     if (conversations?.length) {
       const { transformTicketConversationEntries } = await import('../integrations/freshserviceTransformer.js');

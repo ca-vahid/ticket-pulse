@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.0.01-preview';
+export const APP_VERSION = '4.0.02-preview';
 
 export const changelog = [
+  {
+    version: '4.0.02-preview',
+    date: 'September 28, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Notes backfill skips tickets deleted in FreshService</strong> &mdash; a ticket that no longer exists in FreshService is marked checked instead of being retried six times, so the overnight notes backfill keeps its pace.' },
+      { type: 'fixed', html: '<strong>Error logging never hides the real error</strong> &mdash; logging a FreshService error could itself fail and replace the real message (&ldquo;Converting circular structure to JSON&rdquo;). The log now always records what FreshService actually said.' },
+    ],
+  },
   {
     version: '4.0.01-preview',
     date: 'September 27, 2026',
