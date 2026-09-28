@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { BookMarked, FileText, Hourglass, Lightbulb, ListChecks, Settings2, X } from 'lucide-react';
+import { Settings2, X } from 'lucide-react';
+import { knowledgePictogram } from '../components/v4/KnowledgePictogram';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import { knowledgeAPI } from '../services/api';
@@ -31,12 +32,14 @@ import { TabActionsContext } from '../components/knowledge/builderUi';
  * before any in-section navigation (in-app dialog) and before the browser tab
  * closes (the browser's own prompt).
  */
+// Ticket Pulse 4 (v4.0.01): the content tabs carry the v4 pictograms;
+// Settings keeps a plain glyph so it reads as chrome, not content.
 const TABS = [
-  { id: 'articles', label: 'Articles', icon: FileText },
-  { id: 'gaps', label: 'Gaps', icon: Lightbulb },
-  { id: 'playbooks', label: 'Playbooks', icon: BookMarked },
-  { id: 'waiting', label: 'Waiting', icon: Hourglass },
-  { id: 'activity', label: 'Activity', icon: ListChecks },
+  { id: 'articles', label: 'Articles', icon: knowledgePictogram('articles') },
+  { id: 'gaps', label: 'Gaps', icon: knowledgePictogram('gaps') },
+  { id: 'playbooks', label: 'Playbooks', icon: knowledgePictogram('playbooks') },
+  { id: 'waiting', label: 'Waiting', icon: knowledgePictogram('followup') },
+  { id: 'activity', label: 'Activity', icon: knowledgePictogram('autohelp') },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ];
 

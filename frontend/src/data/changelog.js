@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.9.97-preview';
+export const APP_VERSION = '4.0.01-preview';
 
 export const changelog = [
+  {
+    version: '4.0.01-preview',
+    date: 'September 27, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Ticket Pulse 4 &mdash; now with Knowledge</strong> &mdash; the pulse of the queue meets what the team knows. Knowledge brings articles the team stands behind, playbooks per category, and Auto-help that drafts the first answer from them (an agent sends it). Version 4 is where Ticket Pulse builds on this.' },
+      { type: 'new', html: '<strong>A new mark</strong> &mdash; the ticket and its heartbeat, now flowing into an open book. New app icon, a Knowledge icon in the rail, and fresh pictograms on the Knowledge tabs.' },
+      { type: 'new', html: '<strong>Welcome to version 4</strong> &mdash; workspace admins see a one-time introduction to Knowledge; reopen it any time from the account menu (&ldquo;Ticket Pulse 4&rdquo;).' },
+    ],
+  },
   {
     version: '3.9.97-preview',
     date: 'September 27, 2026',

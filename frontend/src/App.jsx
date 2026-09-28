@@ -42,6 +42,7 @@ import CommandPalette from './components/CommandPalette';
 import AdminRoute, { BounceTo, LoadingScreen, ViewRoute } from './components/nav/AdminRoute';
 import { consumePostLoginPath } from './utils/postLoginRedirect';
 import AccessBounceToast from './components/nav/AccessBounceToast';
+import V4Splash from './components/v4/V4Splash';
 import { homePathFor, useWorkspaceRole } from './components/nav/navDestinations';
 
 /*
@@ -475,6 +476,7 @@ function App() {
                     <EmailHealthBanner />
                   </div>
                   <AccessBounceToast />
+                  <V4Splash />
                   <CommandPalette />
                 </SettingsProvider>
               </DashboardProvider>
