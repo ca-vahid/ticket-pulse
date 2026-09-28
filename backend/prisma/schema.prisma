@@ -1558,6 +1558,8 @@ model Ticket {
   // behind this ticket fired, and when last. 0 = not an alert ticket.
   occurrenceCount    Int       @default(0) @map("occurrence_count")
   lastOccurrenceAt   DateTime? @map("last_occurrence_at")
+  // Simorgh Phase C: the caller's one-line "why" for the latest occurrence.
+  lastOccurrenceSummary String? @map("last_occurrence_summary") @db.VarChar(300)
   // Parked (plans/PARKED_BUILD_PLAN.md): denormalised current park, for fast
   // queue filters and counts. The park itself lives in ticket_parks.
   parkedUntil        DateTime? @map("parked_until") @db.Timestamptz(6)

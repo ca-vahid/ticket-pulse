@@ -23,10 +23,10 @@ registerCustomFieldConditionOps(jsonLogic);
 const src = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 describe('the vocabulary is theirs, verbatim', () => {
-  test('exactly the seven reasons from the request, in their order', () => {
+  test('the seven reasons from the request, in their order, plus "detection_tuned" (Phase C)', () => {
     expect(RESOLUTION_REASONS.map((r) => r.value)).toEqual([
       'confirmed_threat_contained', 'false_positive', 'benign_expected', 'duplicate',
-      'needs_detection_tuning', 'no_action_required', 'other',
+      'needs_detection_tuning', 'detection_tuned', 'no_action_required', 'other',
     ]);
   });
 
@@ -84,7 +84,7 @@ describe('validation', () => {
     let err;
     try { validateResolution({}, { required: true }); } catch (e) { err = e; }
     expect(err.code).toBe('resolution_reason_required');
-    expect(err.details.reasons).toHaveLength(7);
+    expect(err.details.reasons).toHaveLength(8);
   });
 
   test('an unknown reason is rejected even when nothing was required', () => {

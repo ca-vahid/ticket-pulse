@@ -32,7 +32,7 @@ import ParkDialog, { ParkedMark } from '../components/tickets/ParkControls';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
 import {
   BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
-  buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths,
+  buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths, OccurrenceMark,
 } from '../components/tickets/queueColumns';
 import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/queueCards';
 import { ticketsAPI } from '../services/api';
@@ -61,6 +61,8 @@ const SORT_OPTIONS = [
   { value: 'department', label: 'Department' },
   // Parked view: soonest wake first.
   { value: 'parkedUntil', label: 'Wake date (parked)' },
+  // Alert / rule-tuning tickets (Simorgh Phase C): noisiest first.
+  { value: 'occurrences', label: 'Most occurrences' },
 ];
 // Fields whose FIRST click sorts ascending — status asc walks the lifecycle
 // Open-first (QA 08-04 #14a) and due asc puts the soonest deadline on top;
@@ -1994,6 +1996,7 @@ export default function Tickets() {
                                   {ticket.isExternal && <ExternalChip />}
                                   {ticket.solutionVerifiedAt && <SolutionMark />}
                                   {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
+                                  <OccurrenceMark ticket={ticket} />
                                   <StateChip state={ticket.stateChip} />
                                   {ticket.hasProposedReply && (
                                     <span

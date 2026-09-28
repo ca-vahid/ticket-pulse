@@ -7,6 +7,7 @@ export const RESOLUTION_REASONS = [
   { value: 'benign_expected', label: 'Benign / expected', hint: 'Real activity, but authorised or routine.' },
   { value: 'duplicate', label: 'Duplicate', hint: 'Already covered by another ticket.' },
   { value: 'needs_detection_tuning', label: 'Needs detection tuning', hint: 'Benign, and the rule should stop firing on it.' },
+  { value: 'detection_tuned', label: 'Detection tuned', hint: 'The rule was changed so it stops firing on this.' },
   { value: 'no_action_required', label: 'No action required', hint: 'Informational; nothing to do.' },
   { value: 'other', label: 'Other', hint: 'Say what in the note.' },
 ];

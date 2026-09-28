@@ -6,6 +6,16 @@ import { sendTransactionalEmail } from './transactionalEmailService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { taskEventPayload } from './relationWebhookPayload.js';
+
+// Simorgh Phase C (27 Sep 2026): a task carries the "why" and the steps —
+// plain text, line breaks kept. A longer text is refused, never cut short.
+export const TASK_DESCRIPTION_MAX = 4000;
+function taskDescription(raw) {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).replace(/\r\n?/g, '\n').trim();
+  if (s.length > TASK_DESCRIPTION_MAX) throw new ValidationError(`Task description must be at most ${TASK_DESCRIPTION_MAX} characters (this one is ${s.length})`);
+  return s || null;
+}
 // Local status <-> FreshService task status. FS: 1 Open, 2 In Progress, 3 Completed.
 const STATUSES = ['open', 'in_progress', 'done'];
 const TO_FS_STATUS = { open: 1, in_progress: 2, done: 3 };
@@ -141,7 +151,7 @@ class TicketTaskService {
     const maxOrder = await prisma.ticketTask.aggregate({ where: { ticketId, workspaceId }, _max: { sortOrder: true } });
     const base = {
       workspaceId, ticketId, title,
-      description: input?.description ? String(input.description) : null,
+      description: taskDescription(input?.description),
       status, assignedTechId: assignee?.id ?? null, dueAt, notifyAgent, externalRef,
       remindBeforeMinutes: dueAt ? remindBeforeMinutes : null,
       sortOrder: (maxOrder._max.sortOrder ?? 0) + 1,
@@ -186,7 +196,7 @@ class TicketTaskService {
       if (!t) throw new ValidationError('Task title cannot be empty');
       data.title = t;
     }
-    if (patch.description !== undefined) data.description = patch.description ? String(patch.description) : null;
+    if (patch.description !== undefined) data.description = taskDescription(patch.description);
     if (patch.status !== undefined) {
       if (!STATUSES.includes(patch.status)) throw new ValidationError(`Status must be one of: ${STATUSES.join(', ')}`);
       data.status = patch.status;
@@ -428,7 +438,7 @@ class TicketTaskService {
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;">',
       '<tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;">',
       `<div style="font-size:15px;line-height:21px;font-weight:700;color:#0f172a;">${esc(row.title)}</div>`,
-      row.description ? `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:4px;">${esc(row.description)}</div>` : '',
+      row.description ? `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:4px;white-space:pre-line;">${esc(row.description)}</div>` : '',
       dueLine,
       '</td></tr></table>',
       `<p style="margin:16px 0 0;"><a href="${publicBase}/tickets/${ticket.id}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,

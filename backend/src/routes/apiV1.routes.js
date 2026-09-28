@@ -147,6 +147,7 @@ function ticketShape(t) {
     // Alert occurrences (Sentinel integration): 0 = not an alert ticket.
     occurrenceCount: t.occurrenceCount ?? 0,
     lastOccurrenceAt: t.lastOccurrenceAt || null,
+    lastOccurrenceSummary: t.lastOccurrenceSummary || null,
     // Due date + who set it (ContinuIT B1; their acceptance run 19 Sep found
     // the date was stored but never echoed). 'manual' = a person or a
     // trusted integration; 'sla' = the workspace SLA clock.
@@ -263,7 +264,10 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
   // always present for forward paging; honour an explicit ?page= for offset
   // paging (QA 07-21 #8 — the default response had no cursor to follow).
   const q = { ...req.query };
-  if (q.page === undefined && q.cursor === undefined) q.useCursor = true;
+  // A sort (Simorgh Phase C: sort=occurrences) pages by offset — the cursor
+  // walks id order only.
+  if (q.page === undefined && q.cursor === undefined && !q.sort) q.useCursor = true;
+  if (q.sort && q.cursor === undefined && q.page === undefined) q.page = 1;
   // The reply's pagination block says `limit`; accept it on the request too
   // (Simorgh reconciled at 25/page because only pageSize was honoured).
   if (q.pageSize === undefined && q.limit !== undefined) q.pageSize = q.limit;
@@ -1069,7 +1073,7 @@ router.post('/alert-occurrences', S('tickets:write'), withIdempotency, asyncHand
     success: true,
     action: result.action,
     data: { ...ticketShape(ticket), url: `${base}/tickets/${ticket.id}` },
-    occurrence: { count: result.occurrenceCount, lastSeenAt: result.lastOccurrenceAt },
+    occurrence: { count: result.occurrenceCount, lastSeenAt: result.lastOccurrenceAt, summary: result.lastOccurrenceSummary ?? null },
     priorityRaised: result.priorityRaised,
     previousTicket,
   });

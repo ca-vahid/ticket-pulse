@@ -51,6 +51,9 @@ export default function AlertOccurrenceStrip({ ticket }) {
           {ticket.lastOccurrenceAt ? <> · last {timeAgo(ticket.lastOccurrenceAt)}</> : null}
         </span>
       </p>
+      {ticket.lastOccurrenceSummary && (
+        <p className="mt-0.5 ml-5 text-foreground/85" data-testid="alert-occurrence-summary">{ticket.lastOccurrenceSummary}</p>
+      )}
       {incidents.length > 0 && (
         <ul className="mt-1 ml-5 space-y-0.5">
           {shown.map((r) => (
