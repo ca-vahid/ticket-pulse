@@ -9,10 +9,10 @@ const prismaMock = {
   ticket: { findFirst: jest.fn() },
   ticketApproval: { findMany: jest.fn() },
 };
-const verdictAsset = jest.fn(async () => null);
+const verdictAssets = jest.fn(async () => ({ asset: null, assets: [] }));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/fsApprovalRefreshService.js', () => ({ refreshFsApprovalStatus: jest.fn(async () => {}) }));
-jest.unstable_mockModule('../src/services/assetronReservationService.js', () => ({ default: { verdictAsset } }));
+jest.unstable_mockModule('../src/services/assetronReservationService.js', () => ({ default: { verdictAssets } }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
 const { default: svc } = await import('../src/services/approvalVerdictService.js');
@@ -51,6 +51,10 @@ test('a named category scopes to it', async () => {
 test('`asset` carries the Assetron laptop when there is one, else null', async () => {
   prismaMock.ticketApproval.findMany.mockResolvedValue([]);
   expect((await svc.verdict(44, 1, {})).asset).toBeNull();
-  verdictAsset.mockResolvedValueOnce({ system: 'ASSETRON', assetId: 'a1', state: 'ASSIGNED' });
-  expect((await svc.verdict(44, 1, {})).asset).toMatchObject({ system: 'ASSETRON', state: 'ASSIGNED' });
+  const one = { system: 'ASSETRON', assetId: 'a1', state: 'ASSIGNED' };
+  const two = { system: 'ASSETRON', assetId: 'a2', state: 'ON_HOLD' };
+  verdictAssets.mockResolvedValueOnce({ asset: one, assets: [one, two] });
+  const v = await svc.verdict(44, 1, {});
+  expect(v.asset).toMatchObject({ system: 'ASSETRON', state: 'ASSIGNED' });
+  expect(v.assets.map((a) => a.assetId)).toEqual(['a1', 'a2']);
 });

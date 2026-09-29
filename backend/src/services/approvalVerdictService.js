@@ -1,10 +1,10 @@
 import prisma from './prisma.js';
 import { refreshFsApprovalStatus } from './fsApprovalRefreshService.js';
-async function assetronVerdictAsset(ticketId, workspaceId) {
+async function assetronVerdictAssets(ticketId, workspaceId) {
   try {
     const { default: svc } = await import('./assetronReservationService.js');
-    return await svc.verdictAsset(ticketId, workspaceId);
-  } catch { return null; }
+    return await svc.verdictAssets(ticketId, workspaceId);
+  } catch { return { asset: null, assets: [] }; }
 }
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -258,7 +258,8 @@ class ApprovalVerdictService {
         : null,
       // The Assetron laptop held for / assigned by this ticket's approval
       // (Assetron Part B, 25 Sep 2026), or null. Always present.
-      asset: await assetronVerdictAsset(ticket.id, workspaceId),
+      // `assets` (29 Sep 2026): every device of that request, in item order.
+      ...(await assetronVerdictAssets(ticket.id, workspaceId)),
     };
   }
 }

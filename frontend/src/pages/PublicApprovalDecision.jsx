@@ -586,18 +586,28 @@ export default function PublicApprovalDecision() {
             <h1 id="approval-subject" className="mb-1.5 mt-1 text-2xl font-bold leading-tight tracking-[-0.01em] text-foreground">
               {ticket.subject || '(no subject)'}
             </h1>
-            {approval.laptop?.asset && (
-              <div className="my-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="public-approval-laptop">
-                <p className="text-foreground">
-                  <span className="font-semibold">{[approval.laptop.asset.make, approval.laptop.asset.model].filter(Boolean).join(' ') || 'Laptop'}</span>
-                  {approval.laptop.asset.assetTag || approval.laptop.asset.serialNumber ? <span className="text-muted-foreground"> · {approval.laptop.asset.assetTag || `S/N ${approval.laptop.asset.serialNumber}`}</span> : null}
-                  <span className="text-muted-foreground"> — held in Assetron, assigned to </span>
-                  <span className="font-semibold">{approval.laptop.recipient?.name || approval.laptop.recipient?.email}</span>
-                  <span className="text-muted-foreground"> if you approve</span>
-                </p>
-                <p className="text-xs text-muted-foreground">{[approval.laptop.asset.cpu, approval.laptop.asset.ram, approval.laptop.asset.storage, approval.laptop.asset.screenSize].filter(Boolean).join(' · ')}</p>
-              </div>
-            )}
+            {(() => {
+              // Every device the request holds in Assetron (up to 5 since 29 Sep 2026).
+              const held = (Array.isArray(approval.laptops) ? approval.laptops : (approval.laptop ? [approval.laptop] : [])).filter((h) => h?.asset);
+              if (!held.length) return null;
+              return (
+                <div className="my-2 space-y-1.5" data-testid="public-approval-laptop">
+                  {held.map((h, i) => (
+                    <div key={h.reservationId || i} className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+                      <p className="text-foreground">
+                        {held.length > 1 && <span className="mr-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Device {i + 1}</span>}
+                        <span className="font-semibold">{[h.asset.make, h.asset.model].filter(Boolean).join(' ') || 'Device'}</span>
+                        {h.asset.assetTag || h.asset.serialNumber ? <span className="text-muted-foreground"> · {h.asset.assetTag || `S/N ${h.asset.serialNumber}`}</span> : null}
+                        <span className="text-muted-foreground"> — held in Assetron, assigned to </span>
+                        <span className="font-semibold">{h.recipient?.name || h.recipient?.email}</span>
+                        <span className="text-muted-foreground"> if you approve</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">{[h.asset.cpu, h.asset.ram, h.asset.storage, h.asset.screenSize].filter(Boolean).join(' · ')}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             <p className="text-[13px] text-muted-foreground">
               Requested for <span className="font-semibold text-foreground">{requester.name || 'unknown requester'}</span>
               {requesterMeta ? ` · ${requesterMeta}` : ''}

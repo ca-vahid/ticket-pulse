@@ -2099,7 +2099,7 @@ router.get('/:id/assetron-holds', asyncHandler(async (req, res) => {
 router.put('/:id/approvals/:approvalId/hardware', asyncHandler(async (req, res) => {
   const { default: svc } = await import('../services/assetronReservationService.js');
   try {
-    res.json({ success: true, data: await svc.change(parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.body || {}, req.ticketActor) });
+    res.json({ success: true, data: await svc.change(parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.body || {}, req.ticketActor, Number(req.body?.itemIndex) || 0) });
   } catch (err) { throw assetronFail(err); }
 }));
 

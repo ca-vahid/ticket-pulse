@@ -616,7 +616,9 @@ model AssetronReservation {
   id                 Int       @id @default(autoincrement())
   workspaceId        Int       @map("workspace_id")
   ticketId           Int       @map("ticket_id")
-  requestGroupId     String    @unique @map("request_group_id") @db.VarChar(64)
+  requestGroupId     String    @map("request_group_id") @db.VarChar(64)
+  // Position of this device among the request's hardware items (0-based).
+  itemIndex          Int       @default(0) @map("item_index")
   approvalCategoryId Int?      @map("approval_category_id")
   reservationId      String    @map("reservation_id") @db.VarChar(80)
   assetId            String    @map("asset_id") @db.VarChar(80)
@@ -641,6 +643,7 @@ model AssetronReservation {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  @@unique([requestGroupId, itemIndex], map: "assetron_reservations_request_group_id_item_index_key")
   @@index([workspaceId, state])
   @@index([ticketId])
   @@map("assetron_reservations")

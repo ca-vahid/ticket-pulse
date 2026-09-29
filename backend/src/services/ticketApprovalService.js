@@ -246,14 +246,18 @@ class TicketApprovalService {
     // Assetron (24 Sep 2026): a hardware category may hold a laptop for this
     // request. The hold comes FIRST — if Assetron refuses (laptop taken,
     // recipient unknown) nothing is created and the agent sees why.
-    const hardware = assetronReservationService.normalizeHardware(rawHardware);
-    if (hardware && category.gatesHardware !== true) throw new ValidationError(`"${category.name}" is not a hardware category — a laptop cannot be reserved with it`);
-    const reserved = hardware ? await assetronReservationService.reserve({ ticket, requestGroupId, hardware, actor }) : null;
-    if (reserved) {
+    // 29 Sep 2026: up to 5 devices per request, each its own hold.
+    const hardwareItems = assetronReservationService.normalizeHardwareList(rawHardware);
+    if (hardwareItems.length && category.gatesHardware !== true) throw new ValidationError(`"${category.name}" is not a hardware category — a device cannot be reserved with it`);
+    const reserved = hardwareItems.length ? await assetronReservationService.reserveAll({ ticket, requestGroupId, items: hardwareItems, actor }) : [];
+    if (reserved.length) {
       try {
-        await assetronReservationService.record({ ticket, requestGroupId, categoryId: category.id, hardware, reserved, actor });
+        for (let i = 0; i < reserved.length; i += 1) {
+          await assetronReservationService.record({ ticket, requestGroupId, categoryId: category.id, hardware: hardwareItems[i], reserved: reserved[i], actor, itemIndex: i });
+        }
       } catch (err) {
-        await assetronReservationService.abandon(reserved.reservationId, actor);
+        await assetronReservationService.abandonAll(reserved, actor);
+        await prisma.assetronReservation.deleteMany({ where: { requestGroupId } }).catch(() => {});
         throw err;
       }
     }
@@ -288,8 +292,8 @@ class TicketApprovalService {
         created.push({ id: approval.id, approverEmail: email });
       }
     } catch (err) {
-      if (reserved) {
-        await assetronReservationService.abandon(reserved.reservationId, actor);
+      if (reserved.length) {
+        await assetronReservationService.abandonAll(reserved, actor);
         await prisma.assetronReservation.deleteMany({ where: { requestGroupId } }).catch(() => {});
       }
       throw err;
@@ -349,7 +353,7 @@ class TicketApprovalService {
       startedAtTier: startTier,
       startedAtTierName: tiers[startTierIdx].name,
       skippedTiers,
-      hardware: reserved ? await assetronReservationService.forGroup(requestGroupId).catch(() => null) : null,
+      hardware: reserved.length ? await assetronReservationService.forGroup(requestGroupId).catch(() => []) : [],
     };
   }
 
@@ -632,8 +636,11 @@ class TicketApprovalService {
         decisionNote: approval.decisionNote || null,
         decisionNoteHtml: approval.decisionNoteHtml || null,
         category: category ? { name: category.name, description: category.description || null } : null,
-        // Assetron: the laptop this request holds (24 Sep 2026), or null.
-        laptop: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => null) : null,
+        // Assetron: the devices this request holds (list, 29 Sep 2026); `laptop` = the first, for older pages.
+        ...(await (async () => {
+          const laptops = approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [];
+          return { laptops, laptop: laptops[0] || null };
+        })()),
         clarificationLog,
         supersededBy,
         cancelledReason,
@@ -1793,7 +1800,7 @@ class TicketApprovalService {
       decisionUrl,
       expiresAt: approval.expiresAt || null,
       reRequest: !!clarification?.answer,
-      laptop: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => null) : null,
+      laptops: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [],
     });
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');

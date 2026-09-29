@@ -523,13 +523,16 @@ export function renderApproverRequestEmail(ctx) {
   // Facts: amount first when there is one, then the ticket's own.
   const facts = [];
   if (ctx.amountLabel) facts.push(['Amount', escapeHtml(ctx.amountLabel)]);
-  if (ctx.laptop && ctx.laptop.asset) {
-    const a = ctx.laptop.asset;
+  // Assetron devices held by this request (up to 5 since 29 Sep 2026).
+  const held = (Array.isArray(ctx.laptops) ? ctx.laptops : (ctx.laptop ? [ctx.laptop] : [])).filter((h) => h && h.asset);
+  held.forEach((h, i) => {
+    const a = h.asset;
     const id = a.assetTag || (a.serialNumber ? `S/N ${a.serialNumber}` : '');
     const spec = [a.cpu, a.ram, a.storage, a.screenSize].filter(Boolean).join(' · ');
-    facts.push(['Laptop (held in Assetron)', `${escapeHtml([a.make, a.model].filter(Boolean).join(' ') || 'Laptop')}${id ? ` <span class="ap-muted" style="font-weight:normal;color:${AP.muted};">· ${escapeHtml(id)}</span>` : ''}${spec ? `<div class="ap-muted" style="font-size:12.5px;line-height:18px;font-weight:normal;color:${AP.muted};">${escapeHtml(spec)}</div>` : ''}`]);
-    facts.push(['Assigned to on approval', escapeHtml(ctx.laptop.recipient?.name || ctx.laptop.recipient?.email || '—')]);
-  }
+    const label = held.length > 1 ? `Device ${i + 1} (held in Assetron)` : 'Device (held in Assetron)';
+    facts.push([label, `${escapeHtml([a.make, a.model].filter(Boolean).join(' ') || 'Device')}${id ? ` <span class="ap-muted" style="font-weight:normal;color:${AP.muted};">· ${escapeHtml(id)}</span>` : ''}${spec ? `<div class="ap-muted" style="font-size:12.5px;line-height:18px;font-weight:normal;color:${AP.muted};">${escapeHtml(spec)}</div>` : ''}`]);
+    facts.push(['Assigned to on approval', escapeHtml(h.recipient?.name || h.recipient?.email || '—')]);
+  });
   facts.push(['Priority', escapeHtml(t.priorityLabel || '—')]);
   facts.push(['Due', escapeHtml(t.dueBy ? fmtDay(t.dueBy) : '—')]);
   facts.push(['Type', escapeHtml(t.typeLabel || '—')]);

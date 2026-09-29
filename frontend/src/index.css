@@ -893,6 +893,26 @@ html[data-motion="reduce"] .animate-fadeIn {
   animation-duration: 0.01ms;
 }
 
+/* Smooth open/close for panels whose height is unknown (approval request
+   redesign, 29 Sep 2026): the grid row eases between 0fr and 1fr, so a section
+   slides instead of snapping. The child must be the only element inside. */
+.tp-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease-out;
+}
+.tp-collapse > * { min-height: 0; overflow: hidden; }
+.tp-collapse[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
+/* A step or an added item eases in from just below. */
+@keyframes tpEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.tp-enter { animation: tpEnter 0.24s cubic-bezier(0.22, 1, 0.36, 1) both; }
+html[data-motion="reduce"] .tp-collapse { transition: none; }
+html[data-motion="reduce"] .tp-enter { animation: none; }
+
 @keyframes slideInRight {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }

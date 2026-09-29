@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.1.06-preview';
+export const APP_VERSION = '4.1.07-preview';
 
 export const changelog = [
+  {
+    version: '4.1.07-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Up to 5 hardware items on one approval</strong> — add or remove items with + and −. Each item is a device reserved from Assetron or a manual entry with the full editor (paste a list or an Excel range). The approver sees every device in the e-mail and on the approval page.' },
+      { type: 'improved', html: '<strong>Request approval</strong> — a bold + on the Approvals tab starts a request from any tab.' },
+      { type: 'improved', html: '<strong>Device filters</strong> — sections fold and unfold smoothly, one-value sections start folded and show their value, and the filter list keeps its header while it scrolls.' },
+    ],
+  },
   {
     version: '4.1.06-preview',
     date: 'September 29, 2026',
