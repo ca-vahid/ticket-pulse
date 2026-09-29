@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -864,6 +864,10 @@ export default function TicketDetail() {
   const [splitFromId, setSplitFromId] = useState(null); // QA 09-18 #6: opened from a message's "Split from here"
   const [isSending, setIsSending] = useState(false);
   const [requestApprovalOpen, setRequestApprovalOpen] = useState(false);
+  const requestableApprovalCategories = useMemo(
+    () => (meta?.approvalCategories || []).filter((c) => (c.managerCount || 0) > 0),
+    [meta?.approvalCategories],
+  );
   const [deleteApprovalTarget, setDeleteApprovalTarget] = useState(null); // approval group pending delete-confirm
   const [changeApprovalTarget, setChangeApprovalTarget] = useState(null); // {approvalId, from, to, categoryName, approverName}
   const [changeNote, setChangeNote] = useState('');
@@ -2400,6 +2404,11 @@ export default function TicketDetail() {
                           <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
                             <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
                           </button>
+                          {requestableApprovalCategories.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
+                            <button onClick={() => { setRequestApprovalOpen(true); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                              <Stamp className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Request approval…
+                            </button>
+                          )}
                           {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
                             <button
                               onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
@@ -3289,12 +3298,21 @@ export default function TicketDetail() {
                         <ShieldCheck className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                         Ticket Pulse feature — not synced to FreshService
                       </span>
+                      {/* Approval redesign A3 (29 Sep 2026): the request action sits with the heading. */}
+                      {requestableApprovalCategories.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setRequestApprovalOpen(true)}
+                          data-testid="new-approval-request"
+                          className="tp-focus-ring ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+                        >
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New request
+                        </button>
+                      )}
                     </div>
 
-                    {(ticket.approvals?.length || 0) === 0 && (
-                      <p className="text-sm text-muted-foreground/75 mb-4">
-                        No approvals yet. Request one below — the approver decides in-app or through a personal magic link.
-                      </p>
+                    {(ticket.approvals?.length || 0) === 0 && requestableApprovalCategories.length > 0 && (
+                      <p className="text-sm text-muted-foreground/75">No approvals yet.</p>
                     )}
                     {(ticket.approvals?.length || 0) > 0 && (
                       <ApprovalTimeline
@@ -3317,17 +3335,7 @@ export default function TicketDetail() {
                       />
                     )}
 
-                    {/* Request approval — prominent button opens the guided modal */}
-                    {(meta?.approvalCategories?.filter((c) => (c.managerCount || 0) > 0).length || 0) > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setRequestApprovalOpen(true)}
-                        className="tp-focus-ring inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:bg-blue-700 shadow-subtle"
-                      >
-                        <Stamp className="w-4 h-4" aria-hidden="true" />
-                        Request approval
-                      </button>
-                    ) : (
+                    {requestableApprovalCategories.length === 0 && (
                       <p className="text-sm text-muted-foreground/75">
                         No approval categories are set up yet. An admin can add them under <span className="font-medium">Settings → Approval Categories</span>.
                       </p>
@@ -4147,7 +4155,7 @@ export default function TicketDetail() {
 
       {requestApprovalOpen && (
         <RequestApprovalModal
-          categories={(meta?.approvalCategories || []).filter((c) => (c.managerCount || 0) > 0)}
+          categories={requestableApprovalCategories}
           technicians={meta?.technicians || []}
           members={meta?.members || []}
           actorEmail={meta?.actor?.email || null}

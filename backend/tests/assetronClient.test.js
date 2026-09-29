@@ -63,6 +63,25 @@ test('search: comma = OR within a key, status forced to NEW whatever the caller 
   expect(r.items).toEqual([{ id: 'a' }]);
 });
 
+test('listAllNew walks every page of NEW devices (100 a page) and stops at the cap', async () => {
+  const pages = { 1: 100, 2: 100, 3: 37 };
+  client._setFetch(async (url) => {
+    const q = new URL(url).searchParams;
+    calls.push(q.get('page'));
+    const n = pages[q.get('page')] || 0;
+    return respond(200, { data: Array.from({ length: n }, (_, i) => ({ id: `${q.get('page')}-${i}` })), pagination: { page: Number(q.get('page')), pageSize: 100, totalItems: 237, totalPages: 3 } });
+  });
+  const all = await client.listAllNew();
+  expect(calls).toEqual(['1', '2', '3']);
+  expect(all).toMatchObject({ total: 237, truncated: false });
+  expect(all.items).toHaveLength(237);
+  calls.length = 0;
+  const capped = await client.listAllNew({ maxItems: 150 });
+  expect(capped.items).toHaveLength(150);
+  expect(capped.truncated).toBe(true);
+  expect(calls).toEqual(['1', '2']);
+});
+
 test('error envelope → AssetronError with the agent-safe message and the machine reason', async () => {
   client._setFetch(async () => respond(409, { error: { code: 'CONFLICT', message: 'This laptop is On Hold for TP-1650.', details: [{ field: 'assetId', message: 'ASSET_UNAVAILABLE' }] } }));
   const err = await client.createReservation({ assetId: 'x' }).catch((e) => e);

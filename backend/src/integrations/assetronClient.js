@@ -146,6 +146,27 @@ const assetronClient = {
     return { items: Array.isArray(json.data) ? json.data : [], pagination: json.pagination || null };
   },
 
+  /**
+   * Every NEW device, page by page (100 a page), up to `maxItems`. The finder
+   * loads this once when it opens and filters in the browser — one short burst
+   * of calls instead of one per filter change (Sam's B6 rule), and it gives
+   * real counts next to every filter value (approval redesign, 29 Sep 2026).
+   */
+  async listAllNew({ maxItems = 1000 } = {}) {
+    const items = [];
+    let page = 1;
+    let total = null;
+    for (;;) {
+      const { items: batch, pagination } = await this.searchAssets({}, { page, pageSize: 100 });
+      items.push(...batch);
+      total = pagination?.totalItems ?? total;
+      const pages = pagination?.totalPages ?? null;
+      if (!batch.length || items.length >= maxItems || (pages !== null && page >= pages) || batch.length < 100) break;
+      page += 1;
+    }
+    return { items: items.slice(0, maxItems), total: total ?? items.length, truncated: (total ?? items.length) > maxItems };
+  },
+
   async getAsset(id) {
     const { json } = await request('GET', `/assets/${encodeURIComponent(id)}`, { retries: 2 });
     return json.data || null;
