@@ -19,6 +19,29 @@ const LABELS = {
 const ORDER = ['location', 'make', 'model', 'ram', 'storage', 'cpu', 'gpu', 'screenSize', 'touchScreen'];
 
 const fmtValue = (v) => (v === true ? 'Yes' : v === false ? 'No' : String(v));
+// A yes/no field (touchScreen) is one choice — Any, Yes or No. Assetron refuses
+// "true,false" with a bare 400 "Validation failed" (29 Sep 2026).
+const isBooleanField = (values) => Array.isArray(values) && values.length > 0 && values.every((v) => v === true || v === false);
+
+function YesNoFilter({ name, value, onChange }) {
+  const opts = [{ v: null, t: 'Any' }, { v: true, t: 'Yes' }, { v: false, t: 'No' }];
+  return (
+    <div className="inline-flex items-center gap-1 text-xs" role="radiogroup" aria-label={label(name)}>
+      <span className="text-muted-foreground">{label(name)}</span>
+      <span className="inline-flex overflow-hidden rounded-lg border border-input">
+        {opts.map((o) => {
+          const on = value === o.v;
+          return (
+            <button
+              key={o.t} type="button" role="radio" aria-checked={on} onClick={() => onChange(o.v)}
+              className={`tp-focus-ring px-2 py-1.5 ${on ? 'bg-primary/10 font-semibold text-primary' : 'bg-card text-muted-foreground hover:bg-muted/50'}`}
+            >{o.t}</button>
+          );
+        })}
+      </span>
+    </div>
+  );
+}
 const label = (k) => LABELS[k] || k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
 
 export function assetTitle(a) {
@@ -165,12 +188,21 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange }
     const all = Object.keys(options).filter((k) => Array.isArray(options[k]) && options[k].length > 0);
     return [...ORDER.filter((k) => all.includes(k)), ...all.filter((k) => !ORDER.includes(k)).sort()];
   }, [options]);
+  // filter-options lists values across laptops that are NEW right now. When
+  // every real field is empty there is nothing to reserve — say so instead of
+  // showing a lone yes/no filter (Assetron prod, 29 Sep 2026).
+  const noStock = keys.every((k) => isBooleanField(options[k]));
 
   const search = async () => {
     setSearching(true); setError(null);
     try {
       // Raw values (true/false, "32 GB") — Assetron matches its canonical values exactly.
-      const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.map((x) => String(x)).join(',')]));
+      const params = {};
+      for (const [k, v] of Object.entries(filters)) {
+        if (isBooleanField(options[k])) { if (v === true || v === false) params[k] = String(v); continue; }
+        // Every value ticked = no constraint; leave the filter out.
+        if (Array.isArray(v) && v.length && v.length < (options[k] || []).length) params[k] = v.map((x) => String(x)).join(',');
+      }
       const res = await ticketsAPI.assetronAssets({ ...params, pageSize: 50 });
       setResults(res?.data?.items || []);
     } catch (err) {
@@ -181,6 +213,16 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange }
   if (status.loading) return <p className="text-xs text-muted-foreground"><Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" aria-hidden="true" />Connecting to Assetron…</p>;
   if (!status.configured) return <p className="text-xs text-muted-foreground">Assetron is not connected yet, so a laptop can’t be reserved from here. The approval can still be requested.</p>;
   if (status.error) return <p role="alert" className="text-xs text-red-700 dark:text-red-200">Assetron: {status.error}</p>;
+  if (noStock) {
+    return (
+      <div className="space-y-3" data-testid="laptop-picker">
+        <RecipientField recipient={recipient} onRecipient={onRecipient} />
+        <p className="text-xs text-muted-foreground" data-testid="laptop-no-stock">
+          Assetron has no new laptops available right now. Choose “No laptop” to send the request without one, or ask the Assetron team to add stock.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3" data-testid="laptop-picker">
@@ -198,9 +240,9 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange }
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-1.5">
-            {keys.map((k) => (
-              <FilterSelect key={k} id={`laptop-filter-${k}`} name={k} values={options[k]} selected={filters[k] || []} onChange={(v) => setFilters({ ...filters, [k]: v })} />
-            ))}
+            {keys.map((k) => (isBooleanField(options[k])
+              ? <YesNoFilter key={k} name={k} value={filters[k] ?? null} onChange={(v) => setFilters({ ...filters, [k]: v })} />
+              : <FilterSelect key={k} id={`laptop-filter-${k}`} name={k} values={options[k]} selected={filters[k] || []} onChange={(v) => setFilters({ ...filters, [k]: v })} />))}
             <button type="button" onClick={search} disabled={searching} className="tp-focus-ring inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-60">
               {searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Search className="h-3.5 w-3.5" aria-hidden="true" />} Search new laptops
             </button>

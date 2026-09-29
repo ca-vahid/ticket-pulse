@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight, BadgeDollarSign, Check, ChevronDown, ImagePlus, Loader2, Mail, Paperclip, Search, Send, ShieldAlert, ShieldCheck, Stamp, X,
+  ArrowRight, BadgeDollarSign, Ban, Check, ChevronDown, ImagePlus, Laptop, Loader2, Mail, Paperclip, Search, Send, ShieldAlert, ShieldCheck, Stamp, X,
 } from 'lucide-react';
 import { PersonAvatar } from './ticketUi';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
@@ -38,7 +38,8 @@ export default function RequestApprovalModal({
   const [amountTouched, setAmountTouched] = useState(false);
   // Assetron: optional laptop for a hardware category (chargers and batteries
   // go through the same category, so a laptop is never forced).
-  const [wantLaptop, setWantLaptop] = useState(false);
+  // null = not chosen yet; true = reserve from Assetron; false = no laptop.
+  const [wantLaptop, setWantLaptop] = useState(null);
   const [laptop, setLaptop] = useState(null);
   const [recipient, setRecipient] = useState(requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null } : null);
   const pasteCount = useRef(0);
@@ -99,6 +100,7 @@ export default function RequestApprovalModal({
     e.preventDefault();
     if (!categoryId || busy) return;
     if (!amountValid) { setAmountTouched(true); return; }
+    if (hardwareOn && wantLaptop === null) return;
     if (hardwareOn && wantLaptop && (!laptop || !recipient?.email)) return;
     onSubmit({
       approvalCategoryId: Number(categoryId),
@@ -153,19 +155,34 @@ export default function RequestApprovalModal({
 
           {/* Laptop from Assetron (hardware categories) */}
           {selected && hardwareOn && (
-            <div className="rounded-xl border border-border px-3.5 py-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <input
-                  type="checkbox" checked={wantLaptop} onChange={(e) => { setWantLaptop(e.target.checked); if (!e.target.checked) setLaptop(null); }}
-                  className="tp-focus-ring h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
-                />
-                Reserve a new laptop from Assetron
-              </label>
-              <p className="mt-0.5 ml-6 text-[11px] text-muted-foreground">It is held while the approval is open, assigned to the person when approved, and released if it is not.</p>
+            <div data-testid="laptop-choice">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Laptop</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Laptop">
+                {[
+                  { v: true, title: 'Reserve a laptop from Assetron', hint: 'Held while the approval is open, assigned to the person when approved, released if not.', Icon: Laptop },
+                  { v: false, title: 'No laptop', hint: 'A charger, a battery, or anything Assetron does not track.', Icon: Ban },
+                ].map((o) => {
+                  const on = wantLaptop === o.v;
+                  return (
+                    <button
+                      key={String(o.v)} type="button" role="radio" aria-checked={on}
+                      onClick={() => { setWantLaptop(o.v); if (!o.v) setLaptop(null); }}
+                      className={`tp-focus-ring flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}
+                    >
+                      <o.Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${on ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
+                      <span className="min-w-0">
+                        <span className={`block text-sm font-medium ${on ? 'text-foreground' : 'text-foreground/85'}`}>{o.title}</span>
+                        <span className="block text-[11px] leading-4 text-muted-foreground">{o.hint}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {wantLaptop === null && <p className="mt-1.5 text-[11px] text-muted-foreground">Choose one to continue.</p>}
               {wantLaptop && (
-                <div className="mt-3">
+                <div className="mt-3 rounded-xl border border-border px-3.5 py-3">
                   <LaptopPicker recipient={recipient} onRecipient={setRecipient} value={laptop} onChange={setLaptop} />
-                  {!laptop && <p className="mt-2 text-[11px] text-muted-foreground">Pick one laptop to continue, or untick the box to request without one.</p>}
+                  {!laptop && <p className="mt-2 text-[11px] text-muted-foreground">Pick one laptop to continue, or choose “No laptop”.</p>}
                 </div>
               )}
             </div>
@@ -305,7 +322,7 @@ export default function RequestApprovalModal({
           <button type="button" onClick={onClose} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           <button
             type="submit"
-            disabled={!categoryId || busy || selfOnEveryTier || (monetary && amountTouched && !amountValid)}
+            disabled={!categoryId || busy || selfOnEveryTier || (monetary && amountTouched && !amountValid) || (hardwareOn && (wantLaptop === null || (wantLaptop && (!laptop || !recipient?.email))))}
             className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
