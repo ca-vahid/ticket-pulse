@@ -10,6 +10,11 @@ import { StatusPill } from './ticketUi';
  * on the child and a Children card on the parent. Children are real, separately
  * assignable tickets; the link is Ticket-Pulse-authoritative and mirrored to
  * FreshService as a cosmetic note. Rendered in the ticket sidebar.
+ *
+ * FS-born tickets (29 Sep 2026): FreshService's own parent/child links are
+ * read in by the family endpoint (source 'freshservice'). FreshService owns
+ * those, so they show without an unlink control; FreshService children that
+ * are not in Ticket Pulse are listed read-only by their FreshService number.
  */
 export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigate, refreshToken }) {
   const [family, setFamily] = useState(null); // { parent, children }
@@ -75,7 +80,11 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
 
   if (family === null) return null;
   const { parent, children } = family;
-  if (!parent && children.length === 0 && !canWrite) return null;
+  const externalChildren = family.fsExternalChildren || [];
+  const externalParent = family.fsExternalParent || null;
+  const childCount = children.length + externalChildren.length;
+  if (!parent && !externalParent && childCount === 0 && !canWrite) return null;
+  const fromFs = <span className="shrink-0 text-[10px] text-muted-foreground/75" title="This link comes from FreshService; change it there">FreshService</span>;
 
   return (
     <div className="tp-card rounded-xl p-3.5">
@@ -93,11 +102,19 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
             <span className="text-[11px] text-violet-600 dark:text-violet-300">Child of</span>
             <button onClick={() => onNavigate?.(parent.id)} className="tp-focus-ring rounded font-mono text-xs font-bold text-violet-700 dark:text-violet-200 hover:underline">{parent.displayRef}</button>
             <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{parent.subject}</span>
-            {canWrite && (
+            {parent.source === 'freshservice' && fromFs}
+            {canWrite && parent.source !== 'freshservice' && (
               <button onClick={removeParent} disabled={busy} aria-label="Remove parent" className="tp-focus-ring rounded p-0.5 text-muted-foreground/75 hover:text-red-500">
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             )}
+          </div>
+        ) : externalParent ? (
+          <div className="flex items-center gap-2 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/10 px-2.5 py-1.5">
+            <span className="text-[11px] text-violet-600 dark:text-violet-300">Child of</span>
+            <span className="font-mono text-xs font-bold text-violet-700 dark:text-violet-200">#{externalParent.fsId}</span>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/75">Not in Ticket Pulse</span>
+            {fromFs}
           </div>
         ) : canWrite && (
           showParentInput ? (
@@ -115,20 +132,30 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
       </div>
 
       {/* Children */}
-      {children.length > 0 && (
+      {childCount > 0 && (
         <ul className="space-y-1">
-          <li className="text-[11px] font-semibold text-muted-foreground/75">Children ({children.length})</li>
+          <li className="text-[11px] font-semibold text-muted-foreground/75">Children ({childCount})</li>
           {children.map((c) => (
             <li key={c.id} className="flex items-center gap-2 rounded-lg border border-border/60 px-2.5 py-1.5">
               <button onClick={() => onNavigate?.(c.id)} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 dark:text-blue-200 hover:underline">{c.displayRef}</button>
               <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{c.subject}</span>
               {c.assignee?.name && <span className="hidden truncate text-[10px] text-muted-foreground/75 sm:inline">{c.assignee.name}</span>}
               <StatusPill status={c.status} />
-              {canWrite && (
+              {c.source === 'freshservice' && fromFs}
+              {canWrite && c.source !== 'freshservice' && (
                 <button onClick={() => removeChild(c.id)} disabled={busy} aria-label="Unlink child" className="tp-focus-ring rounded p-0.5 text-muted-foreground/75 hover:text-red-500">
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               )}
+            </li>
+          ))}
+          {externalChildren.map((c) => (
+            <li key={`fs-${c.fsId}`} className="flex items-center gap-2 rounded-lg border border-border/60 px-2.5 py-1.5">
+              <span className="font-mono text-xs font-bold text-muted-foreground" title="In FreshService, not in Ticket Pulse">#{c.fsId}</span>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{c.subject || 'Not in Ticket Pulse'}</span>
+              {c.agent && <span className="hidden truncate text-[10px] text-muted-foreground/75 sm:inline">{c.agent}</span>}
+              {c.status && <StatusPill status={c.status} />}
+              {fromFs}
             </li>
           ))}
         </ul>

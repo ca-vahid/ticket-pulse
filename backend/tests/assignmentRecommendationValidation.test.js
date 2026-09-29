@@ -3,6 +3,12 @@ import { jest } from '@jest/globals';
 // The type normalizer now reads the per-workspace ticket-type registry.
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: {
+    competencyCategory: {
+      findMany: jest.fn(async ({ where }) => [
+        { id: 89, workspaceId: 1, name: 'Collaboration & Files' },
+        { id: 93, workspaceId: 1, name: 'Site Access / Ownership Change' },
+      ].filter((row) => row.workspaceId === where.workspaceId && where.id.in.includes(row.id))),
+    },
     ticketTypeDefinition: {
       findMany: jest.fn().mockResolvedValue([
         { id: 1, workspaceId: 1, name: 'Incident', aliases: ['incident', 'issue', 'outage'], isActive: true, aiAssignable: true, fsTypeValue: 'Incident', sortOrder: 0 },
@@ -116,5 +122,25 @@ describe('assignment recommendation validation', () => {
     expect(message.stop_reason).toBe('tool_use');
     expect(normalized.recommendations).toEqual(basePayload.recommendations);
     expect(normalized.overallReasoning).toBe('OpenAI adapter recovered rationale');
+  });
+});
+
+describe('ticketClassification rebuilt from category ids (Sonnet 5.5, 29 Sep 2026)', () => {
+  const withoutLabel = { ...basePayload };
+  delete withoutLabel.ticketClassification;
+
+  test('a missing label is rebuilt from internalCategoryId > internalSubcategoryId', async () => {
+    const normalized = await normalizeSubmitRecommendationPayload({ ...withoutLabel, internalCategoryId: 89, internalSubcategoryId: 93 }, 1);
+    expect(normalized.ticketClassification).toBe('Collaboration & Files > Site Access / Ownership Change');
+  });
+
+  test('a label the model sent is kept as is', async () => {
+    const normalized = await normalizeSubmitRecommendationPayload({ ...basePayload, internalCategoryId: 89, internalSubcategoryId: 93 }, 1);
+    expect(normalized.ticketClassification).toBe(basePayload.ticketClassification);
+  });
+
+  test('no ids, or ids from another workspace: still required', async () => {
+    await expect(normalizeSubmitRecommendationPayload({ ...withoutLabel }, 1)).rejects.toThrow('ticketClassification is required');
+    await expect(normalizeSubmitRecommendationPayload({ ...withoutLabel, internalCategoryId: 89 }, 2)).rejects.toThrow('ticketClassification is required');
   });
 });

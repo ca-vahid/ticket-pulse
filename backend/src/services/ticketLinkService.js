@@ -259,14 +259,18 @@ class TicketLinkService {
         orderBy: { id: 'asc' },
       }),
     ]);
-    const asCard = (t, linkId) => ({
-      id: t.id, linkId, subject: t.subject, status: t.status,
+    // source: 'freshservice' marks a relationship read from FreshService
+    // (fsTicketRelationService) — FreshService owns it, so the card shows it
+    // without an unlink control.
+    const asCard = (t, link) => ({
+      id: t.id, linkId: link.id, subject: t.subject, status: t.status,
       displayRef: ticketDisplayRef(t),
+      source: link.createdBy === 'freshservice' ? 'freshservice' : 'ticketpulse',
       assignee: t.assignedTech ? { id: t.assignedTech.id, name: t.assignedTech.name, photoUrl: t.assignedTech.photoUrl } : null,
     });
     return {
-      parent: parentLink ? asCard(parentLink.ticket, parentLink.id) : null,
-      children: childLinks.map((l) => asCard(l.relatedTicket, l.id)),
+      parent: parentLink ? asCard(parentLink.ticket, parentLink) : null,
+      children: childLinks.map((l) => asCard(l.relatedTicket, l)),
     };
   }
 
@@ -336,6 +340,9 @@ class TicketLinkService {
   async removeParent(childId, workspaceId, actor) {
     const link = await prisma.ticketLink.findFirst({ where: { workspaceId, relatedTicketId: childId, kind: 'parent_of' } });
     if (!link) throw new NotFoundError('This ticket has no parent to remove');
+    if (link.createdBy === 'freshservice') {
+      throw new ValidationError('This parent / child link comes from FreshService — change it in FreshService, and Ticket Pulse follows within a few minutes');
+    }
     const [child, parent] = await Promise.all([
       prisma.ticket.findFirst({ where: { id: childId, workspaceId } }),
       prisma.ticket.findFirst({ where: { id: link.ticketId, workspaceId } }),

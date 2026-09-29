@@ -1236,7 +1236,24 @@ class AssignmentPipelineService {
 
         messages.push({ role: 'assistant', content: finalMessage.content });
 
-        if (finalMessage.stop_reason === 'tool_use') {
+        // 29 Sep 2026 (run 27139, Sonnet 5.5): a turn carried three tool calls
+        // but a stop_reason other than tool_use, so the loop ended after one
+        // turn with nothing submitted. Tool calls that were executed are
+        // answered and the loop goes on; a refusal still ends it, logged.
+        const executedToolCalls = finalMessage.content.some((b) => b.type === 'tool_use');
+        const unexpectedStop = !['tool_use', 'pause_turn'].includes(finalMessage.stop_reason);
+        if (unexpectedStop && recommendation === null && (executedToolCalls || finalMessage.stop_reason !== 'end_turn')) {
+          logger.warn('Pipeline turn ended without a submission', {
+            runId,
+            ticketId,
+            stopReason: finalMessage.stop_reason || null,
+            stopDetails: finalMessage.stop_details || null,
+            toolCalls: finalMessage.content.filter((b) => b.type === 'tool_use').length,
+          });
+        }
+
+        if (finalMessage.stop_reason === 'tool_use'
+          || (executedToolCalls && recommendation === null && finalMessage.stop_reason !== 'refusal')) {
           const toolResultBlocks = finalMessage.content
             .filter((b) => b.type === 'tool_use')
             .map((b) => ({
