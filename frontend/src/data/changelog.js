@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.01-preview';
+export const APP_VERSION = '4.1.02-preview';
 
 export const changelog = [
+  {
+    version: '4.1.02-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Faster classification of already-assigned tickets</strong> &mdash; the AI now sees the current assignee&rsquo;s internal id with the ticket, so on already-assigned tickets Sonnet 5.5 no longer submits an invalid assignee and has to look up the team list to correct it.' },
+    ],
+  },
   {
     version: '4.1.01-preview',
     date: 'September 28, 2026',
