@@ -12,6 +12,12 @@ const prismaMock = {
       ? h.requestGroupId === where.requestGroupId
       : where.OR.some((c) => h.state === c.state && (!c.outcomeWhy || h.outcomeWhy === c.outcomeWhy))))),
     findUnique: jest.fn(async ({ where }) => holds.find((h) => (where.id ? h.id === where.id : h.requestGroupId === where.requestGroupId)) || null),
+    // Holds are per request AND item since 29 Sep 2026 (several devices per request).
+    findFirst: jest.fn(async ({ where }) => holds.find((h) => (where.requestGroupId === undefined || h.requestGroupId === where.requestGroupId)
+      && (where.itemIndex === undefined || (h.itemIndex ?? 0) === where.itemIndex)
+      && (where.assetId === undefined || h.assetId === where.assetId)
+      && (where.state === undefined || h.state === where.state)
+      && (where.NOT?.itemIndex === undefined || (h.itemIndex ?? 0) !== where.NOT.itemIndex)) || null),
     update: jest.fn(async ({ where, data }) => { const h = holds.find((x) => x.id === where.id); Object.assign(h, data); return h; }),
     create: jest.fn(async ({ data }) => { const h = { id: holds.length + 1, attempts: 0, ...data }; holds.push(h); return h; }),
   },
@@ -39,7 +45,7 @@ jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: 
 const { default: svc, desiredOutcome, assetLabel } = await import('../src/services/assetronReservationService.js');
 
 const ASSET = { id: '4c1e9d2a-0000-4000-8000-000000000001', make: 'Dell', model: 'Latitude 7650', serialNumber: '5CG4XYZ123', cpu: 'Intel Core Ultra 7 165U', ram: '32 GB', storage: '1 TB', screenSize: '16"' };
-const HOLD = () => ({ id: 1, workspaceId: 1, ticketId: 10, requestGroupId: 'g1', reservationId: 'res-1', assetId: ASSET.id, asset: ASSET, recipientEmail: 'jsmith@bgc.ca', recipientName: 'Jordan Smith', state: 'reserved', attempts: 0, pendingOutcome: null, requestedByEmail: 'agent@bgc.ca' });
+const HOLD = () => ({ id: 1, workspaceId: 1, ticketId: 10, requestGroupId: 'g1', itemIndex: 0, reservationId: 'res-1', assetId: ASSET.id, asset: ASSET, recipientEmail: 'jsmith@bgc.ca', recipientName: 'Jordan Smith', state: 'reserved', attempts: 0, pendingOutcome: null, requestedByEmail: 'agent@bgc.ca' });
 const future = new Date(Date.now() + 5 * 864e5);
 const past = new Date(Date.now() - 864e5);
 
@@ -243,6 +249,33 @@ describe('reserve / change', () => {
     clientMock.createReservation.mockRejectedValueOnce(new AssetronError({ status: 404, reason: 'USER_NOT_FOUND', message: 'x@bgc.ca is not in Assetron. Run "Sync from Entra ID" in Assetron, then try again.' }));
     const err = await svc.reserve({ ticket: tickets[0], requestGroupId: 'g9', hardware: svc.normalizeHardware({ assetId: ASSET.id, recipient: { email: 'x@bgc.ca' } }), actor: {} }).catch((e) => e);
     expect(err.message.match(/Sync from Entra ID/g)).toHaveLength(1);
+  });
+
+  test('several devices: normalized as a list (≤ 5), the same device twice is refused', () => {
+    const a = { assetId: ASSET.id, recipient: { email: 'a@bgc.ca' } };
+    const b = { assetId: '4c1e9d2a-0000-4000-8000-000000000009', recipient: { email: 'a@bgc.ca' } };
+    expect(svc.normalizeHardwareList(a)).toHaveLength(1);
+    expect(svc.normalizeHardwareList([a, b])).toHaveLength(2);
+    expect(() => svc.normalizeHardwareList([a, a])).toThrow(/twice/);
+    expect(() => svc.normalizeHardwareList(Array(6).fill(a))).toThrow(/At most 5/);
+  });
+
+  test('reserveAll: a failing device releases the ones already held, and says which device', async () => {
+    const a = svc.normalizeHardware({ assetId: ASSET.id, recipient: { email: 'a@bgc.ca' } });
+    const b = svc.normalizeHardware({ assetId: '4c1e9d2a-0000-4000-8000-000000000009', recipient: { email: 'a@bgc.ca' } });
+    clientMock.createReservation
+      .mockResolvedValueOnce({ status: 201, data: { reservationId: 'res-a' } })
+      .mockRejectedValueOnce(new AssetronError({ status: 409, reason: 'ASSET_UNAVAILABLE', message: 'This laptop is On Hold for TP-1650.' }));
+    await expect(svc.reserveAll({ ticket: tickets[0], requestGroupId: 'g9', items: [a, b], actor: {} })).rejects.toThrow('Device 2: Assetron: This laptop is On Hold for TP-1650.');
+    expect(clientMock.decideReservation).toHaveBeenCalledWith('res-a', expect.objectContaining({ status: 'CANCELLED' }));
+  });
+
+  test('change a second device: only that item moves; a device held by another item is refused', async () => {
+    holds.push({ ...HOLD(), id: 2, itemIndex: 1, reservationId: 'res-b', assetId: '4c1e9d2a-0000-4000-8000-000000000002' });
+    await expect(svc.change(10, 1, 5, { assetId: ASSET.id, recipient: { email: 'x@bgc.ca' } }, { email: 'agent@bgc.ca', role: 'agent' }, 1)).rejects.toThrow(/already on this request/);
+    await svc.change(10, 1, 5, { assetId: '4c1e9d2a-0000-4000-8000-000000000003', recipient: { email: 'x@bgc.ca' } }, { email: 'agent@bgc.ca', role: 'agent' }, 1);
+    expect(holds.find((h) => h.id === 1).reservationId).toBe('res-1');
+    expect(holds.find((h) => h.id === 2)).toMatchObject({ assetId: '4c1e9d2a-0000-4000-8000-000000000003', reservationId: 'res-2' });
   });
 
   test('change is refused once the request is decided', async () => {

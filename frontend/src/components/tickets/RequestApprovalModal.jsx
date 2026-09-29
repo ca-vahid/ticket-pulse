@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, BadgeDollarSign, Check, HardDrive, ImagePlus, Laptop, Loader2, Mail, Paperclip, PencilLine, Search, Send, ShieldAlert, ShieldCheck, Stamp, X,
+  ArrowLeft, ArrowRight, BadgeDollarSign, Check, ChevronDown, HardDrive, ImagePlus, Laptop, Loader2, Mail, Minus, Paperclip, PencilLine, Plus, Search, Send, ShieldAlert, ShieldCheck, Stamp, X,
 } from 'lucide-react';
 import { PersonAvatar } from './ticketUi';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import StagedFileChip from './StagedFileChip';
 import { formatMoney } from './ApprovalHandoff';
-import LaptopPicker, { assetTitle } from './LaptopPicker';
+import LaptopPicker, { RecipientField, assetTitle } from './LaptopPicker';
 
 const MAX_FILES = 5;
 const NL2 = String.fromCharCode(10, 10);
 const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const STEP_LABEL = { what: 'What', hardware: 'Hardware', details: 'Details' };
+const NL = String.fromCharCode(10);
+// Hardware items (29 Sep 2026): up to 5 per request, each from Assetron or entered by hand.
+const MAX_ITEMS = 5;
+let itemSeq = 0;
+const newItem = () => ({ key: `hw-${(itemSeq += 1)}`, source: null, device: null, html: '', text: '' });
+const itemDone = (it) => (it.source === 'assetron' ? Boolean(it.device) : it.source === 'manual' ? it.text.trim().length > 0 : false);
 
 /**
  * "Request approval" — a wide dialog in steps (approval redesign B1 + C1, 29 Sep 2026).
@@ -42,11 +48,9 @@ export default function RequestApprovalModal({
   const [amountTouched, setAmountTouched] = useState(false);
   // Hardware categories: null = not chosen yet; 'assetron' = reserve a device;
   // 'manual' = something Assetron does not track (chargers, docks…).
-  const [source, setSource] = useState(null);
-  const [device, setDevice] = useState(null);
+  const [items, setItems] = useState(() => [newItem()]);
+  const [activeKey, setActiveKey] = useState(null);
   const [deviceCount, setDeviceCount] = useState(null);
-  const [manualWhat, setManualWhat] = useState('');
-  const [manualQty, setManualQty] = useState('1');
   const [recipient, setRecipient] = useState(requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null } : null);
   const pasteCount = useRef(0);
   const fileInputRef = useRef(null);
@@ -80,10 +84,21 @@ export default function RequestApprovalModal({
   const currency = selected?.amountCurrency || 'CAD';
   const amountNumber = amount.trim() === '' ? null : Number(String(amount).replace(/[^0-9.]/g, ''));
   const amountValid = !monetary || (amountNumber !== null && Number.isFinite(amountNumber) && amountNumber >= 0);
-  const qtyNumber = Math.max(1, Math.floor(Number(manualQty) || 1));
+  const openKey = activeKey === null ? items[0]?.key : activeKey;
+  const anyDevice = items.some((it) => it.source === 'assetron');
   const hardwareReady = !hardwareOn
-    || (source === 'assetron' && Boolean(device) && Boolean(recipient?.email))
-    || (source === 'manual' && manualWhat.trim().length > 0);
+    || (items.length > 0 && items.every(itemDone) && (!anyDevice || Boolean(recipient?.email)));
+  const updateItem = (key, patch) => setItems((list) => list.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+  const addItem = () => {
+    if (items.length >= MAX_ITEMS) return;
+    const it = newItem();
+    setItems((list) => [...list, it]);
+    setActiveKey(it.key);
+  };
+  const removeItem = (key) => {
+    setItems((list) => (list.length > 1 ? list.filter((it) => it.key !== key) : list));
+    if (openKey === key) setActiveKey('');
+  };
 
   // Which tiers this amount has to pass through (limits are "may finalise up to").
   const route = useMemo(() => {
@@ -112,7 +127,7 @@ export default function RequestApprovalModal({
     if (c.id !== categoryId) {
       setCategoryId(c.id);
       if (!c.hasAmount) setAmount('');
-      if (!c.gatesHardware) { setSource(null); setDevice(null); }
+      if (!c.gatesHardware) { setItems([newItem()]); setActiveKey(null); }
     }
     setStep(c.gatesHardware ? 'hardware' : 'details');
   };
@@ -135,23 +150,33 @@ export default function RequestApprovalModal({
     if (!categoryId || busy) return;
     if (!amountValid) { setAmountTouched(true); return; }
     if (!hardwareReady) { setStep('hardware'); return; }
-    // Manual entry is not reserved anywhere: it rides at the top of the note
-    // so the approver reads exactly what is being asked for.
-    const manualLine = hardwareOn && source === 'manual' ? `Hardware (manual entry): ${qtyNumber} × ${manualWhat.trim()}` : null;
-    const text = [manualLine, note.trim()].filter(Boolean).join(NL2);
+    // Assetron items are reserved; manual items are not reserved anywhere —
+    // they lead the request note so the approver reads exactly what is asked
+    // for (pasted tables and lists included).
+    const deviceItems = hardwareOn ? items.filter((it) => it.source === 'assetron' && it.device) : [];
+    const manualItems = hardwareOn ? items.filter((it) => it.source === 'manual' && it.text.trim()) : [];
+    const numbered = manualItems.length > 1;
+    const manualText = manualItems.length
+      ? ['Hardware requested (manual entry):', ...manualItems.map((it, i) => `${numbered ? `${i + 1}. ` : ''}${it.text.trim()}`)].join(NL)
+      : null;
+    const manualHtml = manualItems.length
+      ? `<p><strong>Hardware requested (manual entry)</strong></p>${manualItems.map((it, i) => `${numbered ? `<p><strong>${i + 1}.</strong></p>` : ''}${it.html && isRichContent(it.html) ? it.html : `<p>${escHtml(it.text.trim())}</p>`}`).join('')}`
+      : '';
+    const text = [manualText, note.trim()].filter(Boolean).join(NL2);
     const rich = note.trim() && isRichContent(noteHtml);
+    const contextHtml = rich ? noteHtml : (note.trim() ? `<p>${escHtml(note.trim())}</p>` : '');
     onSubmit({
       approvalCategoryId: Number(categoryId),
       note: text || null,
-      noteHtml: rich ? `${manualLine ? `<p><strong>Hardware (manual entry):</strong> ${qtyNumber} × ${escHtml(manualWhat.trim())}</p>` : ''}${noteHtml}` : null,
+      noteHtml: manualHtml ? `${manualHtml}${contextHtml}` : (rich ? noteHtml : null),
       notifyApprover,
       amount: monetary ? Math.round(amountNumber * 100) / 100 : null,
       files,
-      hardware: hardwareOn && source === 'assetron' && device && recipient?.email ? { assetId: device.id, recipient } : null,
+      hardware: deviceItems.length && recipient?.email ? deviceItems.map((it) => ({ assetId: it.device.id, recipient })) : null,
     });
   };
 
-  const wide = step === 'hardware' && source === 'assetron';
+  const wide = step === 'hardware' && anyDevice;
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="req-approval-title">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
@@ -199,37 +224,35 @@ export default function RequestApprovalModal({
           )}
 
           {step === 'hardware' && selected && (
-            <div data-testid="hardware-step">
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Hardware</p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Hardware source">
-                <SourceTile
-                  on={source === 'assetron'} onPick={() => setSource('assetron')} Icon={Laptop}
-                  title="Reserve from Assetron"
-                  hint={deviceCount === null ? 'Held until the approval is decided, then assigned or released.' : `${deviceCount} new device${deviceCount === 1 ? '' : 's'} available · held until decided`}
-                />
-                <SourceTile
-                  on={source === 'manual'} onPick={() => { setSource('manual'); setDevice(null); }} Icon={PencilLine}
-                  title="Manual entry" hint="Hardware Assetron doesn’t track: describe it."
-                />
+            <div data-testid="hardware-step" className="space-y-2 tp-enter">
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Hardware</p>
+                <span className="text-[11px] tabular-nums text-muted-foreground">{items.length} of {MAX_ITEMS}</span>
               </div>
-              {source === null && <p className="mt-1.5 text-[11px] text-muted-foreground">Choose one to continue.</p>}
-              {source === 'assetron' && (
-                <div className="mt-3">
-                  <LaptopPicker recipient={recipient} onRecipient={setRecipient} value={device} onChange={setDevice} onLoaded={setDeviceCount} />
+              {anyDevice && (
+                <div className="rounded-lg bg-muted/40 px-3 py-1.5">
+                  <RecipientField recipient={recipient} onRecipient={setRecipient} />
                 </div>
               )}
-              {source === 'manual' && (
-                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-                  <label className="text-xs text-muted-foreground" htmlFor="manual-what">What is needed
-                    <input id="manual-what" value={manualWhat} onChange={(e) => setManualWhat(e.target.value)} autoFocus
-                      placeholder="e.g. USB-C charger 100 W, docking station" className="tp-focus-ring mt-1 block w-full rounded-lg border border-input bg-card px-2.5 py-1.5 text-sm text-foreground" />
-                  </label>
-                  <label className="text-xs text-muted-foreground" htmlFor="manual-qty">Quantity
-                    <input id="manual-qty" value={manualQty} onChange={(e) => setManualQty(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric"
-                      className="tp-focus-ring mt-1 block w-full rounded-lg border border-input bg-card px-2.5 py-1.5 text-sm tabular-nums text-foreground" />
-                  </label>
-                  <p className="text-[11px] text-muted-foreground sm:col-span-2">Nothing is reserved. The approver reads this line at the top of the request.</p>
-                </div>
+              {items.map((it, i) => (
+                <HardwareItem
+                  key={it.key} index={i} item={it} count={items.length}
+                  open={openKey === it.key}
+                  onToggle={() => setActiveKey(openKey === it.key ? '' : it.key)}
+                  onChange={(patch) => updateItem(it.key, patch)}
+                  onRemove={items.length > 1 ? () => removeItem(it.key) : null}
+                  onDevicePicked={() => setActiveKey('')}
+                  recipient={recipient} deviceCount={deviceCount} onLoaded={setDeviceCount}
+                  excludeIds={items.filter((x) => x.key !== it.key && x.device).map((x) => x.device.id)}
+                />
+              ))}
+              {items.length < MAX_ITEMS ? (
+                <button type="button" onClick={addItem} data-testid="add-hardware"
+                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-dashed border-primary/50 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/5">
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add hardware
+                </button>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">Up to {MAX_ITEMS} items on one request.</p>
               )}
             </div>
           )}
@@ -237,14 +260,23 @@ export default function RequestApprovalModal({
           {step === 'details' && selected && (
             <>
               {hardwareOn && (
-                <div className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="hardware-summary">
-                  {source === 'assetron' ? <Laptop className="h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" /> : <HardDrive className="h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />}
-                  <span className="min-w-0 flex-1 text-foreground/85">
-                    {source === 'assetron' && device
-                      ? <><span className="font-medium text-foreground">{assetTitle(device)}</span>{device.serialNumber ? ` · S/N ${device.serialNumber}` : ''} held in Assetron for <span className="font-medium text-foreground">{recipient?.name || recipient?.email}</span></>
-                      : <>Manual entry: <span className="font-medium text-foreground">{qtyNumber} × {manualWhat.trim()}</span></>}
-                  </span>
-                  <button type="button" onClick={() => setStep('hardware')} className="tp-focus-ring text-xs font-semibold text-primary hover:underline">Change</button>
+                <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="hardware-summary">
+                  <div className="flex items-start gap-2.5">
+                    <ul className="min-w-0 flex-1 space-y-1">
+                      {items.map((it, i) => (
+                        <li key={it.key} className="flex items-start gap-2 text-foreground/85">
+                          {it.source === 'assetron' ? <Laptop className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" /> : <HardDrive className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />}
+                          <span className="min-w-0">
+                            {items.length > 1 && <span className="mr-1 text-xs font-semibold text-muted-foreground">{i + 1}.</span>}
+                            {it.source === 'assetron' && it.device
+                              ? <><span className="font-medium text-foreground">{assetTitle(it.device)}</span>{it.device.serialNumber ? ` · S/N ${it.device.serialNumber}` : ''} held in Assetron for <span className="font-medium text-foreground">{recipient?.name || recipient?.email}</span></>
+                              : <span className="line-clamp-2">Manual entry: <span className="text-foreground">{it.text.trim()}</span></span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <button type="button" onClick={() => setStep('hardware')} className="tp-focus-ring text-xs font-semibold text-primary hover:underline">Change</button>
+                  </div>
                 </div>
               )}
 
@@ -403,16 +435,87 @@ export default function RequestApprovalModal({
   );
 }
 
+/**
+ * One hardware item (29 Sep 2026): a folding card. Open: the source tiles and
+ * either the device finder or a full editor (paste a list or an Excel range).
+ * Folded: a one-line summary. The finder stays mounted once opened, so folding
+ * and unfolding slide smoothly and never reload the devices.
+ */
+function HardwareItem({ index, item, count, open, onToggle, onChange, onRemove, onDevicePicked, recipient, deviceCount, onLoaded, excludeIds }) {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => { if (open) setMounted(true); }, [open]);
+  const done = itemDone(item);
+  const summary = item.source === 'assetron'
+    ? (item.device ? `${assetTitle(item.device)}${item.device.serialNumber ? ` · S/N ${item.device.serialNumber}` : ''}` : 'Reserve from Assetron: pick a device')
+    : item.source === 'manual'
+      ? (item.text.trim() ? item.text.trim().split(NL)[0] : 'Manual entry: describe the hardware')
+      : 'Choose where it comes from';
+  const bodyId = `${item.key}-body`;
+  return (
+    <div className={`tp-enter rounded-xl border transition-colors ${open ? 'border-primary/40 bg-card shadow-subtle' : 'border-border bg-card'}`} data-testid="hardware-item">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={bodyId} className="tp-focus-ring flex min-w-0 flex-1 items-center gap-2 rounded text-left">
+          <span className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${done ? 'bg-primary text-primary-foreground' : 'border border-input text-muted-foreground'}`}>
+            {done ? <Check className="h-3 w-3" aria-hidden="true" /> : index + 1}
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{count > 1 ? `Item ${index + 1}` : 'Item'}</span>
+          <span className={`min-w-0 flex-1 truncate text-sm ${done ? 'text-foreground' : 'text-muted-foreground'}`}>{summary}</span>
+          <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </button>
+        {onRemove && (
+          <button type="button" onClick={onRemove} aria-label={`Remove item ${index + 1}`} title="Remove this item"
+            className="tp-focus-ring inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-input text-muted-foreground transition-colors hover:border-red-300 hover:text-red-600 dark:hover:text-red-300">
+            <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      <div id={bodyId} className="tp-collapse" data-open={open ? 'true' : 'false'}>
+        <div>
+          {mounted && (
+            <div className="space-y-3 border-t border-border/70 px-3 pb-3 pt-2.5">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label={`Item ${index + 1} source`}>
+                <SourceTile
+                  on={item.source === 'assetron'} onPick={() => onChange({ source: 'assetron' })} Icon={Laptop}
+                  title="Reserve from Assetron"
+                  hint={deviceCount === null ? 'Held until the approval is decided, then assigned or released.' : `${deviceCount} new device${deviceCount === 1 ? '' : 's'} available · held until decided`}
+                />
+                <SourceTile
+                  on={item.source === 'manual'} onPick={() => onChange({ source: 'manual', device: null })} Icon={PencilLine}
+                  title="Manual entry" hint="Anything Assetron doesn’t track: describe it, paste a list or an Excel range."
+                />
+              </div>
+              {item.source === 'assetron' && (
+                <LaptopPicker hideRecipient recipient={recipient} onRecipient={() => {}} value={item.device}
+                  onChange={(d) => { onChange({ device: d }); if (d) onDevicePicked?.(); }}
+                  onLoaded={onLoaded} excludeIds={excludeIds} />
+              )}
+              {item.source === 'manual' && (
+                <RichTextEditor
+                  value={item.html}
+                  onChange={({ html, text }) => onChange({ html, text })}
+                  placeholder="What is needed? e.g. “USB-C dock and two 27-inch monitors for the Calgary desk” — or paste the list from Excel."
+                  ariaLabel={`Hardware item ${index + 1}`}
+                  minHeight={90}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Hardware source choice (C1): compact tile; the chosen one is ringed and tinted. */
 function SourceTile({ on, onPick, Icon, title, hint }) {
   return (
     <button
       type="button" role="radio" aria-checked={on} onClick={onPick}
-      className={`tp-focus-ring relative flex items-start gap-2.5 rounded-xl border px-3 py-2 pr-9 text-left transition-colors ${on ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-input bg-card hover:border-primary/50'}`}
+      className={`tp-focus-ring relative flex items-start gap-2.5 rounded-xl border px-3 py-1.5 pr-9 text-left transition-[border-color,background-color,box-shadow] duration-200 ${on ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-input bg-card hover:border-primary/50 hover:shadow-subtle'}`}
     >
       <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${on ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
       <span className="min-w-0">
-        <span className="block text-sm font-semibold text-foreground">{title}</span>
+        <span className="block text-[13px] font-semibold text-foreground">{title}</span>
         <span className="block text-[11px] leading-4 text-muted-foreground">{hint}</span>
       </span>
       <span className={`absolute right-3 top-2.5 h-4 w-4 rounded-full border ${on ? 'border-primary bg-primary shadow-[inset_0_0_0_3px_hsl(var(--card))]' : 'border-input'}`} aria-hidden="true" />

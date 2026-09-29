@@ -2746,6 +2746,21 @@ export default function TicketDetail() {
                         {count}
                       </span>
                     )}
+                    {/* Approval redesign A1 (29 Sep 2026): a plus you can't miss on the tab itself. */}
+                    {key === 'approvals' && requestableApprovalCategories.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); setRequestApprovalOpen(true); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setRequestApprovalOpen(true); } }}
+                        aria-label="New approval request"
+                        title="New approval request"
+                        data-testid="new-approval-request"
+                        className="tp-focus-ring -my-1 ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm ring-2 ring-primary/25 transition-transform hover:scale-110 hover:bg-blue-700"
+                      >
+                        <Plus className="h-4 w-4" strokeWidth={3} aria-hidden="true" />
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -3298,21 +3313,10 @@ export default function TicketDetail() {
                         <ShieldCheck className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                         Ticket Pulse feature — not synced to FreshService
                       </span>
-                      {/* Approval redesign A3 (29 Sep 2026): the request action sits with the heading. */}
-                      {requestableApprovalCategories.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setRequestApprovalOpen(true)}
-                          data-testid="new-approval-request"
-                          className="tp-focus-ring ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
-                        >
-                          <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New request
-                        </button>
-                      )}
                     </div>
 
                     {(ticket.approvals?.length || 0) === 0 && requestableApprovalCategories.length > 0 && (
-                      <p className="text-sm text-muted-foreground/75">No approvals yet.</p>
+                      <p className="text-sm text-muted-foreground/75">No approvals yet. Use the <span className="font-semibold text-primary">+</span> on the Approvals tab to request one.</p>
                     )}
                     {(ticket.approvals?.length || 0) > 0 && (
                       <ApprovalTimeline

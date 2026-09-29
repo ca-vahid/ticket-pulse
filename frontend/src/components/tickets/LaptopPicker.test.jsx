@@ -72,10 +72,30 @@ describe('Assetron device finder', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Touch' }));
     expect(screen.getByTestId('device-count')).toHaveTextContent('1 of 32');
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
-    fireEvent.click(screen.getByRole('button', { name: /^RAM/ }));
-    fireEvent.click(screen.getByRole('button', { name: /^RAM/ }));
+    const table = screen.getByRole('table');
+    fireEvent.click(within(table).getByRole('button', { name: /^RAM/ }));
+    fireEvent.click(within(table).getByRole('button', { name: /^RAM/ }));
     const firstRow = screen.getAllByRole('row')[1];
     expect(firstRow).toHaveTextContent('64 GB');
+  });
+
+  test('filter sections fold: one-value sections start closed and say their value; a click opens them', async () => {
+    load([dev(1), dev(2, { location: 'Calgary' })]);
+    renderPicker();
+    const filters = await screen.findByRole('group', { name: 'Filters' });
+    const office = within(filters).getByRole('button', { name: /Office/ });
+    const make = within(filters).getByRole('button', { name: /Make/ });
+    expect(office).toHaveAttribute('aria-expanded', 'true');
+    expect(make).toHaveAttribute('aria-expanded', 'false');
+    expect(make).toHaveTextContent('Dell');
+    fireEvent.click(make);
+    expect(make).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('devices picked on another item are left out', async () => {
+    load();
+    renderPicker({ excludeIds: ['d31'] });
+    await waitFor(() => expect(screen.getByTestId('device-count')).toHaveTextContent('31 of 31 new devices'));
   });
 
   test('clicking a row picks the device', async () => {

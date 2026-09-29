@@ -21,7 +21,15 @@ const publicStatusMock = { getPublicTicketStatusSettings: jest.fn(), ensurePubli
 const azureAdMock = { isConfigured: jest.fn(() => false), getUserPhoto: jest.fn() };
 const assetronMock = {
   normalizeHardware: jest.fn((h) => (h && h.assetId ? { assetId: h.assetId, recipient: h.recipient } : null)),
-  reserve: jest.fn(), record: jest.fn(), abandon: jest.fn(), touch: jest.fn(), forGroup: jest.fn(async () => null),
+  // 29 Sep 2026: requests carry a list of devices; the doubles walk it through reserve/abandon.
+  normalizeHardwareList: jest.fn((raw) => (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter((h) => h && h.assetId).map((h) => ({ assetId: h.assetId, recipient: h.recipient }))),
+  reserveAll: jest.fn(async (args) => {
+    const out = [];
+    for (const h of args.items) out.push(await assetronMock.reserve({ ...args, hardware: h }));
+    return out;
+  }),
+  abandonAll: jest.fn(async (list, actor) => { for (const r of list) await assetronMock.abandon(r.reservationId, actor); }),
+  reserve: jest.fn(), record: jest.fn(), abandon: jest.fn(), touch: jest.fn(), forGroup: jest.fn(async () => []),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -75,6 +83,16 @@ test('a hardware request with a laptop: reserved FIRST (same request id), record
   expect(reserveArgs.requestGroupId).toBe(res.requestGroupId);
   expect(reserveArgs.hardware).toEqual(HW);
   expect(prismaMock.ticketApproval.create.mock.calls[0][0].data.requestGroupId).toBe(res.requestGroupId);
+});
+
+test('several devices: each reserved in order and recorded with its item number', async () => {
+  prismaMock.approvalCategory.findFirst.mockResolvedValue(HW_CATEGORY);
+  let n = 0;
+  assetronMock.reserve.mockImplementation(async () => ({ reservationId: `res-${++n}`, asset: {}, entraObjectId: null }));
+  const HW2 = { ...HW, assetId: '5d2e8f3b-0000-4000-8000-000000000002' };
+  await ticketApprovalService.request(501, 1, { approvalCategoryId: 4, hardware: [HW, HW2] }, { email: 'agent@x.io' });
+  expect(assetronMock.reserve).toHaveBeenCalledTimes(2);
+  expect(assetronMock.record.mock.calls.map((c) => [c[0].itemIndex, c[0].reserved.reservationId])).toEqual([[0, 'res-1'], [1, 'res-2']]);
 });
 
 test('Assetron refusing the hold: nothing is created and the agent sees why', async () => {

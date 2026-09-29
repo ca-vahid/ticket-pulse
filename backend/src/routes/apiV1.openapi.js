@@ -343,7 +343,8 @@ const T = {
         },
       },
       requester: { type: 'object', nullable: true, properties: { name: { type: 'string', nullable: true }, email: { type: 'string', nullable: true } } },
-      asset: { type: 'object', nullable: true, description: 'The Assetron laptop held for (ON_HOLD) or assigned by (ASSIGNED) the approval on this ticket: { system: ASSETRON, assetId, reservationId, state, serialNumber, assetTag, make, model, recipient { email, name } }. null when none. Always present.' },
+      asset: { type: 'object', nullable: true, description: 'The Assetron device held for (ON_HOLD) or assigned by (ASSIGNED) the approval on this ticket — the first one when the request holds several: { system: ASSETRON, assetId, reservationId, state, serialNumber, assetTag, make, model, recipient { email, name } }. null when none. Always present.' },
+      assets: { type: 'array', items: { type: 'object' }, description: 'Every Assetron device of that approval request (up to 5), in item order, each shaped like `asset`. [] when none. Always present.' },
     },
   },
 };

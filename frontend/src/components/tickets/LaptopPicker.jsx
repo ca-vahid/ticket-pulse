@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Loader2, Search, UserRound, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, Search, UserRound, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 
 /**
@@ -50,7 +50,7 @@ function sizeValue(v) {
 }
 const idOf = (a) => a?.id ?? null;
 
-function RecipientField({ recipient, onRecipient }) {
+export function RecipientField({ recipient, onRecipient }) {
   const [editing, setEditing] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
@@ -131,7 +131,12 @@ function TouchFilter({ value, onChange, available }) {
   );
 }
 
-export default function LaptopPicker({ recipient, onRecipient, value, onChange, onLoaded }) {
+/**
+ * Extra props (multi-device requests, 29 Sep 2026): `hideRecipient` when the
+ * step shows the recipient once for every item; `excludeIds` = devices already
+ * picked on another item of the same request (hidden here).
+ */
+export default function LaptopPicker({ recipient, onRecipient, value, onChange, onLoaded, hideRecipient = false, excludeIds = [] }) {
   const [status, setStatus] = useState({ loading: true, configured: false, error: null });
   const [devices, setDevices] = useState([]);
   const [truncated, setTruncated] = useState(false);
@@ -142,6 +147,8 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
   const [page, setPage] = useState(1);
   const [per, setPer] = useState(25);
   const [expanded, setExpanded] = useState({});
+  // Which filter sections are open. Unset = the default (see isOpen below).
+  const [openFacets, setOpenFacets] = useState({});
 
   useEffect(() => {
     let alive = true;
@@ -185,8 +192,10 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
     }
     return true;
   };
-  const filtered = useMemo(() => devices.filter((d) => matches(d)), // eslint-disable-line react-hooks/exhaustive-deps
-    [devices, sel, touch, q]);
+  const excluded = useMemo(() => new Set((excludeIds || []).filter(Boolean)), [excludeIds]);
+  const pool = useMemo(() => devices.filter((d) => !excluded.has(d.id)), [devices, excluded]);
+  const filtered = useMemo(() => pool.filter((d) => matches(d)), // eslint-disable-line react-hooks/exhaustive-deps
+    [pool, sel, touch, q]);
   const sorted = useMemo(() => {
     const k = sort.key;
     const val = (d) => (k === 'model' ? assetTitle(d) : SIZE_FIELDS.has(k) ? sizeValue(d[k]) : String(d[k] ?? ''));
@@ -228,7 +237,7 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
 
   return (
     <div className="space-y-3" data-testid="laptop-picker">
-      <RecipientField recipient={recipient} onRecipient={onRecipient} />
+      {!hideRecipient && <RecipientField recipient={recipient} onRecipient={onRecipient} />}
 
       {devices.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="laptop-no-stock">
@@ -258,7 +267,7 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
               />
             </label>
             <TouchFilter value={touch} onChange={(v) => { setTouch(v); setPage(1); }} available={touchAvailable} />
-            <span className="text-xs text-muted-foreground" data-testid="device-count"><span className="font-semibold tabular-nums text-foreground">{filtered.length}</span> of {devices.length} new devices</span>
+            <span className="text-xs text-muted-foreground" data-testid="device-count"><span className="font-semibold tabular-nums text-foreground">{filtered.length}</span> of {pool.length} new devices</span>
           </div>
           {(activeTokens.length > 0 || touch !== null || q.trim()) && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -273,29 +282,55 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
           )}
 
           <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
-            <div className="max-h-[440px] overflow-y-auto settings-scrollbar pr-1" aria-label="Filters" role="group">
-              {facets.map(({ f, label, values }) => {
+            <div className="max-h-[460px] overflow-y-auto settings-scrollbar rounded-lg border border-border bg-muted/20" aria-label="Filters" role="group">
+              <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-border bg-card/95 px-2.5 py-1.5 backdrop-blur-sm">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Filters</span>
+                {activeTokens.length > 0 && <button type="button" onClick={clearAll} className="tp-focus-ring text-[11px] font-medium text-primary hover:underline">Clear</button>}
+              </div>
+              {facets.map(({ f, label, values }, idx) => {
+                const picked = (sel[f] || []).length;
+                // Open by default: a section with a choice to make (2+ values) among the first
+                // three, or one with a value ticked. One-value sections start folded.
+                const multi = facets.filter((x) => x.values.length > 1).map((x) => x.f);
+                const isOpen = openFacets[f] ?? (picked > 0 || (values.length > 1 && multi.indexOf(f) < 3));
                 const shown = expanded[f] ? values : values.slice(0, FACET_PREVIEW);
+                const bodyId = `facet-${f}`;
                 return (
-                  <fieldset key={f} className="border-b border-border/70 py-2 first:pt-0">
-                    <legend className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</legend>
-                    {shown.map((v) => {
-                      const on = (sel[f] || []).includes(v);
-                      const c = devices.filter((d) => matches(d, f) && d[f] === v).length;
-                      return (
-                        <label key={String(v)} className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-muted/50 ${c === 0 && !on ? 'opacity-45' : ''}`}>
-                          <input type="checkbox" checked={on} onChange={() => toggle(f, v)} className="tp-focus-ring h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300" />
-                          <span className="min-w-0 flex-1 truncate text-foreground/85" title={String(v)}>{String(v)}</span>
-                          <span className="tabular-nums text-muted-foreground/75">{c}</span>
-                        </label>
-                      );
-                    })}
-                    {values.length > FACET_PREVIEW && (
-                      <button type="button" onClick={() => setExpanded((x) => ({ ...x, [f]: !x[f] }))} className="tp-focus-ring mt-0.5 px-1 text-[11px] font-medium text-primary hover:underline">
-                        {expanded[f] ? 'Show fewer' : `Show all ${values.length}`}
-                      </button>
-                    )}
-                  </fieldset>
+                  <div key={f} className={`px-2.5 ${idx > 0 ? 'border-t border-border/70' : ''}`}>
+                    <button
+                      type="button" aria-expanded={isOpen} aria-controls={bodyId}
+                      onClick={() => setOpenFacets((o) => ({ ...o, [f]: !isOpen }))}
+                      className="tp-focus-ring flex w-full items-center gap-1.5 rounded py-2 text-left"
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`} aria-hidden="true" />
+                      <span className="text-xs font-semibold text-foreground/85">{label}</span>
+                      <span className="ml-auto truncate pl-2 text-[11px] text-muted-foreground">
+                        {picked > 0 ? <span className="font-semibold text-primary">{picked} selected</span> : !isOpen ? (values.length === 1 ? String(values[0]) : `${values.length} options`) : null}
+                      </span>
+                    </button>
+                    <div id={bodyId} className="tp-collapse" data-open={isOpen ? 'true' : 'false'} aria-hidden={!isOpen}>
+                      <div>
+                        <div className="pb-2">
+                          {shown.map((v) => {
+                            const on = (sel[f] || []).includes(v);
+                            const c = pool.filter((d) => matches(d, f) && d[f] === v).length;
+                            return (
+                              <label key={String(v)} className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs transition-colors hover:bg-muted/60 ${c === 0 && !on ? 'opacity-45' : ''}`}>
+                                <input type="checkbox" checked={on} onChange={() => toggle(f, v)} tabIndex={isOpen ? 0 : -1} className="tp-focus-ring h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300" />
+                                <span className="min-w-0 flex-1 truncate text-foreground/85" title={String(v)}>{String(v)}</span>
+                                <span className="tabular-nums text-muted-foreground/75">{c}</span>
+                              </label>
+                            );
+                          })}
+                          {values.length > FACET_PREVIEW && (
+                            <button type="button" onClick={() => setExpanded((x) => ({ ...x, [f]: !x[f] }))} tabIndex={isOpen ? 0 : -1} className="tp-focus-ring mt-0.5 px-1 text-[11px] font-medium text-primary hover:underline">
+                              {expanded[f] ? 'Show fewer' : `Show all ${values.length}`}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 );
               })}
             </div>

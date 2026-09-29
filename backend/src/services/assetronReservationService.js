@@ -27,6 +27,7 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 
 const SWEEP_MS = 2 * 60 * 1000;
+const MAX_ITEMS = 5;
 const REVIVE_DAYS = 30;
 const OPEN_STATUSES = ['pending', 'info_requested'];
 
@@ -126,6 +127,44 @@ class AssetronReservationService {
   }
 
   /**
+   * Validate the request's Assetron items: one object (older callers) or a
+   * list of up to 5 (29 Sep 2026). The same device twice is refused.
+   */
+  normalizeHardwareList(raw) {
+    const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    if (list.length > MAX_ITEMS) throw bad(`At most ${MAX_ITEMS} devices on one request`);
+    const items = list.map((x) => this.normalizeHardware(x)).filter(Boolean);
+    const seen = new Set();
+    for (const it of items) {
+      if (seen.has(it.assetId)) throw bad('The same device is on this request twice — pick a different one');
+      seen.add(it.assetId);
+    }
+    return items;
+  }
+
+  /**
+   * Reserve every item, in order. If one fails, the ones already held are
+   * released and the error names the device, so nothing is left half-held.
+   */
+  async reserveAll({ ticket, requestGroupId, items, actor }) {
+    const done = [];
+    for (let i = 0; i < items.length; i += 1) {
+      try {
+        done.push(await this.reserve({ ticket, requestGroupId, hardware: items[i], actor }));
+      } catch (err) {
+        await this.abandonAll(done, actor);
+        if (items.length > 1 && err instanceof ValidationError) throw bad(`Device ${i + 1}: ${err.message}`);
+        throw err;
+      }
+    }
+    return done;
+  }
+
+  async abandonAll(reservedList, actor) {
+    for (const r of reservedList || []) if (r?.reservationId) await this.abandon(r.reservationId, actor);
+  }
+
+  /**
    * Reserve before the approval rows are written. Throws a ValidationError
    * carrying Assetron's own agent-safe sentence (laptop taken, recipient not
    * in Assetron…) so nothing is created when the hold fails.
@@ -162,10 +201,10 @@ class AssetronReservationService {
   }
 
   /** Persist the hold once the approval rows exist. */
-  async record({ ticket, requestGroupId, categoryId, hardware, reserved, actor }) {
+  async record({ ticket, requestGroupId, categoryId, hardware, reserved, actor, itemIndex = 0 }) {
     await prisma.assetronReservation.create({
       data: {
-        workspaceId: ticket.workspaceId, ticketId: ticket.id, requestGroupId, approvalCategoryId: categoryId ?? null,
+        workspaceId: ticket.workspaceId, ticketId: ticket.id, requestGroupId, itemIndex, approvalCategoryId: categoryId ?? null,
         reservationId: reserved.reservationId, assetId: hardware.assetId, asset: reserved.asset,
         recipientEmail: hardware.recipient.email, recipientName: hardware.recipient.name, recipientEntraId: reserved.entraObjectId,
         requestedByEmail: actor?.email || null, state: 'reserved',
@@ -319,7 +358,7 @@ class AssetronReservationService {
    * original requester only. The new hold is taken first; the old one is
    * then released, so the request is never without a laptop.
    */
-  async change(ticketId, workspaceId, approvalId, rawHardware, actor) {
+  async change(ticketId, workspaceId, approvalId, rawHardware, actor, itemIndex = 0) {
     const approval = await prisma.ticketApproval.findFirst({ where: { id: Number(approvalId), ticketId, workspaceId } });
     if (!approval) throw new NotFoundError('Approval not found');
     const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
@@ -330,7 +369,13 @@ class AssetronReservationService {
     const hardware = this.normalizeHardware(rawHardware);
     if (!hardware) throw bad('Pick a laptop and who it is for');
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId }, select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true } });
-    const existing = await prisma.assetronReservation.findUnique({ where: { requestGroupId: approval.requestGroupId } });
+    const idx = Math.max(0, Math.min(MAX_ITEMS - 1, Number(itemIndex) || 0));
+    const existing = await prisma.assetronReservation.findFirst({ where: { requestGroupId: approval.requestGroupId, itemIndex: idx } });
+    // A device already held by ANOTHER item of this request can't be picked here.
+    const clash = await prisma.assetronReservation.findFirst({
+      where: { requestGroupId: approval.requestGroupId, assetId: hardware.assetId, state: 'reserved', NOT: { itemIndex: idx } }, select: { id: true },
+    });
+    if (clash) throw bad('That device is already on this request — pick a different one');
     const sameLaptop = existing && existing.state === 'reserved' && existing.assetId === hardware.assetId;
     if (sameLaptop) {
       if (String(existing.recipientEmail || '').toLowerCase() === hardware.recipient.email.toLowerCase()) return this.forGroup(approval.requestGroupId);
@@ -362,7 +407,7 @@ class AssetronReservationService {
         // Keep a separate release record so the reconciler keeps trying.
         await prisma.assetronReservation.create({
           data: {
-            workspaceId, ticketId, requestGroupId: `${approval.requestGroupId}:replaced:${crypto.randomUUID().slice(0, 8)}`,
+            workspaceId, ticketId, requestGroupId: `${approval.requestGroupId}:replaced:${crypto.randomUUID().slice(0, 8)}`, itemIndex: idx,
             approvalCategoryId: existing.approvalCategoryId, reservationId: existing.reservationId, assetId: existing.assetId, asset: existing.asset,
             recipientEmail: existing.recipientEmail, recipientName: existing.recipientName, state: 'reserved', pendingOutcome: 'CANCELLED', outcomeWhy: 'replaced',
             attempts: 1, nextAttemptAt: new Date(Date.now() + 2 * 60 * 1000), lastError: String(err.message).slice(0, 1000),
@@ -376,36 +421,56 @@ class AssetronReservationService {
       state: 'reserved', outcome: null, outcomeWhy: null, pendingOutcome: null, completedAt: null, attempts: 0, lastError: null,
     };
     if (existing) await prisma.assetronReservation.update({ where: { id: existing.id }, data });
-    else await prisma.assetronReservation.create({ data: { ...data, workspaceId, ticketId, requestGroupId: approval.requestGroupId, approvalCategoryId: approval.approvalCategoryId, requestedByEmail: approval.requestedBy } });
+    else await prisma.assetronReservation.create({ data: { ...data, workspaceId, ticketId, requestGroupId: approval.requestGroupId, itemIndex: idx, approvalCategoryId: approval.approvalCategoryId, requestedByEmail: approval.requestedBy } });
     await ticketNote(ticketId, workspaceId, `Assetron: the request now holds ${assetLabel(reserved.asset)} for ${hardware.recipient.name || hardware.recipient.email} (changed by ${actor?.name || actor?.email}).`);
     return this.forGroup(approval.requestGroupId);
   }
 
-  /** The hold for one request group, shaped for the app. */
+  /** The holds of one request group, in item order, shaped for the app. */
   async forGroup(requestGroupId) {
-    const r = await prisma.assetronReservation.findUnique({ where: { requestGroupId } });
-    return r ? shape(r) : null;
+    const rows = await prisma.assetronReservation.findMany({ where: { requestGroupId }, orderBy: { itemIndex: 'asc' } });
+    return rows.map(shape);
   }
 
-  /** All holds on a ticket, keyed by request group (approval timeline). */
+  /** All holds on a ticket, keyed by request group, each a list in item order (approval timeline). */
   async forTicket(ticketId, workspaceId) {
-    const rows = await prisma.assetronReservation.findMany({ where: { ticketId, workspaceId, NOT: { requestGroupId: { contains: ':replaced:' } } } });
-    return Object.fromEntries(rows.map((r) => [r.requestGroupId, shape(r)]));
+    const rows = await prisma.assetronReservation.findMany({
+      where: { ticketId, workspaceId, NOT: { requestGroupId: { contains: ':replaced:' } } },
+      orderBy: [{ requestGroupId: 'asc' }, { itemIndex: 'asc' }],
+    });
+    const out = {};
+    for (const r of rows) (out[r.requestGroupId] ||= []).push(shape(r));
+    return out;
   }
 
-  /** The laptop behind a ticket's approval verdict (API v1 `asset`), or null. */
-  async verdictAsset(ticketId, workspaceId) {
-    const r = await prisma.assetronReservation.findFirst({
+  /**
+   * The devices behind a ticket's approval verdict (API v1): `asset` = the
+   * first device of the latest request (the original single field, unchanged),
+   * `assets` = every held/assigned device of that request, in item order.
+   */
+  async verdictAssets(ticketId, workspaceId) {
+    const latest = await prisma.assetronReservation.findFirst({
       where: { ticketId, workspaceId, state: { in: ['reserved', 'assigned'] }, NOT: { requestGroupId: { contains: ':replaced:' } } },
       orderBy: { updatedAt: 'desc' },
     }).catch(() => null);
-    if (!r) return null;
-    const a = r.asset || {};
-    return {
-      system: 'ASSETRON', assetId: r.assetId, reservationId: r.reservationId, state: r.state === 'assigned' ? 'ASSIGNED' : 'ON_HOLD',
-      serialNumber: a.serialNumber || null, assetTag: a.assetTag || null, make: a.make || null, model: a.model || null,
-      recipient: { email: r.recipientEmail, name: r.recipientName || null },
-    };
+    if (!latest) return { asset: null, assets: [] };
+    const rows = await prisma.assetronReservation.findMany({
+      where: { requestGroupId: latest.requestGroupId, state: { in: ['reserved', 'assigned'] } }, orderBy: { itemIndex: 'asc' },
+    }).catch(() => [latest]);
+    const out = rows.map((r) => {
+      const a = r.asset || {};
+      return {
+        system: 'ASSETRON', assetId: r.assetId, reservationId: r.reservationId, state: r.state === 'assigned' ? 'ASSIGNED' : 'ON_HOLD',
+        serialNumber: a.serialNumber || null, assetTag: a.assetTag || null, make: a.make || null, model: a.model || null,
+        recipient: { email: r.recipientEmail, name: r.recipientName || null },
+      };
+    });
+    return { asset: out[0] || null, assets: out };
+  }
+
+  /** Older single-device reader (kept for callers that want one). */
+  async verdictAsset(ticketId, workspaceId) {
+    return (await this.verdictAssets(ticketId, workspaceId)).asset;
   }
 
   start() {
@@ -445,7 +510,7 @@ class AssetronReservationService {
 
 function shape(r) {
   return {
-    requestGroupId: r.requestGroupId, reservationId: r.reservationId, assetId: r.assetId, asset: r.asset || null,
+    requestGroupId: r.requestGroupId, itemIndex: r.itemIndex ?? 0, reservationId: r.reservationId, assetId: r.assetId, asset: r.asset || null,
     label: assetLabel(r.asset), recipient: { email: r.recipientEmail, name: r.recipientName || null },
     state: r.state, pendingOutcome: r.pendingOutcome || null, outcome: r.outcome || null, why: r.outcomeWhy || null,
     lastError: r.lastError || null, attempts: r.attempts || 0, requestedBy: r.requestedByEmail || null, updatedAt: r.updatedAt,

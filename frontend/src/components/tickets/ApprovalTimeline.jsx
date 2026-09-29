@@ -196,9 +196,16 @@ export default function ApprovalTimeline({
               </span>
             </div>
 
-            <ApprovalLaptop hold={head.requestGroupId ? holds[head.requestGroupId] || null : null} decided={decided}
-              canChange={!decided && Boolean(onChangeHardware) && canChangeHardware(head.requestedBy)}
-              onChange={(hardware) => onChangeHardware(head.id, hardware)} requester={requester} />
+            {(() => {
+              // Up to 5 devices per request since 29 Sep 2026 (older holds came as one object).
+              const raw = head.requestGroupId ? holds[head.requestGroupId] : null;
+              const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+              return list.map((h, i) => (
+                <ApprovalLaptop key={`${h.reservationId || i}-${h.itemIndex ?? i}`} hold={h} decided={decided} label={list.length > 1 ? `Device ${i + 1}` : null}
+                  canChange={!decided && Boolean(onChangeHardware) && canChangeHardware(head.requestedBy)}
+                  onChange={(hardware) => onChangeHardware(head.id, { ...hardware, itemIndex: h.itemIndex ?? i })} requester={requester} />
+              ));
+            })()}
 
             {/* Decided → compact summary (who decided, when). No dated rail.
                 Actions sit on the RIGHT so they read as secondary to the verdict. */}
