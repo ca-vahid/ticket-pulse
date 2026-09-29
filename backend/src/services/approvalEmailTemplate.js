@@ -12,7 +12,7 @@
  * and padding applied) — see normalizeNoteHtmlForEmail.
  */
 import sanitizeHtml from 'sanitize-html';
-import { brandImg, categoryArt } from './emailBrandAssets.js';
+import { brandImg } from './emailBrandAssets.js';
 
 const FONT = 'Arial,Helvetica,sans-serif';
 const INK = '#0f172a';
@@ -196,125 +196,14 @@ function pick(obj, keys) {
 
 // ---------------------------------------------------------------- building blocks
 //
-// Redesign 17 Sep 2026 (Vahid): pictograms instead of the "TP" box and the
-// status pill; the approval category gets its own tinted card; requested-for
-// and asked-by sit side by side at the same avatar size, the recipient in the
-// bigger card. Every picture is an inline cid: attachment (emailBrandAssets).
-
-const SOFT = '#f8fafc';
-
-function spacer(h = 16) {
-  return `<tr><td height="${h}" style="height:${h}px;line-height:${h}px;font-size:1px;">&nbsp;</td></tr>`;
-}
-
-const TONES = {
-  amber: { bg: '#fef3c7', color: '#92400e', line: '#fcd34d' },
-  blue: { bg: '#dbeafe', color: '#1e40af', line: '#93c5fd' },
-  green: { bg: '#d1fae5', color: '#065f46', line: '#6ee7b7' },
-  red: { bg: '#fee2e2', color: '#991b1b', line: '#fca5a5' },
-  violet: { bg: '#ede9fe', color: '#5b21b6', line: '#c4b5fd' },
-  slate: { bg: '#e2e8f0', color: '#334155', line: '#cbd5e1' },
-};
-
-function initialsCircle(name, size = 56) {
-  const font = size >= 56 ? 19 : size >= 40 ? 14 : 12;
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="${size}" height="${size}" align="center" valign="middle" bgcolor="#dbeafe" style="width:${size}px;height:${size}px;border-radius:${size / 2}px;background:#dbeafe;color:#1d4ed8;font-family:${FONT};font-size:${font}px;font-weight:bold;line-height:${size}px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
-}
+// People photos travel as inline cid: attachments; initials circles are the
+// fallback. emailShell (the 17 Sep 2026 pictogram shell) is kept for the
+// requester-reply copy; approval e-mails use apDocument below.
 
 function photoCircle(cid, name, size) {
   // Inline attachment referenced by cid: — the picture is INSIDE the message (no remote fetch, works
   // with images-off policies). Outlook desktop ignores border-radius; the square photo is still right.
   return `<img src="cid:${escapeHtml(cid)}" width="${size}" height="${size}" alt="${escapeHtml(initialsOf(name))}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:0;">`;
-}
-
-function avatar(name, size, photoCid) {
-  return photoCid ? photoCircle(photoCid, name, size) : initialsCircle(name, size);
-}
-
-/**
- * One person as a panel cell (no border of its own — peopleRow draws the frame):
- * avatar left, eyebrow / name / detail lines right. Both people share the same
- * avatar size; `emphasis` only colours the eyebrow and enlarges the name.
- */
-function personCard({ label, name, lines = [], size = 48, photoCid = null, emphasis = false }) {
-  const detail = lines.filter(Boolean).map((l) => `<div style="font-size:12.5px;line-height:18px;color:${MUTED};">${escapeHtml(l)}</div>`).join('');
-  return [
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="${size + 12}" valign="top" style="padding:0 12px 0 0;">${avatar(name, size, photoCid)}</td>`,
-    `<td valign="top" style="font-family:${FONT};">`,
-    `<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${emphasis ? '#1d4ed8' : MUTED};font-weight:bold;">${escapeHtml(label)}</div>`,
-    `<div style="font-size:${emphasis ? 16 : 15}px;line-height:${emphasis ? 22 : 20}px;font-weight:bold;color:${INK};margin-top:2px;">${escapeHtml(name || 'Unknown')}</div>`,
-    detail,
-    '</td></tr></table>',
-  ].join('');
-}
-
-/**
- * The people panel: one hairline frame, no fill, the two cells side by side and
- * divided by a single rule — equal height by construction. `right` optional.
- */
-function peopleRow(left, right = null) {
-  const cells = right
-    ? `<td width="55%" valign="top" style="padding:14px 16px 14px 16px;">${left}</td>`
-      + `<td width="45%" valign="top" style="padding:14px 16px 14px 16px;border-left:1px solid ${LINE};">${right}</td>`
-    : `<td valign="top" style="padding:14px 16px;">${left}</td>`;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border:1px solid ${LINE};border-radius:12px;"><tr>${cells}</tr></table>`;
-}
-
-function button(label, url, { bg = BLUE } = {}) {
-  return [
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr>',
-    `<td align="center" bgcolor="${bg}" style="border-radius:10px;background:${bg};">`,
-    `<a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;padding:13px 28px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:10px;">${escapeHtml(label)} &rarr;</a>`,
-    '</td></tr></table>',
-  ].join('');
-}
-
-function card(innerHtml, { bg = SOFT, border = LINE, accent = null } = {}) {
-  const accentTd = accent ? `<td width="4" bgcolor="${accent}" style="width:4px;background:${accent};border-radius:10px 0 0 10px;">&nbsp;</td>` : '';
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${bg}" style="border-collapse:separate;background:${bg};border:1px solid ${border};border-radius:10px;"><tr>${accentTd}<td style="padding:14px 16px;font-family:${FONT};font-size:14px;line-height:21px;color:${INK};">${innerHtml}</td></tr></table>`;
-}
-
-function sectionLabel(text) {
-  return `<div style="font-family:${FONT};font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${MUTED};font-weight:bold;margin:0 0 6px;">${escapeHtml(text)}</div>`;
-}
-
-/**
- * The opening block of every approval e-mail: pictogram on the left, then an
- * optional tone-coloured eyebrow (the verdict), the kicker, the ticket subject
- * and a monospace meta line. The pictogram's alt text names the message kind.
- */
-function hero({ art, alt = '', eyebrow = null, eyebrowColor = MUTED, kicker = null, kickerColor = BLUE, title, meta = null }) {
-  const img = art ? brandImg(art, { size: 64, alt }) : '';
-  const parts = [];
-  if (eyebrow) parts.push(`<div style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.8px;text-transform:uppercase;color:${eyebrowColor};">${escapeHtml(eyebrow)}</div>`);
-  if (kicker) parts.push(`<div style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;text-transform:uppercase;color:${kickerColor};${eyebrow ? 'margin-top:2px;' : ''}">${escapeHtml(kicker)}</div>`);
-  parts.push(`<div style="font-family:${FONT};font-size:23px;line-height:29px;font-weight:bold;color:${INK};margin-top:${eyebrow || kicker ? 6 : 0}px;">${escapeHtml(title || 'Ticket')}</div>`);
-  if (meta) parts.push(`<div style="font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};margin-top:4px;">${escapeHtml(meta)}</div>`);
-  if (!img) return `<tr><td>${parts.join('')}</td></tr>`;
-  return '<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
-    + `<td width="80" valign="top" style="padding:2px 16px 0 0;">${img}</td>`
-    + `<td valign="top">${parts.join('')}</td></tr></table></td></tr>`;
-}
-
-/** The approval category as a quiet strip between two hairlines: small icon, eyebrow, name; amount and tier as chips on the right. */
-function categoryCard({ categoryName, amountLabel = null, tierLabel = null }) {
-  if (!categoryName) return '';
-  const art = brandImg(categoryArt(categoryName), { size: 32, alt: '' });
-  const chips = [
-    amountLabel ? `<span style="font-family:${FONT};font-size:14px;line-height:18px;font-weight:bold;color:${INK};">${escapeHtml(amountLabel)}</span>` : '',
-    tierLabel ? `<span style="font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};">${escapeHtml(tierLabel)}</span>` : '',
-  ].filter(Boolean).join('<span style="color:#cbd5e1;">&nbsp;&nbsp;·&nbsp;&nbsp;</span>');
-  return [
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-top:1px solid ${LINE};border-bottom:1px solid ${LINE};"><tr>`,
-    art ? `<td width="44" valign="middle" style="padding:12px 12px 12px 0;">${art}</td>` : '',
-    `<td valign="middle" style="padding:12px 0;font-family:${FONT};">`,
-    `<div style="font-size:10.5px;line-height:14px;letter-spacing:0.8px;text-transform:uppercase;color:${MUTED};font-weight:bold;">Approval category</div>`,
-    `<div style="font-size:16px;line-height:22px;font-weight:bold;color:${INK};margin-top:1px;">${escapeHtml(categoryName)}</div>`,
-    '</td>',
-    chips ? `<td align="right" valign="middle" style="padding:12px 0;white-space:nowrap;">${chips}</td>` : '',
-    '</tr></table>',
-  ].join('');
 }
 
 /**
@@ -351,13 +240,6 @@ export function emailShell({ workspaceName, bodyRows, footerHtml, preheader = ''
     '<!--[if mso]></td></tr></table><![endif]-->',
     '</td></tr></table></body></html>',
   ].join('');
-}
-
-const VERDICT_ART = { approved: 'kind-approved', condition: 'kind-condition', rejected: 'kind-rejected' };
-function verdictOf(approved, conditionNote) {
-  if (!approved) return { word: 'Not approved', art: VERDICT_ART.rejected, tone: TONES.red };
-  if (conditionNote) return { word: 'Approved with condition', art: VERDICT_ART.condition, tone: TONES.green };
-  return { word: 'Approved', art: VERDICT_ART.approved, tone: TONES.green };
 }
 
 // ---------------------------------------------------------------- the e-mails
@@ -407,6 +289,7 @@ body{margin:0;padding:0} a{text-decoration:none}
   .ap-go{background:transparent!important;border-color:${d.goLine}!important} .ap-go a{color:${d.go}!important}
   .ap-no{background:transparent!important;border-color:${d.noLine}!important} .ap-no a{color:${d.no}!important}
   .ap-ask{background:transparent!important;border-color:${d.askLine}!important} .ap-ask a{color:${d.ask}!important}
+  .ap-s-go{color:#6ee7b7!important} .ap-s-no{color:#ff9b93!important} .ap-s-amber{color:#fbbf24!important} .ap-s-violet{color:#c4b5fd!important} .ap-s-blue{color:#9cc0ff!important}
   .ap-rich,.ap-rich *{color:${d.ink2}!important;background:transparent!important;border-color:${d.line}!important}
   .ap-rich a{color:${d.link}!important}
 }
@@ -471,12 +354,7 @@ export function renderApproverRequestEmail(ctx) {
   const rows = [];
   const pad = (html, padding = '0 28px') => `<tr><td class="ap-pad" style="padding:${padding};">${html}</td></tr>`;
 
-  // Header: product on the left, what this is on the right.
   const kind = ['Approval', ctx.tierLabel].filter(Boolean).join(' · ');
-  rows.push(`<tr><td class="ap-pad ap-line" style="padding:14px 28px;border-bottom:1px solid ${AP.line};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>`
-    + `<td class="ap-ink" style="font-family:${AP_FONT};font-size:13.5px;font-weight:bold;color:${AP.ink};">Ticket Pulse</td>`
-    + `<td align="right" class="ap-muted" style="font-family:${AP_FONT};font-size:12px;color:${AP.muted};">${escapeHtml(kind)}</td>`
-    + '</tr></table></td></tr>');
 
   // Title: the category (what is being approved); ticket number (linked) + subject underneath.
   const ticketHref = t.appUrl || ctx.decisionUrl;
@@ -557,54 +435,125 @@ export function renderApproverRequestEmail(ctx) {
   if (tail.length) rows.push(pad(tail.join(''), '16px 28px 0'));
 
   // The decision — at the end, filling the row: Approve half, Decline and Ask a quarter each.
-  const cell = (w, html, last = false, first = false) => `<td width="${w}" valign="top" style="padding:0 ${last ? 0 : 4}px 0 ${first ? 0 : 4}px;">${html}</td>`;
-  rows.push(`<tr><td class="ap-pad" style="padding:22px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td class="ap-line" style="border-top:1px solid ${AP.line};padding-top:18px;">`
-    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
-    + cell('50%', apButton('go', 'Approve', decisionIntentUrl(ctx.decisionUrl, 'approve')), false, true)
-    + cell('25%', apButton('no', 'Decline', decisionIntentUrl(ctx.decisionUrl, 'reject')))
-    + cell('25%', apButton('ask', 'Ask', decisionIntentUrl(ctx.decisionUrl, 'ask')), true)
-    + '</tr></table>'
-    + apText('ap-muted', `font-size:12px;line-height:17px;color:${AP.muted};margin-top:10px;text-align:center;`, 'Each button opens the approval page with that choice picked. Add a note if you like, then confirm.')
-    + '</td></tr></table></td></tr>');
+  rows.push(apActions([
+    { kind: 'go', label: 'Approve', href: decisionIntentUrl(ctx.decisionUrl, 'approve'), width: '50%' },
+    { kind: 'no', label: 'Decline', href: decisionIntentUrl(ctx.decisionUrl, 'reject'), width: '25%' },
+    { kind: 'ask', label: 'Ask', href: decisionIntentUrl(ctx.decisionUrl, 'ask'), width: '25%' },
+  ], 'Each button opens the approval page with that choice picked. Add a note if you like, then confirm.'));
 
   const expires = fmtDayLong(ctx.expiresAt);
-  rows.push('<tr><td style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr>');
-  rows.push(`<tr><td class="ap-pad ap-muted ap-line" style="padding:16px 28px 22px;border-top:1px solid ${AP.line};font-family:${AP_FONT};font-size:12px;line-height:18px;color:${AP.muted};">`
-    + `This link is personal to you. Please don't forward it.${expires ? ` It expires on ${escapeHtml(expires)}.` : ''}<br>`
-    + `Sent by Ticket Pulse on behalf of ${escapeHtml(ctx.requestedByName || 'the service desk')}${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.</td></tr>`);
+  return apDocument({
+    headerRight: kind,
+    rows,
+    footerHtml: `This link is personal to you. Please don't forward it.${expires ? ` It expires on ${escapeHtml(expires)}.` : ''}<br>`
+      + `Sent by Ticket Pulse on behalf of ${escapeHtml(ctx.requestedByName || 'the service desk')}${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.`,
+    preheader: `${ctx.requestedByName || 'An agent'} needs your approval${requester.name ? ` for ${requester.name}` : ''}: ${ctx.categoryName || t.subject || ''}`,
+  });
+}
 
-  const preheader = `${ctx.requestedByName || 'An agent'} needs your approval${requester.name ? ` for ${requester.name}` : ''}: ${ctx.categoryName || t.subject || ''}`;
+// ------------------------------------------ the rest of the approval family
+//
+// 29 Sep 2026: every approval e-mail follows the request e-mail's layout —
+// status word with a dot, the category as the title, the ticket ref (linked
+// when the reader can open the ticket) and subject under it, ruled blocks for
+// notes, and the action as a full-width row at the end. Same dark-mode rule:
+// no painted surfaces.
+
+const AP_STATUS = {
+  go: { color: '#0f7a4f', dark: '#6ee7b7' },
+  no: { color: '#b42318', dark: '#ff9b93' },
+  amber: { color: '#b45309', dark: '#fbbf24' },
+  violet: { color: '#6d28d9', dark: '#c4b5fd' },
+  blue: { color: '#1d4ed8', dark: '#9cc0ff' },
+};
+
+/** "● Approved" — the state as a coloured word with a dot, never a pill or band. */
+function apStatus(word, tone) {
+  const c = AP_STATUS[tone] || AP_STATUS.blue;
+  return apText(`ap-s-${tone}`, `font-size:13px;line-height:18px;font-weight:bold;color:${c.color};margin-bottom:4px;`, `&#9679;&nbsp; ${escapeHtml(word)}`);
+}
+
+/** Title block shared by every approval e-mail: optional status, title, linked ref + subject. */
+function apHero({ status = null, statusTone = 'blue', categoryName = null, ticket = {}, href = null }) {
+  const title = categoryName || ticket.subject || 'Approval';
+  const sub = categoryName ? escapeHtml(ticket.subject || '') : '';
+  const ref = ticket.ref
+    ? (href
+      ? `<a href="${escapeHtml(href)}" target="_blank" class="ap-link" style="color:${AP.link};font-weight:600;text-decoration:none;">${escapeHtml(ticket.ref)}&nbsp;&#8599;</a>&nbsp; `
+      : `<span class="ap-ink2" style="color:${AP.ink2};font-weight:600;">${escapeHtml(ticket.ref)}</span>&nbsp; `)
+    : '';
+  return `<tr><td class="ap-pad" style="padding:22px 28px 0;">${status ? apStatus(status, statusTone) : ''}`
+    + apText('ap-h1 ap-ink', `font-size:19px;line-height:25px;font-weight:bold;color:${AP.ink};`, escapeHtml(title))
+    + ((ref || sub) ? apText('ap-muted', `font-size:14px;line-height:21px;color:${AP.muted};margin-top:4px;`, `${ref}${sub}`) : '')
+    + '</td></tr>';
+}
+
+/** A body row with the standard side padding. */
+const apRow = (html, top = 18) => `<tr><td class="ap-pad" style="padding:${top}px 28px 0;">${html}</td></tr>`;
+const apSentence = (html) => apText('ap-ink2', `font-size:15px;line-height:22px;color:${AP.ink2};`, html);
+
+/**
+ * The action row at the end, above the footer: a hairline, then buttons that
+ * fill the row. `buttons` = [{ kind:'go'|'no'|'ask', label, href, width }].
+ */
+function apActions(buttons, helpHtml = null) {
+  const list = buttons.filter((b) => b && b.href);
+  if (!list.length && !helpHtml) return '';
+  const cells = list.map((b, i) => `<td width="${b.width || `${Math.floor(100 / list.length)}%`}" valign="top" style="padding:0 ${i === list.length - 1 ? 0 : 4}px 0 ${i === 0 ? 0 : 4}px;">${apButton(b.kind || 'ask', b.label, b.href)}</td>`).join('');
+  return `<tr><td class="ap-pad" style="padding:22px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td class="ap-line" style="border-top:1px solid ${AP.line};padding-top:18px;">`
+    + (cells ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>${cells}</tr></table>` : '')
+    + (helpHtml ? apText('ap-muted', `font-size:12px;line-height:17px;color:${AP.muted};margin-top:${cells ? 10 : 0}px;text-align:center;`, helpHtml) : '')
+    + '</td></tr></table></td></tr>';
+}
+
+/** Quoted history entries (conversation / decision thread), each on a left rule. */
+function apHistoryItem(headHtml, bodyHtml) {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 10px;"><tr><td class="ap-line" style="border-left:3px solid ${AP.line};padding:0 0 0 12px;">`
+    + apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};`, headHtml)
+    + `<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13.5px;line-height:19px;color:${AP.ink2};margin-top:2px;">${bodyHtml}</div>`
+    + '</td></tr></table>';
+}
+
+/** The whole document: header, rows, footer — shared by every approval e-mail. */
+function apDocument({ headerRight = 'Approval', rows, footerHtml, preheader = '' }) {
+  const head = `<tr><td class="ap-pad ap-line" style="padding:14px 28px;border-bottom:1px solid ${AP.line};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>`
+    + `<td class="ap-ink" style="font-family:${AP_FONT};font-size:13.5px;font-weight:bold;color:${AP.ink};">Ticket Pulse</td>`
+    + `<td align="right" class="ap-muted" style="font-family:${AP_FONT};font-size:12px;color:${AP.muted};">${escapeHtml(headerRight)}</td>`
+    + '</tr></table></td></tr>';
+  const foot = '<tr><td style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr>'
+    + `<tr><td class="ap-pad ap-muted ap-line" style="padding:16px 28px 22px;border-top:1px solid ${AP.line};font-family:${AP_FONT};font-size:12px;line-height:18px;color:${AP.muted};">${footerHtml}</td></tr>`;
   return [
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting">',
     '<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title></title>',
     approverCss(),
     '</head><body style="margin:0;padding:0;-webkit-text-size-adjust:100%;">',
-    `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;opacity:0;">${escapeHtml(preheader)}${'&nbsp;&zwnj;'.repeat(40)}</div>`,
+    preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;opacity:0;">${escapeHtml(preheader)}${'&nbsp;&zwnj;'.repeat(40)}</div>` : '',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td align="center" class="ap-wrap" style="padding:20px 12px;">',
     '<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->',
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="ap-card ap-line" style="max-width:600px;border:1px solid ${AP.line};border-radius:12px;border-collapse:separate;">`,
-    rows.join(''),
+    head, rows.join(''), foot,
     '</table>',
     '<!--[if mso]></td></tr></table><![endif]-->',
     '</td></tr></table></body></html>',
   ].join('');
 }
 
+const verdictWordOf = (approved, conditionNote) => (!approved ? 'Not approved' : conditionNote ? 'Approved with condition' : 'Approved');
+const apWord = (text, tone) => `<span class="ap-s-${tone}" style="color:${AP_STATUS[tone].color};font-weight:bold;">${escapeHtml(text)}</span>`;
+const workspaceFooter = (ctx, tail = '') => `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.${tail}`;
+
 /**
  * Requester (the agent): the verdict. ctx:
- *  { workspaceName, ticket:{ref, subject, appUrl}, approved:boolean, approverName, isSelf, changedFrom, note, conditionNote, signatureHtml, requester:{name} }
+ *  { workspaceName, categoryName, ticket:{ref, subject, appUrl}, approved:boolean, approverName, isSelf, changedFrom, note, conditionNote, signatureHtml, requester:{name,title,location,photoCid} }
  */
 export function renderRequesterDecisionEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
-  const v = verdictOf(approved, ctx.conditionNote);
-  const verdict = v.word;
-  const tone = v.tone;
+  const verdict = verdictWordOf(approved, ctx.conditionNote);
+  const tone = approved ? 'go' : 'no';
   const who = ctx.isSelf ? 'You' : (ctx.approverName || 'The approver');
   const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
-  // Sentence case: the eyebrow above already carries the verdict in capitals; repeating it in
-  // capitals inside the sentence shouted it twice (Vahid, 18 Sep 2026).
-  const verdictWord = `<span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span>`;
+  const verdictWord = apWord(verdict.toLowerCase(), tone);
   // Sentence shapes are load-bearing (inbox filters + tests): "<actor> decided your approval request",
   // "changed the decision on your approval request", "You approved your own approval request".
   const sentence = ctx.isSelf
@@ -616,48 +565,28 @@ export function renderRequesterDecisionEmail(ctx) {
       : `${escapeHtml(who)} decided your approval request${forWhom}: ${verdictWord}`);
   const verb = ctx.changedFrom ? `changed the decision to ${verdict.toLowerCase()} on` : (approved ? 'approved' : 'did not approve');
   const rows = [];
-  rows.push(hero({
-    art: v.art,
-    alt: verdict,
-    eyebrow: `${verdict}${ctx.changedFrom ? ' (changed)' : ''}`,
-    eyebrowColor: tone.color,
-    kicker: ctx.categoryName ? `${ctx.categoryName} approval` : null,
-    title: t.subject || 'Ticket',
-    meta: t.ref || null,
-  }));
-  rows.push(spacer(16));
-  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</div>`, { bg: tone.bg, border: tone.line, accent: tone.color })}</td></tr>`);
+  rows.push(apHero({ status: `${verdict}${ctx.changedFrom ? ' (changed)' : ''}`, statusTone: tone, categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
+  rows.push(apRow(apSentence(sentence)));
   if (ctx.requester?.name) {
-    rows.push(spacer(12));
-    rows.push(`<tr><td>${peopleRow(personCard({ label: 'Requested for', name: ctx.requester.name, lines: [ctx.requester.title, ctx.requester.location].filter(Boolean), photoCid: ctx.requester.photoCid || null, emphasis: true }))}</td></tr>`);
+    rows.push(apRow(apPerson({ label: 'Requested for', name: ctx.requester.name, sub: [ctx.requester.title, ctx.requester.location].filter(Boolean).join(' · '), photoCid: ctx.requester.photoCid || null, tint: 'amber' })));
   }
-  if (ctx.conditionNote) {
-    rows.push(spacer(12));
-    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:14px;line-height:20px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
-  }
-  if (ctx.note) {
-    rows.push(spacer(12));
-    rows.push(`<tr><td>${card(`${sectionLabel(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`)}${escapeHtml(ctx.note).replace(/\r?\n/g, '<br>')}`, { accent: BLUE })}</td></tr>`);
-  }
-  if (ctx.signatureHtml) {
-    rows.push(spacer(10));
-    rows.push(`<tr><td style="font-family:${FONT};font-size:13px;line-height:18px;color:#334155;">${ctx.signatureHtml}</td></tr>`);
-  }
-  rows.push(spacer(18));
-  if (t.appUrl) rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: approved ? '#059669' : '#334155' })}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">${approved ? 'The approval is recorded on the ticket — you can proceed.' : 'The rejection and the reason are recorded on the ticket.'}</td></tr>`);
-  rows.push(spacer(8));
-  return emailShell({
-    workspaceName: ctx.workspaceName,
-    bodyRows: rows,
-    footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}. The full approval trail is on the ticket.`,
+  if (ctx.conditionNote) rows.push(apRow(apRuled('Condition', escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>'))));
+  if (ctx.note) rows.push(apRow(apRuled(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`, escapeHtml(ctx.note).replace(/\r?\n/g, '<br>'))));
+  if (ctx.signatureHtml) rows.push(apRow(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13px;line-height:18px;color:${AP.ink2};">${ctx.signatureHtml}</div>`, 14));
+  rows.push(apActions(
+    [t.appUrl ? { kind: approved ? 'go' : 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null],
+    approved ? 'The approval is recorded on the ticket — you can proceed.' : 'The rejection and the reason are recorded on the ticket.',
+  ));
+  return apDocument({
+    rows,
+    footerHtml: workspaceFooter(ctx, ' The full approval trail is on the ticket.'),
     preheader: `${who} ${verb} your approval request on ${t.ref || 'the ticket'}`,
   });
 }
 
 /**
  * Requester (the agent): the request moved to another approver (Approvals v2).
- * ctx: { workspaceName, ticket:{ref, subject, appUrl}, kind:'escalated'|'forwarded'|'auto',
+ * ctx: { workspaceName, categoryName, ticket:{ref, subject, appUrl}, kind:'escalated'|'forwarded'|'auto',
  *        byName, toNames:[…], toTierName, fromTierName, requester:{name} }
  * No note on purpose — the approver's reasoning stays between approvers.
  */
@@ -673,58 +602,36 @@ export function renderRequesterHandoffEmail(ctx) {
   else if (ctx.kind === 'auto') sentence = `<b>${by}</b> approved your request${forWhom} at ${escapeHtml(ctx.fromTierName || 'Tier 1')}. The amount is above that tier's limit, so it has moved on to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}) for the final approval.`;
   else sentence = `<b>${by}</b> escalated your approval request${forWhom} to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}).`;
   const rows = [];
-  rows.push(hero({
-    art: forwarded ? 'kind-forwarded' : 'kind-escalated',
-    alt: forwarded ? 'Forwarded' : 'Escalated',
-    eyebrow: forwarded ? 'Forwarded' : 'Escalated',
-    eyebrowColor: TONES.amber.color,
-    kicker: ctx.categoryName ? `${ctx.categoryName} approval` : `Approval ${forwarded ? 'forwarded' : 'escalated'}`,
-    title: t.subject || '(no subject)',
-    meta: t.ref || null,
-  }));
-  rows.push(spacer(16));
-  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${sentence}</div>`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
-  rows.push(spacer(18));
-  if (t.appUrl) rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: '#334155' })}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">Nothing is needed from you — you will get another e-mail when the decision is made.</td></tr>`);
-  rows.push(spacer(8));
-  return emailShell({
-    workspaceName: ctx.workspaceName,
-    bodyRows: rows,
-    footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}. The full approval trail is on the ticket.`,
+  rows.push(apHero({ status: forwarded ? 'Forwarded' : 'Escalated', statusTone: 'amber', categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
+  rows.push(apRow(apSentence(sentence)));
+  rows.push(apActions(
+    [t.appUrl ? { kind: 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null],
+    'Nothing is needed from you — you will get another e-mail when the decision is made.',
+  ));
+  return apDocument({
+    rows,
+    footerHtml: workspaceFooter(ctx, ' The full approval trail is on the ticket.'),
     preheader: `${ctx.byName || 'The approver'} ${forwarded ? 'forwarded' : 'escalated'} your approval request on ${t.ref || 'the ticket'} to ${who}`,
   });
 }
 
 /**
  * Requester (the agent): the approver asked a question. ctx:
- *  { workspaceName, ticket:{ref, subject, appUrl}, approverName, question, requester:{name} }
+ *  { workspaceName, categoryName, ticket:{ref, subject, appUrl}, approverName, question, requester:{name} }
  */
 export function renderRequesterClarificationEmail(ctx) {
   const t = ctx.ticket || {};
   const rows = [];
-  rows.push(hero({
-    art: 'kind-question',
-    alt: 'Question from the approver',
-    eyebrow: 'Needs your answer',
-    eyebrowColor: TONES.violet.color,
-    kicker: 'Question from the approver',
-    kickerColor: '#5b21b6',
-    title: t.subject || 'Ticket',
-    meta: t.ref || null,
-  }));
-  rows.push(spacer(16));
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};"><b>${escapeHtml(ctx.approverName || 'The approver')}</b> needs more information before deciding${ctx.requester?.name ? ` the request for <b>${escapeHtml(ctx.requester.name)}</b>` : ''}.</td></tr>`);
-  rows.push(spacer(12));
-  rows.push(`<tr><td>${card(`${sectionLabel('Their question')}<div style="font-size:15px;line-height:22px;">${escapeHtml(ctx.question || '')}</div>`, { bg: '#f5f3ff', border: '#ddd6fe', accent: '#7c3aed' })}</td></tr>`);
-  rows.push(spacer(18));
-  if (t.appUrl) rows.push(`<tr><td>${button('Answer on the ticket', t.appUrl, { bg: '#7c3aed' })}</td></tr>`);
-  rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">Your answer goes back to ${escapeHtml(ctx.approverName || 'the approver')} by e-mail and the approval link re-opens for them.</td></tr>`);
-  rows.push(spacer(8));
-  return emailShell({
-    workspaceName: ctx.workspaceName,
-    bodyRows: rows,
-    footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.`,
+  rows.push(apHero({ status: 'Needs your answer', statusTone: 'violet', categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
+  rows.push(apRow(apSentence(`<b>${escapeHtml(ctx.approverName || 'The approver')}</b> needs more information before deciding${ctx.requester?.name ? ` the request for <b>${escapeHtml(ctx.requester.name)}</b>` : ''}.`)));
+  rows.push(apRow(apRuled('Their question', escapeHtml(ctx.question || '')), 14));
+  rows.push(apActions(
+    [t.appUrl ? { kind: 'ask', label: 'Answer on the ticket', href: t.appUrl, width: '100%' } : null],
+    `Your answer goes back to ${escapeHtml(ctx.approverName || 'the approver')} by e-mail and the approval link re-opens for them.`,
+  ));
+  return apDocument({
+    rows,
+    footerHtml: workspaceFooter(ctx),
     preheader: `${ctx.approverName || 'The approver'} asked: ${ctx.question || ''}`,
   });
 }
@@ -737,57 +644,38 @@ export function renderRequesterClarificationEmail(ctx) {
 export function renderApprovalMessageEmail(ctx) {
   const t = ctx.ticket || {};
   const rows = [];
-  const kicker = ctx.kind === 'answer' ? 'Answer on an approval' : ctx.kind === 'comment' ? 'Note on an approval' : 'Question on an approval';
   const by = escapeHtml(ctx.authorName || 'An approver');
-  const art = ctx.kind === 'answer' ? 'kind-answer' : ctx.kind === 'comment' ? 'kind-note' : 'kind-question';
-  const eyebrow = ctx.kind === 'answer' ? 'Answer' : ctx.kind === 'comment' ? 'Note' : 'Question';
-  const tone = ctx.kind === 'answer' ? TONES.green : TONES.violet;
-  rows.push(hero({
-    art,
-    alt: eyebrow,
-    eyebrow,
-    eyebrowColor: tone.color,
-    kicker: `${kicker}${ctx.categoryName ? ` · ${ctx.categoryName}` : ''}`,
-    kickerColor: MUTED,
-    title: t.subject || '(no subject)',
-    meta: t.ref || null,
-  }));
-  rows.push(spacer(16));
+  const status = ctx.kind === 'answer' ? 'Answer' : ctx.kind === 'comment' ? 'Note' : 'Question';
+  const tone = ctx.kind === 'answer' ? 'go' : ctx.kind === 'comment' ? 'blue' : 'violet';
+  rows.push(apHero({ status: `${status} on an approval`, statusTone: tone, categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
   const lead = ctx.kind === 'answer'
     ? `<b>${by}</b> answered${ctx.recipient?.name ? ' your question' : ''}:`
     : ctx.kind === 'comment'
       ? `<b>${by}</b> left a note${ctx.isCc ? ' (you are copied)' : ' for you'}:`
       : `<b>${by}</b> has a question${ctx.isCc ? ' (you are copied)' : ' for you'}:`;
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${lead}</td></tr>`);
-  rows.push(spacer(10));
+  rows.push(apRow(apSentence(lead)));
   const body = ctx.bodyHtml ? (normalizeNoteHtmlForEmail(ctx.bodyHtml) || ctx.bodyHtml) : escapeHtml(ctx.bodyText || '').replace(/\n/g, '<br>');
-  rows.push(`<tr><td>${card(`<div style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${body}</div>`, { accent: tone.color })}</td></tr>`);
-  if (ctx.internalNote) {
-    rows.push(spacer(8));
-    rows.push(`<tr><td style="font-family:${FONT};font-size:12.5px;line-height:18px;color:#92400e;">Internal — the ticket requester is not on this message.</td></tr>`);
-  }
-  if (ctx.replyUrl || ctx.canReplyByEmail) {
-    rows.push(spacer(16));
-    if (ctx.replyUrl) rows.push(`<tr><td>${button(ctx.kind === 'question' ? 'Answer' : 'Reply', ctx.replyUrl)}</td></tr>`);
-    rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">${ctx.canReplyByEmail ? 'Or simply reply to this e-mail — your answer lands on the request and everyone on it is told.' : 'Use the button to answer — this mailbox does not read replies.'}</td></tr>`);
-  }
+  rows.push(apRow(apRuled(null, body, { rich: true }), 10));
+  if (ctx.internalNote) rows.push(apRow(apText('ap-s-amber', `font-size:12.5px;line-height:18px;color:${AP_STATUS.amber.color};`, 'Internal — the ticket requester is not on this message.'), 8));
   const thread = Array.isArray(ctx.thread) ? ctx.thread.filter((m) => m && (m.bodyText || m.bodyHtml)) : [];
   if (thread.length) {
-    rows.push(spacer(18));
-    rows.push(`<tr><td style="font-family:${FONT};">${sectionLabel('Earlier on this request')}</td></tr>`);
-    for (const m of thread.slice(-8)) {
+    const items = thread.slice(-8).map((m) => {
       const who = escapeHtml(m.author?.name || m.author?.email || 'Someone');
       const when = m.createdAt ? fmtDay(m.createdAt) : '';
       const label = m.kind === 'question' ? 'asked' : m.kind === 'answer' ? 'answered' : m.kind === 'decision' ? 'decided' : m.kind === 'handoff' ? 'handed off' : 'wrote';
       const mb = m.bodyHtml ? (normalizeNoteHtmlForEmail(m.bodyHtml) || m.bodyHtml) : escapeHtml(m.bodyText || '').replace(/\n/g, '<br>');
-      rows.push(`<tr><td style="padding:6px 0 0 12px;border-left:3px solid ${LINE};font-family:${FONT};font-size:13px;line-height:19px;color:#334155;"><b>${who}</b> ${label}${when ? ` · ${escapeHtml(when)}` : ''}${m.audience === 'internal' ? ' · internal' : ''}<div style="margin-top:2px;">${mb}</div></td></tr>`);
-      rows.push(spacer(6));
-    }
+      return apHistoryItem(`<b>${who}</b> ${label}${when ? ` · ${escapeHtml(when)}` : ''}${m.audience === 'internal' ? ' · internal' : ''}`, mb);
+    }).join('');
+    rows.push(apRow(`${apLabel('Earlier on this request')}<div style="margin-top:8px;">${items}</div>`, 20));
   }
-  rows.push(spacer(8));
-  return emailShell({
-    workspaceName: ctx.workspaceName || null,
-    bodyRows: rows,
+  if (ctx.replyUrl || ctx.canReplyByEmail) {
+    rows.push(apActions(
+      [ctx.replyUrl ? { kind: ctx.kind === 'question' ? 'ask' : 'go', label: ctx.kind === 'question' ? 'Answer' : 'Reply', href: ctx.replyUrl, width: '100%' } : null],
+      ctx.canReplyByEmail ? 'Or simply reply to this e-mail — your answer lands on the request and everyone on it is told.' : 'Use the button to answer — this mailbox does not read replies.',
+    ));
+  }
+  return apDocument({
+    rows,
     footerHtml: 'Sent by Ticket Pulse. This message is part of an approval on the ticket above.',
     preheader: `${ctx.authorName || 'An approver'}: ${String(ctx.bodyText || '').slice(0, 120)}`,
   });
@@ -796,49 +684,27 @@ export function renderApprovalMessageEmail(ctx) {
 /**
  * Approvals v3 — the decision, reply-style, to the requester and the chain.
  * ctx: { workspaceName, categoryName, ticket:{ref,subject,appUrl|null}, approved, changedFrom, approverName,
- *   note, conditionNote, signatureHtml, recipient:{role,name}, requester:{name}, requestNote(Html), requestedByName, thread:[…] }
+ *   note, conditionNote, signatureHtml, recipient:{role,name}, requester:{name}, requestNote(Html), requestedByName, thread:[…], amountLabel?, tierLabel? }
  */
 export function renderDecisionThreadEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
-  const v = verdictOf(approved, ctx.conditionNote);
-  const verdict = v.word;
-  const tone = v.tone;
+  const verdict = verdictWordOf(approved, ctx.conditionNote);
+  const tone = approved ? 'go' : 'no';
   const rows = [];
-  rows.push(hero({
-    art: v.art,
-    alt: verdict,
-    eyebrow: verdict,
-    eyebrowColor: tone.color,
-    kicker: ctx.categoryName ? `${ctx.categoryName} approval` : 'Approval',
-    kickerColor: MUTED,
-    title: t.subject || '(no subject)',
-    meta: t.ref || null,
-  }));
-  rows.push(spacer(16));
+  rows.push(apHero({ status: verdict, statusTone: tone, categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
   const greet = ctx.recipient?.name ? `Hi ${escapeHtml(String(ctx.recipient.name).split(' ')[0])},` : 'Hello,';
   const forWhom = ctx.requester?.name && ctx.recipient?.role !== 'requester' ? ` for ${escapeHtml(ctx.requester.name)}` : '';
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has <span style="color:${tone.color};font-weight:bold;">${escapeHtml(verdict.toLowerCase())}</span> the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom === 'rejected' ? 'not approved' : ctx.changedFrom)})` : ''}.</td></tr>`);
-  if (ctx.categoryName) {
-    rows.push(spacer(14));
-    rows.push(`<tr><td>${categoryCard({ categoryName: ctx.categoryName, amountLabel: ctx.amountLabel || null, tierLabel: ctx.tierLabel || null })}</td></tr>`);
+  rows.push(apRow(apSentence(`${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has ${apWord(verdict.toLowerCase(), tone)} the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom === 'rejected' ? 'not approved' : ctx.changedFrom)})` : ''}.`)));
+  if (ctx.amountLabel || ctx.tierLabel) {
+    rows.push(apRow('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
+      + (ctx.amountLabel ? apFact('Amount', escapeHtml(ctx.amountLabel)) : '')
+      + (ctx.tierLabel ? apFact('Approval tier', escapeHtml(ctx.tierLabel)) : '')
+      + '</tr></table>', 6));
   }
-  if (ctx.conditionNote) {
-    rows.push(spacer(12));
-    rows.push(`<tr><td>${card(`${sectionLabel('Condition')}<div style="font-size:15px;line-height:22px;color:#7c2d12;">${escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')}</div>`, { bg: '#fff7ed', border: '#fdba74', accent: '#f59e0b' })}</td></tr>`);
-  }
-  if (ctx.note) {
-    rows.push(spacer(12));
-    rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${escapeHtml(ctx.note).replace(/\n/g, '<br>')}</td></tr>`);
-  }
-  if (ctx.signatureHtml) {
-    rows.push(spacer(14));
-    rows.push(`<tr><td style="font-family:${FONT};font-size:13px;line-height:18px;color:#334155;">${ctx.signatureHtml}</td></tr>`);
-  }
-  if (t.appUrl) {
-    rows.push(spacer(16));
-    rows.push(`<tr><td>${button('Open the ticket', t.appUrl, { bg: approved ? '#059669' : '#334155' })}</td></tr>`);
-  }
+  if (ctx.conditionNote) rows.push(apRow(apRuled('Condition', escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')), 14));
+  if (ctx.note) rows.push(apRow(apSentence(escapeHtml(ctx.note).replace(/\n/g, '<br>')), 14));
+  if (ctx.signatureHtml) rows.push(apRow(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13px;line-height:18px;color:${AP.ink2};">${ctx.signatureHtml}</div>`, 14));
   // History — quoted like a reply thread, newest first.
   const history = [];
   for (const m of (Array.isArray(ctx.thread) ? ctx.thread : []).slice().reverse()) {
@@ -846,21 +712,17 @@ export function renderDecisionThreadEmail(ctx) {
     const who = escapeHtml(m.author?.name || m.author?.email || 'Someone');
     const label = m.kind === 'question' ? 'asked' : m.kind === 'answer' ? 'answered' : m.kind === 'handoff' ? 'handed off' : 'wrote';
     const mb = m.bodyHtml ? (normalizeNoteHtmlForEmail(m.bodyHtml) || m.bodyHtml) : escapeHtml(m.bodyText || '').replace(/\n/g, '<br>');
-    history.push(`<div style="margin:0 0 10px;padding:0 0 0 12px;border-left:3px solid ${LINE};"><div style="font-size:12.5px;color:${MUTED};">On ${escapeHtml(m.createdAt ? fmtDayLong(m.createdAt) : '')}, <b>${who}</b> ${label}${m.audience === 'internal' ? ' (internal)' : ''}:</div><div style="font-size:13.5px;line-height:19px;color:#334155;margin-top:2px;">${mb}</div></div>`);
+    history.push(apHistoryItem(`On ${escapeHtml(m.createdAt ? fmtDayLong(m.createdAt) : '')}, <b>${who}</b> ${label}${m.audience === 'internal' ? ' (internal)' : ''}:`, mb));
   }
   if (ctx.requestNoteHtml || ctx.requestNote) {
     const rb = ctx.requestNoteHtml ? (normalizeNoteHtmlForEmail(ctx.requestNoteHtml) || ctx.requestNoteHtml) : escapeHtml(ctx.requestNote || '').replace(/\n/g, '<br>');
-    history.push(`<div style="margin:0 0 10px;padding:0 0 0 12px;border-left:3px solid ${LINE};"><div style="font-size:12.5px;color:${MUTED};"><b>${escapeHtml(ctx.requestedByName || 'The agent')}</b> asked for approval:</div><div style="font-size:13.5px;line-height:19px;color:#334155;margin-top:2px;">${rb}</div></div>`);
+    history.push(apHistoryItem(`<b>${escapeHtml(ctx.requestedByName || 'The agent')}</b> asked for approval:`, rb));
   }
-  if (history.length) {
-    rows.push(spacer(20));
-    rows.push(`<tr><td style="font-family:${FONT};">${sectionLabel('History')}${history.join('')}</td></tr>`);
-  }
-  rows.push(spacer(8));
-  return emailShell({
-    workspaceName: ctx.workspaceName,
-    bodyRows: rows,
-    footerHtml: `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.${ctx.recipient?.role === 'requester' ? '' : ' The full approval trail is on the ticket.'}`,
+  if (history.length) rows.push(apRow(`${apLabel('History')}<div style="margin-top:8px;">${history.join('')}</div>`, 20));
+  rows.push(apActions([t.appUrl ? { kind: approved ? 'go' : 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null]));
+  return apDocument({
+    rows,
+    footerHtml: workspaceFooter(ctx, ctx.recipient?.role === 'requester' ? '' : ' The full approval trail is on the ticket.'),
     preheader: `${ctx.approverName || 'The approver'} ${verdict.toLowerCase()} — ${t.subject || t.ref || ''}`,
   });
 }

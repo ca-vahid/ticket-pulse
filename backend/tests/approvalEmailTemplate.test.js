@@ -6,6 +6,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
   dropEmptyTableColumns, normalizeNoteHtmlForEmail, textExcerpt, initialsOf,
   renderApproverRequestEmail, decisionIntentUrl, renderRequesterDecisionEmail, renderRequesterClarificationEmail,
+  renderRequesterHandoffEmail, renderDecisionThreadEmail, renderApprovalMessageEmail,
 } from '../src/services/approvalEmailTemplate.js';
 
 const PASTE = '<table width="1400" style="width:1400px"><tr>'
@@ -168,9 +169,9 @@ describe('renderRequesterDecisionEmail / renderRequesterClarificationEmail', () 
   const t = { ref: '#1', subject: 'S', appUrl: 'https://app/tickets/1' };
   test('sentence shapes are preserved', () => {
     expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss', requester: { name: 'Rita' } }))
-      .toContain('Boss decided your approval request for <b>Rita</b>: <span style="color:#065f46;font-weight:bold;">approved</span>');
+      .toContain('Boss decided your approval request for <b>Rita</b>: <span class="ap-s-go" style="color:#0f7a4f;font-weight:bold;">approved</span>');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: false, approverName: 'Boss', changedFrom: 'approved' }))
-      .toContain('Boss changed the decision on your approval request: <span style="color:#991b1b;font-weight:bold;">not approved</span>');
+      .toContain('Boss changed the decision on your approval request: <span class="ap-s-no" style="color:#b42318;font-weight:bold;">not approved</span>');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: true, isSelf: true })).toContain('You approved your own approval request');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: false, isSelf: true, note: 'Too <b>pricey</b>' })).toContain('Your note');
     expect(renderRequesterDecisionEmail({ ticket: t, approved: false, isSelf: true, note: 'Too <b>pricey</b>' })).toContain('Too &lt;b&gt;pricey&lt;/b&gt;');
@@ -180,24 +181,40 @@ describe('renderRequesterDecisionEmail / renderRequesterClarificationEmail', () 
     expect(html).toContain('Needs your answer');
     expect(html).toContain('Vahid</b> needs more information before deciding the request for <b>Rita</b>');
     expect(html).toContain('Refurb &lt;ok&gt;?');
-    expect(html).toContain('Answer on the ticket &rarr;');
+    expect(html).toContain('>Answer on the ticket<');
   });
 });
 
-describe('brand pictograms (17 Sep 2026 redesign)', () => {
+describe('one layout for the approval family (29 Sep 2026)', () => {
   test('the request e-mail carries no pictograms (29 Sep 2026 redesign) — only people photos, if any', () => {
     const html = renderApproverRequestEmail(baseCtx());
     expect(html).not.toContain('cid:tp-');
     expect(html).toContain('Service desk agent');
   });
 
-  test('every verdict and hand-off e-mail names its pictogram', async () => {
-    const { hasBrandAsset } = await import('../src/services/emailBrandAssets.js');
-    if (!hasBrandAsset('kind-approved')) return;
-    const t = { ref: '#1', subject: 'x', appUrl: 'https://app/t/1' };
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss' })).toContain('cid:tp-kind-approved');
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss', conditionNote: 'UAT first' })).toContain('cid:tp-kind-condition');
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, approverName: 'Boss' })).toContain('cid:tp-kind-rejected');
-    expect(renderRequesterClarificationEmail({ ticket: t, approverName: 'Boss', question: 'Why?' })).toContain('cid:tp-kind-question');
+  test('every approval e-mail shares the request layout: status word, category title, linked ref, no pictograms, no painted surfaces', () => {
+    const t = { ref: '#1', subject: 'Laptop swap', appUrl: 'https://app/t/1' };
+    const all = {
+      approved: renderRequesterDecisionEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: true, approverName: 'Boss' }),
+      condition: renderRequesterDecisionEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: true, approverName: 'Boss', conditionNote: 'UAT first' }),
+      rejected: renderRequesterDecisionEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: false, approverName: 'Boss' }),
+      question: renderRequesterClarificationEmail({ ticket: t, categoryName: 'New Computer Upgrade', approverName: 'Boss', question: 'Why?' }),
+      escalated: renderRequesterHandoffEmail({ ticket: t, categoryName: 'New Computer Upgrade', kind: 'escalated', byName: 'Boss', toNames: ['CFO'], toTierName: 'Tier 2' }),
+      thread: renderDecisionThreadEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: true, approverName: 'Boss', recipient: { role: 'agent', name: 'Ann' } }),
+      message: renderApprovalMessageEmail({ kind: 'question', authorName: 'Boss', categoryName: 'New Computer Upgrade', ticket: t, bodyText: 'Why?', replyUrl: 'https://app/r' }),
+    };
+    expect(all.approved).toContain('&#9679;&nbsp; Approved<');
+    expect(all.condition).toContain('&#9679;&nbsp; Approved with condition<');
+    expect(all.rejected).toContain('&#9679;&nbsp; Not approved<');
+    expect(all.question).toContain('&#9679;&nbsp; Needs your answer<');
+    expect(all.escalated).toContain('&#9679;&nbsp; Escalated<');
+    for (const html of Object.values(all)) {
+      expect(html).toContain('>New Computer Upgrade<');
+      expect(html).toContain('href="https://app/t/1"');
+      expect(html).toContain('#1&nbsp;&#8599;');
+      expect(html).not.toContain('cid:tp-');
+      expect(html).not.toContain('background:#f1f5f9');
+      expect(html).toContain('<meta name="color-scheme" content="light dark">');
+    }
   });
 });
