@@ -28,9 +28,11 @@ export const AI_OPERATIONS = [
   'auto_help',
 ];
 
-// Sonnet 5 (launched 2026-06-30) is the default; Sonnet 4.6 stays selectable
-// in the settings dropdown for opt-back.
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
+// Sonnet 5.5 (released 28 Sep 2026: same $2/$10 price as Sonnet 5, >30%
+// faster output, same tokenizer) is the default. Sonnet 5 and Sonnet 4.6 stay
+// selectable in the settings dropdown for opt-back.
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5-5';
+export const SONNET_5_MODEL = 'claude-sonnet-5';
 export const SONNET_4_6_MODEL = 'claude-sonnet-4-6';
 // GPT-6 Sol (released 22 Sep 2026, verified 23 Sep against the prod key: tool
 // call + history replay + image input through OpenAiProvider). $2/M in, $10/M
@@ -64,6 +66,18 @@ export const MODEL_METADATA = [
   {
     provider: AI_PROVIDER_ANTHROPIC,
     model: DEFAULT_ANTHROPIC_MODEL,
+    label: 'Claude Sonnet 5.5',
+    operations: AI_OPERATIONS,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsJson: true,
+    supportsThinking: false,
+    supportsVision: true,
+    costNotes: 'Default quality model for assignment automation. Same price as Sonnet 5, faster, fewer tool calls per task.',
+  },
+  {
+    provider: AI_PROVIDER_ANTHROPIC,
+    model: SONNET_5_MODEL,
     label: 'Claude Sonnet 5',
     operations: AI_OPERATIONS,
     supportsStreaming: true,
@@ -71,7 +85,7 @@ export const MODEL_METADATA = [
     supportsJson: true,
     supportsThinking: false,
     supportsVision: true,
-    costNotes: 'Default quality model for assignment automation. Near-Opus agentic quality at Sonnet cost.',
+    costNotes: 'Previous Sonnet default; kept selectable for opt-back.',
   },
   {
     provider: AI_PROVIDER_ANTHROPIC,
@@ -191,8 +205,25 @@ export function shouldOmitAnthropicTemperature(model) {
   const normalized = normalizeModelAlias(model);
   const value = String(normalized || '').trim().toLowerCase();
   if (value === DEFAULT_OPUS_MODEL || value.startsWith(`${DEFAULT_OPUS_MODEL}-`)) return true;
-  // Sonnet 5 also rejects non-default sampling params (400), unlike Sonnet 4.6.
+  // Sonnet 5 and Sonnet 5.5 (claude-sonnet-5-5) reject non-default sampling
+  // params (400), unlike Sonnet 4.6.
   return value === 'claude-sonnet-5' || value.startsWith('claude-sonnet-5-');
+}
+
+/**
+ * Request shape a Claude model accepts (Sonnet 5.5 migration, 28 Sep 2026).
+ * Sonnet 5.5, Opus 5.5 and Fable 5.1 reject `thinking: {type: 'disabled'}`
+ * (400; the lowest setting is `between_tools` on Sonnet 5.5, adaptive at low
+ * effort on the others) and forced `tool_choice` ('any' / 'tool').
+ * @returns {{ thinkingOff: object|null, forcedToolChoice: boolean }}
+ *   thinkingOff: what to send for "no up-front thinking" (null = omit the field)
+ */
+export function anthropicRequestRules(model) {
+  const value = String(normalizeModelAlias(model) || '').trim().toLowerCase();
+  const is = (id) => value === id || value.startsWith(`${id}-`);
+  if (is('claude-sonnet-5-5')) return { thinkingOff: { type: 'between_tools' }, forcedToolChoice: false };
+  if (is('claude-opus-5-5') || is('claude-fable-5-1') || is('claude-mythos-5-1')) return { thinkingOff: null, forcedToolChoice: false };
+  return { thinkingOff: { type: 'disabled' }, forcedToolChoice: true };
 }
 
 export function defaultModelForProvider(provider, operation = null) {

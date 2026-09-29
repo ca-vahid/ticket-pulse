@@ -4413,7 +4413,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
   const selected = settings.find((row) => row.operation === operation) || {
     operation,
     primaryProvider: 'anthropic',
-    primaryModel: 'claude-sonnet-5',
+    primaryModel: 'claude-sonnet-5-5',
     fallbackProvider: 'openai',
     fallbackModel: 'gpt-6-sol',
     autoFallbackEnabled: true,
@@ -4477,7 +4477,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
       <button
         type="button"
         onClick={() => {
-          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-6-sol' : 'claude-sonnet-5');
+          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-6-sol' : 'claude-sonnet-5-5');
           updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
         }}
         className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200' : 'bg-card border-border text-muted-foreground hover:bg-muted/50'}`}
@@ -4627,7 +4627,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       const cfg = res?.data || {};
       setConfig({
         isEnabled: false, autoAssign: false, autoCloseNoise: false, duplicateBurstEnabled: true, dryRunMode: true,
-        llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
+        llmModel: 'claude-sonnet-5-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false, observeCategoryWritebackEnabled: false, competencyFeedbackEnabled: true,
@@ -4638,7 +4638,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         ...cfg,
       });
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, duplicateBurstEnabled: true, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, duplicateBurstEnabled: true, dryRunMode: true, llmModel: 'claude-sonnet-5-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 

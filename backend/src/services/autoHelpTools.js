@@ -29,7 +29,10 @@ export const SUBMIT_AUTO_HELP_TOOL = Object.freeze({
   input_schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['answerable'],
+    // stayQuiet is required (Sonnet 5.5, 28 Sep 2026): newer models leave
+    // optional fields out, and a missing answer is a failed check. With no
+    // condition in force the model sends {"matched": false}.
+    required: ['answerable', 'stayQuiet'],
     properties: {
       answerable: { type: 'boolean', description: 'True only when the cited sources clearly answer this request.' },
       subject: { type: 'string', maxLength: 200, description: 'Reply subject line (short).' },

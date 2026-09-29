@@ -202,8 +202,8 @@ describe('cost', () => {
     const data = updates().find((d) => d.status === 'drafted');
     expect(data.inputTokens).toBe(5000);
     expect(data.outputTokens).toBe(550);
-    // sonnet 3/15 per Mtok (4000 in, 500 out) + haiku 1/5 (1000 in, 50 out)
-    expect(data.costUsd).toBeCloseTo((4000 * 3 + 500 * 15 + 1000 * 1 + 50 * 5) / 1e6, 6);
+    // sonnet 5 2/10 per Mtok (4000 in, 500 out) + haiku 1/5 (1000 in, 50 out)
+    expect(data.costUsd).toBeCloseTo((4000 * 2 + 500 * 10 + 1000 * 1 + 50 * 5) / 1e6, 6);
   });
 
   test('the monthly cap stops a new-ticket run before any model call (skip row budget_exhausted)', async () => {

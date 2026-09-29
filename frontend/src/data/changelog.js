@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.1.00-preview';
+export const APP_VERSION = '4.1.01-preview';
 
 export const changelog = [
+  {
+    version: '4.1.01-preview',
+    date: 'September 28, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Claude Sonnet 5.5 is the default AI model</strong> &mdash; released today at the same price as Sonnet 5 and faster. Assignment runs, Auto-help, daily review and e-mail drafting now use it wherever Sonnet 5 was the default. In a side-by-side run on 16 recent IT and Accounting tickets it picked the same category every time and cost 17&ndash;25% less per ticket.' },
+      { type: 'improved', html: '<strong>Sonnet 5 stays selectable</strong> &mdash; Settings &rarr; AI &amp; Routing still lists Claude Sonnet 5, so a workspace can switch back at any time.' },
+      { type: 'fixed', html: '<strong>AI cost estimates for Sonnet 5</strong> &mdash; token-cost figures priced Sonnet 5 at the older Sonnet rate and overstated it by half; they now use $2 / $10 per million tokens.' },
+    ],
+  },
   {
     version: '4.1.00-preview',
     date: 'September 28, 2026',

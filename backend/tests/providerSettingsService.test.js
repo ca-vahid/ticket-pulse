@@ -57,13 +57,13 @@ describe('providerSettingsService', () => {
       primaryProvider: 'openai',
       primaryModel: 'gpt-6-sol',
       fallbackProvider: 'anthropic',
-      fallbackModel: 'claude-sonnet-5',
+      fallbackModel: 'claude-sonnet-5-5',
     });
     expect(created.find((row) => row.operation === 'notification_workflow_generation')).toMatchObject({
       primaryProvider: 'openai',
       primaryModel: 'gpt-6-sol',
       fallbackProvider: 'anthropic',
-      fallbackModel: 'claude-sonnet-5',
+      fallbackModel: 'claude-sonnet-5-5',
     });
   });
 });

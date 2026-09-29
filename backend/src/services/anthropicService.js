@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../config/index.js';
 import { normalizeAnthropicModel } from '../utils/anthropicModels.js';
-import { shouldOmitAnthropicTemperature } from '../utils/aiProviders.js';
+import { anthropicRequestRules, shouldOmitAnthropicTemperature } from '../utils/aiProviders.js';
 import logger from '../utils/logger.js';
 
 const MAX_RETRIES = 3;
@@ -42,10 +42,11 @@ class AnthropicService {
       try {
         const startTime = Date.now();
 
+        const thinkingOff = anthropicRequestRules(selectedModel).thinkingOff;
         const request = {
           model: selectedModel,
           max_tokens: maxTokens,
-          thinking: { type: 'disabled' },
+          ...(thinkingOff ? { thinking: thinkingOff } : {}),
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
         };
