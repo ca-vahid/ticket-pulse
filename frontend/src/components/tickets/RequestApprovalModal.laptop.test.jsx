@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-// Assetron (24 Sep 2026): a hardware category offers an OPTIONAL laptop hold.
+// Assetron: a hardware category asks "laptop or not?" as a real choice (29 Sep 2026).
 vi.mock('./RichTextEditor', () => ({
   default: ({ ariaLabel, onChange }) => <textarea aria-label={ariaLabel || 'editor'} onChange={(e) => onChange?.({ html: `<p>${e.target.value}</p>`, text: e.target.value })} />,
   isRichContent: () => false,
@@ -25,34 +25,39 @@ const categories = [
   { id: 9, name: 'AI Premium License Request', managerEmails: ['bob@x.io'], managerCount: 1 },
 ];
 const requester = { name: 'Rita', email: 'Rita@X.io' };
+const send = () => screen.getByRole('button', { name: /Send approval request/ });
 
-describe('RequestApprovalModal — Assetron laptop', () => {
+describe('RequestApprovalModal — Assetron laptop choice', () => {
   afterEach(() => cleanup());
 
-  test('only a hardware category offers the laptop; the requester is the default recipient', () => {
+  test('only a hardware category asks; the requester is the default recipient', () => {
     const { unmount } = render(<RequestApprovalModal categories={[categories[1]]} requester={requester} onSubmit={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.queryByText(/Reserve a new laptop from Assetron/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Laptop' })).not.toBeInTheDocument();
     unmount();
     render(<RequestApprovalModal categories={[categories[0]]} requester={requester} onSubmit={vi.fn()} onClose={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/Reserve a new laptop from Assetron/));
+    fireEvent.click(screen.getByRole('radio', { name: /Reserve a laptop from Assetron/ }));
     expect(screen.getByText('for rita@x.io')).toBeInTheDocument();
   });
 
-  test('without the box ticked no laptop is sent (a charger request)', () => {
+  test('nothing is sent until the agent chooses; "No laptop" sends without one (a charger request)', () => {
     const onSubmit = vi.fn();
     render(<RequestApprovalModal categories={[categories[0]]} requester={requester} onSubmit={onSubmit} onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /Send approval request/ }));
+    expect(screen.getByText('Choose one to continue.')).toBeInTheDocument();
+    expect(send()).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: /No laptop/ }));
+    expect(screen.getByRole('radio', { name: /No laptop/ })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(send());
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ approvalCategoryId: 4, hardware: null }));
   });
 
-  test('box ticked: blocked until a laptop is picked, then the laptop and recipient are sent', () => {
+  test('Assetron chosen: blocked until a laptop is picked, then the laptop and recipient are sent', () => {
     const onSubmit = vi.fn();
     render(<RequestApprovalModal categories={[categories[0]]} requester={requester} onSubmit={onSubmit} onClose={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/Reserve a new laptop from Assetron/));
-    fireEvent.click(screen.getByRole('button', { name: /Send approval request/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Reserve a laptop from Assetron/ }));
+    fireEvent.click(send());
     expect(onSubmit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('stub pick'));
-    fireEvent.click(screen.getByRole('button', { name: /Send approval request/ }));
+    fireEvent.click(send());
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       hardware: { assetId: 'asset-1', recipient: { email: 'rita@x.io', name: 'Rita' } },
     }));

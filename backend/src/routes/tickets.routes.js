@@ -2041,7 +2041,11 @@ router.get('/assetron/status', asyncHandler(async (req, res) => {
 }));
 
 function assetronFail(err) {
-  if (err?.name === 'AssetronError') return new ValidationError(`Assetron: ${err.message}`);
+  if (err?.name === 'AssetronError') {
+    // Assetron's generic "Validation failed" says nothing on its own — name the field it refused.
+    const where = err.field ? ` (${err.field}${err.reason && err.reason !== err.field ? `: ${err.reason}` : ''})` : '';
+    return new ValidationError(`Assetron: ${err.message}${where}`);
+  }
   return err;
 }
 

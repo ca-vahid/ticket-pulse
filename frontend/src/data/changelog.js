@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.02-preview';
+export const APP_VERSION = '4.1.03-preview';
 
 export const changelog = [
+  {
+    version: '4.1.03-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Laptop step on hardware approvals</strong> — a New Computer Upgrade request now asks plainly: “Reserve a laptop from Assetron” or “No laptop”, instead of a small checkbox.' },
+      { type: 'fixed', html: '<strong>Assetron filters</strong> — Touch screen is one choice (Any / Yes / No); picking both answers used to fail with “Validation failed”. When Assetron has no new laptops, the picker says so instead of showing a lone filter, and Assetron errors now name the field.' },
+    ],
+  },
   {
     version: '4.1.02-preview',
     date: 'September 29, 2026',

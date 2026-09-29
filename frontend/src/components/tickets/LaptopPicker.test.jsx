@@ -36,14 +36,38 @@ describe('LaptopPicker (Assetron)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /RAM/ }));
     fireEvent.click(screen.getByLabelText('32 GB'));
-    fireEvent.click(screen.getByRole('button', { name: /Touch Screen|Touch screen/ }));
-    fireEvent.click(screen.getByLabelText('No'));
+    // Yes/no fields are one choice (Any / Yes / No) — Assetron refuses "true,false".
+    fireEvent.click(screen.getByRole('radio', { name: 'No' }));
     expect(api.assetronAssets).not.toHaveBeenCalled(); // search only on the button
     fireEvent.click(screen.getByRole('button', { name: /Search new laptops/ }));
     await waitFor(() => expect(api.assetronAssets).toHaveBeenCalledWith({ ram: '32 GB', touchScreen: 'false', pageSize: 50 }));
     await waitFor(() => expect(screen.getByText('Dell Latitude 7650')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /Pick/ }));
     expect(onChange).toHaveBeenCalledWith(LAPTOP);
+  });
+
+  test('ticking every value of a field leaves it out; Any clears a yes/no field', async () => {
+    api.assetronStatus.mockResolvedValue({ data: { configured: true } });
+    api.assetronFilterOptions.mockResolvedValue({ data: { ram: ['16 GB', '32 GB'], touchScreen: [true, false] } });
+    api.assetronAssets.mockResolvedValue({ data: { items: [] } });
+    render(<LaptopPicker recipient={null} onRecipient={() => {}} value={null} onChange={() => {}} />);
+    await waitFor(() => screen.getByRole('button', { name: /RAM/ }));
+    fireEvent.click(screen.getByRole('button', { name: /RAM/ }));
+    fireEvent.click(screen.getByLabelText('16 GB'));
+    fireEvent.click(screen.getByLabelText('32 GB'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Any' }));
+    fireEvent.click(screen.getByRole('button', { name: /Search new laptops/ }));
+    await waitFor(() => expect(api.assetronAssets).toHaveBeenCalledWith({ pageSize: 50 }));
+  });
+
+  test('no new laptops in Assetron: says so instead of showing a lone yes/no filter', async () => {
+    api.assetronStatus.mockResolvedValue({ data: { configured: true } });
+    api.assetronFilterOptions.mockResolvedValue({ data: { make: [], ram: [], touchScreen: [true, false] } });
+    render(<LaptopPicker recipient={null} onRecipient={() => {}} value={null} onChange={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('laptop-no-stock')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /Search new laptops/ })).toBeNull();
+    expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 
   test('warranty reads as month and year; odd values pass through', () => {
