@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowUpRight, Hand, ListChecks } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, Hand, ListChecks } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../ui';
@@ -12,29 +12,40 @@ import { fitReasonOf, fmtDuration, isNotThisPlaybook, readableReason } from './k
 import PlaybookMetrics from './PlaybookMetrics';
 import { DECISION_WORD, DISMISS_WORD, OUTCOME_WORD, runLifeLine, usd } from './autoHelpWords';
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'Any result' },
+/**
+ * Knowledge → Activity (reorganised 29 Sep 2026). Two views:
+ *   Runs (default)  one line of outcome counts that doubles as the result
+ *                   filter, then every run; a run opens a side panel.
+ *   By playbook     one compact row per playbook (PlaybookMetrics).
+ * The run panel answers, in order: what happened, what Auto-help would have
+ * said (with any step the knowledge didn't back marked), what the team did,
+ * your review. Sources, raw steps and cost sit under "Details".
+ */
+
+// The outcome line, in the order a ticket falls through Auto-help.
+const OUTCOMES = [
   { value: 'drafted', label: 'Drafted' },
   { value: 'staged', label: 'Suggested to an agent' },
   { value: 'sent', label: 'Sent' },
   { value: 'not_answerable', label: 'Not answerable' },
-  { value: 'failed', label: 'Failed' },
+  { value: 'no_match', label: 'No playbook' },
   { value: 'skipped', label: 'Skipped' },
-  { value: 'no_match', label: 'No match' },
+  { value: 'failed', label: 'Failed' },
 ];
+
 // Why a run ended where it did (gateDecision), in plain words.
 const GATE_WORD = {
-  shadow_recorded: 'Grounded in an article or verified solution.',
-  playbook_only: 'Grounded only in the playbook’s own instructions — never sent without a person.',
-  no_sources: 'Nothing in the knowledge matched, so the model was not asked.',
-  no_grounded_source: 'The answer cited no article or verified solution it had seen.',
-  model_declined: 'The model said the sources don’t answer this.',
-  invalid_submission: 'The model’s answer was malformed.',
+  shadow_recorded: 'Drafted from an article or verified solution.',
+  playbook_only: 'Drafted from the playbook’s own instructions only — never sent without a person.',
+  no_sources: 'No article or verified solution matched this ticket, so there was nothing to answer from.',
+  no_grounded_source: 'The answer quoted nothing it had actually read.',
+  model_declined: 'The AI said the knowledge doesn’t answer this.',
+  invalid_submission: 'The AI’s answer was malformed.',
   guard_blocked: 'The safety guard blocked the answer.',
-  time_budget: 'Ran out of its time budget.',
+  time_budget: 'Ran out of time.',
   interrupted: 'Interrupted before it finished.',
   run_not_recorded: 'Could not be recorded, so it did not run.',
-  no_match: 'No playbook matched this ticket.',
+  no_match: 'No playbook covers this ticket’s category.',
   noise: 'Skipped: the ticket is marked noise.',
   security: 'Skipped: security ticket.',
   trusted_intake: 'Skipped: machine alert from a trusted integration.',
@@ -46,21 +57,21 @@ const GATE_WORD = {
   requester_daily_cap: 'Skipped: this requester reached the daily limit.',
   resolved: 'Skipped: already resolved or closed.',
   already_ran: 'Skipped: Auto-help already ran on this ticket.',
-  uncited_step: 'A step named no source the run had seen.',
-  insufficient_context: 'The check found the retrieved knowledge not enough to answer.',
-  partial_context: 'The check found the knowledge answers only part of this — never sent without a person.',
-  check_failed: 'The answerability check could not run.',
-  // P1 (approve mode, budgets)
-  staged_for_agent: 'Passed every gate and was suggested on the ticket for an agent to send.',
+  noise_decision: 'Skipped: the AI marked the ticket as noise.',
+  not_actionable: 'Skipped: the AI marked the ticket as not needing action.',
+  parked: 'Skipped: the ticket is parked.',
+  uncited_step: 'A step quoted nothing it had read.',
+  insufficient_context: 'The knowledge doesn’t cover enough of this to answer.',
+  partial_context: 'Drafted from what the knowledge covers — never sent without a person.',
+  check_failed: 'The answer check could not run.',
+  staged_for_agent: 'Suggested on the ticket for an agent to send.',
   below_confidence: 'Drafted, but below the playbook’s confidence bar — not suggested to an agent.',
   human_draft_exists: 'Drafted, but a proposed reply was already waiting on the ticket — that one wins.',
   stage_failed: 'Drafted, but it could not be suggested on the ticket.',
   auto_sent: 'Sent automatically.',
   budget_exhausted: 'Skipped: the workspace reached its monthly Auto-help cost cap.',
-  // "Stay quiet when" (26 Sep 2026)
-  stayed_quiet: 'A “stay quiet when” rule applied, so Auto-help did not answer — a person picks it up.',
-  // Knowledge v2 (MEGA 09-28): the AI fit check against "When to help".
-  not_this_playbook: 'In the playbook’s subcategories, but the AI read its “When to help” and decided it doesn’t fit — a person picks it up.',
+  stayed_quiet: 'A “stay quiet when” rule applied, so a person picks it up.',
+  not_this_playbook: 'In the playbook’s subcategories, but the AI read its “When to help” and decided it doesn’t fit.',
 };
 const HISTORY_WORD = {
   drafted: 'Drafted',
@@ -83,13 +94,30 @@ const VERDICTS = [
 ];
 const VERDICT_WORD = Object.fromEntries(VERDICTS.map((v) => [v.value, v.label]));
 const CHECK_WORD = { yes: 'enough', partial: 'partly enough', no: 'not enough' };
+const RANGE_OPTIONS = [
+  { value: '', label: 'All time' },
+  { value: '1', label: 'Last 24 hours' },
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+];
+const TRIGGER_WORD = { categorized: 'New ticket', test: 'Test', manual: 'Manual', backtest: 'Backtest' };
 
 /** The stay-quiet record on a run (checks.stayQuiet), or null. */
 function stayQuietOf(run) {
   if (run?.checks?.stayQuiet) return run.checks.stayQuiet;
   return run?.gateDecision === 'stayed_quiet' ? {} : null;
 }
-/** The Result cell / drawer status: "Not this playbook" wins over the plain status. */
+function stayQuietLine(sq) {
+  return `Stayed quiet: ${sq?.condition || 'a stay-quiet condition applied'}`;
+}
+function StayedQuietStatus() {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-blue-700 dark:text-blue-200">
+      <Hand className="h-3.5 w-3.5" aria-hidden="true" /> Stayed quiet
+    </span>
+  );
+}
+/** The Result cell / panel status: stay-quiet and "Not this playbook" win over the plain status. */
 function RunResult({ run }) {
   if (stayQuietOf(run)) return <StayedQuietStatus />;
   if (isNotThisPlaybook(run)) {
@@ -98,11 +126,23 @@ function RunResult({ run }) {
   }
   return <RunStatus status={run.status} />;
 }
-function stayQuietLine(sq) {
-  return `Stayed quiet: ${sq?.condition || 'a stay-quiet condition applied'}`;
+
+/** One short line for a run's row: why it ended where it did. */
+function rowReason(r) {
+  const sq = stayQuietOf(r);
+  if (sq) return stayQuietLine(sq);
+  if (isNotThisPlaybook(r)) return fitReasonOf(r) || 'The AI decided this playbook doesn’t fit';
+  const life = runLifeLine(r);
+  if (life) return life;
+  if (r.status === 'drafted') {
+    const dropped = r.checks?.droppedSteps || [];
+    return dropped.length ? `Drafted without step ${dropped.join(', ')} (not in the knowledge)` : 'Drafted — not sent (shadow)';
+  }
+  if (r.gateDecision === 'insufficient_context') return 'The knowledge doesn’t cover enough of this';
+  return GATE_WORD[r.gateDecision] || '—';
 }
 
-/** A drawer section: a quiet card with a small heading. */
+/** A panel section: a quiet card with a small heading. */
 function DrawerCard({ title, hint = null, children, testId = undefined }) {
   return (
     <section className="rounded-xl border border-border/80 p-3.5" data-testid={testId}>
@@ -110,6 +150,98 @@ function DrawerCard({ title, hint = null, children, testId = undefined }) {
       {children}
     </section>
   );
+}
+
+/**
+ * The numbered draft the answer check judged (checks.draftSteps). Steps the
+ * knowledge did not back are marked — this is what "step 3" refers to.
+ */
+function DraftSteps({ steps }) {
+  return (
+    <ol className="space-y-1.5" data-testid="draft-steps">
+      {steps.map((st) => (
+        <li key={st.n} className="flex gap-2.5 text-sm">
+          <span className={`mt-px w-5 flex-shrink-0 text-right tabular-nums ${st.supported ? 'text-muted-foreground' : 'font-semibold text-amber-700 dark:text-amber-300'}`}>{st.n}.</span>
+          <span className="min-w-0 flex-1">
+            <span className={st.supported ? 'text-foreground/85' : 'text-foreground/60 line-through decoration-amber-500/70'}>{st.text}</span>
+            {!st.supported && (
+              <span className="mt-0.5 block text-xs font-medium text-amber-700 dark:text-amber-300">Not in the knowledge — left out</span>
+            )}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** "What Auto-help would have said" — or, when it didn't answer, why. */
+function AnswerCard({ run }) {
+  const draftSteps = Array.isArray(run.checks?.draftSteps) ? run.checks.draftSteps : [];
+  const dropped = draftSteps.filter((st) => !st.supported);
+  const checkReason = run.checks?.answerability?.reason ? readableReason(run.checks.answerability.reason, run.sources) : null;
+  const sq = stayQuietOf(run);
+
+  if (run.status === 'drafted' || run.status === 'staged' || run.status === 'sent') {
+    return (
+      <DrawerCard title="What the requester would get">
+        {dropped.length > 0 && (
+          <div className="mb-2.5 rounded-lg border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100" data-testid="dropped-steps">
+            Left out {dropped.length === 1 ? 'a step' : `${dropped.length} steps`} the knowledge doesn’t cover:
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {dropped.map((st) => <li key={st.n}>{st.text}</li>)}
+            </ul>
+          </div>
+        )}
+        <DraftPreview subject={run.draftSubject} html={run.draftHtml} />
+      </DrawerCard>
+    );
+  }
+
+  let body;
+  if (isNotThisPlaybook(run)) {
+    body = (
+      <div className="rounded-lg bg-muted/50 px-3.5 py-3 text-sm text-foreground/85" data-testid="run-not-this-playbook">
+        <p className="font-medium text-foreground">Not this playbook</p>
+        <p className="mt-0.5 text-[13px]">{fitReasonOf(run) ? readableReason(fitReasonOf(run), run.sources) : 'The AI fit check gave no reason.'}</p>
+      </div>
+    );
+  } else if (sq) {
+    body = (
+      <div className="rounded-lg border border-blue-200/80 bg-blue-50/60 px-3.5 py-3 text-sm text-blue-900 dark:border-blue-400/25 dark:bg-blue-500/10 dark:text-blue-100" data-testid="run-stayed-quiet">
+        <p className="font-medium">{stayQuietLine(sq)}</p>
+        {sq.reason && <p className="mt-0.5 text-[13px] opacity-80">{sq.reason}</p>}
+        <p className="mt-1 text-xs opacity-75">
+          {sq.scope === 'workspace' ? 'A workspace-wide rule' : sq.scope === 'playbook' ? 'One of this playbook’s rules' : 'A rule'}
+          {sq.via === 'check' ? ', caught by the answer check.' : ', reported by the drafting AI.'}
+        </p>
+      </div>
+    );
+  } else if (draftSteps.length) {
+    body = (
+      <div className="space-y-2.5">
+        {checkReason && <p className="text-sm text-foreground/85">{checkReason}</p>}
+        <p className="text-xs font-medium text-muted-foreground">What it tried to say</p>
+        <DraftSteps steps={draftSteps} />
+      </div>
+    );
+  } else {
+    const legacySteps = run.checks?.answerability?.unsupportedSteps || [];
+    body = (
+      <div className="space-y-1.5">
+        <p className="rounded-lg bg-muted/50 px-3.5 py-3 text-sm text-foreground/85">
+          {run.status === 'failed'
+            ? (run.error || 'The run failed.')
+            : (checkReason || readableReason(run.transcript?.reason, run.sources) || (run.transcript?.reasons || []).join('; ') || GATE_WORD[run.gateDecision] || 'Auto-help did not answer.')}
+        </p>
+        {legacySteps.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Runs before 29 Sep did not keep the draft, so the step {legacySteps.length === 1 ? 'number refers' : 'numbers refer'} to a draft that is no longer shown.
+          </p>
+        )}
+      </div>
+    );
+  }
+  return <DrawerCard title="Why Auto-help didn’t answer">{body}</DrawerCard>;
 }
 
 /** "What the team did": the first public agent reply after the run, and where the ticket is now. */
@@ -202,11 +334,10 @@ function ReviewBox({ run, onSaved }) {
   );
 }
 
-/** P1: what happened after the draft — the agent's decision, the loop's steps, the cost. */
+/** Approve / auto mode: what the agent did with the suggestion and how the follow-up went. */
 function RunLife({ run }) {
   const history = Array.isArray(run.outcomeDetail?.history) ? run.outcomeDetail.history : [];
   const shown = history.filter((h) => h.step !== 'drafted');
-  const tokens = (Number(run.inputTokens) || 0) + (Number(run.outputTokens) || 0);
   return (
     <div className="space-y-2" data-testid="run-life">
       {run.decision && (
@@ -219,6 +350,7 @@ function RunLife({ run }) {
           {run.decision === 'agent_dismissed' && run.dismissReason && <span className="text-xs text-muted-foreground">· {DISMISS_WORD[run.dismissReason] || run.dismissReason}</span>}
         </p>
       )}
+      {run.status === 'staged' && !run.decision && <p className="text-sm text-muted-foreground">Suggested on the ticket — waiting for an agent.</p>}
       {shown.length > 0 && (
         <ol className="space-y-1 border-l border-border pl-3">
           {shown.map((h, i) => (
@@ -226,30 +358,48 @@ function RunLife({ run }) {
               <span className="text-muted-foreground tabular-nums">{formatDayTime(h.at)}</span> · {HISTORY_WORD[h.step] || h.step.replace(/_/g, ' ')}
               {h.until ? <span className="text-muted-foreground"> until {formatDayTime(h.until)}</span> : null}
               {h.closeAt ? <span className="text-muted-foreground"> — next step {formatDayTime(h.closeAt)}</span> : null}
-              {h.via === 'model' ? <span className="text-muted-foreground"> (reply read by the model)</span> : h.via === 'keywords' ? <span className="text-muted-foreground"> (reply read by keywords)</span> : null}
+              {h.via === 'model' ? <span className="text-muted-foreground"> (reply read by the AI)</span> : h.via === 'keywords' ? <span className="text-muted-foreground"> (reply read by keywords)</span> : null}
             </li>
           ))}
         </ol>
       )}
-      <p className="text-xs text-muted-foreground" data-testid="run-cost">
-        Model cost {usd(run.costUsd)}{tokens ? ` · ${tokens.toLocaleString()} tokens` : ''}
-      </p>
     </div>
   );
 }
-const RANGE_OPTIONS = [
-  { value: '', label: 'All time' },
-  { value: '1', label: 'Last 24 hours' },
-  { value: '7', label: 'Last 7 days' },
-  { value: '30', label: 'Last 30 days' },
-];
-const TRIGGER_WORD = { categorized: 'New ticket', test: 'Test', manual: 'Manual', backtest: 'Backtest' };
 
-function StayedQuietStatus() {
+/** Sources, the raw steps, the answer check and cost — for when you need them. */
+function RunDetails({ run }) {
+  const tokens = (Number(run.inputTokens) || 0) + (Number(run.outputTokens) || 0);
+  const a = run.checks?.answerability;
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-blue-700 dark:text-blue-200">
-      <Hand className="h-3.5 w-3.5" aria-hidden="true" /> Stayed quiet
-    </span>
+    <details className="group rounded-xl border border-border/80" data-testid="run-details">
+      <summary className="tp-focus-ring flex cursor-pointer list-none items-center gap-1.5 rounded-xl px-3.5 py-3 text-sm font-medium text-foreground/85 hover:bg-muted/40">
+        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
+        Details
+        <span className="ml-auto text-xs font-normal text-muted-foreground">sources, steps, cost</span>
+      </summary>
+      <div className="space-y-4 border-t border-border/70 px-3.5 py-3">
+        {a && (
+          <p className="text-xs text-muted-foreground" data-testid="answerability">
+            Answer check: {CHECK_WORD[a.sufficient] || a.sufficient}
+            {(a.unsupportedSteps || []).length ? ` · not backed: step ${a.unsupportedSteps.join(', ')}` : ''}
+            {a.reason ? ` — ${readableReason(a.reason, run.sources)}` : ''}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground" data-testid="run-cost">
+          Model cost {usd(run.costUsd)}{tokens ? ` · ${tokens.toLocaleString()} tokens` : ''}
+          {fmtDuration(run.durationMs) ? ` · ${fmtDuration(run.durationMs)}` : ''}
+        </p>
+        <div>
+          <SectionTitle>Sources</SectionTitle>
+          <SourcesList sources={run.sources || []} />
+        </div>
+        <div>
+          <SectionTitle>Steps</SectionTitle>
+          <TranscriptSteps transcript={run.transcript} />
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -268,72 +418,38 @@ function RunDetail({ runId, canReview = false }) {
 
   if (error) return <p className="text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>;
   if (!run) return <Loading label="Loading run…" />;
-  const sq = stayQuietOf(run);
+  const reviewable = ['drafted', 'staged', 'sent'].includes(run.status)
+    || (run.status === 'not_answerable' && (run.checks?.draftSteps || []).length > 0);
   return (
     <div className="space-y-4" data-testid="run-detail">
-      <div className="space-y-1">
+      <div className="space-y-1.5">
+        <Link to={`/tickets/${run.ticketId}?tab=ai`} className="tp-focus-ring inline-flex items-center gap-1 rounded text-[15px] font-semibold text-foreground hover:underline">
+          {run.ticketRef} · {run.ticketSubject} <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+        </Link>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <RunResult run={run} />
           <Confidence value={run.confidence} min={run.minConfidence} />
-          {fmtDuration(run.durationMs) && <span className="text-xs tabular-nums text-muted-foreground">{fmtDuration(run.durationMs)}</span>}
         </div>
+        {GATE_WORD[run.gateDecision] && <p className="text-sm text-foreground/85">{GATE_WORD[run.gateDecision]}</p>}
         <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
           <span>{TRIGGER_WORD[run.trigger] || run.trigger} · {formatDayTime(run.createdAt)}</span>
-          {run.createdBy && (
+          {run.createdBy && (<><span aria-hidden="true">·</span><span>by</span><PersonLine person={run.createdByPerson} email={run.createdBy} /></>)}
+          {run.playbookId && (
             <>
               <span aria-hidden="true">·</span>
-              <span>by</span>
-              <PersonLine person={run.createdByPerson} email={run.createdBy} />
+              <Link to={`/knowledge/playbooks/${run.playbookId}`} className="tp-focus-ring rounded text-foreground/85 hover:underline">{run.playbookName || `Playbook #${run.playbookId}`}</Link>
+              {run.playbookVersion ? <span>v{run.playbookVersion}</span> : null}
             </>
           )}
           <span aria-hidden="true">·</span>
-          <span>{run.mode === 'approve' || run.mode === 'auto' ? `${run.mode} mode` : 'shadow — not sent'}</span>
+          <span>{run.mode === 'approve' || run.mode === 'auto' ? `${run.mode} mode` : 'shadow — never sent'}</span>
         </p>
-        {GATE_WORD[run.gateDecision] && <p className="text-xs text-muted-foreground">{GATE_WORD[run.gateDecision]}</p>}
-        {run.checks?.answerability && (
-          <p className="text-xs text-muted-foreground" data-testid="answerability">
-            Context check: {CHECK_WORD[run.checks.answerability.sufficient] || run.checks.answerability.sufficient}
-            {(run.checks.answerability.unsupportedSteps || []).length ? ` · unsupported step ${run.checks.answerability.unsupportedSteps.join(', ')}` : ''}
-            {run.checks.answerability.reason ? ` — ${readableReason(run.checks.answerability.reason, run.sources)}` : ''}
-          </p>
-        )}
-        <Link to={`/tickets/${run.ticketId}?tab=ai`} className="tp-focus-ring inline-flex items-center gap-1 rounded text-sm font-medium text-primary hover:underline">
-          {run.ticketRef} · {run.ticketSubject} <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </Link>
-        {run.playbookId && (
-          <p className="text-xs text-muted-foreground">
-            Playbook <Link to={`/knowledge/playbooks/${run.playbookId}`} className="tp-focus-ring rounded text-foreground/85 hover:underline">{run.playbookName || `#${run.playbookId}`}</Link>{run.playbookVersion ? ` v${run.playbookVersion}` : ''}
-          </p>
-        )}
       </div>
 
-      <DrawerCard title={run.status === 'drafted' ? 'What the requester would get' : 'Why Auto-help didn’t answer'}>
-        {run.status === 'drafted' ? (
-          <DraftPreview subject={run.draftSubject} html={run.draftHtml} />
-        ) : isNotThisPlaybook(run) ? (
-          <div className="rounded-lg bg-muted/50 px-3.5 py-3 text-sm text-foreground/85" data-testid="run-not-this-playbook">
-            <p className="font-medium text-foreground">Not this playbook</p>
-            <p className="mt-0.5 text-[13px]">{fitReasonOf(run) ? readableReason(fitReasonOf(run), run.sources) : 'The AI fit check gave no reason.'}</p>
-          </div>
-        ) : sq ? (
-          <div className="rounded-lg border border-blue-200/80 bg-blue-50/60 px-3.5 py-3 text-sm text-blue-900 dark:border-blue-400/25 dark:bg-blue-500/10 dark:text-blue-100" data-testid="run-stayed-quiet">
-            <p className="font-medium">{stayQuietLine(sq)}</p>
-            {sq.reason && <p className="mt-0.5 text-[13px] opacity-80">{sq.reason}</p>}
-            <p className="mt-1 text-xs opacity-75">
-              {sq.scope === 'workspace' ? 'A workspace-wide rule' : sq.scope === 'playbook' ? 'One of this playbook’s rules' : 'A rule'}
-              {sq.via === 'check' ? ', caught by the answerability check.' : ', reported by the drafting model.'}
-            </p>
-          </div>
-        ) : (
-          <p className="rounded-lg bg-muted/50 px-3.5 py-3 text-sm text-foreground/85">
-            {run.status === 'failed' ? (run.error || 'The run failed.') : (readableReason(run.transcript?.reason, run.sources) || (run.transcript?.reasons || []).join('; ') || 'Nothing — the playbook stayed quiet.')}
-          </p>
-        )}
-      </DrawerCard>
+      <AnswerCard run={run} />
 
-      {(run.decision || run.status === 'staged' || run.costUsd !== null && run.costUsd !== undefined) && (
-        <DrawerCard title="What happened" hint="What the agent did with the suggestion, and how the follow-up went.">
-          {run.status === 'staged' && !run.decision ? <p className="text-sm text-muted-foreground">Suggested on the ticket — waiting for an agent.</p> : null}
+      {(run.decision || run.status === 'staged') && (
+        <DrawerCard title="What the agent did">
           <RunLife run={run} />
         </DrawerCard>
       )}
@@ -342,8 +458,8 @@ function RunDetail({ runId, canReview = false }) {
         <TeamOutcome outcome={run.teamOutcome} />
       </DrawerCard>
 
-      {canReview && !['skipped', 'no_match', 'running'].includes(run.status) && (
-        <DrawerCard title="Your review" hint="Judge the draft against what the team did. Counts per playbook, never per person.">
+      {canReview && reviewable && (
+        <DrawerCard title="Your review" hint="Would this have been right? Counts per playbook, never per person.">
           <ReviewBox run={run} onSaved={(next) => { if (next) setRun(next); }} />
         </DrawerCard>
       )}
@@ -351,48 +467,42 @@ function RunDetail({ runId, canReview = false }) {
         <p className="text-xs text-muted-foreground">Reviewed: {VERDICT_WORD[run.reviewVerdict] || run.reviewVerdict}</p>
       )}
 
-      <DrawerCard title="Sources">
-        <SourcesList sources={run.sources || []} />
-      </DrawerCard>
-
-      <DrawerCard title="Steps">
-        <TranscriptSteps transcript={run.transcript} />
-      </DrawerCard>
+      <RunDetails run={run} />
     </div>
   );
 }
 
-/** Runs table (time, ticket, playbook, result, confidence, outcome) + detail drawer. */
-export default function ActivityPanel({ runId = null, canReview = false }) {
+/** The outcome line: every result with its count; a click filters the list. */
+function OutcomeLine({ counts, total, value, onChange }) {
+  const shown = OUTCOMES.filter((o) => (counts?.[o.value] || 0) > 0 || o.value === value);
+  const item = (key, label, n, active) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => onChange(active && key ? '' : key)}
+      aria-pressed={active}
+      className={`tp-focus-ring inline-flex items-baseline gap-1.5 rounded-md px-2 py-1 text-sm transition-colors ${
+        active ? 'bg-primary/10 font-semibold text-primary' : 'text-foreground/85 hover:bg-muted'
+      }`}
+    >
+      <span className="tabular-nums">{n}</span>{' '}
+      <span className={active ? '' : 'text-muted-foreground'}>{label}</span>
+    </button>
+  );
+  return (
+    <nav aria-label="Filter by result" className="flex flex-wrap items-center gap-x-1 gap-y-1" data-testid="outcome-line">
+      {item('', 'All runs', total, value === '')}
+      <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+      {shown.map((o) => item(o.value, o.label, counts?.[o.value] || 0, value === o.value))}
+    </nav>
+  );
+}
+
+function RunsView({ playbookId, range, canReview }) {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
   const [status, setStatus] = useState('');
-  // ?playbook=<id> (the builder's "Runs in Activity") pre-filters the list.
-  const [playbookId, setPlaybookId] = useState(() => params.get('playbook') || '');
-  const [range, setRange] = useState('');
-  const [playbooks, setPlaybooks] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [summary, setSummary] = useState(null);
-  const [autoModeAllowed, setAutoModeAllowed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const from = range ? new Date(Date.now() - Number(range) * 86400e3).toISOString() : undefined;
-    Promise.resolve()
-      .then(() => knowledgeAPI.runsSummary({ from }))
-      .then((res) => { if (!cancelled) setSummary(res?.data || []); })
-      .catch(() => { if (!cancelled) setSummary([]); });
-    return () => { cancelled = true; };
-  }, [range, runId]);
-
-  useEffect(() => {
-    knowledgeAPI.listPlaybooks().then((res) => setPlaybooks(res?.data || [])).catch(() => {});
-    Promise.resolve()
-      .then(() => knowledgeAPI.getSettings())
-      .then((res) => setAutoModeAllowed(res?.data?.autoModeAllowed === true))
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -403,26 +513,17 @@ export default function ActivityPanel({ runId = null, canReview = false }) {
     return () => { cancelled = true; };
   }, [status, playbookId, range]);
 
-  const playbookOptions = useMemo(() => [
-    { value: '', label: 'Every playbook' },
-    ...playbooks.map((p) => ({ value: p.id, label: p.name })),
-  ], [playbooks]);
+  const counts = data?.statusCounts || null;
+  const allTotal = counts ? Object.values(counts).reduce((s, n) => s + n, 0) : (data?.total || 0);
+  const open = (id) => navigate(`/knowledge/activity/${id}`);
 
   return (
-    <div className="space-y-3">
-      <div className="tp-card grid grid-cols-1 gap-2 p-3 sm:flex sm:flex-wrap sm:items-center sm:p-4" data-testid="activity-filters">
-        <div className="sm:w-48"><FancySelect value={status} onChange={setStatus} options={STATUS_OPTIONS} aria-label="Run result" className="h-10" /></div>
-        <div className="sm:w-60"><FancySelect value={playbookId} onChange={setPlaybookId} options={playbookOptions} aria-label="Playbook" className="h-10" /></div>
-        <div className="sm:w-48"><FancySelect value={range} onChange={setRange} options={RANGE_OPTIONS} aria-label="When" className="h-10" /></div>
-        <p className="text-xs text-muted-foreground sm:ml-auto">Every run, per playbook — never per person.</p>
-      </div>
-
-      <PlaybookMetrics items={playbookId ? (summary || []).filter((p) => String(p.playbookId) === String(playbookId)) : summary} autoModeAllowed={autoModeAllowed} />
-
+    <div className="space-y-3" data-testid="runs-view">
+      {counts && <OutcomeLine counts={counts} total={allTotal} value={status} onChange={setStatus} />}
       {error && <p className="text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
       {!data && !error ? <Loading label="Loading activity…" /> : data && data.items.length === 0 ? (
         <div className="tp-card">
-          <EmptyState icon={ListChecks} title="No runs yet">
+          <EmptyState icon={ListChecks} title={status ? 'No runs with this result' : 'No runs yet'}>
             Runs appear here when a new ticket matches a switched-on playbook, or when someone tests a playbook on a ticket.
           </EmptyState>
         </div>
@@ -435,8 +536,7 @@ export default function ActivityPanel({ runId = null, canReview = false }) {
                 <th scope="col" className="px-2 py-2 font-medium">Ticket</th>
                 <th scope="col" className="px-2 py-2 font-medium">Playbook</th>
                 <th scope="col" className="px-2 py-2 font-medium">Result</th>
-                <th scope="col" className="px-2 py-2 font-medium">Confidence</th>
-                <th scope="col" className="px-4 py-2 font-medium">Outcome</th>
+                <th scope="col" className="px-4 py-2 font-medium">Why</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -444,25 +544,24 @@ export default function ActivityPanel({ runId = null, canReview = false }) {
                 <tr
                   key={r.id}
                   tabIndex={0}
-                  onClick={() => navigate(`/knowledge/activity/${r.id}`)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/knowledge/activity/${r.id}`); } }}
+                  onClick={() => open(r.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(r.id); } }}
                   className="tp-focus-ring cursor-pointer align-middle transition-colors hover:bg-muted/40 max-sm:flex max-sm:flex-wrap max-sm:gap-x-3 max-sm:px-4 max-sm:py-3"
                   aria-label={`Run on ${r.ticketRef}`}
                 >
                   <td className="whitespace-nowrap text-xs text-muted-foreground sm:px-4 sm:py-2.5" title={formatDayTime(r.createdAt)}>
                     {timeAgo(r.createdAt)}{r.trigger === 'test' ? ' · test' : r.trigger === 'backtest' ? ' · backtest' : ''}
                   </td>
-                  <td className="min-w-0 max-w-[16rem] max-sm:w-full sm:px-2 sm:py-2.5">
+                  <td className="min-w-0 max-w-[18rem] max-sm:w-full sm:px-2 sm:py-2.5">
                     <p className="truncate text-foreground"><span className="text-muted-foreground">{r.ticketRef}</span> {r.ticketSubject}</p>
                   </td>
-                  <td className="max-w-[12rem] truncate text-xs text-foreground/85 sm:px-2 sm:py-2.5">{r.playbookName || '—'}</td>
+                  <td className="max-w-[11rem] truncate text-xs text-foreground/85 sm:px-2 sm:py-2.5">{r.playbookName || (r.playbookId ? `Removed playbook #${r.playbookId}` : '—')}</td>
                   <td className="sm:px-2 sm:py-2.5"><RunResult run={r} /></td>
-                  <td className="sm:px-2 sm:py-2.5"><Confidence value={r.confidence} min={r.minConfidence} /></td>
-                  <td className="text-xs text-muted-foreground sm:px-4 sm:py-2.5">
-                    {stayQuietOf(r) ? <span className="text-foreground/80" data-testid="row-stayed-quiet">{stayQuietLine(stayQuietOf(r))}</span> : isNotThisPlaybook(r) ? (
-                      <span className="line-clamp-2 text-foreground/80" title={fitReasonOf(r) || undefined} data-testid="row-not-this-playbook">{fitReasonOf(r) || 'The AI decided this playbook doesn’t fit'}</span>
-                    ) : (runLifeLine(r) || (r.mode === 'approve' || r.mode === 'auto' ? 'not suggested' : 'shadow — not sent'))}
-                    {r.reviewVerdict ? ` · ${VERDICT_WORD[r.reviewVerdict] || r.reviewVerdict}` : ''}
+                  <td className="max-w-[28rem] text-xs text-muted-foreground sm:px-4 sm:py-2.5">
+                    <span className="line-clamp-2" data-testid={stayQuietOf(r) ? 'row-stayed-quiet' : isNotThisPlaybook(r) ? 'row-not-this-playbook' : undefined}>
+                      {rowReason(r)}
+                    </span>
+                    {r.reviewVerdict ? <span className="text-foreground/80"> · reviewed: {VERDICT_WORD[r.reviewVerdict] || r.reviewVerdict}</span> : ''}
                   </td>
                 </tr>
               ))}
@@ -473,11 +572,107 @@ export default function ActivityPanel({ runId = null, canReview = false }) {
       {data && data.total > data.items.length && (
         <p className="px-1 text-xs text-muted-foreground">Showing the newest {data.items.length} of {data.total}.</p>
       )}
+      {canReview && data?.items?.some((r) => r.status === 'drafted' && !r.reviewVerdict) && (
+        <p className="px-1 text-xs text-muted-foreground">Open a drafted run to review it — reviews are what unlock approve mode.</p>
+      )}
+    </div>
+  );
+}
 
-      <Sheet open={Boolean(runId)} onOpenChange={(open) => { if (!open) navigate('/knowledge/activity'); }}>
+function PlaybooksView({ playbookId, range }) {
+  const [summary, setSummary] = useState(null);
+  const [autoModeAllowed, setAutoModeAllowed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const from = range ? new Date(Date.now() - Number(range) * 86400e3).toISOString() : undefined;
+    Promise.resolve()
+      .then(() => knowledgeAPI.runsSummary({ from }))
+      .then((res) => { if (!cancelled) setSummary(res?.data || []); })
+      .catch(() => { if (!cancelled) setSummary([]); });
+    return () => { cancelled = true; };
+  }, [range]);
+  useEffect(() => {
+    Promise.resolve()
+      .then(() => knowledgeAPI.getSettings())
+      .then((res) => setAutoModeAllowed(res?.data?.autoModeAllowed === true))
+      .catch(() => {});
+  }, []);
+  if (summary === null) return <Loading label="Loading playbooks…" />;
+  const items = playbookId ? summary.filter((p) => String(p.playbookId) === String(playbookId)) : summary;
+  if (!items.length) {
+    return (
+      <div className="tp-card">
+        <EmptyState icon={ListChecks} title="No playbook has run yet">Numbers appear once a playbook has drafted or declined at least one ticket.</EmptyState>
+      </div>
+    );
+  }
+  return <PlaybookMetrics items={items} autoModeAllowed={autoModeAllowed} />;
+}
+
+const VIEWS = [
+  { value: 'runs', label: 'Runs' },
+  { value: 'playbooks', label: 'By playbook' },
+];
+
+/** Knowledge → Activity: Runs / By playbook, shared filters, the run side panel. */
+export default function ActivityPanel({ runId = null, canReview = false }) {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const view = params.get('view') === 'playbooks' ? 'playbooks' : 'runs';
+  // ?playbook=<id> (the builder's "Runs in Activity") pre-filters the list.
+  const [playbookId, setPlaybookId] = useState(() => params.get('playbook') || '');
+  const [range, setRange] = useState('');
+  const [playbooks, setPlaybooks] = useState([]);
+
+  useEffect(() => {
+    knowledgeAPI.listPlaybooks().then((res) => setPlaybooks(res?.data || [])).catch(() => {});
+  }, []);
+
+  const playbookOptions = useMemo(() => [
+    { value: '', label: 'Every playbook' },
+    ...playbooks.map((p) => ({ value: p.id, label: p.name })),
+  ], [playbooks]);
+
+  const setView = (next) => {
+    const nextParams = new URLSearchParams(params);
+    if (next === 'runs') nextParams.delete('view'); else nextParams.set('view', next);
+    setParams(nextParams, { replace: true });
+  };
+  const closeRun = () => navigate(`/knowledge/activity${view === 'playbooks' ? '?view=playbooks' : ''}`);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center" data-testid="activity-filters">
+        <div role="tablist" aria-label="Activity view" className="inline-flex rounded-lg border border-border bg-card p-0.5">
+          {VIEWS.map((v) => (
+            <button
+              key={v.value}
+              type="button"
+              role="tab"
+              aria-selected={view === v.value}
+              onClick={() => setView(v.value)}
+              className={`tp-focus-ring h-8 rounded-md px-3.5 text-sm font-medium transition-colors ${
+                view === v.value ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
+          <div className="sm:w-56"><FancySelect value={playbookId} onChange={setPlaybookId} options={playbookOptions} aria-label="Playbook" className="h-9" /></div>
+          <div className="sm:w-44"><FancySelect value={range} onChange={setRange} options={RANGE_OPTIONS} aria-label="When" className="h-9" /></div>
+        </div>
+      </div>
+
+      {view === 'runs'
+        ? <RunsView playbookId={playbookId} range={range} canReview={canReview} />
+        : <PlaybooksView playbookId={playbookId} range={range} />}
+
+      <Sheet open={Boolean(runId)} onOpenChange={(isOpen) => { if (!isOpen) closeRun(); }}>
         <SheetContent side="right" className="settings-scrollbar w-full overflow-y-auto border-border bg-card sm:max-w-xl">
           <SheetTitle className="text-base">Auto-help run</SheetTitle>
-          <SheetDescription className="sr-only">Draft, sources and steps of one Auto-help run.</SheetDescription>
+          <SheetDescription className="sr-only">What Auto-help did on one ticket: its answer, what the team did, and your review.</SheetDescription>
           <div className="mt-4">{runId && <RunDetail runId={runId} canReview={canReview} />}</div>
         </SheetContent>
       </Sheet>

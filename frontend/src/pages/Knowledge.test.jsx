@@ -473,7 +473,7 @@ describe('Knowledge page', () => {
     expect(team).toHaveTextContent('Resolved');
     expect(detail).toHaveTextContent('Company Portal installs › Install Bluebeam');
     expect(detail).toHaveTextContent('review due');
-    expect(within(detail).getByTestId('answerability')).toHaveTextContent('Context check: enough');
+    expect(within(detail).getByTestId('answerability')).toHaveTextContent('Answer check: enough');
 
     const box = within(detail).getByTestId('review-box');
     const partly = within(box).getByRole('button', { name: 'Partly right' });
@@ -492,30 +492,35 @@ describe('Knowledge page', () => {
     expect(within(detail).queryByTestId('review-box')).not.toBeInTheDocument();
   });
 
+  // 29 Sep 2026: per-playbook numbers are one compact row each, under Activity → By playbook.
   test('R6: per-playbook summary with N and the rollout bar in plain text', async () => {
-    renderAt('/knowledge/activity');
-    const strip = await screen.findByTestId('runs-summary');
-    expect(strip).toHaveTextContent('Software installs');
-    expect(strip).toHaveTextContent('drafted 75 % (N=40)');
-    expect(strip).toHaveTextContent('good 92 % (N=12)');
-    expect(strip).toHaveTextContent('wrong 1');
-    expect(strip).toHaveTextContent('Approve-mode bar (≥30 reviewed, ≥85 % good): not met yet');
+    renderAt('/knowledge/activity?view=playbooks');
+    const row = await screen.findByTestId('playbook-metrics');
+    expect(row).toHaveTextContent('Software installs');
+    expect(row).toHaveTextContent('30 of 40');
+    expect(row).toHaveTextContent('12 · 92 % good');
+    expect(row).toHaveTextContent('12 of 30 reviews');
+    fireEvent.click(within(row).getByRole('button', { name: /Show details for Software installs/ }));
+    const bar = await screen.findByTestId('stat-review');
+    expect(bar).toHaveTextContent('≥30 reviewed and ≥85 % good — not met yet (12 reviewed, 92 % good)');
+    expect(bar).toHaveTextContent('wrong 1');
   });
 
   test('P1 metrics: outcomes and decisions with N, CSAT with N, cost, and the readiness gate line by line', async () => {
-    renderAt('/knowledge/activity');
-    const block = await screen.findByTestId('playbook-metrics');
-    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('Sent answers (N=10)');
-    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('Closed after no reply 4 (40 %)');
-    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('Reopened within 7 days 1 (10 %)');
-    expect(within(block).getByTestId('stat-outcomes')).toHaveTextContent('still waiting 2');
-    expect(within(block).getByTestId('stat-decisions')).toHaveTextContent('Unchanged 7 (58 %) · edited 3 (25 %) (median change 12 %) · dismissed 2 (17 %) (N=12)');
-    expect(within(block).getByTestId('stat-csat')).toHaveTextContent('Average 3.7 out of 4 across 3 survey answers (N = 3)');
-    expect(within(block).getByTestId('stat-cost')).toHaveTextContent('US$0.0200 per run (N=40) · US$0.30 this month');
-    const gate = within(block).getByRole('button', { name: /2 of 3 lines met/ });
-    expect(gate).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(gate);
-    const list = await within(block).findByTestId('readiness-list');
+    renderAt('/knowledge/activity?view=playbooks');
+    const row = await screen.findByTestId('playbook-metrics');
+    expect(within(row).getByTestId('stat-cost')).toHaveTextContent('US$0.0200 (N=40)');
+    const toggle = within(row).getByRole('button', { name: /Show details for Software installs/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(await screen.findByTestId('stat-outcomes')).toHaveTextContent('Sent answers (N=10)');
+    expect(screen.getByTestId('stat-outcomes')).toHaveTextContent('Closed after no reply 4 (40 %)');
+    expect(screen.getByTestId('stat-outcomes')).toHaveTextContent('Reopened within 7 days 1 (10 %)');
+    expect(screen.getByTestId('stat-outcomes')).toHaveTextContent('still waiting 2');
+    expect(screen.getByTestId('stat-decisions')).toHaveTextContent('Unchanged 7 (58 %) · edited 3 (25 %) (median change 12 %) · dismissed 2 (17 %) (N=12)');
+    expect(screen.getByTestId('stat-csat')).toHaveTextContent('Average 3.7 out of 4 across 3 survey answers (N = 3)');
+    expect(screen.getByTestId('stat-cost-detail')).toHaveTextContent('US$0.0200 per run (N=40) · US$0.30 this month');
+    const list = await screen.findByTestId('readiness-list');
     expect(list).toHaveTextContent('At least 30 reviewed shadow drafts');
     expect(list).toHaveTextContent('not met: 12');
     expect(list).toHaveTextContent('Auto sending is switched off in this build');
