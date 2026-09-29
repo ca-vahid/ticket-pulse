@@ -16,12 +16,32 @@ const AVATARS = {
   simorgh: '/brand/integrations/simorgh.png',
   simorghDark: '/brand/integrations/simorgh-dark.png',
   rostam: '/brand/integrations/rostam.png',
+  // Microsoft Sentinel (29 Sep 2026): an original shield-and-eye mark in the
+  // app's pictogram style — not Microsoft's logo.
+  sentinel: '/brand/integrations/sentinel.png',
 };
 
 /** Requester records that belong to an integration, keyed on the address. */
 const INTEGRATION_REQUESTERS = {
   'simorgh@bgcengineering.ca': 'simorgh',
+  // Exact address only: "Sentinel Storage" is a real vendor and keeps its initials.
+  'sentinel@bgcengineering.ca': 'sentinel',
 };
+
+const REQUESTER_IDENTITIES = {
+  simorgh: { key: 'simorgh', name: 'Simorgh', subtitle: 'Security agent', avatarUrl: AVATARS.simorgh, avatarDarkUrl: AVATARS.simorghDark, tone: 'simorgh' },
+  sentinel: { key: 'sentinel', name: 'Microsoft Sentinel', subtitle: 'Monitoring alerts', avatarUrl: AVATARS.sentinel, tone: 'sentinel' },
+};
+
+/**
+ * The picture for an integration's requester address, or null. The shared
+ * photo lookup (hooks/useRequesterPhoto) uses it, so every requester avatar —
+ * queue, search, approvals, requester pages — shows it with no network call.
+ */
+export function integrationRequesterAvatar(email) {
+  const key = INTEGRATION_REQUESTERS[String(email || '').trim().toLowerCase()];
+  return key ? REQUESTER_IDENTITIES[key]?.avatarUrl || null : null;
+}
 
 /**
  * The requester card: the Simorgh mailbox is an application, not a person —
@@ -31,8 +51,7 @@ export function requesterIntegrationIdentity(requester) {
   if (!requester) return null;
   const email = String(requester.email || '').trim().toLowerCase();
   const key = INTEGRATION_REQUESTERS[email] || (/^Simorgh\b/i.test(String(requester.name || '')) ? 'simorgh' : null);
-  if (key !== 'simorgh') return null;
-  return { key: 'simorgh', name: 'Simorgh', subtitle: 'Security agent', avatarUrl: AVATARS.simorgh, avatarDarkUrl: AVATARS.simorghDark, tone: 'simorgh' };
+  return key ? REQUESTER_IDENTITIES[key] || null : null;
 }
 
 export function integrationIdentity(entry) {
