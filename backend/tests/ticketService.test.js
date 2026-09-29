@@ -2625,6 +2625,71 @@ describe('Re-opened state + filter + sort (QA 09-25 #1)', () => {
     expect((await ticketService.buildListWhere(1, { reopened: '0' })).reopenedAt).toBeUndefined();
   });
 
+  describe('view = only tickets still waiting after the reopen (QA 09-28 #3)', () => {
+    // A tiny in-memory stand-in for the two tables, evaluated with the same
+    // rules the SQL spells out, so the fixtures read like the QA report.
+    const rows = {
+      tickets: [
+        { id: 11, status: 'Open', reopened_at: reopenedAt, first_public_agent_reply_at: null }, // no reply since
+        { id: 12, status: 'Open', reopened_at: reopenedAt, first_public_agent_reply_at: null }, // agent replied after
+        { id: 13, status: 'Pending', reopened_at: reopenedAt, first_public_agent_reply_at: null }, // agent replied BEFORE the reopen
+        { id: 14, status: 'Open', reopened_at: reopenedAt, first_public_agent_reply_at: null }, // only a private note after
+        { id: 15, status: 'Open', reopened_at: reopenedAt, first_public_agent_reply_at: after }, // first reply stamped after
+      ],
+      entries: [
+        { ticket_id: 12, occurred_at: after, is_private: false, incoming: false, author_type: 'agent', body_text: 'On it' },
+        { ticket_id: 13, occurred_at: before, is_private: false, incoming: false, author_type: 'agent', body_text: 'Done' },
+        { ticket_id: 14, occurred_at: after, is_private: true, incoming: false, author_type: 'agent', body_text: 'note' },
+        { ticket_id: 11, occurred_at: after, is_private: false, incoming: true, author_type: 'requester', body_text: 'still broken' },
+      ],
+    };
+    const evaluate = () => rows.tickets.filter((t) => t.reopened_at
+      && (!t.first_public_agent_reply_at || t.first_public_agent_reply_at <= t.reopened_at)
+      && !rows.entries.some((e) => e.ticket_id === t.id && e.occurred_at > t.reopened_at
+        && e.is_private !== true && e.body_text !== null && e.body_text !== undefined && e.incoming !== true && e.author_type !== 'requester'))
+      .map((t) => ({ id: t.id }));
+
+    test('reopened with no agent reply since → in the view; agent reply after the reopen → out', async () => {
+      prismaMock.$queryRaw.mockReset();
+      prismaMock.$queryRaw.mockImplementation(async () => evaluate());
+      const where = await ticketService.buildListWhere(1, { reopened: '1' });
+      const idClause = where.AND.find((c) => c.id);
+      expect(idClause.id.in.sort()).toEqual([11, 13, 14]);
+      expect(idClause.id.in).not.toContain(12);
+      expect(idClause.id.in).not.toContain(15);
+      // The SQL carries the same rule: NOT EXISTS a public, outgoing entry after reopened_at.
+      const sql = prismaMock.$queryRaw.mock.calls[0][0].join('?');
+      expect(sql).toMatch(/NOT EXISTS/);
+      expect(sql).toMatch(/te\.occurred_at > t\.reopened_at/);
+      expect(sql).toMatch(/te\.incoming IS DISTINCT FROM true/);
+      expect(sql).toMatch(/first_public_agent_reply_at <= t\.reopened_at/);
+      expect(where.reopenedAt).toEqual({ not: null });
+    });
+
+    test('the list total (count pill) uses the same where as the rows', async () => {
+      prismaMock.$queryRaw.mockReset();
+      prismaMock.$queryRaw.mockImplementation(async (strings) => (strings.join('?').includes('reopened_at IS NOT NULL') ? evaluate() : []));
+      prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+      prismaMock.ticket.count.mockResolvedValue(3);
+      prismaMock.ticket.findMany.mockResolvedValue([]);
+      await ticketService.listTickets(1, { reopened: '1' });
+      const countWhere = prismaMock.ticket.count.mock.calls.at(-1)[0].where;
+      const rowsWhere = prismaMock.ticket.findMany.mock.calls.at(-1)[0].where;
+      expect(countWhere).toEqual(rowsWhere);
+      expect(countWhere.AND.find((c) => c.id).id.in.sort()).toEqual([11, 13, 14]);
+    });
+
+    test('a failed lookup keeps the plain reopenedAt filter instead of an empty view', async () => {
+      prismaMock.$queryRaw.mockReset();
+      prismaMock.$queryRaw.mockRejectedValue(new Error('boom'));
+      const where = await ticketService.buildListWhere(1, { reopened: '1' });
+      expect(where.reopenedAt).toEqual({ not: null });
+      expect((where.AND || []).find((c) => c.id)).toBeUndefined();
+      prismaMock.$queryRaw.mockReset();
+      prismaMock.$queryRaw.mockResolvedValue([]);
+    });
+  });
+
   test('sort=reopenedAt orders by the latest stuck reopen, never-reopened last', async () => {
     jest.clearAllMocks();
     prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });

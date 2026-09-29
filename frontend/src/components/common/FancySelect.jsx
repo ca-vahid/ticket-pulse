@@ -48,9 +48,16 @@ export default function FancySelect({
     const wanted = Math.min(320, 40 + flat.length * 34);
     const below = vh - r.bottom - 8;
     const flip = below < wanted && r.top > below;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    // The menu is at least as wide as the trigger and grows to fit its longest
+    // option (QA 09-28: "Service Desk & Routing → Non-actionable Notifications"
+    // was cut off in a 224 px filter), capped so it never runs off-screen.
+    const room = vw ? vw - r.left - 8 : 440;
+    const maxWidth = Math.max(r.width, Math.min(440, room));
     setPos({
       left: r.left,
-      width: r.width,
+      minWidth: r.width,
+      maxWidth,
       top: flip ? undefined : r.bottom + 4,
       bottom: flip ? vh - r.top + 4 : undefined,
       maxHeight: Math.max(160, Math.min(320, (flip ? r.top : below) - 8)),
@@ -163,7 +170,7 @@ export default function FancySelect({
           role="listbox"
           aria-label={ariaLabel}
           aria-activedescendant={active >= 0 ? `${id}-opt-${active}` : undefined}
-          style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight, transformOrigin: pos.bottom != null ? 'bottom center' : 'top center' }}
+          style={{ position: 'fixed', left: pos.left, minWidth: pos.minWidth, width: 'max-content', maxWidth: pos.maxWidth, scrollbarGutter: 'stable', top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight, transformOrigin: pos.bottom != null ? 'bottom center' : 'top center' }}
           className="z-[60] overflow-y-auto settings-scrollbar tp-card rounded-xl shadow-soft p-1.5 animate-popIn"
         >
           {rows.map((r) => (r.heading ? (
@@ -190,7 +197,7 @@ export default function FancySelect({
             >
               {r.option.dot && <span aria-hidden="true" className={`h-2 w-2 flex-shrink-0 rounded-full ${r.option.dot}`} />}
               {r.option.icon && <span aria-hidden="true" className="flex flex-shrink-0 items-center">{r.option.icon}</span>}
-              <span className="min-w-0 flex-1 truncate">{r.option.label}</span>
+              <span className="min-w-0 flex-1 truncate" title={r.option.hint ? undefined : String(r.option.label ?? '')}>{r.option.label}</span>
               {current === r.option && <Check className="h-3.5 w-3.5 flex-shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />}
             </li>
           )))}

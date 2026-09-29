@@ -1,6 +1,21 @@
-export const APP_VERSION = '4.0.02-preview';
+export const APP_VERSION = '4.1.00-preview';
 
 export const changelog = [
+  {
+    version: '4.1.00-preview',
+    date: 'September 28, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Knowledge: the AI decides which tickets a playbook takes</strong> &mdash; a playbook now covers its subcategories and says in plain words &ldquo;When to help&rdquo;. Auto-help&rsquo;s AI reads that with each ticket and decides whether it fits, so typos, other wording and other languages no longer keep a ticket out. Tickets it turns away show as &ldquo;Not this playbook&rdquo; with the reason. Word lists are still there under Advanced, with spelling variants (licence/license, set up/setup), plurals and small typos matched automatically.' },
+      { type: 'new', html: '<strong>See the effect before saving</strong> &mdash; saving a playbook first shows how many of last month&rsquo;s tickets it would take, compared with the saved version, with examples gained and lost.' },
+      { type: 'improved', html: '<strong>Playbooks and articles say how they connect</strong> &mdash; each playbook shows a one-line summary with the articles it can quote; each article shows which playbooks quote it (or warns that none do) and how often it was quoted.' },
+      { type: 'improved', html: '<strong>Topics, not tags, on articles</strong> &mdash; article tags are now Topics, with suggestions and usage counts as you type; where an article came from (for example &ldquo;Drafted from tickets&rdquo;) is its own Source line. Research always uses every published article, verified solution and similar resolved ticket.' },
+      { type: 'fixed', html: '<strong>Articles filter bar</strong> &mdash; a shorter search box and a wider category list; long option names are no longer cut off in any dropdown.' },
+      { type: 'fixed', html: '<strong>&ldquo;Open Ticket Pulse&rdquo; buttons in classic Outlook</strong> &mdash; e-mail buttons no longer look like highlighted text in the Outlook desktop app.' },
+      { type: 'fixed', html: '<strong>Re-opened view</strong> &mdash; shows only tickets still waiting after a reopen (no agent reply since), so every row matches the Re-opened state.' },
+      { type: 'fixed', html: '<strong>Settings</strong> &mdash; no more empty space below long sections such as Ticket Ops.' },
+      { type: 'fixed', html: '<strong>Mail Workflows templates</strong> &mdash; the Templates list opens fully on screen instead of being cut off on the left.' },
+    ],
+  },
   {
     version: '4.0.02-preview',
     date: 'September 28, 2026',

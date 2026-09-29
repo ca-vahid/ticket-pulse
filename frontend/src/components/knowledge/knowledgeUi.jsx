@@ -51,16 +51,18 @@ const RUN_STATUS = {
   failed: { label: 'Failed', Icon: AlertTriangle, tone: 'text-red-700 dark:text-red-300' },
   running: { label: 'Running', Icon: Activity, tone: 'text-primary', spin: true },
   no_match: { label: 'No match', Icon: CircleSlash, tone: 'text-muted-foreground' },
+  // Knowledge v2 (MEGA 09-28): in scope, but the AI fit check said this playbook doesn't fit.
+  not_this_playbook: { label: 'Not this playbook', Icon: CircleSlash, tone: 'text-muted-foreground' },
   skipped: { label: 'Skipped', Icon: SkipForward, tone: 'text-muted-foreground' },
   staged: { label: 'Staged', Icon: FileCheck2, tone: 'text-primary' },
   sent: { label: 'Sent', Icon: Check, tone: 'text-emerald-700 dark:text-emerald-300' },
 };
 
-export function RunStatus({ status, className = '' }) {
+export function RunStatus({ status, className = '', title = undefined }) {
   const m = RUN_STATUS[status] || { label: status || '—', Icon: CircleSlash, tone: 'text-muted-foreground' };
   const { Icon } = m;
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${m.tone} ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${m.tone} ${className}`} title={title}>
       <Icon className={`h-3.5 w-3.5 ${m.spin ? 'animate-spin' : ''}`} aria-hidden="true" />
       {m.label}
     </span>
@@ -131,7 +133,7 @@ export function PersonLine({ person = null, email = null, className = '' }) {
  * safe choice, Escape to cancel and Tab kept inside.
  */
 export function ConfirmDialog({
-  open, title, children, confirmLabel = 'Confirm', cancelLabel = 'Cancel', destructive = false, onConfirm, onCancel,
+  open, title, children, confirmLabel = 'Confirm', cancelLabel = 'Cancel', destructive = false, onConfirm, onCancel, wide = false, testId = undefined,
 }) {
   const titleId = useId();
   const bodyId = useId();
@@ -166,7 +168,8 @@ export function ConfirmDialog({
         aria-labelledby={titleId}
         aria-describedby={children ? bodyId : undefined}
         onKeyDown={onKeyDown}
-        className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-soft animate-scaleIn"
+        data-testid={testId}
+        className={`w-full ${wide ? 'max-w-lg' : 'max-w-sm'} rounded-xl border border-border bg-card p-5 shadow-soft animate-scaleIn`}
       >
         <h2 id={titleId} className="text-sm font-semibold text-foreground">{title}</h2>
         {children && <div id={bodyId} className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{children}</div>}

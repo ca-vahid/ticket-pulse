@@ -40,7 +40,17 @@ import { actorKindOf } from '../utils/actorKind.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 export const DRAFT_OPERATION = 'auto_help';
+/** Pre-v2 provenance tag (Knowledge v2 keeps it out of new articles; old rows still match). */
 export const DRAFTED_TAG = 'drafted-from-tickets';
+export const DRAFTED_KINDS = Object.freeze(['tickets', 'gap', 'promote']);
+
+/** Prisma OR-list for "an article drafted from tickets": the legacy tag, or sourceMeta.draftedFrom.kind. */
+export function draftedArticleFilter(kinds = DRAFTED_KINDS) {
+  return [
+    { tags: { has: DRAFTED_TAG } },
+    ...kinds.map((kind) => ({ sourceMeta: { path: ['draftedFrom', 'kind'], equals: kind } })),
+  ];
+}
 export const DRAFT_MAX_TICKETS = 12;
 /** A gap cluster offers up to this many tickets; the best DRAFT_MAX_TICKETS with evidence are read. */
 export const DRAFT_SCAN_TICKETS = 40;
@@ -444,7 +454,9 @@ class ArticleDraftService {
       title: draft.title,
       bodyHtml,
       status: 'draft',
-      tags: [DRAFTED_TAG],
+      // Knowledge v2: provenance is sourceMeta.draftedFrom (shown as "Drafted
+      // from tickets"); tags stay pure Topics, so no provenance tag here.
+      tags: [],
       categoryId,
       subcategoryId,
       ownerEmail: actor?.email || undefined,
@@ -507,7 +519,8 @@ class ArticleDraftService {
   async existingDraftFor(workspaceId, ticketId) {
     const rows = await Promise.resolve()
       .then(() => prisma.knowledgeArticle.findMany({
-        where: { workspaceId: Number(workspaceId), status: 'draft', tags: { has: DRAFTED_TAG } },
+        // Pre-v2 drafts carry the tag; v2 drafts only sourceMeta.draftedFrom.
+        where: { workspaceId: Number(workspaceId), status: 'draft', OR: draftedArticleFilter() },
         select: { id: true, title: true, status: true, sourceMeta: true },
         orderBy: { updatedAt: 'desc' },
         take: 200,

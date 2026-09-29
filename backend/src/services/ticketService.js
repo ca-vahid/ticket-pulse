@@ -1171,9 +1171,15 @@ class TicketService {
     // Re-opened (QA 09-25 #1): ?reopened=1 — tickets that came back from
     // Resolved/Closed and stuck (ticketReopenService). Scoped to Open/Pending
     // bases unless the caller picked statuses itself.
+    // QA 09-28 #3: only tickets STILL waiting after the reopen — no public
+    // agent reply since reopenedAt — so the view agrees with the "Re-opened"
+    // State chip (deriveQueueState). The list total / count pill ride on this
+    // same where, so they agree too.
     if (['1', 'true', 'yes'].includes(String(query.reopened ?? '').toLowerCase())) {
       where.reopenedAt = { not: null };
       if (!query.status) where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
+      const waitingIds = await this._reopenedWaitingTicketIds(workspaceId, where.status.in);
+      if (waitingIds) where.AND = [...(where.AND || []), { id: { in: waitingIds.length ? waitingIds : [-1] } }];
     }
     // Verified solutions (QA 09-22 #6): the "Verified solutions" view.
     if (String(query.solution || '') === 'verified') where.solutionVerifiedAt = { not: null };
@@ -1833,6 +1839,42 @@ class TicketService {
       logger.warn(`last-entry lookup failed (non-fatal): ${err.message}`);
     }
     return map;
+  }
+
+  /**
+   * Re-opened view (QA 09-28 #3): ids of reopened tickets (status in
+   * `statusNames`) with NO public agent reply after reopened_at. "Agent reply"
+   * is the same entry shape _lastPublicEntryIncoming / deriveQueueState use —
+   * public, has a body, not the original e-mail, not inbound — and a
+   * first_public_agent_reply_at later than the reopen counts as a reply too.
+   * Returns null when the lookup fails, so the caller keeps the plain
+   * reopenedAt filter rather than showing an empty view.
+   */
+  async _reopenedWaitingTicketIds(workspaceId, statusNames = []) {
+    if (!statusNames.length) return [];
+    try {
+      const rows = await prisma.$queryRaw`
+        SELECT t.id FROM tickets t
+        WHERE t.workspace_id = ${workspaceId}
+          AND t.reopened_at IS NOT NULL
+          AND t.status IN (${Prisma.join(statusNames)})
+          AND (t.first_public_agent_reply_at IS NULL OR t.first_public_agent_reply_at <= t.reopened_at)
+          AND NOT EXISTS (
+            SELECT 1 FROM ticket_thread_entries te
+            WHERE te.ticket_id = t.id
+              AND te.occurred_at > t.reopened_at
+              AND (te.is_private = false OR te.is_private IS NULL)
+              AND (te.body_text IS NOT NULL OR te.content IS NOT NULL)
+              AND (te.event_type IS NULL OR te.event_type <> 'original_email')
+              AND te.incoming IS DISTINCT FROM true
+              AND te.author_type IS DISTINCT FROM 'requester'
+          )
+        LIMIT 5000`;
+      return rows.map((r) => Number(r.id));
+    } catch (err) {
+      logger.warn(`reopened-waiting lookup failed (non-fatal): ${err.message}`);
+      return null;
+    }
   }
 
   /** Open tickets whose latest public conversation entry came from the requester. */

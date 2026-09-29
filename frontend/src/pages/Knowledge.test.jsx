@@ -236,14 +236,15 @@ describe('Knowledge page', () => {
     renderAt('/knowledge/playbooks/3');
     const name = await screen.findByLabelText('Name');
     fireEvent.change(name, { target: { value: 'Software installs v2' } });
-    const kw = screen.getByLabelText('Only when it mentions any of these terms');
+    // A legacy playbook with words (no useWords flag) opens "Advanced: also require words".
+    const kw = screen.getByLabelText('Words that bring a ticket in');
     fireEvent.change(kw, { target: { value: 'download' } });
     fireEvent.keyDown(kw, { key: 'Enter' });
     fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
     await waitFor(() => expect(api.updatePlaybook).toHaveBeenCalled());
     const [id, payload] = api.updatePlaybook.mock.calls[0];
     expect(id).toBe('3');
-    expect(payload).toMatchObject({ name: 'Software installs v2', categoryId: 10, subcategoryIds: [101], match: { keywords: ['install', 'download'] } });
+    expect(payload).toMatchObject({ name: 'Software installs v2', categoryId: 10, subcategoryIds: [101], match: { useWords: true, keywords: ['install', 'download'] } });
     expect(payload).toMatchObject({ mode: 'shadow', sensitive: false, onHelp: 'assign_normally' });
   });
 

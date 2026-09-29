@@ -7,7 +7,7 @@ import { knowledgeAPI } from '../../services/api';
 import {
   Confidence, DraftPreview, RunStatus, SourcesList, inputClass,
 } from './knowledgeUi';
-import { fmtDuration, readableReason } from './knowledgeFormat';
+import { fitReasonOf, fmtDuration, readableReason } from './knowledgeFormat';
 import { IconTile } from './builderUi';
 
 /**
@@ -45,7 +45,7 @@ function TestEmptyState() {
         Enter a ticket number above and you&rsquo;ll see the exact answer the requester would get, from this playbook&rsquo;s settings and knowledge.
       </p>
       <ul className="mt-5 space-y-2.5 text-left text-[13px] text-foreground/85">
-        {['Uses your matching rules and instructions', 'Shows source articles and links', 'Does not send a reply to the requester'].map((line) => (
+        {['Uses your scope, “When to help” and instructions', 'Shows source articles and links', 'Does not send a reply to the requester'].map((line) => (
           <li key={line} className="flex items-center gap-2.5">
             <CircleCheck className="h-[18px] w-[18px] flex-shrink-0 text-primary" aria-hidden="true" />
             {line}
@@ -93,6 +93,9 @@ export default function PlaybookTestBox({
   }, [runRequest, playbookId]); // eslint-disable-line react-hooks/exhaustive-deps -- runs once per request
 
   const stayQuiet = run?.checks?.stayQuiet || (run?.gateDecision === 'stayed_quiet' ? {} : null);
+  // Knowledge v2: the AI fit check read "When to help" and said no.
+  const notThis = !stayQuiet && (run?.gateDecision === 'not_this_playbook' || run?.status === 'no_match');
+  const fitReason = notThis ? fitReasonOf(run) : null;
 
   return (
     <section aria-label="Test on a ticket" data-testid="playbook-test">
@@ -147,7 +150,7 @@ export default function PlaybookTestBox({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             {stayQuiet ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 dark:text-blue-200"><Hand className="h-3.5 w-3.5" aria-hidden="true" /> Stayed quiet</span>
-            ) : <RunStatus status={run.status} />}
+            ) : <RunStatus status={notThis ? 'not_this_playbook' : run.status} />}
             <Confidence value={run.confidence} min={run.minConfidence} />
             {fmtDuration(run.durationMs) && <span className="text-xs tabular-nums text-muted-foreground">{fmtDuration(run.durationMs)}</span>}
             {run.id && (
@@ -183,6 +186,14 @@ export default function PlaybookTestBox({
 
           {run.status === 'drafted' ? (
             <DraftPreview subject={run.draftSubject} html={run.draftHtml} />
+          ) : notThis ? (
+            <div className="rounded-lg border border-border bg-muted/50 px-3.5 py-3 text-sm text-foreground/90" data-testid="test-not-this-playbook">
+              <p className="font-medium text-foreground">Not this playbook</p>
+              <p className="mt-0.5 text-[13px]">
+                {fitReason ? readableReason(fitReason, run.sources) : 'The AI read the ticket against “When to help” and decided this playbook doesn’t fit.'}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">No answer was drafted. If it should fit, reword &ldquo;When to help&rdquo; in step 1 and test again.</p>
+            </div>
           ) : stayQuiet ? (
             <div className="rounded-lg border border-blue-200/80 bg-blue-50/60 px-3.5 py-3 text-sm text-blue-900 dark:border-blue-400/25 dark:bg-blue-500/10 dark:text-blue-100" data-testid="test-stayed-quiet">
               <p className="font-medium">Stayed quiet: {stayQuiet.condition || 'a stay-quiet condition applied'}</p>

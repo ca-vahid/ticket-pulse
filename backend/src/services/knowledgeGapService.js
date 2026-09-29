@@ -238,7 +238,17 @@ class KnowledgeGapService {
     const mode = vectors && allTickets.every((t) => vectors.has(t.id)) ? 'dense' : 'sparse';
 
     const drafted = await Promise.resolve().then(() => prisma.knowledgeArticle.findMany({
-      where: { workspaceId: ws, tags: { has: 'drafted-from-tickets' }, status: { not: 'archived' } },
+      // Pre-v2 drafts carry the tag; v2 drafts only sourceMeta.draftedFrom
+      // (same filter as articleDraftService.draftedArticleFilter, inlined to
+      // keep this module's imports light).
+      where: {
+        workspaceId: ws,
+        status: { not: 'archived' },
+        OR: [
+          { tags: { has: 'drafted-from-tickets' } },
+          ...['tickets', 'gap', 'promote'].map((kind) => ({ sourceMeta: { path: ['draftedFrom', 'kind'], equals: kind } })),
+        ],
+      },
       select: { id: true, title: true, status: true, sourceMeta: true },
       orderBy: { updatedAt: 'desc' },
       take: 200,

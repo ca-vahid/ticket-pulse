@@ -598,7 +598,7 @@ export default function Settings() {
             layout
             transition={{ type: 'spring', stiffness: 360, damping: 34 }}
             className={cn(
-              'tp-glass-strong z-30 w-full shrink-0 border-b border-card/70 dark:border-white/10 md:sticky md:top-[61px] md:h-[calc(100vh-61px)] md:self-start md:border-b-0 md:border-r',
+              'tp-glass-strong z-30 w-full shrink-0 border-b border-card/70 dark:border-white/10 md:min-h-0 md:self-stretch md:border-b-0 md:border-r',
               isNavCollapsed ? 'md:w-[76px]' : 'md:w-[250px]',
             )}
           >
@@ -733,7 +733,11 @@ export default function Settings() {
             </nav>
           </motion.aside>
 
-          <main className="settings-scrollbar min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-transparent">
+          {/* `relative` (QA 09-28 #4): the scroll pane is the containing block for
+              absolutely positioned descendants (sr-only inputs, popovers). Without
+              it they sized the PAGE past h-screen — a huge blank tail below long
+              sections and a settings nav that stopped at the first screen. */}
+          <main className="settings-scrollbar relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-transparent">
             {/* Zero visible sections (e.g. agent-role deep link): friendly
                 empty state instead of a blank pane (Phase A1). */}
             {!activeNavigationItem && (

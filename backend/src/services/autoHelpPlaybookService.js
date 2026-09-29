@@ -20,8 +20,9 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { AUTO_HELP_TOOL_NAMES } from './autoHelpTools.js';
-import { containsWordForm as containsWord } from '../utils/wordMatch.js';
+import { containsWordVariant, wordTokens } from '../utils/wordMatch.js';
 import { READINESS, evaluateReadiness, readinessEvidence, SENT_DECISIONS } from './autoHelpOutcomes.js';
+import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 export const AUTO_HELP_MODES = Object.freeze(['shadow', 'approve', 'auto']);
 export const DEFAULT_MODE = 'shadow';
@@ -62,11 +63,19 @@ export const DEFAULT_ALWAYS_STAY_QUIET = Object.freeze([
   'HR, legal, or personal matters',
 ]);
 export const MAX_STAY_QUIET = 20;
+/** Effect preview (Knowledge v2): how far back, how many tickets, how many examples. */
+export const PREVIEW_DAYS = 30;
+export const PREVIEW_MAX_TICKETS = 4000;
+export const PREVIEW_EXAMPLES = 5;
+/** Playbook summary: at most this many articles listed by name. */
+export const SUMMARY_ARTICLES = 10;
 /** How long enabledState() trusts its per-workspace read. */
 export const ENABLED_CACHE_MS = 60e3;
 export const MAX_STAY_QUIET_CHARS = 300;
 
 const MAX_KEYWORDS = 30;
+/** "When this playbook helps" (Knowledge v2): plain words the AI fit check reads. */
+export const MAX_WHEN_TO_HELP = 600;
 const MAX_INSTRUCTIONS = 8000;
 // Fields whose change makes a different playbook (runs record the version).
 const VERSIONED_FIELDS = ['name', 'categoryId', 'subcategoryIds', 'match', 'instructions', 'instructionsAreSource', 'stayQuietWhen', 'allowedTools', 'kbScope', 'minConfidence', 'followUp', 'onHelp'];
@@ -153,9 +162,22 @@ export function normalizeKbScope(raw = {}) {
   };
 }
 
+/**
+ * A playbook's match rules (Knowledge v2, "scope, then let the AI judge"):
+ *   whenToHelp       plain words for the AI fit check ("" = no fit check)
+ *   useWords         whether the word rules below gate at all (Advanced).
+ *                    Absent = true when a legacy row has words, so playbooks
+ *                    saved before v2 keep behaving exactly as they did.
+ *   keywords         at least one must appear (when useWords)
+ *   excludeKeywords  none may appear (when useWords)
+ */
 export function normalizeMatch(raw = {}) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  return { keywords: cleanWords(src.keywords), excludeKeywords: cleanWords(src.excludeKeywords) };
+  const keywords = cleanWords(src.keywords);
+  const excludeKeywords = cleanWords(src.excludeKeywords);
+  const whenToHelp = String(src.whenToHelp ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_WHEN_TO_HELP).trim();
+  const useWords = typeof src.useWords === 'boolean' ? src.useWords : (keywords.length > 0 || excludeKeywords.length > 0);
+  return { keywords, excludeKeywords, whenToHelp, useWords };
 }
 
 /**
@@ -252,13 +274,19 @@ export function explainMatch(playbook, ticket, { ignoreEnabled = false } = {}) {
   if (pb.subcategoryIds.length && !pb.subcategoryIds.includes(Number(ticket?.internalSubcategoryId))) {
     return { matches: false, reason: 'Subcategory not covered' };
   }
+  const { keywords, excludeKeywords, useWords } = pb.match;
+  // Knowledge v2: scope is category + subcategories; words gate only when the
+  // playbook opts in (Advanced) — the AI fit check reads "When to help".
+  if (!useWords) return { matches: true, reason: 'Matches' };
   const text = haystack(ticket);
-  const { keywords, excludeKeywords } = pb.match;
-  // Whole words only, case-insensitive: "app" never matches "approval".
-  if (keywords.length && !keywords.some((k) => containsWord(text, k))) {
+  const tokens = wordTokens(text);
+  // Whole words, case-insensitive ("app" never matches "approval"), plus
+  // endings, UK/US spellings, set up/setup and one typo in longer words.
+  const has = (k) => containsWordVariant(text, k, { tokens });
+  if (keywords.length && !keywords.some(has)) {
     return { matches: false, reason: 'None of the keywords appear' };
   }
-  const excluded = excludeKeywords.find((k) => containsWord(text, k));
+  const excluded = excludeKeywords.find(has);
   if (excluded) return { matches: false, reason: `Excluded word "${excluded}" appears` };
   return { matches: true, reason: 'Matches' };
 }
@@ -274,8 +302,60 @@ export function matchPlaybook(ticket, playbooks = []) {
   return fits[0] || null;
 }
 
+/**
+ * The plain-language summary line of a playbook (Knowledge v2): "Answers
+ * tickets in 7 subcategories. Stays quiet for ... and 6 workspace rules. Can
+ * quote 5 articles." `articlesByCategory` = Map(categoryId -> [{id, title}])
+ * of the workspace's published articles. Pure; exported for tests.
+ */
+export function playbookSummary(pb, { workspaceRuleCount = 0, articlesByCategory = new Map(), articleTotalPublished = 0 } = {}) {
+  const view = playbookView(pb);
+  const articles = view.categoryId ? (articlesByCategory.get(view.categoryId) || []) : [];
+  return {
+    subcategoryCount: view.subcategoryIds.length,
+    whenToHelp: view.match.whenToHelp,
+    useWords: view.match.useWords,
+    stayQuietCount: view.stayQuietWhen.length,
+    workspaceRuleCount,
+    articles: articles.slice(0, SUMMARY_ARTICLES).map((a) => ({ id: a.id, title: a.title })),
+    articleCount: articles.length,
+    articleTotalPublished,
+  };
+}
+
 class AutoHelpPlaybookService {
   _enabledCache = new Map();
+
+  /**
+   * Adds `summary` (playbookSummary) to playbook views: one settings read and
+   * one published-article read for the whole list, never one per playbook.
+   * Fails soft: a failed read leaves zeros / empty lists.
+   */
+  async _withSummaries(workspaceId, views) {
+    if (!views.length) return views;
+    const ws = Number(workspaceId);
+    const categoryIds = [...new Set(views.map((v) => v.categoryId).filter(Boolean))];
+    const [settings, articles, total] = await Promise.all([
+      Promise.resolve().then(() => this.getSettings(ws)).catch(() => null),
+      categoryIds.length
+        ? Promise.resolve().then(() => prisma.knowledgeArticle.findMany({
+          where: { workspaceId: ws, status: 'published', categoryId: { in: categoryIds } },
+          select: { id: true, title: true, categoryId: true },
+          orderBy: { title: 'asc' },
+          take: 2000,
+        })).catch(() => [])
+        : [],
+      Promise.resolve().then(() => prisma.knowledgeArticle.count({ where: { workspaceId: ws, status: 'published' } })).catch(() => 0),
+    ]);
+    const articlesByCategory = new Map();
+    for (const a of Array.isArray(articles) ? articles : []) {
+      if (!articlesByCategory.has(a.categoryId)) articlesByCategory.set(a.categoryId, []);
+      articlesByCategory.get(a.categoryId).push(a);
+    }
+    const workspaceRuleCount = Array.isArray(settings?.alwaysStayQuietWhen) ? settings.alwaysStayQuietWhen.length : 0;
+    const articleTotalPublished = Number(total) || 0;
+    return views.map((v) => ({ ...v, summary: playbookSummary(v, { workspaceRuleCount, articlesByCategory, articleTotalPublished }) }));
+  }
 
   async list(workspaceId) {
     const ws = Number(workspaceId);
@@ -290,7 +370,8 @@ class AutoHelpPlaybookService {
       })).catch(() => []),
     ]);
     const byId = new Map((lastRuns || []).map((r) => [r.playbookId, { lastRunAt: r._max?.createdAt || null, runCount: r._count?._all || 0 }]));
-    return rows.map((r) => ({ ...playbookView(r), lastRunAt: byId.get(r.id)?.lastRunAt || null, runCount: byId.get(r.id)?.runCount || 0 }));
+    const views = rows.map((r) => ({ ...playbookView(r), lastRunAt: byId.get(r.id)?.lastRunAt || null, runCount: byId.get(r.id)?.runCount || 0 }));
+    return this._withSummaries(ws, views);
   }
 
   async get(workspaceId, id) {
@@ -299,6 +380,61 @@ class AutoHelpPlaybookService {
       .catch(() => null);
     if (!row) throw new NotFoundError('Playbook not found');
     return playbookView(row);
+  }
+
+  /** get() plus the summary line (the API's single-playbook read). */
+  async getWithSummary(workspaceId, id) {
+    const [view] = await this._withSummaries(workspaceId, [await this.get(workspaceId, id)]);
+    return view;
+  }
+
+  /**
+   * "Show the effect before saving" (Knowledge v2): the unsaved playbook body
+   * against the saved one (none for a new playbook) on the last PREVIEW_DAYS
+   * of the workspace's non-noise tickets in either playbook's category.
+   * Scope + word rules only (explainMatch, on or off alike) - the AI fit
+   * check is NOT run here, so the real take can only be the same or lower.
+   */
+  async previewMatch(workspaceId, { id = null, draft = {}, now = Date.now() } = {}) {
+    const ws = Number(workspaceId);
+    const saved = id ? await this.get(ws, id) : null;
+    // Preview only: never trip "pick a category before switching on".
+    const body = { ...(draft && typeof draft === 'object' ? draft : {}) };
+    delete body.enabled;
+    const draftPb = playbookView({ ...(saved || {}), ...normalizePlaybookInput(body, { partial: true }), id: saved?.id ?? 0 });
+    const categoryIds = [...new Set([draftPb.categoryId, saved?.categoryId].filter(Boolean).map(Number))];
+    const base = { days: PREVIEW_DAYS, inScope: 0, draftTakes: 0, savedTakes: 0, gained: [], lost: [], scanned: 0, capped: false, aiFitCheckNotRun: true };
+    if (!categoryIds.length) return base;
+    const rows = await Promise.resolve().then(() => prisma.ticket.findMany({
+      where: {
+        workspaceId: ws,
+        createdAt: { gte: new Date(now - PREVIEW_DAYS * 86400e3) },
+        internalCategoryId: { in: categoryIds },
+        isNoise: false,
+        status: { notIn: ['Deleted', 'Spam'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: PREVIEW_MAX_TICKETS,
+      // Never photoUrl or other wide columns: this can be thousands of rows.
+      select: {
+        id: true, freshserviceTicketId: true, nativeNumber: true, origin: true, subject: true, descriptionText: true,
+        internalCategoryId: true, internalSubcategoryId: true,
+      },
+    })).catch((err) => { logger.warn(`Playbook preview-match failed (ws ${ws}): ${err.message}`); return []; });
+    const tickets = Array.isArray(rows) ? rows : [];
+    const out = { ...base, scanned: tickets.length, capped: tickets.length >= PREVIEW_MAX_TICKETS };
+    const scopeOnly = { ...draftPb, match: { ...draftPb.match, useWords: false } };
+    const example = (t) => ({ id: t.id, ref: ticketDisplayRef(t), subject: t.subject || '(no subject)' });
+    for (const t of tickets) {
+      if (explainMatch(scopeOnly, t, { ignoreEnabled: true }).matches) out.inScope += 1;
+      const d = explainMatch(draftPb, t, { ignoreEnabled: true }).matches;
+      const s = saved ? explainMatch(saved, t, { ignoreEnabled: true }).matches : false;
+      if (d) out.draftTakes += 1;
+      if (s) out.savedTakes += 1;
+      if (d && !s && out.gained.length < PREVIEW_EXAMPLES) out.gained.push(example(t));
+      if (s && !d && out.lost.length < PREVIEW_EXAMPLES) out.lost.push(example(t));
+    }
+    return out;
   }
 
   /**
