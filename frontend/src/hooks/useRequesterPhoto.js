@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ticketsAPI } from '../services/api';
+import { integrationRequesterAvatar } from '../utils/integrationIdentity';
 
 /**
  * Requester photo from the directory (Entra), by e-mail, through the cached
@@ -14,6 +15,10 @@ export function fetchRequesterPhoto(email) {
   const key = String(email || '').trim().toLowerCase();
   if (!key || !key.includes('@')) return Promise.resolve(null);
   if (cache.has(key)) return Promise.resolve(cache.get(key));
+  // Integrations (Simorgh, Microsoft Sentinel) are applications, not people:
+  // their own mark, no directory lookup.
+  const app = integrationRequesterAvatar(key);
+  if (app) { cache.set(key, app); return Promise.resolve(app); }
   if (inflight.has(key)) return inflight.get(key);
   const p = ticketsAPI.requesterPhoto(key)
     .then((res) => { const photo = res?.data?.photo || res?.photo || null; cache.set(key, photo); return photo; })
@@ -25,7 +30,7 @@ export function fetchRequesterPhoto(email) {
 
 export function useRequesterPhoto(email) {
   const key = String(email || '').trim().toLowerCase();
-  const [photo, setPhoto] = useState(() => (cache.has(key) ? cache.get(key) : null));
+  const [photo, setPhoto] = useState(() => (cache.has(key) ? cache.get(key) : integrationRequesterAvatar(key)));
   useEffect(() => {
     let alive = true;
     if (!key) { setPhoto(null); return undefined; }

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.08-preview';
+export const APP_VERSION = '4.1.09-preview';
 
 export const changelog = [
+  {
+    version: '4.1.09-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Microsoft Sentinel</strong> — tickets from Sentinel show a shield-and-eye mark instead of “MS” initials, in the queue, search, the ticket page and approvals.' },
+    ],
+  },
   {
     version: '4.1.08-preview',
     date: 'September 29, 2026',
