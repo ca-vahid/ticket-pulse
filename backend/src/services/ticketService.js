@@ -3680,6 +3680,28 @@ class TicketService {
       changes.priority = { from: ticket.priority, to: p };
     }
 
+    // Resolution due (29 Sep 2026): FreshService's due_by is writable on the
+    // same PUT. It cannot be removed there (every FS ticket carries one), so
+    // clearing is refused; FreshService itself checks the date against the
+    // first-response due and says so when it refuses.
+    if (input.dueBy !== undefined) {
+      if (input.dueBy === null || input.dueBy === '') {
+        throw new ValidationError('FreshService tickets always have a resolution due date — pick a new date instead of removing it');
+      }
+      const due = new Date(input.dueBy);
+      if (Number.isNaN(due.getTime())) throw new ValidationError('Resolution due must be a valid date and time');
+      if (ticket.createdAt && due.getTime() <= new Date(ticket.createdAt).getTime()) {
+        throw new ValidationError('The resolution due date must be after the ticket was created');
+      }
+      const currentMs = ticket.dueBy ? new Date(ticket.dueBy).getTime() : null;
+      if (currentMs === null || Math.abs(currentMs - due.getTime()) >= 60 * 1000) {
+        fsPayload.due_by = due.toISOString();
+        localPatch.dueBy = due;
+        localPatch.dueBySetBy = 'manual';
+        changes.dueBy = { from: ticket.dueBy ? new Date(ticket.dueBy).toISOString() : null, to: due.toISOString() };
+      }
+    }
+
     let assignee = null;
     // Hand-back reason (QA 09-25 item 3): validated before FreshService is
     // touched; recorded once the write-back succeeds. Sync later ties it to
@@ -3808,6 +3830,18 @@ class TicketService {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), synced: [], noChanges: true };
     }
 
+    // FreshService will not resolve or close a parent while its child tickets
+    // are open (29 Sep 2026). Ask it first, so the agent sees which children
+    // are in the way instead of an opaque refusal.
+    if (localPatch.status) {
+      const nextBase = await statusService.baseStatusOf(workspaceId, localPatch.status);
+      const currentBase = await statusService.baseStatusOf(workspaceId, ticket.status);
+      if (TERMINAL_STATUSES.includes(nextBase) && !TERMINAL_STATUSES.includes(currentBase)) {
+        const { assertNoOpenFsChildren } = await import('./fsTicketRelationService.js');
+        await assertNoOpenFsChildren(ticket, workspaceId, client);
+      }
+    }
+
     // 1) Write to FreshService — any failure aborts before local changes.
     //    Slow write-backs are logged: the custom-field lookup resolution can
     //    take multiple FS calls on the rate-limited client (QA 231648).
@@ -3905,13 +3939,31 @@ class TicketService {
     // unverifiable and the write is trusted (logged), never rejected blindly.
     if (fsPayload.subject !== undefined && String(fsTicket.subject ?? '') !== fsPayload.subject) rejected.push('subject');
     if (fsPayload.requester_id !== undefined && String(fsTicket.requester_id ?? '') !== String(fsPayload.requester_id)) rejected.push('requester');
+    if (fsPayload.due_by !== undefined && fsTicket.due_by) {
+      if (Math.abs(new Date(fsTicket.due_by).getTime() - new Date(fsPayload.due_by).getTime()) >= 60 * 1000) rejected.push('resolution due');
+      else localPatch.dueBy = new Date(fsTicket.due_by);
+    }
     if (fsPayload.description !== undefined) {
       const collapse = (s) => String(s || '').replace(/\s+/g, ' ').trim();
       if (fsTicket.description === undefined && fsTicket.description_text === undefined) {
         logger.warn(`FS write-back: #${ticket.freshserviceTicketId} echo carries no description — accepted unverified`);
       } else {
         const echoedText = collapse(fsTicket.description_text ?? stripHtml(fsTicket.description));
-        if (echoedText !== collapse(descriptionNormalized?.descriptionText)) rejected.push('description');
+        const sentText = collapse(descriptionNormalized?.descriptionText);
+        if (echoedText !== sentText) {
+          rejected.push('description');
+          // 29 Sep 2026 (#244504): a description edit was refused on the echo
+          // with no record of what differed. Log where the texts part ways.
+          let at = 0;
+          while (at < sentText.length && sentText[at] === echoedText[at]) at += 1;
+          logger.warn(`FS write-back: #${ticket.freshserviceTicketId} description echo differs`, {
+            sentLength: sentText.length,
+            echoedLength: echoedText.length,
+            at,
+            sent: sentText.slice(Math.max(0, at - 30), at + 50),
+            echoed: echoedText.slice(Math.max(0, at - 30), at + 50),
+          });
+        }
       }
     }
     if (rejected.length > 0) {

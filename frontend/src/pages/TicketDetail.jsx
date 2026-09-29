@@ -3446,7 +3446,10 @@ export default function TicketDetail() {
                   {/* SLA clocks. TP-born (canWrite): pencil-editable — presets
                       or a custom datetime, null clears (QA 08-04 #13). The
                       rows render even without a clock so agents can SET one.
-                      FS-born: read-only, FreshService owns the dates. */}
+                      FS-born: the resolution due is editable through the
+                      FreshService write-back confirmation (29 Sep 2026); it
+                      can be moved but not removed. First response stays
+                      FreshService's. */}
                   {(ticket.frDueBy || ticket.dueBy || canWrite) && !['Deleted', 'Spam'].includes(ticket.status) && (
                     <div className="pt-1 border-t border-border/60 space-y-2">
                       {(ticket.frDueBy || canWrite) && (
@@ -3474,11 +3477,11 @@ export default function TicketDetail() {
                           )}
                         </div>
                       )}
-                      {(ticket.dueBy || canWrite) && (
+                      {(ticket.dueBy || canWrite || fsEditable) && (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-muted-foreground font-medium">Resolution</span>
                           {ticket.dueBy ? (
-                            <span className="ml-auto text-muted-foreground/75" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
+                            <span className="ml-auto text-muted-foreground/75" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — changes are written to FreshService'}`}>{formatDayTime(ticket.dueBy)}</span>
                           ) : (
                             <span className="ml-auto text-muted-foreground/50">Not set</span>
                           )}
@@ -3494,6 +3497,20 @@ export default function TicketDetail() {
                                   label: iso ? `Resolution due → ${formatDayTime(iso)}` : 'Resolution due removed',
                                   undo: () => ticketsAPI.update(ticketId, { dueBy: prev }),
                                 });
+                              }}
+                            />
+                          )}
+                          {!canWrite && fsEditable && (
+                            <DueDateEditor
+                              label="Resolution"
+                              value={ticket.dueBy}
+                              allowRemove={false}
+                              onSave={(iso) => {
+                                if (!iso) return;
+                                requestFsSync(
+                                  [{ field: 'Resolution due', from: ticket.dueBy ? formatDayTime(ticket.dueBy) : 'Not set', to: formatDayTime(iso) }],
+                                  { dueBy: iso },
+                                ).catch(() => { /* cancelled or refused — the dialog showed why */ });
                               }}
                             />
                           )}

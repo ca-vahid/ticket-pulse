@@ -39,8 +39,10 @@ function toLocalInputValue(date) {
  * a "Pick date and time" custom row, and "Remove due date" when one is set.
  *
  * The caller owns persistence: `onSave(isoString | null)` — null clears.
+ * `allowRemove={false}` hides "Remove due date" (FreshService tickets always
+ * carry a resolution due date, so it can be moved but not removed).
  */
-export default function DueDateEditor({ label, value, onSave, saving = false }) {
+export default function DueDateEditor({ label, value, onSave, saving = false, allowRemove = true }) {
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [custom, setCustom] = useState('');
@@ -132,7 +134,7 @@ export default function DueDateEditor({ label, value, onSave, saving = false }) 
               </button>
             </div>
           )}
-          {value && (
+          {value && allowRemove && (
             <>
               <div className="my-1.5 border-t border-border/60" />
               <button onClick={() => choose(null)} className={`${rowClass} !text-rose-600 dark:!text-rose-300 hover:!bg-rose-50 dark:hover:!bg-rose-500/15`}>

@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.1.05-preview';
+export const APP_VERSION = '4.1.06-preview';
 
 export const changelog = [
+  {
+    version: '4.1.06-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Change the resolution due date on FreshService tickets</strong> &mdash; the pencil next to &ldquo;Resolution&rdquo; now works on FreshService tickets too. Pick a new date, confirm, and Ticket Pulse writes it to FreshService and checks FreshService kept it before showing it. FreshService tickets always keep a due date, so it can be moved but not removed.' },
+      { type: 'new', html: '<strong>FreshService child tickets show in Ticket Pulse</strong> &mdash; a FreshService parent ticket now lists its child tickets under Parent / child, with each child&rsquo;s status and agent, and a child shows its parent. FreshService owns these links, so they are marked &ldquo;FreshService&rdquo; and change only in FreshService; Ticket Pulse follows within a few minutes. Children that are not in Ticket Pulse are listed by their FreshService number.' },
+      { type: 'improved', html: '<strong>Closing a parent with open child tickets</strong> &mdash; FreshService will not resolve or close a parent while its child tickets are open. Ticket Pulse now checks with FreshService first and names the open children (for example &ldquo;#241814 (Open), #241815 (Pending)&rdquo;) instead of a vague refusal.' },
+      { type: 'fixed', html: '<strong>Fewer AI assignment retries</strong> &mdash; when the AI left out the category label, the run had to resubmit its whole recommendation; the label is now filled in from the category it chose.' },
+      { type: 'fixed', html: '<strong>AI assignment runs no longer stop after the first step</strong> &mdash; a run could end right after looking up the ticket, with nothing recommended, and be retried from scratch. It now carries on to a recommendation, and a run that ends without one is recorded as such instead of as a database error.' },
+    ],
+  },
   {
     version: '4.1.05-preview',
     date: 'September 29, 2026',

@@ -1,4 +1,5 @@
 import { ValidationError } from '../utils/errors.js';
+import prisma from './prisma.js';
 import { validateRecommendationPriorityFields } from './priorityAssessment.js';
 import {
   normalizeTicketTypeAssessment,
@@ -25,6 +26,29 @@ const EMBEDDED_STRING_FIELDS = new Set([
   'suggestedInternalCategoryName',
   'suggestedInternalSubcategoryName',
 ]);
+
+/**
+ * ticketClassification is only the readable label for the category ids the
+ * model also sends. Sonnet 5.5 sometimes omits it (29 Sep 2026: 2 of its first
+ * 45 runs), which cost a whole resubmit; rebuild it from the ids instead.
+ * Returns null when there is nothing to rebuild from, so the field stays required.
+ */
+async function classificationFromCategoryIds(payload, workspaceId) {
+  const ids = [payload.internalCategoryId, payload.internalSubcategoryId]
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  if (!workspaceId || ids.length === 0) return null;
+  const rows = await Promise.resolve()
+    .then(() => prisma.competencyCategory.findMany({
+      where: { workspaceId, id: { in: ids }, isActive: true },
+      select: { id: true, name: true },
+    }))
+    .catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const byId = new Map(rows.map((row) => [row.id, row.name]));
+  const names = ids.map((id) => byId.get(id)).filter(Boolean);
+  return names.length ? names.join(' > ') : null;
+}
 
 function requiredText(payload, fieldName) {
   const value = String(payload?.[fieldName] ?? '').trim();
@@ -189,6 +213,10 @@ export async function normalizeSubmitRecommendationPayload(payload = {}, workspa
   await validateRecommendationTicketTypeFields(normalized, workspaceId);
 
   normalized.overallReasoning = requiredText(normalized, 'overallReasoning');
+  if (String(normalized.ticketClassification ?? '').trim() === '') {
+    const rebuilt = await classificationFromCategoryIds(normalized, workspaceId);
+    if (rebuilt) normalized.ticketClassification = rebuilt;
+  }
   normalized.ticketClassification = requiredText(normalized, 'ticketClassification');
   normalized.classificationRationale = requiredText(normalized, 'classificationRationale');
   normalized.categoryFit = requiredText(normalized, 'categoryFit').toLowerCase();

@@ -91,6 +91,13 @@ describe('DueDateEditor popover', () => {
     expect(screen.queryByRole('button', { name: /remove due date/i })).not.toBeInTheDocument();
   });
 
+  test('allowRemove={false} (FreshService tickets) never offers "Remove due date"', () => {
+    render(<DueDateEditor label="Resolution" value="2026-08-06T23:59:00.000Z" onSave={vi.fn()} allowRemove={false} />);
+    open();
+    expect(screen.queryByRole('button', { name: /remove due date/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /tomorrow/i })).toBeInTheDocument();
+  });
+
   test('Escape closes the popover without saving', () => {
     const onSave = vi.fn();
     render(<DueDateEditor label="Resolution" value={null} onSave={onSave} />);

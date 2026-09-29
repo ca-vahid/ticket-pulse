@@ -1682,8 +1682,20 @@ router.post('/:id/duplicate-of/:targetId', asyncHandler(async (req, res) => {
 // Parent / child ticket relationship (QA 07-16 #4).
 router.get('/:id/family', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
-  const family = await ticketLinkService.family(parseTicketId(req), req.workspaceId);
-  res.json({ success: true, data: family });
+  const ticketId = parseTicketId(req);
+  // FS-born: bring FreshService's own parent/child links in first (cached a
+  // few minutes per ticket; a FreshService hiccup just shows what TP has).
+  const { syncFsRelations } = await import('../services/fsTicketRelationService.js');
+  const fsRelations = await syncFsRelations(ticketId, req.workspaceId).catch(() => null);
+  const family = await ticketLinkService.family(ticketId, req.workspaceId);
+  res.json({
+    success: true,
+    data: {
+      ...family,
+      fsExternalChildren: fsRelations?.externalChildren || [],
+      fsExternalParent: fsRelations?.externalParent || null,
+    },
+  });
 }));
 
 router.post('/:id/parent', asyncHandler(async (req, res) => {

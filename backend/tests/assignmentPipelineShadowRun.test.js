@@ -143,3 +143,35 @@ describe('assignmentPipelineService.shadowRun', () => {
     await expect(service.shadowRun(501, 1, {})).rejects.toThrow('needs a model');
   });
 });
+
+describe('tool calls under an unexpected stop_reason (Sonnet 5.5, run 27139)', () => {
+  const withStop = (stopReason, content) => ({ ...turn(content, { inputTokens: 10 }), message: { content, stop_reason: stopReason } });
+  beforeEach(() => { jest.clearAllMocks(); runToolTurnMock.mockReset(); });
+
+  test('executed tool calls are answered and the loop goes on to the submission', async () => {
+    runToolTurnMock
+      .mockResolvedValueOnce(withStop('end_turn', [
+        { type: 'text', text: "I'll start by reading the ticket details." },
+        { type: 'tool_use', id: 't1', name: 'get_ticket_details', input: { ticketId: 501 } },
+      ]))
+      .mockResolvedValueOnce(turn(
+        [{ type: 'tool_use', id: 't2', name: 'submit_recommendation', input: { recommendations: [{ techId: 42, rank: 1 }], overallReasoning: 'VPN person' } }],
+        { inputTokens: 10 },
+      ));
+    const result = await service.shadowRun(501, 1, { model: 'claude-sonnet-5-5' });
+    expect(result.turns).toBe(2);
+    expect(result.recommendation.recommendations[0].techId).toBe(42);
+    const results = runToolTurnMock.mock.calls[1][0].messages.flatMap((m) => (Array.isArray(m.content) ? m.content : []));
+    expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'tool_result', tool_use_id: 't1' })]));
+  });
+
+  test('a refusal still ends the loop', async () => {
+    runToolTurnMock.mockResolvedValueOnce(withStop('refusal', [
+      { type: 'tool_use', id: 't1', name: 'get_ticket_details', input: { ticketId: 501 } },
+    ]));
+    const result = await service.shadowRun(501, 1, { model: 'claude-sonnet-5-5' }).catch((err) => ({ error: err.message }));
+    expect(runToolTurnMock).toHaveBeenCalledTimes(1);
+    expect(result.recommendation ?? null).toBeNull();
+  });
+});
+
