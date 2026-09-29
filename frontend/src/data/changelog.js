@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.03-preview';
+export const APP_VERSION = '4.1.04-preview';
 
 export const changelog = [
+  {
+    version: '4.1.04-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>New approval request e-mail</strong> &mdash; the approval category is the title, the ticket number links to the ticket, and the decision sits at the end as one row: Approve, Decline and Ask. Each button opens the approval page with that choice already picked; nothing is decided until you confirm there. Built for phones, and dark mode now reads properly in Outlook on Android and iPhone.' },
+      { type: 'improved', html: '<strong>Approval page remembers the button you pressed</strong> &mdash; arriving from Decline or Ask opens that tab with the text box ready; Approve opens the Approve tab.' },
+    ],
+  },
   {
     version: '4.1.03-preview',
     date: 'September 29, 2026',

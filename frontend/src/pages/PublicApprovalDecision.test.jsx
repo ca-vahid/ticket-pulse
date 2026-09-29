@@ -52,8 +52,8 @@ vi.mock('../components/tickets/RichTextEditor', async () => {
 const ok = (data) => Promise.resolve(data);
 const fail = ({ status, data }) => Promise.reject(Object.assign(new Error(data?.message || 'Request failed'), { status }));
 
-const renderPage = (token = 'tok-1') => render(
-  <MemoryRouter initialEntries={[`/approval/${token}`]}>
+const renderPage = (token = 'tok-1', search = '') => render(
+  <MemoryRouter initialEntries={[`/approval/${token}${search}`]}>
     <Routes>
       <Route path="/approval/:token" element={<PublicApprovalDecisionPage />} />
     </Routes>
@@ -154,6 +154,25 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(screen.getByText('Budget frozen until Q4.')).toBeInTheDocument();
     expect(screen.getByText('Not approved')).toBeInTheDocument();
     expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
+  });
+
+  test('?intent= from the e-mail pre-picks the tab and decides nothing on its own', async () => {
+    // jsdom has no scrollIntoView; the page calls it once to bring the composer into view.
+    Element.prototype.scrollIntoView = vi.fn();
+    apiMock.get.mockReturnValue(ok(pendingFixture));
+    renderPage('tok-1', '?intent=reject');
+    expect(await screen.findByRole('tab', { name: 'Reject' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('textbox', { name: 'Reason for rejecting' })).toHaveFocus();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(apiMock.decide).not.toHaveBeenCalled();
+    cleanup();
+
+    renderPage('tok-1', '?intent=ask');
+    expect(await screen.findByRole('tab', { name: 'Ask a question' })).toHaveAttribute('aria-selected', 'true');
+    cleanup();
+
+    renderPage('tok-1', '?intent=nonsense');
+    expect(await screen.findByRole('tab', { name: 'Approve' })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('approve posts and swaps the composer for the decided banner (focus lands on it)', async () => {

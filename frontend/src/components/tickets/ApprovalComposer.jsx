@@ -207,8 +207,16 @@ export default function ApprovalComposer({
   // false = the viewer may hand the request on but not decide it (an admin who
   // is not the named approver, 17 Sep 2026): only Forward / Escalate tabs show.
   canDecide = true,
+  // The choice the approver already made in the e-mail (?intent=), e.g. 'rejected'.
+  initialTab = null,
 }) {
-  const [tab, setTab] = useState(canDecide ? 'approved' : 'forward');
+  const [tab, setTab] = useState(() => {
+    const fallback = canDecide ? 'approved' : 'forward';
+    if (!initialTab) return fallback;
+    if (!canDecide && ['approved', 'rejected', 'condition'].includes(initialTab)) return fallback;
+    if (initialTab === 'question' && typeof onAsk !== 'function') return fallback;
+    return initialTab;
+  });
   // 23 Sep 2026: the Forward picker grabbed focus on mount, which opened its
   // list and scrolled the ticket page to the bottom. Focus only follows a click.
   const [tabChosen, setTabChosen] = useState(false);
@@ -230,6 +238,12 @@ export default function ApprovalComposer({
   const canForward = typeof onHandoff === 'function';
   const canAsk = typeof onAsk === 'function';
   const tabs = useMemo(() => TABS.filter((t) => (t.key === 'escalate' ? canEscalate : t.key === 'forward' ? canForward : t.key === 'question' ? canAsk : canDecide)), [canEscalate, canForward, canAsk, canDecide]);
+
+  // Decline and Ask from the e-mail need words, so the editor is ready for them.
+  useEffect(() => {
+    if (tab === initialTab && (initialTab === 'rejected' || initialTab === 'question')) editorRef.current?.focus();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
+  }, []);
 
   const clear = () => { setNote(''); setNoteHtml(''); };
   const rich = () => (text && isRichContent(noteHtml) ? noteHtml : null);

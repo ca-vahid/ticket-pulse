@@ -694,16 +694,16 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'Need {{decision.url}} please' }, { email: 'jane.doe@x.io' });
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.html).toContain('Note from Jane Doe');
-    expect(email.html).not.toContain('Note from jane.doe@x.io');
+    expect(email.html).toContain('Why Jane is asking');
+    expect(email.html).toContain('Jane Doe');
+    expect(email.html).not.toContain('jane.doe@x.io');
     expect(email.subject).toBe('Approval needed: Laptop purchase for Rita — New laptop [TP-ID-501]');
-    // category lives in its own strip now, not in the kicker
-    expect(email.html).toContain('Laptop purchase');
-    expect(email.html).toContain('Your decision is needed');
+    // The category is the title (29 Sep 2026 redesign).
+    expect(email.html).toContain('>Laptop purchase<');
     expect(email.html).toContain('Requested for');
     expect(email.html).toContain('>Rita<');
     expect(email.html).toContain('Analyst');
-    expect(email.html).toContain('Review and decide');
+    expect(email.html).toContain('?intent=approve');
     // Placeholders still substitute.
     expect(email.html).toContain('review &amp; decide</a>');
   });
@@ -725,9 +725,8 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     expect(people).toEqual([
       { name: 'requester-photo.png', contentType: 'image/png', contentBytes: PNG, contentId: 'requester-photo', inline: true },
     ]);
-    const brand = email.attachments.filter((a) => String(a.contentId || '').startsWith('tp-'));
-    expect(brand.map((a) => a.contentId)).toEqual(expect.arrayContaining(['tp-tp-mark', 'tp-kind-decision']));
-    for (const a of brand) expect(a.inline).toBe(true);
+    // The request e-mail carries no brand pictograms since the 29 Sep 2026 redesign.
+    expect(email.attachments.filter((a) => String(a.contentId || '').startsWith('tp-'))).toEqual([]);
     expect(email.html).toContain('<img src="cid:requester-photo"');
     // The agent has no directory photo → initials, no dangling cid reference.
     expect(email.html).not.toContain('cid:requested-by-photo');
@@ -740,6 +739,6 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
     prismaMock.technician.findFirst.mockResolvedValue({ name: 'Jane Doe-Smith' });
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'jdoe@x.io' });
-    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('Note from Jane Doe-Smith');
+    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('Jane Doe-Smith');
   });
 });
