@@ -497,7 +497,7 @@ describe('R4b answerability check', () => {
     expect(arg.userMessage).toContain('1. Open Company Portal.');
     expect(arg.userMessage).not.toContain(note);
     expect(arg.userMessage).not.toContain(LONG_INSTRUCTIONS); // playbook is not a source here
-    expect(arg.extra.jsonSchema.required).toEqual(['sufficient', 'unsupportedSteps']);
+    expect(arg.extra.jsonSchema.required).toEqual(['sufficient', 'unsupportedSteps', 'stayQuiet']);
   });
 
   test('"no" → not_answerable insufficient_context, whatever the drafting model said; the check is stored', async () => {

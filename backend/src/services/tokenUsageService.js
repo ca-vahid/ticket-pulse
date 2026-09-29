@@ -16,6 +16,8 @@ import settingsRepository from './settingsRepository.js';
 export const MODEL_PRICING_USD_PER_MTOK = [
   // [model prefix, input, output, cacheWrite, cacheRead]
   ['claude-opus', 15, 75, 18.75, 1.50],
+  // Sonnet 5 and Sonnet 5.5 (28 Sep 2026): $2 / $10, cache write $2.50, read $0.20.
+  ['claude-sonnet-5', 2, 10, 2.5, 0.20],
   ['claude-sonnet', 3, 15, 3.75, 0.30],
   ['claude-haiku', 1, 5, 1.25, 0.10],
   // GPT-6 (22 Sep 2026): no cache-write fee; cached reads 90% off.

@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../../config/index.js';
-import { normalizeAiModel, shouldOmitAnthropicTemperature } from '../../utils/aiProviders.js';
+import { anthropicRequestRules, normalizeAiModel, shouldOmitAnthropicTemperature } from '../../utils/aiProviders.js';
 import { sanitizeMessagesForAnthropicReplay } from './openAiConverters.js';
 
 function usageFromResponse(response) {
@@ -102,10 +102,15 @@ class AnthropicProvider {
     extra = {},
   }) {
     const selectedModel = normalizeAiModel(model || config.anthropic.defaultModel, 'anthropic');
+    const rules = anthropicRequestRules(selectedModel);
+    // Unforced tool use (Sonnet 5.5+): the model may write a sentence or two
+    // before the call, so a tight JSON budget (400 for the Auto-help check)
+    // could run out before the answer. Give it headroom.
+    const unforcedJson = Boolean(extra.jsonSchema) && !rules.forcedToolChoice;
     const request = {
       model: selectedModel,
-      max_tokens: maxTokens,
-      thinking: { type: 'disabled' },
+      max_tokens: unforcedJson ? maxTokens + 1024 : maxTokens,
+      ...(rules.thinkingOff ? { thinking: rules.thinkingOff } : {}),
       // Cached system prompt: single-shot operations (sentiment, workflow
       // generation) reuse the same static instructions call after call.
       system: cacheableSystem(systemPrompt),
@@ -114,10 +119,16 @@ class AnthropicProvider {
     if (extra.jsonSchema) {
       request.tools = [{
         name: 'emit_notification_json',
-        description: 'Return the notification workflow email content using the exact requested schema.',
+        description: 'Return your answer using the exact requested schema.',
         input_schema: extra.jsonSchema,
       }];
-      request.tool_choice = { type: 'tool', name: 'emit_notification_json' };
+      if (rules.forcedToolChoice) {
+        request.tool_choice = { type: 'tool', name: 'emit_notification_json' };
+      } else {
+        // Sonnet 5.5 and later reject forced tool_choice: ask for the call in
+        // the prompt instead; a plain-JSON reply still parses below.
+        request.system = cacheableSystem(`${systemPrompt}\n\nCall the emit_notification_json tool right away, exactly once, with your answer. Do not write any text before or after the call.`);
+      }
     }
     if (!shouldOmitAnthropicTemperature(selectedModel)) {
       request.temperature = temperature;
@@ -159,6 +170,7 @@ class AnthropicProvider {
     extra = {},
   }) {
     const selectedModel = normalizeAiModel(model || config.anthropic.defaultModel, 'anthropic');
+    const thinkingSetting = extra.thinking || anthropicRequestRules(selectedModel).thinkingOff;
     const stream = this.getClient().messages.stream({
       model: selectedModel,
       max_tokens: maxTokens,
@@ -171,9 +183,12 @@ class AnthropicProvider {
       // annotations, unsigned thinking blocks) that the Messages API 400s on.
       messages: cacheableMessages(sanitizeMessagesForAnthropicReplay(messages)),
       // Sonnet 5 runs adaptive thinking when the field is omitted (4.6 ran
-      // thinking-off); disable explicitly so pipeline latency/token behavior
-      // stays model-independent unless a caller opts in via extra.thinking.
-      thinking: extra.thinking || { type: 'disabled' },
+      // thinking-off); turn up-front thinking off explicitly so pipeline
+      // latency/token behavior stays model-independent unless a caller opts in
+      // via extra.thinking. Sonnet 5.5 spells that `between_tools`
+      // (anthropicRequestRules); its thinking blocks come back signed and the
+      // callers' loops replay them unchanged.
+      ...(thinkingSetting ? { thinking: thinkingSetting } : {}),
       ...(extra.outputConfig ? { output_config: extra.outputConfig } : {}),
     }, signal ? { signal } : undefined);
 

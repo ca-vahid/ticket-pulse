@@ -640,7 +640,8 @@ function matchesAlwaysHuman(email, entries) {
 const ANSWERABILITY_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['sufficient', 'unsupportedSteps'],
+  // stayQuiet required: see SUBMIT_AUTO_HELP_TOOL (Sonnet 5.5 skips optional fields).
+  required: ['sufficient', 'unsupportedSteps', 'stayQuiet'],
   properties: {
     sufficient: { type: 'string', enum: ['yes', 'partial', 'no'] },
     unsupportedSteps: { type: 'array', items: { type: 'integer' } },
