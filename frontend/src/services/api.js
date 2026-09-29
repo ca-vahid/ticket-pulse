@@ -1189,6 +1189,8 @@ export const ticketsAPI = {
   assetronStatus: async () => await api.get('/tickets/assetron/status'),
   assetronFilterOptions: async () => await api.get('/tickets/assetron/filter-options'),
   assetronAssets: async (params) => await api.get('/tickets/assetron/assets', { params }),
+  // Device finder (approval redesign, 29 Sep 2026): every NEW device in one load.
+  assetronDevices: async () => await api.get('/tickets/assetron/devices'),
   assetronHolds: async (id) => await api.get(`/tickets/${id}/assetron-holds`),
   changeApprovalHardware: async (id, approvalId, hardware) => await api.put(`/tickets/${id}/approvals/${approvalId}/hardware`, hardware),
 

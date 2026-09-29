@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.1.04-preview';
+export const APP_VERSION = '4.1.05-preview';
 
 export const changelog = [
+  {
+    version: '4.1.05-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Request approval</strong> — “+ New request” now sits beside the Approvals heading (and in the ticket’s More menu). The request opens in a wider dialog with steps: pick what needs approval from compact cards, choose the hardware if it is a hardware category, then add the context.' },
+      { type: 'improved', html: '<strong>Hardware step</strong> — choose “Reserve from Assetron” or “Manual entry” for hardware Assetron does not track (what and how many go at the top of the request).' },
+      { type: 'added', html: '<strong>Device finder</strong> — every new device in Assetron at once, with filters down the side that show how many devices each choice leaves, a search box, and a sortable table with 25/50/100 per page.' },
+    ],
+  },
   {
     version: '4.1.04-preview',
     date: 'September 29, 2026',

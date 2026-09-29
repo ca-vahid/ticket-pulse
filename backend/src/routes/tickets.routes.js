@@ -2071,6 +2071,14 @@ router.get('/assetron/assets', asyncHandler(async (req, res) => {
   } catch (err) { throw assetronFail(err); }
 }));
 
+// The device finder's one load: every NEW device (≤ 1,000), filtered in the browser.
+router.get('/assetron/devices', asyncHandler(async (req, res) => {
+  const { default: assetronClient } = await import('../integrations/assetronClient.js');
+  try {
+    res.json({ success: true, data: await assetronClient.listAllNew({ maxItems: 1000 }) });
+  } catch (err) { throw assetronFail(err); }
+}));
+
 router.get('/:id/assetron-holds', asyncHandler(async (req, res) => {
   const { default: svc } = await import('../services/assetronReservationService.js');
   res.json({ success: true, data: await svc.forTicket(parseTicketId(req), req.workspaceId) });
