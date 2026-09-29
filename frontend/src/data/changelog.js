@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.1.07-preview';
+export const APP_VERSION = '4.1.08-preview';
 
 export const changelog = [
+  {
+    version: '4.1.08-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Auto-help drafts again</strong> &mdash; one step the knowledge didn&rsquo;t cover used to throw the whole answer away, so almost nothing was ever drafted. Auto-help now leaves out just the steps it can&rsquo;t back up and drafts the rest (marked partial, never sent without a person). It only stays silent when none of the answer is covered.' },
+      { type: 'fixed', html: '<strong>&ldquo;Step 6 not supported&rdquo; now points at a real step</strong> &mdash; the run panel shows the numbered answer Auto-help tried to give, with the steps the knowledge doesn&rsquo;t cover crossed out, so the step number matches what you see. A partial draft lists what it left out.' },
+      { type: 'improved', html: '<strong>Knowledge &rarr; Activity is simpler</strong> &mdash; two views: <em>Runs</em> (the default), with one line of counts at the top (drafted, not answerable, no playbook, skipped&hellip;) that also filters the list, and <em>By playbook</em>, one compact row per playbook instead of seven boxes each. A row opens the rest: approve-mode progress, cost, CSAT and the auto-mode checklist.' },
+      { type: 'improved', html: '<strong>A clearer run panel</strong> &mdash; ticket and result first, then what Auto-help would have said (or why it didn&rsquo;t answer), what the team did and your review. Sources, raw steps and cost sit under &ldquo;Details&rdquo;.' },
+    ],
+  },
   {
     version: '4.1.07-preview',
     date: 'September 29, 2026',

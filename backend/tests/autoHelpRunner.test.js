@@ -510,13 +510,44 @@ describe('R4b answerability check', () => {
     expect(run.checks.answerability).toMatchObject({ sufficient: 'no', reason: 'Article is about a different app' });
   });
 
-  test('any unsupported step → insufficient_context even when sufficient is "yes"', async () => {
+  // 29 Sep 2026: one unsupported step used to throw the whole answer away, so
+  // nothing was ever drafted. The unsupported steps are dropped instead and
+  // the rest drafted as partial (never auto-send); the numbered draft the
+  // check judged is kept on the run.
+  test('unsupported steps are dropped; the rest is drafted as partial_context', async () => {
     gatewayMock.sendJson.mockResolvedValueOnce({ content: JSON.stringify({ sufficient: 'yes', unsupportedSteps: [2, 9], stayQuiet: { matched: false } }) });
     gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
-    expect(run.gateDecision).toBe('insufficient_context');
+    expect(run.status).toBe('drafted');
+    expect(run.gateDecision).toBe('partial_context');
     expect(run.checks.answerability.unsupportedSteps).toEqual([2]);
-    expect(run.transcript.reason).toMatch(/Step 2 not supported/);
+    expect(run.checks.droppedSteps).toEqual([2]);
+    expect(run.checks.draftSteps).toEqual([
+      { n: 1, text: 'Open Company Portal.', supported: true },
+      { n: 2, text: 'Search for Bluebeam Revu and choose Install.', supported: false },
+    ]);
+    expect(run.draftText).toContain('Open Company Portal.');
+    expect(run.draftText).not.toContain('Search for Bluebeam Revu');
+    expect(run.transcript.autoSendEligible).toBe(false);
+  });
+
+  test('every step unsupported → insufficient_context, with the judged draft kept', async () => {
+    gatewayMock.sendJson.mockResolvedValueOnce({ parsed: { sufficient: 'yes', unsupportedSteps: [1, 2], stayQuiet: { matched: false } } });
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.status).toBe('not_answerable');
+    expect(run.gateDecision).toBe('insufficient_context');
+    expect(run.checks.draftSteps.map((st) => st.supported)).toEqual([false, false]);
+    expect(run.transcript.reason).toMatch(/None of the draft steps/);
+  });
+
+  test('"no" → insufficient_context, with the judged draft kept', async () => {
+    gatewayMock.sendJson.mockResolvedValueOnce({ parsed: { sufficient: 'no', unsupportedSteps: [], reason: 'nothing on licences', stayQuiet: { matched: false } } });
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.gateDecision).toBe('insufficient_context');
+    expect(run.checks.draftSteps).toHaveLength(2);
+    expect(run.transcript.reason).toMatch(/not enough to answer this \(nothing on licences\)/);
   });
 
   test('"partial" → drafted under partial_context, never auto-send eligible', async () => {
@@ -809,5 +840,23 @@ describe('Knowledge v2 fit check ("When this playbook helps")', () => {
     expect(run.transcript.fit).toBeUndefined();
     expect(gatewayMock.runToolTurn).toHaveBeenCalledTimes(1);
     expect(gatewayMock.runToolTurn.mock.calls[0][0].systemPrompt).not.toContain('When this playbook helps');
+  });
+});
+
+// 29 Sep 2026: the Activity page's outcome line — counts per result under the
+// same playbook / time filters, ignoring the result filter itself.
+describe('listRuns status counts', () => {
+  test('counts per status come back beside the page, without the status filter', async () => {
+    prismaMock.autoHelpRun.findMany = jest.fn().mockResolvedValue([]);
+    prismaMock.autoHelpRun.count.mockResolvedValue(0);
+    prismaMock.autoHelpRun.groupBy.mockResolvedValue([
+      { status: 'no_match', _count: { _all: 59 } },
+      { status: 'drafted', _count: { _all: 4 } },
+    ]);
+    const out = await runner.listRuns(1, { status: 'drafted', playbookId: 3 });
+    expect(out.statusCounts).toEqual({ no_match: 59, drafted: 4 });
+    const where = prismaMock.autoHelpRun.groupBy.mock.calls.at(-1)[0].where;
+    expect(where).toEqual(expect.objectContaining({ workspaceId: 1, playbookId: 3 }));
+    expect(where.status).toBeUndefined();
   });
 });

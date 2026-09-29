@@ -308,8 +308,11 @@ describe('Activity: stayed-quiet runs', () => {
     expect(await screen.findByTestId('row-stayed-quiet')).toHaveTextContent('Stayed quiet: Any sign of a security incident');
     const drawer = await screen.findByTestId('run-stayed-quiet');
     expect(drawer).toHaveTextContent('Unknown sign-in from abroad');
-    expect(drawer).toHaveTextContent('A workspace-wide rule, caught by the answerability check.');
-    expect(await screen.findByTestId('stat-stayed-quiet')).toHaveTextContent('2 runs hit a stay-quiet rule (N=5)');
+    expect(drawer).toHaveTextContent('A workspace-wide rule, caught by the answer check.');
+    // Per-playbook numbers moved to their own view (29 Sep 2026).
+    cleanup();
+    renderAt('/knowledge/activity?view=playbooks');
+    expect(await screen.findByTestId('stat-stayed-quiet')).toHaveTextContent('2 of 5');
     api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
     api.runsSummary.mockResolvedValue({ success: true, data: [] });
   });
@@ -396,5 +399,68 @@ describe('article list: system tags read as words (audit, 26 Sep 2026)', () => {
     expect(list).toHaveTextContent('revit');
     expect(list).not.toHaveTextContent('Drafted from tickets, revit');
     expect(list).not.toHaveTextContent('drafted-from-tickets');
+  });
+});
+
+// 29 Sep 2026: Activity reorganised — outcome line, the judged draft with its
+// unsupported steps marked, and partial drafts that say what they left out.
+describe('Activity: runs view and the run panel', () => {
+  const base = { trigger: 'categorized', createdAt: new Date().toISOString(), mode: 'shadow', ticketId: 5, ticketRef: '#244642', ticketSubject: 'Bluebeam', playbookId: 3, playbookName: 'Software installs', sources: [] };
+
+  test('the outcome line counts every result and filters the list', async () => {
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0, statusCounts: { no_match: 59, not_answerable: 27, drafted: 4 } } });
+    renderAt('/knowledge/activity');
+    const line = await screen.findByTestId('outcome-line');
+    expect(line).toHaveTextContent('90 All runs');
+    expect(line).toHaveTextContent('4 Drafted');
+    expect(line).toHaveTextContent('59 No playbook');
+    fireEvent.click(within(line).getByRole('button', { name: /27 Not answerable/ }));
+    await waitFor(() => expect(api.listRuns).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'not_answerable' })));
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
+  });
+
+  test('not answerable: the panel shows the draft the check judged, with the unsupported step marked', async () => {
+    const RUN = {
+      ...base, id: 100, status: 'not_answerable', gateDecision: 'insufficient_context',
+      checks: {
+        answerability: { sufficient: 'no', unsupportedSteps: [], reason: 'Nothing on project numbers.' },
+        draftSteps: [
+          { n: 1, text: 'Request Bluebeam in the Software Request form.', supported: true },
+          { n: 2, text: 'Add the project number.', supported: false },
+        ],
+      },
+    };
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [RUN], total: 1 } });
+    api.getRun.mockResolvedValue({ success: true, data: RUN });
+    renderAt('/knowledge/activity/100');
+    const steps = await screen.findByTestId('draft-steps');
+    expect(steps).toHaveTextContent('1.Request Bluebeam in the Software Request form.');
+    expect(steps).toHaveTextContent('2.Add the project number.Not in the knowledge — left out');
+    expect(screen.getByTestId('run-detail')).toHaveTextContent('Nothing on project numbers.');
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
+  });
+
+  test('a partial draft says which steps it left out', async () => {
+    const RUN = {
+      ...base, id: 101, status: 'drafted', gateDecision: 'partial_context', draftSubject: 'Re: Bluebeam', draftHtml: '<ol><li>Request it.</li></ol>',
+      checks: { droppedSteps: [2], draftSteps: [{ n: 1, text: 'Request it.', supported: true }, { n: 2, text: 'Use PDF-XChange instead.', supported: false }] },
+    };
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [RUN], total: 1 } });
+    api.getRun.mockResolvedValue({ success: true, data: RUN });
+    renderAt('/knowledge/activity/101');
+    expect(await screen.findByTestId('dropped-steps')).toHaveTextContent('Use PDF-XChange instead.');
+    // The open panel hides the page from the accessibility tree: find the row by its label.
+    const row = screen.getByTestId('runs-table').querySelector('tr[aria-label="Run on #244642"]');
+    expect(row).toHaveTextContent('Drafted without step 2 (not in the knowledge)');
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
+  });
+
+  test('older runs that named a step without keeping the draft say so', async () => {
+    const RUN = { ...base, id: 91, status: 'not_answerable', gateDecision: 'insufficient_context', checks: { answerability: { sufficient: 'yes', unsupportedSteps: [6], reason: 'Step 6 is not in the context.' } } };
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [RUN], total: 1 } });
+    api.getRun.mockResolvedValue({ success: true, data: RUN });
+    renderAt('/knowledge/activity/91');
+    expect(await screen.findByText(/Runs before 29 Sep did not keep the draft/)).toBeInTheDocument();
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
   });
 });

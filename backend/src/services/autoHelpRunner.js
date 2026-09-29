@@ -1498,44 +1498,55 @@ class AutoHelpRunner {
     }
 
     // The runner builds the body from the steps (R4a) — the model never hands over raw HTML.
+    // finalizeBody runs again on the kept steps when the answerability check
+    // drops some (29 Sep 2026), so the stored draft is always guarded.
     const allowedUrls = await this._allowedLinkUrls(ctx, cited, playbookIsSource);
     const part = (t) => sanitizeDraftHtml(String(t || '').trim(), allowedUrls);
-    const builtHtml = [
-      sub.intro ? `<p>${part(sub.intro)}</p>` : '',
-      `<ol>${sub.steps.map((st) => `<li>${part(st.text)}</li>`).join('')}</ol>`,
-      sub.outro ? `<p>${part(sub.outro)}</p>` : '',
-    ].join('');
-    const bodyHtml = sanitizeDraftHtml(builtHtml, allowedUrls);
-    const bodyText = htmlToText(bodyHtml);
-    if (!bodyHtml || !bodyText) throw new Error('The model submitted an empty answer');
-    const subject = clip(String(sub.subject || '').trim() || `Re: ${ticket.subject || 'your request'}`, 200);
-    this._leakCheck(subject, bodyHtml, bodyText, ticket);
+    const contextBundle = await this._guardContext(ctx);
+    const finalizeBody = (steps) => {
+      const builtHtml = [
+        sub.intro ? `<p>${part(sub.intro)}</p>` : '',
+        `<ol>${steps.map((st) => `<li>${part(st.text)}</li>`).join('')}</ol>`,
+        sub.outro ? `<p>${part(sub.outro)}</p>` : '',
+      ].join('');
+      const bodyHtml = sanitizeDraftHtml(builtHtml, allowedUrls);
+      const bodyText = htmlToText(bodyHtml);
+      if (!bodyHtml || !bodyText) throw new Error('The model submitted an empty answer');
+      const subject = clip(String(sub.subject || '').trim() || `Re: ${ticket.subject || 'your request'}`, 200);
+      this._leakCheck(subject, bodyHtml, bodyText, ticket);
 
-    let guarded;
-    try {
-      guarded = guardNotificationEmailPayload({ subject, html: bodyHtml, text: bodyText }, {
-        contextBundle: await this._guardContext(ctx),
-        strictCitations: false,
-        repairGuardrails: ['direct_email_address', 'unsupported_timing_claims', 'unsupported_outage_claims', 'similar_report_claim_without_evidence'],
-        toneStyleAction: 'audit',
-      });
-    } catch (err) {
-      throw gateError(`Guard blocked the answer: ${err.message}`, GATE.GUARD_BLOCKED);
-    }
-    const payload = guarded.payload || { subject, html: bodyHtml };
-    // Final form: re-sanitize whatever the guard repaired, derive text from it,
-    // and run the leak checks once more on exactly what would be stored.
-    const finalHtml = sanitizeDraftHtml(payload.html || bodyHtml, allowedUrls);
-    const finalText = htmlToText(finalHtml);
-    const finalSubject = clip(String(payload.subject || subject), 200);
-    if (!finalHtml || !finalText) throw gateError('Guard removed the whole answer', GATE.GUARD_BLOCKED);
-    this._leakCheck(finalSubject, finalHtml, finalText, ticket);
-
-    transcript.guard = {
-      repaired: (guarded.repairedIssues || []).map((i) => i.id),
-      audit: (guarded.auditOnlyIssues || []).map((i) => i.id),
+      let guarded;
+      try {
+        guarded = guardNotificationEmailPayload({ subject, html: bodyHtml, text: bodyText }, {
+          contextBundle,
+          strictCitations: false,
+          repairGuardrails: ['direct_email_address', 'unsupported_timing_claims', 'unsupported_outage_claims', 'similar_report_claim_without_evidence'],
+          toneStyleAction: 'audit',
+        });
+      } catch (err) {
+        throw gateError(`Guard blocked the answer: ${err.message}`, GATE.GUARD_BLOCKED);
+      }
+      const payload = guarded.payload || { subject, html: bodyHtml };
+      // Final form: re-sanitize whatever the guard repaired, derive text from it,
+      // and run the leak checks once more on exactly what would be stored.
+      const html = sanitizeDraftHtml(payload.html || bodyHtml, allowedUrls);
+      const text = htmlToText(html);
+      const finalSubjectLine = clip(String(payload.subject || subject), 200);
+      if (!html || !text) throw gateError('Guard removed the whole answer', GATE.GUARD_BLOCKED);
+      this._leakCheck(finalSubjectLine, html, text, ticket);
+      return {
+        html,
+        text,
+        subject: finalSubjectLine,
+        guard: {
+          repaired: (guarded.repairedIssues || []).map((i) => i.id),
+          audit: (guarded.auditOnlyIssues || []).map((i) => i.id),
+        },
+      };
     };
-    transcript.body = { html: finalHtml, text: finalText };
+    let body = finalizeBody(sub.steps);
+    transcript.guard = body.guard;
+    transcript.body = { html: body.html, text: body.text };
 
     // R4b: a separate, cheap "is the retrieved context enough?" check. Its
     // verdict overrides the drafting model's own answerable=true.
@@ -1563,11 +1574,36 @@ class AutoHelpRunner {
       transcript.reason = stayQuietReason(sq);
       return { status: 'not_answerable', confidence, cited, gateDecision: GATE.STAYED_QUIET, checks };
     }
-    if (check.sufficient === 'no' || check.unsupportedSteps.length) {
-      transcript.reason = check.sufficient === 'no'
-        ? `The retrieved knowledge is not enough to answer this fully${check.reason ? ` (${clip(check.reason, 200)})` : ''}`
-        : `Step${check.unsupportedSteps.length === 1 ? '' : 's'} ${check.unsupportedSteps.join(', ')} not supported by the retrieved knowledge`;
+    // The numbered draft the check judged, kept on every run so a reviewer can
+    // see which step it means (29 Sep 2026: "step 6 not supported" named a
+    // draft that was thrown away, next to three unrelated steps).
+    const unsupported = new Set(check.unsupportedSteps.filter((n) => n >= 1 && n <= sub.steps.length));
+    checks.draftSteps = sub.steps.map((st, i) => ({
+      n: i + 1,
+      text: clip(htmlToText(part(st.text)) || String(st.text || ''), 500),
+      supported: !unsupported.has(i + 1),
+    }));
+    if (check.sufficient === 'no') {
+      transcript.reason = `The retrieved knowledge is not enough to answer this${check.reason ? ` (${clip(check.reason, 200)})` : ''}`;
       return { status: 'not_answerable', confidence, cited, gateDecision: GATE.INSUFFICIENT_CONTEXT, checks };
+    }
+    // One step the knowledge does not back no longer throws the whole answer
+    // away (29 Sep 2026: every shadow run with a single unsupported step ended
+    // not answerable). Those steps are dropped; what is left is drafted as
+    // partial, which never auto-sends. Nothing left → not answerable.
+    if (unsupported.size) {
+      const kept = sub.steps.filter((_, i) => !unsupported.has(i + 1));
+      const dropped = [...unsupported].sort((a, b) => a - b);
+      if (!kept.length) {
+        transcript.reason = 'None of the draft steps is backed by the retrieved knowledge';
+        return { status: 'not_answerable', confidence, cited, gateDecision: GATE.INSUFFICIENT_CONTEXT, checks };
+      }
+      body = finalizeBody(kept);
+      transcript.guard = body.guard;
+      transcript.body = { html: body.html, text: body.text };
+      transcript.droppedSteps = dropped;
+      checks.droppedSteps = dropped;
+      if (gateDecision === GATE.SHADOW_RECORDED) gateDecision = GATE.PARTIAL_CONTEXT;
     }
     if (check.sufficient === 'partial' && gateDecision === GATE.SHADOW_RECORDED) gateDecision = GATE.PARTIAL_CONTEXT;
 
@@ -1576,9 +1612,9 @@ class AutoHelpRunner {
     transcript.autoSendEligible = !AUTO_SEND_INELIGIBLE_GATES.includes(gateDecision) && !transcript.belowMinConfidence;
 
     const preview = buildPreview({
-      subject: finalSubject,
-      html: finalHtml,
-      text: finalText,
+      subject: body.subject,
+      html: body.html,
+      text: body.text,
       settings,
       workspaceName,
       followUp: playbook.followUp,
@@ -1775,7 +1811,11 @@ class AutoHelpRunner {
     if (Object.keys(created).length) where.createdAt = created;
     const take = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const skip = Math.max(Number(offset) || 0, 0);
-    const [rows, total] = await Promise.all([
+    // Counts per result under the same playbook / time filters (not the result
+    // filter itself), for the Activity page's outcome line (29 Sep 2026).
+    const countWhere = { ...where };
+    delete countWhere.status;
+    const [rows, total, byStatus] = await Promise.all([
       Promise.resolve().then(() => prisma.autoHelpRun.findMany({
         where, orderBy: { createdAt: 'desc' }, take, skip,
         select: {
@@ -1786,8 +1826,10 @@ class AutoHelpRunner {
         },
       })).catch((err) => { logger.warn(`Auto-help run list failed (ws ${workspaceId}): ${err.message}`); return []; }),
       Promise.resolve().then(() => prisma.autoHelpRun.count({ where })).catch(() => 0),
+      Promise.resolve().then(() => prisma.autoHelpRun.groupBy({ by: ['status'], where: countWhere, _count: { _all: true } })).catch(() => []),
     ]);
-    return { items: await this._decorate(workspaceId, rows), total };
+    const statusCounts = Object.fromEntries((byStatus || []).map((g) => [g.status, g._count?._all || 0]));
+    return { items: await this._decorate(workspaceId, rows), total, statusCounts };
   }
 
   async getRun(workspaceId, id) {
