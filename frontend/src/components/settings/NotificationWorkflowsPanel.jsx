@@ -4824,7 +4824,9 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
         Templates
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-1 w-96 rounded-xl border border-border bg-card p-2 shadow-lg">
+        // QA 09-28 #5: the button sits near the LEFT of the toolbar, so a
+        // right-anchored panel ran off the left edge and was clipped.
+        <div className="absolute left-0 z-40 mt-1 w-96 max-w-[calc(100vw-5rem)] rounded-xl border border-border bg-card p-2 shadow-lg" data-testid="workflow-templates-panel">
           <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">AI email workflow templates</p>
           {templates === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
           {templates?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No templates available.</p>}

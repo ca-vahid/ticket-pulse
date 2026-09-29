@@ -268,3 +268,103 @@ describe('enabled_at + the cached switch (audit, 26 Sep 2026)', () => {
     expect(await service.enabledState(1, { now: t0 + 62e3 })).toMatchObject({ enabled: false });
   });
 });
+
+describe('Knowledge v2: scope, then let the AI judge (28 Sep 2026)', () => {
+  test('normalizeMatch: whenToHelp trimmed + capped; useWords explicit, else inferred from legacy words', async () => {
+    const { normalizeMatch, MAX_WHEN_TO_HELP } = await import('../src/services/autoHelpPlaybookService.js');
+    expect(normalizeMatch({})).toEqual({ keywords: [], excludeKeywords: [], whenToHelp: '', useWords: false });
+    expect(normalizeMatch({ keywords: ['install'] }).useWords).toBe(true);
+    expect(normalizeMatch({ excludeKeywords: ['mac'] }).useWords).toBe(true);
+    expect(normalizeMatch({ keywords: ['install'], useWords: false }).useWords).toBe(false);
+    expect(normalizeMatch({ useWords: true }).useWords).toBe(true);
+    expect(normalizeMatch({ whenToHelp: '  Software   installs\n and updates  ' }).whenToHelp).toBe('Software installs and updates');
+    expect(normalizeMatch({ whenToHelp: 'x'.repeat(900) }).whenToHelp).toHaveLength(MAX_WHEN_TO_HELP);
+    expect(playbookView(pb({ match: { whenToHelp: 'Installs', useWords: false } })).match).toMatchObject({ whenToHelp: 'Installs', useWords: false });
+  });
+
+  test('useWords false: scope only (category + subcategories), words ignored', () => {
+    const p = pb({ subcategoryIds: [101], match: { keywords: ['printer'], excludeKeywords: ['bluebeam'], useWords: false } });
+    expect(explainMatch(p, ticket())).toEqual({ matches: true, reason: 'Matches' });
+    expect(explainMatch(p, ticket({ internalSubcategoryId: 102 })).matches).toBe(false);
+    expect(explainMatch(p, ticket({ internalCategoryId: 11 })).matches).toBe(false);
+  });
+
+  test('legacy rows (words, no useWords) keep their word gate', () => {
+    expect(explainMatch(pb({ match: { keywords: ['printer'] } }), ticket()).matches).toBe(false);
+  });
+
+  test('word rules hear spelling variants and one typo when they apply', () => {
+    const lic = pb({ match: { keywords: ['bluebeam'], excludeKeywords: ['licence'] } });
+    expect(explainMatch(lic, ticket({ subject: 'Bluebeam license expired' }))).toEqual({ matches: false, reason: 'Excluded word "licence" appears' });
+    const gm = pb({ match: { keywords: ['global'] } });
+    expect(explainMatch(gm, ticket({ subject: 'Globbal Mapper Update', descriptionText: '' })).matches).toBe(true);
+    const setup = pb({ match: { keywords: ['setup'] } });
+    expect(explainMatch(setup, ticket({ subject: 'Please set up my new laptop', descriptionText: '' })).matches).toBe(true);
+  });
+
+  test('previewMatch: draft vs saved on 30 days of tickets, examples capped, no AI fit check', async () => {
+    const saved = pb({ id: 7, match: { keywords: ['bluebeam'] } });
+    prismaMock.autoHelpPlaybook.findFirst.mockResolvedValue(saved);
+    prismaMock.ticket = {
+      findMany: jest.fn(async () => [
+        { id: 1, origin: 'freshservice', freshserviceTicketId: 501, internalCategoryId: 10, internalSubcategoryId: 101, subject: 'Bluebeam please', descriptionText: '' },
+        { id: 2, origin: 'ticketpulse', nativeNumber: 12, internalCategoryId: 10, internalSubcategoryId: 101, subject: 'Leapfrog Viewer', descriptionText: '' },
+        { id: 3, origin: 'ticketpulse', nativeNumber: 13, internalCategoryId: 10, internalSubcategoryId: 102, subject: 'RocScience', descriptionText: '' },
+        { id: 4, origin: 'ticketpulse', nativeNumber: 14, internalCategoryId: 11, internalSubcategoryId: 111, subject: 'Other category', descriptionText: '' },
+      ]),
+    };
+    const now = Date.parse('2026-09-28T12:00:00Z');
+    const out = await service.previewMatch(1, { id: 7, draft: { match: { whenToHelp: 'Software installs', useWords: false }, subcategoryIds: [101] }, now });
+    expect(out).toMatchObject({ days: 30, aiFitCheckNotRun: true, inScope: 2, draftTakes: 2, savedTakes: 1, scanned: 4, capped: false });
+    expect(out.gained).toEqual([{ id: 2, ref: 'TP-12', subject: 'Leapfrog Viewer' }]);
+    expect(out.lost).toEqual([]);
+    const args = prismaMock.ticket.findMany.mock.calls.at(-1)[0];
+    expect(args.where).toMatchObject({ workspaceId: 1, isNoise: false, internalCategoryId: { in: [10] } });
+    expect(args.where.createdAt.gte.toISOString()).toBe('2026-08-29T12:00:00.000Z');
+    expect(args.take).toBe(4000);
+    expect(Object.keys(args.select).sort()).toEqual(['descriptionText', 'freshserviceTicketId', 'id', 'internalCategoryId', 'internalSubcategoryId', 'nativeNumber', 'origin', 'subject']);
+
+    // Switching a draft on without a category never throws in a preview.
+    await expect(service.previewMatch(1, { id: 7, draft: { enabled: true, subcategoryIds: [] }, now })).resolves.toMatchObject({ aiFitCheckNotRun: true });
+
+    // A new, unsaved playbook: nothing saved to compare with.
+    const fresh = await service.previewMatch(1, { draft: { categoryId: 10, match: { keywords: ['bluebeam'] } }, now });
+    expect(fresh).toMatchObject({ draftTakes: 1, savedTakes: 0, inScope: 3 });
+    expect(fresh.gained.map((g) => g.id)).toEqual([1]);
+
+    // No category anywhere: no ticket read.
+    prismaMock.ticket.findMany.mockClear();
+    expect(await service.previewMatch(1, { draft: {}, now })).toMatchObject({ inScope: 0, draftTakes: 0 });
+    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+    delete prismaMock.ticket;
+  });
+
+  test('list: summary per playbook from one article read (no N+1)', async () => {
+    prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([
+      pb({ id: 1, subcategoryIds: [101, 102], stayQuietWhen: ['Macs'], match: { whenToHelp: 'Installs' } }),
+      pb({ id: 2, categoryId: 20 }),
+    ]);
+    prismaMock.autoHelpRun.groupBy.mockResolvedValue([]);
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ workspaceId: 1, alwaysStayQuietWhen: ['a', 'b', 'c'] });
+    prismaMock.knowledgeArticle = {
+      findMany: jest.fn(async () => [{ id: 5, title: 'Installing', categoryId: 10 }, { id: 6, title: 'Licences', categoryId: 10 }]),
+      count: jest.fn(async () => 9),
+    };
+    const rows = await service.list(1);
+    expect(prismaMock.knowledgeArticle.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.knowledgeArticle.findMany.mock.calls[0][0].where).toEqual({ workspaceId: 1, status: 'published', categoryId: { in: [10, 20] } });
+    expect(rows[0].summary).toEqual({
+      subcategoryCount: 2, whenToHelp: 'Installs', useWords: false, stayQuietCount: 1, workspaceRuleCount: 3,
+      articles: [{ id: 5, title: 'Installing' }, { id: 6, title: 'Licences' }], articleCount: 2, articleTotalPublished: 9,
+    });
+    expect(rows[1].summary).toMatchObject({ articles: [], articleCount: 0, articleTotalPublished: 9 });
+    delete prismaMock.knowledgeArticle;
+  });
+
+  test('summary degrades when articles cannot be read', async () => {
+    prismaMock.autoHelpPlaybook.findFirst.mockResolvedValue(pb({ id: 3 }));
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue(null);
+    const view = await service.getWithSummary(1, 3);
+    expect(view.summary).toMatchObject({ articles: [], articleTotalPublished: 0, workspaceRuleCount: 3 });
+  });
+});

@@ -54,4 +54,37 @@ describe('FancySelect (16 Sep 2026)', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Open' }));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  test('menu is at least trigger-wide, grows to fit long labels and stays inside the viewport (QA 09-28)', () => {
+    const long = [{ value: '', label: 'All categories' }, { value: 's1', label: 'Service Desk & Routing → Non-actionable Notifications', group: 'Subcategories' }];
+    const onChange = vi.fn();
+    render(<FancySelect value="" onChange={onChange} options={long} aria-label="Article category" />);
+    const btn = screen.getByRole('combobox', { name: 'Article category' });
+    btn.getBoundingClientRect = () => ({ left: 900, right: 1124, top: 100, bottom: 140, width: 224, height: 40 });
+    const prevW = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    fireEvent.click(btn);
+    const list = screen.getByRole('listbox');
+    expect(list.style.minWidth).toBe('224px');
+    expect(list.style.width).toBe('max-content');
+    expect(list.style.maxWidth).toBe('372px'); // 1280 - 900 - 8, under the 440 px cap
+    const opt = screen.getByRole('option', { name: /Non-actionable Notifications/ });
+    expect(opt.querySelector('span[title]')).toHaveAttribute('title', 'Service Desk & Routing → Non-actionable Notifications');
+    // type-ahead still works on the wider menu
+    fireEvent.keyDown(btn, { key: 's' });
+    fireEvent.keyDown(btn, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('s1');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: prevW });
+  });
+
+  test('menu never shrinks below the trigger even when the viewport is tight', () => {
+    render(<FancySelect value="Open" onChange={() => {}} options={OPTIONS} aria-label="S" />);
+    const btn = screen.getByRole('combobox', { name: 'S' });
+    btn.getBoundingClientRect = () => ({ left: 300, right: 700, top: 100, bottom: 140, width: 400, height: 40 });
+    const prevW = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 });
+    fireEvent.click(btn);
+    expect(screen.getByRole('listbox').style.maxWidth).toBe('400px');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: prevW });
+  });
 });

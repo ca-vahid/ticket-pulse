@@ -35,6 +35,21 @@ import { htmlToText, splitArticleSections } from '../utils/articleSections.js';
 
 export const ARTICLE_STATUSES = Object.freeze(['draft', 'published', 'archived']);
 export const ARTICLE_SOURCES = Object.freeze(['tp', 'fs_solution', 'verified_ticket']);
+/**
+ * Where an article came from, in words (Knowledge v2). Provenance lives in
+ * source / sourceMeta, not in the tags: tags are Topics (browsing only).
+ */
+export const SOURCE_LABELS = Object.freeze({
+  drafted: 'Drafted from tickets',
+  fs_solution: 'FreshService solution',
+  verified_ticket: 'Verified solution',
+  tp: 'Written in Ticket Pulse',
+});
+/** The tag drafted articles carried before Knowledge v2 - hidden from Topics, read as provenance. */
+export const LEGACY_DRAFTED_TAG = 'drafted-from-tickets';
+export const MAX_TOPIC_SUGGESTIONS = 15;
+/** "Quoted" counts look at this many recent runs at most (jsonb scan bound). */
+const QUOTED_RUN_SCAN = 5000;
 const MAX_TITLE = 300;
 const MAX_BODY_HTML = 100000;
 const MAX_TAGS = 20;
@@ -218,6 +233,36 @@ export function snippetOf(text, max = 220) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+const isLegacyDraftedTag = (tag) => String(tag || '').trim().toLowerCase() === LEGACY_DRAFTED_TAG;
+
+/** "Drafted from tickets" / "FreshService solution" / "Verified solution" / "Written in Ticket Pulse". */
+export function sourceLabelOf(row) {
+  if (row?.source === 'fs_solution') return SOURCE_LABELS.fs_solution;
+  if (row?.source === 'verified_ticket') return SOURCE_LABELS.verified_ticket;
+  const drafted = Boolean(row?.sourceMeta && typeof row.sourceMeta === 'object' && row.sourceMeta.draftedFrom)
+    || (Array.isArray(row?.tags) && row.tags.some(isLegacyDraftedTag));
+  return drafted ? SOURCE_LABELS.drafted : SOURCE_LABELS.tp;
+}
+
+/**
+ * Playbooks that can quote an article (Knowledge v2 "Quoted by"): same
+ * category, and - when the playbook lists subcategories - the article's
+ * subcategory is one of them, or the article has none (it covers the whole
+ * category). Pure; exported for tests.
+ */
+export function playbooksReaching(article, playbooks = []) {
+  const cat = Number(article?.categoryId) || null;
+  if (!cat) return [];
+  const sub = Number(article?.subcategoryId) || null;
+  return (playbooks || [])
+    .filter((pb) => Number(pb.categoryId) === cat)
+    .filter((pb) => {
+      const subs = Array.isArray(pb.subcategoryIds) ? pb.subcategoryIds.map(Number) : [];
+      return !subs.length || !sub || subs.includes(sub);
+    })
+    .map((pb) => ({ playbookId: pb.id, name: pb.name, enabled: pb.enabled === true }));
+}
+
 /** API shape: never ships the vector, only whether one exists. */
 export function articleView(row, { withBody = true, now = Date.now() } = {}) {
   if (!row) return null;
@@ -225,6 +270,9 @@ export function articleView(row, { withBody = true, now = Date.now() } = {}) {
   const list = Array.isArray(sections) ? sections : [];
   return {
     ...rest,
+    // Topics only: the pre-v2 provenance tag moves to sourceLabel.
+    tags: Array.isArray(row.tags) ? row.tags.filter((t) => !isLegacyDraftedTag(t)) : [],
+    sourceLabel: sourceLabelOf(row),
     ...(withBody ? {} : { bodyHtml: undefined, bodyText: undefined }),
     snippet: snippetOf(row.bodyText),
     embedded: Array.isArray(embedding) && embedding.length > 0,
@@ -324,7 +372,8 @@ class KnowledgeArticleService {
       }),
       Promise.resolve().then(() => prisma.knowledgeArticle.count({ where })).catch(() => 0),
     ]);
-    return { items: rows.map((r) => articleView(r, { withBody: false })), total };
+    const items = await this._withReach(workspaceId, rows.map((r) => articleView(r, { withBody: false })));
+    return { items, total };
   }
 
   async get(workspaceId, id) {
@@ -332,7 +381,85 @@ class KnowledgeArticleService {
       .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) } }))
       .catch(() => null);
     if (!row) throw new NotFoundError('Article not found');
-    return articleView(row);
+    const [view] = await this._withReach(workspaceId, [articleView(row)]);
+    return view;
+  }
+
+  /**
+   * Adds `quotedBy` (playbooksReaching) and `timesQuoted` (Auto-help runs
+   * that CITED the article) to article views: one playbook read and one
+   * grouped jsonb count for the whole page. Fails soft to [] / 0.
+   */
+  async _withReach(workspaceId, views) {
+    if (!views.length) return views;
+    const ws = Number(workspaceId);
+    const [playbooks, quoted] = await Promise.all([
+      Promise.resolve().then(() => prisma.autoHelpPlaybook.findMany({
+        where: { workspaceId: ws },
+        select: { id: true, name: true, enabled: true, categoryId: true, subcategoryIds: true },
+        orderBy: [{ priority: 'desc' }, { id: 'asc' }],
+      })).catch(() => []),
+      this.timesQuoted(ws, views.map((v) => v.id)),
+    ]);
+    return views.map((v) => ({
+      ...v,
+      quotedBy: playbooksReaching(v, Array.isArray(playbooks) ? playbooks : []),
+      timesQuoted: quoted.get(v.id) || 0,
+    }));
+  }
+
+  /**
+   * Map(articleId -> runs that cited it): Auto-help runs of the workspace
+   * whose `sources` hold { sourceId: 'article:<id>', cited: true }, over the
+   * newest QUOTED_RUN_SCAN runs. Never throws (empty map).
+   */
+  async timesQuoted(workspaceId, articleIds = []) {
+    const ids = [...new Set((articleIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return new Map();
+    const sourceIds = ids.map((id) => `article:${id}`);
+    const rows = await Promise.resolve().then(() => prisma.$queryRaw`
+      SELECT e->>'sourceId' AS "sourceId", COUNT(DISTINCT r.id)::int AS n
+      FROM (
+        SELECT id, sources FROM auto_help_runs
+        WHERE workspace_id = ${Number(workspaceId)} AND jsonb_typeof(sources) = 'array'
+        ORDER BY created_at DESC
+        LIMIT ${QUOTED_RUN_SCAN}
+      ) r
+      CROSS JOIN LATERAL jsonb_array_elements(r.sources) e
+      WHERE e->>'cited' = 'true' AND e->>'sourceId' = ANY(${sourceIds})
+      GROUP BY 1
+    `).catch((err) => { logger.warn(`Knowledge: quoted counts failed (ws ${workspaceId}): ${err.message}`); return []; });
+    const out = new Map();
+    for (const r of Array.isArray(rows) ? rows : []) {
+      const id = Number(String(r.sourceId || '').split(':')[1]);
+      if (id) out.set(id, Number(r.n) || 0);
+    }
+    return out;
+  }
+
+  /**
+   * Topic suggestions (Knowledge v2): the workspace's article tags (Topics)
+   * that start with `q` (case-insensitive), grouped case-insensitively, most
+   * used first, top MAX_TOPIC_SUGGESTIONS. Archived articles and the legacy
+   * provenance tag are left out. Never throws.
+   */
+  async topics(workspaceId, { q = '' } = {}) {
+    const prefix = String(q ?? '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, MAX_TAG_CHARS);
+    const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const rows = await Promise.resolve().then(() => prisma.$queryRaw`
+      SELECT MIN(t) AS topic, COUNT(*)::int AS count
+      FROM knowledge_articles a
+      CROSS JOIN LATERAL unnest(a.tags) t
+      WHERE a.workspace_id = ${Number(workspaceId)} AND a.status <> 'archived'
+        AND lower(btrim(t)) LIKE ${like}
+        AND lower(btrim(t)) <> ${LEGACY_DRAFTED_TAG}
+      GROUP BY lower(btrim(t))
+      ORDER BY count DESC, lower(btrim(t)) ASC
+      LIMIT ${MAX_TOPIC_SUGGESTIONS}
+    `).catch((err) => { logger.warn(`Knowledge: topics failed (ws ${workspaceId}): ${err.message}`); return []; });
+    return (Array.isArray(rows) ? rows : [])
+      .map((r) => ({ topic: String(r.topic || '').trim(), count: Number(r.count) || 0 }))
+      .filter((r) => r.topic);
   }
 
   /**

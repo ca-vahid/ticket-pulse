@@ -158,6 +158,15 @@ router.get('/search', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await knowledgeArticleService.search(req.workspaceId, q, { limit: req.query.limit || 10, minScore: 0.1 }) });
 }));
 
+/**
+ * Topic suggestions for the article editor (Knowledge v2: tags are "Topics",
+ * for browsing only): the workspace's article topics starting with ?q=, most
+ * used first (top 15), as [{ topic, count }].
+ */
+router.get('/topics', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeArticleService.topics(req.workspaceId, { q: req.query.q }) });
+}));
+
 router.get('/articles/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await knowledgeArticleService.get(req.workspaceId, req.params.id) });
 }));
@@ -188,7 +197,21 @@ router.get('/playbooks', asyncHandler(async (req, res) => {
 }));
 
 router.get('/playbooks/:id', asyncHandler(async (req, res) => {
-  res.json({ success: true, data: await autoHelpPlaybookService.get(req.workspaceId, req.params.id) });
+  res.json({ success: true, data: await autoHelpPlaybookService.getWithSummary(req.workspaceId, req.params.id) });
+}));
+
+/**
+ * "Show the effect before saving" (Knowledge v2): the playbook body in the
+ * editor (unsaved) vs the saved one on the last 30 days of tickets. Scope and
+ * word rules only - no model call (aiFitCheckNotRun: true). The /:id form
+ * compares with the saved playbook; the bare form is a new playbook.
+ */
+router.post('/playbooks/preview-match', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await autoHelpPlaybookService.previewMatch(req.workspaceId, { draft: req.body || {} }) });
+}));
+
+router.post('/playbooks/:id/preview-match', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await autoHelpPlaybookService.previewMatch(req.workspaceId, { id: req.params.id, draft: req.body || {} }) });
 }));
 
 router.post('/playbooks', requireKnowledgeManager, asyncHandler(async (req, res) => {

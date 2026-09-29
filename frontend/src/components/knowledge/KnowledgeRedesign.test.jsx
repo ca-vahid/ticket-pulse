@@ -135,7 +135,7 @@ describe('playbook builder', () => {
     expect(header).not.toHaveTextContent('kim.lee@example.com');
     const titles = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
     expect(titles).toEqual(expect.arrayContaining([
-      'Step 1: Ticket matching', 'Step 2: Answer behaviour & instructions', 'Step 3: Tools the AI may use',
+      'Step 1: Which tickets', 'Step 2: Answer behaviour & instructions', 'Step 3: Tools the AI may use',
       'Step 4: Knowledge', 'Step 5: Decision thresholds', 'Step 6: Follow-up & closure',
     ]));
     expect(screen.getByTestId('instructions-count')).toHaveTextContent(`${PLAYBOOK.instructions.length}/8000`);
@@ -391,7 +391,10 @@ describe('article list: system tags read as words (audit, 26 Sep 2026)', () => {
     api.listArticles.mockResolvedValueOnce({ success: true, data: { items: [{ id: 88, title: 'Revit add-ins', status: 'draft', snippet: 'x', tags: ['drafted-from-tickets', 'revit'] }], total: 1 } });
     renderAt('/knowledge/articles');
     const list = await screen.findByTestId('articles-list');
-    expect(list).toHaveTextContent('Drafted from tickets, revit');
+    // MEGA 09-28: the source is its own part of the line, never mixed into the topics.
+    expect(list).toHaveTextContent('Drafted from tickets');
+    expect(list).toHaveTextContent('revit');
+    expect(list).not.toHaveTextContent('Drafted from tickets, revit');
     expect(list).not.toHaveTextContent('drafted-from-tickets');
   });
 });

@@ -8,7 +8,7 @@ import { formatDayTime, timeAgo } from '../tickets/ticketUi';
 import {
   Confidence, DraftPreview, EmptyState, Loading, PersonLine, RunStatus, SectionTitle, SourcesList, TranscriptSteps,
 } from './knowledgeUi';
-import { fmtDuration, readableReason } from './knowledgeFormat';
+import { fitReasonOf, fmtDuration, isNotThisPlaybook, readableReason } from './knowledgeFormat';
 import PlaybookMetrics from './PlaybookMetrics';
 import { DECISION_WORD, DISMISS_WORD, OUTCOME_WORD, runLifeLine, usd } from './autoHelpWords';
 
@@ -59,6 +59,8 @@ const GATE_WORD = {
   budget_exhausted: 'Skipped: the workspace reached its monthly Auto-help cost cap.',
   // "Stay quiet when" (26 Sep 2026)
   stayed_quiet: 'A “stay quiet when” rule applied, so Auto-help did not answer — a person picks it up.',
+  // Knowledge v2 (MEGA 09-28): the AI fit check against "When to help".
+  not_this_playbook: 'In the playbook’s subcategories, but the AI read its “When to help” and decided it doesn’t fit — a person picks it up.',
 };
 const HISTORY_WORD = {
   drafted: 'Drafted',
@@ -86,6 +88,15 @@ const CHECK_WORD = { yes: 'enough', partial: 'partly enough', no: 'not enough' }
 function stayQuietOf(run) {
   if (run?.checks?.stayQuiet) return run.checks.stayQuiet;
   return run?.gateDecision === 'stayed_quiet' ? {} : null;
+}
+/** The Result cell / drawer status: "Not this playbook" wins over the plain status. */
+function RunResult({ run }) {
+  if (stayQuietOf(run)) return <StayedQuietStatus />;
+  if (isNotThisPlaybook(run)) {
+    const why = fitReasonOf(run);
+    return <RunStatus status="not_this_playbook" title={why ? `Why: ${why}` : undefined} />;
+  }
+  return <RunStatus status={run.status} />;
 }
 function stayQuietLine(sq) {
   return `Stayed quiet: ${sq?.condition || 'a stay-quiet condition applied'}`;
@@ -262,7 +273,7 @@ function RunDetail({ runId, canReview = false }) {
     <div className="space-y-4" data-testid="run-detail">
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          {sq ? <StayedQuietStatus /> : <RunStatus status={run.status} />}
+          <RunResult run={run} />
           <Confidence value={run.confidence} min={run.minConfidence} />
           {fmtDuration(run.durationMs) && <span className="text-xs tabular-nums text-muted-foreground">{fmtDuration(run.durationMs)}</span>}
         </div>
@@ -299,6 +310,11 @@ function RunDetail({ runId, canReview = false }) {
       <DrawerCard title={run.status === 'drafted' ? 'What the requester would get' : 'Why Auto-help didn’t answer'}>
         {run.status === 'drafted' ? (
           <DraftPreview subject={run.draftSubject} html={run.draftHtml} />
+        ) : isNotThisPlaybook(run) ? (
+          <div className="rounded-lg bg-muted/50 px-3.5 py-3 text-sm text-foreground/85" data-testid="run-not-this-playbook">
+            <p className="font-medium text-foreground">Not this playbook</p>
+            <p className="mt-0.5 text-[13px]">{fitReasonOf(run) ? readableReason(fitReasonOf(run), run.sources) : 'The AI fit check gave no reason.'}</p>
+          </div>
         ) : sq ? (
           <div className="rounded-lg border border-blue-200/80 bg-blue-50/60 px-3.5 py-3 text-sm text-blue-900 dark:border-blue-400/25 dark:bg-blue-500/10 dark:text-blue-100" data-testid="run-stayed-quiet">
             <p className="font-medium">{stayQuietLine(sq)}</p>
@@ -440,10 +456,12 @@ export default function ActivityPanel({ runId = null, canReview = false }) {
                     <p className="truncate text-foreground"><span className="text-muted-foreground">{r.ticketRef}</span> {r.ticketSubject}</p>
                   </td>
                   <td className="max-w-[12rem] truncate text-xs text-foreground/85 sm:px-2 sm:py-2.5">{r.playbookName || '—'}</td>
-                  <td className="sm:px-2 sm:py-2.5">{stayQuietOf(r) ? <StayedQuietStatus /> : <RunStatus status={r.status} />}</td>
+                  <td className="sm:px-2 sm:py-2.5"><RunResult run={r} /></td>
                   <td className="sm:px-2 sm:py-2.5"><Confidence value={r.confidence} min={r.minConfidence} /></td>
                   <td className="text-xs text-muted-foreground sm:px-4 sm:py-2.5">
-                    {stayQuietOf(r) ? <span className="text-foreground/80" data-testid="row-stayed-quiet">{stayQuietLine(stayQuietOf(r))}</span> : (runLifeLine(r) || (r.mode === 'approve' || r.mode === 'auto' ? 'not suggested' : 'shadow — not sent'))}
+                    {stayQuietOf(r) ? <span className="text-foreground/80" data-testid="row-stayed-quiet">{stayQuietLine(stayQuietOf(r))}</span> : isNotThisPlaybook(r) ? (
+                      <span className="line-clamp-2 text-foreground/80" title={fitReasonOf(r) || undefined} data-testid="row-not-this-playbook">{fitReasonOf(r) || 'The AI decided this playbook doesn’t fit'}</span>
+                    ) : (runLifeLine(r) || (r.mode === 'approve' || r.mode === 'auto' ? 'not suggested' : 'shadow — not sent'))}
                     {r.reviewVerdict ? ` · ${VERDICT_WORD[r.reviewVerdict] || r.reviewVerdict}` : ''}
                   </td>
                 </tr>

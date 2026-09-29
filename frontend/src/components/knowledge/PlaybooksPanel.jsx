@@ -10,6 +10,7 @@ import PlaybookBuilder from './PlaybookBuilder';
 import { EmptyState, Loading } from './knowledgeUi';
 import { categoryLabel } from './knowledgeFormat';
 import { IconTile, StatusBadge, TabActions } from './builderUi';
+import PlaybookSummary from './PlaybookSummary';
 
 export { FALLBACK_NUDGE_TEXT } from './PlaybookBuilder';
 
@@ -73,25 +74,29 @@ function PlaybookList({ categories, canManage }) {
           {items.map((pb) => (
             <li key={pb.id} className="tp-card flex items-start gap-3.5 p-4 transition-shadow hover:shadow-soft">
               <IconTile icon={BookMarked} size="md" tone={pb.enabled ? 'primary' : 'muted'} />
-              <Link to={`/knowledge/playbooks/${pb.id}`} className="tp-focus-ring min-w-0 flex-1 rounded">
-                <span className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 truncate text-[15px] font-semibold text-foreground">{pb.name}</span>
-                  <StatusBadge tone={pb.enabled ? 'success' : 'muted'}>{pb.enabled ? 'Active' : 'Off'}</StatusBadge>
-                </span>
-                <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">{categoryLabel(categories, pb.categoryId, pb.subcategoryIds)}</span>
-                <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    {pb.mode === 'approve' || pb.mode === 'auto' ? <Send className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
-                    {MODE_SHORT[pb.mode] || 'Shadow'}
+              <div className="min-w-0 flex-1">
+                <Link to={`/knowledge/playbooks/${pb.id}`} className="tp-focus-ring block min-w-0 rounded">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="min-w-0 truncate text-[15px] font-semibold text-foreground">{pb.name}</span>
+                    <StatusBadge tone={pb.enabled ? 'success' : 'muted'}>{pb.enabled ? 'Active' : 'Off'}</StatusBadge>
                   </span>
-                  {pb.sensitive && <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />sensitive</span>}
-                  {(pb.stayQuietWhen || []).length > 0 && (
-                    <span className="inline-flex items-center gap-1"><Hand className="h-3.5 w-3.5" aria-hidden="true" />{pb.stayQuietWhen.length} stay-quiet rule{pb.stayQuietWhen.length === 1 ? '' : 's'}</span>
-                  )}
-                  <span>priority {pb.priority}</span>
-                  <span>{pb.lastRunAt ? `last run ${timeAgo(pb.lastRunAt)} · ${pb.runCount} run${pb.runCount === 1 ? '' : 's'}` : 'never run'}</span>
-                </span>
-              </Link>
+                  <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">{categoryLabel(categories, pb.categoryId, pb.subcategoryIds)}</span>
+                  <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      {pb.mode === 'approve' || pb.mode === 'auto' ? <Send className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+                      {MODE_SHORT[pb.mode] || 'Shadow'}
+                    </span>
+                    {pb.sensitive && <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />sensitive</span>}
+                    {(pb.stayQuietWhen || []).length > 0 && (
+                      <span className="inline-flex items-center gap-1"><Hand className="h-3.5 w-3.5" aria-hidden="true" />{pb.stayQuietWhen.length} stay-quiet rule{pb.stayQuietWhen.length === 1 ? '' : 's'}</span>
+                    )}
+                    <span>priority {pb.priority}</span>
+                    <span>{pb.lastRunAt ? `last run ${timeAgo(pb.lastRunAt)} · ${pb.runCount} run${pb.runCount === 1 ? '' : 's'}` : 'never run'}</span>
+                  </span>
+                </Link>
+                {/* Outside the card link: the article titles are links of their own. */}
+                <PlaybookSummary summary={pb.summary} className="mt-2 border-t border-border/60 pt-2" small testId={`playbook-summary-${pb.id}`} />
+              </div>
               {canManage && (
                 <Switch
                   checked={pb.enabled}

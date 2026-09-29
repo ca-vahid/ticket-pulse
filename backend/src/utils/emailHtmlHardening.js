@@ -13,10 +13,11 @@
 const STYLE_PROP = (style, name) => {
   const re = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, 'i');
   const m = re.exec(style);
-  return m ? m[1].trim() : null;
+  return m ? m[1].replace(/!important/gi, '').trim() : null;
 };
 
-const ANCHOR_RE = /<a\b([^>]*?)\sstyle\s*=\s*"([^"]*)"([^>]*)>([\s\S]*?)<\/a>/gi;
+// style="…" or style='…' (some authoring tools emit single quotes).
+const ANCHOR_RE = /<a\b([^>]*?)\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')([^>]*)>([\s\S]*?)<\/a>/gi;
 
 function escapeAttr(value) {
   return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -25,13 +26,15 @@ function escapeAttr(value) {
 /**
  * Rewrites every anchor whose inline style carries BOTH a background and a
  * padding into a table-cell button. Anchors that are plain links, or already
- * sit inside a bulletproof cell (no padding on the anchor), are left alone,
- * which also makes the transform idempotent.
+ * sit inside a bulletproof cell (the colour lives on the cell, so the anchor has
+ * padding but no background), are left alone, which also makes the transform
+ * idempotent.
  */
 export function bulletproofButtons(html) {
   const input = String(html || '');
   if (!input || !/<a\b/i.test(input)) return input;
-  return input.replace(ANCHOR_RE, (whole, before, style, after, inner) => {
+  return input.replace(ANCHOR_RE, (whole, before, dq, sq, after, inner) => {
+    const style = dq ?? sq ?? '';
     const background = STYLE_PROP(style, 'background-color') || STYLE_PROP(style, 'background');
     const padding = STYLE_PROP(style, 'padding');
     if (!background || !padding) return whole;
@@ -43,10 +46,17 @@ export function bulletproofButtons(html) {
     const fontWeight = STYLE_PROP(style, 'font-weight');
     const fontSize = STYLE_PROP(style, 'font-size');
     const attrs = `${before} ${after}`.replace(/\s+/g, ' ').trim();
+    // Non-Outlook clients: the anchor carries the padding (and radius), so the
+    // whole coloured area is clickable. Outlook's Word engine ignores padding on
+    // an <a>, so the cell carries it there via mso-padding-alt; `padding:0` for
+    // everyone else avoids doubling it. (mso-padding-alt:0 was the QA 09-28 bug:
+    // it cancelled the cell padding in Outlook and the colour hugged the text.)
     const anchorStyle = [
       'display:inline-block',
+      `padding:${padding}`,
       `color:${color}`,
       'text-decoration:none',
+      radius ? `border-radius:${radius}` : null,
       `font-family:${fontFamily}`,
       fontWeight ? `font-weight:${fontWeight}` : null,
       fontSize ? `font-size:${fontSize}` : null,
@@ -55,13 +65,13 @@ export function bulletproofButtons(html) {
     const cellStyle = [
       `background-color:${bg}`,
       radius ? `border-radius:${radius}` : null,
-      `padding:${padding}`,
+      'padding:0',
+      `mso-padding-alt:${padding}`,
       'text-align:center',
-      'mso-padding-alt:0',
     ].filter(Boolean).join(';');
-    return '<table role="presentation" border="0" cellpadding="0" cellspacing="0" style="display:inline-table;border-collapse:separate;">'
-      + `<tr><td bgcolor="${escapeAttr(bg)}" style="${cellStyle}">`
-      + `<a ${attrs} style="${anchorStyle}">${inner.trim()}</a>`
+    return '<table role="presentation" border="0" cellpadding="0" cellspacing="0" style="border-collapse:separate;">'
+      + `<tr><td align="center" bgcolor="${escapeAttr(bg)}" style="${escapeAttr(cellStyle)}">`
+      + `<a ${attrs} style="${escapeAttr(anchorStyle)}">${inner.trim()}</a>`
       + '</td></tr></table>';
   });
 }

@@ -1349,6 +1349,14 @@ export const knowledgeAPI = {
   updatePlaybook: (id, data) => api.put(`/knowledge/playbooks/${id}`, data),
   deletePlaybook: (id) => api.delete(`/knowledge/playbooks/${id}`),
   playbookReadiness: (id) => api.get(`/knowledge/playbooks/${id}/readiness`),
+  // Knowledge v2 (MEGA 09-28 §6): "effect before saving" — the draft body's
+  // 30-day scope delta vs the saved version, before the AI's fit check.
+  // → { days, inScope, draftTakes, savedTakes, gained:[{id,ref,subject}], lost:[…], aiFitCheckNotRun }
+  previewPlaybookMatch: (id, data) => (id
+    ? api.post(`/knowledge/playbooks/${id}/preview-match`, data)
+    : api.post('/knowledge/playbooks/preview-match', data)),
+  // Article topics type-ahead → [{ topic, count }] (top 15).
+  topics: (q = '') => api.get('/knowledge/topics', { params: { q }, _speculative: true }),
   // "Preview answer": the newest drafted test run, or a labelled sample (no model call).
   playbookPreview: (id) => api.get(`/knowledge/playbooks/${id}/preview`),
   // Synchronous model run (≤45 s budget server-side) — long client timeout.

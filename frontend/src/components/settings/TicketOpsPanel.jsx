@@ -1475,7 +1475,7 @@ export function CategoryGroupSection() {
                   return (
                     <label
                       key={g.id}
-                      className={`flex items-center gap-2 px-2 py-1.5 rounded-md border cursor-pointer text-xs focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ${
+                      className={`relative flex items-center gap-2 px-2 py-1.5 rounded-md border cursor-pointer text-xs focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ${
                         on
                           ? 'bg-primary/10 border-primary/30 text-foreground font-medium'
                           : 'bg-card border-border text-foreground/85 hover:bg-muted/50'

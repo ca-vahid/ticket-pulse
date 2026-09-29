@@ -380,13 +380,53 @@ export function splitTokens(text) {
  * in the empty box) removes; pasting "a, b, c" adds each. Duplicates are
  * ignored case-insensitively; a half-typed term is added when the box loses
  * focus, so nothing typed is lost on Save.
+ *
+ * `loadSuggestions(prefix)` (optional, a stable function) turns it into a
+ * combobox: a debounced list of [{ value, count? }] under the box ("company-
+ * portal · 6"); arrows move, Enter or a click picks, Escape closes.
  */
 export function TokenInput({
   id, values = [], onChange, placeholder = 'Type a term and press Enter…', disabled = false, max = 30, maxLength = 80,
-  describedBy = undefined, label, testId = undefined, minRows = 2,
+  describedBy = undefined, label, testId = undefined, minRows = 2, loadSuggestions = null,
 }) {
   const [draft, setDraft] = useState('');
   const input = useRef(null);
+  const box = useRef(null);
+  const autoId = useId();
+  const listId = `${id || autoId}-suggestions`;
+  const [sugOpen, setSugOpen] = useState(false);
+  const [sugs, setSugs] = useState([]);
+  const [sugActive, setSugActive] = useState(-1);
+  const [sugPos, setSugPos] = useState(null);
+  const valuesKey = values.map((v) => v.toLowerCase()).join('\n');
+  useEffect(() => {
+    if (!loadSuggestions || !sugOpen) return undefined;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      Promise.resolve().then(() => loadSuggestions(draft.trim()))
+        .then((list) => {
+          if (cancelled) return;
+          const have = new Set(valuesKey ? valuesKey.split('\n') : []);
+          setSugs((list || []).filter((o) => o && o.value && !have.has(String(o.value).toLowerCase())).slice(0, 15));
+          setSugActive(-1);
+        })
+        .catch(() => { if (!cancelled) setSugs([]); });
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [draft, sugOpen, loadSuggestions, valuesKey]);
+  const showSugs = Boolean(loadSuggestions) && sugOpen && sugs.length > 0;
+  useEffect(() => {
+    if (!showSugs) return undefined;
+    // Portal-positioned: a later tp-card (its own stacking context) would paint over an absolute list.
+    const place = () => {
+      const r = box.current?.getBoundingClientRect();
+      if (r) setSugPos({ left: r.left, top: r.bottom + 4, width: r.width });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [showSugs, values.length]);
   const add = (terms) => {
     const next = [...values];
     for (const raw of terms) {
@@ -401,8 +441,15 @@ export function TokenInput({
     setDraft('');
   };
   const remove = (i) => onChange(values.filter((_, j) => j !== i));
+  const pickSuggestion = (o) => {
+    add([String(o.value)]);
+    setDraft('');
+    setSugActive(-1);
+    input.current?.focus();
+  };
   return (
     <div
+      ref={box}
       className={`flex flex-wrap content-start items-center gap-1.5 rounded-lg border border-input bg-card px-2 py-2 transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:border-blue-500/60 dark:focus-within:ring-blue-500/20 ${disabled ? 'opacity-70' : 'cursor-text'}`}
       style={{ minHeight: `${minRows * 2 + 1}rem` }}
       onMouseDown={(e) => { if (!disabled && e.target === e.currentTarget) { e.preventDefault(); input.current?.focus(); } }}
@@ -440,9 +487,16 @@ export function TokenInput({
             } else setDraft(v);
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); commit(); }
-            else if (e.key === 'Backspace' && !draft && values.length) remove(values.length - 1);
+            if (showSugs && e.key === 'ArrowDown') { e.preventDefault(); setSugActive((i) => (i + 1) % sugs.length); }
+            else if (showSugs && e.key === 'ArrowUp') { e.preventDefault(); setSugActive((i) => (i <= 0 ? sugs.length - 1 : i - 1)); }
+            else if (showSugs && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSugOpen(false); }
+            else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (showSugs && sugActive >= 0) pickSuggestion(sugs[sugActive]);
+              else commit();
+            } else if (e.key === 'Backspace' && !draft && values.length) remove(values.length - 1);
           }}
+          onFocus={() => { if (loadSuggestions) setSugOpen(true); }}
           onPaste={(e) => {
             const text = e.clipboardData?.getData('text') || '';
             if (/[,;\n]/.test(text)) {
@@ -451,12 +505,47 @@ export function TokenInput({
               setDraft('');
             }
           }}
-          onBlur={commit}
+          onBlur={() => { commit(); setSugOpen(false); }}
           placeholder={values.length ? 'Add another…' : placeholder}
           aria-label={id ? undefined : label}
           aria-describedby={describedBy}
+          {...(loadSuggestions ? {
+            role: 'combobox',
+            'aria-autocomplete': 'list',
+            'aria-expanded': showSugs,
+            'aria-controls': showSugs ? listId : undefined,
+            'aria-activedescendant': showSugs && sugActive >= 0 ? `${listId}-${sugActive}` : undefined,
+          } : {})}
           className="h-7 min-w-[9rem] flex-1 bg-transparent px-1 text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
         />
+      )}
+      {showSugs && sugPos && createPortal(
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label={label ? `${label} suggestions` : 'Suggestions'}
+          style={{ position: 'fixed', left: sugPos.left, top: sugPos.top, width: sugPos.width }}
+          className="settings-scrollbar z-[60] max-h-60 overflow-y-auto rounded-xl p-1.5 tp-card shadow-soft animate-popIn"
+          data-testid={testId ? `${testId}-suggestions` : undefined}
+        >
+          {sugs.map((o, i) => (
+            <li
+              key={o.value}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === sugActive}
+              aria-label={o.count !== undefined && o.count !== null ? `${o.value} · ${o.count}` : String(o.value)}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setSugActive(i)}
+              onClick={() => pickSuggestion(o)}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm ${i === sugActive ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200' : 'text-foreground/85'}`}
+            >
+              <span className="min-w-0 flex-1 truncate">{o.value}</span>
+              {o.count !== undefined && o.count !== null && <span className="text-xs tabular-nums text-muted-foreground">· {o.count}</span>}
+            </li>
+          ))}
+        </ul>,
+        document.body,
       )}
     </div>
   );

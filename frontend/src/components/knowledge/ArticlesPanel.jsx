@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, Archive, ArrowLeft, BadgeCheck, BookOpen, Eye, FileText, Layers, ListTree, Plus, Save, Search, UserRound,
+  AlertTriangle, Archive, ArrowLeft, BadgeCheck, BookMarked, BookOpen, Eye, FileText, Layers, ListTree, Plus, Save, Search, UserRound,
 } from 'lucide-react';
 import { knowledgeAPI, ticketsAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
@@ -10,7 +10,9 @@ import { PersonAvatar, SafeHtml, timeAgo } from '../tickets/ticketUi';
 import {
   ConfirmDialog, EmptyState, GuardedLink, Loading, PersonLine, inputClass, prettyEmailName, useUnsavedGuard,
 } from './knowledgeUi';
-import { agoWords, governanceLine, tagLabel } from './knowledgeFormat';
+import {
+  agoWords, articleSourceLabel, articleTopics, governanceLine, isSystemTag,
+} from './knowledgeFormat';
 import { DraftedFromBanner, FsSourceNote, ReviewDigestLine } from './ArticleGrowth';
 import {
   HelpPopover, IconTile, Menu, MetaRow, NumberedSection, PanelTabs, StatusBadge, TabActions, TitleField, TokenInput, fieldHint, fieldLabel,
@@ -35,6 +37,17 @@ const STATUS_BADGE = {
 function ArticleStatus({ status }) {
   const m = STATUS_BADGE[status] || STATUS_BADGE.draft;
   return <StatusBadge tone={m.tone} testId="article-status">{m.label}</StatusBadge>;
+}
+
+/** Topic type-ahead for the article editor: GET /knowledge/topics?q= → [{ topic, count }]. */
+async function loadTopics(q) {
+  const res = await knowledgeAPI.topics?.(q);
+  return (res?.data || []).map((t) => ({ value: t.topic, count: t.count }));
+}
+
+/** No playbook's category reaches it (quotedBy is an empty list, not just absent). */
+function unreached(article) {
+  return Array.isArray(article?.quotedBy) && article.quotedBy.length === 0 && article.status !== 'archived';
 }
 
 function categoryName(tree, id) {
@@ -113,7 +126,7 @@ function ArticleList({ categories, canManage }) {
         </TabActions>
       )}
       <div className="tp-card flex flex-col gap-2.5 p-3 sm:p-4 lg:flex-row lg:flex-wrap lg:items-center" data-testid="articles-filters">
-        <label className="relative min-w-0 flex-1 lg:min-w-[260px]">
+        <label className="relative min-w-0 flex-1 lg:min-w-[260px] lg:max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
           <input
             value={q}
@@ -127,7 +140,7 @@ function ArticleList({ categories, canManage }) {
           <div className="lg:w-48">
             <FancySelect value={status} onChange={setStatus} options={STATUS_FILTERS} aria-label="Article status" disabled={searching || showArchived} className="h-10" />
           </div>
-          <div className="lg:w-56"><FancySelect value={categoryId} onChange={setCategoryId} options={categoryOptions} aria-label="Article category" className="h-10" /></div>
+          <div className="lg:w-72"><FancySelect value={categoryId} onChange={setCategoryId} options={categoryOptions} aria-label="Article category" className="h-10" /></div>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <label className="inline-flex cursor-pointer items-center gap-2 px-1 text-sm text-foreground/85">
@@ -168,14 +181,19 @@ function ArticleList({ categories, canManage }) {
                   <span className="mt-0.5 line-clamp-1 text-[13px] text-muted-foreground">{a.snippet || 'No text yet'}</span>
                   <span className="mt-1.5 block text-xs text-muted-foreground/85">
                     {[
-                      a.source === 'fs_solution' ? 'FreshService' : null,
+                      articleSourceLabel(a),
                       categoryName(categories, a.subcategoryId) || categoryName(categories, a.categoryId),
-                      (a.tags || []).length ? a.tags.map(tagLabel).join(', ') : null,
+                      articleTopics(a).length ? articleTopics(a).join(', ') : null,
                       data.searched ? `relevance ${Math.round(Number(a.score || 0) * 100)}%` : (a.updatedAt ? `updated ${timeAgo(a.updatedAt)}` : null),
                     ].filter(Boolean).join(' · ')}
                     {governanceLine(a) && (
                       <span className={a.needsReview ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'} data-testid="governance-line">
                         {' · '}{governanceLine(a)}
+                      </span>
+                    )}
+                    {unreached(a) && (
+                      <span className="text-amber-700 dark:text-amber-300" data-testid="no-playbook-reaches" title="No playbook reaches this article's category yet — Auto-help can still find it by search.">
+                        {' · '}<AlertTriangle className="inline h-3 w-3 -translate-y-px" aria-hidden="true" /> No playbook reaches it
                       </span>
                     )}
                   </span>
@@ -300,6 +318,43 @@ function ArticleSidePanel({ form, isNew }) {
         )}
       </div>
     </aside>
+  );
+}
+
+/**
+ * "Quoted by" (Knowledge v2, MEGA 09-28 §6.7): which playbooks reach this
+ * article's category, and how often Auto-help has quoted it.
+ */
+function ArticleReach({ form }) {
+  if (!Array.isArray(form?.quotedBy)) return null;
+  const list = form.quotedBy;
+  const times = Number(form.timesQuoted) || 0;
+  return (
+    <section className="tp-card p-3 sm:p-4" aria-labelledby="ka-reach-title" data-testid="article-quoted-by">
+      <h3 id="ka-reach-title" className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+        <BookMarked className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /> Quoted by
+      </h3>
+      {list.length ? (
+        <ul className="mt-2 space-y-1">
+          {list.map((pb) => (
+            <li key={pb.playbookId} className="flex items-center gap-2 text-sm">
+              <GuardedLink to={`/knowledge/playbooks/${pb.playbookId}`} className="tp-focus-ring min-w-0 truncate rounded font-medium text-primary hover:underline">
+                {pb.name || `Playbook #${pb.playbookId}`}
+              </GuardedLink>
+              {!pb.enabled && <StatusBadge tone="muted">off</StatusBadge>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:bg-amber-500/10 dark:text-amber-200" role="note" data-testid="no-playbook-note">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+          No playbook reaches this article&rsquo;s category yet &mdash; Auto-help can still find it by search, but no playbook is aimed at it.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground" data-testid="times-quoted">
+        Quoted in {times} Auto-help answer{times === 1 ? '' : 's'}
+      </p>
+    </section>
   );
 }
 
@@ -451,9 +506,11 @@ function ArticleEditor({ articleId, categories, canManage }) {
         {header}
         <section className="tp-card space-y-3 p-4 sm:p-5" aria-label="Article">
           <DraftedFromBanner article={form} />
-          <p className="text-xs text-muted-foreground">{[categoryName(categories, form.subcategoryId) || categoryName(categories, form.categoryId), (form.tags || []).map(tagLabel).join(', ')].filter(Boolean).join(' · ')}</p>
+          <p className="text-xs text-muted-foreground">{[categoryName(categories, form.subcategoryId) || categoryName(categories, form.categoryId), articleTopics(form).join(', ')].filter(Boolean).join(' · ')}</p>
+          {articleSourceLabel(form) && <p className="text-xs text-muted-foreground" data-testid="article-source">Source: {articleSourceLabel(form)}</p>}
           <SafeHtml html={form.bodyHtml} />
         </section>
+        <ArticleReach form={form} />
       </div>
     );
   }
@@ -528,10 +585,26 @@ function ArticleEditor({ articleId, categories, canManage }) {
                 />
               </div>
               <div className="sm:col-span-2">
-                <label htmlFor="ka-tags" className={fieldLabel}>Tags</label>
-                <TokenInput id="ka-tags" label="Tags" values={form.tags || []} onChange={(tags) => set({ tags })} placeholder="company portal, install…" minRows={1} testId="article-tags" />
-                <p className={fieldHint}>Enter or a comma adds a tag. A playbook limited to tags only quotes articles that carry one.</p>
+                <label htmlFor="ka-tags" className={fieldLabel}>Topics</label>
+                <TokenInput
+                  id="ka-tags"
+                  label="Topics"
+                  values={articleTopics(form)}
+                  onChange={(topics) => set({ tags: [...(form.tags || []).filter(isSystemTag), ...topics] })}
+                  placeholder="company portal, install…"
+                  minRows={1}
+                  testId="article-tags"
+                  describedBy="ka-tags-hint"
+                  loadSuggestions={loadTopics}
+                />
+                <p id="ka-tags-hint" className={fieldHint}>For browsing and search: Enter or a comma adds a topic; topics other articles use are suggested as you type.</p>
               </div>
+              {!isNew && articleSourceLabel(form) && (
+                <div className="sm:col-span-2" data-testid="article-source">
+                  <span className={fieldLabel}>Source</span>
+                  <p className="text-sm text-foreground/85">{articleSourceLabel(form)}</p>
+                </div>
+              )}
             </div>
           </NumberedSection>
 
@@ -563,7 +636,10 @@ function ArticleEditor({ articleId, categories, canManage }) {
         </div>
 
         <div className="settings-scrollbar min-w-0 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:rounded-xl">
-          <ArticleSidePanel form={form} isNew={isNew} />
+          <div className="space-y-4">
+            <ArticleSidePanel form={form} isNew={isNew} />
+            {!isNew && <ArticleReach form={form} />}
+          </div>
         </div>
       </div>
 

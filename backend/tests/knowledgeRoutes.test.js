@@ -230,3 +230,40 @@ describe('knowledge routes', () => {
     expect((await request(app(MEMBER)).put('/api/knowledge/settings').send({ alwaysStayQuietWhen: [] })).status).toBe(403);
   });
 });
+
+describe('Knowledge v2 routes (28 Sep 2026)', () => {
+  test('preview-match: managers only; saved and new-playbook forms; no model call', async () => {
+    prismaMock.ticket.findMany = jest.fn(async () => [
+      { id: 1, origin: 'ticketpulse', nativeNumber: 5, internalCategoryId: 10, internalSubcategoryId: 101, subject: 'Leapfrog Viewer', descriptionText: '' },
+    ]);
+    const denied = await request(app(MEMBER)).post('/api/knowledge/playbooks/3/preview-match').send({});
+    expect(denied.status).toBe(403);
+
+    const saved = await request(app(WS_ADMIN)).post('/api/knowledge/playbooks/3/preview-match')
+      .send({ match: { whenToHelp: 'Installs', useWords: false } });
+    expect(saved.status).toBe(200);
+    expect(saved.body.data).toMatchObject({ days: 30, inScope: 1, draftTakes: 1, savedTakes: 1, aiFitCheckNotRun: true, gained: [], lost: [] });
+
+    const fresh = await request(app(WS_ADMIN)).post('/api/knowledge/playbooks/preview-match')
+      .send({ categoryId: 10, match: { keywords: ['leapfrog'] } });
+    expect(fresh.status).toBe(200);
+    expect(fresh.body.data).toMatchObject({ draftTakes: 1, savedTakes: 0, gained: [{ id: 1, ref: 'TP-5', subject: 'Leapfrog Viewer' }] });
+    expect(runnerMock.runForTicket).not.toHaveBeenCalled();
+    delete prismaMock.ticket.findMany;
+  });
+
+  test('GET /playbooks/:id carries the summary line', async () => {
+    const res = await request(app(MEMBER)).get('/api/knowledge/playbooks/3');
+    expect(res.status).toBe(200);
+    expect(res.body.data.summary).toMatchObject({ subcategoryCount: 0, whenToHelp: '', useWords: false, stayQuietCount: 0 });
+    expect(res.body.data.match).toMatchObject({ whenToHelp: '', useWords: false });
+  });
+
+  test('GET /topics lists topic suggestions for members', async () => {
+    prismaMock.$queryRaw = jest.fn(async () => [{ topic: 'VPN', count: 2 }]);
+    const res = await request(app(MEMBER)).get('/api/knowledge/topics?q=v');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ topic: 'VPN', count: 2 }]);
+    delete prismaMock.$queryRaw;
+  });
+});

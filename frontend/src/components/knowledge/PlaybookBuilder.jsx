@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AppWindow, ArrowLeft, BookMarked, ChevronDown, BookOpen, Copy, Eye, FileSearch, FolderTree, History, Layers, ListChecks, Lock,
+  AppWindow, ArrowLeft, BookMarked, ChevronDown, ChevronRight, BookOpen, Copy, Eye, FileSearch, FolderTree, History, Info, Layers, ListChecks, Lock,
   Power, Save, Search, Send, Settings2, ShieldCheck, Ticket, Trash2, Undo2, UserRound, Wand2,
 } from 'lucide-react';
 import { knowledgeAPI, ticketsAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
+import { Switch } from '../ui';
 import { timeAgo } from '../tickets/ticketUi';
 import PlaybookSidePanel from './PlaybookSidePanel';
+import PlaybookSummary from './PlaybookSummary';
+import { normaliseMatch, previewMatchLine } from './knowledgeFormat';
 import { StayQuietPanel } from './StayQuietEditor';
 import { findStayQuietBlock, mergeConditions } from './stayQuietFormat';
 import {
@@ -30,7 +33,8 @@ export const NEW_PLAYBOOK = {
   enabled: false,
   categoryId: null,
   subcategoryIds: [],
-  match: { keywords: [], excludeKeywords: [] },
+  // Knowledge v2 (MEGA 09-28): scope + "When to help"; words are an Advanced opt-in.
+  match: { whenToHelp: '', useWords: false, keywords: [], excludeKeywords: [] },
   instructions: '',
   instructionsAreSource: false,
   stayQuietWhen: [],
@@ -105,7 +109,12 @@ function playbookPayload(form, { mode, onHelp }) {
     enabled: form.enabled,
     categoryId: form.categoryId || null,
     subcategoryIds: form.subcategoryIds || [],
-    match: { keywords: form.match?.keywords || [], excludeKeywords: form.match?.excludeKeywords || [] },
+    match: {
+      whenToHelp: String(form.match?.whenToHelp || ''),
+      useWords: form.match?.useWords === true,
+      keywords: form.match?.keywords || [],
+      excludeKeywords: form.match?.excludeKeywords || [],
+    },
     instructions: form.instructions,
     instructionsAreSource: form.instructionsAreSource === true,
     stayQuietWhen: form.stayQuietWhen || [],
@@ -141,6 +150,11 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
   const [panelTab, setPanelTab] = useState('test');
   const [runRequest, setRunRequest] = useState(0);
   const [offerDismissed, setOfferDismissed] = useState(false);
+  // "Advanced: also require words" opens by itself when the words are on.
+  const [wordsOpen, setWordsOpen] = useState(false);
+  // "Effect before saving": the 30-day preview waiting for Save / Keep editing.
+  const [preview, setPreview] = useState(null);
+  const [checking, setChecking] = useState(false);
   const leave = useUnsavedGuard(canManage && dirty);
   // In-section navigation goes through the unsaved-changes guard (it asks first).
   const go = (to) => (leave ? leave(to) : navigate(to));
@@ -166,14 +180,15 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
   }, [playbookId, isNew, savedAt]);
 
   const adopt = (pb) => {
-    const next = { ...NEW_PLAYBOOK, ...pb, match: { keywords: pb.match?.keywords || [], excludeKeywords: pb.match?.excludeKeywords || [] }, stayQuietWhen: pb.stayQuietWhen || [] };
+    const next = { ...NEW_PLAYBOOK, ...pb, match: normaliseMatch(pb.match), stayQuietWhen: pb.stayQuietWhen || [] };
+    if (next.match.useWords) setWordsOpen(true);
     setForm(next);
     setSaved(next);
     setDirty(false);
   };
 
   useEffect(() => {
-    if (isNew) { setForm(NEW_PLAYBOOK); setSaved(null); setDirty(false); return undefined; }
+    if (isNew) { setForm(NEW_PLAYBOOK); setSaved(null); setDirty(false); setWordsOpen(false); return undefined; }
     let cancelled = false;
     setForm(null);
     knowledgeAPI.getPlaybook(playbookId)
@@ -205,6 +220,7 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
   const helpGroup = onHelp.startsWith('group:') ? onHelp : '';
   const workspaceQuiet = wsSettings?.alwaysStayQuietWhen || [];
   const instructionsBlock = !offerDismissed && !readOnly ? findStayQuietBlock(form.instructions) : null;
+  const useWords = form.match?.useWords === true;
 
   const toggleSub = (id) => {
     const cur = new Set(form.subcategoryIds || []);
@@ -235,6 +251,32 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * Save, after showing the effect (MEGA 09-28 section 6.6): the draft's
+   * 30-day scope next to the saved version's. Never blocks: when the preview
+   * fails, or nothing changes for an existing playbook, it saves at once.
+   */
+  const requestSave = async (opts = {}) => {
+    if (saving || checking) return false;
+    const payload = playbookPayload(form, { mode, onHelp });
+    let data = null;
+    setChecking(true);
+    try {
+      const res = await knowledgeAPI.previewPlaybookMatch?.(isNew ? null : playbookId, payload);
+      data = res?.data || null;
+    } catch {
+      data = null;
+    } finally {
+      setChecking(false);
+    }
+    const unchanged = data && !isNew
+      && !(data.gained || []).length && !(data.lost || []).length
+      && Number(data.draftTakes) === Number(data.savedTakes);
+    if (!data || unchanged) return save(opts);
+    setPreview({ data, opts });
+    return true;
   };
 
   /** A new, switched-off shadow copy — of the current edits (Save as copy) or of the saved version (Duplicate). */
@@ -332,15 +374,15 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
         {canManage && (
           <>
             <SplitButton
-              label={saving ? 'Saving…' : isNew ? 'Create playbook' : 'Save changes'}
+              label={saving ? 'Saving…' : checking ? 'Checking…' : isNew ? 'Create playbook' : 'Save changes'}
               icon={Save}
-              onClick={() => save()}
-              disabled={saving || !String(form.name || '').trim()}
+              onClick={() => requestSave()}
+              disabled={saving || checking || !String(form.name || '').trim()}
               menuLabel="More ways to save"
               testId="save-split"
               items={[
-                { id: 'save', label: isNew ? 'Create' : 'Save', hint: 'Keep the changes', icon: Save, onSelect: () => save() },
-                { id: 'save-test', label: isNew ? 'Create & test' : 'Save & test', hint: 'Save, then run the test on the ticket in the panel', icon: Wand2, onSelect: () => save({ andTest: true }) },
+                { id: 'save', label: isNew ? 'Create' : 'Save', hint: 'Keep the changes', icon: Save, onSelect: () => requestSave() },
+                { id: 'save-test', label: isNew ? 'Create & test' : 'Save & test', hint: 'Save, then run the test on the ticket in the panel', icon: Wand2, onSelect: () => requestSave({ andTest: true }) },
                 { id: 'save-copy', label: 'Save as copy', hint: 'A new, switched-off playbook with these edits', icon: Copy, onSelect: () => copy(form) },
               ]}
             />
@@ -398,6 +440,9 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
                   )}
                   {form.sensitive && <StatusBadge tone="info" icon={ShieldCheck}>Sensitive · approve only</StatusBadge>}
                 </MetaRow>
+                {!isNew && form.summary && (
+                  <PlaybookSummary summary={form.summary} className="mt-2.5" />
+                )}
                 {mode !== 'shadow' && !approveOn && (
                   <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Switch approve mode on in Knowledge → Settings for this playbook to suggest answers on tickets.</p>
                 )}
@@ -406,19 +451,19 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
           </section>
 
           <fieldset disabled={readOnly} className="min-w-0 space-y-4" aria-label="Playbook editor">
-            {/* 1 · Ticket matching */}
+            {/* 1 · Which tickets (Knowledge v2, MEGA 09-28: scope, then let the AI judge) */}
             <NumberedSection
               n={1}
               id="pb-matching"
-              title="Ticket matching"
-              description="Which tickets this playbook looks at, and the words that include or exclude them."
+              title="Which tickets"
+              description="The subcategories this playbook covers, and in plain words when it should help."
               action={(
                 <HelpPopover label="Learn how matching works" icon={BookOpen} title="How matching works" testId="help-matching">
                   <ul className="list-disc space-y-1.5 pl-4">
                     <li>The ticket&rsquo;s category must be this playbook&rsquo;s category. Tick subcategories to narrow it; none ticked covers the whole category.</li>
-                    <li><span className="font-medium text-foreground/90">Only when</span>: at least one term must appear in the subject or description. Whole words, any case: &ldquo;app&rdquo; never matches &ldquo;approval&rdquo;.</li>
-                    <li><span className="font-medium text-foreground/90">Never when</span>: any one of these terms keeps the playbook quiet.</li>
-                    <li>E-mail disclaimers under a signature are ignored.</li>
+                    <li><span className="font-medium text-foreground/90">When to help</span>: Auto-help&rsquo;s AI reads it with each ticket in scope and decides whether this playbook fits. A ticket it turns away shows in Activity as &ldquo;Not this playbook&rdquo;, with the reason.</li>
+                    <li><span className="font-medium text-foreground/90">Stay quiet when</span> (step 2) is where the &ldquo;never for these&rdquo; rules live.</li>
+                    <li>Words are optional (Advanced). When on, spelling variants, plurals and small typos match automatically.</li>
                     <li>When two playbooks fit, the higher priority (step 5) runs.</li>
                   </ul>
                 </HelpPopover>
@@ -454,41 +499,104 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
                   )}
                 </div>
               </div>
-              <div className="mt-5 grid gap-5 md:grid-cols-2">
+              <div className="mt-5">
                 <Field
-                  label="Only when it mentions any of these terms"
-                  htmlFor="pb-kw"
-                  hintId="pb-kw-hint"
-                  hint="Enter or a comma adds a term. Empty = any wording."
-                  tip={<InfoTip label="About these terms">At least one of these words must appear in the ticket&rsquo;s subject or description, as a whole word.</InfoTip>}
+                  label="When to help"
+                  htmlFor="pb-when"
+                  hintId="pb-when-hint"
+                  hint="Auto-help’s AI reads this with each ticket in these subcategories and decides whether the playbook fits — typos and other wording are fine."
                 >
-                  <TokenInput
-                    id="pb-kw"
-                    label="Only when it mentions any of these terms"
-                    values={form.match?.keywords || []}
-                    onChange={(keywords) => setMatch({ keywords })}
-                    describedBy="pb-kw-hint"
-                    disabled={readOnly}
-                    testId="tokens-include"
+                  <textarea
+                    id="pb-when"
+                    rows={3}
+                    value={form.match?.whenToHelp || ''}
+                    maxLength={1000}
+                    onChange={(e) => setMatch({ whenToHelp: e.target.value })}
+                    placeholder="Someone wants to install or update an app on their own BGC laptop."
+                    aria-describedby="pb-when-hint"
+                    className={`${textareaClass} font-[inherit]`}
+                    data-testid="when-to-help"
                   />
                 </Field>
-                <Field
-                  label="Never when it mentions these terms"
-                  htmlFor="pb-ex"
-                  hintId="pb-ex-hint"
-                  hint="Any of these words keeps the playbook quiet."
-                  tip={<InfoTip label="About excluded terms">If any of these appears, the playbook leaves the ticket to a person, whatever else it says.</InfoTip>}
+              </div>
+              <div className="mt-5 rounded-xl border border-border/80" data-testid="advanced-words">
+                <button
+                  type="button"
+                  onClick={() => setWordsOpen((v) => !v)}
+                  aria-expanded={wordsOpen}
+                  aria-controls="pb-words"
+                  className="tp-focus-ring flex w-full items-center gap-2 rounded-xl px-3.5 py-2.5 text-left text-[13px] font-medium text-foreground/90 hover:bg-muted/40"
                 >
-                  <TokenInput
-                    id="pb-ex"
-                    label="Never when it mentions these terms"
-                    values={form.match?.excludeKeywords || []}
-                    onChange={(excludeKeywords) => setMatch({ excludeKeywords })}
-                    describedBy="pb-ex-hint"
-                    disabled={readOnly}
-                    testId="tokens-exclude"
-                  />
-                </Field>
+                  <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${wordsOpen ? 'rotate-90' : ''}`} aria-hidden="true" />
+                  Advanced: also require words
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">{useWords ? 'On' : 'Off'}</span>
+                </button>
+                {wordsOpen && (
+                  <div id="pb-words" className="space-y-4 border-t border-border/70 px-3.5 pb-4 pt-3.5 animate-fadeIn">
+                    <div className="flex items-start gap-3">
+                      <Switch
+                        id="pb-use-words"
+                        checked={useWords}
+                        onCheckedChange={(v) => setMatch({ useWords: v })}
+                        disabled={readOnly}
+                        aria-describedby="pb-use-words-hint"
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0">
+                        <label htmlFor="pb-use-words" className="text-sm font-medium text-foreground">Also require words</label>
+                        <p id="pb-use-words-hint" className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                          {useWords
+                            ? 'A ticket must use one of the words below before the AI looks at it. Usually not needed — “When to help” covers wording.'
+                            : 'Off: every ticket in these subcategories goes to the AI, which judges it against “When to help”.'}
+                        </p>
+                      </div>
+                    </div>
+                    {useWords && (
+                      <>
+                        <div className="grid gap-5 md:grid-cols-2">
+                          <Field
+                            label="Words that bring a ticket in"
+                            htmlFor="pb-kw"
+                            hintId="pb-kw-hint"
+                            hint="Enter or a comma adds a word. Empty = any wording."
+                            tip={<InfoTip label="About these words">One of these must appear in the ticket&rsquo;s subject or description, as a whole word.</InfoTip>}
+                          >
+                            <TokenInput
+                              id="pb-kw"
+                              label="Words that bring a ticket in"
+                              values={form.match?.keywords || []}
+                              onChange={(keywords) => setMatch({ keywords })}
+                              describedBy="pb-kw-hint"
+                              disabled={readOnly}
+                              testId="tokens-include"
+                            />
+                          </Field>
+                          <Field
+                            label="Words that keep it out"
+                            htmlFor="pb-ex"
+                            hintId="pb-ex-hint"
+                            hint="Any of these words leaves the ticket to a person."
+                            tip={<InfoTip label="About words that keep it out">For whole kinds of request, a Stay quiet rule (step 2) usually reads better.</InfoTip>}
+                          >
+                            <TokenInput
+                              id="pb-ex"
+                              label="Words that keep it out"
+                              values={form.match?.excludeKeywords || []}
+                              onChange={(excludeKeywords) => setMatch({ excludeKeywords })}
+                              describedBy="pb-ex-hint"
+                              disabled={readOnly}
+                              testId="tokens-exclude"
+                            />
+                          </Field>
+                        </div>
+                        <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="variants-note">
+                          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                          Spelling variants (licence/license, set up/setup), plurals and small typos are matched automatically.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </NumberedSection>
 
@@ -595,35 +703,25 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
               </div>
             </NumberedSection>
 
-            {/* 4 · Knowledge */}
+            {/* 4 · Knowledge (MEGA 09-28: research always reads every published article) */}
             <NumberedSection n={4} id="pb-knowledge" title="Knowledge" description="What the playbook may quote. Only published articles are ever used.">
-              <div className="grid gap-2.5 md:grid-cols-2" role="radiogroup" aria-label="Knowledge scope">
-                {[['all', 'All published articles', 'Every published article in this workspace.'], ['tags', 'Only articles with these tags', 'Narrow it to articles tagged for this kind of request.']].map(([scope, label, hint]) => {
-                  const on = (form.kbScope?.mode || 'all') === scope;
-                  return (
-                    <label key={scope} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${on ? 'border-blue-300/80 bg-blue-50/50 dark:border-blue-400/35 dark:bg-blue-500/10' : 'border-border hover:bg-muted/40'}`}>
-                      <input type="radio" name="pb-scope" checked={on} onChange={() => set({ kbScope: { ...(form.kbScope || {}), mode: scope } })} className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-foreground">{label}</span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-              {(form.kbScope?.mode || 'all') === 'tags' && (
-                <div className="mt-3">
-                  <Field label="Article tags" htmlFor="pb-tags" hint="An article with any of these tags may be quoted.">
-                    <TokenInput
-                      id="pb-tags"
-                      label="Article tags"
-                      values={form.kbScope?.tags || []}
-                      onChange={(tags) => set({ kbScope: { ...(form.kbScope || {}), tags } })}
-                      placeholder="company portal, software…"
-                      disabled={readOnly}
-                      minRows={1}
-                    />
-                  </Field>
+              <p className="text-[13px] leading-relaxed text-foreground/85" data-testid="knowledge-scope">
+                Auto-help searches every published article in this workspace and similar resolved tickets, and quotes the parts that answer the ticket. Articles in this playbook&rsquo;s category are looked at first.
+              </p>
+              {form.kbScope?.mode === 'tags' && (
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200" role="note" data-testid="legacy-tag-scope">
+                  <span className="min-w-0 flex-1">
+                    This playbook still only quotes articles with {(form.kbScope?.tags || []).length ? `the topics ${(form.kbScope.tags || []).join(', ')}` : 'certain topics'} — an older setting that is going away.
+                  </span>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => set({ kbScope: { ...(form.kbScope || {}), mode: 'all' } })}
+                      className="tp-focus-ring inline-flex h-7 items-center rounded-md bg-primary px-2.5 font-semibold text-primary-foreground hover:bg-primary/90"
+                    >
+                      Use all articles
+                    </button>
+                  )}
                 </div>
               )}
               <div className="mt-3">
@@ -712,6 +810,37 @@ export default function PlaybookBuilder({ playbookId, categories, canManage, too
         </div>
       </div>
 
+      <ConfirmDialog
+        open={Boolean(preview)}
+        wide
+        title={isNew ? 'Create this playbook?' : 'Save this version?'}
+        confirmLabel={isNew ? 'Create' : 'Save'}
+        cancelLabel="Keep editing"
+        testId="preview-match-dialog"
+        onCancel={() => setPreview(null)}
+        onConfirm={() => { const opts = preview?.opts || {}; setPreview(null); save(opts); }}
+      >
+        {preview && (
+          <div className="space-y-3">
+            <p className="font-medium text-foreground" data-testid="preview-match-line">{previewMatchLine(preview.data, { isNew })}</p>
+            {[
+              ['gained', isNew ? 'For example' : 'Would now take', preview.data.gained],
+              ['lost', 'Would no longer take', isNew ? [] : preview.data.lost],
+            ].filter(([, , list]) => (list || []).length).map(([key, label, list]) => (
+              <div key={key} data-testid={`preview-${key}`}>
+                <p className="text-xs font-semibold text-foreground/85">{label}</p>
+                <ul className="mt-1 space-y-0.5 text-xs">
+                  {list.slice(0, 5).map((t) => (
+                    <li key={t.id} className="truncate"><span className="tabular-nums text-muted-foreground">{t.ref}</span> <span className="text-foreground/85">{t.subject}</span></li>
+                  ))}
+                  {list.length > 5 && <li className="text-muted-foreground/80">and {list.length - 5} more</li>}
+                </ul>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">Before the AI&rsquo;s fit check &mdash; the AI still decides each ticket.</p>
+          </div>
+        )}
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmDelete}
         title="Delete this playbook?"

@@ -94,3 +94,76 @@ test('the default list hides archived; status=archived shows them', async () => 
   await service.list(1, { status: 'archived' });
   expect(prismaMock.knowledgeArticle.findMany.mock.calls[1][0].where.status).toBe('archived');
 });
+
+describe('Knowledge v2: Topics, provenance, Quoted by (28 Sep 2026)', () => {
+  test('articleView: the legacy drafted tag leaves Topics and becomes sourceLabel', async () => {
+    const { articleView, sourceLabelOf } = await import('../src/services/knowledgeArticleService.js');
+    const legacy = articleView({ id: 1, source: 'tp', tags: ['VPN', 'drafted-from-tickets'], bodyText: '' });
+    expect(legacy.tags).toEqual(['VPN']);
+    expect(legacy.sourceLabel).toBe('Drafted from tickets');
+    expect(sourceLabelOf({ source: 'tp', sourceMeta: { draftedFrom: { kind: 'gap' } }, tags: [] })).toBe('Drafted from tickets');
+    expect(sourceLabelOf({ source: 'fs_solution' })).toBe('FreshService solution');
+    expect(sourceLabelOf({ source: 'verified_ticket' })).toBe('Verified solution');
+    expect(sourceLabelOf({ source: 'tp', tags: [] })).toBe('Written in Ticket Pulse');
+  });
+
+  test('playbooksReaching: same category; listed subcategories must include the article\'s (or the article has none)', async () => {
+    const { playbooksReaching } = await import('../src/services/knowledgeArticleService.js');
+    const pbs = [
+      { id: 1, name: 'Installs', enabled: true, categoryId: 10, subcategoryIds: [101] },
+      { id: 2, name: 'All software', enabled: false, categoryId: 10, subcategoryIds: [] },
+      { id: 3, name: 'Other sub', enabled: true, categoryId: 10, subcategoryIds: [102] },
+      { id: 4, name: 'Network', enabled: true, categoryId: 20, subcategoryIds: [] },
+    ];
+    expect(playbooksReaching({ categoryId: 10, subcategoryId: 101 }, pbs)).toEqual([
+      { playbookId: 1, name: 'Installs', enabled: true },
+      { playbookId: 2, name: 'All software', enabled: false },
+    ]);
+    expect(playbooksReaching({ categoryId: 10, subcategoryId: null }, pbs).map((p) => p.playbookId)).toEqual([1, 2, 3]);
+    expect(playbooksReaching({ categoryId: null }, pbs)).toEqual([]);
+  });
+
+  test('get and list carry quotedBy + timesQuoted (one playbook read, one grouped count)', async () => {
+    prismaMock.autoHelpPlaybook = { findMany: jest.fn(async () => [{ id: 1, name: 'Installs', enabled: true, categoryId: 10, subcategoryIds: [] }]) };
+    prismaMock.$queryRaw = jest.fn(async () => [{ sourceId: 'article:5', n: 4 }]);
+    prismaMock.knowledgeArticle.findFirst.mockResolvedValue({ id: 5, workspaceId: 1, source: 'tp', title: 'A', bodyText: 'x', tags: [], categoryId: 10, subcategoryId: null });
+    const one = await service.get(1, 5);
+    expect(one.quotedBy).toEqual([{ playbookId: 1, name: 'Installs', enabled: true }]);
+    expect(one.timesQuoted).toBe(4);
+
+    prismaMock.knowledgeArticle.findMany.mockResolvedValue([
+      { id: 5, title: 'A', bodyText: 'x', tags: [], categoryId: 10 },
+      { id: 6, title: 'B', bodyText: 'y', tags: [], categoryId: 30 },
+    ]);
+    prismaMock.knowledgeArticle.count.mockResolvedValue(2);
+    prismaMock.autoHelpPlaybook.findMany.mockClear();
+    prismaMock.$queryRaw.mockClear();
+    const { items } = await service.list(1, {});
+    expect(prismaMock.autoHelpPlaybook.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(items.map((a) => [a.id, a.quotedBy.length, a.timesQuoted])).toEqual([[5, 1, 4], [6, 0, 0]]);
+    // The raw query was given the cited source ids as one array parameter.
+    expect(prismaMock.$queryRaw.mock.calls[0]).toEqual(expect.arrayContaining([['article:5', 'article:6']]));
+    delete prismaMock.autoHelpPlaybook;
+    delete prismaMock.$queryRaw;
+  });
+
+  test('reach degrades to [] / 0 when the reads fail', async () => {
+    prismaMock.knowledgeArticle.findFirst.mockResolvedValue({ id: 5, workspaceId: 1, source: 'tp', title: 'A', bodyText: 'x', tags: [], categoryId: 10 });
+    const one = await service.get(1, 5);
+    expect(one.quotedBy).toEqual([]);
+    expect(one.timesQuoted).toBe(0);
+  });
+
+  test('topics: prefix (LIKE-escaped), top list mapped to { topic, count }; fails soft', async () => {
+    prismaMock.$queryRaw = jest.fn(async () => [{ topic: 'VPN', count: 3 }, { topic: 'Vpn client', count: 1 }]);
+    expect(await service.topics(1, { q: ' vP ' })).toEqual([{ topic: 'VPN', count: 3 }, { topic: 'Vpn client', count: 1 }]);
+    const values = prismaMock.$queryRaw.mock.calls[0].slice(1);
+    expect(values).toEqual(expect.arrayContaining([1, 'vp%', 'drafted-from-tickets', 15]));
+    await service.topics(1, { q: '50%_off' });
+    expect(prismaMock.$queryRaw.mock.calls[1].slice(1)).toContain('50\\%\\_off%');
+    prismaMock.$queryRaw = jest.fn(async () => { throw new Error('no db'); });
+    expect(await service.topics(1, {})).toEqual([]);
+    delete prismaMock.$queryRaw;
+  });
+});
