@@ -5,7 +5,7 @@
 import { describe, expect, test } from '@jest/globals';
 import {
   dropEmptyTableColumns, normalizeNoteHtmlForEmail, textExcerpt, initialsOf,
-  renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail,
+  renderApproverRequestEmail, decisionIntentUrl, renderRequesterDecisionEmail, renderRequesterClarificationEmail,
 } from '../src/services/approvalEmailTemplate.js';
 
 const PASTE = '<table width="1400" style="width:1400px"><tr>'
@@ -85,54 +85,61 @@ const baseCtx = () => ({
 });
 
 describe('renderApproverRequestEmail', () => {
-  test('carries every fact the page shows, escapes user text, and has one primary button', () => {
+  // 29 Sep 2026 redesign (mockups C1 + D3): category title, linked ticket ref,
+  // decision row at the end with ?intent= links, surfaces never painted.
+  test('carries every fact the page shows, escapes user text, and ends with the decision row', () => {
     const html = renderApproverRequestEmail(baseCtx());
-    expect(html).toContain('Approval requested');
-    // The category has its own strip under the hero, so the kicker no longer repeats it (18 Sep 2026).
-    expect(html).toContain('Your decision is needed');
-    expect(html).not.toContain('New Computer Upgrade approval — your decision is needed');
+    // Title is the category; the ticket ref links to the ticket, subject beside it.
+    expect(html).toContain('>New Computer Upgrade<');
+    expect(html).toContain('href="https://app/tickets/1"');
+    expect(html).toContain('#239934&nbsp;&#8599;');
     expect(html).toContain('Laptop &lt;b&gt;fails&lt;/b&gt;');
-    expect(html).toContain('#239934  ·  created Aug 31  ·  due Sep 4');
+    // No greeting / "asks you to approve" sentence — the people row names them.
+    expect(html).not.toContain('asks you to approve');
+    expect(html).not.toContain('Your decision is needed');
     expect(html).toContain('Requested for');
     expect(html).toContain('Ingrid Berru Garcia');
     expect(html).toContain('>IG<');
-    // Title on one line, place on the next (17 Sep 2026); department == location → printed once.
-    expect(html).toContain('>Engineer<');
-    expect(html).toContain('>Vancouver<');
+    // Title and place on one line; department == location → printed once.
+    expect(html).toContain('Engineer · Vancouver');
     expect(html).not.toContain('Vancouver · Vancouver');
     expect(html).toContain('Asked by');
     expect(html).toContain('Marcus Blackstock');
     expect(html).toContain('Devices › Laptops');
-    expect(html).toContain('Note from Marcus Blackstock');
-    expect(html).toContain('Ticket description');
+    expect(html).toContain('Sep 4'); // due
+    expect(html).toContain('Why Marcus is asking');
+    expect(html).toContain('What Ingrid wrote');
     expect(html).toContain('It shuts down.');
     expect(html).toContain('Also asked to approve');
     expect(html).toContain('Reza Zaim');
-    expect(html).toContain('href="https://app/approval/tok"');
-    expect(html).toContain('Review and decide &rarr;');
+    // Decision row: Approve half, Decline and Ask a quarter; each pre-picks its choice.
+    expect(html).toContain('href="https://app/approval/tok?intent=approve"');
+    expect(html).toContain('href="https://app/approval/tok?intent=reject"');
+    expect(html).toContain('href="https://app/approval/tok?intent=ask"');
+    expect(html.indexOf('intent=approve')).toBeGreaterThan(html.indexOf('It shuts down.'));
+    expect(html).toContain('<td width="50%" valign="top" style="padding:0 4px 0 0px;">');
     expect(html).toContain('expires on October 2, 2026');
-    expect(html).toContain('open the ticket in Ticket Pulse');
     expect(html).toContain('IT workspace');
-    // No raw e-mail addresses, no data URIs.
+    // No raw e-mail addresses, no data URIs, no painted page/card background.
     expect(html).not.toMatch(/@[a-z]+\.[a-z]+/);
     expect(html).not.toContain('data:image');
+    expect(html).not.toContain('background:#f1f5f9');
+    expect(html).toContain('<meta name="color-scheme" content="light dark">');
   });
-  test('re-request shows the Q&A and a different pill/button', () => {
+  test('re-request shows the Q&A first', () => {
     const html = renderApproverRequestEmail({ ...baseCtx(), reRequest: true, clarification: { question: 'Refurb ok?', answer: 'No stock.' } });
-    expect(html).toContain('Re-requested');
     expect(html).toContain('Re-requested with the answer you asked for');
     expect(html).toContain('<b>You asked:</b> Refurb ok?');
     expect(html).toContain('<b>Marcus Blackstock replied:</b> No stock.');
-    expect(html).toContain('Review the answer and decide &rarr;');
+    expect(html.indexOf('Refurb ok?')).toBeLessThan(html.indexOf('Why Marcus is asking'));
   });
   test('renders inline (cid:) photos when attachments exist, initials otherwise', () => {
     const ctx = baseCtx();
     ctx.requester.photoCid = 'requester-photo';
     ctx.requestedByPhotoCid = 'requested-by-photo';
     const html = renderApproverRequestEmail(ctx);
-    // Same avatar size for both people (17 Sep 2026): the recipient is not bigger, just wider.
-    expect(html).toContain('<img src="cid:requester-photo" width="48" height="48" alt="IG"');
-    expect(html).toContain('<img src="cid:requested-by-photo" width="48" height="48" alt="MB"');
+    expect(html).toContain('<img src="cid:requester-photo" width="38" height="38" alt="IG"');
+    expect(html).toContain('<img src="cid:requested-by-photo" width="38" height="38" alt="MB"');
     expect(html).not.toContain('>IG<');
     expect(html).not.toMatch(/src="https?:/);
     const plain = renderApproverRequestEmail(baseCtx());
@@ -142,11 +149,18 @@ describe('renderApproverRequestEmail', () => {
   });
   test('degrades without optional data', () => {
     const html = renderApproverRequestEmail({ ticket: { ref: 'TP-9', subject: 'x' }, decisionUrl: 'https://app/a', noteHtml: '', otherApprovers: [] });
-    expect(html).toContain('Approval — your decision is needed');
-    expect(html).not.toContain('Note from');
-    expect(html).not.toContain('Ticket description');
+    // No category → the subject is the title; the ref falls back to the approval page.
+    expect(html).toContain('>x<');
+    expect(html).toContain('href="https://app/a"');
+    expect(html).not.toContain('is asking');
+    expect(html).not.toContain(' wrote<');
     expect(html).not.toContain('Also asked');
-    expect(html).toContain('Review and decide');
+    expect(html).toContain('href="https://app/a?intent=approve"');
+  });
+  test('decisionIntentUrl keeps an existing query string', () => {
+    expect(decisionIntentUrl('https://app/a', 'ask')).toBe('https://app/a?intent=ask');
+    expect(decisionIntentUrl('https://app/a?x=1', 'reject')).toBe('https://app/a?x=1&intent=reject');
+    expect(decisionIntentUrl('', 'ask')).toBe('');
   });
 });
 
@@ -171,25 +185,10 @@ describe('renderRequesterDecisionEmail / renderRequesterClarificationEmail', () 
 });
 
 describe('brand pictograms (17 Sep 2026 redesign)', () => {
-  test('the request e-mail carries the decision pictogram, the category card and side-by-side people', async () => {
-    const { brandAttachmentsFor, hasBrandAsset } = await import('../src/services/emailBrandAssets.js');
+  test('the request e-mail carries no pictograms (29 Sep 2026 redesign) — only people photos, if any', () => {
     const html = renderApproverRequestEmail(baseCtx());
-    if (!hasBrandAsset('kind-decision')) return; // assets are shipped with the build; nothing to check without them
-    expect(html).toContain('cid:tp-kind-decision');
-    expect(html).toContain('cid:tp-tp-mark');
-    expect(html).toContain('Approval category');
-    expect(html).toContain('cid:tp-cat-computer'); // "New Computer Upgrade"
-    // One framed panel, two cells divided by a rule (17 Sep 2026 redesign) — no stacked tinted boxes.
-    expect(html).toContain('width="55%"');
-    expect(html).toContain('border-left:1px solid #e2e8f0');
+    expect(html).not.toContain('cid:tp-');
     expect(html).toContain('Service desk agent');
-    // Every cid the HTML references resolves to a real file, exactly once.
-    const atts = brandAttachmentsFor(html);
-    const cids = [...new Set([...html.matchAll(/cid:(tp-[a-z0-9-]+)/g)].map((m) => m[1]))];
-    expect(atts.map((a) => a.contentId).sort()).toEqual(cids.sort());
-    for (const a of atts) expect(a.inline).toBe(true);
-    // No status pill any more — the hero says what the message is.
-    expect(html).not.toContain('text-transform:uppercase;">APPROVAL REQUESTED');
   });
 
   test('every verdict and hand-off e-mail names its pictogram', async () => {

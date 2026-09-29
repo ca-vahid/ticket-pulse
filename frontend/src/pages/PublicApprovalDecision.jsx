@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowUpRight,
   Ban,
@@ -363,8 +363,16 @@ function HeaderActions({ ticket, copied, onCopy }) {
   );
 }
 
+// The e-mail's buttons carry the approver's choice: ?intent=approve|reject|ask.
+// It only pre-picks the tab — nothing is decided until they confirm on the page.
+const INTENT_TAB = { approve: 'approved', reject: 'rejected', ask: 'question' };
+
 export default function PublicApprovalDecision() {
   const { token } = useParams();
+  const [searchParams] = useSearchParams();
+  const intentTab = INTENT_TAB[String(searchParams.get('intent') || '').toLowerCase()] || null;
+  const composerRef = useRef(null);
+  const scrolledToIntentRef = useRef(false);
   const { theme, isDark, toggle } = usePublicTheme();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -383,6 +391,13 @@ export default function PublicApprovalDecision() {
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, [token]);
+
+  // Arriving from an e-mail button: bring the composer (with that choice picked) into view, once.
+  useEffect(() => {
+    if (!intentTab || scrolledToIntentRef.current || !composerRef.current) return;
+    scrolledToIntentRef.current = true;
+    composerRef.current.scrollIntoView({ block: 'center' });
+  });
 
   // After a submit, the decided banner takes focus so screen readers land on the result.
   useEffect(() => {
@@ -615,16 +630,19 @@ export default function PublicApprovalDecision() {
             />
             <TicketDescription ticket={ticket} isDark={isDark} />
             {open && (
-              <ApprovalComposer
-                approval={{ ...approval, ticketRef: ticket.displayRef, requesterName: requester.name || null }}
-                participants={approval.participants || null}
-                selfEmail={approval.approverEmail}
-                signatureHtml={approval.signaturePreview || null}
-                onDecide={onDecide}
-                onAsk={onAsk}
-                onHandoff={onHandoff}
-                forwardCandidates={data.forwardCandidates || []}
-              />
+              <div ref={composerRef}>
+                <ApprovalComposer
+                  approval={{ ...approval, ticketRef: ticket.displayRef, requesterName: requester.name || null }}
+                  participants={approval.participants || null}
+                  selfEmail={approval.approverEmail}
+                  signatureHtml={approval.signaturePreview || null}
+                  onDecide={onDecide}
+                  onAsk={onAsk}
+                  onHandoff={onHandoff}
+                  forwardCandidates={data.forwardCandidates || []}
+                  initialTab={intentTab}
+                />
+              </div>
             )}
           </section>
           <ApprovalRail approval={approval} ticket={ticket} approvers={data.approvers} />

@@ -407,7 +407,7 @@ describe('e-mail templates (v3)', () => {
 
   test('the approver e-mail renders the description formatted, not as a flattened excerpt', () => {
     const html = renderApproverRequestEmail({ ticket: { ref: 'TP-9', subject: 'x', description: '<p>One</p><ul><li>Two</li></ul>' }, decisionUrl: 'https://app/a', noteHtml: '', otherApprovers: [] });
-    expect(html).toContain('Ticket description');
+    expect(html).toContain('What the requester wrote');
     expect(html).toContain('<li style="margin:0 0 4px">Two</li>');
     expect(html).not.toContain('white-space:pre-line');
   });
