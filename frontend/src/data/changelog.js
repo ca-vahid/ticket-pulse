@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.09-preview';
+export const APP_VERSION = '4.1.10-preview';
 
 export const changelog = [
+  {
+    version: '4.1.10-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Every approval e-mail matches the new request e-mail</strong> &mdash; approved, approved with condition, not approved, escalated, forwarded, questions and answers, and the decision thread now share one layout: the state as a coloured word (&ldquo;&#9679; Approved&rdquo;), the approval category as the title, the ticket number linked underneath, notes set off by a thin line, and the action as a full-width button at the end. Dark mode reads properly in Outlook on phones.' },
+    ],
+  },
   {
     version: '4.1.09-preview',
     date: 'September 29, 2026',

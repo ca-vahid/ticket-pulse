@@ -1711,6 +1711,17 @@ class TicketApprovalService {
     };
   }
 
+  /** The approval category's name for e-mail titles (29 Sep 2026); null when unset or unreadable. */
+  async _approvalCategoryName(approval) {
+    if (!approval?.approvalCategoryId) return null;
+    try {
+      const row = await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } });
+      return row?.name || null;
+    } catch {
+      return null; // a title without the category is fine; never block the e-mail on it
+    }
+  }
+
   async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null, { handoff = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.approverEmail}`);
@@ -1835,6 +1846,7 @@ class TicketApprovalService {
     const subject = `${verdictLabel}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
     const html = renderRequesterDecisionEmail({
       workspaceName: await this._workspaceName(ticket),
+      categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
       approved,
       approverName: actorLabel || approval.approverName || approval.approverEmail,
@@ -1963,6 +1975,7 @@ class TicketApprovalService {
     const subject = `${kind === 'forwarded' ? 'Forwarded' : 'Escalated'}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
     const html = renderRequesterHandoffEmail({
       workspaceName: await this._workspaceName(ticket),
+      categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
       kind, byName: byName || byEmail || 'The approver', toNames, toTierName, fromTierName,
       requester: { name: ticket.requester?.name || null },
@@ -1984,6 +1997,7 @@ class TicketApprovalService {
     const subject = `More info needed on your approval request [${ref}]`;
     const html = renderRequesterClarificationEmail({
       workspaceName: await this._workspaceName(ticket),
+      categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
       approverName: approval.approverName || approval.approverEmail,
       question,
