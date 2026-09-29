@@ -2430,6 +2430,10 @@ async function getTicketDetails(ticketId) {
     workspaceTimezone: timezone,
     requester: ticket.requester || null,
     currentlyAssignedTo: ticket.assignedTech?.name || 'Unassigned',
+    // Internal id alongside the name: in classification-only runs Sonnet 5.5
+    // submits the current assignee without calling get_technicians, and sent
+    // techId 0 (rejected, then a lookup round trip) when only the name was here.
+    currentlyAssignedTechId: ticket.assignedTech?.id || null,
   };
 }
 
