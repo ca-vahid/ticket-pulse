@@ -413,7 +413,7 @@ describe('Activity: runs view and the run panel', () => {
     const line = await screen.findByTestId('outcome-line');
     expect(line).toHaveTextContent('90 All runs');
     expect(line).toHaveTextContent('4 Drafted');
-    expect(line).toHaveTextContent('59 No playbook');
+    expect(line).toHaveTextContent('59 No match');
     fireEvent.click(within(line).getByRole('button', { name: /27 Not answerable/ }));
     await waitFor(() => expect(api.listRuns).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'not_answerable' })));
     api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });

@@ -28,7 +28,7 @@ const OUTCOMES = [
   { value: 'staged', label: 'Suggested to an agent' },
   { value: 'sent', label: 'Sent' },
   { value: 'not_answerable', label: 'Not answerable' },
-  { value: 'no_match', label: 'No playbook' },
+  { value: 'no_match', label: 'No match' },
   { value: 'skipped', label: 'Skipped' },
   { value: 'failed', label: 'Failed' },
 ];
