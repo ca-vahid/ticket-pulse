@@ -18,7 +18,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import bot from '../integrations/teamsBotClient.js';
-import { ticketCard, approvalCard, digestCard, textCard, EVENT_META } from './teamsCards.js';
+import { ticketCard, approvalCard, digestCard, textCard, EVENT_META, OUTCOMES, htmlToCardMarkdown, textToCardMarkdown } from './teamsCards.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
@@ -117,7 +117,7 @@ function eventText(eventKey, ctx) {
   case 'group_unassigned':
     return t.descriptionText || '';
   case 'teammate_update':
-    return x.bodyText ? `${x.author ? `${x.author}: ` : ''}${x.bodyText}` : (x.author ? `${x.author} added an update.` : '');
+    return x.bodyText || (x.author ? `${x.author} added an update.` : '');
   case 'status_changed':
     return `Now ${t.status}${x.actor?.name ? ` — by ${x.actor.name}` : ''}.`;
   case 'reopened':
@@ -266,8 +266,9 @@ class TeamsNotificationService {
     // Team channel feed: new unassigned tickets at/above the chosen priority.
     if (ctx.event.type === 'ticket.created' && ws.channelWebhookUrl && !ctx.assignedAgent && !ctx.ticket.isNoise
       && Number(ctx.ticket.priority || 0) >= ws.channelMinPriority) {
-      const card = ticketCard(this._ticketModel(ctx, { canWrite: false, isUnassigned: false }), [{ eventKey: 'group_unassigned', text: ctx.ticket.descriptionText }], { actionsOff: true });
-      bot.postToWorkflowWebhook(ws.channelWebhookUrl, card).catch((err) => logger.warn(`Teams channel feed post failed (ws ${workspaceId}): ${bot.describeError(err)}`));
+      this._ticketModelById(ctx.ticket.id, workspaceId)
+        .then((model) => bot.postToWorkflowWebhook(ws.channelWebhookUrl, ticketCard({ ...(model || this._ticketModel(ctx, {})), canWrite: false, isUnassigned: false }, [{ eventKey: 'group_unassigned' }], { actionsOff: true })))
+        .catch((err) => logger.warn(`Teams channel feed post failed (ws ${workspaceId}): ${bot.describeError(err)}`));
     }
     if (!ws.teamsEnabled) return;
     if (ctx.event.type === 'ticket.note_added' && x.systemNote === true) return;
@@ -384,19 +385,27 @@ class TeamsNotificationService {
     try {
       const lines = [];
       for (const l of entry.lines) {
-        let text = eventText(l.eventKey, l.ctx);
-        if (l.eventKey === 'requester_replied' && l.ctx.event?.extra?.entryId) {
-          const e = await prisma.ticketThreadEntry.findUnique({ where: { id: Number(l.ctx.event.extra.entryId) }, select: { bodyText: true } }).catch(() => null);
-          text = e?.bodyText || text;
+        const x = l.ctx.event?.extra || {};
+        let text = textToCardMarkdown(eventText(l.eventKey, l.ctx));
+        let who = null;
+        if (l.eventKey === 'requester_replied') {
+          who = l.ctx.requester?.name || null;
+          if (x.entryId) {
+            const e = await prisma.ticketThreadEntry.findUnique({ where: { id: Number(x.entryId) }, select: { bodyHtml: true, bodyText: true } }).catch(() => null);
+            if (e) text = e.bodyHtml ? htmlToCardMarkdown(e.bodyHtml) : textToCardMarkdown(e.bodyText);
+          }
+        } else if (l.eventKey === 'teammate_update') {
+          who = x.author || null;
         }
-        lines.push({ eventKey: l.eventKey, text, at: l.at });
+        lines.push({ eventKey: l.eventKey, text, who, at: l.at });
       }
-      const canWrite = await this._nativeOn(ctx.workspace.id);
-      const card = ticketCard(this._ticketModel(ctx, { canWrite, isUnassigned: !ctx.assignedAgent }), lines);
+      const model = await this._ticketModelById(ctx.ticket.id, ctx.workspace.id)
+        || this._ticketModel(ctx, { canWrite: await this._nativeOn(ctx.workspace.id), isUnassigned: !ctx.assignedAgent });
+      const card = ticketCard(model, lines);
       const first = lines[0];
-      const word = EVENT_META[first.eventKey]?.word || 'Update';
+      const word = EVENT_META[first.eventKey]?.heading || 'Update';
       const bell = ['sla_breach', 'sla_pre_breach'].includes(first.eventKey) || entry.urgent
-        ? { title: `${word}: ${ctx.ticket.displayRef} ${ctx.ticket.subject || ''}`.slice(0, 150), preview: first.text, webUrl: this._ticketUrl(ctx.ticket.id) }
+        ? { title: `${word}: ${ctx.ticket.displayRef} ${ctx.ticket.subject || ''}`.slice(0, 150), preview: String(first.text || '').replace(/[*_#[\]()]/g, '').slice(0, 150), webUrl: this._ticketUrl(ctx.ticket.id) }
         : null;
       await this._send(tech.email, card, {
         summary: `${word} — ${ctx.ticket.displayRef} ${ctx.ticket.subject || ''}`,
@@ -418,11 +427,15 @@ class TeamsNotificationService {
       ref: t.displayRef,
       subject: t.subject,
       requesterName: ctx.requester?.name || null,
+      priority: t.priority,
       priorityLabel: t.priorityLabel || PRIORITY_WORD[t.priority] || null,
       dueLabel: fmtDue(t.dueBy, ctx.workspace.timezone),
+      categoryTop: t.internalCategory?.name || t.category || null,
+      categorySub: t.internalSubcategory?.name || t.subCategory || null,
+      descriptionMd: textToCardMarkdown(t.descriptionText),
       url: this._ticketUrl(t.id),
-      canWrite,
-      isUnassigned,
+      canWrite: Boolean(canWrite),
+      isUnassigned: Boolean(isUnassigned),
     };
   }
 
@@ -430,20 +443,33 @@ class TeamsNotificationService {
   async _ticketModelById(ticketId, workspaceId) {
     const t = await prisma.ticket.findFirst({
       where: { id: Number(ticketId), workspaceId: Number(workspaceId) },
-      select: { id: true, workspaceId: true, subject: true, priority: true, dueBy: true, freshserviceTicketId: true, nativeNumber: true, origin: true, assignedTechId: true, requester: { select: { name: true } }, workspace: { select: { defaultTimezone: true } } },
+      select: {
+        id: true, workspaceId: true, subject: true, priority: true, dueBy: true, freshserviceTicketId: true, nativeNumber: true, origin: true,
+        assignedTechId: true, category: true, subCategory: true, description: true, descriptionText: true,
+        internalCategory: { select: { name: true } }, internalSubcategory: { select: { name: true } },
+        requester: { select: { name: true, jobTitle: true, entraOfficeLocation: true, entraCity: true } },
+        workspace: { select: { defaultTimezone: true } },
+      },
     });
     if (!t) return null;
+    const r = t.requester || {};
     return {
       id: t.id,
       workspaceId: t.workspaceId,
       ref: ticketDisplayRef(t),
       subject: t.subject,
-      requesterName: t.requester?.name || null,
-      priorityLabel: PRIORITY_WORD[t.priority] || null,
-      dueLabel: fmtDue(t.dueBy, t.workspace?.defaultTimezone),
       url: this._ticketUrl(t.id),
       canWrite: await this._nativeOn(t.workspaceId),
       isUnassigned: !t.assignedTechId,
+      categoryTop: t.internalCategory?.name || t.category || null,
+      categorySub: t.internalSubcategory?.name || t.subCategory || null,
+      priority: t.priority,
+      priorityLabel: PRIORITY_WORD[t.priority] || null,
+      dueLabel: fmtDue(t.dueBy, t.workspace?.defaultTimezone),
+      overdue: Boolean(t.dueBy && t.dueBy < new Date()),
+      requesterName: r.name || null,
+      requesterPlace: [r.jobTitle, r.entraOfficeLocation || r.entraCity].filter(Boolean).join(' · ') || null,
+      descriptionMd: t.description ? htmlToCardMarkdown(t.description) : textToCardMarkdown(t.descriptionText),
     };
   }
 
@@ -467,7 +493,8 @@ class TeamsNotificationService {
     const a = {
       approvalId: approval.id, ticketId: ticket.id, workspaceId: ticket.workspaceId, categoryName,
       ref: ticketDisplayRef(ticket), subject: ticket.subject, requesterName: ticket.requester?.name || null,
-      askedByName: requestedByName, note, decisionUrl,
+      askedByName: requestedByName, noteMd: textToCardMarkdown(note), decisionUrl,
+      tierLabel: approval.tier && approval.tier > 1 ? `Tier ${approval.tier}` : null,
     };
     await this._send(email, approvalCard(a), {
       summary: `Approval waiting: ${categoryName || ticket.subject || ''}`,
@@ -487,7 +514,7 @@ class TeamsNotificationService {
       model: {
         approvalId: ap.id, ticketId: ap.ticketId, workspaceId: ap.workspaceId, categoryName: cat?.name || null,
         ref: t ? ticketDisplayRef(t) : null, subject: t?.subject || null, requesterName: t?.requester?.name || null,
-        askedByName: null, note: ap.requestNote || null,
+        askedByName: null, noteMd: textToCardMarkdown(ap.requestNote), tierLabel: ap.tier && ap.tier > 1 ? `Tier ${ap.tier}` : null,
         // The approver's own link rides in the card data (the token is stored hashed).
         decisionUrl: decisionUrl && String(decisionUrl).startsWith(baseUrl()) ? decisionUrl : `${baseUrl()}/approvals`,
         lastDeliveryId: last?.id || null,
@@ -588,9 +615,9 @@ class TeamsNotificationService {
       const { default: ticketService } = await import('./ticketService.js');
 
       if (verb === 'take') {
-        if (!model.isUnassigned) return cardRes(ticketCard({ ...model, isUnassigned: false }, [], { outcome: { word: 'Already assigned', color: 'Default', detail: 'Someone took it before you.' } }));
+        if (!model.isUnassigned) return cardRes(ticketCard({ ...model, isUnassigned: false }, [], { outcome: OUTCOMES.already }));
         await ticketService.assignTicket(ticketId, workspaceId, tech.id, actor);
-        return cardRes(ticketCard({ ...model, isUnassigned: false }, [], { outcome: { word: 'Taken by you', color: 'Good', detail: 'It is in your queue now.' } }));
+        return cardRes(ticketCard({ ...model, isUnassigned: false }, [], { outcome: OUTCOMES.taken }));
       }
       if (verb === 'note' || verb === 'reply') {
         const body = String(data[verb === 'note' ? 'noteText' : 'replyText'] || '').trim();
@@ -599,12 +626,12 @@ class TeamsNotificationService {
         const input = { bodyText: body, bodyHtml: `<p>${body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')}</p>` };
         if (verb === 'note') await ticketService.addPrivateNote(ticketId, workspaceId, input, actor);
         else await ticketService.addReply(ticketId, workspaceId, input, actor);
-        return cardRes(ticketCard(model, [], { outcome: { word: verb === 'note' ? 'Note added' : 'Reply sent', color: 'Good', detail: body.length > 160 ? `${body.slice(0, 159)}…` : body } }));
+        return cardRes(ticketCard(model, [], { outcome: { ...OUTCOMES[verb], detail: body.length > 160 ? `${body.slice(0, 159)}…` : body } }));
       }
       if (verb === 'snooze' || verb === 'mute') {
         const until = verb === 'snooze' ? new Date(Date.now() + SNOOZE_MS) : MUTE_FOREVER;
         await prisma.ticketNotificationMute.upsert({ where: { technicianId_ticketId: { technicianId: tech.id, ticketId } }, update: { until }, create: { technicianId: tech.id, ticketId, until } });
-        return cardRes(ticketCard(model, [], { outcome: { word: verb === 'snooze' ? 'Snoozed for 4 hours' : 'Muted', color: 'Default', detail: verb === 'snooze' ? 'You will hear about this ticket again after that.' : 'Unmute it in Ticket Pulse → Mail & alerts.' } }));
+        return cardRes(ticketCard(model, [], { outcome: OUTCOMES[verb] }));
       }
       return toast('Unknown action.');
     } catch (err) {
@@ -674,7 +701,7 @@ class TeamsNotificationService {
     const ids = techs.map((t) => t.id);
     const open = await prisma.ticket.findMany({
       where: { assignedTechId: { in: ids }, resolvedAt: null, closedAt: null, isNoise: false },
-      select: { id: true, subject: true, dueBy: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
+      select: { id: true, subject: true, dueBy: true, priority: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
       orderBy: [{ dueBy: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
       take: 200,
     });
@@ -682,7 +709,7 @@ class TeamsNotificationService {
     const tz = techs[0].timezone || 'America/Los_Angeles';
     const today = localDay(tz, now);
     const rows = open.map((t) => ({
-      ref: ticketDisplayRef(t), subject: t.subject, url: this._ticketUrl(t.id),
+      ref: ticketDisplayRef(t), subject: t.subject, url: this._ticketUrl(t.id), priority: t.priority,
       overdue: Boolean(t.dueBy && t.dueBy < now), dueLabel: t.dueBy ? fmtDue(t.dueBy, tz) : '',
       dueToday: Boolean(t.dueBy && localDay(tz, t.dueBy) === today),
     }));
@@ -746,7 +773,7 @@ class TeamsNotificationService {
 
   async sendTest(email, workspaceId) {
     const tech = await this._tech(email, workspaceId);
-    const card = textCard('● Test message from Ticket Pulse', [
+    const card = textCard('Test message from Ticket Pulse', [
       'This is what your ticket notifications look like. Choose what you are told about in Mail & alerts.',
     ], [{ type: 'Action.OpenUrl', title: 'Open Mail & alerts', url: `${baseUrl()}/mail-alerts` }]);
     await this._send(tech.email, card, { summary: 'Test message from Ticket Pulse', workspaceId: tech.workspaceId, technicianId: tech.id, eventKey: 'test' });

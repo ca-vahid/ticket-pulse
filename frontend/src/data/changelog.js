@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.19-preview';
+export const APP_VERSION = '4.1.20-preview';
 
 export const changelog = [
+  {
+    version: '4.1.20-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>New look for Teams messages</strong> &mdash; every Teams message now opens with a coloured banner: the ticket subject (click it to open the ticket), the ticket number and requester, and a big icon with one word for what happened (🎫 Assigned, 💬 Reply, 📝 Update, ⏳ Due soon, 🔥 Overdue, ✅ Approval…). Under it: Category › Subcategory, a coloured priority and the due date in one framed panel, then the reply or note that just arrived and the ticket description with its formatting kept (lists, bold, links; long ones fold behind &ldquo;Show more&rdquo;). Approvals, the daily digest and the confirmations after a button press use the same style, and everything reads well in dark mode.' },
+    ],
+  },
   {
     version: '4.1.19-preview',
     date: 'September 30, 2026',

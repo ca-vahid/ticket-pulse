@@ -147,10 +147,15 @@ describe('cards', () => {
   const t = { id: 50, workspaceId: 1, ref: '#244001', subject: 'VPN down', requesterName: 'Rita', priorityLabel: 'High', dueLabel: 'Oct 1', url: 'https://tp/tickets/50' };
   test('Take it only on unassigned tickets; note and reply only where Ticket Pulse can write', () => {
     const a = ticketCard({ ...t, isUnassigned: true, canWrite: false }, [{ eventKey: 'group_unassigned', text: 'x' }]);
-    expect(a.actions.map((x) => x.title)).toEqual(['Take it', 'Open', 'Snooze 4 hours', 'Mute this ticket']);
+    expect(a.actions.map((x) => x.title)).toEqual(['✋ Take it', 'Open ticket', '💤 Snooze 4 hours', '🔕 Mute this ticket']);
     const b = ticketCard({ ...t, isUnassigned: false, canWrite: true }, [{ eventKey: 'assigned', text: 'x' }]);
-    expect(b.actions.map((x) => x.title)).toEqual(['Add note', 'Reply', 'Open', 'Snooze 4 hours', 'Mute this ticket']);
-    expect(b.body[0].text).toBe('● Assigned to you');
+    expect(b.actions.map((x) => x.title)).toEqual(['Open ticket', 'Add note', 'Reply', '💤 Snooze 4 hours', '🔕 Mute this ticket']);
+    // D2-a: banner with the linked subject and the state as icon + word on the right; facts panel next.
+    const bannerCols = b.body[0].items[0].columns;
+    expect(bannerCols[0].items[0].text).toBe('VPN down  ↗');
+    expect(b.body[0].selectAction.url).toBe('https://tp/tickets/50');
+    expect(bannerCols[1].items.map((i) => i.text)).toEqual(['🎫', 'Assigned']);
+    expect(JSON.stringify(b.body[1])).toContain('CATEGORY');
   });
   test('approval card: nothing is decided in one click', () => {
     const a = { approvalId: 9, ticketId: 50, workspaceId: 1, categoryName: 'Laptop', decisionUrl: 'https://tp/approval/tok' };
@@ -172,19 +177,19 @@ describe('card actions', () => {
     const res = await svc.handleActivity(invoke('take', { ticketId: 50, workspaceId: 1 }));
     expect(assignTicket).toHaveBeenCalledWith(50, 1, 7, expect.objectContaining({ email: 'adrian@x.io', technicianId: 7 }));
     expect(res.type).toBe('application/vnd.microsoft.card.adaptive');
-    expect(res.value.body[0].text).toBe('● Taken by you');
+    expect(JSON.stringify(res.value)).toContain('Taken by you');
   });
   test('Add note posts an internal note as that agent', async () => {
     const res = await svc.handleActivity(invoke('note', { ticketId: 50, workspaceId: 1, noteText: 'On it' }));
     expect(addPrivateNote).toHaveBeenCalledWith(50, 1, expect.objectContaining({ bodyText: 'On it' }), expect.objectContaining({ technicianId: 7 }));
-    expect(res.value.body[0].text).toBe('● Note added');
+    expect(JSON.stringify(res.value)).toContain('Note added');
   });
   test('approval confirm decides as the named approver only', async () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue({ id: 9, ticketId: 50, workspaceId: 1, approverEmail: 'adrian@x.io', status: 'pending', approvalCategoryId: null });
     botMock.findUser.mockResolvedValue({ displayName: 'Adrian Lo' });
     const res = await svc.handleActivity(invoke('approval.confirm', { approvalId: 9, ticketId: 50, workspaceId: 1, decision: 'approved', decisionNote: 'ok' }));
     expect(decideInApp).toHaveBeenCalledWith(50, 1, 9, 'approved', 'ok', expect.objectContaining({ email: 'adrian@x.io' }));
-    expect(res.value.body[0].text).toBe('● Approved');
+    expect(JSON.stringify(res.value)).toContain('You approved this');
 
     prismaMock.ticketApproval.findFirst.mockResolvedValue({ id: 9, ticketId: 50, workspaceId: 1, approverEmail: 'someone.else@x.io', status: 'pending' });
     decideInApp.mockClear();
