@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.23-preview';
+export const APP_VERSION = '4.1.24-preview';
 
 export const changelog = [
+  {
+    version: '4.1.24-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Related tab on tickets</strong> &mdash; Parent / child, Linked tickets and Related tickets moved out of the side panel into their own tab, between AI &amp; Routing and Tasks. The tab shows how many parent, child and linked tickets there are; the side panel now starts straight with the ticket fields.' },
+      { type: 'improved', html: '<strong>Ticket tabs stand out more</strong> &mdash; the tabs are a little taller, and the numbers that ask for action (open tasks, related tickets) sit in a solid blue badge. The open-task count now shows before you open the Tasks tab.' },
+    ],
+  },
   {
     version: '4.1.23-preview',
     date: 'September 30, 2026',

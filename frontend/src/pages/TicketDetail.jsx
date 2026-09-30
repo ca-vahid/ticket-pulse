@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -731,7 +731,7 @@ export default function TicketDetail() {
     if (workspaceId !== openedWsRef.current) navigate('/tickets', { replace: true });
   }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const pageTab = ['approvals', 'history', 'ai', 'tasks'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
+  const pageTab = ['approvals', 'history', 'ai', 'tasks', 'links'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
   // Arriving with ?tab=approvals (the Approvals page's ticket link): bring the
   // approvals card to the top of the view once, after the ticket renders.
   const approvalsSectionRef = useRef(null);
@@ -1670,6 +1670,25 @@ export default function TicketDetail() {
   // ---- Related tickets (accuracy-first): facts + clearly-labeled suggestions ----
   const [related, setRelated] = useState(null);
   const [dupeDismissed, setDupeDismissed] = useState(false);
+  const relatedHasAny = Boolean(related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed) || related.similarByContent?.length > 0));
+  // Related tab badge (30 Sep 2026): explicit relations only — parent, children,
+  // links — facts, not suggestions. Fetched here so the tab shows it while closed.
+  const [linkCount, setLinkCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const safe = (fn) => Promise.resolve().then(fn).catch(() => null);
+    Promise.all([safe(() => ticketsAPI.family(ticketId)), safe(() => ticketsAPI.links(ticketId)), safe(() => ticketsAPI.tasks(ticketId))])
+      .then(([f, l, t]) => {
+        if (cancelled) return;
+        const fam = f?.data?.data || f?.data || {};
+        const links = Array.isArray(l?.data) ? l.data : [];
+        setLinkCount((fam.parent ? 1 : 0) + (fam.children?.length || 0) + links.length);
+        // Open tasks for the Tasks badge before the tab is ever opened (the tab keeps it live after).
+        const tasks = t?.data?.data || t?.data;
+        if (Array.isArray(tasks)) setTaskOpenCount(tasks.filter((x) => x.status !== 'done').length);
+      });
+    return () => { cancelled = true; };
+  }, [ticketId, ticket?.updatedAt]);
 
   // ---- Verified solutions in this category (QA 09-22 #6) ----
   const [solutions, setSolutions] = useState(null);
@@ -2719,6 +2738,7 @@ export default function TicketDetail() {
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
                 { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
+                { key: 'links', label: 'Related', icon: GitBranch, count: linkCount },
                 { key: 'tasks', label: 'Tasks', icon: CheckSquare, count: taskOpenCount },
                 { key: 'history', label: 'Activity', icon: History, count: historyItems.length },
               ].map(({ key, label, icon: TabIcon, count }) => {
@@ -2729,18 +2749,20 @@ export default function TicketDetail() {
                     role="tab"
                     aria-selected={selected}
                     onClick={() => setPageTab(key)}
-                    className={`tp-focus-ring relative shrink-0 -mb-px inline-flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg border text-sm font-semibold transition-colors ${
+                    className={`tp-focus-ring relative shrink-0 -mb-px inline-flex items-center gap-2 px-4 py-3 rounded-t-lg border text-sm font-semibold transition-colors ${
                       selected
                         ? 'bg-card text-blue-700 dark:text-blue-200 border-border border-b-white'
                         : 'bg-muted/50 text-muted-foreground border-transparent hover:bg-muted hover:text-foreground/85'
                     }`}
                   >
                     {selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-blue-600" aria-hidden="true" />}
-                    <TabIcon className="w-4 h-4" aria-hidden="true" />
+                    <TabIcon className="w-[18px] h-[18px]" aria-hidden="true" />
                     {label}
                     {count > 0 && (
-                      <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-md text-[10px] font-bold ${
-                        selected ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'bg-secondary/80 text-muted-foreground'
+                      <span className={`inline-flex items-center justify-center rounded-md font-bold ${
+                        ['tasks', 'links'].includes(key)
+                          ? 'min-w-[22px] h-[22px] px-1.5 text-[11px] bg-blue-600 text-white dark:bg-blue-500 shadow-sm'
+                          : `min-w-[18px] h-[18px] px-1 text-[10px] ${selected ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'bg-secondary/80 text-muted-foreground'}`
                       }`}
                       >
                         {count}
@@ -3362,6 +3384,134 @@ export default function TicketDetail() {
                   </>
                 )}
 
+                {/* Related tab (30 Sep 2026): parent / child, explicit links and
+                    related tickets moved out of the side panel into their own tab. */}
+                {pageTab === 'links' && (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start" data-testid="ticket-related-tab">
+                    <div className="space-y-4 min-w-0">
+                      {/* Explicit ticket links (duplicate/related/parent) + merge */}
+                      <TicketFamilyCard
+                        ticketId={ticketId}
+                        canWrite={meta?.actor?.kind !== 'agent'}
+                        refreshToken={ticket?.updatedAt}
+                        onNavigate={(id) => navigate(`/tickets/${id}`)}
+                      />
+
+                      <TicketLinksCard
+                        ticketId={ticketId}
+                        canWrite={canConverse}
+                        canMerge={ticketingOn}
+                        onMerged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Ticket merged — the conversation continues on the target'); }}
+                        onReopened={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reopened — this ticket is back in the queue'); }}
+                        refreshToken={ticket?.updatedAt}
+                        onNavigate={(id) => navigate(`/tickets/${id}`)}
+                      />
+                    </div>
+                    <div className="space-y-4 min-w-0">
+                      {/* Related tickets: facts first, suggestions clearly labeled */}
+                      {relatedHasAny ? (
+                        <div className="tp-card rounded-xl p-4">
+                          <div className="flex items-center gap-2 mb-2.5">
+                            <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
+                            <h2 className="text-sm font-bold text-foreground">Related</h2>
+                          </div>
+                          {related.sameRequester.length > 0 && (
+                            <>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">
+                          Other tickets from this requester
+                              </p>
+                              <ul className="space-y-1 mb-2.5">
+                                {related.sameRequester.map((r) => (
+                                  <li key={r.id}>
+                                    <Link
+                                      to={`/tickets/${r.id}`}
+                                      className="tp-focus-ring flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50/60 dark:hover:bg-blue-500/10 border border-transparent hover:border-blue-100 dark:hover:border-blue-500/20"
+                                    >
+                                      <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{r.displayRef}</span>
+                                      <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
+                                      <StatusPill status={r.status} className="!text-[9px] !px-1.5" />
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                          {related.nearDuplicates.length > 0 && !dupeDismissed && (
+                            <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10 p-2">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <Sparkles className="w-3 h-3 text-amber-500" aria-hidden="true" />
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
+                            Suggestion — same subject within 7 days
+                                </span>
+                                <button
+                                  onClick={dismissDupes}
+                                  aria-label="Dismiss duplicate suggestion"
+                                  className="tp-focus-ring ml-auto p-0.5 rounded text-amber-400 hover:text-amber-700 dark:hover:text-amber-200"
+                                >
+                                  <X className="w-3 h-3" aria-hidden="true" />
+                                </button>
+                              </div>
+                              <ul className="space-y-1">
+                                {related.nearDuplicates.map((r) => (
+                                  <li key={r.id}>
+                                    <Link
+                                      to={`/tickets/${r.id}`}
+                                      className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-amber-100/70 dark:hover:bg-amber-500/15"
+                                    >
+                                      <span className="font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-300 whitespace-nowrap">{r.displayRef}</span>
+                                      <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
+                                      <span className="text-[10px] text-muted-foreground/75 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                              <p className="mt-1 text-[10px] text-amber-600/80">Might be unrelated — treat as a hint, not a fact.</p>
+                            </div>
+                          )}
+                          {related.similarByContent?.length > 0 && (
+                            <div className={`rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/10 p-2 ${related.nearDuplicates.length > 0 && !dupeDismissed ? 'mt-2' : ''}`}>
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <Sparkles className="w-3 h-3 text-violet-500" aria-hidden="true" />
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200">
+                            AI suggestion — similar by content
+                                </span>
+                              </div>
+                              <ul className="space-y-1">
+                                {related.similarByContent.map((r) => (
+                                  <li key={r.id}>
+                                    <Link
+                                      to={`/tickets/${r.id}`}
+                                      className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70 dark:hover:bg-violet-500/15"
+                                    >
+                                      <span className="font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300 whitespace-nowrap">{r.displayRef}</span>
+                                      <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
+                                      <span
+                                        className="text-[10px] font-semibold text-violet-500 whitespace-nowrap"
+                                        title="Content similarity (cosine over text embeddings)"
+                                      >
+                                        {Math.round((r.similarity || 0) * 100)}%
+                                      </span>
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                              <p className="mt-1 text-[10px] text-violet-600/80">Matched on wording, not history — verify before acting.</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="tp-card rounded-xl p-4">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
+                            <h2 className="text-sm font-bold text-foreground">Related</h2>
+                          </div>
+                          <p className="text-sm italic text-muted-foreground">{related ? 'No other tickets from this requester and no similar tickets found.' : 'Looking for related tickets…'}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {pageTab === 'tasks' && (
                   <TicketTasksTab
                     ticketId={ticketId}
@@ -3748,24 +3898,6 @@ export default function TicketDetail() {
 
               </aside>
               <aside className="space-y-4 lg:col-start-2 lg:row-start-2" aria-label="Ticket context">
-                {/* Explicit ticket links (duplicate/related/parent) + merge */}
-                <TicketFamilyCard
-                  ticketId={ticketId}
-                  canWrite={meta?.actor?.kind !== 'agent'}
-                  refreshToken={ticket?.updatedAt}
-                  onNavigate={(id) => navigate(`/tickets/${id}`)}
-                />
-
-                <TicketLinksCard
-                  ticketId={ticketId}
-                  canWrite={canConverse}
-                  canMerge={ticketingOn}
-                  onMerged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Ticket merged — the conversation continues on the target'); }}
-                  onReopened={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reopened — this ticket is back in the queue'); }}
-                  refreshToken={ticket?.updatedAt}
-                  onNavigate={(id) => navigate(`/tickets/${id}`)}
-                />
-
                 {/* Per-workspace custom fields (TP annotation layer, both origins).
                     Wrapper ref is the scroll/flash target for field-card pencils. */}
                 <div
@@ -3807,99 +3939,6 @@ export default function TicketDetail() {
                     </ul>
                   </div>
                 )}
-                {/* Related tickets: facts first, suggestions clearly labeled */}
-                {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed) || (related.similarByContent?.length > 0)) && (
-                  <div className="tp-card rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-2.5">
-                      <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-foreground">Related</h2>
-                    </div>
-                    {related.sameRequester.length > 0 && (
-                      <>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">
-                          Other tickets from this requester
-                        </p>
-                        <ul className="space-y-1 mb-2.5">
-                          {related.sameRequester.map((r) => (
-                            <li key={r.id}>
-                              <Link
-                                to={`/tickets/${r.id}`}
-                                className="tp-focus-ring flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50/60 dark:hover:bg-blue-500/10 border border-transparent hover:border-blue-100 dark:hover:border-blue-500/20"
-                              >
-                                <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{r.displayRef}</span>
-                                <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
-                                <StatusPill status={r.status} className="!text-[9px] !px-1.5" />
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                    {related.nearDuplicates.length > 0 && !dupeDismissed && (
-                      <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10 p-2">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Sparkles className="w-3 h-3 text-amber-500" aria-hidden="true" />
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
-                            Suggestion — same subject within 7 days
-                          </span>
-                          <button
-                            onClick={dismissDupes}
-                            aria-label="Dismiss duplicate suggestion"
-                            className="tp-focus-ring ml-auto p-0.5 rounded text-amber-400 hover:text-amber-700 dark:hover:text-amber-200"
-                          >
-                            <X className="w-3 h-3" aria-hidden="true" />
-                          </button>
-                        </div>
-                        <ul className="space-y-1">
-                          {related.nearDuplicates.map((r) => (
-                            <li key={r.id}>
-                              <Link
-                                to={`/tickets/${r.id}`}
-                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-amber-100/70 dark:hover:bg-amber-500/15"
-                              >
-                                <span className="font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-300 whitespace-nowrap">{r.displayRef}</span>
-                                <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
-                                <span className="text-[10px] text-muted-foreground/75 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                        <p className="mt-1 text-[10px] text-amber-600/80">Might be unrelated — treat as a hint, not a fact.</p>
-                      </div>
-                    )}
-                    {related.similarByContent?.length > 0 && (
-                      <div className={`rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/10 p-2 ${related.nearDuplicates.length > 0 && !dupeDismissed ? 'mt-2' : ''}`}>
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Sparkles className="w-3 h-3 text-violet-500" aria-hidden="true" />
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200">
-                            AI suggestion — similar by content
-                          </span>
-                        </div>
-                        <ul className="space-y-1">
-                          {related.similarByContent.map((r) => (
-                            <li key={r.id}>
-                              <Link
-                                to={`/tickets/${r.id}`}
-                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70 dark:hover:bg-violet-500/15"
-                              >
-                                <span className="font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300 whitespace-nowrap">{r.displayRef}</span>
-                                <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
-                                <span
-                                  className="text-[10px] font-semibold text-violet-500 whitespace-nowrap"
-                                  title="Content similarity (cosine over text embeddings)"
-                                >
-                                  {Math.round((r.similarity || 0) * 100)}%
-                                </span>
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                        <p className="mt-1 text-[10px] text-violet-600/80">Matched on wording, not history — verify before acting.</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Attachments */}
                 <div className="tp-card rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2.5">
