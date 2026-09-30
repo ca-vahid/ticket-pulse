@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.14-preview';
+export const APP_VERSION = '4.1.15-preview';
 
 export const changelog = [
+  {
+    version: '4.1.15-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Updated sort shows real activity again</strong> &mdash; FreshService automations (&ldquo;Ticket Workflow executed &hellip;&rdquo;, the Supervisor rule that closes resolved tickets) and FreshService&rsquo;s echo of changes made in Ticket Pulse no longer count as an update, so old tickets stop jumping to the top of the Tickets page. Replies, notes and status changes by people still count. About 20,000 tickets had their Updated time corrected.' },
+    ],
+  },
   {
     version: '4.1.14-preview',
     date: 'September 30, 2026',
