@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, Bot, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -44,10 +44,11 @@ import AutoHelpRunCard from '../components/tickets/AutoHelpRunCard';
 import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
+import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
 import {
   BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
-  PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, pipelineRunLabel,
-  pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
+  PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry,
+  ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
@@ -64,7 +65,7 @@ export function newIdempotencyKey() {
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
-import { assignmentAPI, ticketsAPI, uiPreferencesAPI } from '../services/api';
+import { ticketsAPI, uiPreferencesAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
@@ -731,7 +732,7 @@ export default function TicketDetail() {
     if (workspaceId !== openedWsRef.current) navigate('/tickets', { replace: true });
   }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const pageTab = ['approvals', 'history', 'ai', 'tasks', 'links'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
+  const pageTab = ['approvals', 'history', 'ai', 'tasks', 'links', 'attachments'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
   // Arriving with ?tab=approvals (the Approvals page's ticket link): bring the
   // approvals card to the top of the view once, after the ticket renders.
   const approvalsSectionRef = useRef(null);
@@ -762,7 +763,6 @@ export default function TicketDetail() {
   const [toast, setToast] = useState(null);
   const [savingField, setSavingField] = useState(null);
   const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [aiDeciding, setAiDeciding] = useState(false);
   // AI assignment/review is reviewer/admin only (endpoints are reviewer-gated).
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
@@ -1297,6 +1297,21 @@ export default function TicketDetail() {
   // Long threads: keep the original request + the newest messages in view;
   // everything between folds behind a divider until asked for.
   const [showFolded, setShowFolded] = useState(false);
+  // Attachments tab → "Show in conversation": open Conversation (All, unfolded)
+  // and bring the message into view with a short highlight.
+  const jumpToEntry = useCallback((entryId) => {
+    setPageTab('conversation');
+    setConversationTab('all');
+    setShowFolded(true);
+    setTimeout(() => {
+      const el = document.getElementById(`entry-${entryId}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-primary/60');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 1800);
+    }, 150);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- setters are stable; setPageTab is defined above
+  }, []);
   useEffect(() => { setShowFolded(false); }, [ticketId, conversationTab]);
   const FOLD_THRESHOLD = 8;
   const KEEP_TAIL = 5;
@@ -2042,25 +2057,6 @@ export default function TicketDetail() {
     }
     : pipelineRuns.some((r) => r.status === 'running') ? { state: 'analyzing' }
       : pipelineRuns.some((r) => r.status === 'queued') ? { state: 'queued' } : null;
-  // Already-assigned guard: approving an AI pick when the ticket already has an
-  // owner is a reassignment — surface it instead of a plain "Approve".
-  const alreadyAssigned = Boolean(ticket?.assignedTechId);
-  const assigneeName = ticket?.assignedTech?.name || null;
-  const aiIsReassign = alreadyAssigned && aiRecs[0] && Number(aiRecs[0].techId) !== Number(ticket?.assignedTechId);
-
-  const approveAiRun = async () => {
-    if (!aiPendingRun || aiDeciding) return;
-    setAiDeciding(true);
-    try {
-      await assignmentAPI.decide(aiPendingRun.id, { decision: 'approved', assignedTechId: aiRecs[0]?.techId || undefined });
-      lastLocalMutationRef.current = Date.now();
-      showToast('emerald', `Approved — assigning to ${aiRecs[0]?.techName || 'technician'}`);
-      fetchTicket({ silent: true });
-    } catch (err) {
-      showToast('red', err.response?.data?.message || err.message || 'Approve failed');
-    }
-    setAiDeciding(false);
-  };
 
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)] print:pl-0">
@@ -2736,6 +2732,7 @@ export default function TicketDetail() {
             <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-border mb-4 overflow-x-auto no-scrollbar print-hide">
               {[
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
+                { key: 'attachments', label: 'Attachments', icon: Paperclip, count: ticket.attachments?.length || 0 },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
                 { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
                 { key: 'links', label: 'Related', icon: GitBranch, count: linkCount },
@@ -2903,7 +2900,7 @@ export default function TicketDetail() {
                         <div className="rounded-2xl border border-border/70 bg-gradient-to-b from-muted/90 via-indigo-50/40 to-blue-50/40 dark:from-muted/40 dark:via-indigo-500/5 dark:to-blue-500/5 p-3 sm:p-4">
                           <ul className="space-y-5">
                             {visibleTimeline.map((item, idx) => (
-                              <li key={`wrap-${item.e.id}`} className="list-none">
+                              <li key={`wrap-${item.e.id}`} id={`entry-${item.e.id}`} className="list-none scroll-mt-24 rounded-2xl transition-shadow duration-700">
                                 {folded && idx === 1 && (
                                   <div className="relative flex items-center justify-center py-1.5 mb-3.5" role="separator">
                                     <span aria-hidden="true" className="absolute inset-x-2 top-1/2 border-t border-dashed border-input" />
@@ -3512,6 +3509,21 @@ export default function TicketDetail() {
                   </div>
                 )}
 
+                {pageTab === 'attachments' && (
+                  <TicketAttachmentsTab
+                    ticketId={ticketId}
+                    attachments={ticket.attachments || []}
+                    entries={conversationEntries}
+                    onPreview={previewImage}
+                    onDownload={downloadAttachment}
+                    onJumpToEntry={jumpToEntry}
+                    canUpload={canWrite}
+                    onUpload={uploadAttachments}
+                    uploading={savingField === 'attachments'}
+                    nameForEmail={nameForEmail}
+                  />
+                )}
+
                 {pageTab === 'tasks' && (
                   <TicketTasksTab
                     ticketId={ticketId}
@@ -3898,52 +3910,13 @@ export default function TicketDetail() {
 
               </aside>
               <aside className="space-y-4 lg:col-start-2 lg:row-start-2" aria-label="Ticket context">
-                {/* Per-workspace custom fields (TP annotation layer, both origins).
-                    Wrapper ref is the scroll/flash target for field-card pencils. */}
-                <div
-                  ref={customFieldsCardRef}
-                  className={`rounded-xl transition-shadow duration-500 ${cfCardFlash ? 'ring-2 ring-violet-400 shadow-soft' : ''}`}
-                  data-testid="custom-fields-card-slot"
-                >
-                  <CustomFieldsCard
-                    ticketId={ticketId}
-                    values={ticket?.customFields || {}}
-                    canWrite={canConverse}
-                    onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
-                  />
-                </div>
-
-                {/* Verified solutions in this category (QA 09-22 #6) */}
-                {solutions?.items?.length > 0 && (
-                  <div className="tp-card rounded-xl p-4" data-testid="verified-solutions-card">
-                    <div className="flex items-center gap-2 mb-2.5">
-                      <Lightbulb className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-foreground">Verified solutions</h2>
-                      <span className="text-[10px] text-muted-foreground/75">{solutions.scope === 'subcategory' ? 'same subcategory' : 'same category'}</span>
-                    </div>
-                    <ul className="space-y-1">
-                      {solutions.items.map((s) => (
-                        <li key={s.id}>
-                          <Link to={`/tickets/${s.id}`} className="tp-focus-ring block rounded-lg px-2 py-1.5 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10">
-                            <span className="flex items-center gap-2">
-                              <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{s.displayRef}</span>
-                              <span className="min-w-0 flex-1 text-xs font-medium text-foreground/85 truncate">{s.subject || '(no subject)'}</span>
-                            </span>
-                            {(s.solutionNote || s.resolutionNote) && (
-                              <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground line-clamp-2">{s.solutionNote || s.resolutionNote}</span>
-                            )}
-                            {s.solutionVerifiedBy && <span className="mt-0.5 block text-[10px] text-muted-foreground/70">verified by {s.solutionVerifiedBy}</span>}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
                 {/* Attachments */}
                 <div className="tp-card rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2.5">
                     <Paperclip className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                    <h2 className="text-sm font-bold text-foreground">Attachments</h2>
+                    <button type="button" onClick={() => setPageTab('attachments')} className="tp-focus-ring rounded text-left hover:text-primary" title="Open the Attachments tab">
+                      <h2 className="text-sm font-bold text-foreground hover:text-primary">Attachments</h2>
+                    </button>
                     <span className="text-xs text-muted-foreground/75">({ticket.attachments?.length || 0})</span>
                     {canWrite && (
                       <>
@@ -3986,7 +3959,7 @@ export default function TicketDetail() {
                     <p className="text-xs text-muted-foreground/75">No files attached{canWrite ? ' — drop something in with Add.' : '.'}</p>
                   ) : (
                     <ul className="space-y-1.5">
-                      {ticket.attachments.map((a) => (
+                      {ticket.attachments.slice(0, 5).map((a) => (
                         <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border/60 bg-muted/30">
                           {isImageAttachment(a)
                             ? <ImageIcon className="w-[18px] h-[18px] text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
@@ -3999,7 +3972,7 @@ export default function TicketDetail() {
                             <p className="text-sm font-medium text-foreground/85 truncate hover:text-blue-700 dark:hover:text-blue-200">{a.fileName}</p>
                             <p className="text-[11px] text-muted-foreground/75 truncate">
                               {formatBytes(a.sizeBytes)}
-                              {a.source === 'email' ? ' · from email' : a.source === 'freshservice' ? ' · from FreshService' : a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
+                              {a.source === 'email' ? ' · from email' : a.source === 'freshservice' ? ' · from FreshService' : a.uploadedBy ? ` · ${(nameForEmail(a.uploadedBy) && !String(nameForEmail(a.uploadedBy)).includes('@')) ? nameForEmail(a.uploadedBy) : a.uploadedBy.split('@')[0]}` : ''}
                             </p>
                           </button>
                           <button
@@ -4030,114 +4003,52 @@ export default function TicketDetail() {
                       ))}
                     </ul>
                   )}
+                  {(ticket.attachments?.length || 0) > 0 && (
+                    <button type="button" onClick={() => setPageTab('attachments')} className="tp-focus-ring mt-2 text-xs font-semibold text-primary hover:underline">
+                      {ticket.attachments.length > 5 ? `View all ${ticket.attachments.length} in the Attachments tab →` : 'Open the Attachments tab →'}
+                    </button>
+                  )}
                 </div>
 
-                {/* AI triage — reviewer/admin only (endpoints are reviewer-gated) */}
-                {canReview && (
-                  <div className="tp-card rounded-xl p-4">
+                {/* Per-workspace custom fields (TP annotation layer, both origins).
+                    Wrapper ref is the scroll/flash target for field-card pencils. */}
+                <div
+                  ref={customFieldsCardRef}
+                  className={`rounded-xl transition-shadow duration-500 ${cfCardFlash ? 'ring-2 ring-violet-400 shadow-soft' : ''}`}
+                  data-testid="custom-fields-card-slot"
+                >
+                  <CustomFieldsCard
+                    ticketId={ticketId}
+                    values={ticket?.customFields || {}}
+                    canWrite={canConverse}
+                    onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
+                  />
+                </div>
+
+                {/* Verified solutions in this category (QA 09-22 #6) */}
+                {solutions?.items?.length > 0 && (
+                  <div className="tp-card rounded-xl p-4" data-testid="verified-solutions-card">
                     <div className="flex items-center gap-2 mb-2.5">
-                      <Sparkles className="w-4 h-4 text-indigo-500" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-foreground">AI runs</h2>
-                      {pipelineRuns.length > 0 && <span className="text-xs text-muted-foreground/75">({pipelineRuns.length})</span>}
-                      <button
-                        onClick={() => setAiModalOpen(true)}
-                        className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/70 dark:bg-indigo-500/10 text-[11px] font-semibold text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20"
-                        title="Run the assignment pipeline and watch it live"
-                      >
-                        <Sparkles className="w-3 h-3" aria-hidden="true" />
-                        {pipelineRuns.length > 0 ? 'Run again' : 'Run AI'}
-                      </button>
+                      <Lightbulb className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+                      <h2 className="text-sm font-bold text-foreground">Verified solutions</h2>
+                      <span className="text-[10px] text-muted-foreground/75">{solutions.scope === 'subcategory' ? 'same subcategory' : 'same category'}</span>
                     </div>
-
-                    {/* Pending recommendation — approve without leaving the ticket */}
-                    {aiPendingRun && aiRecs.length > 0 && (
-                      <div className={`mb-3 rounded-lg border p-3 ${alreadyAssigned ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10' : 'border-indigo-200 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50 dark:from-indigo-500/15 to-violet-50/50'}`}>
-                        <p className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mb-2 ${alreadyAssigned ? 'text-amber-600 dark:text-amber-300' : 'text-indigo-500'}`}>
-                          <Sparkles className="w-3 h-3" aria-hidden="true" /> {alreadyAssigned ? 'AI suggestion (already assigned)' : 'Awaiting your review'}
-                        </p>
-                        {alreadyAssigned && (
-                          <p className="mb-2 text-[11px] text-amber-700 dark:text-amber-200 leading-relaxed">
-                            Already assigned{assigneeName ? ` to ${assigneeName}` : ''} — handled outside this run. Approving reassigns the ticket.
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <PersonAvatar
-                            name={aiRecs[0].techName || '?'}
-                            photoUrl={(meta?.technicians || []).find((t) => t.id === aiRecs[0].techId)?.photoUrl}
-                            size="h-9 w-9"
-                            textSize="text-[11px]"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold text-foreground truncate">{aiRecs[0].techName || 'Unknown'}</span>
-                            {typeof aiRecs[0].score === 'number' && (
-                              <span className="block text-[11px] text-indigo-500 font-medium">{Math.round(aiRecs[0].score * 100)}% match</span>
+                    <ul className="space-y-1">
+                      {solutions.items.map((s) => (
+                        <li key={s.id}>
+                          <Link to={`/tickets/${s.id}`} className="tp-focus-ring block rounded-lg px-2 py-1.5 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10">
+                            <span className="flex items-center gap-2">
+                              <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{s.displayRef}</span>
+                              <span className="min-w-0 flex-1 text-xs font-medium text-foreground/85 truncate">{s.subject || '(no subject)'}</span>
+                            </span>
+                            {(s.solutionNote || s.resolutionNote) && (
+                              <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground line-clamp-2">{s.solutionNote || s.resolutionNote}</span>
                             )}
-                          </span>
-                        </div>
-                        {aiRecs[0].reasoning && (
-                          <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed line-clamp-3">{aiRecs[0].reasoning}</p>
-                        )}
-                        {aiRecs.length > 1 && (
-                          <p className="mt-1.5 text-[10px] text-muted-foreground/75 truncate">
-                          Also considered: {aiRecs.slice(1).map((r) => r.techName).filter(Boolean).join(', ')}
-                          </p>
-                        )}
-                        <div className="mt-2.5 flex items-center gap-1.5">
-                          <button
-                            onClick={approveAiRun}
-                            disabled={aiDeciding}
-                            title={aiIsReassign ? `Already assigned to ${assigneeName} — this reassigns to ${aiRecs[0].techName}.` : undefined}
-                            className={`tp-focus-ring flex-1 px-2.5 py-1.5 rounded-lg text-white text-xs font-semibold disabled:opacity-60 ${aiIsReassign ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                          >
-                            {aiDeciding ? 'Approving…' : `${aiIsReassign ? 'Reassign' : 'Approve'} — ${(aiRecs[0].techName || '').split(' ')[0] || 'assign'}`}
-                          </button>
-                          <button
-                            onClick={() => setAiModalOpen(true)}
-                            className="tp-focus-ring px-2.5 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-200 text-xs font-medium hover:bg-indigo-100/60 dark:hover:bg-indigo-500/15"
-                            title="See reasoning, pick another technician, or reject"
-                          >
-                          Review…
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {pipelineRuns.length === 0 ? (
-                      <p className="text-sm text-muted-foreground/75">No pipeline run yet for this ticket.</p>
-                    ) : (
-                      <ul className="space-y-1.5">
-                        {pipelineRuns.map((r) => (
-                          <li key={r.id} className={`rounded-lg border p-2.5 ${
-                            r.status === 'queued' ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10' : 'border-border/60 bg-muted/30'
-                          }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs font-semibold ${r.status === 'queued' ? 'text-amber-700 dark:text-amber-200' : 'text-foreground/85'}`}>
-                                {pipelineRunLabel(r)}
-                              </span>
-                              <span
-                                className="ml-auto text-[10px] text-muted-foreground/75 whitespace-nowrap"
-                                title={new Date(r.decidedAt || r.createdAt).toLocaleString()}
-                              >
-                                {timeAgo(r.decidedAt || r.createdAt)}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground/75 mt-0.5">
-                            via {pipelineTriggerLabel(r.triggerSource)}
-                              {r.status === 'queued' && ' — runs when business hours open'}
-                              {r.syncStatus ? ` · sync ${r.syncStatus}` : ''}
-                            </p>
-                            <Link
-                              to={`/assignments/history/${r.id}`}
-                              state={{ returnTo: `/tickets/${ticket.id}` }}
-                              className="tp-focus-ring inline-flex items-center gap-1 mt-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:underline rounded"
-                            >
-                              <Bot className="w-3 h-3" aria-hidden="true" /> View run
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                            {s.solutionVerifiedBy && <span className="mt-0.5 block text-[10px] text-muted-foreground/70">verified by {s.solutionVerifiedBy}</span>}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 

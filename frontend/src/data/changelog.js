@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.25-preview';
+export const APP_VERSION = '4.1.26-preview';
 
 export const changelog = [
+  {
+    version: '4.1.26-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Attachments tab on tickets</strong> &mdash; every file on the ticket in one place, right after Conversation. Filter by where it came from: from the requester, agent replies, internal notes or uploaded to the ticket. Grid with picture previews or a compact list; click to preview, download in one click, and &ldquo;Go to message&rdquo; jumps to the message the file came with.' },
+      { type: 'improved', html: '<strong>Tidier side panel</strong> &mdash; Attachments moved above Custom fields (newest five, with a link to the tab), uploads show who added them by name, and the AI runs card is gone &mdash; everything it showed is on the AI &amp; Routing tab.' },
+    ],
+  },
   {
     version: '4.1.25-preview',
     date: 'September 30, 2026',
