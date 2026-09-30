@@ -178,7 +178,12 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'autohelp', verb: verbs[t] || humanize(t.replace(/^auto_help_/, '')), detail: friendlyDays(d.note) || null, importance: 2 });
     } else if (t === 'ticket_ready') {
       // "Ticket ready" workflow trigger (30 Sep 2026).
-      item = baseItem({ event: 'system', verb: 'marked the ticket ready for "Ticket ready" workflows', detail: d.note || null, machine: true });
+      item = baseItem({
+        event: 'system',
+        verb: d.pending ? 'is waiting for the ticket to be sorted before "Ticket ready" workflows run' : 'marked the ticket ready for "Ticket ready" workflows',
+        detail: d.pending ? null : d.note || null,
+        machine: true,
+      });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

@@ -94,6 +94,24 @@ describe('notification workflow policy routing', () => {
     jest.clearAllMocks();
   });
 
+  // 30 Sep 2026: the arrival e-mails moved to "Ticket ready" keep their
+  // day/night split — a copied after-hours workflow keeps its scheduleMode.
+  test('"Ticket ready" gets the same day/night routing as "Ticket arrived"', () => {
+    const readyStandard = { ...standardWorkflow, id: 11, key: 'ticket_ready_copy', triggerType: 'ticket.ready' };
+    const readyAfterHours = { ...afterHoursWorkflow, id: 12, key: 'ticket_ready_after_hours_copy', triggerType: 'ticket.ready' };
+    const day = selectWorkflowsForNotificationTiming([readyStandard, readyAfterHours], context({ eventType: 'ticket.ready' }));
+    expect(day.selected.map((w) => w.id)).toEqual([11]);
+    expect(day.suppressed.map((w) => w.id)).toEqual([12]);
+    const night = selectWorkflowsForNotificationTiming([readyStandard, readyAfterHours], context({ eventType: 'ticket.ready', isBusinessHours: false, isAfterHours: true }));
+    expect(night.selected.map((w) => w.id)).toEqual([12]);
+    expect(night.suppressed.map((w) => w.id)).toEqual([11]);
+  });
+
+  test('other events are not touched by the arrival routing', () => {
+    const out = selectWorkflowsForNotificationTiming([standardWorkflow, afterHoursWorkflow], context({ eventType: 'ticket.assigned' }));
+    expect(out.selected.map((w) => w.id)).toEqual([1, 2]);
+  });
+
   test('uses the standard ticket-created workflow during business hours', () => {
     const result = selectWorkflowsForNotificationTiming(
       [standardWorkflow, afterHoursWorkflow],

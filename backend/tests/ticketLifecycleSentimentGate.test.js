@@ -36,7 +36,14 @@ test('no sentiment-reading workflow = no classification scheduled', async () => 
   hasReaderMock.mockResolvedValue(false);
   await maybeRefreshSentiment(created);
   expect(hasReaderMock).toHaveBeenCalledWith(3, 'ticket.created');
+  expect(hasReaderMock).toHaveBeenCalledWith(3, 'ticket.ready');
   expect(scheduleRefreshMock).not.toHaveBeenCalled();
+});
+
+test('an arrival e-mail moved to "Ticket ready" that reads sentiment still schedules it (30 Sep 2026)', async () => {
+  hasReaderMock.mockImplementation(async (_ws, type) => type === 'ticket.ready');
+  await maybeRefreshSentiment(created);
+  expect(scheduleRefreshMock).toHaveBeenCalledWith(77, 3, 5000);
 });
 
 test('a workflow that reads sentiment schedules the delayed classification', async () => {

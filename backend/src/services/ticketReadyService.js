@@ -17,13 +17,18 @@
  *                        it never waits longer, and never overnight when the
  *                        pipeline is queued until the morning
  *
- * Exactly once per ticket, and only for tickets that arrived in the last
- * READY_NEW_TICKET_WINDOW_MS and after the workspace's first "Ticket ready"
- * workflow was switched on (turning one on never fires for the tickets of the
- * last two hours): the claim is a 'ticket_ready' activity written
- * under a per-ticket advisory lock; workflow runs dedupe on `ready:<id>` too.
- * Workspaces with no enabled "Ticket ready" workflow are skipped entirely
- * (no activity, no event).
+ * "Ticket ready" follows "Ticket arrived" exactly (30 Sep 2026, moving the
+ * arrival e-mails onto it): it fires only for tickets whose ticket.created
+ * event was dispatched to workflows (noteArrival, called from the lifecycle
+ * service after its own gates — an ingest path or a "don't notify the
+ * requester" create that ran no arrival workflows runs no ready workflows
+ * either), and it carries the same suppressRequesterAck and createdVia.
+ *
+ * One 'ticket_ready' activity per ticket: written pending at arrival (only in
+ * workspaces with an enabled "Ticket ready" workflow, only for tickets that
+ * arrived after the first one was switched on), then claimed once — under a
+ * per-ticket advisory lock — when it fires. Workflow runs dedupe on
+ * `ready:<id>` too.
  */
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
@@ -78,23 +83,54 @@ class TicketReadyService {
     return value;
   }
 
-  /** Workspaces with an enabled "Ticket ready" workflow → since when (for the sweep). */
-  async _workspacesUsingTrigger() {
-    const rows = await Promise.resolve()
-      .then(() => prisma.notificationWorkflow.findMany({
-        where: { triggerType: READY_TRIGGER, isEnabled: true, archivedAt: null, publishedVersion: { gt: 0 } },
-        select: { workspaceId: true, enabledAt: true, lastPublishedAt: true, createdAt: true },
-        take: 200,
-      }))
-      .catch(() => []);
-    const by = new Map();
-    for (const r of rows || []) by.set(r.workspaceId, [...(by.get(r.workspaceId) || []), r]);
-    return [...by.entries()].map(([workspaceId, list]) => ({ workspaceId, since: sinceOf(list) })).filter((w) => w.since);
+  /**
+   * ticket.created was dispatched to workflows for this ticket: remember it
+   * (pending) with what the arrival workflows saw. Never throws.
+   */
+  async noteArrival(ticketId, { workspaceId = null, createdAt = null, suppressRequesterAck = false, createdVia = null, now = new Date() } = {}) {
+    try {
+      let ws = Number(workspaceId) || null;
+      let created = createdAt ? new Date(createdAt) : null;
+      if (!ws || !created) {
+        const t = await prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { workspaceId: true, createdAt: true } });
+        if (!t) return { skipped: 'no_ticket' };
+        ws = t.workspaceId;
+        created = new Date(t.createdAt);
+      }
+      if (new Date(now).getTime() - created.getTime() > READY_NEW_TICKET_WINDOW_MS) return { skipped: 'not_new' };
+      const since = await this.readySince(ws);
+      if (!since) return { skipped: 'unused' };
+      if (created < since) return { skipped: 'before_trigger_on' };
+      const noted = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${READY_LOCK_NAMESPACE}::int, ${Number(ticketId)}::int)`;
+        const existing = await tx.ticketActivity.findFirst({ where: { ticketId: Number(ticketId), activityType: READY_ACTIVITY }, select: { id: true } });
+        if (existing) return false;
+        await tx.ticketActivity.create({
+          data: {
+            ticketId: Number(ticketId),
+            activityType: READY_ACTIVITY,
+            performedBy: 'Ticket Pulse',
+            performedAt: created,
+            details: {
+              pending: true,
+              suppressRequesterAck: suppressRequesterAck === true,
+              createdVia: createdVia || null,
+              note: 'Waiting for the ticket to be sorted before "Ticket ready" workflows run',
+            },
+          },
+        });
+        return true;
+      });
+      return noted ? { noted: true } : { already: true };
+    } catch (err) {
+      logger.warn(`Ticket ready: arrival not noted for ticket ${ticketId}: ${err.message}`);
+      return { skipped: 'error', error: err.message };
+    }
   }
 
   /**
    * Claim + emit. Returns { emitted } | { skipped: reason } | { already: true }.
-   * Never throws.
+   * Only a ticket whose arrival was noted fires. Never throws.
    */
   async markReady(ticketId, { reason = 'auto_help_done', autoHelpAnswered = null, runId = null, now = new Date() } = {}) {
     try {
@@ -105,26 +141,26 @@ class TicketReadyService {
       if (!ticket) return { skipped: 'no_ticket' };
       const ageMs = new Date(now).getTime() - new Date(ticket.createdAt).getTime();
       if (!(ageMs <= READY_NEW_TICKET_WINDOW_MS)) return { skipped: 'not_new' };
-      const since = await this.readySince(ticket.workspaceId);
-      if (!since) return { skipped: 'unused' };
-      if (new Date(ticket.createdAt) < since) return { skipped: 'before_trigger_on' };
 
-      const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(${READY_LOCK_NAMESPACE}::int, ${Number(ticket.id)}::int)`;
-        const existing = await tx.ticketActivity.findFirst({ where: { ticketId: ticket.id, activityType: READY_ACTIVITY }, select: { id: true } });
-        if (existing) return false;
-        await tx.ticketActivity.create({
-          data: {
-            ticketId: ticket.id,
-            activityType: READY_ACTIVITY,
-            performedBy: 'Ticket Pulse',
-            performedAt: new Date(now),
-            details: { reason: why, note: REASON_NOTES[why], waitedSeconds: Math.max(0, Math.round(ageMs / 1000)), runId: runId ?? null },
-          },
-        });
-        return true;
+        const row = await tx.ticketActivity.findFirst({ where: { ticketId: ticket.id, activityType: READY_ACTIVITY }, select: { id: true, details: true } });
+        if (!row) return { skipped: 'not_arrived' };
+        const details = row.details && typeof row.details === 'object' ? row.details : {};
+        if (details.firedAt) return { already: true };
+        const next = {
+          ...details,
+          pending: false,
+          firedAt: new Date(now).toISOString(),
+          reason: why,
+          note: REASON_NOTES[why],
+          waitedSeconds: Math.max(0, Math.round(ageMs / 1000)),
+          runId: runId ?? null,
+        };
+        await tx.ticketActivity.update({ where: { id: row.id }, data: { details: next, performedAt: new Date(now) } });
+        return { claimed: next };
       });
-      if (!claimed) return { already: true };
+      if (!claim.claimed) return claim;
 
       const answered = autoHelpAnswered === null
         ? why === 'auto_help_answering' || (await this._autoHelpAnswered(ticket.id))
@@ -133,14 +169,17 @@ class TicketReadyService {
       await emitTicketEvent(READY_TRIGGER, ticket.id, {
         source: 'ticket_ready',
         dedupeStamp: `ready:${ticket.id}`,
+        createdVia: claim.claimed.createdVia || null,
         extra: {
           readyReason: why,
           autoHelpAnswered: answered,
           autoHelpRunId: runId ?? null,
-          waitedSeconds: Math.max(0, Math.round(ageMs / 1000)),
+          waitedSeconds: claim.claimed.waitedSeconds,
+          // What "Ticket arrived" saw: the agent already replied → no requester ack.
+          ...(claim.claimed.suppressRequesterAck ? { suppressRequesterAck: true } : {}),
         },
       });
-      logger.info(`Ticket ready: ticket ${ticket.id} (${why}${answered ? ', Auto-help answered' : ''}) after ${Math.round(ageMs / 1000)} s`);
+      logger.info(`Ticket ready: ticket ${ticket.id} (${why}${answered ? ', Auto-help answered' : ''}) after ${claim.claimed.waitedSeconds} s`);
       return { emitted: true, reason: why };
     } catch (err) {
       logger.warn(`Ticket ready not emitted for ticket ${ticketId}: ${err.message}`);
@@ -158,39 +197,27 @@ class TicketReadyService {
   }
 
   /**
-   * The 3-minute cap: new tickets in workspaces that use the trigger, older
-   * than READY_MAX_WAIT_MS and not yet ready, go ahead now.
+   * The 3-minute cap: arrivals noted more than READY_MAX_WAIT_MS ago and not
+   * yet ready go ahead now.
    */
   async sweep({ now = new Date(), limit = SWEEP_LIMIT } = {}) {
-    const workspaces = await this._workspacesUsingTrigger();
-    if (!workspaces.length) return { ready: 0 };
     const nowMs = new Date(now).getTime();
-    const windowStart = nowMs - READY_NEW_TICKET_WINDOW_MS;
-    const tickets = await Promise.resolve()
-      .then(() => prisma.ticket.findMany({
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticketActivity.findMany({
         where: {
-          OR: workspaces.map((w) => ({
-            workspaceId: w.workspaceId,
-            createdAt: { gte: new Date(Math.max(windowStart, w.since.getTime())), lte: new Date(nowMs - READY_MAX_WAIT_MS) },
-          })),
+          activityType: READY_ACTIVITY,
+          performedAt: { gte: new Date(nowMs - READY_NEW_TICKET_WINDOW_MS), lte: new Date(nowMs - READY_MAX_WAIT_MS) },
         },
-        select: { id: true },
-        orderBy: { createdAt: 'asc' },
+        select: { ticketId: true, details: true },
+        orderBy: { performedAt: 'asc' },
         take: 500,
       }))
       .catch(() => []);
-    if (!tickets.length) return { ready: 0 };
-    const ids = tickets.map((t) => t.id);
-    const done = await Promise.resolve()
-      .then(() => prisma.ticketActivity.findMany({ where: { ticketId: { in: ids }, activityType: READY_ACTIVITY }, select: { ticketId: true } }))
-      .catch(() => null);
-    if (done === null) return { ready: 0 };
-    const doneIds = new Set(done.map((d) => d.ticketId));
     let ready = 0;
-    for (const id of ids) {
+    for (const row of rows || []) {
       if (ready >= limit) break;
-      if (doneIds.has(id)) continue;
-      const res = await this.markReady(id, { reason: 'timeout', now });
+      if (row.details?.firedAt) continue;
+      const res = await this.markReady(row.ticketId, { reason: 'timeout', now });
       if (res.emitted) ready += 1;
     }
     return { ready };

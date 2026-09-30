@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.21-preview';
+export const APP_VERSION = '4.1.22-preview';
 
 export const changelog = [
+  {
+    version: '4.1.22-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>&ldquo;Ticket arrived&rdquo; e-mails can wait for the category</strong> &mdash; the &ldquo;Ticket ready&rdquo; trigger now behaves exactly like &ldquo;Ticket arrived&rdquo;, just later: it fires only for tickets whose arrival would have sent the e-mail, keeps the day / after-hours / holiday split, never acknowledges a requester an agent already answered, and never runs for a ticket created with &ldquo;notify the requester&rdquo; off. So the arrival e-mail can name the category the AI chose instead of &ldquo;Being triaged&rdquo;.' },
+    ],
+  },
   {
     version: '4.1.21-preview',
     date: 'September 30, 2026',

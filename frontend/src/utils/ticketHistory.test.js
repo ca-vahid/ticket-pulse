@@ -168,6 +168,8 @@ describe('30 Sep 2026 lines', () => {
     expect(byKey['a-71']).toMatchObject({ event: 'autohelp', verb: 'told the assignee an answer is waiting' });
     expect(byKey['a-72']).toMatchObject({ event: 'autohelp', verb: 'answered by itself overnight (outside business hours)' });
     expect(byKey['a-73']).toMatchObject({ event: 'system', verb: 'marked the ticket ready for "Ticket ready" workflows', machine: true });
+    const pending = buildHistoryItems({ activities: [{ id: 74, activityType: 'ticket_ready', performedBy: 'Ticket Pulse', performedAt: iso(0), details: { pending: true, note: 'x' } }] })[0];
+    expect(pending).toMatchObject({ verb: 'is waiting for the ticket to be sorted before "Ticket ready" workflows run', detail: null });
   });
 });
 
