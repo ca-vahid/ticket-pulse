@@ -145,6 +145,19 @@ export default function AutoHelpSuggestion({ proposal, onSend, onDismiss }) {
           Sensitive topic — Auto-help only ever suggests; a person always sends.
         </p>
       )}
+      {ah.partial && (
+        <div className="mt-2 rounded-lg border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100" data-testid="auto-help-partial">
+          <p className="font-medium">Partial answer — check what’s missing before you send.</p>
+          {Array.isArray(ah.leftOut) && ah.leftOut.length > 0 && (
+            <>
+              <p className="mt-0.5 opacity-80">Left out because the knowledge doesn’t cover it:</p>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                {ah.leftOut.map((t) => <li key={t}>{t}</li>)}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
 
       {/* The mail as the requester reads it: a white e-mail well in both themes. */}
       <div className="mt-2.5 overflow-hidden rounded-lg border border-border" data-testid="email-well-wrap">

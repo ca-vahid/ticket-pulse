@@ -152,11 +152,15 @@ describe('approve mode staging', () => {
     expect(proposalsMock.create).not.toHaveBeenCalled();
   });
 
-  test('partial context is never staged', async () => {
+  // 30 Sep 2026: a partial draft used to be recorded and silently never shown;
+  // it is now suggested to the agent, marked partial (never auto-sent).
+  test('partial context is suggested to the agent, marked partial', async () => {
     gatewayMock.sendJson.mockResolvedValue({ parsed: { sufficient: 'partial', unsupportedSteps: [], stayQuiet: { matched: false } } });
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
-    expect(run.gateDecision).toBe('partial_context');
-    expect(proposalsMock.create).not.toHaveBeenCalled();
+    expect(run.gateDecision).toBe('staged_for_agent');
+    expect(proposalsMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      guardSummary: expect.objectContaining({ autoHelp: true, partial: true }),
+    }));
   });
 
   test('approve switch off → the approve playbook runs as shadow', async () => {

@@ -104,7 +104,7 @@ export function playbookSummaryParts(summary) {
   parts.push({
     key: 'articles',
     text: arts
-      ? `Can quote ${plural(arts, 'article')} in its category${total ? ` (${total} published)` : ''}`
+      ? `Prefers ${plural(arts, 'article')} in its category${total ? ` (searches all ${total} published)` : ''}`
       : `No article in its category yet${total ? ` — search still reaches all ${total} published` : ''}`,
   });
   return parts;
