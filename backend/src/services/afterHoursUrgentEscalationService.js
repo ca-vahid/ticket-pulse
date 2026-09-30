@@ -389,12 +389,22 @@ function publicBranding(settings, workspace) {
 
 class AfterHoursUrgentEscalationService {
   async getPolicy(workspaceId) {
-    const row = await prisma.urgentEscalationPolicy.upsert({
-      where: { workspaceId },
-      update: {},
-      create: { workspaceId },
-      include: { recipients: true },
-    });
+    let row;
+    try {
+      row = await prisma.urgentEscalationPolicy.upsert({
+        where: { workspaceId },
+        update: {},
+        create: { workspaceId },
+        include: { recipients: true },
+      });
+    } catch (err) {
+      // Two first reads at once (30 Sep 2026: GET /settings/urgent-escalation
+      // → 500) both try to create the default row; the loser reads the
+      // winner's row instead of failing.
+      if (err?.code !== 'P2002') throw err;
+      row = await prisma.urgentEscalationPolicy.findUnique({ where: { workspaceId }, include: { recipients: true } });
+      if (!row) throw err;
+    }
     return normalizePolicy(row);
   }
 

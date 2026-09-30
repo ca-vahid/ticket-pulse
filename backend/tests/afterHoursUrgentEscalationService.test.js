@@ -494,3 +494,21 @@ describe('afterHoursUrgentEscalationService', () => {
     expect(prismaMock.notificationDelivery.createMany).not.toHaveBeenCalled();
   });
 });
+
+// 30 Sep 2026: two first reads raced on creating the default policy row and
+// GET /settings/urgent-escalation answered 500 (P2002). The loser now reads.
+describe('getPolicy — concurrent first read', () => {
+  test('a P2002 from the upsert falls back to reading the row the other request created', async () => {
+    const dup = Object.assign(new Error('Unique constraint failed on the fields: (`workspace_id`)'), { code: 'P2002' });
+    prismaMock.urgentEscalationPolicy.upsert.mockRejectedValueOnce(dup);
+    prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValueOnce({ id: 9, workspaceId: 1, enabled: false, recipients: [] });
+    const policy = await afterHoursUrgentEscalationService.getPolicy(1);
+    expect(prismaMock.urgentEscalationPolicy.findUnique).toHaveBeenCalledWith({ where: { workspaceId: 1 }, include: { recipients: true } });
+    expect(policy).toBeTruthy();
+  });
+
+  test('any other error still throws', async () => {
+    prismaMock.urgentEscalationPolicy.upsert.mockRejectedValueOnce(Object.assign(new Error('db down'), { code: 'P1001' }));
+    await expect(afterHoursUrgentEscalationService.getPolicy(1)).rejects.toThrow('db down');
+  });
+});

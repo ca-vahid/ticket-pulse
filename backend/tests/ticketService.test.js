@@ -99,7 +99,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
   MAX_ATTACHMENTS_PER_TICKET: 20,
 }));
 
-const { default: ticketService, deriveQueueState, deriveStateChip, describeOversizeBody } = await import('../src/services/ticketService.js');
+const { default: ticketService, deriveQueueState, deriveStateChip, describeOversizeBody, extractInlineImages, MAX_BODY_CHARS } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { ValidationError, ExternalAPIError } = await import('../src/utils/errors.js');
 
@@ -430,6 +430,23 @@ describe('ticketService conversation + status + assignment', () => {
     expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'failed_permanent', ccRecipients: ['boss@example.com'] }),
     }));
+  });
+
+  // 30 Sep 2026: a note with two pasted screenshots (338 KB) was refused as
+  // "too long". Pasted pictures now become attachments on the server.
+  test('pictures pasted into the text become attachments; the text keeps a marker and passes', async () => {
+    const jpeg = Buffer.alloc(180 * 1024, 7).toString('base64');
+    const bodyHtml = `<p>See the error:</p><img src="data:image/jpeg;base64,${jpeg}"><p>and</p><img alt="x" src='data:image/png;base64,${jpeg}'>`;
+    expect(bodyHtml.length).toBeGreaterThan(200000);
+
+    await ticketService.addReply(501, 1, { bodyHtml }, actor);
+
+    const uploads = attachmentServiceMock.upload.mock.calls.map(([arg]) => [arg.fileName, arg.contentType]);
+    expect(uploads).toEqual([['pasted-image-1.jpg', 'image/jpeg'], ['pasted-image-2.png', 'image/png']]);
+    const sent = sendgridMock.sendEmail.mock.calls.at(-1)[0];
+    expect(sent.attachments.map((a) => a.name)).toEqual(['pasted-image-1.jpg', 'pasted-image-2.png']);
+    expect(sent.html).toContain('[Pasted image attached: pasted-image-1.jpg]');
+    expect(sent.html).not.toContain('data:image');
   });
 
   test('reply attachments ride the SendGrid path as mailable copies (name/contentType/base64)', async () => {
@@ -2720,5 +2737,29 @@ describe('Re-opened state + filter + sort (QA 09-25 #1)', () => {
     const { items } = await ticketService.listTickets(1, {});
     expect(items.map((t) => t.state)).toEqual([null, 'reopened']);
     expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('extractInlineImages — pasted pictures leave the body (30 Sep 2026)', () => {
+  const b64 = Buffer.from('fake-image-bytes').toString('base64');
+
+  test('each embedded picture becomes a file and a marker; everything else is untouched', () => {
+    const { html, files } = extractInlineImages(`<p>a</p><img src="data:image/jpeg;base64,${b64}" width="40"><p>b</p><img src="https://x.io/logo.png">`);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ originalname: 'pasted-image-1.jpg', mimetype: 'image/jpeg', size: 16 });
+    expect(files[0].buffer.toString()).toBe('fake-image-bytes');
+    expect(html).toBe('<p>a</p><p><em>[Pasted image attached: pasted-image-1.jpg]</em></p><p>b</p><img src="https://x.io/logo.png">');
+  });
+
+  test('base64 wrapped across lines still decodes; no pictures → the same string back', () => {
+    const wrapped = `${b64.slice(0, 8)}\n  ${b64.slice(8)}`;
+    expect(extractInlineImages(`<img src="data:image/png;base64,${wrapped}">`).files[0].buffer.toString()).toBe('fake-image-bytes');
+    const plain = '<p>no pictures</p>';
+    expect(extractInlineImages(plain)).toEqual({ html: plain, files: [] });
+    expect(extractInlineImages(null)).toEqual({ html: null, files: [] });
+  });
+
+  test('the text limit is 400 000 characters', () => {
+    expect(MAX_BODY_CHARS).toBe(400000);
   });
 });

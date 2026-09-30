@@ -357,16 +357,49 @@ export function describeOversizeBody(html) {
   };
 }
 
+// Text limit for a reply / note body, in characters of HTML (30 Sep 2026:
+// raised from 200 000 — pictures no longer count against it, see below).
+export const MAX_BODY_CHARS = 400000;
+const MAX_INLINE_IMAGES = 20;
+const IMAGE_EXT = { jpeg: 'jpg', jpg: 'jpg', png: 'png', gif: 'gif', webp: 'webp', bmp: 'bmp', 'svg+xml': 'svg' };
+
+/**
+ * Pictures pasted INTO a reply or note arrive as <img src="data:image/…;base64,…">
+ * (30 Sep 2026: a note with two pasted screenshots was 338 KB and refused).
+ * The composer turns most pastes into attachments already; this catches the
+ * rest on the server: each embedded picture becomes a real attachment and a
+ * short "[Pasted image attached: …]" line stays where it was. Returns the
+ * body unchanged when there is nothing to lift.
+ * @returns {{ html: string, files: Array<{ originalname, size, buffer, mimetype }> }}
+ */
+export function extractInlineImages(html) {
+  if (typeof html !== 'string' || !/data:image\//i.test(html)) return { html, files: [] };
+  const files = [];
+  const out = html.replace(
+    /<img\b[^>]*?\bsrc\s*=\s*(["'])\s*data:(image\/([a-z0-9.+-]+));base64,([A-Za-z0-9+/=\s]+?)\1[^>]*>/gi,
+    (match, _q, mime, sub, b64) => {
+      if (files.length >= MAX_INLINE_IMAGES) return '';
+      let buffer;
+      try { buffer = Buffer.from(b64.replace(/\s+/g, ''), 'base64'); } catch { return ''; }
+      if (!buffer.length) return '';
+      const name = `pasted-image-${files.length + 1}.${IMAGE_EXT[sub.toLowerCase()] || 'png'}`;
+      files.push({ originalname: name, size: buffer.length, buffer, mimetype: mime.toLowerCase() });
+      return `<p><em>[Pasted image attached: ${name}]</em></p>`;
+    },
+  );
+  return { html: out, files };
+}
+
 function logOversizeBody(html, context = {}) {
-  if (typeof html !== 'string' || html.length <= 200000) return;
+  if (typeof html !== 'string' || html.length <= MAX_BODY_CHARS) return;
   try {
     logger.warn('Oversize message body rejected', { ...context, ...describeOversizeBody(html) });
   } catch { /* diagnostics only */ }
 }
 
 const threadBodySchema = z.object({
-  bodyHtml: z.string().max(200000, 'This message is too long to send. If you pasted pictures into the text, attach them as files instead.').optional().nullable(),
-  bodyText: z.string().max(200000, 'This message is too long to send.').optional().nullable(),
+  bodyHtml: z.string().max(MAX_BODY_CHARS, 'This message is too long to send — shorten the text or attach it as a file.').optional().nullable(),
+  bodyText: z.string().max(MAX_BODY_CHARS, 'This message is too long to send.').optional().nullable(),
   cc: emailListSchema.default([]),
   // Addresses the agent explicitly took OFF this reply's Cc (QA 09-09 #6).
   // Only meaningful for a client that seeds the row from the ticket's "Also
@@ -4671,7 +4704,7 @@ class TicketService {
     });
   }
 
-  async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files = [], systemNote = false, replyOptions = {} }) {
+  async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files: uploadedFiles = [], systemNote = false, replyOptions = {} }) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -4682,6 +4715,13 @@ class TicketService {
       throw new ValidationError('This FreshService ticket has no FS id to reply through');
     }
 
+    // Pasted pictures become attachments before the size check (30 Sep 2026).
+    const inline = extractInlineImages(input?.bodyHtml);
+    const files = [...uploadedFiles, ...inline.files];
+    if (inline.files.length) {
+      logger.info(`Ticket ${ticket.id}: ${inline.files.length} pasted picture(s) moved from the ${isPrivate ? 'note' : 'reply'} text to attachments`);
+      input = { ...input, bodyHtml: inline.html };
+    }
     logOversizeBody(input?.bodyHtml, { ticketId: ticket.id, kind: isPrivate ? 'note' : 'reply' });
     const parsed = threadBodySchema.safeParse(input || {});
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));

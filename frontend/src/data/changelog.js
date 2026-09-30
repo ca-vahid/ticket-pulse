@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.11-preview';
+export const APP_VERSION = '4.1.12-preview';
 
 export const changelog = [
+  {
+    version: '4.1.12-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Pasting pictures into a reply or note</strong> &mdash; screenshots pasted into the text (for example copied from Outlook or Word) no longer make the message &ldquo;too long to send&rdquo;. Each picture is attached as a file automatically, with a short &ldquo;[Pasted image attached]&rdquo; line where it was. Text-only messages can now be twice as long.' },
+      { type: 'fixed', html: '<strong>Urgent escalation settings</strong> &mdash; opening them for the first time in a workspace could fail with a server error; it now opens every time.' },
+    ],
+  },
   {
     version: '4.1.11-preview',
     date: 'September 29, 2026',
