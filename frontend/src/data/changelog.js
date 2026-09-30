@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.10-preview';
+export const APP_VERSION = '4.1.11-preview';
 
 export const changelog = [
+  {
+    version: '4.1.11-preview',
+    date: 'September 29, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Knowledge &rarr; Activity</strong> &mdash; the count line and the runs list now use the same word, &ldquo;No match&rdquo;, for tickets no playbook covers.' },
+    ],
+  },
   {
     version: '4.1.10-preview',
     date: 'September 29, 2026',
