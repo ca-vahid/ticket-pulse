@@ -30,7 +30,7 @@ import businessCalendarService from './businessCalendarService.js';
 import statusService from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketParkService, { AUTO_HELP_PARK_KIND } from './ticketParkService.js';
-import autoHelpPlaybookService, { normalizeFollowUp } from './autoHelpPlaybookService.js';
+import autoHelpPlaybookService, { autoHelpSignature, normalizeFollowUp } from './autoHelpPlaybookService.js';
 import {
   AUTO_SEND_INELIGIBLE_GATES, GATE, buildPreview, disclosureLine, followUpFooter, sanitizeDraftHtml, urlsIn,
 } from './autoHelpRunner.js';
@@ -47,6 +47,10 @@ const FALLBACK_TIMEZONE = 'America/Los_Angeles';
 // it was recorded and silently never shown. Never auto-sent.
 const STAGEABLE_GATES = Object.freeze([GATE.SHADOW_RECORDED, GATE.PLAYBOOK_ONLY, GATE.PARTIAL_CONTEXT]);
 const MAX_EDITED_HTML = 60000;
+
+function escapeHtmlText(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 function safeJson(value) {
   return JSON.parse(JSON.stringify(value ?? null, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)));
@@ -222,6 +226,67 @@ class AutoHelpDeliveryService {
     return { nudgeAt, closeAt, onSilence: fu.onSilence, timezone: cal.timezone };
   }
 
+  // ---------- "Send to me" (30 Sep 2026) ----------
+
+  /**
+   * E-mail the person asking exactly what the requester would get for this
+   * run: disclosure, answer, follow-up line and signature(s) as they would be
+   * sent today, under a "Preview only" band. Never touches the ticket or the
+   * requester. Runs without an answer (skipped, no match, not answerable)
+   * have nothing to send.
+   */
+  async sendPreviewToMe(workspaceId, runId, actor) {
+    const to = String(actor?.email || '').trim().toLowerCase();
+    if (!to || !to.includes('@')) throw new ValidationError('Your account has no e-mail address to send the preview to');
+    const run = await this._run(workspaceId, runId);
+    if (!run) throw new NotFoundError('Run not found');
+    const body = run.transcript?.body || {};
+    if (!body.html) throw new ValidationError('This run has no answer to preview — Auto-help didn\'t write one');
+    const [playbook, settings, workspaceName, ticket] = await Promise.all([
+      this._playbook(workspaceId, run.playbookId),
+      autoHelpPlaybookService.getSettings(workspaceId),
+      this._workspaceName(workspaceId),
+      Promise.resolve().then(() => prisma.ticket.findFirst({
+        where: { id: run.ticketId, workspaceId: Number(workspaceId) },
+        select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+      })).catch(() => null),
+    ]);
+    const followUp = normalizeFollowUp(playbook?.followUp);
+    let mail = buildPreview({
+      subject: run.draftSubject || `Re: ${ticket?.subject || 'your request'}`,
+      html: body.html,
+      text: body.text || htmlToText(body.html),
+      settings,
+      workspaceName,
+      followUp,
+    });
+    // The sender's own signature, as it would be added when they click Send.
+    if (!mail.signature || settings?.signatureWith === 'both') {
+      const { getEnabledSignatureForSend, appendSignatureToEmail } = await import('./userSignatureService.js');
+      const own = await getEnabledSignatureForSend(workspaceId, to).catch(() => null);
+      if (own) mail = { ...mail, ...appendSignatureToEmail({ html: mail.html, text: mail.text }, own) };
+    }
+    const ref = ticket ? ticketDisplayRef(ticket) : `ticket ${run.ticketId}`;
+    const band = [
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px">',
+      '<tr><td bgcolor="#fef3c7" style="background-color:#fef3c7;color:#78350f;padding:10px 14px;font-size:13px;line-height:1.45;border-radius:6px">',
+      `<strong style="color:#78350f">Preview only.</strong> This is what the requester of ${escapeHtmlText(ref)} would get from Auto-help (run ${run.id}). Nothing was sent to them.`,
+      '</td></tr></table>',
+    ].join('');
+    const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+    const result = await sendTransactionalEmail({
+      workspaceId: Number(workspaceId),
+      to: [to],
+      subject: `[Preview] ${mail.subject}`,
+      html: `${band}${mail.html}`,
+      text: `PREVIEW ONLY - what the requester of ${ref} would get from Auto-help (run ${run.id}). Nothing was sent to them.\n\n${mail.text}`,
+      label: 'auto-help-preview',
+    });
+    logger.info(`Auto-help run ${run.id}: preview e-mailed to ${to} (${result?.sent ? `sent via ${result.via}` : 'not sent'})`);
+    if (!result?.sent) throw new ValidationError('The preview could not be e-mailed just now — try again in a minute');
+    return { sent: true, to, via: result.via || null };
+  }
+
   // ---------- staging (approve mode) ----------
 
   /**
@@ -374,6 +439,8 @@ class AutoHelpDeliveryService {
       answerText: body.text || null,
       disclosure: disclosureLine(settings, workspaceName),
       footer: followUpFooter(followUp),
+      // The Auto-help signature as it will be appended (30 Sep 2026), for the card's e-mail well.
+      signatureHtml: autoHelpSignature(settings)?.html || null,
       followUp: {
         ...followUp,
         nudgeAt: dates?.nudgeAt || null,
@@ -568,6 +635,9 @@ class AutoHelpDeliveryService {
     const replyOptions = {
       // W2: the first reply is Auto-help's grounded answer (even when an agent clicks Send).
       replyOwner: { kind: 'auto_help', ref: `run:${run.id}` },
+      // The Auto-help signature is already in the mail (buildPreview). 'replace'
+      // leaves the sending agent's own signature off; 'both' adds it after.
+      ...(mail.signature && settings?.signatureWith !== 'both' ? { signatureOverride: null } : {}),
       // W4: an auto-sent answer never stops the first-response clock unless the workspace says so.
       ...(automated ? { automatedReply: { kind: 'answer', countsAsFirstResponse: settings?.countsAsFirstResponse === true } } : {}),
     };

@@ -255,14 +255,39 @@ describe('articles: Topics, Source, Quoted by', () => {
     const rows = within(list).getAllByRole('listitem');
     expect(within(rows[0]).queryByTestId('no-playbook-reaches')).not.toBeInTheDocument();
     expect(rows[0]).toHaveTextContent('Drafted from tickets');
-    expect(within(rows[1]).getByTestId('no-playbook-reaches')).toHaveTextContent('No playbook reaches it');
+    expect(within(rows[1]).getByTestId('no-playbook-reaches')).toHaveTextContent('No playbook covers its category');
+    expect(rows[0]).toHaveTextContent('Preferred by A');
   });
 
-  test('filter bar: the search is capped and the category select is wider (QA 09-28 item 1)', async () => {
+  // 30 Sep 2026: filters you can type in, and the landing overview.
+  test('filter bar: category, topic, owner and source are filters you can type in', async () => {
     renderAt('/knowledge/articles');
     const bar = await screen.findByTestId('articles-filters');
-    expect(within(bar).getByLabelText('Search articles').closest('label').className).toMatch(/lg:max-w-md/);
-    expect(within(bar).getByRole('combobox', { name: 'Article category' }).parentElement.className).toMatch(/lg:w-72/);
+    const category = within(bar).getByRole('combobox', { name: 'Article category' });
+    fireEvent.focus(category);
+    fireEvent.change(category, { target: { value: 'lic' } });
+    const list = await screen.findByRole('listbox');
+    const options = within(list).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toEqual(['All categories', 'Software & Apps → Licensing']);
+    fireEvent.mouseDown(within(list).getByRole('option', { name: 'Software & Apps → Licensing' }));
+    await waitFor(() => expect(api.listArticles).toHaveBeenLastCalledWith(expect.objectContaining({ categoryId: 102 })));
+    for (const name of ['Article topic', 'Article owner', 'Article source']) {
+      expect(within(bar).getByRole('combobox', { name })).toBeInTheDocument();
+    }
+  });
+
+  test('the overview shows counts and categories with tickets but no articles', async () => {
+    api.articlesOverview = vi.fn().mockResolvedValue({ success: true, data: {
+      published: 7, draft: 2, archived: 15, needsReview: 1, quoted30d: 12, articlesQuoted30d: 3,
+      coverage: [
+        { categoryId: 1, name: 'Software & Apps', tickets30d: 192, published: 5 },
+        { categoryId: 2, name: 'Account & Access', tickets30d: 128, published: 0 },
+      ],
+    } });
+    renderAt('/knowledge/articles');
+    const box = await screen.findByTestId('articles-overview');
+    expect(box).toHaveTextContent('7published');
+    expect(within(screen.getByTestId('coverage')).getByTitle('Show Account & Access articles')).toHaveTextContent('128 tickets · no articles');
   });
 });
 

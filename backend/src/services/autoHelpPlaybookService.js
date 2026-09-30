@@ -23,6 +23,44 @@ import { AUTO_HELP_TOOL_NAMES } from './autoHelpTools.js';
 import { containsWordVariant, wordTokens } from '../utils/wordMatch.js';
 import { READINESS, evaluateReadiness, readinessEvidence, SENT_DECISIONS } from './autoHelpOutcomes.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { sanitizeSignatureHtml } from './notificationWorkflowSignatureService.js';
+
+// Auto-help e-mail signature (30 Sep 2026): the same spacing choices as a
+// person's own signature (userSignatureService), applied when appended.
+export const SIGNATURE_SPACINGS = Object.freeze(['tight', 'normal', 'relaxed']);
+export const SIGNATURE_WITH = Object.freeze(['replace', 'both']);
+const SIGNATURE_MARGIN = Object.freeze({ tight: '0', normal: '0 0 4px', relaxed: '0 0 10px' });
+
+function htmlToPlain(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * The Auto-help signature to append, or null when it is off or empty:
+ * { html (spacing applied), text }. Pure.
+ */
+export function autoHelpSignature(settings) {
+  if (!settings?.signatureEnabled) return null;
+  const raw = String(settings.signatureHtml || '').trim();
+  const text = String(settings.signatureText || '').trim() || htmlToPlain(raw);
+  if (!raw && !text) return null;
+  const margin = SIGNATURE_MARGIN[settings.signatureSpacing] ?? SIGNATURE_MARGIN.tight;
+  const html = raw.replace(/<p\b([^>]*)>/gi, (match, attrs) => {
+    const styleMatch = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+    const existing = styleMatch ? (styleMatch[1] ?? styleMatch[2] ?? '') : '';
+    const kept = existing.split(';').map((d) => d.trim()).filter((d) => d && !/^margin/i.test(d)).join('; ');
+    const rest = styleMatch ? attrs.replace(styleMatch[0], '') : attrs;
+    return `<p${rest.trimEnd()} style="margin: ${margin}${kept ? `; ${kept}` : ''}">`;
+  });
+  return { html, text };
+}
 
 export const AUTO_HELP_MODES = Object.freeze(['shadow', 'approve', 'auto']);
 export const DEFAULT_MODE = 'shadow';
@@ -645,6 +683,12 @@ class AutoHelpPlaybookService {
       countsAsFirstResponse: row?.countsAsFirstResponse === true,
       // No row yet = the seeded defaults; a list someone emptied stays empty.
       alwaysStayQuietWhen: Array.isArray(row?.alwaysStayQuietWhen) ? row.alwaysStayQuietWhen : [...DEFAULT_ALWAYS_STAY_QUIET],
+      // Auto-help e-mail signature (30 Sep 2026).
+      signatureEnabled: row?.signatureEnabled === true,
+      signatureHtml: row?.signatureHtml || '',
+      signatureText: row?.signatureText || '',
+      signatureSpacing: SIGNATURE_SPACINGS.includes(row?.signatureSpacing) ? row.signatureSpacing : 'tight',
+      signatureWith: SIGNATURE_WITH.includes(row?.signatureWith) ? row.signatureWith : 'replace',
       // Not a setting anyone can flip: the build decides (AUTO_MODE_BUILD_ENABLED).
       autoModeAllowed: this.autoModeAllowed(),
       autoModeLockedMessage: this.autoModeAllowed() ? null : AUTO_MODE_LOCKED_MESSAGE,
@@ -678,6 +722,28 @@ class AutoHelpPlaybookService {
       }
     }
     if (input.disclosureEnabled !== undefined) data.disclosureEnabled = input.disclosureEnabled !== false;
+    // Auto-help e-mail signature (30 Sep 2026).
+    if (input.signatureEnabled !== undefined) data.signatureEnabled = input.signatureEnabled === true;
+    if (input.signatureHtml !== undefined) {
+      let html;
+      try {
+        html = sanitizeSignatureHtml(String(input.signatureHtml ?? ''));
+      } catch (err) {
+        throw new ValidationError(err.message);
+      }
+      data.signatureHtml = html || null;
+      data.signatureText = input.signatureText !== undefined
+        ? (String(input.signatureText ?? '').trim().slice(0, 20000) || null)
+        : (htmlToPlain(html) || null);
+    }
+    if (input.signatureSpacing !== undefined) {
+      if (!SIGNATURE_SPACINGS.includes(input.signatureSpacing)) throw new ValidationError(`Spacing must be one of: ${SIGNATURE_SPACINGS.join(', ')}`);
+      data.signatureSpacing = input.signatureSpacing;
+    }
+    if (input.signatureWith !== undefined) {
+      if (!SIGNATURE_WITH.includes(input.signatureWith)) throw new ValidationError(`signatureWith must be one of: ${SIGNATURE_WITH.join(', ')}`);
+      data.signatureWith = input.signatureWith;
+    }
     if (input.disclosureText !== undefined) {
       const text = String(input.disclosureText ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);
       data.disclosureText = text || null;

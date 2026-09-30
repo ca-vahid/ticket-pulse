@@ -42,6 +42,8 @@ describe('Auto-help shadow-only imports', () => {
       './autoHelpLocks.js',
       './autoHelpOutcomes.js',
       './autoHelpPlaybookService.js',
+      // Prompt guidance (30 Sep 2026): reads/writes prompt text only, never sends.
+      './autoHelpPromptService.js',
       './autoHelpTools.js',
       './knowledgeArticleService.js',
       './notificationWorkflowOutputGuard.js',

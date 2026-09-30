@@ -148,8 +148,13 @@ router.get('/categories', asyncHandler(async (req, res) => {
 // ---------- articles ----------
 
 router.get('/articles', asyncHandler(async (req, res) => {
-  const { q, status, categoryId, review, limit, offset } = req.query;
-  res.json({ success: true, data: await knowledgeArticleService.list(req.workspaceId, { q, status, categoryId, review, limit, offset }) });
+  const { q, status, categoryId, review, topic, owner, source, sort, limit, offset } = req.query;
+  res.json({ success: true, data: await knowledgeArticleService.list(req.workspaceId, { q, status, categoryId, review, topic, owner, source, sort, limit, offset }) });
+}));
+
+/** The Articles landing page: counts, recent quoting, coverage by category (30 Sep 2026). */
+router.get('/articles-overview', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeArticleService.overview(req.workspaceId) });
 }));
 
 router.get('/search', asyncHandler(async (req, res) => {
@@ -307,6 +312,59 @@ router.get('/runs-summary', asyncHandler(async (req, res) => {
 router.post('/runs/:id/review', requireKnowledgeReviewer, asyncHandler(async (req, res) => {
   const { verdict, note } = req.body || {};
   res.json({ success: true, data: await autoHelpRunner.review(req.workspaceId, req.params.id, { verdict, note }, actorOf(req)) });
+}));
+
+/** "Send to me": e-mail yourself exactly what the requester would get (30 Sep 2026). */
+router.post('/runs/:id/send-to-me', asyncHandler(async (req, res) => {
+  const { default: autoHelpDeliveryService } = await import('../services/autoHelpDeliveryService.js');
+  res.json({ success: true, data: await autoHelpDeliveryService.sendPreviewToMe(req.workspaceId, req.params.id, actorOf(req)) });
+}));
+
+// ---------- prompts (Knowledge → Settings → Prompts, 30 Sep 2026) ----------
+
+router.get('/prompts', asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  const { promptPreview } = await import('../services/autoHelpRunner.js');
+  const list = await autoHelpPromptService.list(req.workspaceId);
+  res.json({ success: true, data: list.map((p) => ({ ...p, fullPrompt: promptPreview(p.key, p.activeBody) })) });
+}));
+
+router.post('/prompts/preview', asyncHandler(async (req, res) => {
+  const { promptPreview } = await import('../services/autoHelpRunner.js');
+  const key = String(req.body?.key || '');
+  if (!['answer', 'route', 'check'].includes(key)) throw new ValidationError('Unknown prompt');
+  res.json({ success: true, data: { fullPrompt: promptPreview(key, String(req.body?.body || '')) } });
+}));
+
+router.get('/prompts/:id', asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  res.json({ success: true, data: await autoHelpPromptService.get(req.workspaceId, req.params.id) });
+}));
+
+router.post('/prompts', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  const { key, body, notes } = req.body || {};
+  res.status(201).json({ success: true, data: await autoHelpPromptService.createDraft(req.workspaceId, { key, body, notes }, actorOf(req)) });
+}));
+
+router.post('/prompts/:id/publish', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  res.json({ success: true, data: await autoHelpPromptService.publish(req.workspaceId, req.params.id, actorOf(req)) });
+}));
+
+router.post('/prompts/:id/restore', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  res.status(201).json({ success: true, data: await autoHelpPromptService.restore(req.workspaceId, req.params.id, actorOf(req)) });
+}));
+
+router.post('/prompts/use-default/:key', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  res.json({ success: true, data: await autoHelpPromptService.useDefault(req.workspaceId, req.params.key) });
+}));
+
+router.delete('/prompts/:id', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  const { default: autoHelpPromptService } = await import('../services/autoHelpPromptService.js');
+  res.json({ success: true, data: await autoHelpPromptService.remove(req.workspaceId, req.params.id) });
 }));
 
 router.get('/runs/:id', asyncHandler(async (req, res) => {

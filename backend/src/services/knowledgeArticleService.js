@@ -327,7 +327,9 @@ function normalizeInput(input = {}, { partial = false } = {}) {
 }
 
 class KnowledgeArticleService {
-  async list(workspaceId, { q = '', status = null, categoryId = null, review = null, limit = 100, offset = 0 } = {}) {
+  async list(workspaceId, {
+    q = '', status = null, categoryId = null, review = null, topic = null, owner = null, source = null, sort = null, limit = 100, offset = 0,
+  } = {}) {
     const where = { workspaceId: Number(workspaceId) };
     // "Needs review": published articles past their review date. Dates are
     // compared in JS (interval is per row), over a bounded id/date scan.
@@ -358,13 +360,26 @@ class KnowledgeArticleService {
         ],
       });
     }
+    // Articles page filters (30 Sep 2026): a topic (as typed, any capitals),
+    // an owner e-mail, a source ('tp' | 'fs_solution' | 'verified_ticket' | 'drafted').
+    const topicText = String(topic || '').trim();
+    if (topicText) {
+      const variants = [...new Set([topicText, topicText.toLowerCase(), topicText.toUpperCase(), topicText.charAt(0).toUpperCase() + topicText.slice(1).toLowerCase()])];
+      and.push({ tags: { hasSome: variants } });
+    }
+    const ownerText = String(owner || '').trim().toLowerCase();
+    if (ownerText) and.push({ ownerEmail: { equals: ownerText, mode: 'insensitive' } });
+    const sourceText = String(source || '').trim();
+    if (sourceText === 'drafted') and.push({ tags: { has: 'drafted-from-tickets' } });
+    else if (ARTICLE_SOURCES.includes(sourceText)) and.push({ source: sourceText });
     if (and.length) where.AND = and;
     const take = Math.min(Math.max(Number(limit) || 100, 1), 200);
     const skip = Math.max(Number(offset) || 0, 0);
+    const orderBy = sort === 'title' ? { title: 'asc' } : sort === 'oldest_verified' ? { lastVerifiedAt: { sort: 'asc', nulls: 'first' } } : { updatedAt: 'desc' };
     const [rows, total] = await Promise.all([
       Promise.resolve().then(() => prisma.knowledgeArticle.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy,
         take,
         skip,
         // The list shows title + snippet; vectors and section embeddings stay in the DB.
@@ -375,8 +390,82 @@ class KnowledgeArticleService {
       }),
       Promise.resolve().then(() => prisma.knowledgeArticle.count({ where })).catch(() => 0),
     ]);
-    const items = await this._withReach(workspaceId, rows.map((r) => articleView(r, { withBody: false })));
+    let items = await this._withReach(workspaceId, rows.map((r) => articleView(r, { withBody: false })));
+    // "Most quoted" sorts the page by what Auto-help actually cited.
+    if (sort === 'quoted') items = [...items].sort((a, b) => (Number(b.timesQuoted) || 0) - (Number(a.timesQuoted) || 0));
     return { items, total };
+  }
+
+  /**
+   * The Articles landing page (30 Sep 2026): counts, how much Auto-help
+   * quoted them lately, and coverage — per top-level category, the last 30
+   * days of tickets next to the published articles, so the gaps show.
+   * Every part fails soft.
+   */
+  async overview(workspaceId) {
+    const ws = Number(workspaceId);
+    const since = new Date(Date.now() - 30 * 86400e3);
+    const [byStatus, published, categories, ticketCounts, runs] = await Promise.all([
+      Promise.resolve().then(() => prisma.knowledgeArticle.groupBy({ by: ['status'], where: { workspaceId: ws }, _count: { _all: true } })).catch(() => []),
+      Promise.resolve().then(() => prisma.knowledgeArticle.findMany({
+        where: { workspaceId: ws, status: 'published' },
+        select: { id: true, categoryId: true, subcategoryId: true, lastVerifiedAt: true, reviewEveryDays: true, createdAt: true, status: true },
+        take: 5000,
+      })).catch(() => []),
+      Promise.resolve().then(() => prisma.competencyCategory.findMany({
+        where: { workspaceId: ws, isActive: true },
+        select: { id: true, name: true, parentId: true },
+        take: 2000,
+      })).catch(() => []),
+      Promise.resolve().then(() => prisma.ticket.groupBy({
+        by: ['internalCategoryId'],
+        where: { workspaceId: ws, createdAt: { gte: since }, internalCategoryId: { not: null } },
+        _count: { _all: true },
+      })).catch(() => []),
+      Promise.resolve().then(() => prisma.autoHelpRun.findMany({
+        where: { workspaceId: ws, createdAt: { gte: since } },
+        select: { sources: true },
+        take: 5000,
+      })).catch(() => []),
+    ]);
+    const counts = Object.fromEntries((byStatus || []).map((g) => [g.status, g._count?._all || 0]));
+    const now = Date.now();
+    const quotedIds = new Map();
+    for (const r of runs || []) {
+      for (const src of Array.isArray(r.sources) ? r.sources : []) {
+        if (src?.cited && src.type === 'article') quotedIds.set(src.id, (quotedIds.get(src.id) || 0) + 1);
+      }
+    }
+    const parentOf = new Map((categories || []).map((c) => [c.id, c.parentId || null]));
+    const topOf = (id) => {
+      let cur = Number(id) || null;
+      for (let i = 0; cur && parentOf.get(cur) && i < 5; i += 1) cur = parentOf.get(cur);
+      return cur;
+    };
+    const coverage = new Map();
+    const row = (id) => {
+      if (!coverage.has(id)) {
+        coverage.set(id, { categoryId: id, name: (categories || []).find((c) => c.id === id)?.name || `Category #${id}`, tickets30d: 0, published: 0 });
+      }
+      return coverage.get(id);
+    };
+    for (const g of ticketCounts || []) {
+      const top = topOf(g.internalCategoryId);
+      if (top) row(top).tickets30d += g._count?._all || 0;
+    }
+    for (const a of published || []) {
+      const top = topOf(a.categoryId || a.subcategoryId);
+      if (top) row(top).published += 1;
+    }
+    return {
+      published: counts.published || 0,
+      draft: counts.draft || 0,
+      archived: counts.archived || 0,
+      needsReview: (published || []).filter((a) => isReviewOverdue(a, now)).length,
+      quoted30d: [...quotedIds.values()].reduce((sum, n) => sum + n, 0),
+      articlesQuoted30d: quotedIds.size,
+      coverage: [...coverage.values()].sort((a, b) => b.tickets30d - a.tickets30d || a.name.localeCompare(b.name)),
+    };
   }
 
   async get(workspaceId, id) {

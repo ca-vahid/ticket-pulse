@@ -179,6 +179,7 @@ export default function AutoHelpSuggestion({ proposal, onSend, onDismiss }) {
             <SafeHtml html={answerHtml} isDark={false} />
           )}
           {ah.footer && <p className="mt-3 text-foreground/85" data-testid="auto-help-footer">{ah.footer}</p>}
+          {ah.signatureHtml && <div className="mt-3" data-testid="auto-help-signature"><SafeHtml html={ah.signatureHtml} isDark={false} /></div>}
         </div>
       </div>
 

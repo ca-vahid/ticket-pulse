@@ -4196,8 +4196,37 @@ model AutoHelpSettings {
   // playbook here. Seeded with three defaults; keep in step with the SQL
   // default and autoHelpPlaybookService.DEFAULT_ALWAYS_STAY_QUIET.
   alwaysStayQuietWhen String[] @default(["Any sign of a security incident or a possibly compromised account (phishing, suspicious sign-ins, hacked, breach)", "The requester is complaining about IT or is frustrated with a previous answer", "HR, legal, or personal matters"]) @map("always_stay_quiet_when")
+  // Auto-help e-mail signature (30 Sep 2026): pasted HTML appended to every
+  // Auto-help answer; signatureWith = 'replace' (instead of the sending
+  // agent's own) | 'both' (after it).
+  signatureEnabled  Boolean  @default(false) @map("signature_enabled")
+  signatureHtml     String?  @map("signature_html") @db.Text
+  signatureText     String?  @map("signature_text") @db.Text
+  signatureSpacing  String   @default("tight") @map("signature_spacing") @db.VarChar(10)
+  signatureWith     String   @default("replace") @map("signature_with") @db.VarChar(10)
   updatedBy         String?  @map("updated_by") @db.VarChar(255)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("auto_help_settings")
+}
+
+// Knowledge → Settings → Prompts (30 Sep 2026): versioned guidance for
+// Auto-help's prompts. key = 'answer' | 'route' | 'check'; one published row
+// per key at most; no row = the built-in default.
+model AutoHelpPromptVersion {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  key         String    @db.VarChar(20)
+  version     Int
+  status      String    @default("draft") @db.VarChar(20)
+  body        String    @db.Text
+  notes       String?   @db.Text
+  createdBy   String?   @map("created_by") @db.VarChar(255)
+  publishedBy String?   @map("published_by") @db.VarChar(255)
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([workspaceId, key, version])
+  @@index([workspaceId, key, status])
+  @@map("auto_help_prompt_versions")
 }
