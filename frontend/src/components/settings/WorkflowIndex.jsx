@@ -66,7 +66,7 @@ export const TRIGGER_ORDER = [
 ];
 const triggerRank = (type) => { const i = TRIGGER_ORDER.indexOf(type); return i === -1 ? TRIGGER_ORDER.length : i; };
 
-function groupByTrigger(workflows, eventLabels = {}) {
+export function groupByTrigger(workflows, eventLabels = {}) {
   const groups = new Map(); // triggerType -> { default, customs: [] }
   for (const workflow of workflows) {
     const key = workflow.triggerType || 'other';

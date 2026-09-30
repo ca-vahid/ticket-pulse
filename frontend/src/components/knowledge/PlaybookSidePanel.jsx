@@ -69,6 +69,12 @@ export function PreviewAnswer({ playbookId, refreshKey = 0 }) {
               {latest.ticketRef}{latest.ticketSubject ? ` · ${latest.ticketSubject}` : ''} · {timeAgo(latest.createdAt)}
             </span>
           </div>
+          {latest.verdict && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300" data-testid="preview-not-answerable">
+              <AlertTriangle className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+              The answer check marked this test &ldquo;Not answerable&rdquo;, so it would not have been suggested. This is the draft it wrote &mdash; open the run to see which step the knowledge didn&rsquo;t cover.
+            </p>
+          )}
           {latest.outdated && (
             <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300" data-testid="preview-outdated">
               <AlertTriangle className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
@@ -85,7 +91,7 @@ export function PreviewAnswer({ playbookId, refreshKey = 0 }) {
           <p className="text-xs leading-relaxed text-muted-foreground">
             Built without AI from{' '}
             <Link to={sample.article.url} className="tp-focus-ring rounded font-medium text-foreground/85 hover:underline">{sample.article.title}</Link>
-            {sample.article.section ? ` › ${sample.article.section}` : ''}, with the lines every answer carries. A real answer is written for each ticket from your instructions and knowledge.
+            {sample.article.section ? ` › ${sample.article.section}` : ''}, with the lines every answer carries. It never shows a ticket&rsquo;s answer: a real one is written for each ticket from your instructions and knowledge &mdash; use &ldquo;Test on a ticket&rdquo; to see one.
           </p>
         </div>
       )}

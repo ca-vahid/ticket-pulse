@@ -234,6 +234,23 @@ describe('playbook builder', () => {
     expect(preview).toHaveTextContent('Company Portal installs');
   });
 
+  // QA 09-29 #3: a test the answer check called "not answerable" still wrote
+  // a draft; it is shown (with that verdict) instead of the article sample.
+  test('Preview answer: a not-answerable test shows its draft and says it would not have been suggested', async () => {
+    api.playbookPreview.mockResolvedValueOnce({ success: true, data: { latest: {
+      id: 88, ticketRef: '#244573', ticketSubject: 'Openground installation', createdAt: new Date().toISOString(), playbookVersion: 2, outdated: false,
+      verdict: { status: 'not_answerable', gateDecision: 'insufficient_context' },
+      draftSubject: 'Re: Openground installation', draftHtml: '<p>Automated answer from IT.</p><ol><li>Open Company Portal.</li></ol>',
+      sources: [],
+    }, sample: null } });
+    renderAt('/knowledge/playbooks/3');
+    fireEvent.click(await screen.findByRole('tab', { name: /Preview answer/ }));
+    const preview = await screen.findByTestId('preview-answer');
+    expect(within(preview).getByTestId('preview-not-answerable')).toHaveTextContent('would not have been suggested');
+    expect(within(preview).getByTestId('email-well')).toHaveTextContent('Open Company Portal.');
+    expect(within(preview).queryByTestId('preview-sample')).toBeNull();
+  });
+
   test('Preview answer: a labelled sample from the best article when nothing was tested; a plain empty state when there is no article', async () => {
     api.playbookPreview.mockResolvedValueOnce({ success: true, data: { latest: null, sample: {
       subject: 'Re: Company Portal installs', html: '<p>Automated answer from IT.</p><p>Install an app</p>',
