@@ -6,7 +6,7 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   ticket: { findUnique: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
-  ticketActivity: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(async ({ data }) => ({ id: 1, ...data })) },
+  ticketActivity: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(async ({ data }) => ({ id: 1, ...data })), update: jest.fn(async () => ({})) },
   notificationWorkflow: { findMany: jest.fn() },
   autoHelpRun: { count: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(async () => ({})) },
   autoHelpSettings: { findMany: jest.fn(), findUnique: jest.fn(), updateMany: jest.fn() },
@@ -45,63 +45,65 @@ beforeEach(() => {
 });
 afterEach(() => { spies.forEach((s) => s.mockRestore()); spies = []; });
 
-describe('"Ticket ready"', () => {
+describe('"Ticket ready" follows "Ticket arrived"', () => {
   const ticket = (minutesOld) => ({ id: 55, workspaceId: 1, createdAt: new Date(NOW.getTime() - minutesOld * 60e3) });
+  const pending = (extra = {}) => ({ id: 3, details: { pending: true, suppressRequesterAck: false, createdVia: null, ...extra } });
 
-  test('a new ticket: claimed once (activity under a lock), then the event with what Auto-help did', async () => {
+  test('arrival: noted pending (under a lock) only where the trigger is used, for tickets after it was switched on', async () => {
+    expect(await ticketReady.noteArrival(55, { workspaceId: 1, createdAt: new Date(NOW.getTime() - 60e3), suppressRequesterAck: true, createdVia: 'email', now: NOW })).toEqual({ noted: true });
+    expect(prismaMock.$executeRaw).toHaveBeenCalled();
+    expect(prismaMock.ticketActivity.create.mock.calls[0][0].data).toMatchObject({
+      ticketId: 55, activityType: 'ticket_ready', details: { pending: true, suppressRequesterAck: true, createdVia: 'email' },
+    });
+    prismaMock.notificationWorkflow.findMany.mockResolvedValueOnce([]);
+    ticketReady._usesCache.clear();
+    expect(await ticketReady.noteArrival(56, { workspaceId: 2, createdAt: NOW, now: NOW })).toEqual({ skipped: 'unused' });
+    expect(await ticketReady.noteArrival(57, { workspaceId: 1, createdAt: new Date(ENABLED_AT.getTime() - 60e3), now: new Date(ENABLED_AT.getTime() + 60e3) })).toEqual({ skipped: 'before_trigger_on' });
+    expect(await ticketReady.noteArrival(58, { workspaceId: 1, createdAt: new Date(NOW.getTime() - 3 * 3600e3), now: NOW })).toEqual({ skipped: 'not_new' });
+  });
+
+  test('ready: claims the pending row once, then the event with what Auto-help did and what the arrival saw', async () => {
     prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(2));
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(pending({ suppressRequesterAck: true, createdVia: 'email' }));
     const res = await ticketReady.markReady(55, { reason: 'auto_help_done', runId: 901, now: NOW });
     expect(res).toEqual({ emitted: true, reason: 'auto_help_done' });
-    expect(prismaMock.$executeRaw).toHaveBeenCalled();
-    expect(prismaMock.ticketActivity.create.mock.calls[0][0].data).toMatchObject({ ticketId: 55, activityType: 'ticket_ready' });
+    expect(prismaMock.ticketActivity.update.mock.calls[0][0].data.details).toMatchObject({ pending: false, reason: 'auto_help_done', firedAt: NOW.toISOString() });
     expect(emitTicketEvent).toHaveBeenCalledWith('ticket.ready', 55, expect.objectContaining({
       dedupeStamp: 'ready:55',
-      extra: expect.objectContaining({ readyReason: 'auto_help_done', autoHelpAnswered: false, autoHelpRunId: 901, waitedSeconds: 120 }),
+      createdVia: 'email',
+      extra: expect.objectContaining({ readyReason: 'auto_help_done', autoHelpAnswered: false, autoHelpRunId: 901, waitedSeconds: 120, suppressRequesterAck: true }),
     }));
   });
 
-  test('already ready → nothing again', async () => {
+  test('no arrival noted (the arrival ran no workflows, e.g. "notify the requester" off) → never ready', async () => {
     prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(2));
-    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce({ id: 3 });
-    expect(await ticketReady.markReady(55, { now: NOW })).toEqual({ already: true });
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(null);
+    expect(await ticketReady.markReady(55, { now: NOW })).toEqual({ skipped: 'not_arrived' });
     expect(emitTicketEvent).not.toHaveBeenCalled();
   });
 
-  test('"answering" says Auto-help answered', async () => {
+  test('already fired → nothing again; "answering" says Auto-help answered', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(2));
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce({ id: 3, details: { firedAt: NOW.toISOString() } });
+    expect(await ticketReady.markReady(55, { now: NOW })).toEqual({ already: true });
     prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(1));
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(pending());
     await ticketReady.markReady(55, { reason: 'auto_help_answering', autoHelpAnswered: true, now: NOW });
     expect(emitTicketEvent.mock.calls[0][2].extra).toMatchObject({ readyReason: 'auto_help_answering', autoHelpAnswered: true });
+    expect(emitTicketEvent.mock.calls[0][2].extra).not.toHaveProperty('suppressRequesterAck');
   });
 
-  test('an old ticket, a workspace without the trigger, or a ticket from before the trigger was switched on → skipped', async () => {
-    prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(200));
-    expect(await ticketReady.markReady(55, { now: NOW })).toEqual({ skipped: 'not_new' });
-    prismaMock.ticket.findUnique.mockResolvedValueOnce({ ...ticket(5), workspaceId: 2 });
-    prismaMock.notificationWorkflow.findMany.mockResolvedValueOnce([]);
-    expect(await ticketReady.markReady(55, { now: NOW })).toEqual({ skipped: 'unused' });
-    prismaMock.ticket.findUnique.mockResolvedValueOnce({ ...ticket(5), createdAt: new Date(ENABLED_AT.getTime() - 60e3) });
-    expect(await ticketReady.markReady(55, { now: new Date(ENABLED_AT.getTime() + 60e3) })).toEqual({ skipped: 'before_trigger_on' });
-    expect(emitTicketEvent).not.toHaveBeenCalled();
-  });
-
-  test('the sweep: tickets past 3 minutes and not ready go ahead ("timeout"); ready ones are left', async () => {
-    prismaMock.ticket.findMany.mockResolvedValueOnce([{ id: 55 }, { id: 56 }]);
-    prismaMock.ticketActivity.findMany.mockResolvedValueOnce([{ ticketId: 56 }]);
+  test('the sweep: arrivals noted over 3 minutes ago and not fired go ahead ("timeout")', async () => {
+    prismaMock.ticketActivity.findMany.mockResolvedValueOnce([{ ticketId: 55, details: { pending: true } }, { ticketId: 56, details: { firedAt: 'x' } }]);
     prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(4));
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(pending());
     const res = await ticketReady.sweep({ now: NOW });
     expect(res.ready).toBe(1);
-    const where = prismaMock.ticket.findMany.mock.calls[0][0].where.OR[0];
-    expect(where.workspaceId).toBe(1);
-    expect(where.createdAt.lte).toEqual(new Date(NOW.getTime() - READY_MAX_WAIT_MS));
-    expect(where.createdAt.gte).toEqual(new Date(NOW.getTime() - 2 * 3600e3));
+    const where = prismaMock.ticketActivity.findMany.mock.calls[0][0].where;
+    expect(where.activityType).toBe('ticket_ready');
+    expect(where.performedAt.lte).toEqual(new Date(NOW.getTime() - READY_MAX_WAIT_MS));
     expect(emitTicketEvent).toHaveBeenCalledTimes(1);
     expect(emitTicketEvent.mock.calls[0][2].extra.readyReason).toBe('timeout');
-  });
-
-  test('no workspace uses the trigger → the sweep reads no tickets', async () => {
-    prismaMock.notificationWorkflow.findMany.mockResolvedValueOnce([]);
-    expect(await ticketReady.sweep({ now: NOW })).toEqual({ ready: 0 });
-    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
   });
 });
 

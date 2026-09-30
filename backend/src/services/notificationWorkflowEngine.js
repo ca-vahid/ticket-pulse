@@ -728,7 +728,7 @@ export async function enrichEventContextWithTone(context, workflows = []) {
   const eventType = context.event?.type;
   const ticketId = Number(context.ticket?.id);
   const workspaceId = Number(context.workspace?.id);
-  if (wantsSentiment && (eventType === 'ticket.created' || eventType === 'ticket.reply_received')
+  if (wantsSentiment && (eventType === 'ticket.created' || eventType === 'ticket.ready' || eventType === 'ticket.reply_received')
     && ticketId && workspaceId) {
     try {
       const sentiment = await ticketSentimentService.refreshWithCap(ticketId, workspaceId, {

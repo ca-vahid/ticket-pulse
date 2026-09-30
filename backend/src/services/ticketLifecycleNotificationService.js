@@ -530,9 +530,13 @@ export async function maybeRefreshSentiment(eventContext) {
     // Review N2: classify a NEW ticket only when an enabled ticket.created
     // workflow reads sentiment or writes with AI (cached; error = no).
     if (type === 'ticket.created') {
-      const needed = await Promise.resolve(notificationWorkflowEngine.workspaceHasSentimentReader?.(eventContext.workspace?.id, 'ticket.created'))
-        .catch(() => false);
-      if (needed !== true) return;
+      const wsId = eventContext.workspace?.id;
+      // Arrival mail moved to "Ticket ready" (30 Sep 2026) still wants the
+      // new ticket's sentiment classified early.
+      const readers = await Promise.all(['ticket.created', 'ticket.ready'].map((t) => Promise
+        .resolve(notificationWorkflowEngine.workspaceHasSentimentReader?.(wsId, t))
+        .catch(() => false)));
+      if (!readers.includes(true)) return;
     }
     const { default: ticketSentimentService } = await import('./ticketSentimentService.js');
     if (type === 'ticket.created') {
@@ -881,6 +885,16 @@ export async function emitTicketLifecycleNotifications({
       }
     }
     emitted.push(event.type);
+    // "Ticket ready" follows "Ticket arrived" (30 Sep 2026): only a ticket
+    // whose arrival reached the workflows can become ready, with the same
+    // ack suppression and createdVia. Fire-and-forget, never blocks.
+    if (event.type === 'ticket.created') {
+      import('./ticketReadyService.js')
+        .then(({ default: ticketReady }) => ticketReady.noteArrival(ticket.id, {
+          workspaceId: ticket.workspaceId, createdAt: ticket.createdAt, suppressRequesterAck, createdVia,
+        }))
+        .catch((err) => logger.warn(`Ticket ready: arrival note failed for ticket ${ticket.id}: ${err.message}`));
+    }
     const eventContext = buildEventContext({ event, ticket, previousAgent, source, statusBase, createdVia });
     dispatchLifecycleWebhook(eventContext);
     dispatchTeamsNotifications(eventContext);
@@ -920,6 +934,7 @@ export async function emitTicketEvent(eventType, ticketId, {
   dedupeStamp = null,
   extra = null,
   onlyWorkflowId = null, // time-trigger/manual dispatch targets one workflow
+  createdVia = null, // "Ticket ready" carries what the arrival workflows saw
 } = {}) {
   const ticket = await hydrateTicket(ticketId);
   if (!ticket) return { status: 'skipped', reason: 'Ticket not found' };
@@ -932,7 +947,7 @@ export async function emitTicketEvent(eventType, ticketId, {
     notificationFingerprint: `wf:${ticket.workspaceId}:${eventType}:${stamp}`,
   };
   const statusBase = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status).catch(() => null);
-  const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase });
+  const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase, ...(createdVia ? { createdVia } : {}) });
   if (extra) eventContext.event.extra = extra;
   dispatchLifecycleWebhook(eventContext);
   dispatchTeamsNotifications(eventContext);

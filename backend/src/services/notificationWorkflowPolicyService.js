@@ -484,8 +484,13 @@ function workflowSendsEmail(workflow) {
   return (definition?.nodes || []).some((node) => node?.type === 'send_email');
 }
 
+/** Arrival events: after-hours routing picks the off-hours or standard "Ticket arrived" set. */
+export const ARRIVAL_EVENT_TYPES = Object.freeze(['ticket.created', 'ticket.ready']);
+
 export function selectWorkflowsForNotificationTiming(workflows = [], context = {}) {
-  if (context.event?.type !== 'ticket.created') {
+  // "Ticket ready" is the arrival, later (30 Sep 2026): the same after-hours
+  // routing applies, so moved arrival e-mails keep their day/night split.
+  if (!ARRIVAL_EVENT_TYPES.includes(context.event?.type)) {
     return {
       selected: workflows,
       suppressed: [],

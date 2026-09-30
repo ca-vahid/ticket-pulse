@@ -20,6 +20,8 @@ const engineMock = { executeForEvent: jest.fn().mockResolvedValue({ status: 'com
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/notificationWorkflowEngine.js', () => ({ default: engineMock }));
+const noteArrival = jest.fn(async () => ({ noted: true }));
+jest.unstable_mockModule('../src/services/ticketReadyService.js', () => ({ default: { noteArrival } }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
@@ -172,6 +174,30 @@ describe('emitTicketLifecycleNotifications — FS-side field diff (opt-in at the
     });
     expect(result.status).toBe('skipped');
     expect(engineMock.executeForEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('"Ticket ready" follows the arrival (30 Sep 2026)', () => {
+  test('a dispatched arrival is noted with the same ack suppression and createdVia', async () => {
+    await emitTicketLifecycleNotifications({
+      existingTicket: null,
+      upsertedTicket: { ...existing, createdAt: new Date('2026-07-06T09:00:00.000Z'), createdVia: 'agent_cc', suppressRequesterAck: true },
+      source: 'ticketpulse_native',
+      allowNotificationWorkflows: true,
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(noteArrival).toHaveBeenCalledWith(501, expect.objectContaining({ workspaceId: 1, suppressRequesterAck: true, createdVia: 'agent_cc' }));
+  });
+
+  test('an arrival that runs no workflows (notify off / quiet ingest) is never noted', async () => {
+    await emitTicketLifecycleNotifications({
+      existingTicket: null,
+      upsertedTicket: { ...existing, createdAt: new Date('2026-07-06T09:00:00.000Z') },
+      source: 'ticketpulse_native',
+      allowNotificationWorkflows: false,
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(noteArrival).not.toHaveBeenCalled();
   });
 });
 
