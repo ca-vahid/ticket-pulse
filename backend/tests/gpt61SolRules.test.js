@@ -44,11 +44,12 @@ describe('GPT-6.1 Sol', () => {
     expect(openAiReasoningFor('gpt-6-luna', { effort: 'none' })).toEqual({ effort: 'none' });
   });
 
-  test('sendJson sends low reasoning to GPT-6.1 Sol and keeps none for GPT-6 Sol', async () => {
+  test('sendJson: GPT-6.1 Sol gets low reasoning and no temperature; GPT-6 Sol keeps none and its temperature', async () => {
     const provider = new OpenAiProvider();
-    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6.1-sol' });
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6.1-sol', temperature: 0.3 });
     expect(create.mock.calls[0][0]).toMatchObject({ model: 'gpt-6.1-sol', reasoning: { effort: 'low' } });
-    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6-sol' });
-    expect(create.mock.calls[1][0]).toMatchObject({ model: 'gpt-6-sol', reasoning: { effort: 'none' } });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6-sol', temperature: 0.3 });
+    expect(create.mock.calls[1][0]).toMatchObject({ model: 'gpt-6-sol', reasoning: { effort: 'none' }, temperature: 0.3 });
   });
 });

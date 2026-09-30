@@ -51,6 +51,16 @@ export const GPT_6_1_SOL_MODEL = 'gpt-6.1-sol';
  * our JSON calls ask for — it runs at 'low' instead. Other models unchanged.
  */
 const OPENAI_MIN_REASONING = [['gpt-6.1', 'low']];
+/**
+ * GPT-6.1 also rejects `temperature` (400 "Unsupported parameter", seen in
+ * the 30 Sep replay of IT's workflow e-mails) — it is left out for them.
+ */
+const OPENAI_NO_TEMPERATURE = ['gpt-6.1'];
+export function openAiOmitsTemperature(model) {
+  const m = String(model || '').toLowerCase();
+  return OPENAI_NO_TEMPERATURE.some((prefix) => m.startsWith(prefix));
+}
+
 export function openAiReasoningFor(model, requested) {
   const effort = requested?.effort;
   const rule = OPENAI_MIN_REASONING.find(([prefix]) => String(model || '').toLowerCase().startsWith(prefix));
