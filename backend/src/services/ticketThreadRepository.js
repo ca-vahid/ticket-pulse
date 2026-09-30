@@ -54,6 +54,21 @@ export function looksLikeSurveyResponse(entry) {
   return /\b(customer satisfaction survey|survey response|survey_result|rate (?:your|the) (?:experience|support)|how would you rate)\b/i.test(text.slice(0, 600));
 }
 
+// FS activity-feed lines that are not work on the ticket (30 Sep 2026): FS
+// automations ("Ticket Workflow executed …", "Supervisor executed the rule
+// Set Resolved Tickets to Closed") and FS's echo of changes Ticket Pulse made
+// itself (those already bumped last_real_activity_at when they happened).
+// Counting them put week-old tickets at the top of the Updated sort.
+const AUTOMATION_ACTORS = new Set(['ticket workflow', 'supervisor', 'workflow automator', 'system', 'freshservice', 'orchestration', 'ticket pulse']);
+
+export function countsAsRealActivity(entry) {
+  if (!entry || entry.source !== 'freshservice_activity') return true;
+  const actor = String(entry.actorName || '').trim().toLowerCase();
+  if (AUTOMATION_ACTORS.has(actor)) return false;
+  const text = String(entry.bodyText || entry.content || '').trim().toLowerCase();
+  return !text.startsWith('executed ');
+}
+
 class TicketThreadRepository {
   /**
    * Workspace technicians matched by the batch's sender emails / FS user ids
@@ -170,7 +185,7 @@ class TicketThreadRepository {
         if (Array.isArray(entry.rawPayload?.attachments) && entry.rawPayload.attachments.length) {
           withAttachments.push({ entryRowId: row.id, entry });
         }
-        if ((entry.bodyText || entry.bodyHtml || entry.content) && entry.occurredAt) {
+        if ((entry.bodyText || entry.bodyHtml || entry.content) && entry.occurredAt && countsAsRealActivity(entry)) {
           const at = new Date(entry.occurredAt);
           if (!Number.isNaN(at.getTime())) {
             const prev = latestRealByTicket.get(entry.ticketId);
