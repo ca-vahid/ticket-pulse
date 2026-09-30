@@ -10,6 +10,7 @@ import MonacoEditor from '@monaco-editor/react';
 import {
   Activity,
   AlertCircle,
+  ArrowLeft,
   Bot,
   CalendarClock,
   Clock3,
@@ -63,7 +64,7 @@ import ConditionGroupBuilder from './ConditionGroupBuilder';
 import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
-import WorkflowIndex from './WorkflowIndex';
+import WorkflowListPage from './WorkflowListPage';
 import { useTheme } from '../../contexts/ThemeContext';
 
 // Inspector width (px) and the minimap choice are remembered per browser.
@@ -4859,21 +4860,25 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
           <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">AI email workflow templates</p>
           {templates === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
           {templates?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No templates available.</p>}
-          {(templates || []).map((template) => (
-            <button
-              key={template.key}
-              type="button"
-              onClick={() => install(template)}
-              disabled={installing !== null}
-              className="w-full rounded-lg px-2 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-60"
-            >
-              <span className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-foreground">{template.name}</span>
-                {installing === template.key && <span className="text-[10px] text-violet-500">installing…</span>}
-              </span>
-              <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{template.description}</span>
-            </button>
-          ))}
+          {/* QA 09-29 #1: the list ran past the bottom of the page and the
+              last templates were cut off — it scrolls inside the panel now. */}
+          <div className="settings-scrollbar max-h-[min(60vh,34rem)] overflow-y-auto overscroll-contain" data-testid="workflow-templates-list">
+            {(templates || []).map((template) => (
+              <button
+                key={template.key}
+                type="button"
+                onClick={() => install(template)}
+                disabled={installing !== null}
+                className="w-full rounded-lg px-2 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-60"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-foreground">{template.name}</span>
+                  {installing === template.key && <span className="text-[10px] text-violet-500">installing…</span>}
+                </span>
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{template.description}</span>
+              </button>
+            ))}
+          </div>
           <p className="border-t border-border/60 px-2 pt-1.5 mt-1 text-[11px] text-muted-foreground/75">Installs as a disabled draft — nothing runs until you publish and enable it.</p>
         </div>
       )}
@@ -5943,7 +5948,7 @@ function workflowRoutingDescription(workflow) {
   return describeCondition(conditionBuilderFromRule(workflow.routingRule));
 }
 
-// The list rail lives in WorkflowIndex.jsx (QA 07-07 #8 redesign).
+// The list lives in WorkflowListPage.jsx (QA 09-29 #2); its helpers in WorkflowIndex.jsx.
 
 export function LlmContextToolsPanel({
   policy,
@@ -7410,6 +7415,29 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
   );
 }
 
+/** ?wf=<id> — the workflow open on its own page (QA 09-29 #2). */
+function readWorkflowParam() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const id = new URLSearchParams(window.location.search).get('wf');
+    return id && /^\d+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkflowParam(id, { push = false } = {}) {
+  if (typeof window === 'undefined') return;
+  try {
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('wf', String(id));
+    else url.searchParams.delete('wf');
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    if (push) window.history.pushState(window.history.state, '', next);
+    else window.history.replaceState(window.history.state, '', next);
+  } catch { /* the address is a convenience */ }
+}
+
 export default function NotificationWorkflowsPanel({
   controlledTab = null,
   onTabChange = null,
@@ -7437,6 +7465,9 @@ export default function NotificationWorkflowsPanel({
   const [undoDepth, setUndoDepth] = useState(0);
   const [edgeInsert, setEdgeInsert] = useState(null);
   const [workflowListCollapsed, setWorkflowListCollapsed] = useState(false);
+  // QA 09-29 #2: the page opens on the full-width list; a workflow opens on a
+  // page of its own (?wf=<id>) and "All workflows" goes back.
+  const [workflowView, setWorkflowView] = useState(() => (readWorkflowParam() ? 'editor' : 'list'));
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [routingExpanded, setRoutingExpanded] = useState(false);
   const [normalizationOpen, setNormalizationOpen] = useState(false);
@@ -7483,7 +7514,6 @@ export default function NotificationWorkflowsPanel({
   const [enableMockConfirm, setEnableMockConfirm] = useState(null);
   const [variantDialogOpen, setVariantDialogOpen] = useState(false);
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
-  const [togglingWorkflowId, setTogglingWorkflowId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [showArchivedWorkflows, setShowArchivedWorkflows] = useState(false);
   const [message, setMessage] = useState(null);
@@ -7787,6 +7817,8 @@ export default function NotificationWorkflowsPanel({
   async function loadWorkflows(selectId = null) {
     setLoading(true);
     setMessage(null);
+    // Asked for a specific workflow (created, installed, the ?wf= link): open it.
+    if (selectId) setWorkflowView('editor');
     try {
       // The list first, on its own: the sidebar paints as soon as it lands
       // (QA 09-22 #10). Catalogs, policies and health fill in behind it, and
@@ -7926,6 +7958,19 @@ export default function NotificationWorkflowsPanel({
     loadWorkflow(id);
   }
 
+  function openWorkflow(id) {
+    writeWorkflowParam(id, { push: true });
+    setWorkflowView('editor');
+    setSelectedNodeId(null);
+    if (String(id) !== String(selected?.id)) loadWorkflow(id);
+  }
+
+  function backToWorkflowList() {
+    writeWorkflowParam(null, { push: true });
+    setWorkflowView('list');
+    setSelectedNodeId(null);
+  }
+
   function applyWorkflowUpdate(updatedWorkflow, { shouldUpdateDraft = true } = {}) {
     if (!updatedWorkflow) return;
     const normalizedDraft = shouldUpdateDraft
@@ -8045,7 +8090,26 @@ export default function NotificationWorkflowsPanel({
   }
 
   useEffect(() => {
-    loadWorkflows();
+    loadWorkflows(readWorkflowParam());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The address follows the page: ?wf=<id> while a workflow is open, nothing
+  // on the list; the browser's Back / Forward move between the two.
+  useEffect(() => {
+    if (workflowView === 'editor' && selected?.id && String(readWorkflowParam()) !== String(selected.id)) {
+      writeWorkflowParam(selected.id, { push: false });
+    }
+  }, [workflowView, selected?.id]);
+  useEffect(() => {
+    const onPop = () => {
+      const id = readWorkflowParam();
+      if (!id) { setWorkflowView('list'); setSelectedNodeId(null); return; }
+      setWorkflowView('editor');
+      loadWorkflow(id);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -8147,19 +8211,14 @@ export default function NotificationWorkflowsPanel({
   const hasBlockingGraphErrors = draftValidationIssues.length > 0;
   const mockAuditOpen = activeGlobalTab === 'mock-audit';
   const workflowTabActive = activeGlobalTab === 'workflows';
-  // Keyboard (22 Sep 2026): Ctrl/⌘+B folds the workflow list to its icon
-  // rail; Esc with nothing else open deselects the step, which closes the
-  // docked inspector. Typing fields and open dialogs are left alone.
+  // Keyboard: Esc with nothing else open deselects the step, which closes the
+  // docked inspector. Typing fields and open dialogs are left alone. (The
+  // Ctrl/⌘+B list fold went with the side list, QA 09-29 #2.)
   useEffect(() => {
     if (!workflowTabActive) return undefined;
     const onKey = (event) => {
       const target = event.target;
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && String(event.key).toLowerCase() === 'b') {
-        event.preventDefault();
-        setWorkflowListCollapsed((current) => !current);
-        return;
-      }
       if (event.key === 'Escape' && !event.defaultPrevented && !typing && !document.querySelector('[role="dialog"]')) {
         setSelectedNodeId(null);
       }
@@ -8490,27 +8549,6 @@ export default function NotificationWorkflowsPanel({
       setMessage({ type: 'error', text: details[0] || error.message || 'Trigger change failed' });
     } finally {
       setSaving(false);
-    }
-  }
-
-  // Inline list toggle (QA 07-07 #8): flip any workflow without opening it.
-  async function toggleEnabledFor(workflow) {
-    if (!workflow || togglingWorkflowId) return;
-    // Same observe-only guard as the editor's Live toggle (QA 08-06).
-    if (!workflow.isEnabled && workflow.mockModeEnabled === true) {
-      setEnableMockConfirm({ workflow });
-      return;
-    }
-    setTogglingWorkflowId(workflow.id);
-    try {
-      const response = await notificationWorkflowAPI.setEnabled(workflow.id, !workflow.isEnabled);
-      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
-      if (response.warning) setMessage({ type: 'warning', text: response.warning });
-      await refreshHealth();
-    } catch (error) {
-      setMessage({ type: 'error', text: error.message || 'Toggle failed' });
-    } finally {
-      setTogglingWorkflowId(null);
     }
   }
 
@@ -11530,7 +11568,8 @@ export default function NotificationWorkflowsPanel({
     );
   }
 
-  const showPanelHeader = !hideTabBar || workflowTabActive;
+  const workflowListView = workflowTabActive && workflowView === 'list';
+  const showPanelHeader = !hideTabBar || (workflowTabActive && !workflowListView);
 
   return (
     <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
@@ -11567,18 +11606,22 @@ export default function NotificationWorkflowsPanel({
               </div>
             )}
 
-            {workflowTabActive && (
+            {workflowTabActive && !workflowListView && (
               <div className="flex min-h-[36px] flex-wrap items-center gap-2" data-testid="workflow-action-row">
                 <button
                   type="button"
-                  onClick={() => setNewWorkflowOpen({})}
-                  disabled={saving}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-sm font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+                  onClick={backToWorkflowList}
+                  className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50"
+                  data-testid="workflow-back-to-list"
                 >
-                  <Plus className="h-4 w-4" />
-                New workflow
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  All workflows
                 </button>
-                <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
+                {selected && (
+                  <span className="min-w-0 max-w-[22rem] truncate text-sm font-semibold text-foreground" data-testid="workflow-page-title" title={workflowDisplayName(selected)}>
+                    {workflowDisplayName(selected)}
+                  </span>
+                )}
                 <div className="relative">
                   <button
                     type="button"
@@ -11820,38 +11863,35 @@ export default function NotificationWorkflowsPanel({
           />
         )}
 
-        {activeGlobalTab === 'workflows' && (
+        {workflowListView && (
+          <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
+            <WorkflowListPage
+              workflows={visibleWorkflows}
+              onOpen={openWorkflow}
+              onCreate={() => setNewWorkflowOpen({})}
+              onCreateForTrigger={(triggerType) => setNewWorkflowOpen({ trigger: triggerType })}
+              onRowAction={handleWorkflowRowAction}
+              getDisplayName={workflowDisplayName}
+              getVisuals={triggerVisuals}
+              eventLabels={EVENT_LABELS}
+              isAfterHours={isAfterHoursWorkflow}
+              showArchived={showArchivedWorkflows}
+              archivedCount={archivedWorkflowCount}
+              onShowArchivedChange={updateShowArchivedWorkflows}
+              actions={<WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />}
+              footer={<WorkflowHealthMenu health={health} warnings={healthWarnings} variant="card" />}
+            />
+          </div>
+        )}
+
+        {activeGlobalTab === 'workflows' && !workflowListView && (
           <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
             {selected && routingExpanded && (
               <div className="shrink-0 border-b border-border">{renderRoutingSettingsPanel()}</div>
             )}
 
-            <div
-              className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--workflow-list-width)_minmax(0,1fr)]"
-              style={{ '--workflow-list-width': workflowListCollapsed ? '3.5rem' : '300px' }}
-            >
-              <aside className="z-10 flex min-h-0 flex-col overflow-visible border-r border-border bg-card/70" data-testid="workflow-sidebar-aside">
-                <WorkflowIndex
-                  workflows={visibleWorkflows}
-                  selectedId={selected?.id}
-                  onSelect={handleWorkflowSelect}
-                  onToggleEnabled={toggleEnabledFor}
-                  togglingId={togglingWorkflowId}
-                  onCreateForTrigger={(triggerType) => setNewWorkflowOpen({ trigger: triggerType })}
-                  onCreate={() => setNewWorkflowOpen({})}
-                  getDisplayName={workflowDisplayName}
-                  getVisuals={triggerVisuals}
-                  eventLabels={EVENT_LABELS}
-                  isAfterHours={isAfterHoursWorkflow}
-                  onRowAction={handleWorkflowRowAction}
-                  collapsed={workflowListCollapsed}
-                  onToggleCollapsed={() => setWorkflowListCollapsed((current) => !current)}
-                  showArchived={showArchivedWorkflows}
-                  archivedCount={archivedWorkflowCount}
-                  onShowArchivedChange={updateShowArchivedWorkflows}
-                  footer={<WorkflowHealthMenu health={health} warnings={healthWarnings} variant={workflowListCollapsed ? 'dot' : 'card'} />}
-                />
-              </aside>
+            {/* The workflow's own page (QA 09-29 #2): no list beside the canvas. */}
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden">
 
               <div ref={editorSplitRef} className="flex min-h-0 min-w-0">
                 <div className="min-h-0 min-w-0 flex-1">

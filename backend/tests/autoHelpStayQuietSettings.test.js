@@ -105,12 +105,31 @@ describe('workspace "Always stay quiet when"', () => {
 
 describe('"Preview answer"', () => {
   test('the newest drafted test run wins, flagged when the playbook changed since', async () => {
-    prismaMock.autoHelpRun.findFirst.mockResolvedValue({ id: 77, playbookId: 3, playbookVersion: 1, trigger: 'test', status: 'drafted', draftHtml: '<p>x</p>' });
+    prismaMock.autoHelpRun.findMany.mockResolvedValueOnce([{ id: 77, playbookId: 3, playbookVersion: 1, trigger: 'test', status: 'drafted', draftHtml: '<p>x</p>' }]);
     const out = await preview.forPlaybook(1, 3);
-    expect(prismaMock.autoHelpRun.findFirst.mock.calls[0][0].where).toMatchObject({ playbookId: 3, trigger: 'test', status: 'drafted' });
-    expect(out.latest).toMatchObject({ id: 77, ticketRef: 'TP-12', outdated: true });
+    expect(prismaMock.autoHelpRun.findMany.mock.calls[0][0].where).toMatchObject({ playbookId: 3, trigger: 'test', status: { in: ['drafted', 'not_answerable'] } });
+    expect(out.latest).toMatchObject({ id: 77, ticketRef: 'TP-12', outdated: true, verdict: null });
     expect(out.sample).toBeNull();
     expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  // QA 09-29 #3: three full OpenGround drafts were hidden behind the article
+  // sample because the answer check had called them "not answerable".
+  test('a not-answerable test that wrote a draft is shown (with its verdict), not the sample', async () => {
+    prismaMock.autoHelpRun.findMany.mockResolvedValueOnce([
+      { id: 88, playbookId: 3, playbookVersion: 2, trigger: 'test', status: 'not_answerable', gateDecision: 'insufficient_context', draftHtml: null, draftSubject: null, transcript: { body: { html: '<ol><li>Open Company Portal.</li></ol>', text: '1. Open Company Portal.' } } },
+    ]);
+    const out = await preview.forPlaybook(1, 3);
+    expect(out.sample).toBeNull();
+    expect(out.latest.verdict).toEqual({ status: 'not_answerable', gateDecision: 'insufficient_context' });
+    expect(out.latest.draftHtml).toContain('Open Company Portal.');
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  test('not-answerable runs with no draft at all → the sample as before', async () => {
+    prismaMock.autoHelpRun.findMany.mockResolvedValueOnce([{ id: 51, status: 'not_answerable', gateDecision: 'no_sources', draftHtml: null, transcript: {} }]);
+    searchMock.mockResolvedValue([]);
+    expect(await preview.forPlaybook(1, 3)).toEqual({ latest: null, sample: null });
   });
 
   test('no test yet: a sample from the best-matching article, keyword-only, wrapped like a real answer', async () => {

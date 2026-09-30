@@ -1,7 +1,7 @@
 /**
  * "Preview answer" for the playbook builder (Knowledge redesign, 26 Sep 2026).
  *
- *   latest  the newest drafted TEST run of the playbook ("Test on a ticket"),
+ *   latest  the newest TEST run of the playbook that wrote a draft ("Test on a ticket"),
  *           exactly as it was stored: disclosure line, answer, follow-up
  *           footer, sources. Flags when the playbook has changed since.
  *   sample  when there is no drafted test yet: a SAMPLE built WITHOUT any
@@ -61,18 +61,46 @@ function clip(text, max) {
 }
 
 class AutoHelpPreviewService {
-  async _latestTest(workspaceId, playbook) {
-    const row = await Promise.resolve()
-      .then(() => prisma.autoHelpRun.findFirst({
-        where: { workspaceId: Number(workspaceId), playbookId: playbook.id, trigger: 'test', status: 'drafted' },
+  /**
+   * The newest test run that WROTE a draft — including one the answer check
+   * then judged "not answerable" (QA 09-29 #3: three full OpenGround drafts
+   * were hidden behind the article sample because none was 'drafted'). A
+   * not-answerable draft is rendered with the same lines a real answer gets
+   * and carries its verdict, so the page can say it would not have been sent.
+   */
+  async _latestTest(workspaceId, playbook, settings = null) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.autoHelpRun.findMany({
+        where: { workspaceId: Number(workspaceId), playbookId: playbook.id, trigger: 'test', status: { in: ['drafted', 'not_answerable'] } },
         orderBy: { createdAt: 'desc' },
+        take: 5,
       }))
-      .catch((err) => { logger.warn(`Auto-help preview: latest test lookup failed (ws ${workspaceId}): ${err.message}`); return null; });
+      .catch((err) => { logger.warn(`Auto-help preview: latest test lookup failed (ws ${workspaceId}): ${err.message}`); return []; });
+    const row = (rows || []).find((r) => r.draftHtml || r.transcript?.body?.html);
     if (!row) return null;
-    const { default: autoHelpRunner } = await import('./autoHelpRunner.js');
+    const { default: autoHelpRunner, buildPreview } = await import('./autoHelpRunner.js');
     const [view] = await autoHelpRunner._decorate(workspaceId, [row]);
+    let rendered = {};
+    if (!row.draftHtml) {
+      const body = row.transcript.body;
+      const workspace = await Promise.resolve()
+        .then(() => prisma.workspace.findUnique({ where: { id: Number(workspaceId) }, select: { name: true } }))
+        .catch(() => null);
+      const preview = buildPreview({
+        subject: row.draftSubject || `Re: ${view?.ticketSubject || 'your request'}`,
+        html: body.html,
+        text: body.text || null,
+        settings: settings || await autoHelpPlaybookService.getSettings(workspaceId),
+        workspaceName: workspace?.name || null,
+        followUp: playbook.followUp,
+      });
+      rendered = { draftSubject: preview.subject, draftHtml: preview.html };
+    }
     return {
       ...view,
+      ...rendered,
+      // Drafted but the answer check said it wasn't enough: never suggested.
+      verdict: row.status === 'drafted' ? null : { status: row.status, gateDecision: row.gateDecision || null },
       // The test ran an older version of the playbook: say so next to it.
       outdated: Number(row.playbookVersion || 1) !== Number(playbook.version || 1),
     };
@@ -127,9 +155,9 @@ class AutoHelpPreviewService {
   /** { latest, sample } — sample only when there is no drafted test run. */
   async forPlaybook(workspaceId, playbookId) {
     const playbook = await autoHelpPlaybookService.get(workspaceId, playbookId);
-    const latest = await this._latestTest(workspaceId, playbook);
-    if (latest) return { latest, sample: null };
     const settings = await autoHelpPlaybookService.getSettings(workspaceId);
+    const latest = await this._latestTest(workspaceId, playbook, settings);
+    if (latest) return { latest, sample: null };
     return { latest: null, sample: await this._sample(workspaceId, playbook, settings) };
   }
 }

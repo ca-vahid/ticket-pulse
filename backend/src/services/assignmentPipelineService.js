@@ -594,6 +594,17 @@ class AssignmentPipelineService {
     return { valid: true };
   }
 
+  /** The ticket's origin — from the row when it carries it, else one read (never throws). */
+  async _ticketOrigin(ticket) {
+    if (!ticket) return null;
+    if (ticket.origin !== undefined) return ticket.origin;
+    if (!ticket.id) return null;
+    const row = await Promise.resolve()
+      .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, select: { origin: true } }))
+      .catch(() => null);
+    return row?.origin ?? null;
+  }
+
   /**
    * Validate a queued run is still worth executing.
    * Returns { valid: true } or { valid: false, reason: string }.
@@ -605,6 +616,7 @@ class AssignmentPipelineService {
         id: true,
         workspaceId: true,
         freshserviceTicketId: true,
+        origin: true,
         subject: true,
         status: true,
         assignedTechId: true,
@@ -627,7 +639,11 @@ class AssignmentPipelineService {
       return localBlocker;
     }
 
-    if (options.liveCheck !== false) {
+    // QA 09-29 #5 (TP-1649): a Ticket Pulse-born ticket is owned here; its
+    // FreshService record is only a fallback copy. A 404 on that copy (just
+    // created, or pruned) must never mark the ticket Deleted — so the
+    // FreshService live check is for FreshService-born tickets only.
+    if (options.liveCheck !== false && (await this._ticketOrigin(ticket)) !== 'ticketpulse') {
       const freshserviceBlocker = await this._validateQueuedRunAgainstFreshService(ticket, options);
       if (freshserviceBlocker) return freshserviceBlocker;
     }

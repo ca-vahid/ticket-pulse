@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.1.20-preview';
+export const APP_VERSION = '4.1.21-preview';
 
 export const changelog = [
+  {
+    version: '4.1.21-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail Workflows: a list first, then a page per workflow</strong> &mdash; the page now opens on a full-width list of every workflow, grouped by trigger, with search, filters (enabled, observe-only, failing, off, archived), state, kind, version and last run. Click one and it opens on a page of its own, with the whole width for the canvas; &ldquo;All workflows&rdquo; takes you back, and the browser&rsquo;s Back button works too. Each workflow has its own link.' },
+      { type: 'fix', html: '<strong>The Templates menu scrolls</strong> &mdash; the last templates in the list were cut off at the bottom of the page. The list now scrolls inside the menu.' },
+      { type: 'fix', html: '<strong>Ticket Pulse tickets are no longer marked Deleted by a FreshService check</strong> &mdash; ten seconds after a Power Apps ticket was created, a check on its FreshService copy got &ldquo;not found&rdquo; and marked the ticket Deleted (TP-1649). Tickets that belong to Ticket Pulse no longer take their status from that check.' },
+      { type: 'improved', html: '<strong>&ldquo;Preview answer&rdquo; shows the real draft</strong> &mdash; when a playbook&rsquo;s last test was judged &ldquo;Not answerable&rdquo;, the preview used to fall back to a sample built from an article. It now shows the draft the test actually wrote, with a note saying it would not have been suggested, so you can see what was missing.' },
+    ],
+  },
   {
     version: '4.1.20-preview',
     date: 'September 30, 2026',
