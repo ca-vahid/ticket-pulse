@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.1.13-preview';
+export const APP_VERSION = '4.1.14-preview';
 
 export const changelog = [
+  {
+    version: '4.1.14-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Knowledge &rarr; Articles at a glance</strong> &mdash; the Articles page opens with how much knowledge there is (published, drafts, due for review), how often Auto-help quoted it in the last 30 days, and a coverage list: tickets per category next to published articles, so the gaps stand out. Click a category to see its articles.' },
+      { type: 'improved', html: '<strong>Filters you can type in</strong> &mdash; filter articles by category, topic, owner or source by typing, sort by most quoted or longest since checked, and clear everything in one click. Each article now shows its owner, how often it was quoted and which playbooks prefer it.' },
+      { type: 'new', html: '<strong>Auto-help prompts in Settings</strong> &mdash; Knowledge &rarr; Settings &rarr; Prompts shows what Auto-help is told for writing the answer, choosing the playbook and checking the answer. Edit the guidance (tone, how picky, how strict), save drafts, publish, compare any two versions side by side, restore an old one or go back to the default. The safety rules around it stay fixed, and the full prompt is shown so you see exactly what the AI gets.' },
+      { type: 'new', html: '<strong>A signature for Auto-help answers</strong> &mdash; paste a signature in Knowledge &rarr; Settings &rarr; E-mail signature (formatting and logos are kept) and choose the line spacing. When an agent sends a suggested answer, it goes out with this signature instead of theirs, or with theirs added after it.' },
+      { type: 'new', html: '<strong>Send to me</strong> &mdash; on any drafted run in Knowledge &rarr; Activity, &ldquo;Send to me&rdquo; e-mails you exactly what the requester would get (automated-answer line, answer, follow-up line and signature) under a &ldquo;Preview only&rdquo; band. Nothing goes to the requester.' },
+    ],
+  },
   {
     version: '4.1.13-preview',
     date: 'September 30, 2026',

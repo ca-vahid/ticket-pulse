@@ -443,7 +443,8 @@ function RawSideBySide({ leftLabel, rightLabel, leftText, rightText, onComputeAn
   );
 }
 
-function PromptDiffModal({
+// Exported for Knowledge → Settings → Prompts (30 Sep 2026): same versions + diff window.
+export function PromptDiffModal({
   isOpen,
   onClose,
   versions,

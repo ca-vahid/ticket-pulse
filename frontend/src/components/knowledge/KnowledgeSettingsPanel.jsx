@@ -6,6 +6,8 @@ import { usd } from './autoHelpWords';
 import { SettingsRow as Row, SettingsSection, inputClass } from './knowledgeUi';
 import { KnowledgeSources } from './KnowledgeSourcesSettings';
 import { StayQuietList } from './StayQuietEditor';
+import AutoHelpSignatureSettings from './AutoHelpSignatureSettings';
+import AutoHelpPromptsSettings from './AutoHelpPromptsSettings';
 
 /**
  * Knowledge → Settings (26 Sep 2026: moved out of the strip above the tabs).
@@ -16,6 +18,8 @@ import { StayQuietList } from './StayQuietEditor';
  *   Always stay quiet when  the workspace's hard stops for every playbook
  *                           (26 Sep 2026; seeded with three defaults)
  *   Automated-answer line   the AI disclosure switch + wording + live preview
+ *   E-mail signature        pasted signature for every answer (30 Sep 2026)
+ *   Prompts                 versioned guidance for the three prompts (30 Sep 2026)
  *   Knowledge sources       FreshService solution import (KnowledgeSourcesSettings)
  *   Reviews                 the Monday review e-mail (KnowledgeSourcesSettings)
  * People who can't manage Knowledge see the same cards read-only.
@@ -301,6 +305,10 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
           </div>
         </Row>
       </SettingsSection>
+
+      <AutoHelpSignatureSettings settings={settings} canManage={canManage} busy={busy} save={save} />
+
+      <AutoHelpPromptsSettings canManage={canManage} />
 
       {/* Announced without reserving a blank gap between the cards. */}
       <p className="sr-only" aria-live="polite">{!error && saved ? 'Saved.' : ''}</p>

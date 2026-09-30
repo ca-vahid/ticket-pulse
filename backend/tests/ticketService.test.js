@@ -432,6 +432,23 @@ describe('ticketService conversation + status + assignment', () => {
     }));
   });
 
+  // 30 Sep 2026: an Auto-help answer that carries its own signature asks the
+  // reply path to leave the agent's off (replyOptions.signatureOverride null).
+  test('the agent signature is added unless the reply says it already has one', async () => {
+    const before = prismaMock.userEmailSignature;
+    prismaMock.userEmailSignature = {
+      findUnique: jest.fn(async () => ({ enabled: true, html: '<p>Agent Sig</p>', text: 'Agent Sig', spacing: 'tight' })),
+    };
+    try {
+      await ticketService.addReply(501, 1, { bodyHtml: '<p>Hello</p>' }, actor);
+      expect(sendgridMock.sendEmail.mock.calls.at(-1)[0].html).toContain('Agent Sig');
+      await ticketService.addReply(501, 1, { bodyHtml: '<p>Hello again</p>' }, actor, [], { signatureOverride: null });
+      expect(sendgridMock.sendEmail.mock.calls.at(-1)[0].html).not.toContain('Agent Sig');
+    } finally {
+      prismaMock.userEmailSignature = before;
+    }
+  });
+
   // 30 Sep 2026: a note with two pasted screenshots (338 KB) was refused as
   // "too long". Pasted pictures now become attachments on the server.
   test('pictures pasted into the text become attachments; the text keeps a marker and passes', async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowUpRight, ChevronRight, Hand, ListChecks } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, Hand, ListChecks, Mail } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../ui';
@@ -175,6 +175,40 @@ function DraftSteps({ steps }) {
   );
 }
 
+/**
+ * "Send to me" (30 Sep 2026): e-mails you exactly what the requester would
+ * get — disclosure, answer, follow-up line and signature — under a
+ * "Preview only" band. Nothing goes to the requester.
+ */
+function SendToMe({ runId }) {
+  const [state, setState] = useState({ busy: false, msg: null, error: null });
+  const send = async () => {
+    setState({ busy: true, msg: null, error: null });
+    try {
+      const res = await knowledgeAPI.sendRunToMe(runId);
+      setState({ busy: false, msg: `Sent to ${res?.data?.to || 'you'} — check your inbox.`, error: null });
+    } catch (err) {
+      setState({ busy: false, msg: null, error: err?.message || 'Could not send the preview' });
+    }
+  };
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-3" data-testid="send-to-me">
+      <button
+        type="button"
+        onClick={send}
+        disabled={state.busy}
+        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground/85 hover:bg-muted disabled:opacity-50"
+      >
+        <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+        {state.busy ? 'Sending…' : 'Send to me'}
+      </button>
+      <span className="text-xs text-muted-foreground">E-mails you exactly what the requester would get. Nothing goes to them.</span>
+      {state.msg && <span className="w-full text-xs text-emerald-700 dark:text-emerald-300" role="status">{state.msg}</span>}
+      {state.error && <span className="w-full text-xs text-red-700 dark:text-red-300" role="alert">{state.error}</span>}
+    </div>
+  );
+}
+
 /** "What Auto-help would have said" — or, when it didn't answer, why. */
 function AnswerCard({ run }) {
   const draftSteps = Array.isArray(run.checks?.draftSteps) ? run.checks.draftSteps : [];
@@ -194,6 +228,7 @@ function AnswerCard({ run }) {
           </div>
         )}
         <DraftPreview subject={run.draftSubject} html={run.draftHtml} />
+        <SendToMe runId={run.id} />
       </DrawerCard>
     );
   }

@@ -464,3 +464,23 @@ describe('Activity: runs view and the run panel', () => {
     api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
   });
 });
+
+// 30 Sep 2026: "Send to me" e-mails yourself what the requester would get.
+describe('Activity: Send to me', () => {
+  test('a drafted run can be e-mailed to yourself; the result is shown', async () => {
+    const RUN = {
+      id: 108, status: 'drafted', gateDecision: 'partial_context', trigger: 'test', createdAt: new Date().toISOString(), mode: 'shadow',
+      ticketId: 5, ticketRef: '#244642', ticketSubject: 'Bluebeam', playbookId: 1, playbookName: 'Software', draftSubject: 'Getting Bluebeam',
+      draftHtml: '<p>Steps</p>', sources: [], checks: {},
+    };
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [RUN], total: 1 } });
+    api.getRun.mockResolvedValue({ success: true, data: RUN });
+    api.sendRunToMe = vi.fn().mockResolvedValue({ success: true, data: { sent: true, to: 'me@x.io' } });
+    renderAt('/knowledge/activity/108');
+    const box = await screen.findByTestId('send-to-me');
+    fireEvent.click(within(box).getByRole('button', { name: 'Send to me' }));
+    expect(await within(box).findByRole('status')).toHaveTextContent('Sent to me@x.io');
+    expect(api.sendRunToMe).toHaveBeenCalledWith(108);
+    api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
+  });
+});

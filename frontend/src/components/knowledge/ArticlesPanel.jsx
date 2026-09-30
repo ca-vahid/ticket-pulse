@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { knowledgeAPI, ticketsAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
+import SearchSelect from '../common/SearchSelect';
 import RichTextEditor from '../tickets/RichTextEditor';
 import { PersonAvatar, SafeHtml, timeAgo } from '../tickets/ticketUi';
 import {
@@ -60,10 +61,93 @@ function categoryName(tree, id) {
   return null;
 }
 
+const SOURCE_FILTERS = [
+  { value: 'tp', label: 'Written in Ticket Pulse' },
+  { value: 'drafted', label: 'Drafted from tickets' },
+  { value: 'fs_solution', label: 'FreshService solution' },
+];
+const SORT_OPTIONS = [
+  { value: '', label: 'Recently updated' },
+  { value: 'quoted', label: 'Most quoted' },
+  { value: 'title', label: 'Title A–Z' },
+  { value: 'oldest_verified', label: 'Longest since checked' },
+];
+
+/**
+ * The landing strip (30 Sep 2026): how much knowledge there is, how much
+ * Auto-help used lately, and — per category — tickets in the last 30 days
+ * next to published articles, so the gaps are obvious. A category row
+ * filters the list.
+ */
+function ArticlesOverview({ onPickCategory }) {
+  const [data, setData] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => knowledgeAPI.articlesOverview())
+      .then((res) => { if (!cancelled) setData(res?.data || null); })
+      .catch(() => { if (!cancelled) setData(null); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!data) return null;
+  const rows = (data.coverage || []).filter((c) => c.tickets30d > 0 || c.published > 0);
+  const shown = showAll ? rows : rows.slice(0, 6);
+  const max = Math.max(1, ...rows.map((c) => c.tickets30d));
+  const stat = (n, label, tone = '') => (
+    <div className="min-w-0">
+      <p className={`text-xl font-semibold tabular-nums ${tone || 'text-foreground'}`}>{n}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+    </div>
+  );
+  return (
+    <section className="tp-card grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]" aria-label="Knowledge at a glance" data-testid="articles-overview">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+        {stat(data.published, 'published')}
+        {stat(data.draft, data.draft === 1 ? 'draft' : 'drafts')}
+        {stat(data.needsReview, 'need a review', data.needsReview ? 'text-amber-700 dark:text-amber-300' : '')}
+        {stat(data.quoted30d, 'quotes by Auto-help, 30 days')}
+        {stat(data.articlesQuoted30d, 'articles quoted, 30 days')}
+        {stat(data.archived, 'archived')}
+      </div>
+      <div className="min-w-0" data-testid="coverage">
+        <p className="mb-1.5 text-xs font-medium text-muted-foreground">Tickets in the last 30 days vs published articles, by category</p>
+        <ul className="space-y-1">
+          {shown.map((c) => (
+            <li key={c.categoryId}>
+              <button
+                type="button"
+                onClick={() => onPickCategory?.(c.categoryId)}
+                className="tp-focus-ring grid w-full grid-cols-[minmax(0,1fr)_5rem_6.5rem] items-center gap-3 rounded-md px-1.5 py-1 text-left text-xs hover:bg-muted/50"
+                title={`Show ${c.name} articles`}
+              >
+                <span className="truncate text-foreground/85">{c.name}</span>
+                <span className="relative h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                  <span className="absolute inset-y-0 left-0 rounded-full bg-primary/60" style={{ width: `${Math.max(3, Math.round((c.tickets30d / max) * 100))}%` }} />
+                </span>
+                <span className="whitespace-nowrap text-right tabular-nums">
+                  <span className="text-muted-foreground">{c.tickets30d} tickets · </span>
+                  <span className={c.published ? 'text-foreground/85' : 'font-medium text-amber-700 dark:text-amber-300'}>{c.published || 'no'} article{c.published === 1 ? '' : 's'}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {rows.length > 6 && (
+          <button type="button" onClick={() => setShowAll((v) => !v)} className="tp-focus-ring mt-1 rounded px-1.5 text-xs font-medium text-primary hover:underline">
+            {showAll ? 'Show fewer' : `Show all ${rows.length} categories`}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /**
  * The list. With a search typed it asks the hybrid /knowledge/search
  * (meaning + words, the same search Auto-help uses — published articles
- * only); without one it lists by status. Archived articles are hidden unless
+ * only); without one it lists by status. Filters you can type in: category,
+ * topic and owner (30 Sep 2026). Archived articles are hidden unless
  * "Show archived" is ticked.
  */
 function ArticleList({ categories, canManage }) {
@@ -73,6 +157,11 @@ function ArticleList({ categories, canManage }) {
   const [showArchived, setShowArchived] = useState(false);
   const [needsReview, setNeedsReview] = useState(false);
   const [categoryId, setCategoryId] = useState('');
+  const [topic, setTopic] = useState('');
+  const [owner, setOwner] = useState('');
+  const [source, setSource] = useState('');
+  const [sort, setSort] = useState('');
+  const [techs, setTechs] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const query = q.trim();
@@ -80,12 +169,23 @@ function ArticleList({ categories, canManage }) {
 
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve()
+      .then(() => ticketsAPI.meta())
+      .then((res) => { if (!cancelled) setTechs(res?.data?.technicians || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const t = setTimeout(() => {
       const req = searching
         ? knowledgeAPI.search(query, { limit: 20 }).then((res) => {
           const cat = Number(categoryId) || null;
+          const tp = topic.trim().toLowerCase();
           const items = (res?.data || [])
             .filter((h) => !cat || h.categoryId === cat || h.subcategoryId === cat)
+            .filter((h) => !tp || (h.tags || []).some((x) => String(x).toLowerCase() === tp))
             .map((h) => ({ ...h, status: 'published' }));
           return { items, total: items.length, searched: true };
         })
@@ -94,23 +194,35 @@ function ArticleList({ categories, canManage }) {
           status: showArchived ? 'archived' : (status || undefined),
           review: !showArchived && needsReview ? 'due' : undefined,
           categoryId: categoryId || undefined,
+          topic: topic || undefined,
+          owner: owner || undefined,
+          source: source || undefined,
+          sort: sort || undefined,
         }).then((res) => res?.data || { items: [], total: 0 });
       req
         .then((d) => { if (!cancelled) { setData(d); setError(null); } })
         .catch((err) => { if (!cancelled) setError(err?.message || 'Could not load articles'); });
     }, query ? 250 : 0);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [query, searching, status, showArchived, needsReview, categoryId]);
+  }, [query, searching, status, showArchived, needsReview, categoryId, topic, owner, source, sort]);
 
-  const categoryOptions = useMemo(() => [
-    { value: '', label: 'All categories' },
-    ...categories.flatMap((c) => [
-      { value: c.id, label: c.name, group: 'Categories' },
-      ...(c.subcategories || []).map((s) => ({ value: s.id, label: `${c.name} → ${s.name}`, group: 'Subcategories' })),
-    ]),
-  ], [categories]);
+  const categoryOptions = useMemo(() => categories.flatMap((c) => [
+    { value: c.id, label: c.name },
+    ...(c.subcategories || []).map((s) => ({ value: s.id, label: `${c.name} → ${s.name}` })),
+  ]), [categories]);
+  const ownerOptions = useMemo(() => (techs || [])
+    .filter((t) => t.email)
+    .map((t) => ({ value: String(t.email).toLowerCase(), label: t.name || prettyEmailName(t.email), hint: t.email }))
+    .sort((a, b) => a.label.localeCompare(b.label)), [techs]);
+  const loadTopicOptions = useCallback(async (text) => {
+    const list = await loadTopics(text);
+    return list.map((t) => ({ value: t.value, label: t.value, hint: t.count ? `${t.count}` : undefined }));
+  }, []);
 
-  const filtered = Boolean(query || status || categoryId || showArchived || needsReview);
+  const filtered = Boolean(query || status || categoryId || topic || owner || source || showArchived || needsReview);
+  const clearAll = () => {
+    setQ(''); setStatus(''); setCategoryId(''); setTopic(''); setOwner(''); setSource(''); setShowArchived(false); setNeedsReview(false);
+  };
 
   return (
     <div className="space-y-4">
@@ -125,22 +237,33 @@ function ArticleList({ categories, canManage }) {
           </button>
         </TabActions>
       )}
-      <div className="tp-card flex flex-col gap-2.5 p-3 sm:p-4 lg:flex-row lg:flex-wrap lg:items-center" data-testid="articles-filters">
-        <label className="relative min-w-0 flex-1 lg:min-w-[260px] lg:max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by meaning or words…"
-            aria-label="Search articles"
-            className={`${inputClass} h-10 pl-9`}
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-2 lg:flex">
-          <div className="lg:w-48">
-            <FancySelect value={status} onChange={setStatus} options={STATUS_FILTERS} aria-label="Article status" disabled={searching || showArchived} className="h-10" />
+      <ArticlesOverview onPickCategory={(id) => setCategoryId(id)} />
+      <div className="tp-card space-y-2.5 p-3 sm:p-4" data-testid="articles-filters">
+        <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
+          <label className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search by meaning or words…"
+              aria-label="Search articles"
+              className={`${inputClass} h-10 pl-9`}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2 lg:flex">
+            <div className="lg:w-44">
+              <FancySelect value={status} onChange={setStatus} options={STATUS_FILTERS} aria-label="Article status" disabled={searching || showArchived} className="h-10" />
+            </div>
+            <div className="lg:w-44">
+              <FancySelect value={sort} onChange={setSort} options={SORT_OPTIONS} aria-label="Sort articles" disabled={searching} className="h-10" />
+            </div>
           </div>
-          <div className="lg:w-72"><FancySelect value={categoryId} onChange={setCategoryId} options={categoryOptions} aria-label="Article category" className="h-10" /></div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <SearchSelect value={categoryId} onChange={setCategoryId} options={categoryOptions} allLabel="All categories" placeholder="Type a category…" aria-label="Article category" data-testid="filter-category" />
+          <SearchSelect value={topic} onChange={setTopic} loadOptions={loadTopicOptions} allLabel="All topics" placeholder="Type a topic…" aria-label="Article topic" data-testid="filter-topic" />
+          <SearchSelect value={owner} onChange={setOwner} options={ownerOptions} allLabel="Any owner" placeholder="Type a name…" aria-label="Article owner" data-testid="filter-owner" />
+          <SearchSelect value={source} onChange={setSource} options={SOURCE_FILTERS} allLabel="Any source" placeholder="Type a source…" aria-label="Article source" data-testid="filter-source" />
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <label className="inline-flex cursor-pointer items-center gap-2 px-1 text-sm text-foreground/85">
@@ -151,6 +274,9 @@ function ArticleList({ categories, canManage }) {
             <input type="checkbox" checked={needsReview} onChange={(e) => setNeedsReview(e.target.checked)} disabled={showArchived} className="tp-focus-ring h-4 w-4 rounded border-input accent-[hsl(var(--primary))]" />
             Needs review
           </label>
+          {filtered && (
+            <button type="button" onClick={clearAll} className="tp-focus-ring ml-auto rounded px-1 text-sm font-medium text-primary hover:underline">Clear filters</button>
+          )}
         </div>
       </div>
       {searching && <p className="px-1 text-xs text-muted-foreground">Searching published articles by meaning and words — the same search Auto-help uses.</p>}
@@ -169,38 +295,51 @@ function ArticleList({ categories, canManage }) {
         </div>
       ) : data && (
         <ul className="space-y-2" data-testid="articles-list">
-          {data.items.map((a) => (
-            <li key={a.id}>
-              <Link to={`/knowledge/articles/${a.id}`} className="tp-card tp-focus-ring flex items-start gap-3.5 px-4 py-3.5 transition-shadow hover:shadow-soft">
-                <IconTile icon={FileText} size="sm" tone={a.status === 'published' ? 'primary' : 'muted'} className="mt-0.5" />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">{a.title}</span>
-                    <ArticleStatus status={a.status} />
-                  </span>
-                  <span className="mt-0.5 line-clamp-1 text-[13px] text-muted-foreground">{a.snippet || 'No text yet'}</span>
-                  <span className="mt-1.5 block text-xs text-muted-foreground/85">
-                    {[
-                      articleSourceLabel(a),
-                      categoryName(categories, a.subcategoryId) || categoryName(categories, a.categoryId),
-                      articleTopics(a).length ? articleTopics(a).join(', ') : null,
-                      data.searched ? `relevance ${Math.round(Number(a.score || 0) * 100)}%` : (a.updatedAt ? `updated ${timeAgo(a.updatedAt)}` : null),
-                    ].filter(Boolean).join(' · ')}
-                    {governanceLine(a) && (
-                      <span className={a.needsReview ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'} data-testid="governance-line">
-                        {' · '}{governanceLine(a)}
+          {data.items.map((a) => {
+            const topics = articleTopics(a);
+            const reach = Array.isArray(a.quotedBy) ? a.quotedBy : [];
+            return (
+              <li key={a.id}>
+                <Link to={`/knowledge/articles/${a.id}`} className="tp-card tp-focus-ring flex items-start gap-3.5 px-4 py-3.5 transition-shadow hover:shadow-soft">
+                  <IconTile icon={FileText} size="sm" tone={a.status === 'published' ? 'primary' : 'muted'} className="mt-0.5" />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">{a.title}</span>
+                      <ArticleStatus status={a.status} />
+                    </span>
+                    <span className="mt-0.5 line-clamp-2 text-[13px] text-muted-foreground">{a.snippet || 'No text yet'}</span>
+                    <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/85">
+                      {(categoryName(categories, a.subcategoryId) || categoryName(categories, a.categoryId)) && (
+                        <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" aria-hidden="true" />{categoryName(categories, a.subcategoryId) || categoryName(categories, a.categoryId)}</span>
+                      )}
+                      {a.ownerEmail && (
+                        <span className="inline-flex items-center gap-1"><UserRound className="h-3 w-3" aria-hidden="true" />{prettyEmailName(a.ownerEmail)}</span>
+                      )}
+                      {data.searched
+                        ? <span>relevance {Math.round(Number(a.score || 0) * 100)}%</span>
+                        : <span data-testid="times-quoted-line">{Number(a.timesQuoted) ? `quoted ${a.timesQuoted}×` : 'not quoted yet'}</span>}
+                      {!data.searched && a.updatedAt && <span>updated {timeAgo(a.updatedAt)}</span>}
+                      {articleSourceLabel(a) && <span>{articleSourceLabel(a)}</span>}
+                      {governanceLine(a) && (
+                        <span className={a.needsReview ? 'text-amber-700 dark:text-amber-300' : ''} data-testid="governance-line">{governanceLine(a)}</span>
+                      )}
+                    </span>
+                    {(topics.length > 0 || reach.length > 0 || unreached(a)) && (
+                      <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/85">
+                        {topics.length > 0 && <span>Topics: {topics.join(', ')}</span>}
+                        {reach.length > 0 && <span>Preferred by {reach.map((pb) => pb.name).join(', ')}</span>}
+                        {unreached(a) && (
+                          <span className="text-amber-700 dark:text-amber-300" data-testid="no-playbook-reaches" title="No playbook covers this article's category — Auto-help can still find it by search.">
+                            <AlertTriangle className="inline h-3 w-3 -translate-y-px" aria-hidden="true" /> No playbook covers its category
+                          </span>
+                        )}
                       </span>
                     )}
-                    {unreached(a) && (
-                      <span className="text-amber-700 dark:text-amber-300" data-testid="no-playbook-reaches" title="No playbook reaches this article's category yet — Auto-help can still find it by search.">
-                        {' · '}<AlertTriangle className="inline h-3 w-3 -translate-y-px" aria-hidden="true" /> No playbook reaches it
-                      </span>
-                    )}
                   </span>
-                </span>
-              </Link>
-            </li>
-          ))}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
       {data && !data.searched && data.total > data.items.length && (

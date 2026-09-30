@@ -4813,7 +4813,9 @@ class TicketService {
     // seam — the composed html feeds both the FS createReply branch and the
     // native requester email below. Appended to the OUTBOUND email only (the
     // stored thread entry stays clean); replies only, never notes/forwards.
-    const signature = isPrivate ? null : await getEnabledSignatureForSend(workspaceId, actor?.email);
+    // replyOptions.signatureOverride === null: the body already carries its
+    // signature (an Auto-help answer with its own, 30 Sep 2026) — no second one.
+    const signature = isPrivate || replyOptions?.signatureOverride === null ? null : await getEnabledSignatureForSend(workspaceId, actor?.email);
 
     // FS-born replies leave from Ticket Pulse when the workspace says so (17 Sep
     // 2026): our mailbox, the agent's name, a reply key the ingest understands —
