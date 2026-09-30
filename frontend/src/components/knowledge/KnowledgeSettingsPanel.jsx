@@ -12,9 +12,10 @@ import AutoHelpPromptsSettings from './AutoHelpPromptsSettings';
 /**
  * Knowledge → Settings (26 Sep 2026: moved out of the strip above the tabs).
  * Every workspace-level Knowledge switch lives here, one card per topic:
- *   Auto-help               on/off, approve mode, the thank-you, the monthly
- *                           cost cap (with this month's spend); auto sending is
- *                           locked by the build
+ *   Auto-help               on/off, approve mode, auto after hours (30 Sep
+ *                           2026), the thank-you, the monthly cost cap (with
+ *                           this month's spend); plain auto mode stays locked
+ *                           by the build
  *   Always stay quiet when  the workspace's hard stops for every playbook
  *                           (26 Sep 2026; seeded with three defaults)
  *   Automated-answer line   the AI disclosure switch + wording + live preview
@@ -37,6 +38,31 @@ function modeWords(settings) {
     : 'on in shadow mode — answers are drafted and recorded, never sent';
 }
 
+/** Morning-summary recipients as the text field shows them. */
+function recipientText(list) {
+  return Array.isArray(list) ? list.join(', ') : String(list || '');
+}
+
+/**
+ * Which playbooks the after-hours switch would let send by themselves, and
+ * whether it is after hours right now — so "on" never looks like it does
+ * something it can't.
+ */
+export function AfterHoursStatus({ afterHours, on }) {
+  if (!afterHours) return null;
+  const list = afterHours.playbooks || [];
+  const qualifying = list.filter((p) => p.readinessMet && !p.sensitive);
+  const waiting = list.filter((p) => !p.readinessMet && !p.sensitive);
+  return (
+    <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground" data-testid="after-hours-status">
+      {qualifying.length
+        ? <>Would send by itself: <span className="font-medium text-foreground/85">{qualifying.map((p) => p.name).join(', ')}</span>.</>
+        : <>No playbook qualifies yet{waiting.length ? ` — ${waiting.map((p) => p.name).join(', ')} still need their readiness checklist` : ' — none is in approve mode'}.</>}
+      {' '}{afterHours.afterHoursNow ? 'It is after hours now' : 'It is business hours now'}{on && afterHours.afterHoursNow && qualifying.length ? ', so these are sending by themselves.' : '.'}
+    </span>
+  );
+}
+
 export default function KnowledgeSettingsPanel({ settings, onChange }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -44,10 +70,12 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
   const [text, setText] = useState(settings?.disclosureText || '');
   const [cap, setCap] = useState(settings?.monthlyCostCapUsd ?? '');
   const [quiet, setQuiet] = useState(settings?.alwaysStayQuietWhen || []);
+  const [summaryTo, setSummaryTo] = useState(recipientText(settings?.afterHoursSummaryTo));
 
   useEffect(() => { setText(settings?.disclosureText || ''); }, [settings?.disclosureText]);
   useEffect(() => { setCap(settings?.monthlyCostCapUsd ?? ''); }, [settings?.monthlyCostCapUsd]);
   useEffect(() => { setQuiet(settings?.alwaysStayQuietWhen || []); }, [settings?.alwaysStayQuietWhen]);
+  useEffect(() => { setSummaryTo(recipientText(settings?.afterHoursSummaryTo)); }, [settings?.afterHoursSummaryTo]);
   useEffect(() => {
     if (!saved) return undefined;
     const t = setTimeout(() => setSaved(false), 2500);
@@ -66,6 +94,8 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
   const defaultQuiet = settings.defaults?.alwaysStayQuietWhen || [];
   const quietDirty = JSON.stringify(quiet) !== JSON.stringify(savedQuiet);
   const quietIsDefault = JSON.stringify(quiet) === JSON.stringify(defaultQuiet);
+  const afterHoursOn = settings.autoAfterHours === true;
+  const summaryDirty = summaryTo.trim() !== recipientText(settings.afterHoursSummaryTo);
 
   const save = async (patch) => {
     setBusy(true);
@@ -130,6 +160,47 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
 
         <Row>
           <Switch
+            id="kh-after-hours"
+            checked={afterHoursOn}
+            disabled={busy || !canManage || !approveOn}
+            onCheckedChange={(v) => save({ autoAfterHours: v })}
+            aria-label="Auto after hours and on holidays"
+          />
+          <div className="min-w-0 flex-1" data-testid="after-hours-setting">
+            <label htmlFor="kh-after-hours" className="block cursor-pointer text-sm font-medium text-foreground">Send by itself after hours and on holidays</label>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              Approve by day, auto by night. Outside business hours and on holidays (Settings &rarr; Business Hours &amp; Holidays), a proven playbook sends its answer without waiting for an agent: only playbooks in approve mode that have met their readiness checklist and aren&rsquo;t sensitive, and only clean answers at the confidence bar. Partial answers still wait for the morning. Each one is marked &ldquo;Answered by Auto-help overnight&rdquo; and listed in a morning summary.
+            </span>
+            {!approveOn && <span className="mt-1 block text-[11px] text-muted-foreground/80">Needs approve mode on.</span>}
+            <AfterHoursStatus afterHours={settings.afterHours} on={afterHoursOn && approveOn} />
+            {afterHoursOn && (
+              <form
+                className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await save({ afterHoursSummaryTo: summaryTo.split(/[\s,;]+/).filter(Boolean) });
+                }}
+              >
+                <label htmlFor="kh-summary-to" className="text-xs text-muted-foreground">Morning summary to</label>
+                <input
+                  id="kh-summary-to"
+                  type="text"
+                  value={summaryTo}
+                  disabled={!canManage}
+                  onChange={(e) => setSummaryTo(e.target.value)}
+                  placeholder="the workspace admins"
+                  className={`${inputClass} min-w-0 flex-1 sm:max-w-sm disabled:opacity-70`}
+                />
+                {canManage && summaryDirty && (
+                  <button type="submit" disabled={busy} className="tp-focus-ring rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-60">Save</button>
+                )}
+              </form>
+            )}
+          </div>
+        </Row>
+
+        <Row>
+          <Switch
             id="kh-thanks"
             checked={settings.thankOnConfirm === true}
             disabled={busy || !canManage}
@@ -153,10 +224,10 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
           <label htmlFor="kh-first-response" className="min-w-0 flex-1 cursor-pointer" data-testid="first-response-setting">
             <span className="block text-sm font-medium text-foreground">Count an automated answer as the first response</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              Off: an answer an agent sends counts as usual; answers sent without an agent (auto mode, not in this build) only record an &lsquo;automated first answer&rsquo; time.
+              Off: an answer an agent sends counts as usual; answers sent without an agent (after hours) only record an &lsquo;automated first answer&rsquo; time.
             </span>
             <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground/80">
-              <Lock className="h-3 w-3" aria-hidden="true" /> Only matters for auto mode (not in this build).
+              <Lock className="h-3 w-3" aria-hidden="true" /> Only matters for answers sent by themselves after hours.
             </span>
           </label>
         </Row>
@@ -199,7 +270,7 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
         {settings.autoModeAllowed !== true && (
           <div className="flex items-center gap-1.5 bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground sm:px-5" data-testid="auto-locked">
             <Lock className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-            <span>{settings.autoModeLockedMessage || 'Auto sending is switched off in this build'}{/[.!?]$/.test(settings.autoModeLockedMessage || '') ? '' : '.'} Playbooks can be Shadow or Approve.</span>
+            <span>{settings.autoModeLockedMessage || 'Auto sending is switched off in this build'}{/[.!?]$/.test(settings.autoModeLockedMessage || '') ? '' : '.'} Playbooks can be Shadow or Approve; the after-hours switch above is the only way an answer goes out by itself.</span>
           </div>
         )}
       </SettingsSection>

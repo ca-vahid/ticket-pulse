@@ -176,6 +176,12 @@ class AutoHelpIntakeService {
         const removed = await this.cleanup({ now }).catch((err) => { logger.warn(`Auto-help job cleanup failed: ${err.message}`); return 0; });
         if (removed) out.removed = removed;
       }
+      // "Ticket ready" never waits past 3 minutes (30 Sep 2026) — before the
+      // drain, which can take minutes on a morning burst.
+      const ready = await import('./ticketReadyService.js')
+        .then(({ default: ticketReady }) => ticketReady.sweep({ now }))
+        .catch((err) => { logger.warn(`Ticket ready sweep failed: ${err.message}`); return null; });
+      if (ready?.ready) out.ticketsReady = ready.ready;
       const drained = await this.drain({ now });
       if (drained?.ran || drained?.failed || drained?.expired || drained?.busy) out.jobs = drained;
       // Every 3rd tick (~2 min): tell assignees about Auto-help answers
@@ -189,6 +195,10 @@ class AutoHelpIntakeService {
           .then(({ default: delivery }) => delivery.supersedeRepliedInFreshService())
           .catch((err) => { logger.warn(`Auto-help FreshService-reply check failed: ${err.message}`); return null; });
         if (aside?.setAside) out.setAsideForFsReply = aside.setAside;
+        const summaries = await import('./autoHelpDeliveryService.js')
+          .then(({ default: delivery }) => delivery.sendMorningSummaries({ now }))
+          .catch((err) => { logger.warn(`Auto-help morning summary failed: ${err.message}`); return null; });
+        if (summaries?.sent) out.morningSummaries = summaries.sent;
       }
       return out;
     } finally {
@@ -373,6 +383,7 @@ class AutoHelpIntakeService {
         where: { id: job.id, status: 'running' },
         data: { status: 'done', finishedAt: new Date(), result: safeJson(result), lastError: null },
       })).catch((err) => logger.warn(`Auto-help job ${job.id} finished but not marked done: ${err.message}`));
+      this._ready(job.ticketId, result?.runId ?? null);
       return { status: 'done', result };
     } catch (err) {
       const attempts = Number(job.attempts) || 1;
@@ -384,8 +395,16 @@ class AutoHelpIntakeService {
           : { status: 'pending', runAfter: new Date(new Date(now).getTime() + backoffMs(attempts)), claimedAt: null, lastError: String(err.message).slice(0, 1000) },
       })).catch(() => {});
       logger.warn(`Auto-help job ${job.id} (ticket ${job.ticketId}) failed (attempt ${attempts}): ${err.message}${final ? ' — giving up' : ''}`);
+      if (final) this._ready(job.ticketId, null);
       return { status: final ? 'failed' : 'retry', error: err.message };
     }
+  }
+
+  /** Auto-help is done with this ticket: "Ticket ready" may fire (30 Sep 2026). Fire-and-forget. */
+  _ready(ticketId, runId) {
+    import('./ticketReadyService.js')
+      .then(({ default: ticketReady }) => ticketReady.markReady(ticketId, { reason: 'auto_help_done', runId }))
+      .catch((err) => logger.warn(`Ticket ready after Auto-help skipped for ticket ${ticketId}: ${err.message}`));
   }
 
   /** Age cap: a settle older than 6 h is stale news — recorded, never run. */

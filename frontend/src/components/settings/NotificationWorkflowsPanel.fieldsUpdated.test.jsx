@@ -26,6 +26,7 @@ vi.mock('react-resizable-panels', () => ({
 vi.mock('../../services/api', () => ({ notificationWorkflowAPI: {} }));
 
 const {
+  AssignedTriggerOptions,
   CONDITION_FIELD_OPTIONS,
   FieldsUpdatedTriggerOptions,
   TRIGGER_PICKER_GROUPS,
@@ -72,5 +73,23 @@ describe('FieldsUpdatedTriggerOptions (TU-8)', () => {
     expect(onChange).toHaveBeenLastCalledWith({ includeFreshserviceChanges: false });
     fireEvent.click(screen.getByRole('checkbox', { name: /Also notify the person who made the change/i }));
     expect(onChange).toHaveBeenLastCalledWith({ notifyActor: true });
+  });
+});
+
+describe('"Ticket ready" and the assigned option (30 Sep 2026)', () => {
+  test('"Ticket ready" is in the picker under Ticket lifecycle, after intake settled, with its conditions', () => {
+    const lifecycle = TRIGGER_PICKER_GROUPS.find((g) => g.label === 'Ticket lifecycle').triggers.map((t) => t.value);
+    expect(lifecycle.indexOf('ticket.ready')).toBe(lifecycle.indexOf('ticket.intake_settled') + 1);
+    const fields = CONDITION_FIELD_OPTIONS.map((f) => f.value);
+    expect(fields).toEqual(expect.arrayContaining(['event.readyReason', 'event.autoHelpAnswered']));
+  });
+
+  test('"Skip when Auto-help already answered" is off by default and toggles the trigger option', () => {
+    const onChange = vi.fn();
+    render(<AssignedTriggerOptions data={{}} onChange={onChange} />);
+    const box = screen.getByRole('checkbox', { name: /Skip when Auto-help already answered/ });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(onChange).toHaveBeenCalledWith({ skipIfAutoHelpAnswered: true });
   });
 });

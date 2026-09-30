@@ -338,8 +338,11 @@ async function autoHelpAckMergeStep({ node, state, eventContext, workflow, run, 
   }
   const mine = state.autoHelpMerge?.[node.id] || null;
   if (!mine) {
+    // "Ticket ready" fired because Auto-help is about to send its answer by
+    // itself (30 Sep 2026): hold — the answer takes the ack in seconds.
+    const answering = eventContext?.event?.type === 'ticket.ready' && eventContext.event.extra?.readyReason === 'auto_help_answering';
     const { expectedFor } = await import('./autoHelpContextService.js');
-    const expected = await expectedFor(ticketId, workflow.workspaceId).catch(() => false);
+    const expected = answering || await expectedFor(ticketId, workflow.workspaceId).catch(() => false);
     if (!expected) {
       state.autoHelpMerge = { ...(state.autoHelpMerge || {}), [node.id]: { held: false, reason: 'auto_help_not_expected' } };
       return null;
@@ -4365,6 +4368,35 @@ async function applyWorkflowTagChanges(prisma, ticket, addNames, removeNames) {
   return { added, removed };
 }
 
+/**
+ * "Ticket assigned" option (30 Sep 2026): skip this e-mail when Auto-help
+ * already answered this NEW ticket — the requester has an answer, a third
+ * mail saying "an agent has it" only adds noise. Only for tickets that
+ * arrived in the last ASSIGNED_SKIP_NEW_WINDOW_MS; a later reassignment still
+ * mails. Returns the skip reason, or null to run.
+ */
+export const ASSIGNED_SKIP_NEW_WINDOW_MS = 24 * 60 * 60 * 1000;
+export async function assignedAfterAutoHelpGate(workflow, workflowContext) {
+  const definition = workflow?.publishedDefinition || workflow?.draftDefinition || null;
+  const trigger = (definition?.nodes || []).find((node) => node?.type === 'trigger');
+  if (trigger?.data?.skipIfAutoHelpAnswered !== true) return null;
+  const ticketId = Number(workflowContext?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return null;
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { createdAt: true } });
+    if (!ticket || Date.now() - new Date(ticket.createdAt).getTime() > ASSIGNED_SKIP_NEW_WINDOW_MS) return null;
+    const { SENT_DECISIONS } = await import('./autoHelpOutcomes.js');
+    const answered = await prisma.autoHelpRun.findFirst({
+      where: { ticketId, decision: { in: [...SENT_DECISIONS] } },
+      select: { id: true },
+    });
+    return answered ? `Auto-help already answered this new ticket (run ${answered.id}) — "skip when Auto-help answered" is on` : null;
+  } catch (error) {
+    logger.warn(`assigned-after-Auto-help check failed (sending as usual): ${error.message}`);
+    return null;
+  }
+}
+
 /** Trigger-node options for a fields_updated workflow (defaults per TU-8). */
 export function fieldsUpdatedTriggerOptions(workflow) {
   const definition = workflow?.publishedDefinition || workflow?.draftDefinition || null;
@@ -4562,6 +4594,10 @@ export async function executeForEvent(eventContext, options = {}) {
     try {
       const run = async () => {
         let parkMinutes = 0;
+        if (eventType === 'ticket.assigned') {
+          const skip = await assignedAfterAutoHelpGate(workflow, workflowContext);
+          if (skip) return { status: 'skipped', reason: skip, workflowId: workflow.id };
+        }
         if (eventType === 'ticket.fields_updated') {
           const gate = await fieldsUpdatedGate(workflow, workflowContext);
           if (gate.skip) return { status: 'skipped', reason: gate.reason, workflowId: workflow.id, ...(gate.runId ? { runId: gate.runId } : {}) };

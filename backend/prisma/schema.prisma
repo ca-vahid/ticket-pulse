@@ -4204,6 +4204,13 @@ model AutoHelpSettings {
   signatureText     String?  @map("signature_text") @db.Text
   signatureSpacing  String   @default("tight") @map("signature_spacing") @db.VarChar(10)
   signatureWith     String   @default("replace") @map("signature_with") @db.VarChar(10)
+  // Approve by day, auto by night (30 Sep 2026): outside business hours and on
+  // holidays (the workspace calendar), a proven approve-mode playbook sends a
+  // clean answer itself. Morning summary to afterHoursSummaryTo (empty = the
+  // workspace admins); afterHoursSummarySentFor = the local date last summarised.
+  autoAfterHours           Boolean  @default(false) @map("auto_after_hours")
+  afterHoursSummaryTo      String[] @default([]) @map("after_hours_summary_to")
+  afterHoursSummarySentFor String?  @map("after_hours_summary_sent_for") @db.VarChar(10)
   updatedBy         String?  @map("updated_by") @db.VarChar(255)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

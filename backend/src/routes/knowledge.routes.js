@@ -107,9 +107,11 @@ router.get('/settings', asyncHandler(async (req, res) => {
     knowledgeCapability(sessionUser(req), req.workspaceId, 'review'),
     isAutoHelpApprover(sessionUser(req), req.workspaceId),
   ]);
-  const [preview, budget] = await Promise.all([
+  const [preview, budget, afterHours] = await Promise.all([
     disclosurePreviewFor(req.workspaceId, settings),
     autoHelpRunner.budgetState(req.workspaceId, settings),
+    // Approve by day, auto by night (30 Sep 2026).
+    autoHelpPlaybookService.afterHoursStatus(req.workspaceId),
   ]);
   res.json({
     success: true,
@@ -124,6 +126,7 @@ router.get('/settings', asyncHandler(async (req, res) => {
       modeLocked: !settings.approveModeEnabled,
       modeLockedMessage: settings.approveModeEnabled ? null : APPROVE_OFF_MESSAGE,
       budget,
+      afterHours,
       readinessBar: READINESS,
       dismissReasons: DISMISS_REASONS,
       defaults: { disclosureText: DEFAULT_DISCLOSURE_TEXT, followUp: DEFAULT_FOLLOW_UP, mode: DEFAULT_MODE, alwaysStayQuietWhen: DEFAULT_ALWAYS_STAY_QUIET },
@@ -135,14 +138,16 @@ router.get('/settings', asyncHandler(async (req, res) => {
 router.put('/settings', requireKnowledgeManager, asyncHandler(async (req, res) => {
   const settings = await autoHelpPlaybookService.updateSettings(req.workspaceId, req.body || {}, actorOf(req));
   logger.info(`Auto-help settings updated (ws ${req.workspaceId}): enabled=${settings.enabled} approve=${settings.approveModeEnabled} cap=${settings.monthlyCostCapUsd ?? 'none'}`);
-  const [preview, budget] = await Promise.all([
+  const [preview, budget, afterHours] = await Promise.all([
     disclosurePreviewFor(req.workspaceId, settings),
     autoHelpRunner.budgetState(req.workspaceId, settings),
+    // Approve by day, auto by night (30 Sep 2026).
+    autoHelpPlaybookService.afterHoursStatus(req.workspaceId),
   ]);
   res.json({
     success: true,
     data: {
-      ...settings, ...preview, canManage: true, budget,
+      ...settings, ...preview, canManage: true, budget, afterHours,
       modeLocked: !settings.approveModeEnabled,
       modeLockedMessage: settings.approveModeEnabled ? null : APPROVE_OFF_MESSAGE,
     },

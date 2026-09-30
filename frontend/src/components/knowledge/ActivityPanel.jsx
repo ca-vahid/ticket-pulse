@@ -77,6 +77,8 @@ const HISTORY_WORD = {
   drafted: 'Drafted',
   staged: 'Suggested on the ticket',
   sent: 'Sent',
+  sent_overnight: 'Sent by itself overnight (outside business hours)',
+  assignee_told: 'The assignee was told it is waiting',
   parked: 'Waiting on the requester',
   park_failed: 'Sent, but the follow-up could not be scheduled',
   dismissed: 'Dismissed',

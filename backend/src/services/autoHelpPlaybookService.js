@@ -25,6 +25,24 @@ import { READINESS, evaluateReadiness, readinessEvidence, SENT_DECISIONS } from 
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sanitizeSignatureHtml } from './notificationWorkflowSignatureService.js';
 
+/** The schedule re-reads a playbook's readiness at most this often. */
+const READINESS_CACHE_MS = 10 * 60 * 1000;
+const MAX_SUMMARY_RECIPIENTS = 10;
+
+/** Morning-summary recipients: a list or a comma/space separated string of e-mail addresses. */
+export function cleanSummaryRecipients(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw ?? '').split(/[\s,;]+/);
+  const out = [];
+  for (const item of list) {
+    const email = String(item || '').trim().toLowerCase();
+    if (!email) continue;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ValidationError(`"${email}" is not an e-mail address`);
+    if (!out.includes(email)) out.push(email);
+  }
+  if (out.length > MAX_SUMMARY_RECIPIENTS) throw new ValidationError(`At most ${MAX_SUMMARY_RECIPIENTS} people can get the morning summary`);
+  return out;
+}
+
 // Auto-help e-mail signature (30 Sep 2026): the same spacing choices as a
 // person's own signature (userSignatureService), applied when appended.
 export const SIGNATURE_SPACINGS = Object.freeze(['tight', 'normal', 'relaxed']);
@@ -402,6 +420,10 @@ export function playbookSummary(pb, { workspaceRuleCount = 0, articlesByCategory
 class AutoHelpPlaybookService {
   _enabledCache = new Map();
 
+  _afterHoursCache = new Map();
+
+  _readinessCache = new Map();
+
   /**
    * Adds `summary` (playbookSummary) to playbook views: one settings read and
    * one published-article read for the whole list, never one per playbook.
@@ -571,14 +593,93 @@ class AutoHelpPlaybookService {
    * workspace switches and the build / readiness / sensitive rules. Auto that
    * is not allowed falls back to approve (a person sends), never to silence.
    */
-  async effectiveMode(workspaceId, playbook, settings = null) {
+  async effectiveMode(workspaceId, playbook, settings = null, { at = new Date() } = {}) {
     const s = settings || await this.getSettings(workspaceId);
     const mode = playbookView(playbook).mode;
     if (mode === 'shadow' || !s.approveModeEnabled) return 'shadow';
-    if (mode === 'approve') return 'approve';
-    if (playbook.sensitive === true || !this.autoModeAllowed()) return 'approve';
+    // Approve by day, auto by night (30 Sep 2026): the schedule is the only
+    // way to auto while the build switch is off.
+    if (mode === 'approve' || playbook.sensitive === true || !this.autoModeAllowed()) {
+      return (await this.scheduledAuto(workspaceId, playbook, s, { at })) ? 'auto' : 'approve';
+    }
     const readiness = await this.readiness(workspaceId, playbook.id, { sensitive: playbook.sensitive === true });
     return readiness.met ? 'auto' : 'approve';
+  }
+
+  /**
+   * Approve by day, auto by night (30 Sep 2026, Vahid): true when this
+   * playbook may send by itself right now because the workspace is outside
+   * business hours (or on a holiday) and "auto after hours" is on. Only a
+   * proven playbook: approve or auto mode, not sensitive, readiness met.
+   * (Clean answers only — no partial, at the bar — is checked where the
+   * answer is staged.) Never throws: any doubt reads as false (a person sends).
+   */
+  async scheduledAuto(workspaceId, playbook, settings = null, { at = new Date() } = {}) {
+    try {
+      const s = settings || await this.getSettings(workspaceId);
+      if (!s?.enabled || !s.approveModeEnabled || s.autoAfterHours !== true) return false;
+      if (!playbook || playbook.sensitive === true || playbook.enabled === false) return false;
+      const mode = playbookView(playbook).mode;
+      if (mode !== 'approve' && mode !== 'auto') return false;
+      if (!(await this.isAfterHours(workspaceId, { at }))) return false;
+      const readiness = await this.cachedReadiness(workspaceId, playbook.id);
+      return readiness?.met === true;
+    } catch (err) {
+      logger.warn(`Auto-help schedule check failed (ws ${workspaceId}): ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Outside business hours or a holiday in the workspace's own calendar (the
+   * same test the assignment pipeline queues on). Cached a minute per
+   * workspace; fails soft to "business hours" (nothing sends by itself).
+   */
+  async isAfterHours(workspaceId, { at = new Date() } = {}) {
+    const ws = Number(workspaceId);
+    const minute = Math.floor(new Date(at).getTime() / 60e3);
+    const hit = this._afterHoursCache.get(ws);
+    if (hit && hit.minute === minute) return hit.value;
+    const value = await Promise.resolve()
+      .then(async () => {
+        const workspace = await prisma.workspace.findUnique({ where: { id: ws }, select: { defaultTimezone: true } });
+        const { default: availabilityService } = await import('./availabilityService.js');
+        const bh = await availabilityService.isBusinessHours(new Date(at), workspace?.defaultTimezone || 'America/Los_Angeles', ws);
+        return bh?.isBusinessHours === false;
+      })
+      .catch((err) => { logger.warn(`Auto-help after-hours check failed (ws ${ws}): ${err.message}`); return false; });
+    this._afterHoursCache.set(ws, { minute, value });
+    return value;
+  }
+
+  /**
+   * For Knowledge → Settings: is it after hours right now, and which enabled
+   * playbooks would send by themselves after hours (approve/auto mode, not
+   * sensitive, readiness met). Never throws.
+   */
+  async afterHoursStatus(workspaceId) {
+    const ws = Number(workspaceId);
+    const rows = await Promise.resolve()
+      .then(() => prisma.autoHelpPlaybook.findMany({ where: { workspaceId: ws, enabled: true }, orderBy: { name: 'asc' }, take: 100 }))
+      .catch(() => []);
+    const playbooks = [];
+    for (const row of rows || []) {
+      const view = playbookView(row);
+      if (view.mode === 'shadow') continue;
+      const readiness = row.sensitive === true ? { met: false } : await this.cachedReadiness(ws, row.id).catch(() => ({ met: false }));
+      playbooks.push({ id: row.id, name: row.name, mode: view.mode, sensitive: row.sensitive === true, readinessMet: readiness?.met === true });
+    }
+    return { afterHoursNow: await this.isAfterHours(ws), playbooks };
+  }
+
+  /** readiness(), cached 10 minutes per playbook (the schedule asks on every run and ack). */
+  async cachedReadiness(workspaceId, playbookId, { now = Date.now() } = {}) {
+    const key = `${Number(workspaceId)}:${Number(playbookId)}`;
+    const hit = this._readinessCache.get(key);
+    if (hit && now - hit.at < READINESS_CACHE_MS) return hit.value;
+    const value = await this.readiness(workspaceId, playbookId);
+    this._readinessCache.set(key, { at: now, value });
+    return value;
   }
 
   async create(workspaceId, input, actor = null) {
@@ -689,6 +790,10 @@ class AutoHelpPlaybookService {
       signatureText: row?.signatureText || '',
       signatureSpacing: SIGNATURE_SPACINGS.includes(row?.signatureSpacing) ? row.signatureSpacing : 'tight',
       signatureWith: SIGNATURE_WITH.includes(row?.signatureWith) ? row.signatureWith : 'replace',
+      // Approve by day, auto by night (30 Sep 2026).
+      autoAfterHours: row?.autoAfterHours === true,
+      afterHoursSummaryTo: Array.isArray(row?.afterHoursSummaryTo) ? row.afterHoursSummaryTo : [],
+      afterHoursSummarySentFor: row?.afterHoursSummarySentFor || null,
       // Not a setting anyone can flip: the build decides (AUTO_MODE_BUILD_ENABLED).
       autoModeAllowed: this.autoModeAllowed(),
       autoModeLockedMessage: this.autoModeAllowed() ? null : AUTO_MODE_LOCKED_MESSAGE,
@@ -722,6 +827,9 @@ class AutoHelpPlaybookService {
       }
     }
     if (input.disclosureEnabled !== undefined) data.disclosureEnabled = input.disclosureEnabled !== false;
+    // Approve by day, auto by night (30 Sep 2026).
+    if (input.autoAfterHours !== undefined) data.autoAfterHours = input.autoAfterHours === true;
+    if (input.afterHoursSummaryTo !== undefined) data.afterHoursSummaryTo = cleanSummaryRecipients(input.afterHoursSummaryTo);
     // Auto-help e-mail signature (30 Sep 2026).
     if (input.signatureEnabled !== undefined) data.signatureEnabled = input.signatureEnabled === true;
     if (input.signatureHtml !== undefined) {

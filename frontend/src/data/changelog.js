@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.1.18-preview';
+export const APP_VERSION = '4.1.19-preview';
 
 export const changelog = [
+  {
+    version: '4.1.19-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Approve by day, auto by night</strong> &mdash; a new switch in Knowledge &rarr; Settings: outside business hours and on holidays (your Business Hours &amp; Holidays calendar), a proven playbook sends its answer without waiting for an agent. Only playbooks in approve mode that met their readiness checklist and aren&rsquo;t sensitive, and only clean answers at the confidence bar &mdash; partial answers still wait for the morning. Off everywhere until you switch it on; the settings card says which playbooks would qualify.' },
+      { type: 'new', html: '<strong>Answered overnight, summarised in the morning</strong> &mdash; each answer Auto-help sends by itself after hours is marked &ldquo;Answered by Auto-help overnight&rdquo; in the ticket history, and the first business-hours morning brings one summary e-mail (to the people you name, or the workspace admins) listing them and what happened since.' },
+      { type: 'new', html: '<strong>&ldquo;Ticket ready&rdquo; workflow trigger</strong> &mdash; fires once a new ticket is sorted and Auto-help has answered or decided not to, at most 3 minutes after it arrives and never overnight. Put requester mail on it so it doesn&rsquo;t race Auto-help; with &ldquo;merge into Auto-help&rdquo; on, the acknowledgement rides on top of an answer Auto-help sends by itself &mdash; one e-mail. New conditions: &ldquo;Ticket ready because&rdquo; and &ldquo;Auto-help answered the requester&rdquo;.' },
+      { type: 'new', html: '<strong>Skip the &ldquo;assigned&rdquo; e-mail when Auto-help answered</strong> &mdash; a new option on &ldquo;Ticket assigned&rdquo; workflows: for a new ticket whose requester already has an Auto-help answer, that e-mail isn&rsquo;t sent. A later reassignment still sends. Off by default.' },
+    ],
+  },
   {
     version: '4.1.18-preview',
     date: 'September 30, 2026',

@@ -21,6 +21,7 @@ const prismaMock = {
   notificationEmailBlock: { findFirst: jest.fn(), findMany: jest.fn() },
   notificationEmailSignature: { findUnique: jest.fn() },
   groupMember: { findMany: jest.fn().mockResolvedValue([]) },
+  autoHelpRun: { findFirst: jest.fn() },
 };
 const processDeliveryMock = jest.fn();
 const listEnabledForEventMock = jest.fn();
@@ -54,6 +55,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { warn: jes
 
 const {
   executeDefinition, executeForEvent, fieldsUpdatedGate, fieldsUpdatedTriggerOptions, recipientExclusions, resumeWaitingRuns,
+  assignedAfterAutoHelpGate,
 } = await import('../src/services/notificationWorkflowEngine.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 const { buildFieldsUpdatedExtra } = await import('../src/services/ticketChangeRenderer.js');
@@ -345,5 +347,38 @@ describe('stop other workflows for this ticket change', () => {
     ]);
     const statuses = [a.results[0].status, b.results[0].status].sort();
     expect(statuses).toEqual(['coalesced', 'waiting']);
+  });
+});
+
+describe('"Ticket assigned": skip when Auto-help already answered (30 Sep 2026)', () => {
+  const wf = (on) => ({ id: 9, publishedDefinition: { nodes: [{ id: 't', type: 'trigger', data: on === undefined ? {} : { skipIfAutoHelpAnswered: on } }] } });
+  const ctx = { ticket: { id: 55 } };
+
+  test('option on + a new ticket Auto-help answered → skipped with the reason', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ createdAt: new Date(Date.now() - 3600e3) });
+    prismaMock.autoHelpRun.findFirst.mockResolvedValueOnce({ id: 901 });
+    const reason = await assignedAfterAutoHelpGate(wf(true), ctx);
+    expect(reason).toMatch(/Auto-help already answered this new ticket \(run 901\)/);
+    expect(prismaMock.autoHelpRun.findFirst.mock.calls[0][0].where).toMatchObject({ ticketId: 55, decision: { in: ['agent_sent', 'agent_edited_sent', 'auto_sent'] } });
+  });
+
+  test('option off (the default) → runs, no lookups', async () => {
+    prismaMock.autoHelpRun.findFirst.mockClear();
+    expect(await assignedAfterAutoHelpGate(wf(undefined), ctx)).toBeNull();
+    expect(await assignedAfterAutoHelpGate(wf(false), ctx)).toBeNull();
+    expect(prismaMock.autoHelpRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  test('not answered, or an older ticket (a later reassignment) → runs', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ createdAt: new Date(Date.now() - 3600e3) });
+    prismaMock.autoHelpRun.findFirst.mockResolvedValueOnce(null);
+    expect(await assignedAfterAutoHelpGate(wf(true), ctx)).toBeNull();
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ createdAt: new Date(Date.now() - 3 * 86400e3) });
+    expect(await assignedAfterAutoHelpGate(wf(true), ctx)).toBeNull();
+  });
+
+  test('a lookup failure sends as usual', async () => {
+    prismaMock.ticket.findUnique.mockRejectedValueOnce(new Error('db down'));
+    expect(await assignedAfterAutoHelpGate(wf(true), ctx)).toBeNull();
   });
 });

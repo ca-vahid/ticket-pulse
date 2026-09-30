@@ -181,7 +181,7 @@ describe('Knowledge page', () => {
     fireEvent.click(screen.getByRole('switch', { name: /Thank the requester/ }));
     await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ thankOnConfirm: true }));
     // First response: editable even while auto mode is locked, and says it only matters for auto mode.
-    expect(screen.getByTestId('first-response-setting')).toHaveTextContent('Only matters for auto mode (not in this build)');
+    expect(screen.getByTestId('first-response-setting')).toHaveTextContent('Only matters for answers sent by themselves after hours');
     fireEvent.click(screen.getByRole('switch', { name: /Count an automated answer as the first response/ }));
     await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ countsAsFirstResponse: true }));
     const cap = screen.getByLabelText('Monthly cost cap');
@@ -192,6 +192,45 @@ describe('Knowledge page', () => {
     expect(await screen.findByTestId('fs-folder-picker')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Weekly review e-mail/ })).toBeChecked();
     expect(screen.getByRole('button', { name: /Import now/ })).toBeInTheDocument();
+    api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
+  });
+
+  test('approve by day, auto by night (30 Sep 2026): needs approve mode; says which playbooks qualify; summary recipients', async () => {
+    const afterHours = { afterHoursNow: true, playbooks: [
+      { id: 1, name: 'Software, apps & licences', mode: 'approve', sensitive: false, readinessMet: false },
+      { id: 2, name: 'Phones & mobile', mode: 'approve', sensitive: false, readinessMet: true },
+    ] };
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, enabled: true, approveModeEnabled: false, afterHours } });
+    const first = renderAt('/knowledge/settings');
+    await screen.findByTestId('knowledge-settings');
+    expect(screen.getByRole('switch', { name: 'Auto after hours and on holidays' })).toBeDisabled();
+    expect(screen.getByTestId('after-hours-setting')).toHaveTextContent('Needs approve mode on.');
+    first.unmount();
+
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, enabled: true, approveModeEnabled: true, autoAfterHours: false, afterHours } });
+    renderAt('/knowledge/settings');
+    await screen.findByTestId('knowledge-settings');
+    const status = screen.getByTestId('after-hours-status');
+    expect(status).toHaveTextContent('Would send by itself: Phones & mobile.');
+    expect(status).toHaveTextContent('It is after hours now.');
+    expect(screen.queryByLabelText('Morning summary to')).not.toBeInTheDocument();
+    api.updateSettings.mockResolvedValueOnce({ success: true, data: { ...SETTINGS, enabled: true, approveModeEnabled: true, autoAfterHours: true, afterHoursSummaryTo: [], afterHours } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Auto after hours and on holidays' }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ autoAfterHours: true }));
+    expect(await screen.findByTestId('after-hours-status')).toHaveTextContent('so these are sending by themselves.');
+    const to = await screen.findByLabelText('Morning summary to');
+    expect(to).toHaveAttribute('placeholder', 'the workspace admins');
+    fireEvent.change(to, { target: { value: 'lead@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ afterHoursSummaryTo: ['lead@example.com'] }));
+    api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
+  });
+
+  test('after hours: nothing qualifies yet says why', async () => {
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, enabled: true, approveModeEnabled: true, afterHours: { afterHoursNow: false, playbooks: [{ id: 1, name: 'Software', mode: 'approve', sensitive: false, readinessMet: false }] } } });
+    renderAt('/knowledge/settings');
+    const status = await screen.findByTestId('after-hours-status');
+    expect(status).toHaveTextContent('No playbook qualifies yet — Software still need their readiness checklist. It is business hours now.');
     api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
   });
 

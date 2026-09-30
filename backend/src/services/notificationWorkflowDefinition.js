@@ -48,6 +48,12 @@ export const NOTIFICATION_EVENT_TYPES = [
   // subcategory, decision, nonActionable, noiseVeto, afterHours, provisional,
   // fullRunPending, source }.
   'ticket.intake_settled',
+  // "Ticket ready" (30 Sep 2026): sorted AND Auto-help finished (or is about
+  // to send an answer, or is off) — at most 3 minutes after arrival, never
+  // overnight. ticketReadyService; event.extra { readyReason,
+  // autoHelpAnswered, autoHelpRunId, waitedSeconds }. For requester-facing
+  // mail that should not race Auto-help.
+  'ticket.ready',
   // Auto-help integration W3: what Auto-help did (plans/AUTO_HELP_INTEGRATION_PLAN.md D).
   'auto_help.staged',
   'auto_help.answered',
@@ -1434,6 +1440,7 @@ function eventLabel(triggerType) {
     'ticket.park_due_soon': 'Parked ticket wakes within a day',
     'ticket.categorized': 'Ticket categorized',
     'ticket.intake_settled': 'Ticket intake settled',
+    'ticket.ready': 'Ticket ready (sorted + Auto-help done)',
     'auto_help.staged': 'Auto-help suggested an answer',
     'auto_help.answered': 'Auto-help answer sent',
     'auto_help.nudged': 'Auto-help checked in',

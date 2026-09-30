@@ -1877,6 +1877,10 @@ class AssignmentPipelineService {
       const state = await autoHelpPlaybookService.enabledState(workspaceId);
       if (!state.enabled) {
         autoHelpOff = true;
+        // "Ticket ready" (30 Sep 2026): nothing to wait for — sorted is ready.
+        import('./ticketReadyService.js')
+          .then(({ default: ticketReady }) => ticketReady.markReady(ticketId, { reason: 'auto_help_off' }))
+          .catch((err) => logger.warn('Pipeline: ticket ready not marked', { runId, ticketId, error: err.message }));
       } else {
         const { default: autoHelpIntakeService } = await import('./autoHelpIntakeService.js');
         const job = await autoHelpIntakeService.onIntakeSettled(ticketId, workspaceId, extra);
