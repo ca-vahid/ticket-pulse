@@ -8,6 +8,7 @@ import sseRoutes from './sse.routes.js';
 import photosRoutes from './photos.routes.js';
 import webhookRoutes from './webhook.routes.js';
 import freshserviceWebhookRoutes from './freshserviceWebhook.routes.js';
+import { teamsBotRouter, teamsAdminRouter } from './teams.routes.js';
 import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import aiUsageRoutes from './aiUsage.routes.js';
@@ -54,6 +55,8 @@ router.use('/webhook', webhookRoutes);
 // FreshService v2 ticket-ingest webhook: per-workspace secret auth, NOT
 // session/JWT auth. Must stay before requireAuth for FreshService delivery.
 router.use('/freshservice-webhooks', freshserviceWebhookRoutes);
+// Teams bot messaging endpoint: Bot Framework JWT auth, NOT session auth.
+router.use('/teams', teamsBotRouter);
 
 // Temporary IT Summit voting links intentionally bypass app auth but require
 // an expiring workshop token.
@@ -122,6 +125,7 @@ router.use(requireWorkspaceAccess);
 // Dashboard + Analytics are the observer pages: the 'readonly' grant may READ
 // them (requireAdminOrObserver); Agent Maps and Summit stay admin-only.
 router.use('/dashboard', requireAdminOrObserver, dashboardRoutes);
+router.use('/teams-notifications', teamsAdminRouter);
 // Ticket-status registry (Phase 8a): Settings CRUD, admin-gated in the router.
 router.use('/ticket-statuses', statusesRoutes);
 router.use('/sync', syncRoutes);

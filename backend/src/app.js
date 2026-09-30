@@ -507,6 +507,14 @@ async function initialize() {
       logger.warn('Agent-alert flush worker failed to start (non-fatal):', e.message);
     }
 
+    // Teams notifications: daily digest runner (plans/TEAMS_NOTIFICATIONS_PLAN.md).
+    try {
+      const { default: teamsNotificationService } = await import('./services/teamsNotificationService.js');
+      teamsNotificationService.start();
+    } catch (e) {
+      logger.warn('Teams digest runner failed to start (non-fatal):', e.message);
+    }
+
     // App-level backup schedules: due-snapshot runner + retention sweeps.
     try {
       const { default: backupService } = await import('./services/backupService.js');

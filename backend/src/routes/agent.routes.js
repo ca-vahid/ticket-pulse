@@ -4,6 +4,7 @@ import agentCompetencyService from '../services/agentCompetencyService.js';
 import summitWorkshopService from '../services/summitWorkshopService.js';
 import notificationPreferenceService from '../services/notificationPreferenceService.js';
 import agentAlertService from '../services/agentAlertService.js';
+import teamsNotificationService from '../services/teamsNotificationService.js';
 import userSignatureService from '../services/userSignatureService.js';
 
 const router = express.Router();
@@ -101,6 +102,25 @@ router.delete('/alerts/:id', asyncHandler(async (req, res) => {
 router.put('/alerts-quiet-hours', asyncHandler(async (req, res) => {
   const result = await agentAlertService.saveQuietHours((req.session?.user ?? req.user)?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
   res.json({ success: true, data: result });
+}));
+
+// Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md): my connection, my choices, mutes.
+const me = (req) => (req.session?.user ?? req.user)?.email;
+const wsOf = (req) => req.body?.workspaceId || req.query.workspaceId;
+router.get('/teams', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await teamsNotificationService.myStatus(me(req), wsOf(req)) });
+}));
+router.put('/teams/preferences', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await teamsNotificationService.saveMyPrefs(me(req), wsOf(req), req.body || {}) });
+}));
+router.post('/teams/connect', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await teamsNotificationService.connectMe(me(req), wsOf(req)) });
+}));
+router.post('/teams/test', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await teamsNotificationService.sendTest(me(req), wsOf(req)) });
+}));
+router.delete('/teams/mutes/:ticketId', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await teamsNotificationService.unmute(me(req), wsOf(req), req.params.ticketId) });
 }));
 
 // My email signature (Mega 08-15 Phase D). Session-email keyed and mounted

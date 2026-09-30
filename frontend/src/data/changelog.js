@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.1.17-preview';
+export const APP_VERSION = '4.1.18-preview';
 
 export const changelog = [
+  {
+    version: '4.1.18-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Ticket Pulse in Microsoft Teams</strong> &mdash; Ticket Pulse can now message agents in Teams: a ticket assigned to you, the requester replying, someone else adding a note, a reopened ticket, a parked ticket waking up, an SLA about to breach or breached, and an approval waiting for your decision. From the message you can take the ticket, add a note, reply, snooze it for 4 hours or mute it.' },
+      { type: 'new', html: '<strong>Choose what you hear about</strong> &mdash; Mail &amp; alerts has a Microsoft Teams section: each event is Teams, Digest or Off, plus a weekday daily digest of your open tickets. You never get a message about your own change; nothing comes while you are on leave or outside your work hours (urgent tickets and SLA breaches still do); quiet hours apply; several updates on one ticket arrive as one message.' },
+      { type: 'new', html: '<strong>Approve from Teams</strong> &mdash; approvers get the request as a Teams message with Approve and Decline. Each asks you to confirm (with a note; a reason is required to decline) before anything is decided.' },
+      { type: 'new', html: '<strong>Settings &rarr; Teams</strong> &mdash; admins switch Teams on per workspace, see which agents are connected, connect everyone in one click, set the defaults agents start with, and can post new unassigned tickets to a Teams channel.' },
+    ],
+  },
   {
     version: '4.1.17-preview',
     date: 'September 30, 2026',

@@ -4230,3 +4230,87 @@ model AutoHelpPromptVersion {
   @@index([workspaceId, key, status])
   @@map("auto_help_prompt_versions")
 }
+
+// ---------------------------------------------------------------------------
+// Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md, 30 Sep 2026).
+// Plain id columns (no relations) — these tables hang off people by e-mail /
+// technician id and must never block deleting a technician or ticket.
+
+/// One Teams 1:1 chat with the Ticket Pulse bot, per person (agent or approver).
+model TeamsConversation {
+  id             Int       @id @default(autoincrement())
+  email          String    @unique @db.VarChar(255) // lower-cased
+  aadObjectId    String?   @map("aad_object_id") @db.VarChar(64)
+  conversationId String?   @map("conversation_id") @db.VarChar(255)
+  serviceUrl     String?   @map("service_url") @db.VarChar(255)
+  tenantId       String?   @map("tenant_id") @db.VarChar(64)
+  installedAt    DateTime? @map("installed_at")
+  lastError      String?   @map("last_error") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([aadObjectId])
+  @@map("teams_conversations")
+}
+
+/// An agent's own choices per event (null events/options = workspace defaults).
+model NotificationPreference {
+  id           Int      @id @default(autoincrement())
+  workspaceId  Int      @map("workspace_id")
+  technicianId Int      @map("technician_id")
+  events       Json?    // { assigned: 'teams'|'digest'|'off', … }
+  options      Json?    // { respectAway, urgentBypassesQuiet, groupMinPriority, digestTime }
+  lastDigestAt DateTime? @map("last_digest_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, technicianId])
+  @@map("notification_preferences")
+}
+
+/// Workspace switch, defaults and the optional channel feed.
+model NotificationWorkspaceSetting {
+  workspaceId        Int      @id @map("workspace_id")
+  teamsEnabled       Boolean  @default(false) @map("teams_enabled")
+  defaults           Json?
+  channelWebhookUrl  String?  @map("channel_webhook_url") @db.Text
+  channelMinPriority Int      @default(3) @map("channel_min_priority")
+  updatedBy          String?  @map("updated_by") @db.VarChar(255)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("notification_workspace_settings")
+}
+
+/// "Snooze" / "Mute this ticket" from a card or the app.
+model TicketNotificationMute {
+  id           Int      @id @default(autoincrement())
+  technicianId Int      @map("technician_id")
+  ticketId     Int      @map("ticket_id")
+  until        DateTime
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([technicianId, ticketId])
+  @@map("ticket_notification_mutes")
+}
+
+/// Every Teams send (or skip): audit, digest source, in-place card updates.
+model TeamsDelivery {
+  id             Int      @id @default(autoincrement())
+  workspaceId    Int?     @map("workspace_id")
+  email          String   @db.VarChar(255)
+  technicianId   Int?     @map("technician_id")
+  ticketId       Int?     @map("ticket_id")
+  eventKey       String   @map("event_key") @db.VarChar(40)
+  status         String   @db.VarChar(20) // sent | skipped | failed | digest
+  reason         String?  @db.VarChar(120)
+  activityId     String?  @map("activity_id") @db.VarChar(255)
+  conversationId String?  @map("conversation_id") @db.VarChar(255)
+  summary        String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([email, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([technicianId, status, createdAt])
+  @@map("teams_deliveries")
+}

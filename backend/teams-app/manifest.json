@@ -1,0 +1,45 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.19",
+  "version": "1.0.0",
+  "id": "ddd8d5f7-17cd-40b2-8d2c-f40010fc040d",
+  "developer": {
+    "name": "BGC Engineering — Ticket Pulse",
+    "websiteUrl": "https://ticketpulse.bgcsaas.com",
+    "privacyUrl": "https://ticketpulse.bgcsaas.com",
+    "termsOfUseUrl": "https://ticketpulse.bgcsaas.com"
+  },
+  "name": { "short": "Ticket Pulse", "full": "Ticket Pulse notifications" },
+  "description": {
+    "short": "Ticket Pulse tells you about your tickets in Teams.",
+    "full": "Ticket Pulse sends agents a Teams message when a ticket is assigned to them, when the requester replies, when an SLA is close to breaching, when an approval waits for them, and more. Take a ticket, add a note, reply or snooze straight from the card. Choose what you hear about in Ticket Pulse → My Alerts."
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#2563EB",
+  "bots": [
+    {
+      "botId": "ddd8d5f7-17cd-40b2-8d2c-f40010fc040d",
+      "scopes": ["personal"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal"],
+          "commands": [
+            { "title": "help", "description": "What Ticket Pulse can tell you about" },
+            { "title": "my tickets", "description": "Your open tickets" },
+            { "title": "settings", "description": "Choose what you are notified about" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["ticketpulse.bgcsaas.com", "ticket-pulse-app.azurewebsites.net"],
+  "webApplicationInfo": { "id": "ddd8d5f7-17cd-40b2-8d2c-f40010fc040d", "resource": "api://ticket-pulse-app.azurewebsites.net/ddd8d5f7-17cd-40b2-8d2c-f40010fc040d" },
+  "activities": {
+    "activityTypes": [
+      { "type": "ticketAlert", "description": "Urgent ticket alert", "templateText": "{title}" }
+    ]
+  }
+}

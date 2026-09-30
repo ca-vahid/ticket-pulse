@@ -501,6 +501,14 @@ export function webhookPayloadFromContext(eventContext) {
   };
 }
 
+// Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md) — fire-and-forget.
+async function dispatchTeamsNotifications(eventContext) {
+  try {
+    const { default: teamsNotificationService } = await import('./teamsNotificationService.js');
+    teamsNotificationService.onTicketEvent(eventContext);
+  } catch { /* notifications never break the pipeline */ }
+}
+
 async function dispatchLifecycleWebhook(eventContext) {
   try {
     const { dispatchWebhookEvent } = await import('./webhookDispatchService.js');
@@ -867,10 +875,15 @@ export async function emitTicketLifecycleNotifications({
         };
       }
       if (event.type === 'ticket.created' && suppressRequesterAck) event.extra.suppressRequesterAck = true;
+      if (actor && (event.type === 'ticket.assigned' || event.type === 'ticket.reassigned')) {
+        event.extra.actorEmail = actor.email || null;
+        event.extra.actorTechnicianId = actor.technicianId || null;
+      }
     }
     emitted.push(event.type);
     const eventContext = buildEventContext({ event, ticket, previousAgent, source, statusBase, createdVia });
     dispatchLifecycleWebhook(eventContext);
+    dispatchTeamsNotifications(eventContext);
     maybeRefreshSentiment(eventContext);
     try {
       results.push(await notificationWorkflowEngine.executeForEvent(eventContext, {
@@ -922,6 +935,7 @@ export async function emitTicketEvent(eventType, ticketId, {
   const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase });
   if (extra) eventContext.event.extra = extra;
   dispatchLifecycleWebhook(eventContext);
+  dispatchTeamsNotifications(eventContext);
   maybeRefreshSentiment(eventContext);
   // Parked: a requester reply wakes the ticket early (mailbox ingest, mirror
   // pull-back and FreshService sync all arrive here).
