@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.24-preview';
+export const APP_VERSION = '4.1.25-preview';
 
 export const changelog = [
+  {
+    version: '4.1.25-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>GPT-6.1 Sol works for every AI task</strong> &mdash; it refuses the &ldquo;temperature&rdquo; setting some tasks send, so those calls failed on it. It is left out for GPT-6.1 now. Tested on 20 recent IT workflow e-mails: GPT-6.1 wrote drafts as good as GPT-6 Sol&rsquo;s but is about twice as slow, so the e-mails stay on GPT-6 Sol for now.' },
+    ],
+  },
   {
     version: '4.1.24-preview',
     date: 'September 30, 2026',
