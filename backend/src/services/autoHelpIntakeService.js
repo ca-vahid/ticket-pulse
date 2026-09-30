@@ -178,6 +178,18 @@ class AutoHelpIntakeService {
       }
       const drained = await this.drain({ now });
       if (drained?.ran || drained?.failed || drained?.expired || drained?.busy) out.jobs = drained;
+      // Every 3rd tick (~2 min): tell assignees about Auto-help answers
+      // waiting on their tickets (approve mode, 30 Sep 2026).
+      if (this._pass % 3 === 1) {
+        const told = await import('./autoHelpDeliveryService.js')
+          .then(({ default: delivery }) => delivery.notifyWaitingAssignees())
+          .catch((err) => { logger.warn(`Auto-help assignee notices failed: ${err.message}`); return null; });
+        if (told?.sent) out.assigneesTold = told.sent;
+        const aside = await import('./autoHelpDeliveryService.js')
+          .then(({ default: delivery }) => delivery.supersedeRepliedInFreshService())
+          .catch((err) => { logger.warn(`Auto-help FreshService-reply check failed: ${err.message}`); return null; });
+        if (aside?.setAside) out.setAsideForFsReply = aside.setAside;
+      }
       return out;
     } finally {
       this._ticking = false;

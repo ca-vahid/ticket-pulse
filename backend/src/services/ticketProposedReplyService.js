@@ -1,7 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { REPLY_OWNERS, claimInTx, mayClaim, rankOf, releaseReplyOwner } from './autoHelpReplyOwner.js';
+import { REPLY_OWNERS, claimInTx, claimReplyOwner, mayClaim, rankOf, releaseReplyOwner } from './autoHelpReplyOwner.js';
 
 /**
  * LLM-drafted replies staged for human approval — the draft→approve pattern.
@@ -43,6 +43,18 @@ async function readOwner(db, ticketId) {
     .then(() => db.ticket.findFirst({ where: { id: Number(ticketId) }, select: { id: true, replyOwner: true, replyOwnerRef: true, firstPublicAgentReplyAt: true } }))
     .catch(() => null);
   return { kind: row?.replyOwner || null, ref: row?.replyOwnerRef || null, firstPublicAgentReplyAt: row?.firstPublicAgentReplyAt || null };
+}
+
+
+function htmlToPlain(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 class TicketProposedReplyService {
@@ -124,8 +136,28 @@ class TicketProposedReplyService {
       proposal = await prisma.$transaction(async (tx) => {
         await lockTicketProposals(tx, ticketId);
         // needs_check = a send nobody could confirm: still this ticket's open suggestion.
-        const open = await tx.ticketProposedReply.count({ where: { ticketId, status: { in: ['proposed', 'sending', 'needs_check'] } } });
-        if (open > 0) { refusedWhy = 'another proposal is waiting'; return null; }
+        // 30 Sep 2026: a workflow's AI draft no longer blocks an Auto-help
+        // answer. The answer takes its place and keeps its text, which goes
+        // out on top of the answer (one e-mail). Another Auto-help answer, or
+        // anything mid-send, still keeps its place.
+        const openRows = await tx.ticketProposedReply.findMany({
+          where: { ticketId, status: { in: ['proposed', 'sending', 'needs_check'] } },
+          select: { id: true, source: true, status: true, bodyText: true, bodyHtml: true },
+        });
+        const workflowDrafts = source === 'auto_help'
+          ? openRows.filter((r) => r.source !== 'auto_help' && r.status === 'proposed')
+          : [];
+        if (openRows.length > workflowDrafts.length) { refusedWhy = 'another proposal is waiting'; return null; }
+        if (workflowDrafts.length) {
+          const ackText = String(workflowDrafts[0].bodyText || htmlToPlain(workflowDrafts[0].bodyHtml) || '').trim().slice(0, 4000);
+          await tx.ticketProposedReply.updateMany({
+            where: { id: { in: workflowDrafts.map((r) => r.id) }, status: 'proposed' },
+            data: { status: 'dismissed', decidedBy: 'superseded_by_auto_help', decidedAt: new Date() },
+          });
+          if (ackText) {
+            data.guardSummary = { ...(data.guardSummary || {}), workflowAck: { text: ackText, fromProposalId: workflowDrafts[0].id } };
+          }
+        }
         if (source === 'auto_help') {
           const owner = await readOwner(tx, ticketId);
           if (!mayClaim(REPLY_OWNERS.AUTO_HELP, owner.kind)) { refusedWhy = 'an agent owns the first reply'; return null; }
@@ -148,7 +180,7 @@ class TicketProposedReplyService {
     return proposal;
   }
 
-  async listForTicket(ticketId, workspaceId, { status = 'proposed' } = {}) {
+  async listForTicket(ticketId, workspaceId, { status = 'proposed', actor = null } = {}) {
     // An Auto-help suggestion whose send could not be confirmed ('needs_check')
     // stays on the card, with the warning, until a person checks.
     const statusWhere = status === 'proposed'
@@ -161,9 +193,16 @@ class TicketProposedReplyService {
     if (!(rows || []).some((r) => r.source === 'auto_help')) return rows;
     // Auto-help suggestions carry what the card shows (playbook, sources, dates).
     const { default: delivery } = await import('./autoHelpDeliveryService.js');
-    return Promise.all(rows.map(async (r) => (r.source === 'auto_help'
-      ? { ...r, autoHelp: await delivery.proposalContext(workspaceId, r).catch(() => null) }
-      : r)));
+    const { canApproveAutoHelp } = await import('./autoHelpDeliveryService.js');
+    const ticket = actor ? await Promise.resolve()
+      .then(() => prisma.ticket.findFirst({ where: { id: Number(ticketId), workspaceId: Number(workspaceId) }, select: { assignedTechId: true } }))
+      .catch(() => null) : null;
+    return Promise.all(rows.map(async (r) => {
+      if (r.source !== 'auto_help') return r;
+      const ctx = await delivery.proposalContext(workspaceId, r).catch(() => null);
+      // canSend: who is looking may send it (the assignee, a reviewer or an admin).
+      return { ...r, autoHelp: ctx ? { ...ctx, canSend: actor ? canApproveAutoHelp(actor, ticket) : true } : ctx };
+    }));
   }
 
   /** Approve & send — optionally with an agent-edited body. */
@@ -208,6 +247,7 @@ class TicketProposedReplyService {
       const updated = await delivery.dismissProposal({ ticketId, workspaceId, proposal, reason, actor });
       // W2: a dismissed Auto-help answer gives the first reply back.
       await releaseReplyOwner(ticketId, REPLY_OWNERS.AUTO_HELP, proposal.autoHelpRunId ? `run:${proposal.autoHelpRunId}` : `proposal:${proposal.id}`);
+      await this._restoreSetAsideWorkflowDraft(ticketId, proposal);
       this._broadcast(workspaceId, ticketId, 'dismissed');
       return updated;
     }
@@ -218,6 +258,26 @@ class TicketProposedReplyService {
     await releaseReplyOwner(ticketId, REPLY_OWNERS.WORKFLOW_DRAFT, `proposal:${proposal.id}`);
     this._broadcast(workspaceId, ticketId, 'dismissed');
     return updated;
+  }
+
+  /**
+   * The workflow draft an Auto-help answer set aside (30 Sep 2026) comes back
+   * when that answer is dismissed, so the requester still gets the
+   * acknowledgement a person can send. Only a draft set aside this way, and
+   * only while it is still the one set aside.
+   */
+  async _restoreSetAsideWorkflowDraft(ticketId, proposal) {
+    const fromId = Number(proposal?.guardSummary?.workflowAck?.fromProposalId) || null;
+    if (!fromId) return false;
+    const res = await Promise.resolve()
+      .then(() => prisma.ticketProposedReply.updateMany({
+        where: { id: fromId, ticketId: Number(ticketId), status: 'dismissed', decidedBy: 'superseded_by_auto_help' },
+        data: { status: 'proposed', decidedBy: null, decidedAt: null },
+      }))
+      .catch((err) => { logger.warn(`Workflow draft ${fromId} not restored on ticket ${ticketId}: ${err.message}`); return null; });
+    if (!res?.count) return false;
+    await claimReplyOwner(ticketId, REPLY_OWNERS.WORKFLOW_DRAFT, `proposal:${fromId}`);
+    return true;
   }
 
   async _requireProposal(ticketId, workspaceId, proposalId) {

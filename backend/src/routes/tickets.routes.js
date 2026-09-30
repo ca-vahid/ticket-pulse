@@ -1781,7 +1781,7 @@ router.patch('/:id/custom-fields', asyncHandler(async (req, res) => {
 // so threading/mirroring/events behave like a hand-written reply.
 router.get('/:id/proposed-replies', asyncHandler(async (req, res) => {
   const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
-  const proposals = await ticketProposedReplyService.listForTicket(parseTicketId(req), req.workspaceId);
+  const proposals = await ticketProposedReplyService.listForTicket(parseTicketId(req), req.workspaceId, { actor: req.ticketActor });
   res.json({ success: true, data: proposals });
 }));
 

@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.1.16-preview';
+export const APP_VERSION = '4.1.17-preview';
 
 export const changelog = [
+  {
+    version: '4.1.17-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>More people can approve Auto-help answers</strong> &mdash; in approve mode, a suggested answer can now be sent or dismissed by the ticket&rsquo;s assignee, or by any reviewer or admin in the workspace. Everyone else sees who it is waiting for.' },
+      { type: 'new', html: '<strong>Knowledge &rarr; Approvals</strong> &mdash; reviewers and admins get one list of every Auto-help answer waiting to be sent, with its ticket, requester and assignee. Read, edit and send, or dismiss, without opening each ticket. Whoever acts first wins.' },
+      { type: 'new', html: '<strong>The assignee is told</strong> &mdash; when an Auto-help answer is waiting on a ticket assigned to you, you get one e-mail with a link to it (and the ticket history says so). Tickets assigned later are covered too.' },
+      { type: 'improved', html: '<strong>A workflow&rsquo;s AI draft no longer blocks Auto-help</strong> &mdash; when a workflow has already drafted an acknowledgement, the Auto-help answer takes its place and the acknowledgement goes out on top of the answer, in one e-mail. Dismiss the answer and the workflow draft comes back.' },
+      { type: 'improved', html: '<strong>Answered in FreshService? The suggestion steps aside</strong> &mdash; if an agent replies to the requester in FreshService while an Auto-help answer is waiting, the answer is set aside so nobody sends a second reply.' },
+    ],
+  },
   {
     version: '4.1.16-preview',
     date: 'September 30, 2026',

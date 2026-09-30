@@ -81,17 +81,23 @@ describe('proposals yield to a higher owner', () => {
     expect(ticket().replyOwner).toBe('auto_help');
   });
 
-  test('a workflow draft takes an empty first reply; Auto-help then waits (open draft = clearable skip)', async () => {
-    const wf = await proposals.create({ workspaceId: 1, ticketId: 55, workflowRunId: 3, bodyHtml: '<p>workflow</p>' });
+  test('a workflow draft takes an empty first reply; an Auto-help answer then takes it over and carries the draft text (30 Sep 2026)', async () => {
+    const wf = await proposals.create({ workspaceId: 1, ticketId: 55, workflowRunId: 3, bodyHtml: '<p>workflow ack</p>' });
     expect(ticket()).toMatchObject({ replyOwner: 'workflow_draft', replyOwnerRef: `proposal:${wf.id}` });
     const staged = await proposals.create({ workspaceId: 1, ticketId: 55, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>a</p>', supersede: false });
-    expect(staged).toBeNull();
-    // Dismissing the workflow draft gives the first reply back.
-    await proposals.dismiss(55, 1, wf.id, { email: 'a@x.io' });
-    expect(ticket().replyOwner).toBeNull();
-    const again = await proposals.create({ workspaceId: 1, ticketId: 55, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>a</p>', supersede: false });
-    expect(again.id).toBeTruthy();
+    expect(staged.id).toBeTruthy();
     expect(ticket().replyOwner).toBe('auto_help');
+    const old = rows('ticketProposedReply').find((r) => r.id === wf.id);
+    expect(old).toMatchObject({ status: 'dismissed', decidedBy: 'superseded_by_auto_help' });
+    expect(staged.guardSummary.workflowAck).toMatchObject({ text: 'workflow ack', fromProposalId: wf.id });
+  });
+
+  test('dismissing that Auto-help answer brings the workflow draft back as the first reply', async () => {
+    const wf = await proposals.create({ workspaceId: 1, ticketId: 55, workflowRunId: 3, bodyHtml: '<p>workflow ack</p>' });
+    const staged = await proposals.create({ workspaceId: 1, ticketId: 55, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>a</p>', supersede: false });
+    await proposals.dismiss(55, 1, staged.id, { role: 'admin', email: 'a@x.io' }, { reason: 'wrong_answer' });
+    expect(rows('ticketProposedReply').find((r) => r.id === wf.id)).toMatchObject({ status: 'proposed', decidedBy: null });
+    expect(ticket()).toMatchObject({ replyOwner: 'workflow_draft', replyOwnerRef: `proposal:${wf.id}` });
   });
 
   test('an agent owns the first reply: Auto-help never stages over it', async () => {

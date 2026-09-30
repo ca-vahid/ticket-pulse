@@ -1367,6 +1367,7 @@ export const knowledgeAPI = {
   listRuns: (params = {}) => api.get('/knowledge/runs', { params }),
   getRun: (id) => api.get(`/knowledge/runs/${id}`),
   sendRunToMe: (id) => api.post(`/knowledge/runs/${id}/send-to-me`),
+  approvals: () => api.get('/knowledge/approvals'),
   // Knowledge → Settings → Prompts (30 Sep 2026).
   listPrompts: () => api.get('/knowledge/prompts'),
   getPrompt: (id) => api.get(`/knowledge/prompts/${id}`),

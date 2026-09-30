@@ -874,7 +874,10 @@ class AutoHelpRunner {
       this._requesterIsAgent(ticket),
       Promise.resolve().then(() => statusService.resolveBaseStatus(ticket.workspaceId, ticket.status)).catch(() => null),
       count(() => prisma.ticketApproval.count({ where: { ticketId: id, status: { in: ['pending', 'info_requested'] } } })),
-      count(() => prisma.ticketProposedReply.count({ where: { ticketId: id, status: { in: ['proposed', 'sending', 'needs_check'] } } })),
+      // A workflow's AI draft never blocks Auto-help (30 Sep 2026): the answer
+      // takes its place at staging and carries its text. Only another open
+      // Auto-help answer does.
+      count(() => prisma.ticketProposedReply.count({ where: { ticketId: id, source: 'auto_help', status: { in: ['proposed', 'sending', 'needs_check'] } } })),
       ticket.firstPublicAgentReplyAt ? 1 : count(() => prisma.ticketThreadEntry.count({
         where: {
           ticketId: id,

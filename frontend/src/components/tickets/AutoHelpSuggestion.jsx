@@ -162,6 +162,9 @@ export default function AutoHelpSuggestion({ proposal, onSend, onDismiss }) {
       {/* The mail as the requester reads it: a white e-mail well in both themes. */}
       <div className="mt-2.5 overflow-hidden rounded-lg border border-border" data-testid="email-well-wrap">
         <div className="tp-light max-h-80 overflow-y-auto bg-card px-3.5 py-3 text-sm text-card-foreground settings-scrollbar" data-testid="email-well">
+          {ah.workflowAck?.text && (
+            <p className="mb-2.5 whitespace-pre-wrap text-foreground/85" data-testid="auto-help-workflow-ack" title="The workflow's acknowledgement goes out on top of this answer — one e-mail">{ah.workflowAck.text}</p>
+          )}
           {ah.disclosure && <p className="mb-2.5 text-xs text-muted-foreground" data-testid="auto-help-disclosure">{ah.disclosure}</p>}
           {editing ? (
             <div
@@ -205,71 +208,77 @@ export default function AutoHelpSuggestion({ proposal, onSend, onDismiss }) {
         </p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={send}
-          disabled={Boolean(busy)}
-          className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-        >
-          {busy === 'send' ? <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Send className="h-3.5 w-3.5" aria-hidden="true" />}
-          {needsCheck ? 'I checked — send again' : editing ? 'Send edited answer' : 'Send'}
-        </button>
-        {editing ? (
+      {ah.canSend === false ? (
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="auto-help-waiting-approver">
+          Waiting for the assignee, a reviewer or an admin to send it.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={leaveEditing}
-            disabled={Boolean(busy) || confirmDiscard}
-            className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
-          >
-            Cancel edit
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => { setAsking(false); setDirty(false); setEditing(true); }}
+            onClick={send}
             disabled={Boolean(busy)}
-            className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground/85 hover:bg-muted disabled:opacity-60"
+            className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
-            <PencilLine className="h-3.5 w-3.5" aria-hidden="true" /> Edit &amp; send
+            {busy === 'send' ? <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Send className="h-3.5 w-3.5" aria-hidden="true" />}
+            {needsCheck ? 'I checked — send again' : editing ? 'Send edited answer' : 'Send'}
           </button>
-        )}
-
-        {asking ? (
-          <div role="group" aria-label="Why dismiss it?" className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto" data-testid="dismiss-reasons">
-            <span className="text-xs text-muted-foreground">Why?</span>
-            {reasons.map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => dismiss(r)}
-                disabled={Boolean(busy)}
-                className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-foreground/85 hover:bg-muted disabled:opacity-60"
-              >
-                {REASON_LABEL[r] || r}
-              </button>
-            ))}
+          {editing ? (
             <button
               type="button"
-              onClick={() => setAsking(false)}
-              disabled={Boolean(busy)}
-              aria-label="Keep the suggestion"
-              className="tp-focus-ring inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+              onClick={leaveEditing}
+              disabled={Boolean(busy) || confirmDiscard}
+              className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
             >
-              {busy === 'dismiss' ? <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <X className="h-3.5 w-3.5" aria-hidden="true" />}
+              Cancel edit
             </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => { stopEditing(); setAsking(true); }}
-            disabled={Boolean(busy)}
-            className="tp-focus-ring ml-auto inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" /> Dismiss
-          </button>
-        )}
-      </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setAsking(false); setDirty(false); setEditing(true); }}
+              disabled={Boolean(busy)}
+              className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground/85 hover:bg-muted disabled:opacity-60"
+            >
+              <PencilLine className="h-3.5 w-3.5" aria-hidden="true" /> Edit &amp; send
+            </button>
+          )}
+
+          {asking ? (
+            <div role="group" aria-label="Why dismiss it?" className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto" data-testid="dismiss-reasons">
+              <span className="text-xs text-muted-foreground">Why?</span>
+              {reasons.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => dismiss(r)}
+                  disabled={Boolean(busy)}
+                  className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-foreground/85 hover:bg-muted disabled:opacity-60"
+                >
+                  {REASON_LABEL[r] || r}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setAsking(false)}
+                disabled={Boolean(busy)}
+                aria-label="Keep the suggestion"
+                className="tp-focus-ring inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                {busy === 'dismiss' ? <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <X className="h-3.5 w-3.5" aria-hidden="true" />}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { stopEditing(); setAsking(true); }}
+              disabled={Boolean(busy)}
+              className="tp-focus-ring ml-auto inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" /> Dismiss
+            </button>
+          )}
+        </div>
+      )}
       {confirmDiscard && (
         <div role="alertdialog" aria-label="Discard your edits?" className="mt-2.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs animate-fadeIn" data-testid="auto-help-discard-confirm">
           <span className="text-foreground">Discard your edits to this answer?</span>

@@ -24,7 +24,7 @@
  */
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import businessCalendarService from './businessCalendarService.js';
 import statusService from './statusService.js';
@@ -67,6 +67,23 @@ export function confidenceWord(value) {
   if (n >= 0.85) return 'high';
   if (n >= 0.7) return 'medium';
   return 'low';
+}
+
+/**
+ * Who may send or dismiss an Auto-help suggestion in approve mode (30 Sep
+ * 2026, Vahid): the ticket's assignee, plus reviewers and admins (global
+ * admin, workspace admin or reviewer — the roles that already "approve AI
+ * suggestions"). Standard (viewer) and read-only members only when they are
+ * the assignee. Auto mode (automation) is not a person and always may.
+ */
+export const APPROVER_WORKSPACE_ROLES = Object.freeze(['admin', 'reviewer']);
+export function canApproveAutoHelp(actor, ticket) {
+  if (!actor) return false;
+  if (actor.role === 'automation') return true;
+  if (actor.role === 'admin') return true;
+  if (APPROVER_WORKSPACE_ROLES.includes(actor.workspaceRole)) return true;
+  const techId = Number(actor.technicianId) || null;
+  return Boolean(techId && ticket?.assignedTechId && Number(ticket.assignedTechId) === techId);
 }
 
 function refusal(message, code) {
@@ -224,6 +241,149 @@ class AutoHelpDeliveryService {
     const nudgeAt = await this.addBusinessDays(workspaceId, from, fu.nudgeAfterBusinessDays, cal);
     const closeAt = await this.addBusinessDays(workspaceId, nudgeAt, fu.closeAfterBusinessDays, cal);
     return { nudgeAt, closeAt, onSilence: fu.onSilence, timezone: cal.timezone };
+  }
+
+  // ---------- approvals (30 Sep 2026) ----------
+
+  /**
+   * Every Auto-help answer waiting for a person in this workspace, newest
+   * first, shaped like the ticket's own proposed replies (so the same card
+   * renders it) plus the ticket it belongs to. For the Knowledge → Approvals
+   * queue (reviewers and admins).
+   */
+  async listWaiting(workspaceId, { limit = 100 } = {}) {
+    const ws = Number(workspaceId);
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticketProposedReply.findMany({
+        where: { workspaceId: ws, source: 'auto_help', status: { in: ['proposed', 'needs_check'] } },
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(Math.max(Number(limit) || 100, 1), 200),
+      }))
+      .catch(() => []);
+    if (!rows.length) return [];
+    const tickets = await Promise.resolve()
+      .then(() => prisma.ticket.findMany({
+        where: { workspaceId: ws, id: { in: [...new Set(rows.map((r) => r.ticketId))] } },
+        select: {
+          id: true, subject: true, status: true, priority: true, origin: true, nativeNumber: true, freshserviceTicketId: true, createdAt: true,
+          assignedTech: { select: { id: true, name: true } },
+          requester: { select: { name: true, email: true } },
+        },
+      }))
+      .catch(() => []);
+    const byId = new Map((tickets || []).map((t) => [t.id, t]));
+    const out = [];
+    for (const r of rows) {
+      const t = byId.get(r.ticketId);
+      if (!t) continue;
+      const ctx = await this.proposalContext(ws, r).catch(() => null);
+      out.push({
+        ...r,
+        autoHelp: ctx ? { ...ctx, canSend: true } : null,
+        ticket: {
+          id: t.id, ref: ticketDisplayRef(t), subject: t.subject, status: t.status, priority: t.priority, createdAt: t.createdAt,
+          assignee: t.assignedTech ? { id: t.assignedTech.id, name: t.assignedTech.name } : null,
+          requester: t.requester ? { name: t.requester.name, email: t.requester.email } : null,
+        },
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Tell the assignee once that an Auto-help answer is waiting on their
+   * ticket (e-mail + ticket activity). Runs from the Auto-help job tick, so
+   * it covers answers staged on assigned tickets AND tickets assigned later.
+   * Remembered per run (outcomeDetail.assigneeNotified), never repeated.
+   */
+  async notifyWaitingAssignees({ limit = 25 } = {}) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticketProposedReply.findMany({
+        where: { source: 'auto_help', status: 'proposed', autoHelpRunId: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { id: true, ticketId: true, workspaceId: true, autoHelpRunId: true, subject: true },
+      }))
+      .catch(() => []);
+    let sent = 0;
+    for (const p of rows || []) {
+      if (sent >= limit) break;
+      const ticket = await Promise.resolve()
+        .then(() => prisma.ticket.findFirst({
+          where: { id: p.ticketId, workspaceId: p.workspaceId },
+          select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } } },
+        }))
+        .catch(() => null);
+      const tech = ticket?.assignedTech;
+      if (!tech?.email) continue;
+      const run = await this._run(p.workspaceId, p.autoHelpRunId);
+      if (!run) continue;
+      const already = Array.isArray(run.outcomeDetail?.assigneeNotified) ? run.outcomeDetail.assigneeNotified : [];
+      if (already.includes(tech.id)) continue;
+      const ref = ticketDisplayRef(ticket);
+      const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js');
+      const link = `${resolvePublicBaseUrl({ warn: (m) => logger.warn(m) })}/tickets/${ticket.id}`;
+      const firstName = String(tech.name || '').split(' ')[0] || 'there';
+      const html = [
+        `<p style="margin:0 0 12px">Hi ${escapeHtmlText(firstName)},</p>`,
+        `<p style="margin:0 0 12px">Auto-help drafted an answer for <strong>${escapeHtmlText(ref)} &middot; ${escapeHtmlText(ticket.subject || '')}</strong>, which is assigned to you. Nothing has gone to the requester yet.</p>`,
+        '<p style="margin:0 0 12px">Open the ticket to read it, edit it if needed, and send it — or dismiss it if it isn\'t right.</p>',
+        `<p style="margin:0 0 12px"><a href="${link}" style="color:#2563eb">Open ${escapeHtmlText(ref)} in Ticket Pulse</a></p>`,
+      ].join('');
+      const text = `Hi ${firstName},\n\nAuto-help drafted an answer for ${ref} - ${ticket.subject || ''}, which is assigned to you. Nothing has gone to the requester yet.\nOpen the ticket to read it, edit it if needed, and send it - or dismiss it if it isn't right.\n\n${link}`;
+      const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+      const result = await sendTransactionalEmail({
+        workspaceId: p.workspaceId, to: [tech.email], subject: `Auto-help answer ready: ${ref} ${ticket.subject || ''}`.trim(), html, text, label: 'auto-help-assignee',
+      }).catch((err) => ({ sent: false, error: err.message }));
+      await prisma.autoHelpRun.update({
+        where: { id: run.id },
+        data: { outcomeDetail: safeJson(withHistory({ ...(run.outcomeDetail || {}), assigneeNotified: [...already, tech.id] }, 'assignee_told', { techId: tech.id, sent: result?.sent === true })) },
+      }).catch(() => {});
+      await this._activity(ticket.id, 'auto_help_assignee_told', AUTO_HELP_ACTOR, {
+        runId: run.id, techId: tech.id, note: `Auto-help told ${tech.name} an answer is waiting`,
+      }).catch(() => {});
+      if (result?.sent) sent += 1;
+    }
+    return { sent };
+  }
+
+  /**
+   * A reply typed straight into FreshService (not through Ticket Pulse)
+   * sets a waiting Auto-help answer aside, as a reply in Ticket Pulse does
+   * (claimForAgentReply). Transition only — Ticket Pulse's own reply path
+   * already does this. Checks FreshService-born tickets with an open answer
+   * for a public reply newer than it on the synced thread.
+   */
+  async supersedeRepliedInFreshService({ limit = 100 } = {}) {
+    const open = await Promise.resolve()
+      .then(() => prisma.ticketProposedReply.findMany({
+        where: { source: 'auto_help', status: 'proposed' },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: { id: true, ticketId: true, createdAt: true },
+      }))
+      .catch(() => []);
+    let setAside = 0;
+    for (const p of open || []) {
+      const reply = await Promise.resolve()
+        .then(() => prisma.ticketThreadEntry.findFirst({
+          where: {
+            ticketId: p.ticketId,
+            eventType: 'public_reply',
+            source: { not: 'ticketpulse_user' },
+            occurredAt: { gt: p.createdAt },
+            ticket: { origin: { not: 'ticketpulse' } },
+          },
+          orderBy: { occurredAt: 'asc' },
+          select: { id: true, actorName: true },
+        }))
+        .catch(() => null);
+      if (!reply) continue;
+      const { claimForAgentReply } = await import('./autoHelpReplyOwner.js');
+      const res = await claimForAgentReply(p.ticketId, { entryId: reply.id, actor: { name: reply.actorName || 'An agent (in FreshService)' } });
+      if (res?.superseded?.length) setAside += res.superseded.length;
+    }
+    return { setAside };
   }
 
   // ---------- "Send to me" (30 Sep 2026) ----------
@@ -427,6 +587,8 @@ class AutoHelpDeliveryService {
       confidence: run.confidence,
       minConfidence: playbook?.minConfidence ?? null,
       gateDecision: run.gateDecision,
+      // A workflow acknowledgement that will go out on top of this answer (30 Sep 2026).
+      workflowAck: proposal?.guardSummary?.workflowAck || null,
       // A partial answer (steps left out) says so on the ticket, with what it left out.
       partial: proposal?.guardSummary?.partial === true,
       leftOut: (Array.isArray(run.checks?.draftSteps) ? run.checks.draftSteps : []).filter((st) => st && st.supported === false).map((st) => st.text),
@@ -474,14 +636,17 @@ class AutoHelpDeliveryService {
    * noise / merged ticket, Auto-help switched off, approve mode off (for the
    * approve path), and a playbook that was deleted or switched off.
    */
-  async _assertSendable({ ticketId, workspaceId, playbook, settings, requireApprove = true }) {
+  async _assertSendable({ ticketId, workspaceId, playbook, settings, requireApprove = true, actor = null }) {
     const ticket = await Promise.resolve()
       .then(() => prisma.ticket.findFirst({
         where: { id: Number(ticketId), workspaceId: Number(workspaceId) },
-        select: { id: true, status: true, isNoise: true, origin: true, requester: { select: { email: true, unattended: true } } },
+        select: { id: true, status: true, isNoise: true, origin: true, assignedTechId: true, requester: { select: { email: true, unattended: true } } },
       }))
       .catch(() => null);
     if (!ticket) throw new NotFoundError('Ticket not found');
+    if (actor && !canApproveAutoHelp(actor, ticket)) {
+      throw new AuthorizationError('Only the ticket\'s assignee, a reviewer or an admin can send this Auto-help answer', 'auto_help_not_approver');
+    }
     // An answer nobody receives must never start a loop that closes the ticket on "silence".
     if (ticket.requester?.unattended === true) throw refusal('The requester is an unattended mailbox — replies to it are not e-mailed, so Auto-help does not answer it', 'auto_help_requester_unattended');
     if (!String(ticket.requester?.email || '').trim()) throw refusal('The requester has no e-mail address — Auto-help cannot answer this ticket', 'auto_help_requester_no_email');
@@ -517,7 +682,7 @@ class AutoHelpDeliveryService {
     }
     const playbook = await this._playbook(workspaceId, run.playbookId);
     const settings = await autoHelpPlaybookService.getSettings(workspaceId);
-    await this._assertSendable({ ticketId, workspaceId, playbook, settings, requireApprove: true });
+    await this._assertSendable({ ticketId, workspaceId, playbook, settings, requireApprove: true, actor });
     const original = run.transcript?.body || {};
     const originalText = original.text || htmlToText(original.html || '') || '';
 
@@ -549,6 +714,7 @@ class AutoHelpDeliveryService {
       sent = await this._send({
         ticketId, workspaceId, run, playbook, settings, answerHtml, answerText,
         subject: run.draftSubject || proposal.subject, actor, checkFreshServiceSince: firstAttemptAt,
+        workflowAckText: proposal?.guardSummary?.workflowAck?.text || null,
       });
     } catch (err) {
       // addReply itself failed: nothing went out, so the suggestion comes
@@ -595,7 +761,7 @@ class AutoHelpDeliveryService {
    * per run, so a retried request inside the reply path's window hands back
    * the entry that already went out instead of mailing again.
    */
-  async _send({ ticketId, workspaceId, run, playbook, settings, answerHtml, answerText, subject, actor, checkFreshServiceSince = null }) {
+  async _send({ ticketId, workspaceId, run, playbook, settings, answerHtml, answerText, subject, actor, checkFreshServiceSince = null, workflowAckText = null }) {
     const workspaceName = await this._workspaceName(workspaceId);
     const followUp = normalizeFollowUp(playbook?.followUp);
     const mail = buildPreview({ subject, html: answerHtml, text: answerText, settings, workspaceName, followUp });
@@ -630,7 +796,10 @@ class AutoHelpDeliveryService {
     // on top of it — one e-mail. Taken now, confirmed only once the answer
     // went out, given back to its workflow if the send fails.
     const heldAck = await Promise.resolve().then(() => autoHelpAckMergeService.takeForAnswer(ticketId, { runId: run.id })).catch(() => null);
-    const outgoing = heldAck ? mergeAckIntoMail(mail, heldAck.ackText) : mail;
+    // A workflow's AI acknowledgement set aside when this answer was staged
+    // (30 Sep 2026) rides on top of it too — one e-mail, never two drafts.
+    const withWorkflowAck = workflowAckText && !heldAck ? mergeAckIntoMail(mail, workflowAckText) : mail;
+    const outgoing = heldAck ? mergeAckIntoMail(mail, heldAck.ackText) : withWorkflowAck;
     const automated = actor?.role === 'automation';
     const replyOptions = {
       // W2: the first reply is Auto-help's grounded answer (even when an agent clicks Send).
@@ -803,6 +972,14 @@ class AutoHelpDeliveryService {
   async dismissProposal({ ticketId, workspaceId, proposal, reason, actor }) {
     const r = String(reason || '').trim();
     if (!DISMISS_REASON_VALUES.includes(r)) throw new ValidationError(`Say why: ${DISMISS_REASON_VALUES.join(', ')}`);
+    if (actor) {
+      const t = await Promise.resolve()
+        .then(() => prisma.ticket.findFirst({ where: { id: Number(ticketId), workspaceId: Number(workspaceId) }, select: { assignedTechId: true } }))
+        .catch(() => null);
+      if (!canApproveAutoHelp(actor, t)) {
+        throw new AuthorizationError('Only the ticket\'s assignee, a reviewer or an admin can dismiss this Auto-help answer', 'auto_help_not_approver');
+      }
+    }
     const res = await prisma.ticketProposedReply.updateMany({
       where: { id: proposal.id, status: { in: ['proposed', 'needs_check'] } },
       data: { status: 'dismissed', decidedBy: actor?.email || actor?.name || 'agent', decidedAt: new Date() },
