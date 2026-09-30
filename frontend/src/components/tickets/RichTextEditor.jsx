@@ -482,7 +482,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             document.execCommand('insertHTML', false, insert);
             emit();
           }}
-          className="tp-rich-editor tp-focus-ring w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0"
+          className="tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0"
           style={{ minHeight, maxHeight: 460 }}
         />
       </div>
