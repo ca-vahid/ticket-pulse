@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   MessageSquareQuote,
+  MessagesSquare,
   PenLine,
   Plug,
   RefreshCw,
@@ -62,6 +63,7 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // the global provider secrets inside are still gated to global admins below.
   { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'admin', group: 'Notifications & Public' },
   { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin', group: 'Notifications & Public' },
+  { id: 'teams', label: 'Teams', Icon: MessagesSquare, minRole: 'admin', group: 'Notifications & Public' },
   // Team & Scheduling
   { id: 'business-hours', label: 'Business Hours', Icon: Clock, minRole: 'admin', group: 'Team & Scheduling' },
   { id: 'groups', label: 'Groups', Icon: Users2, minRole: 'admin', group: 'Team & Scheduling' },

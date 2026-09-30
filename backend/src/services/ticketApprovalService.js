@@ -1814,6 +1814,11 @@ class TicketApprovalService {
       laptops: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [],
     });
 
+    // Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): the same request as a card the approver can decide from.
+    import('./teamsNotificationService.js')
+      .then(({ default: teams }) => teams.notifyApproval({ approval, ticket, decisionUrl, categoryName, requestedByName, note: approval.requestNote || null }))
+      .catch(() => {});
+
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     // `ticket` → Reply-To +tp/+fs and threading headers, so an approver's
     // reply threads onto the ticket instead of dying on a bare mailbox (23 Sep 2026).

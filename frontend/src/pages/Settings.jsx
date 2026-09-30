@@ -35,6 +35,7 @@ import EmailHealthCard from '../components/settings/EmailHealthCard';
 import SyncHealthCard from '../components/settings/SyncHealthCard';
 import RealtimeHealthCard from '../components/settings/RealtimeHealthCard';
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
+import TeamsSettingsPanel from '../components/settings/TeamsSettingsPanel';
 import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
 import UrgentEscalationPanel from '../components/settings/UrgentEscalationPanel';
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui';
@@ -1517,6 +1518,10 @@ export default function Settings() {
 
                 {activeSectionId === 'public-ticket-status' && (
                   <PublicTicketStatusPanel />
+                )}
+
+                {activeSectionId === 'teams' && (
+                  <TeamsSettingsPanel />
                 )}
 
                 {activeSectionId === 'feedback-page' && (

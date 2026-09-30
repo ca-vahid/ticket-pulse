@@ -1869,6 +1869,15 @@ export const notificationWorkflowAPI = {
 /**
  * Agent self-service API
  */
+// Settings → Teams (workspace admins).
+export const teamsAdminAPI = {
+  status: () => api.get('/teams-notifications/status'),
+  saveSettings: (data) => api.put('/teams-notifications/settings', data),
+  install: (data = {}) => api.post('/teams-notifications/install', data),
+  // Static copy of backend/teams-app/ticket-pulse-teams.zip (manifest + icons only).
+  packageUrl: () => '/downloads/ticket-pulse-teams.zip',
+};
+
 export const agentAPI = {
   getMyCompetencies: (params = {}) => api.get('/agent/competencies', { params }),
   submitCompetencyChange: (data) => api.post('/agent/competencies/changes', data),
@@ -1888,6 +1897,12 @@ export const agentAPI = {
   updateAlert: (id, data) => api.patch(`/agent/alerts/${id}`, data),
   deleteAlert: (id, params = {}) => api.delete(`/agent/alerts/${id}`, { params }),
   saveAlertQuietHours: (data) => api.put('/agent/alerts-quiet-hours', data),
+  // Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md)
+  getTeams: (params = {}) => api.get('/agent/teams', { params }),
+  saveTeamsPreferences: (data) => api.put('/agent/teams/preferences', data),
+  connectTeams: (data = {}) => api.post('/agent/teams/connect', data),
+  sendTeamsTest: (data = {}) => api.post('/agent/teams/test', data),
+  unmuteTeamsTicket: (ticketId, params = {}) => api.delete(`/agent/teams/mutes/${ticketId}`, { params }),
   getSummitWorkshop: () => api.get('/agent/summit-2026/workshop'),
   voteSummitCategory: (data) => api.post('/agent/summit-2026/votes', data),
   getSummitWorkshopEventSource: () => new EventSource(`${API_BASE_URL}/agent/summit-2026/workshop/events${_authToken ? `?token=${encodeURIComponent(_authToken)}` : ''}`, { withCredentials: true }),
