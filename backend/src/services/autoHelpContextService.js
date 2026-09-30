@@ -75,17 +75,33 @@ async function pendingJob(ticketId) {
  * sending is allowed in this build AND the workspace has an enabled playbook
  * whose saved mode is auto AND nothing is sent / decided on the ticket yet.
  */
-export async function expectedFor(ticketId, workspaceId, { settings = null } = {}) {
+export async function expectedFor(ticketId, workspaceId, { settings = null, at = new Date() } = {}) {
   const s = settings || await soft(() => autoHelpPlaybookService.getSettings(workspaceId));
   if (!s?.enabled || !s.approveModeEnabled) return false;
-  if (autoHelpPlaybookService.autoModeAllowed() !== true) return false;
-  const autoPlaybooks = await soft(() => prisma.autoHelpPlaybook.count({
+  const byBuild = autoHelpPlaybookService.autoModeAllowed() === true && Number(await soft(() => prisma.autoHelpPlaybook.count({
     where: { workspaceId: Number(workspaceId), enabled: true, mode: 'auto', sensitive: false },
-  }), 0);
-  if (!(Number(autoPlaybooks) > 0)) return false;
+  }), 0)) > 0;
+  // Approve by day, auto by night (30 Sep 2026): after hours a proven
+  // approve-mode playbook may send by itself, so an ack set to merge waits.
+  const bySchedule = !byBuild && await scheduleMayAnswer(workspaceId, s, at);
+  if (!byBuild && !bySchedule) return false;
   const run = await latestRealRun(ticketId);
   const state = stateOfRun(run);
   return !run || state === 'pending';
+}
+
+/** Some enabled playbook of the workspace may send by itself right now under the after-hours schedule. */
+async function scheduleMayAnswer(workspaceId, settings, at) {
+  if (settings?.autoAfterHours !== true) return false;
+  if (!(await soft(() => autoHelpPlaybookService.isAfterHours(workspaceId, { at }), false))) return false;
+  const playbooks = await soft(() => prisma.autoHelpPlaybook.findMany({
+    where: { workspaceId: Number(workspaceId), enabled: true, sensitive: false, mode: { in: ['approve', 'auto'] } },
+    take: 50,
+  }), []);
+  for (const pb of playbooks || []) {
+    if (await soft(() => autoHelpPlaybookService.scheduledAuto(workspaceId, pb, settings, { at }), false)) return true;
+  }
+  return false;
 }
 
 /** `ticket.autoHelp` for workflow conditions, templates and the variable picker. */

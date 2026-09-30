@@ -157,6 +157,20 @@ describe('Auto-help P1 lines', () => {
   });
 });
 
+describe('30 Sep 2026 lines', () => {
+  test('assignee told, answered overnight, and "Ticket ready" read as sentences', () => {
+    const rows = [
+      { id: 71, activityType: 'auto_help_assignee_told', performedBy: 'Ticket Pulse (Auto-help)', performedAt: iso(0), details: { note: 'Auto-help told Dana Agent an answer is waiting' } },
+      { id: 72, activityType: 'auto_help_sent_overnight', performedBy: 'Ticket Pulse (Auto-help)', performedAt: iso(60e3), details: { note: 'Answered by Auto-help overnight (Software)' } },
+      { id: 73, activityType: 'ticket_ready', performedBy: 'Ticket Pulse', performedAt: iso(120e3), details: { reason: 'timeout', note: 'Ticket ready — 3 minutes passed' } },
+    ];
+    const byKey = Object.fromEntries(buildHistoryItems({ activities: rows }).map((i) => [i.key, i]));
+    expect(byKey['a-71']).toMatchObject({ event: 'autohelp', verb: 'told the assignee an answer is waiting' });
+    expect(byKey['a-72']).toMatchObject({ event: 'autohelp', verb: 'answered by itself overnight (outside business hours)' });
+    expect(byKey['a-73']).toMatchObject({ event: 'system', verb: 'marked the ticket ready for "Ticket ready" workflows', machine: true });
+  });
+});
+
 describe('friendlyDays', () => {
   test('bare ISO days become short days; full stamps too; other text untouched', () => {
     expect(friendlyDays('closing 2026-10-16 if there is no reply')).toBe('closing Fri 16 Oct if there is no reply');

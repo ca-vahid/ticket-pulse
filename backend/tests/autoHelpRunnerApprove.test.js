@@ -200,6 +200,77 @@ describe('approve mode staging', () => {
   });
 });
 
+describe('approve by day, auto by night (30 Sep 2026)', () => {
+  let delivery;
+  let spies = [];
+  const setup = ({ afterHours = true, ready = true } = {}) => {
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ ...SETTINGS, autoAfterHours: true });
+    spies = [
+      jest.spyOn(playbookService, 'isAfterHours').mockResolvedValue(afterHours),
+      jest.spyOn(playbookService, 'cachedReadiness').mockResolvedValue({ met: ready }),
+      jest.spyOn(delivery, '_autoSend').mockResolvedValue({ status: 'sent', gateDecision: 'auto_sent', decision: 'auto_sent', sentEntryId: 5000 }),
+    ];
+  };
+  beforeAll(async () => { ({ default: delivery } = await import('../src/services/autoHelpDeliveryService.js')); });
+  afterEach(() => { spies.forEach((s) => s.mockRestore()); spies = []; });
+
+  test('after hours, switch on, proven playbook, clean answer → sent by itself, marked scheduled', async () => {
+    setup();
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.mode).toBe('auto');
+    expect(run.status).toBe('sent');
+    expect(delivery._autoSend).toHaveBeenCalledWith(expect.objectContaining({ scheduled: true }));
+    expect(proposalsMock.create).not.toHaveBeenCalled();
+  });
+
+  test('business hours → approve: staged for a person', async () => {
+    setup({ afterHours: false });
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.mode).toBe('approve');
+    expect(run.status).toBe('staged');
+    expect(delivery._autoSend).not.toHaveBeenCalled();
+  });
+
+  test('after hours but the readiness checklist is not met → staged', async () => {
+    setup({ ready: false });
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.mode).toBe('approve');
+    expect(delivery._autoSend).not.toHaveBeenCalled();
+  });
+
+  test('after hours, a partial answer → staged for the morning, never sent', async () => {
+    setup();
+    gatewayMock.sendJson.mockResolvedValue({ parsed: { sufficient: 'partial', unsupportedSteps: [], stayQuiet: { matched: false } } });
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.gateDecision).toBe('staged_for_agent');
+    expect(delivery._autoSend).not.toHaveBeenCalled();
+  });
+
+  test('after hours, below the confidence bar → not sent', async () => {
+    setup();
+    gatewayMock.runToolTurn.mockResolvedValue(submit({ confidence: 0.7 }));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.gateDecision).toBe('below_confidence');
+    expect(delivery._autoSend).not.toHaveBeenCalled();
+  });
+
+  test('a sensitive playbook never sends by itself, even after hours', async () => {
+    setup();
+    prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([{ ...PLAYBOOK, sensitive: true }]);
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.mode).toBe('approve');
+    expect(delivery._autoSend).not.toHaveBeenCalled();
+  });
+
+  test('the switch off → approve, whatever the hour', async () => {
+    setup();
+    prismaMock.autoHelpSettings.findUnique.mockResolvedValue({ ...SETTINGS, autoAfterHours: false });
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.mode).toBe('approve');
+    expect(delivery._autoSend).not.toHaveBeenCalled();
+  });
+});
+
 describe('cost', () => {
   test('tokens and the estimated cost of every model call land on the run', async () => {
     await runner.runForTicket(55, { trigger: 'categorized' });

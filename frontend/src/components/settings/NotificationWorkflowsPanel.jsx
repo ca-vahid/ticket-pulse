@@ -95,6 +95,7 @@ const EVENT_LABELS = {
   'ticket.park_due_soon': 'Parked ticket wakes within a day',
   'ticket.categorized': 'Ticket categorized',
   'ticket.intake_settled': 'Ticket intake settled',
+  'ticket.ready': 'Ticket ready (sorted + Auto-help done)',
   'auto_help.staged': 'Auto-help suggested an answer',
   'auto_help.answered': 'Auto-help answer sent',
   'auto_help.nudged': 'Auto-help checked in',
@@ -132,6 +133,8 @@ export const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.categorized', hint: 'The category is set — by the AI (about a minute after arrival) or by a person. Use it for mail that should name the category' },
       // Auto-help integration W1: after category, priority, noise and the decision are all saved.
       { value: 'ticket.intake_settled', hint: 'The AI has finished sorting the ticket — category, priority, noise and its decision are saved. Fires at night (provisional) and again in the morning; also when a person sets the category' },
+      // 30 Sep 2026: one e-mail instead of three.
+      { value: 'ticket.ready', hint: 'Sorted, and Auto-help has answered or decided not to — at most 3 minutes after arrival, never overnight. Use it for requester mail so it doesn’t race Auto-help; with “merge into Auto-help” on, an acknowledgement rides on top of an answer Auto-help sends by itself' },
       // Parked (plans/PARKED_BUILD_PLAN.md)
       { value: 'ticket.parked', hint: 'Someone parked the ticket until a date (or parked it again)' },
       { value: 'ticket.woke', hint: 'A parked ticket reached its date and is back in the queue' },
@@ -605,6 +608,9 @@ export const CONDITION_FIELD_OPTIONS = [
   { value: 'ticket.autoHelp.expected', label: 'Auto-help will answer by itself', example: 'false' },
   { value: 'ticket.autoHelp.outcome', label: 'Auto-help outcome', example: 'resolved_confirmed' },
   { value: 'event.intakeProvisional', label: 'Intake verdict is provisional (night run)', example: 'false' },
+  // "Ticket ready" (30 Sep 2026).
+  { value: 'event.readyReason', label: 'Ticket ready because (auto_help_answering / auto_help_done / auto_help_off / timeout)', example: 'auto_help_done' },
+  { value: 'event.autoHelpAnswered', label: 'Auto-help answered the requester', example: 'false' },
   { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', example: 'confirmed' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
   { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
@@ -675,6 +681,29 @@ export function FieldsUpdatedTriggerOptions({ data = {}, onChange, disabled = fa
         </span>
       </label>
     </div>
+  );
+}
+
+/**
+ * "Ticket assigned" trigger option (30 Sep 2026): skip this e-mail when
+ * Auto-help already answered the ticket (new tickets only — read by the
+ * engine's assignedAfterAutoHelpGate).
+ */
+export function AssignedTriggerOptions({ data = {}, onChange, disabled = false }) {
+  return (
+    <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm normal-case" data-testid="assigned-trigger-options">
+      <input
+        type="checkbox"
+        checked={data.skipIfAutoHelpAnswered === true}
+        disabled={disabled}
+        onChange={(event) => onChange({ skipIfAutoHelpAnswered: event.target.checked })}
+        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+      />
+      <span>
+        <span className="font-medium text-foreground">Skip when Auto-help already answered</span>
+        <span className="block text-[11px] text-muted-foreground/75">For a new ticket (under a day old) whose requester already got an Auto-help answer, this e-mail isn&apos;t sent. A later reassignment still sends.</span>
+      </span>
+    </label>
   );
 }
 
@@ -9758,6 +9787,9 @@ export default function NotificationWorkflowsPanel({
           {/* "Ticket updated (fields)" options — read by the engine's fieldsUpdatedGate (TU-8/TU-9). */}
           {triggerType === 'ticket.fields_updated' && (
             <FieldsUpdatedTriggerOptions data={selectedNode.data || {}} onChange={updateNodeData} disabled={saving} />
+          )}
+          {triggerType === 'ticket.assigned' && (
+            <AssignedTriggerOptions data={selectedNode.data || {}} onChange={updateNodeData} disabled={saving} />
           )}
           {/* Time-trigger thresholds — read by the time-trigger worker. */}
           {triggerType === 'ticket.aging' && (

@@ -171,8 +171,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         auto_help_post_close_reply: 'read the reply after its close; the ticket stays closed',
         auto_help_settle_changed: 'noted the category changed after its answer',
         auto_help_manual_settle: 'will look again (the category was set by hand)',
+        // 30 Sep 2026: approvals that scale; approve by day, auto by night.
+        auto_help_assignee_told: 'told the assignee an answer is waiting',
+        auto_help_sent_overnight: 'answered by itself overnight (outside business hours)',
       };
       item = baseItem({ event: 'autohelp', verb: verbs[t] || humanize(t.replace(/^auto_help_/, '')), detail: friendlyDays(d.note) || null, importance: 2 });
+    } else if (t === 'ticket_ready') {
+      // "Ticket ready" workflow trigger (30 Sep 2026).
+      item = baseItem({ event: 'system', verb: 'marked the ticket ready for "Ticket ready" workflows', detail: d.note || null, machine: true });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

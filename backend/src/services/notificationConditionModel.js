@@ -111,6 +111,9 @@ export const CONDITION_FIELDS = Object.freeze({
   'event.intakeDecision': { label: 'Intake decision', type: 'enum', path: 'event.extra.decision', options: ['pending_review', 'auto_assigned', 'classified_only', 'priority_only', 'noise_dismissed'] },
   'event.intakeNonActionable': { label: 'Intake judged not actionable', type: 'boolean', path: 'event.extra.nonActionable' },
   'event.intakeSource': { label: 'Intake settled by', type: 'enum', path: 'event.extra.source', options: ['pipeline', 'manual'] },
+  // "Ticket ready" payload (30 Sep 2026).
+  'event.readyReason': { label: 'Ticket ready because', type: 'enum', path: 'event.extra.readyReason', options: ['auto_help_answering', 'auto_help_done', 'auto_help_off', 'timeout'] },
+  'event.autoHelpAnswered': { label: 'Auto-help answered the requester', type: 'boolean', path: 'event.extra.autoHelpAnswered' },
   // Reopen-on-reply guard (W3): how a reply after an Auto-help close read.
   'event.autoHelpReplyVerdict': { label: 'Reply after an Auto-help close reads as', type: 'enum', path: 'event.extra.autoHelpReplyVerdict', options: ['confirmed', 'help', 'auto_reply'] },
   'availability.isBusinessHours': { label: 'During business hours', type: 'boolean', path: 'availability.isBusinessHours' },

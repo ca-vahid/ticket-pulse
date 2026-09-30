@@ -58,7 +58,7 @@ export const TRIGGER_ORDER = [
   'ticket.status_changed', 'ticket.fields_updated',
   'ticket.reply_received', 'ticket.public_reply_added', 'ticket.note_added', 'ticket.requester_silent_for',
   'ticket.aging', 'ticket.sla_pre_breach', 'ticket.sla_breach',
-  'ticket.categorized', 'ticket.intake_settled', 'ticket.parked', 'ticket.park_due_soon', 'ticket.woke',
+  'ticket.categorized', 'ticket.intake_settled', 'ticket.ready', 'ticket.parked', 'ticket.park_due_soon', 'ticket.woke',
   'auto_help.staged', 'auto_help.answered', 'auto_help.nudged', 'auto_help.help_requested', 'auto_help.resolved',
   'ticket.reopened', 'ticket.resolved_closed',
   'approval.requested', 'approval.clarification_requested', 'approval.decided',

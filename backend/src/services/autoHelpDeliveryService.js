@@ -39,6 +39,11 @@ import { DECISIONS, DISMISS_REASON_VALUES, PRE_SEND_OUTCOMES, editDistance } fro
 import { emitAutoHelpEvent } from './autoHelpEvents.js';
 import autoHelpAckMergeService, { mergeAckIntoMail } from './autoHelpAckMergeService.js';
 
+/** "Ticket ready" gets this long to hold acknowledgements before an auto answer goes. */
+const READY_BEFORE_SEND_MAX_MS = 45 * 1000;
+/** The morning summary looks back this far for overnight answers not yet summarised. */
+const SUMMARY_LOOKBACK_MS = 4 * 24 * 60 * 60 * 1000;
+
 export const AUTO_HELP_SOURCE = 'auto_help';
 export const AUTO_HELP_ACTOR = Object.freeze({ name: 'Ticket Pulse (Auto-help)', email: null, role: 'automation' });
 const FALLBACK_TIMEZONE = 'America/Los_Angeles';
@@ -466,11 +471,13 @@ class AutoHelpDeliveryService {
       return data;
     }
 
-    // Auto mode (locked in this build): only a fully eligible answer, never
-    // playbook-only / partial, and only while the build switch allows it and
-    // the playbook is not sensitive (re-checked here, not only upstream).
-    if (mode === 'auto' && autoSendEligible && !AUTO_SEND_INELIGIBLE_GATES.includes(gateDecision) && this._autoSendAllowed(playbook, settings)) {
-      return this._autoSend({ run, ticket, playbook, settings, preview, body, detail });
+    // Auto: only a fully eligible answer, never playbook-only / partial, and
+    // only while the build switch — or the after-hours schedule (30 Sep 2026)
+    // — allows it and the playbook is not sensitive (re-checked here, not
+    // only upstream). Otherwise it is staged for a person, as in approve mode.
+    if (mode === 'auto' && autoSendEligible && !AUTO_SEND_INELIGIBLE_GATES.includes(gateDecision)) {
+      const permit = await this._autoSendPermit(ticket.workspaceId, playbook, settings);
+      if (permit.ok) return this._autoSend({ run, ticket, playbook, settings, preview, body, detail, scheduled: permit.scheduled });
     }
 
     const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
@@ -512,17 +519,39 @@ class AutoHelpDeliveryService {
     return data;
   }
 
-  /** Auto sending right now: the build switch, a non-sensitive playbook, Auto-help on. */
+  /** Auto sending by the build switch: a non-sensitive playbook, Auto-help on. */
   _autoSendAllowed(playbook, settings) {
     return autoHelpPlaybookService.autoModeAllowed() === true && playbook?.sensitive !== true && settings?.enabled === true;
   }
 
-  /** Auto mode — unreachable in this build; kept honest and covered by tests with the switch stubbed on. */
-  async _autoSend({ run, ticket, playbook, settings, preview, body, detail }) {
-    if (!this._autoSendAllowed(playbook, settings)) {
+  /**
+   * May this answer go out by itself right now? The build switch, or the
+   * after-hours schedule (approve by day, auto by night — 30 Sep 2026).
+   * { ok, scheduled }: scheduled = sent because it is after hours / a holiday.
+   */
+  async _autoSendPermit(workspaceId, playbook, settings) {
+    if (settings?.enabled !== true || playbook?.sensitive === true) return { ok: false, scheduled: false };
+    const scheduled = await autoHelpPlaybookService.scheduledAuto(workspaceId, playbook, settings).catch(() => false);
+    return { ok: this._autoSendAllowed(playbook, settings) || scheduled === true, scheduled: scheduled === true };
+  }
+
+  /** Auto mode: the build switch (locked) or the after-hours schedule. */
+  async _autoSend({ run, ticket, playbook, settings, preview, body, detail, scheduled = false }) {
+    const permit = await this._autoSendPermit(ticket.workspaceId, playbook, settings);
+    if (!permit.ok) {
       throw refusal('Auto sending is not allowed for this playbook', 'auto_help_auto_refused');
     }
     await this._assertSendable({ ticketId: ticket.id, workspaceId: ticket.workspaceId, playbook, settings, requireApprove: false });
+    // "Ticket ready" (30 Sep 2026) fires BEFORE the answer goes, so a
+    // requester acknowledgement set to merge into Auto-help is held and rides
+    // on top of this answer: one e-mail. Bounded: a slow workflow never holds
+    // the answer back for long.
+    await Promise.race([
+      import('./ticketReadyService.js')
+        .then(({ default: ticketReady }) => ticketReady.markReady(ticket.id, { reason: 'auto_help_answering', autoHelpAnswered: true, runId: run.id }))
+        .catch(() => null),
+      new Promise((resolve) => { setTimeout(resolve, READY_BEFORE_SEND_MAX_MS).unref?.(); }),
+    ]);
     const sent = await this._deliver({
       ticketId: ticket.id,
       workspaceId: ticket.workspaceId,
@@ -536,7 +565,159 @@ class AutoHelpDeliveryService {
       decision: DECISIONS.AUTO_SENT,
       distance: null,
     });
+    if (permit.scheduled || scheduled) await this._markOvernight({ ticket, run, playbook });
     return { status: 'sent', gateDecision: GATE.AUTO_SENT, decision: DECISIONS.AUTO_SENT, sentEntryId: sent.entryId };
+  }
+
+  /** "Answered by Auto-help overnight": on the run (for the morning summary) and in the ticket history. */
+  async _markOvernight({ ticket, run, playbook }) {
+    const fresh = await this._run(ticket.workspaceId, run.id);
+    await Promise.resolve()
+      .then(() => prisma.autoHelpRun.update({
+        where: { id: run.id },
+        data: { outcomeDetail: safeJson(withHistory({ ...((fresh || run).outcomeDetail || {}), scheduledAuto: { at: new Date().toISOString(), summarizedAt: null } }, 'sent_overnight', {})) },
+      }))
+      .catch((err) => logger.warn(`Auto-help run ${run.id}: overnight mark not saved (${err.message})`));
+    await this._activity(ticket.id, 'auto_help_sent_overnight', AUTO_HELP_ACTOR, {
+      runId: run.id, playbookId: playbook.id, playbookName: playbook.name,
+      note: `Answered by Auto-help overnight (${playbook.name}) — sent by itself outside business hours; it will be in the morning summary`,
+    });
+  }
+
+  // ---------- approve by day, auto by night: the morning summary (30 Sep 2026) ----------
+
+  /**
+   * Once per workspace per local business day, at the first tick inside
+   * business hours: e-mail what Auto-help sent by itself since the last
+   * summary (after hours / holidays). Recipients: the setting, else the
+   * workspace admins. The day is claimed first (conditional update), so two
+   * containers never both send; a day with nothing sent sends nothing.
+   */
+  async sendMorningSummaries({ now = new Date() } = {}) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.autoHelpSettings.findMany({ where: { enabled: true, autoAfterHours: true }, take: 50 }))
+      .catch(() => []);
+    let sent = 0;
+    for (const row of rows || []) {
+      const ws = row.workspaceId;
+      if (await autoHelpPlaybookService.isAfterHours(ws, { at: now })) continue;
+      const workspace = await Promise.resolve()
+        .then(() => prisma.workspace.findUnique({ where: { id: ws }, select: { name: true, defaultTimezone: true } }))
+        .catch(() => null);
+      const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+      const { formatInTimeZone } = await import('date-fns-tz');
+      const today = formatInTimeZone(now, tz, 'yyyy-MM-dd');
+      if (row.afterHoursSummarySentFor === today) continue;
+      const claim = await Promise.resolve()
+        .then(() => prisma.autoHelpSettings.updateMany({
+          where: { workspaceId: ws, OR: [{ afterHoursSummarySentFor: null }, { afterHoursSummarySentFor: { not: today } }] },
+          data: { afterHoursSummarySentFor: today },
+        }))
+        .catch(() => ({ count: 0 }));
+      if (!claim?.count) continue;
+      const runs = await Promise.resolve()
+        .then(() => prisma.autoHelpRun.findMany({
+          where: { workspaceId: ws, decision: DECISIONS.AUTO_SENT, createdAt: { gte: new Date(now.getTime() - SUMMARY_LOOKBACK_MS) } },
+          orderBy: { createdAt: 'asc' },
+          take: 200,
+        }))
+        .catch(() => []);
+      const overnight = (runs || []).filter((r) => r.outcomeDetail?.scheduledAuto && !r.outcomeDetail.scheduledAuto.summarizedAt);
+      if (!overnight.length) continue;
+      const to = row.afterHoursSummaryTo?.length ? row.afterHoursSummaryTo : await this._workspaceAdminEmails(ws);
+      if (!to.length) {
+        logger.warn(`Auto-help morning summary (ws ${ws}): nobody to send it to (no recipients set, no workspace admins)`);
+        continue;
+      }
+      const mail = await this._morningSummaryMail({ ws, workspaceName: workspace?.name || 'your team', tz, runs: overnight });
+      const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+      const result = await sendTransactionalEmail({ workspaceId: ws, to, subject: mail.subject, html: mail.html, text: mail.text, label: 'auto-help-overnight-summary' })
+        .catch((err) => ({ sent: false, error: err.message }));
+      if (!result?.sent) {
+        // Give the day back so the next tick tries again.
+        await Promise.resolve().then(() => prisma.autoHelpSettings.updateMany({ where: { workspaceId: ws, afterHoursSummarySentFor: today }, data: { afterHoursSummarySentFor: row.afterHoursSummarySentFor || null } })).catch(() => {});
+        logger.warn(`Auto-help morning summary (ws ${ws}) not sent: ${result?.error || 'the mail service refused it'}`);
+        continue;
+      }
+      const at = new Date().toISOString();
+      for (const r of overnight) {
+        await Promise.resolve().then(() => prisma.autoHelpRun.update({
+          where: { id: r.id },
+          data: { outcomeDetail: safeJson({ ...r.outcomeDetail, scheduledAuto: { ...r.outcomeDetail.scheduledAuto, summarizedAt: at } }) },
+        })).catch(() => {});
+      }
+      sent += 1;
+      logger.info(`Auto-help morning summary (ws ${ws}): ${overnight.length} overnight answer(s) to ${to.length} recipient(s)`);
+    }
+    return { sent };
+  }
+
+  async _workspaceAdminEmails(workspaceId) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.workspaceAccess.findMany({ where: { workspaceId: Number(workspaceId), role: 'admin' }, select: { email: true }, take: 20 }))
+      .catch(() => []);
+    return [...new Set((rows || []).map((r) => String(r.email || '').toLowerCase()).filter((e) => e.includes('@')))];
+  }
+
+  async _morningSummaryMail({ ws, workspaceName, tz, runs }) {
+    const ticketIds = [...new Set(runs.map((r) => r.ticketId))];
+    const [tickets, playbooks] = await Promise.all([
+      Promise.resolve().then(() => prisma.ticket.findMany({
+        where: { workspaceId: ws, id: { in: ticketIds } },
+        select: { id: true, subject: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } },
+      })).catch(() => []),
+      Promise.resolve().then(() => prisma.autoHelpPlaybook.findMany({
+        where: { workspaceId: ws, id: { in: [...new Set(runs.map((r) => r.playbookId).filter(Boolean))] } },
+        select: { id: true, name: true },
+      })).catch(() => []),
+    ]);
+    const byTicket = new Map((tickets || []).map((t) => [t.id, t]));
+    const byPlaybook = new Map((playbooks || []).map((p) => [p.id, p.name]));
+    const { formatInTimeZone } = await import('date-fns-tz');
+    const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js');
+    const base = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
+    const lines = runs.map((r) => {
+      const t = byTicket.get(r.ticketId) || { id: r.ticketId, subject: '' };
+      const when = r.outcomeDetail?.scheduledAuto?.at ? formatInTimeZone(new Date(r.outcomeDetail.scheduledAuto.at), tz, 'EEE h:mm a') : '';
+      return {
+        ref: ticketDisplayRef(t), subject: t.subject || '', requester: t.requester?.name || '', status: t.status || '',
+        playbook: byPlaybook.get(r.playbookId) || '', when, outcome: r.outcome || null, link: `${base}/tickets/${t.id}`,
+      };
+    });
+    const n = lines.length;
+    const subject = `Auto-help answered ${n} ticket${n === 1 ? '' : 's'} overnight (${workspaceName})`;
+    const outcomeWord = (o) => ({
+      resolved_confirmed: 'requester confirmed it worked', resolved_silence: 'closed after no reply', help_requested: 'requester still needs help',
+      reopened: 'reopened', agent_took_over: 'an agent took over',
+    }[o] || 'waiting on the requester');
+    const rowsHtml = lines.map((l) => [
+      '<tr>',
+      `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;vertical-align:top"><a href="${l.link}" style="color:#2563eb;font-weight:600">${escapeHtmlText(l.ref)}</a><br>${escapeHtmlText(l.subject)}</td>`,
+      `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#334155;font-size:13px;vertical-align:top">${escapeHtmlText(l.requester)}<br><span style="color:#64748b">${escapeHtmlText(l.playbook)}</span></td>`,
+      `<td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#334155;font-size:13px;vertical-align:top">${escapeHtmlText(l.when)}<br><span style="color:#64748b">${escapeHtmlText(outcomeWord(l.outcome))}</span></td>`,
+      '</tr>',
+    ].join('')).join('');
+    const html = [
+      '<p style="margin:0 0 12px;color:#0f172a">Good morning,</p>',
+      `<p style="margin:0 0 12px;color:#0f172a">Outside business hours, Auto-help answered <strong>${n}</strong> ticket${n === 1 ? '' : 's'} in ${escapeHtmlText(workspaceName)} by itself (proven playbooks only, clean answers at the confidence bar). Each ticket is marked &ldquo;Answered by Auto-help overnight&rdquo; in its history.</p>`,
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 12px">',
+      '<tr>',
+      '<td bgcolor="#f1f5f9" style="background-color:#f1f5f9;color:#334155;padding:8px 10px;font-size:12px;font-weight:600">Ticket</td>',
+      '<td bgcolor="#f1f5f9" style="background-color:#f1f5f9;color:#334155;padding:8px 10px;font-size:12px;font-weight:600">Requester &middot; playbook</td>',
+      '<td bgcolor="#f1f5f9" style="background-color:#f1f5f9;color:#334155;padding:8px 10px;font-size:12px;font-weight:600">Sent &middot; since then</td>',
+      '</tr>',
+      rowsHtml,
+      '</table>',
+      '<p style="margin:0;color:#64748b;font-size:12px">If an answer was wrong, open the ticket and reply to the requester; mark it in Knowledge &rarr; Activity so the playbook learns.</p>',
+    ].join('');
+    const text = [
+      'Good morning,',
+      '',
+      `Outside business hours, Auto-help answered ${n} ticket${n === 1 ? '' : 's'} in ${workspaceName} by itself (proven playbooks only, clean answers at the confidence bar).`,
+      '',
+      ...lines.map((l) => `- ${l.ref} ${l.subject} | ${l.requester} | ${l.playbook} | sent ${l.when} | ${outcomeWord(l.outcome)}\n  ${l.link}`),
+    ].join('\n');
+    return { subject, html, text };
   }
 
   // ---------- the card ----------
