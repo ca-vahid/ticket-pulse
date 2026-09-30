@@ -3228,6 +3228,7 @@ export default function TicketDetail() {
                               ? 'Optional note to include above the forwarded thread…'
                               : 'Add context for the team (never emailed)…'}
                           ariaLabel={composerMode === 'reply' ? 'Reply body' : composerMode === 'forward' ? 'Forward note' : 'Internal note body'}
+                          minHeight={280}
                           className={composerMode === 'note' ? 'bg-amber-50/25 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : composerMode === 'forward' ? 'bg-violet-50/30 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : 'bg-card border-input'}
                           onImagePaste={composerMode === 'forward' ? undefined : (file) => {
                             const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');

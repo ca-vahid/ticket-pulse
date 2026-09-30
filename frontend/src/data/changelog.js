@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.15-preview';
+export const APP_VERSION = '4.1.16-preview';
 
 export const changelog = [
+  {
+    version: '4.1.16-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Bigger reply box</strong> &mdash; the reply, internal note and forward box on a ticket starts taller, so there is more room to write.' },
+      { type: 'fixed', html: '<strong>Reply box border</strong> &mdash; the blue focus border now lines up with the formatting toolbar instead of sticking out past it.' },
+    ],
+  },
   {
     version: '4.1.15-preview',
     date: 'September 30, 2026',
