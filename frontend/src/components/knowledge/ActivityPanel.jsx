@@ -45,7 +45,7 @@ const GATE_WORD = {
   time_budget: 'Ran out of time.',
   interrupted: 'Interrupted before it finished.',
   run_not_recorded: 'Could not be recorded, so it did not run.',
-  no_match: 'No playbook covers this ticket’s category.',
+  no_match: 'No playbook fits this ticket.',
   noise: 'Skipped: the ticket is marked noise.',
   security: 'Skipped: security ticket.',
   trusted_intake: 'Skipped: machine alert from a trusted integration.',
@@ -139,6 +139,7 @@ function rowReason(r) {
     return dropped.length ? `Drafted without step ${dropped.join(', ')} (not in the knowledge)` : 'Drafted — not sent (shadow)';
   }
   if (r.gateDecision === 'insufficient_context') return 'The knowledge doesn’t cover enough of this';
+  if (r.gateDecision === 'no_match' && r.checks?.fit?.reason) return `No playbook fits: ${r.checks.fit.reason}`;
   return GATE_WORD[r.gateDecision] || '—';
 }
 

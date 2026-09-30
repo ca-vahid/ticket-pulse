@@ -218,12 +218,24 @@ describe('runForTicket — drafting and grounding', () => {
     expect(run.transcript.citedUnknown).toEqual(['ticket:999', 'playbook:3']);
   });
 
-  test('nothing retrieved and no opt-in → not_answerable no_sources without a model call', async () => {
+  test('nothing retrieved and no search tool → not_answerable no_sources without a model call', async () => {
     prismaMock.knowledgeArticle.findMany.mockResolvedValue([]);
+    prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([{ ...PLAYBOOK, allowedTools: ['get_article'] }]);
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.status).toBe('not_answerable');
     expect(run.gateDecision).toBe('no_sources');
     expect(gatewayMock.runToolTurn).not.toHaveBeenCalled();
+  });
+
+  // 30 Sep 2026: an empty first search no longer ends the run when the
+  // playbook may search — the model digs with its tools.
+  test('nothing retrieved but the playbook may search → the model is asked to research', async () => {
+    prismaMock.knowledgeArticle.findMany.mockResolvedValue([]);
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(gatewayMock.runToolTurn).toHaveBeenCalled();
+    expect(run.gateDecision).not.toBe('no_sources');
+    expect(run.transcript.researchOnly).toBe(true);
   });
 
   test('guard: an answer leaking a tool name fails the run', async () => {
@@ -764,11 +776,14 @@ describe('audit S2: the "already ran" check and the run row are one step', () =>
   });
 });
 
-describe('Knowledge v2 fit check ("When this playbook helps")', () => {
+// Knowledge v3 (30 Sep 2026): the AI chooses the playbook from every
+// switched-on one, reading "When to help"; the ticket's category is a hint.
+describe('Knowledge v3 playbook choice ("When to help")', () => {
   const FIT_PLAYBOOK = { ...PLAYBOOK, match: { whenToHelp: 'Installing or updating software on a BGC laptop', useWords: false } };
-  const fitTurn = (input) => ({
-    message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'fit1', name: 'submit_fit', input }] },
-    provider: 'anthropic', model: 'claude-haiku-4-5', usage: { inputTokens: 400, outputTokens: 30 },
+  const OTHER = { ...PLAYBOOK, id: 9, name: 'Accounts & access', categoryId: 40, subcategoryIds: [], priority: 100, version: 2, match: { whenToHelp: 'Password resets and MFA', useWords: false } };
+  const routeTurn = (input) => ({
+    message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'r1', name: 'submit_route', input }] },
+    provider: 'anthropic', model: 'claude-sonnet-5-5', usage: { inputTokens: 400, outputTokens: 30 },
   });
 
   beforeEach(() => {
@@ -776,8 +791,8 @@ describe('Knowledge v2 fit check ("When this playbook helps")', () => {
     prismaMock.autoHelpPlaybook.findFirst.mockResolvedValue(FIT_PLAYBOOK);
   });
 
-  test('fits=false → no_match / not_this_playbook with the reason; no drafting call; cost recorded', async () => {
-    gatewayMock.runToolTurn.mockResolvedValueOnce(fitTurn({ fits: false, reason: 'Asks about a licence server outage, not an install' }));
+  test('choice 0 with the ticket in scope → no_match / not_this_playbook with the reason; no drafting; cost recorded', async () => {
+    gatewayMock.runToolTurn.mockResolvedValueOnce(routeTurn({ choice: 0, reason: 'Asks about a licence server outage, not an install' }));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.status).toBe('no_match');
     expect(run.gateDecision).toBe('not_this_playbook');
@@ -785,61 +800,81 @@ describe('Knowledge v2 fit check ("When this playbook helps")', () => {
     expect(run.reasons).toEqual(['Not this playbook: Asks about a licence server outage, not an install']);
     expect(gatewayMock.runToolTurn).toHaveBeenCalledTimes(1);
     const call = gatewayMock.runToolTurn.mock.calls[0][0];
-    expect(call).toMatchObject({ operation: 'auto_help', workspaceId: 1, maxTokens: 300 });
-    expect(call.tools.map((t) => t.name)).toEqual(['submit_fit']);
-    expect(call.messages[0].content).toContain('When this playbook helps: Installing or updating software on a BGC laptop');
-    expect(call.messages[0].content).toContain('Scope (the ticket\'s category): Software & Apps → Installation');
+    expect(call).toMatchObject({ operation: 'auto_help', workspaceId: 1, maxTokens: 400 });
+    expect(call.tools.map((t) => t.name)).toEqual(['submit_route']);
+    expect(call.messages[0].content).toContain('When to help: Installing or updating software on a BGC laptop');
+    expect(call.messages[0].content).toContain('Ticket category (hint, may be wrong): Software & Apps → Installation');
     expect(call.messages[0].content).toMatch(/<ticket_content>[\s\S]*Install Bluebeam please[\s\S]*<\/ticket_content>/);
     const data = prismaMock.autoHelpRun.update.mock.calls[0][0].data;
     expect(data).toMatchObject({ status: 'no_match', gateDecision: 'not_this_playbook', inputTokens: 400, outputTokens: 30 });
-    expect(data.transcript.fit).toEqual({ fits: false, reason: 'Asks about a licence server outage, not an install' });
+    expect(data.checks.fit).toEqual({ fits: false, reason: 'Asks about a licence server outage, not an install' });
     expect(data.transcript.reasons).toEqual(['Not this playbook: Asks about a licence server outage, not an install']);
-    expect(typeof data.durationMs).toBe('number');
+    expect(prismaMock.knowledgeArticle.findMany).not.toHaveBeenCalled();
     expectNothingSent();
   });
 
-  test('fits=true → drafts normally; the main prompt carries "When this playbook helps"', async () => {
+  test('a playbook outside the ticket\'s category can be chosen; its version and name go on the run', async () => {
+    prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([FIT_PLAYBOOK, OTHER]);
     gatewayMock.runToolTurn
-      .mockResolvedValueOnce(fitTurn({ fits: true, reason: 'An install request' }))
+      .mockResolvedValueOnce(routeTurn({ choice: 2, reason: 'A password reset, filed under software' }))
       .mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
-    expect(run.status).toBe('drafted');
-    expect(run.transcript.fit).toEqual({ fits: true, reason: 'An install request' });
-    expect(gatewayMock.runToolTurn).toHaveBeenCalledTimes(2);
-    expect(gatewayMock.runToolTurn.mock.calls[1][0].systemPrompt).toContain('When this playbook helps: Installing or updating software on a BGC laptop');
+    const listing = gatewayMock.runToolTurn.mock.calls[0][0].messages[0].content;
+    expect(listing.indexOf('1. Software installs')).toBeLessThan(listing.indexOf('2. Accounts & access'));
+    expect(listing).toContain('(matches the ticket\'s category)');
+    const data = prismaMock.autoHelpRun.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({ playbookId: 9, playbookVersion: 2 });
+    expect(run.transcript.route).toMatchObject({ choice: 2, reason: 'A password reset, filed under software' });
   });
 
-  test('fit check error or malformed answer → fails open (drafts), error recorded', async () => {
+  test('no playbook in the ticket\'s category and the AI picks none → no_match without a playbook on the run', async () => {
+    prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([OTHER]);
+    gatewayMock.runToolTurn.mockResolvedValueOnce(routeTurn({ choice: 0, reason: 'A new-hire laptop order' }));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run).toMatchObject({ status: 'no_match', gateDecision: 'no_match' });
+    const data = prismaMock.autoHelpRun.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({ playbookId: null, playbookVersion: null });
+    expect(data.checks.fit.reason).toBe('A new-hire laptop order');
+  });
+
+  test('choice error or malformed answer → falls back to the ticket\'s own playbook (drafts), error recorded', async () => {
     gatewayMock.runToolTurn
       .mockRejectedValueOnce(new Error('provider 529'))
       .mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.status).toBe('drafted');
-    expect(run.transcript.fit).toEqual({ error: 'provider 529' });
+    expect(run.transcript.route.error).toBe('provider 529');
 
     gatewayMock.runToolTurn.mockReset();
     gatewayMock.runToolTurn
-      .mockResolvedValueOnce(fitTurn({ fits: 'no' }))
+      .mockResolvedValueOnce(routeTurn({ choice: 7, reason: 'x' }))
       .mockResolvedValueOnce(submitTurn(GOOD));
     const run2 = await runner.runForTicket(55, { trigger: 'test', playbookId: 3 });
     expect(run2.status).toBe('drafted');
-    expect(run2.transcript.fit.error).toMatch(/no fits verdict/);
+    expect(run2.transcript.route.error).toMatch(/returned 7/);
+  });
+
+  test('a failed choice with nothing in the ticket\'s category → no_match, never an unrelated playbook', async () => {
+    prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([OTHER]);
+    gatewayMock.runToolTurn.mockRejectedValueOnce(new Error('provider 529'));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run).toMatchObject({ status: 'no_match', gateDecision: 'no_match' });
+    expect(gatewayMock.runToolTurn).toHaveBeenCalledTimes(1);
   });
 
   test('a probe (test run) reports "Not this playbook" with the reason', async () => {
-    gatewayMock.runToolTurn.mockResolvedValueOnce(fitTurn({ fits: false, reason: 'A hardware fault' }));
+    gatewayMock.runToolTurn.mockResolvedValueOnce(routeTurn({ choice: 0, reason: 'A hardware fault' }));
     const run = await runner.runForTicket(55, { trigger: 'test', playbookId: 3 });
     expect(run).toMatchObject({ status: 'no_match', gateDecision: 'not_this_playbook', reasons: ['Not this playbook: A hardware fault'] });
   });
 
-  test('no whenToHelp → no fit call (legacy playbooks unchanged)', async () => {
+  test('one playbook in the ticket\'s own scope with no "When to help" → no choice call (legacy unchanged)', async () => {
     prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([PLAYBOOK]);
     gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(GOOD));
     const run = await runner.runForTicket(55, { trigger: 'categorized' });
     expect(run.status).toBe('drafted');
-    expect(run.transcript.fit).toBeUndefined();
+    expect(run.transcript.route).toBeUndefined();
     expect(gatewayMock.runToolTurn).toHaveBeenCalledTimes(1);
-    expect(gatewayMock.runToolTurn.mock.calls[0][0].systemPrompt).not.toContain('When this playbook helps');
   });
 });
 

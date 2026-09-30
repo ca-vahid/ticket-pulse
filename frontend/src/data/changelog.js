@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.1.12-preview';
+export const APP_VERSION = '4.1.13-preview';
 
 export const changelog = [
+  {
+    version: '4.1.13-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Auto-help picks the playbook by what the ticket asks</strong> &mdash; the AI now reads every switched-on playbook&rsquo;s &ldquo;When to help&rdquo; and chooses the one that fits (or none). The ticket&rsquo;s category is only a hint, so a ticket filed under the wrong category can still get the right help. Activity shows which playbook it chose and why.' },
+      { type: 'improved', html: '<strong>Auto-help researches when the first search finds nothing</strong> &mdash; if the playbook may search, the AI now looks further (articles and solved tickets) instead of giving up. Every step must still name what it read.' },
+      { type: 'improved', html: '<strong>Partial answers are suggested, clearly marked</strong> &mdash; in approve mode, an answer that left out steps the knowledge doesn&rsquo;t cover is now suggested to the agent with a &ldquo;Partial answer&rdquo; note listing what&rsquo;s missing. It is never sent on its own.' },
+      { type: 'improved', html: '<strong>Articles in the ticket&rsquo;s category come first</strong> &mdash; search still reads every published article, but those in the ticket&rsquo;s category now clearly rank higher, and topics match whatever their capitals (&ldquo;VPN&rdquo; and &ldquo;vpn&rdquo;). The playbook summary now says so: &ldquo;Prefers N articles in its category&rdquo;.' },
+      { type: 'fixed', html: '<strong>Auto-help follow-ups always have an owner</strong> &mdash; when an answer goes out before the ticket is assigned, the agent who sent it owns the follow-up.' },
+    ],
+  },
   {
     version: '4.1.12-preview',
     date: 'September 30, 2026',

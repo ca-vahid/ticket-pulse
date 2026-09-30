@@ -5,7 +5,7 @@ import { playbookSummaryParts } from './knowledgeFormat';
 /**
  * One plain line saying what a playbook does (Knowledge v2, MEGA 09-28 §6.8):
  * "Answers tickets in 7 subcategories · Stays quiet on 6 playbook rules +
- * 6 workspace rules · Can quote 3 articles in its category (12 published):
+ * 6 workspace rules · Prefers 3 articles in its category (searches all 12 published):
  * A, B, C". Built from the server's `summary`; the article titles link to the
  * article through the unsaved-changes guard.
  */

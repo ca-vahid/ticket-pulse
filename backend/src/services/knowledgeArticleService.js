@@ -37,7 +37,8 @@ export const ARTICLE_STATUSES = Object.freeze(['draft', 'published', 'archived']
 export const ARTICLE_SOURCES = Object.freeze(['tp', 'fs_solution', 'verified_ticket']);
 /**
  * Where an article came from, in words (Knowledge v2). Provenance lives in
- * source / sourceMeta, not in the tags: tags are Topics (browsing only).
+ * source / sourceMeta, not in the tags. Tags are Topics: shown for browsing,
+ * and they also count in search (a topic hit weighs like a title hit).
  */
 export const SOURCE_LABELS = Object.freeze({
   drafted: 'Drafted from tickets',
@@ -123,6 +124,8 @@ export function queryTokens(text) {
   }
   return out;
 }
+
+export const CATEGORY_BOOST = Object.freeze({ subcategory: 0.12, category: 0.08 });
 
 /**
  * Fraction of query tokens found as WHOLE words (containsWord: "app" never
@@ -682,7 +685,9 @@ class KnowledgeArticleService {
               { title: { contains: t, mode: 'insensitive' } },
               { bodyText: { contains: t, mode: 'insensitive' } },
             ]),
-            { tags: { hasSome: sqlTokens } },
+            // Topics are stored as typed ("VPN", "Bluebeam"); the tokens are
+            // lower case, and a Postgres array match is exact (30 Sep 2026).
+            { tags: { hasSome: [...new Set(sqlTokens.flatMap((t) => [t, t.toUpperCase(), t.charAt(0).toUpperCase() + t.slice(1)]))] } },
           ],
         },
         orderBy: { updatedAt: 'desc' },
@@ -732,8 +737,11 @@ class KnowledgeArticleService {
         if (!best || score > best.score) best = { score, index, sec, kw, cos };
       });
       let score = best.score;
-      if (subcategoryId && r.subcategoryId === Number(subcategoryId)) score += 0.05;
-      else if (categoryId && r.categoryId === Number(categoryId)) score += 0.03;
+      // Articles in the ticket's own category are preferred (30 Sep 2026:
+      // +0.12 / +0.08, was +0.05 / +0.03, too small to change the order);
+      // every published article can still be found.
+      if (subcategoryId && r.subcategoryId === Number(subcategoryId)) score += CATEGORY_BOOST.subcategory;
+      else if (categoryId && r.categoryId === Number(categoryId)) score += CATEGORY_BOOST.category;
       const stale = isReviewOverdue({ ...r, status: 'published' }, now);
       if (stale) score *= STALE_FACTOR;
       score = Math.min(1, score);

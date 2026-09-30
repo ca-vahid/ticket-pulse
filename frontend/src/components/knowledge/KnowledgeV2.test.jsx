@@ -94,7 +94,7 @@ describe('format helpers', () => {
     expect(playbookSummaryParts(SUMMARY).map((p) => p.text)).toEqual([
       'Answers tickets in 7 subcategories',
       'Stays quiet on 6 playbook rules + 6 workspace rules',
-      'Can quote 2 articles in its category (12 published)',
+      'Prefers 2 articles in its category (searches all 12 published)',
     ]);
     expect(playbookSummaryParts({ subcategoryCount: 0, articles: [], articleTotalPublished: 4, useWords: true }).map((p) => p.text)).toEqual([
       'Answers tickets anywhere in its category', 'only when the words match', 'No article in its category yet — search still reaches all 4 published',
@@ -192,7 +192,7 @@ describe('playbook summary line', () => {
   test('on the list card and in the builder header, with article titles as links', async () => {
     renderAt('/knowledge/playbooks');
     const line = await screen.findByTestId('playbook-summary-3');
-    expect(line).toHaveTextContent('Answers tickets in 7 subcategories · Stays quiet on 6 playbook rules + 6 workspace rules · Can quote 2 articles in its category (12 published): Company Portal installs, Licence errors');
+    expect(line).toHaveTextContent('Answers tickets in 7 subcategories · Stays quiet on 6 playbook rules + 6 workspace rules · Prefers 2 articles in its category (searches all 12 published): Company Portal installs, Licence errors');
     expect(within(line).getByRole('link', { name: 'Company Portal installs' })).toHaveAttribute('href', '/knowledge/articles/12');
     cleanup();
     renderAt('/knowledge/playbooks/3');

@@ -42,7 +42,10 @@ import autoHelpAckMergeService, { mergeAckIntoMail } from './autoHelpAckMergeSer
 export const AUTO_HELP_SOURCE = 'auto_help';
 export const AUTO_HELP_ACTOR = Object.freeze({ name: 'Ticket Pulse (Auto-help)', email: null, role: 'automation' });
 const FALLBACK_TIMEZONE = 'America/Los_Angeles';
-const STAGEABLE_GATES = Object.freeze([GATE.SHADOW_RECORDED, GATE.PLAYBOOK_ONLY]);
+// partial_context joined 30 Sep 2026: a draft that left out steps the
+// knowledge doesn't cover is still suggested to an agent (marked partial) -
+// it was recorded and silently never shown. Never auto-sent.
+const STAGEABLE_GATES = Object.freeze([GATE.SHADOW_RECORDED, GATE.PLAYBOOK_ONLY, GATE.PARTIAL_CONTEXT]);
 const MAX_EDITED_HTML = 60000;
 
 function safeJson(value) {
@@ -255,7 +258,10 @@ class AutoHelpDeliveryService {
       bodyHtml: preview.html,
       bodyText: preview.text || null,
       confidence: confidenceWord(confidence),
-      guardSummary: { autoHelp: true, playbookId: playbook.id, playbookVersion: playbook.version || 1 },
+      guardSummary: {
+        autoHelp: true, playbookId: playbook.id, playbookVersion: playbook.version || 1,
+        ...(gateDecision === GATE.PARTIAL_CONTEXT ? { partial: true } : {}),
+      },
       supersede: false,
     });
     if (!proposal) {
@@ -272,7 +278,9 @@ class AutoHelpDeliveryService {
     await prisma.autoHelpRun.update({ where: { id: run.id }, data });
     await this._activity(ticket.id, 'auto_help_staged', AUTO_HELP_ACTOR, {
       runId: run.id, playbookId: playbook.id, playbookName: playbook.name, confidence,
-      note: `Auto-help suggested an answer (${playbook.name}) — waiting for an agent to send it`,
+      note: gateDecision === GATE.PARTIAL_CONTEXT
+        ? `Auto-help suggested a partial answer (${playbook.name}) — some steps were left out because the knowledge doesn't cover them; check it before sending`
+        : `Auto-help suggested an answer (${playbook.name}) — waiting for an agent to send it`,
     });
     logger.info(`Auto-help staged run ${run.id} on ${ticketDisplayRef(ticket)} as proposal ${proposal.id}`);
     emitAutoHelpEvent('auto_help.staged', ticket.id, { runId: run.id, playbook: playbook.name, mode, confidence: confidence ?? null, proposalId: proposal.id });
@@ -354,6 +362,9 @@ class AutoHelpDeliveryService {
       confidence: run.confidence,
       minConfidence: playbook?.minConfidence ?? null,
       gateDecision: run.gateDecision,
+      // A partial answer (steps left out) says so on the ticket, with what it left out.
+      partial: proposal?.guardSummary?.partial === true,
+      leftOut: (Array.isArray(run.checks?.draftSteps) ? run.checks.draftSteps : []).filter((st) => st && st.supported === false).map((st) => st.text),
       sources: sources.map((s) => ({
         sourceId: s.sourceId, type: s.type, id: s.id, title: s.title, section: s.section || null, ref: s.ref || null,
         url: s.url || null, stale: s.stale === true,
@@ -661,7 +672,9 @@ class AutoHelpDeliveryService {
       onHelp: playbook?.onHelp || 'assign_normally',
       nudgeAt: dates?.nudgeAt ? dates.nudgeAt.toISOString() : null,
       closeAt: dates?.closeAt ? dates.closeAt.toISOString() : null,
-      assignedTechId: assignee?.assignedTechId ?? null,
+      // Unassigned when the answer went out (Auto-help can run before the
+      // assignment settles): the agent who sent it owns the follow-up.
+      assignedTechId: assignee?.assignedTechId ?? (actor?.technicianId ? Number(actor.technicianId) : null),
       playbookVersion: playbook?.version ?? run.playbookVersion ?? null,
       frozenAt: now.toISOString(),
     };

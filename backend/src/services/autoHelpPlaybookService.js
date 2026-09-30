@@ -51,7 +51,9 @@ export const DEFAULT_FOLLOW_UP = Object.freeze({
 });
 export const DEFAULT_DISCLOSURE_TEXT = 'This is an automated first answer from the {{workspace}} team. Reply any time to reach a person.';
 export const DEFAULT_KB_SCOPE = Object.freeze({ mode: 'all', tags: [], includeVerifiedSolutions: true });
-export const DEFAULT_ALLOWED_TOOLS = Object.freeze(['search_knowledge', 'get_article', 'get_ticket_details']);
+// find_similar_resolved_tickets joined the defaults 30 Sep 2026: runs rely on
+// the knowledge (articles + solved tickets), not on the playbook's category.
+export const DEFAULT_ALLOWED_TOOLS = Object.freeze(['search_knowledge', 'get_article', 'get_ticket_details', 'find_similar_resolved_tickets']);
 /**
  * "Always stay quiet when" (26 Sep 2026): the workspace's hard stops, given to
  * the model before every playbook's own list. Same three lines as the SQL
@@ -300,6 +302,42 @@ export function matchPlaybook(ticket, playbooks = []) {
   const fits = (playbooks || []).filter((pb) => explainMatch(pb, ticket).matches);
   fits.sort((a, b) => (Number(b.priority ?? 100) - Number(a.priority ?? 100)) || (a.id - b.id));
   return fits[0] || null;
+}
+
+/**
+ * Knowledge v3 routing (30 Sep 2026): the playbooks an AI may choose from for
+ * this ticket, best first. The ticket's category is a hint, not a gate —
+ * a miscategorised ticket can still reach the playbook that fits it.
+ *   scope 'exact'    category + subcategory in the playbook's scope
+ *   scope 'category' same category, subcategory outside the list
+ *   scope 'other'    any other enabled playbook
+ * Word lists the playbook switched on (Advanced) stay hard rules: a required
+ * word missing or an excluded word present removes the playbook. Within a
+ * scope, higher priority first, then the older playbook. Pure.
+ * @returns {Array<{ playbook, scope }>}
+ */
+export function routeCandidates(ticket, playbooks = []) {
+  const rank = { exact: 0, category: 1, other: 2 };
+  const out = [];
+  for (const row of playbooks || []) {
+    const pb = playbookView(row);
+    if (!pb.enabled) continue;
+    if (pb.match.useWords) {
+      const text = haystack(ticket);
+      const tokens = wordTokens(text);
+      const has = (k) => containsWordVariant(text, k, { tokens });
+      if (pb.match.keywords.length && !pb.match.keywords.some(has)) continue;
+      if (pb.match.excludeKeywords.some(has)) continue;
+    }
+    const sameCategory = pb.categoryId && Number(ticket?.internalCategoryId) === pb.categoryId;
+    const subOk = !pb.subcategoryIds.length || pb.subcategoryIds.includes(Number(ticket?.internalSubcategoryId));
+    const scope = sameCategory && subOk ? 'exact' : sameCategory ? 'category' : 'other';
+    out.push({ playbook: row, scope });
+  }
+  out.sort((a, b) => (rank[a.scope] - rank[b.scope])
+    || (Number(b.playbook.priority ?? 100) - Number(a.playbook.priority ?? 100))
+    || (a.playbook.id - b.playbook.id));
+  return out;
 }
 
 /**
@@ -577,6 +615,14 @@ class AutoHelpPlaybookService {
       .catch((err) => { logger.warn(`Auto-help playbook match failed (ws ${workspaceId}): ${err.message}`); return []; });
     const hit = matchPlaybook(ticket, rows);
     return hit ? playbookView(hit) : null;
+  }
+
+  /** routeCandidates over this workspace's enabled playbooks, as views ({ playbook, scope }). */
+  async candidatesForTicket(workspaceId, ticket) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.autoHelpPlaybook.findMany({ where: { workspaceId: Number(workspaceId), enabled: true } }))
+      .catch((err) => { logger.warn(`Auto-help playbook candidates failed (ws ${workspaceId}): ${err.message}`); return []; });
+    return routeCandidates(ticket, rows).map((c) => ({ playbook: playbookView(c.playbook), scope: c.scope }));
   }
 
   // ---------- settings ----------
