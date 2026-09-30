@@ -8,7 +8,7 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 24 Sep 2026 (sent by hand ~9:30 — 8:45 cron did not fire; Parked + Pending Response shipped; follow-up outcomes)._
+_Last updated: 30 Sep 2026 (holiday — National Day for Truth and Reconciliation, BC stat: all ws runs queued by design; daily cron re-armed after its final firing)._
 
 ## Probe read rules (do not remove)
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
@@ -20,7 +20,16 @@ _Last updated: 24 Sep 2026 (sent by hand ~9:30 — 8:45 cron did not fire; Parke
 - "Idle ticket" claims need a thread-entry check (`occurred_at`), never `updated_at` (TP-1120 lesson).
 - FS-synced thread entries have `author_type` NULL; requester replies = `event_type='customer_reply'`.
 - Queued runs waiting for business hours / holidays are by design; only unexplained queued/running runs are stuck.
+- BC statutory holidays (e.g. Sep 30 Truth & Reconciliation) queue ALL pipeline runs with reason "Holiday: …" — unassigned counts spike BY DESIGN; the next business day's brief uses a 48 h window (72 h after a Monday holiday) and expects a big morning batch.
 - AP (ws2) Monday hill: read age bands, not the raw unassigned count (Sep 11: 127 unassigned, 121 < 2 d, 0 > 7 d).
+
+- NOTES GAP RESOLVED (Sep 29, dev confirmed): the FS double-check rule is RETIRED. App's own gap metric = 0 in every workspace (6-hourly log line "FS notes gap … ws1=0"). The ~385 plateau in my counter was TP's own write-back notes (activity actor "Ticket Pulse") that never return as conversations. Counter from now on: add `AND coalesce(actor_name,'') <> 'Ticket Pulse'` on the activity side → residual ~40 tickets across ws1–4 (old merges / FS-rule replies / FS-deleted notes, unclassified). Flag only if that residual GROWS. Note-based stats are trustworthy again.
+- (history) NOTES GAP Sep 29: plateaued (ws1 385, ws2 488) — standup spot-check of ~60 items found NO FS-note missing in TP; asked dev to confirm the remainder is counting noise → if yes, DROP the FS double-check rule.
+- NOTES GAP status Sep 28: backfill nearly done — ws1 90d gap 388 (from ~2,290), ws2 493, ws3 95, ws4 12; samples #176019/#240410/#241450 all show notes. RELAXED RULE: 90-day note stats are usable again; still FS-spot-check any ticket named individually as 'no note'. Drop entirely when ws1 90d gap < ~50.
+- NOTES GAP (Sep 24, original): TP thread entries are missing FS notes/replies on ~half of FS-born tickets (IT 3,696 incomplete). Any "no action / no note / no update" claim in the brief (per-agent lanes, closure quality) must be spot-checked against FS conversations before it's stated as fact; say "per Ticket Pulse's copy" otherwise. Report: plans/FS_THREAD_SYNC_GAP_REPORT.md. Dev ACCEPTED for Sep 24 night: onFsTicketTransition on both sync paths, pull-on-change (DB-backed queue, debounced), no 60 cap, warn logs, notes-gap metric on an admin endpoint + nightly log line, backfill ws1 90d first (~3–4 h at ~20 FS calls/min, self-pausing), FS-deleted→Deleted fix (#243816), #222020 check. SHIPPED v3.9.83 (PR #452, Sep 24 18:55 PT); backfill started 19:11 PT at ~10 tickets/min. Start gaps: ws1 2,290 (90d) / 3,792 (all), ws2 3,401, ws3 693, ws4 420. ETA: ws1 90d ~23:30 PT Sep 24, ws1 all +2.5 h, ws2 +6 h, ws3/4 +2 h → done ~Fri Sep 25 afternoon. Gap metric: log line every 6 h 'FS notes gap (last 90 days, tickets): ws1=…' and GET /api/sync/fs-thread-gap?days=90|all (admin); kill switch app_settings fs_thread_backfill_enabled=false. Verify #240410 (phase 0) and #176019 (ws1-all phase) show FS notes. NOTE: preheat cursor could read 'caught up' with notes still missing (#241450) — the backfill has its own marker (tickets.fs_thread_pulled_at). #243816 was already marked Deleted 09:25 PT; #222020 closed by the 3.9.72 repair — both resolved. Sep 25 09:20: ws1 1,062 pulled (1,058 with notes — fix works) but ~1.3/min avg vs 10/min planned; #240410/#176019 NOT pulled yet; ws2 3, ws3/4 0. Asked dev about pace/off-hours cap/ordering → ANSWER: the Sep 24 night stall was Vahid's 3-year IT HISTORY IMPORT (13,604 tickets, 20:00–03:10 PT) flooding the low FS queue; 3.9.86 (05:27) made the gate trickle at depth 30–149. Nights (20:00–06:00) + weekends run up to 20/min; ws1 90-day remainder (~1,200) expected to clear ~1–2 h after 20:00 Sep 25; tonight's release widens the night gate + switches the sweep to NEWEST-FIRST. NOTE: the history import explains why ws1 gap_all jumped to ~12.5k (13.6k old tickets added) — expect the 'all time' gap to take days; judge progress on the 90-day number. WATCH: read the gap metric in sanity; report backfill progress; once ws1 gap ≈0, drop the FS spot-check rule. FS API BUDGET IS TIGHT (110/min shared; hit 109/110 in business hours) — any ad-hoc FS API checks from this session must be small and throttled (≤1 call/s), never bulk in business hours.
+
+- RTBT-2026 Finding 1 recs #236272–#236275 + test #236197 were DELETED by Vahid (Sep 29–30) — thread closed.
+- Sep 30 holiday held-for-Thursday IT tickets worth a same-day look: #244717 'Disable or locate computer' (P3, security-ish), #244718 'Tyler Southam sent a message' (P4). Check Thu they were handled. New: #244687 DC baseline remediation (Mo) no first note; KAM-DC2 #244103 quiet since Sep 24.
 
 ## Active threads
 ### (a) Security
@@ -67,8 +76,9 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - ContinuIT LIVE Sat Sep 19 (v3.9.53–55, source 105): dead-webhook issue RESOLVED within a day (0 new dead in 24h by Sep 22, 430 successes) — watch drops to routine; mention only on new dead deliveries.
 
 ### (i) Follow-up email responses (23 Sep)
-- Sep 24 outcome: Andrii DONE (closed #216841/#220915, parked transfers to Oct 5–6). Anton: closed #165792, parked #202791 to Nov 16, but #173857 DarkTrace + #228595 still NO note/park — flagged to Vahid Sep 24 to update from Anton's email or ask at standup. Next check: if still bare Fri, one quiet line only.
+- Sep 24 outcome: Andrii DONE (closed #216841/#220915; transfers were AUTO-parked to Oct 5–6 by the HR reader). Anton: closed #165792, parked #202791 to Nov 16, but #173857 DarkTrace + #228595 still NO note/park — flagged to Vahid Sep 24 to update from Anton's email or ask at standup. Next check: if still bare Fri, one quiet line only.
 - IT resolved 129 vs 49 in on Sep 23 (post-email cleanup day).
+- CLOSURE QUALITY — CORRECTED against FreshService (Sep 24): 89 closed → 68 real note (incl. 5 merged), 4 one-word, 8 old-note-only, 9 no note in either system. The first pass (47 'no note') was WRONG: FS notes on older tickets never reached TP threads (Mo: 20 of 24 had FS notes). READ RULE: never grade notes/closures from TP thread entries alone — check FS conversations (the Fong lesson again). Original wrong numbers for the record: 25 good note, 6 thin, 11 old-note-only, 47 NO note ever; 47 were 30d+ old (23 with no note). Heaviest silent closes: Muhammad 20/25, Sam 9/11. Security items closed silently: #190967 Sentinel↔XDR, #220917 Snaffler findings, #240410 Darktrace tuning. Vahid raising "one line when you close" at the Sep 24 meeting. Track: closure-note rate on future closes; consider making it a follow-up/brief rule.
 - 12 personal follow-up emails went out Sep 23 (/ticket-followups). Anton and Andrii replied to Vahid BY EMAIL, not in the tickets. Vahid's call: give them until Thu morning; if the tickets still show no human note, flag it in the IT brief so Vahid updates them himself (don't nag the person).
 - Anton: #165792 Group Policy Cleanup (closing it) · #173857 DarkTrace (in progress, ETA Oct 31) · #202791 Michèle Ostiguy on leave (nothing until return Nov 16) · #228595 accounting DL external access (waiting on Alexa + Kirsten).
 - Andrii: #216841 + #220915 were reminder tickets (closing both) · #235207 Alyssa Sandeman + #238553 Laura Beamish transfers (nothing until Oct 5).
@@ -77,10 +87,23 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - EXPECTED METRIC SHIFT when Part A ships: 'Waiting on Customer' rows get relabelled "Pending Response" (FS status 6) and start counting in dashboard/queue open counts; FS status 7 / custom 8+ stop syncing as "Open". Read those moves as the fix, not an anomaly. TP pending-response workflows must stay OFF for FS-born tickets (FreshService owns those reminders) — flag it if one is enabled for FS-born.
 
 ### (j) Parked + Pending Response LIVE (v3.9.78 / v3.9.72, Sep 23 eve)
-- 27 IT tickets parked on day one (all until_date). Probe/renderer exclude parked from open/pending/stale/review (parked_now shown faintly). Only until_date used so far — waiting_on / eta unused.
+- 27 IT tickets parked on day one — ALL AUTO by the HR-notice reader (source suggested_hr, parked_by "Ticket Pulse (HR notice)"); NO manual parks yet. Sep 24 briefs wrongly credited the team/Andrii — corrected in the parked list email. Open question for Vahid: departures wake ON the last day (Kenneth Lockwood Sep 25) — maybe wake 1–2 days before. Probe/renderer exclude parked from open/pending/stale/review (parked_now shown faintly). Only until_date used so far — waiting_on / eta unused.
 - 'Waiting on Customer' label gone → "Pending Response" (IT 1, ws2 2). TP pending-response workflows stay OFF for FS-born.
 - NEW WATCH: Sentinel alert intake (v3.9.79) — new machine-alert source into IT; watch volume, point alert correlation at it.
 - NEW: #243879 Mac mail blocked by new IT policies (3 bounces, Soheil) — likely legacy-auth/ROPC side effect; + #243921 MS Authenticator issues same day.
+
+### (l) Infra alert intake — Sep 29: every open [Infra] ticket has an owner note; HV40 RAID alert CLOSED; HV41 updated by Mehdi Sep 29; TOR-HV05 (#244279, Anton) RE-OPENED after Sat close (Sentinel reopen window) — ask whether truly fixed; KAM-DC2 (#244103, Mo) no update since Sep 24. Mehdi's HV40 DIMM note: all 24 modules OK now.
+### (l-sep28) Sep 28: HV40 now ALSO has a storage/RAID fault (#244288, Mehdi) next to HV41 HW fault (#244144, Mehdi) — framed as a cluster-capacity question. Closed over weekend: CAL-DC1 (#244292), TOR-HV05 (#244279), CAL-HV02 low disk (#244297). Open: KAM-DC2 AMA + VAN-HULK agent + BGC32000 expired (Mo), DTSCI11 (Mehdi).
+### (l-old) (new Sep 24–25, source 106 "[Infra] …")
+- First night: BGC-CAL-DC1 offline (Arc disconnected), BGC-KAM-DC2 AMA not reporting, BGC-VAN-HV41 HARDWARE FAULT (sits beside HV40 whose DIMM ticket #230045 is open since Jul — cluster health question), BGC-VAN-DTSCI11 offline, BGC32000 agent expired 45d (retired machine?), BGC-CAL-HV03 AMA. Owners asked for Sep 25. Consider alert-correlation grouping for agent-only alerts.
+
+### (m) Parked usage (Sep 24–25)
+- Manual parks began: Anton 1, Andrii 2, Marcus 3 (real reasons). HR lead-time wake shipped (departures/transfers wake days BEFORE the date — answers Vahid's Sep 24 question). 21 parked in IT on Sep 25. Anton's #173857/#228595: mentioned for the LAST time Sep 28 — retired from the brief (Vahid's to finish if he wants).
+
+### (k) TO FIX LATER (Vahid, Sep 24)
+- FS notes on OLDER tickets don't reach TP threads (thread hydration at resolution isn't covering them): 47 of 64 flagged closes had FS notes TP never saw. Raise with the dev team.
+- FS deletions don't sync back:
+- #243816 "Keeping our IT tickets up to date" (Vahid) was DELETED in FreshService but still shows Open + overdue in Ticket Pulse's Tickets page (Overdue + assignee filter showed 4 instead of 3). Same family as the #222020 closed-in-FS drift and the known FS record-deletion gap (memory ap-category-reorg). Ask the dev team: detect FS 404/deleted on reconcile and mark the TP row Deleted. Until fixed, brief counts must not trust a single oddball overdue on a freshly-touched ticket.
 
 ### (h) Platform reliability
 - Drain thread RETIRED Sep 21: first Monday 8 AM drain under the v3.9.34 concurrency bound ran 20/20 clean. Mention only on relapse.
@@ -95,6 +118,7 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - Per-workspace fast-sync cadence exists (Settings → Workspaces); all five workspaces still on 1 minute.
 
 ## Weekly-only carry-overs
+- Sep 21–25 memo: IT 385 resolved / 291 new; team overdue fell from dozens to 6 (none >2 — Vahid 2; Mo 10→0, Sam 5→1, Gaby 3→0) after the Sep 23 follow-ups; closure review (FS-checked) 68/89 real notes; notes-gap discovery + fix; Parked idea→daily use in 3 days; Sentinel/[Infra] intake found CAL-DC1/KAM-DC2/VAN-HV41. Per-agent weight now: open work Mehdi 17 / Mo 16 / Anton 13; pending piles Gaby 19 / Marcus 17; Andrii mostly parked. Recommended a 2nd /ticket-followups run ~Oct 7 (fortnightly), not sooner. Standing risk now includes the HV40+HV41 cluster (two unhealthy hosts).
 - Sep 14–18 memo highlights (context for next week): 70 releases (v3.8.81→3.9.43); AP board week 551 in/551 out; two failed runs all week (both auto-recovered); "excellent at fires, stuck on projects" pattern named re pentest HIGHs + RTBT; no housekeeping ticket opened (all alert streams owned — bar is unowned+unswept); v3.9.42 = readonly observers actually see Dashboard/Analytics (Bryan Baker role now delivers).
 - Standing default action: promised ticket lists — confirm prod state; if unswept AND unowned, open consolidated owned housekeeping tickets via `ticketService` (TP-1120/TP-1294 pattern; `backend/scripts/weekly-0911-housekeeping.mjs`: DATABASE_URL=prod before the service import, requester ticketpulse@, `suppressRequesterAck: true`). Document the reasoning if not opened.
 - Standing risk line: Azure Backup leg of TP-1120 + TP-1294 until both stop alerting or carry accepted-risk notes.
