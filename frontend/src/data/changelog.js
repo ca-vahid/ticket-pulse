@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.22-preview';
+export const APP_VERSION = '4.1.23-preview';
 
 export const changelog = [
+  {
+    version: '4.1.23-preview',
+    date: 'September 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>GPT-6.1 Sol is available</strong> &mdash; OpenAI&rsquo;s newest model can be picked under Settings &rarr; AI &amp; Routing for any AI task. It costs the same as GPT-6 Sol with cheaper repeated input, and OpenAI reports fewer factual errors. Nothing switches to it automatically: each task moves only after it has been compared on real tickets. Auto-help stays on Claude Sonnet 5.5.' },
+    ],
+  },
   {
     version: '4.1.22-preview',
     date: 'September 30, 2026',

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import config from '../../config/index.js';
-import { normalizeAiModel } from '../../utils/aiProviders.js';
+import { normalizeAiModel, openAiReasoningFor } from '../../utils/aiProviders.js';
 import {
   buildAnthropicMessageFromOpenAiResponse,
   convertAnthropicMessagesToOpenAiInput,
@@ -58,7 +58,7 @@ class OpenAiProvider {
         verbosity: 'medium',
         ...(extra.text || {}),
       },
-      reasoning: extra.reasoning || { effort: 'none' },
+      reasoning: openAiReasoningFor(selectedModel, extra.reasoning || { effort: 'none' }),
       max_output_tokens: maxTokens,
       ...(temperature === null ? {} : { temperature }),
     }, signal ? { signal } : undefined);
@@ -96,7 +96,7 @@ class OpenAiProvider {
       tools: convertedTools.tools,
       max_output_tokens: maxTokens,
       include: ['reasoning.encrypted_content'],
-      reasoning: extra.reasoning || { effort: 'low' },
+      reasoning: openAiReasoningFor(selectedModel, extra.reasoning || { effort: 'low' }),
       text: extra.text || { verbosity: 'medium' },
     }, signal ? { signal } : undefined);
 
