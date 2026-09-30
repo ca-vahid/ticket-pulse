@@ -40,6 +40,23 @@ export const SONNET_4_6_MODEL = 'claude-sonnet-4-6';
 // replacing GPT-5.6 Sol ($5/$30).
 export const DEFAULT_OPENAI_MODEL = 'gpt-6-sol';
 export const OPENAI_ECONOMY_MODEL = 'gpt-6-luna';
+// GPT-6.1 Sol (29 Sep 2026): same $2/$10 as GPT-6 Sol, cached reads $0.10
+// (vs $0.20), fewer factual errors. Selectable; replaces GPT-6 Sol per
+// operation only after a replay against real tickets.
+export const GPT_6_1_SOL_MODEL = 'gpt-6.1-sol';
+
+/**
+ * Per-model request rules for OpenAI (30 Sep 2026): GPT-6.1 rejects
+ * reasoning.effort 'none' (400 unsupported_value; supports low … max), which
+ * our JSON calls ask for — it runs at 'low' instead. Other models unchanged.
+ */
+const OPENAI_MIN_REASONING = [['gpt-6.1', 'low']];
+export function openAiReasoningFor(model, requested) {
+  const effort = requested?.effort;
+  const rule = OPENAI_MIN_REASONING.find(([prefix]) => String(model || '').toLowerCase().startsWith(prefix));
+  if (!rule || (effort !== 'none' && effort !== 'minimal')) return requested;
+  return { ...requested, effort: rule[1] };
+}
 export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
 export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
 
@@ -137,6 +154,18 @@ export const MODEL_METADATA = [
     // Image input verified live 23 Sep 2026 (Responses `input_image`).
     supportsVision: true,
     costNotes: 'Default OpenAI model: roughly Sonnet-class on business workflows at about two-thirds the price ($2/M in, $10/M out, cached reads 90% off, no cache-write fee). Replaces GPT-5.6 Sol.',
+  },
+  {
+    provider: AI_PROVIDER_OPENAI,
+    model: GPT_6_1_SOL_MODEL,
+    label: 'GPT-6.1 Sol',
+    operations: AI_OPERATIONS,
+    supportsStreaming: false,
+    supportsTools: true,
+    supportsJson: true,
+    supportsThinking: true,
+    supportsVision: true,
+    costNotes: 'Successor to GPT-6 Sol at the same price ($2/M in, $10/M out) with cached reads at $0.10 and fewer factual errors (OpenAI: 7.7% vs 11.4%). Behind Sonnet 5.5 on tool-heavy agent work.',
   },
   {
     provider: AI_PROVIDER_OPENAI,

@@ -91,8 +91,10 @@ describe('ai provider utilities', () => {
     });
     // Approved set (23 Sep 2026): GPT-6 Sol (default), GPT-6 Luna (economy),
     // and GPT-5.6 Luna kept for the one ws2 fallback that still names it.
+    // 30 Sep 2026: GPT-6.1 Sol added (selectable, not the default).
     expect(openAiModels).toEqual([
       expect.objectContaining({ model: 'gpt-6-sol', label: 'GPT-6 Sol' }),
+      expect.objectContaining({ model: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' }),
       expect.objectContaining({ model: 'gpt-6-luna', label: 'GPT-6 Luna (Economy)' }),
       expect.objectContaining({ model: 'gpt-5.6-luna', label: expect.stringContaining('legacy') }),
     ]);

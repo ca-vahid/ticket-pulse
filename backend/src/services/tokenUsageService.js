@@ -23,6 +23,8 @@ export const MODEL_PRICING_USD_PER_MTOK = [
   // GPT-6 (22 Sep 2026): no cache-write fee; cached reads 90% off.
   ['gpt-6-luna', 0.10, 0.50, 0, 0.01],
   ['gpt-6-sol', 2, 10, 0, 0.20],
+  // GPT-6.1 Sol (29 Sep 2026): same list price, cache write $2.50, read $0.10.
+  ['gpt-6.1-sol', 2, 10, 2.5, 0.10],
   ['gpt-5.6-luna', 0.20, 1.20, 0, 0.02],
   ['gpt-5.6-terra', 2, 12, 0, 0.20],
   ['gpt-5.6-sol', 5, 30, 0, 0.50],
