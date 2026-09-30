@@ -26,17 +26,35 @@ beforeEach(() => {
 });
 
 describe('proposal store', () => {
-  test('supersede:false with a draft already waiting → nothing created, nothing dismissed', async () => {
-    prismaMock.ticketProposedReply.count.mockResolvedValue(1);
+  test('supersede:false with another Auto-help answer waiting → nothing created, nothing dismissed', async () => {
+    prismaMock.ticketProposedReply.findMany.mockResolvedValue([{ id: 7, source: 'auto_help', status: 'proposed', bodyText: 'x' }]);
     const out = await proposals.create({ workspaceId: 1, ticketId: 5, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>x</p>', supersede: false });
     expect(out).toBeNull();
     expect(prismaMock.ticketProposedReply.create).not.toHaveBeenCalled();
     expect(prismaMock.ticketProposedReply.updateMany).not.toHaveBeenCalled();
-    expect(prismaMock.ticketProposedReply.count.mock.calls[0][0].where).toEqual({ ticketId: 5, status: { in: ['proposed', 'sending', 'needs_check'] } });
+    expect(prismaMock.ticketProposedReply.findMany.mock.calls[0][0].where).toEqual({ ticketId: 5, status: { in: ['proposed', 'sending', 'needs_check'] } });
+  });
+
+  test('supersede:false with a workflow draft mid-send → still waits', async () => {
+    prismaMock.ticketProposedReply.findMany.mockResolvedValue([{ id: 7, source: 'workflow', status: 'sending', bodyText: 'x' }]);
+    const out = await proposals.create({ workspaceId: 1, ticketId: 5, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>x</p>', supersede: false });
+    expect(out).toBeNull();
+    expect(prismaMock.ticketProposedReply.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('supersede:false with a workflow AI draft waiting → the draft is set aside and its text rides on the answer', async () => {
+    prismaMock.ticketProposedReply.findMany.mockResolvedValue([{ id: 7, source: 'workflow', status: 'proposed', bodyText: null, bodyHtml: '<p>Thanks, we got your ticket.</p>' }]);
+    const out = await proposals.create({ workspaceId: 1, ticketId: 5, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>x</p>', supersede: false });
+    expect(out).toMatchObject({ id: 88, source: 'auto_help' });
+    expect(prismaMock.ticketProposedReply.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: [7] }, status: 'proposed' },
+      data: expect.objectContaining({ status: 'dismissed', decidedBy: 'superseded_by_auto_help' }),
+    }));
+    expect(prismaMock.ticketProposedReply.create.mock.calls[0][0].data.guardSummary.workflowAck).toEqual({ text: 'Thanks, we got your ticket.', fromProposalId: 7 });
   });
 
   test('supersede:false with no draft → created with the run link', async () => {
-    prismaMock.ticketProposedReply.count.mockResolvedValue(0);
+    prismaMock.ticketProposedReply.findMany.mockResolvedValue([]);
     const out = await proposals.create({ workspaceId: 1, ticketId: 5, source: 'auto_help', autoHelpRunId: 901, bodyHtml: '<p>x</p>', supersede: false });
     expect(out).toMatchObject({ id: 88, source: 'auto_help', autoHelpRunId: 901 });
   });

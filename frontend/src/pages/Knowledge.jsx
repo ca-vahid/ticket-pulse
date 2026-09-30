@@ -11,6 +11,7 @@ import LightTabBar from '../components/common/LightTabBar';
 import ArticlesPanel from '../components/knowledge/ArticlesPanel';
 import PlaybooksPanel from '../components/knowledge/PlaybooksPanel';
 import WaitingPanel from '../components/knowledge/WaitingPanel';
+import ApprovalsPanel from '../components/knowledge/ApprovalsPanel';
 import ActivityPanel from '../components/knowledge/ActivityPanel';
 import GapsPanel from '../components/knowledge/GapsPanel';
 import { ConfirmDialog, KnowledgeGuardContext, Loading } from '../components/knowledge/knowledgeUi';
@@ -39,6 +40,8 @@ const TABS = [
   { id: 'gaps', label: 'Gaps', icon: knowledgePictogram('gaps') },
   { id: 'playbooks', label: 'Playbooks', icon: knowledgePictogram('playbooks') },
   { id: 'waiting', label: 'Waiting', icon: knowledgePictogram('followup') },
+  // Reviewers and admins only (30 Sep 2026): every Auto-help answer waiting to be sent.
+  { id: 'approvals', label: 'Approvals', icon: knowledgePictogram('approve') },
   { id: 'activity', label: 'Activity', icon: knowledgePictogram('autohelp') },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ];
@@ -85,6 +88,7 @@ export default function Knowledge() {
   if (!tab) return <Navigate to="/knowledge/articles" replace />;
   if (!TABS.some((t) => t.id === tab)) return <Navigate to="/knowledge/articles" replace />;
   const canManage = settings?.canManage === true;
+  const tabs = TABS.filter((t) => t.id !== 'approvals' || settings?.canApprove === true);
   // A tab click also closes an open article / playbook / run on the same tab.
   const selectTab = (id) => { if (id !== tab || itemId) leave(`/knowledge/${id}`); };
 
@@ -93,7 +97,7 @@ export default function Knowledge() {
       <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
         <AppHeader activePage="knowledge" />
         <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-          <LightTabBar tabs={TABS} activeId={tab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
+          <LightTabBar tabs={tabs} activeId={tab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
             <div ref={setActionsNode} className="flex flex-wrap items-center justify-end gap-2" data-testid="knowledge-tab-actions" />
           </LightTabBar>
 
@@ -116,6 +120,7 @@ export default function Knowledge() {
                 {tab === 'gaps' && <GapsPanel canManage={canManage} canRefresh={canManage || settings?.canReview === true} />}
                 {tab === 'playbooks' && <PlaybooksPanel itemId={itemId} categories={categories} canManage={canManage} tools={settings?.tools || []} defaults={settings?.defaults || null} />}
                 {tab === 'waiting' && <WaitingPanel />}
+                {tab === 'approvals' && <ApprovalsPanel />}
                 {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} />}
                 {tab === 'settings' && <KnowledgeSettingsPanel settings={settings} onChange={setSettings} />}
               </section>

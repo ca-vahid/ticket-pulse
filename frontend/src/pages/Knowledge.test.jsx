@@ -90,6 +90,7 @@ const api = {
   ] })),
   playbookReadiness: vi.fn(() => Promise.resolve({ success: true, data: { met: false, autoModeAllowed: false, criteria: [{ key: 'reviewed', label: 'At least 30 reviewed shadow drafts', value: 12, target: 30, n: 12, met: false }] } })),
   waiting: vi.fn(() => Promise.resolve({ success: true, data: [] })),
+  approvals: vi.fn(() => Promise.resolve({ success: true, data: [] })),
   updateSettings: vi.fn((patch) => Promise.resolve({ success: true, data: patch })),
 };
 // Getter: vi.mock is hoisted above `api`, so resolve it lazily.
@@ -141,6 +142,16 @@ describe('Knowledge page', () => {
     // 26 Sep 2026 (Vahid): no "Knowledge — Answers we can stand behind…" header, no settings above the tabs.
     expect(screen.queryByText(/Answers we can stand behind/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('knowledge-settings')).not.toBeInTheDocument();
+  });
+
+  test('reviewers and admins get an Approvals tab (30 Sep 2026); it lists answers waiting to be sent', async () => {
+    api.getSettings.mockResolvedValueOnce({ success: true, data: { ...SETTINGS, canApprove: true } });
+    renderAt('/knowledge/approvals');
+    const tabs = await screen.findAllByRole('tab');
+    await waitFor(() => expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toContain('Approvals'));
+    expect(tabs.length).toBeGreaterThan(0);
+    expect(await screen.findByText('Nothing waiting')).toBeInTheDocument();
+    expect(api.approvals).toHaveBeenCalled();
   });
 
   test('the Settings tab holds the Auto-help switch and the automated-answer line with a live preview', async () => {

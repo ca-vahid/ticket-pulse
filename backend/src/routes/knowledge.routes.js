@@ -66,6 +66,25 @@ function requireKnowledgeReviewer(req, _res, next) {
     .catch(next);
 }
 
+/** Approvals queue (30 Sep 2026): admins and reviewers (the roles that approve AI suggestions). */
+async function isAutoHelpApprover(user, workspaceId) {
+  if (user?.role === 'admin') return true;
+  if (!user?.email || !workspaceId) return false;
+  const access = await Promise.resolve()
+    .then(() => prisma.workspaceAccess.findUnique({
+      where: { email_workspaceId: { email: String(user.email).toLowerCase(), workspaceId: Number(workspaceId) } },
+      select: { role: true },
+    }))
+    .catch(() => null);
+  return ['admin', 'reviewer'].includes(access?.role);
+}
+
+function requireAutoHelpApprover(req, _res, next) {
+  isAutoHelpApprover(sessionUser(req), req.workspaceId)
+    .then((ok) => (ok ? next() : next(new AuthorizationError('Only reviewers and admins can open the Auto-help approvals queue', 'auto_help_not_approver'))))
+    .catch(next);
+}
+
 const actorOf = (req) => {
   const u = sessionUser(req);
   return { email: u?.email || null, name: u?.name || null };
@@ -82,10 +101,11 @@ async function disclosurePreviewFor(workspaceId, settings) {
 }
 
 router.get('/settings', asyncHandler(async (req, res) => {
-  const [settings, canManage, canReview] = await Promise.all([
+  const [settings, canManage, canReview, canApprove] = await Promise.all([
     autoHelpPlaybookService.getSettings(req.workspaceId),
     canManageKnowledge(sessionUser(req), req.workspaceId),
     knowledgeCapability(sessionUser(req), req.workspaceId, 'review'),
+    isAutoHelpApprover(sessionUser(req), req.workspaceId),
   ]);
   const [preview, budget] = await Promise.all([
     disclosurePreviewFor(req.workspaceId, settings),
@@ -98,6 +118,7 @@ router.get('/settings', asyncHandler(async (req, res) => {
       ...preview,
       canManage,
       canReview,
+      canApprove,
       // P1: approve needs the workspace switch; auto is locked by the build.
       modes: AUTO_HELP_MODES,
       modeLocked: !settings.approveModeEnabled,
@@ -312,6 +333,12 @@ router.get('/runs-summary', asyncHandler(async (req, res) => {
 router.post('/runs/:id/review', requireKnowledgeReviewer, asyncHandler(async (req, res) => {
   const { verdict, note } = req.body || {};
   res.json({ success: true, data: await autoHelpRunner.review(req.workspaceId, req.params.id, { verdict, note }, actorOf(req)) });
+}));
+
+/** Every Auto-help answer waiting for a person (Knowledge → Approvals, 30 Sep 2026). */
+router.get('/approvals', requireAutoHelpApprover, asyncHandler(async (req, res) => {
+  const { default: autoHelpDeliveryService } = await import('../services/autoHelpDeliveryService.js');
+  res.json({ success: true, data: await autoHelpDeliveryService.listWaiting(req.workspaceId) });
 }));
 
 /** "Send to me": e-mail yourself exactly what the requester would get (30 Sep 2026). */
