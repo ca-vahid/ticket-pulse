@@ -16,7 +16,10 @@ import logger from '../utils/logger.js';
 
 const attachmentUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_ATTACHMENT_BYTES, files: 5 },
+  // fieldSize: the reply/note text may carry pasted pictures inline; the
+  // service lifts them into attachments (30 Sep 2026), so let them arrive
+  // (multer's default 1 MB refused them first).
+  limits: { fileSize: MAX_ATTACHMENT_BYTES, files: 5, fieldSize: 8 * 1024 * 1024 },
 });
 
 /**

@@ -53,7 +53,9 @@ app.use(
 
 // Body parsing middleware. Branding settings carry uploaded images as data URLs (logo <= ~512 KB
 // plus an optional feedback-page background <= ~700 KB in one PUT), so allow up to 3 MB.
-app.use(express.json({ limit: '3mb' }));
+// 8 MB: a reply or note may carry pasted pictures inline until ticketService
+// lifts them into attachments (30 Sep 2026; was 3 MB).
+app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '3mb' }));
 
 // Session configuration with PostgreSQL store
