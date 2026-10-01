@@ -23,6 +23,7 @@ import sys
 from urllib.parse import urlencode
 
 BASE_TP = 'https://ticketpulse.bgcsaas.com/tickets'
+WS_ID = 1  # IT; ?ws= makes links open in this workspace whatever the browser last used (v4.1.28)
 BASE_FS = 'https://it.bgcengineering.ca/a/tickets/'
 BLUE, GREY, RED, TRACK = '#3b82f6', '#cbd5e1', '#ef4444', '#f1f5f9'
 INK, SUB, FAINT, LINE = '#0f172a', '#475569', '#94a3b8', '#e2e8f0'
@@ -34,7 +35,7 @@ LANE_RANK = {'urgent_no_action': 0, 'overdue': 1, 'stale_pending': 2}
 
 
 def tp_link(**q):
-    return f'{BASE_TP}?{urlencode(q)}'
+    return f'{BASE_TP}?{urlencode({**q, "ws": WS_ID})}'
 
 
 def person_links(tid, since):
@@ -47,7 +48,7 @@ def person_links(tid, since):
 
 def ticket_url(i):
     if i.get('origin') == 'ticketpulse':
-        return f"{BASE_TP}/{i['tp_id']}"
+        return f"{BASE_TP}/{i['tp_id']}?ws={WS_ID}"
     return f"{BASE_FS}{i['fs']}"
 
 

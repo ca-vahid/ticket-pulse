@@ -33,6 +33,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TP = 'https://ticketpulse.bgcsaas.com/tickets'
+WS = 'ws=1'  # IT; links open in this workspace whatever the browser last used (v4.1.28)
 PRI = {4: ('Urgent', '#dc2626'), 3: ('High', '#d97706'), 2: ('Medium', '#64748b'), 1: ('Low', '#94a3b8')}
 OVERDUE_MIN, STALE_DAYS, URGENT_WINDOW_DAYS, SHOW_EACH = 3, 30, 7, 4
 TEST = re.compile(r'^\s*(QA TEST|\[SIMORGH TEST)', re.I)
@@ -65,6 +66,10 @@ def classify(data, exclude):
     people = {}
     for r in data['tickets']:
         if TEST.search(r['subject'] or '') or str(r['fs']) in exclude:
+            continue
+        # Parked tickets wait on purpose until their date (the probe already
+        # leaves them out; this guards older probe output).
+        if r.get('parked_until'):
             continue
         t = techs.get(r['agent'])
         if not t or (t['email'] or '').lower() == sender:
@@ -126,7 +131,7 @@ def row(r, asks):
     ask = asks.get(str(r['fs'])) or default_ask(r)
     return (f'<tr><td style="padding:6px 10px 6px 0;vertical-align:top;font-size:13px;color:{col};font-weight:700;white-space:nowrap;">{lbl}</td>'
             f'<td style="padding:6px 0;vertical-align:top;font-size:13.5px;color:#1f2937;line-height:1.45;">'
-            f'<a href="{TP}/{r["tp_id"]}" style="color:#1d4ed8;text-decoration:none;">#{r["fs"]}</a> {r["subject"]}'
+            f'<a href="{TP}/{r["tp_id"]}?{WS}" style="color:#1d4ed8;text-decoration:none;">#{r["fs"]}</a> {r["subject"]}'
             f'<br><span style="color:#6b7280;font-size:12.5px;">{what}. {ask}</span></td></tr>')
 
 
@@ -160,10 +165,10 @@ def cmd_render(data, exclude, openers, outdir):
         body = (f'<p style="margin:0 0 12px;">Hi {first},</p>'
                 f'<p style="margin:0 0 12px;">Following up on my email to the team, here&rsquo;s your own breakdown, so it&rsquo;s easier to see where to start.</p>'
                 f'<p style="margin:0 0 4px;">{opener}</p>'
-                + section('Urgent or high priority, due this week, no update yet', p['un'], asks, f'{TP}?assignee={tid}&amp;segment=open', 'urgent')
-                + section('Past their due date', p['od'], asks, f'{TP}?assignee={tid}&amp;segment=overdue', 'past due')
+                + section('Urgent or high priority, due this week, no update yet', p['un'], asks, f'{TP}?assignee={tid}&amp;segment=open&amp;{WS}', 'urgent')
+                + section('Past their due date', p['od'], asks, f'{TP}?assignee={tid}&amp;segment=overdue&amp;{WS}', 'past due')
                 + section(f'Pending with no update for over a month', p['st'], asks,
-                          f'{TP}?assignee={tid}&amp;status=Pending&amp;sort=createdAt&amp;dir=asc', 'pending')
+                          f'{TP}?assignee={tid}&amp;status=Pending&amp;sort=createdAt&amp;dir=asc&amp;{WS}', 'pending')
                 + '<p style="margin:16px 0 12px;">Could you go through these before the next standup? A short note on each one '
                   '(what you&rsquo;re waiting on, or a new date) is enough, and please close anything that&rsquo;s already done. '
                   'If something is stuck or needs me, just tell me and I&rsquo;ll help.</p>'

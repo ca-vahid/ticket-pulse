@@ -8,7 +8,7 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 30 Sep 2026 (holiday — National Day for Truth and Reconciliation, BC stat: all ws runs queued by design; daily cron re-armed after its final firing)._
+_Last updated: 1 Oct 2026 (Thu standup, 48 h window after the Sep 30 holiday; holiday drain clean — IT all assigned, AP 155 runs to pending_review by design, AP 257 unassigned; daily cron live to Wed Oct 7, weekly fires Fri Oct 2 14:02)._
 
 ## Probe read rules (do not remove)
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
@@ -37,10 +37,11 @@ _Last updated: 30 Sep 2026 (holiday — National Day for Truth and Reconciliatio
 - RTBT-2026 burn-down flat at 11 open + 1 pending since Aug 28 (Mehdi 7, Muhammad 3) — cyber load concentrated on three people; who-takes-what ask stands.
 - CLEARED Sep 14 (mention only on relapse): #242218 CRITICAL defense-evasion (closed same-day, Anton), #241869 Darktrace 100-score (closed, Anton), #242225 suspicious-CAPTCHA report (same-day).
 
-### (b) Hedberg BEC campaign — NOW 15 INSTANCES
+### (b) Hedberg BEC campaign — NOW 16 INSTANCES
+- Instance #16 = #244809 "FWD: CONFIDENTIAL: Initial Retainer Billing – Executive Search Engagement 'Steve Hedberg'" (Sep 30 12:05 PT, ws2), from christina@tcgglobal-usa.com ("Christina Graham") — NEW domain, 6th in the tcg-global lookalike family; zero-width characters between letters (same trick as #8). Open + UNASSIGNED over the holiday. Flagged Oct 1: spam-close + block domain; transport-rule argument (persona + external sender) restated. Exit when spam-closed and domain blocked.
 - Instance #15 = #242789 "Outstanding Fee – Invoice 80044710620" (Sep 16, ws2), sender m@emsgdirect.com — one of the four KNOWN fake "Steve Hedberg" requester records from the PDF. Spam-marked SAME-DAY (vs 5 days for #14). Two lessons: vocabulary drifted again ("outstanding fee"), and the actor REUSES old infrastructure — the block list has real teeth.
 - FOLLOW-THROUGH still needs owners (ask weekly until landed): transport rule, tenant blocks (7 domains + 2 Gmails + the 4 fake senders incl. m@emsgdirect.com), consolidated incident record, AP brief-in, CAFC report. #241544 spam-closed Sep 14.
-- Briefing PDF: `reports/Hedberg BEC Campaign - Cyber Ops Briefing (2026-09-11).pdf` (14 instances; #15 above is new). Watch for #16.
+- Briefing PDF: `reports/Hedberg BEC Campaign - Cyber Ops Briefing (2026-09-11).pdf` (14 instances; #15 above is new). Watch for #17.
 - FALSE-POSITIVE GUARD: #241803 is a legitimate internal Stornoway-Renard retainer request — any mail/noise rule must key persona + external sender, never bare payment vocabulary. #241803 is the standing test case a rule must NOT catch.
 
 ### (c) Storage
@@ -100,6 +101,11 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (m) Parked usage (Sep 24–25)
 - Manual parks began: Anton 1, Andrii 2, Marcus 3 (real reasons). HR lead-time wake shipped (departures/transfers wake days BEFORE the date — answers Vahid's Sep 24 question). 21 parked in IT on Sep 25. Anton's #173857/#228595: mentioned for the LAST time Sep 28 — retired from the brief (Vahid's to finish if he wants).
 
+### (n) Stolen laptop + holiday-hold gap (Oct 1)
+- #244718 "Urgent – stolen laptop" (Urgent) + #244717 "Disable or locate computer" = same event, Tyler Southam's laptop, reported Tue Sep 29 ~20:00–21:00 PT. Held as after-hours then holiday ~37 h; auto-assigned to Mo Oct 1 morning, no human action at brief time. Asked: account disabled, device locked/wiped (Intune, BitLocker key), merge the pair.
+- Product recommendation raised in brief: holiday/after-hours queues should pass Urgent or security-worded tickets to on-call. Not yet sent to dev thread — offer it. Exit when tickets actioned AND product decision taken.
+### (o) AD replication alert storm (Oct 1) — load concentrated on Mo
+- From Sep 30 ~15:45 PT: #244831/#244832 (topology/DNS FDR-DC1, OTT-DC1), #244835 #244845 #244846 #244847 #244855 (integrity errors, Urgent: VAN-DC1/DC2, OTT-DC1, HFX-DC2, SA-DC2), #244933 (VAN-DC1 replication failing, Oct 1 08:30). All Mo, no notes. Coincides with Mo's #244687 "DC baseline remediation" (no note). Asked at standup: remediation side-effect or real fault; group into one incident; second pair of hands for Mo. KAM-DC2 (#244103) may be part of it. Exit when notes/closures land.
 ### (k) TO FIX LATER (Vahid, Sep 24)
 - FS notes on OLDER tickets don't reach TP threads (thread hydration at resolution isn't covering them): 47 of 64 flagged closes had FS notes TP never saw. Raise with the dev team.
 - FS deletions don't sync back:
