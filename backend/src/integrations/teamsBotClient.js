@@ -190,9 +190,31 @@ export async function installForUser(aadObjectId) {
 }
 
 /** A line in the user's Teams bell list; the app must be installed for them. */
-export async function sendActivityFeed(aadObjectId, { title, preview, webUrl }) {
+const installationCache = new Map(); // aadObjectId -> installedApps id
+
+/** The id of the Ticket Pulse app installation for a user (null when not installed). */
+async function userInstallationId(aadObjectId) {
+  if (installationCache.has(aadObjectId)) return installationCache.get(aadObjectId);
+  const { appId } = teamsConfig();
+  const res = await graph('get', `/users/${encodeURIComponent(aadObjectId)}/teamwork/installedApps?$expand=teamsApp&$filter=teamsApp/externalId eq '${appId}'`);
+  const id = res.value?.[0]?.id || null;
+  if (id) installationCache.set(aadObjectId, id);
+  return id;
+}
+
+/**
+ * A line in the user's Teams bell list; the app must be installed for them.
+ * The topic is the app installation (source 'entityUrl') — clicking the bell
+ * opens the Ticket Pulse chat, where the card with the ticket link sits.
+ * A 'text' topic would need a teams.microsoft.com deep link as webUrl; Graph
+ * refuses our own site ("Weburl must start with a valid Microsoft Teams
+ * domain", every bell failed on prod 1 Oct 2026).
+ */
+export async function sendActivityFeed(aadObjectId, { title, preview }) {
+  const installationId = await userInstallationId(aadObjectId);
+  if (!installationId) throw new Error('Ticket Pulse app is not installed for this user');
   await graph('post', `/users/${encodeURIComponent(aadObjectId)}/teamwork/sendActivityNotification`, {
-    topic: { source: 'text', value: 'Ticket Pulse', webUrl },
+    topic: { source: 'entityUrl', value: `https://graph.microsoft.com/v1.0/users/${aadObjectId}/teamwork/installedApps/${installationId}` },
     activityType: 'ticketAlert',
     previewText: { content: String(preview || title || '').slice(0, 150) },
     templateParameters: [{ name: 'title', value: String(title || '').slice(0, 150) }],
