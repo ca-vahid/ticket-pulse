@@ -104,7 +104,7 @@ describe('resolveRequesterHint', () => {
     ]);
     const out = await resolveRequesterHint(1, 'simon dickinson');
     expect(requesterFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ isActive: true, name: { contains: 'dickinson', mode: 'insensitive' } }),
+      where: expect.objectContaining({ isActive: true, OR: expect.arrayContaining([{ name: { contains: 'dickinson', mode: 'insensitive' } }]) }),
     }));
     expect(out.status).toBe('matched');
     expect(out.candidate).toEqual({ requesterId: 99, email: 'sdickinson@example.com', name: 'Simon Dickinson', source: 'requester' });
@@ -227,5 +227,24 @@ describe('resolveConversingAgent', () => {
     expect(await resolveConversingAgent(1, 'Vahid', { preferTechnicianId: '2' })).toEqual({ name: 'Vahid Haeri', technicianId: 2, email: 'vhaeri@example.com' });
     expect(await resolveConversingAgent(1, 'Vahid', { preferTechnicianId: 4 })).toEqual({ name: 'Vahid', technicianId: null, email: null });
     expect(await resolveConversingAgent(1, 'Soheil', { preferTechnicianId: 2 })).toMatchObject({ technicianId: 1 });
+  });
+});
+
+
+describe('name matching helpers (1 Oct 2026)', () => {
+  test('sameFirstLast ignores order, middle names and initials', async () => {
+    const { sameFirstLast } = await import('../src/services/intakeResolvers.js');
+    expect(sameFirstLast('Randy Shinduke', 'Shinduke, Randy')).toBe(true);
+    expect(sameFirstLast('Simon P. Dickinson', 'Simon Dickinson')).toBe(true);
+    expect(sameFirstLast('Simon Dickinson', 'Geoff Dickinson')).toBe(false);
+  });
+  test('compatibleFirst / closeName accept short forms and nicknames, not strangers', async () => {
+    const { compatibleFirst, closeName } = await import('../src/services/intakeResolvers.js');
+    expect(compatibleFirst('randy', 'randall')).toBe(true);
+    expect(compatibleFirst('mike', 'michael')).toBe(true);
+    expect(compatibleFirst('rob', 'robert')).toBe(true);
+    expect(compatibleFirst('sam', 'mark')).toBe(false);
+    expect(closeName('Randy Shinduke', 'Randall Shinduke')).toBe(true);
+    expect(closeName('Randy Shinduke', 'Randy Smith')).toBe(false);
   });
 });
