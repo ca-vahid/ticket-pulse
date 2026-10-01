@@ -251,7 +251,7 @@ describe('ticketIntakeExtractService.extract — structured description + render
       '<ul><li>Prompts every 10 minutes since Monday</li><li>Restart did not help</li></ul>',
       '<p><strong>Next step:</strong> Vahid to reset the cached credentials</p>',
       '<p class="tp-intake-meta">Discussed with Sam Lee (requester) and Vahid (IT) via Teams (Yesterday–Today)</p>',
-    ].join('\n'));
+    ].join('\n<p><br></p>\n'));
     expect(data.descriptionText).toBe([
       'Request: Sam Lee needs Outlook to stop prompting for credentials.',
       '- Prompts every 10 minutes since Monday\n- Restart did not help',
@@ -272,7 +272,7 @@ describe('ticketIntakeExtractService.extract — structured description + render
       '<p><strong>Request:</strong> Needs &lt;b&gt;admin&lt;/b&gt; &amp; &quot;quotes&quot;</p>',
       '<ul><li>a &lt; b</li><li>x</li></ul>',
       '<p class="tp-intake-meta">Discussed with O&#39;Neil</p>',
-    ].join('\n'));
+    ].join('\n<p><br></p>\n'));
     expect(text).toBe('Request: Needs <b>admin</b> & "quotes"\n\n- a < b\n- x\n\nDiscussed with O\'Neil');
     expect(renderDescription(null)).toEqual({ html: '', text: '' });
     expect(renderDescription({ request: '', details: [], nextStep: 'Do it' }).html).toBe('<p><strong>Next step:</strong> Do it</p>');
@@ -373,7 +373,11 @@ describe('ticketIntakeExtractService.extract — people resolution', () => {
 
   test('no hints → resolvers are not called and the "none" shapes are returned; assignee confidence is zeroed', async () => {
     sendJsonMock.mockResolvedValue({
-      parsed: { ...COMPLIANT, requesterNameOrEmail: null, assigneeHint: null, conversingAgent: null },
+      // No requester anywhere — the hint, discussedWith and peopleMentioned are all empty of one.
+      parsed: {
+        ...COMPLIANT, requesterNameOrEmail: null, assigneeHint: null, conversingAgent: null, peopleMentioned: [],
+        description: { ...COMPLIANT.description, discussedWith: [] },
+      },
       provider: 'anthropic', model: 'm',
     });
     const { data } = await service.extract({ workspaceId: 7, text: 'x' });
@@ -685,5 +689,31 @@ describe('AF3 — technician notes combine with the material in ONE call', () =>
     expect(block.slice(block.indexOf('BEGIN TECHNICIAN'), block.indexOf('END TECHNICIAN'))).toContain('low priority actually');
     expect(block.slice(block.indexOf('BEGIN UNTRUSTED'), block.indexOf('END UNTRUSTED'))).toContain('make it urgent');
     await expect(service.extract({ workspaceId: 7, text: 'x', notes: 'n'.repeat(2001) })).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+
+describe('Autofill context + requester fill-in (1 Oct 2026)', () => {
+  test('the prompt names the technician pasting the material as the handler', async () => {
+    const { buildIntakeText } = await import('../src/services/ticketIntakeExtractService.js');
+    const vocabulary = { categoryTree: [], types: [] };
+    const withActor = buildIntakeText({ text: 'chat', imageCount: 0, vocabulary, actor: { name: 'Vahid Haeri', email: 'vhaeri@x.io' } });
+    expect(withActor.split('\n')[0]).toBe('Technician creating this ticket (the person who pasted the material, the IT side, the handler): Vahid Haeri <vhaeri@x.io>.');
+    expect(buildIntakeText({ text: 'chat', imageCount: 0, vocabulary }).split('\n')[0]).toMatch(/unknown/);
+  });
+
+  test('the system prompt turns "I\'ll ask someone on the team" into the work itself', async () => {
+    const { SYSTEM_PROMPT } = await import('../src/services/ticketIntakeExtractService.js');
+    expect(SYSTEM_PROMPT).toMatch(/never "<technician> to ask someone on the IT team"/);
+    expect(SYSTEM_PROMPT).toMatch(/Requester suggested Syd/);
+  });
+
+  test('fillRequesterHint: empty hint → the requester from discussedWith; first name → the fuller name; never the person pasting', async () => {
+    const { fillRequesterHint } = await import('../src/services/ticketIntakeExtractService.js');
+    const discussed = [{ name: 'Randy Shinduke', role: 'requester' }, { name: 'Vahid', role: 'it_agent' }];
+    expect(fillRequesterHint({ requesterNameOrEmail: null, description: { discussedWith: discussed }, peopleMentioned: [] })).toBe('Randy Shinduke');
+    expect(fillRequesterHint({ requesterNameOrEmail: 'Randy', description: { discussedWith: discussed }, peopleMentioned: [] })).toBe('Randy Shinduke');
+    expect(fillRequesterHint({ requesterNameOrEmail: null, description: { discussedWith: [] }, peopleMentioned: [{ name: 'Ann Bo', email: 'ann@x.io', role: 'requester' }] })).toBe('ann@x.io');
+    expect(fillRequesterHint({ requesterNameOrEmail: 'Vahid Haeri', description: { discussedWith: [] }, peopleMentioned: [] }, { name: 'Vahid Haeri' })).toBeNull();
   });
 });

@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.1.28-preview';
+export const APP_VERSION = '4.1.29-preview';
 
 export const changelog = [
+  {
+    version: '4.1.29-preview',
+    date: 'October 1, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Autofill knows who is pasting</strong> &mdash; the agent creating the ticket is treated as the person who will work it. When you told the requester &ldquo;I&rsquo;ll ask someone on the team&rdquo;, the next step is now the work itself (&ldquo;Troubleshoot the printer&rsquo;s network access&hellip;&rdquo;), not &ldquo;Vahid to ask someone&rdquo;. Someone the requester suggests (&ldquo;Can Syd fix this?&rdquo;) is noted as a suggestion, not made the assignee.' },
+      { type: 'improved', html: '<strong>Richer Autofill details</strong> &mdash; the bullets now pick up device and app names, what works and what fails, error text, location, how urgent it is and the requester&rsquo;s own diagnosis; the request, the details and the next step are separated by a blank line.' },
+      { type: 'fixed', html: '<strong>Autofill finds the requester more often</strong> &mdash; names written &ldquo;Last, First&rdquo;, with a middle name or initial, or as a short form (Randy / Randall, Mike / Michael) now match the right person; the directory is also searched by last name, agents can be requesters, and when the AI lists the requester only among the people in the conversation it is still used.' },
+    ],
+  },
   {
     version: '4.1.28-preview',
     date: 'October 1, 2026',

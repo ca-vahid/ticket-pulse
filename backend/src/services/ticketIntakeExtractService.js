@@ -91,13 +91,13 @@ export const INTAKE_SCHEMA = {
         details: {
           type: 'array',
           maxItems: MAX_DETAILS,
-          description: 'Short factual bullets: what was asked, what was already tried or explained, constraints, error text, quantities, dates. No narration ("X asked, Y replied").',
+          description: 'Short factual bullets, one fact each, covering EVERY concrete detail a technician needs: device / model / app names, what works and what fails, exact error text, what was already tried or explained, location / office, dates and deadlines, how urgent it is in the requester\'s words, the requester\'s own diagnosis ("Requester suspects a firewall problem") and anyone they suggested ("Requester suggested Syd"). No narration ("X asked, Y replied"); do not restate the request line.',
           items: { type: 'string', maxLength: MAX_DETAIL_CHARS },
         },
         nextStep: {
           type: ['string', 'null'],
           maxLength: MAX_NEXT_STEP_CHARS,
-          description: 'The agreed or implied next action, naming who does it (e.g. "Vahid to ask Soheil to set up the account"); null when none.',
+          description: 'The concrete work that resolves the request, as an imperative ("Troubleshoot the printer\'s internet access to Bambu Studio — check firewall rules for the printer"). The technician creating the ticket IS the handler: never "<technician> to ask someone on the team". Name a person only when the material or notes name a specific handler ("Soheil to set up the account"). null only when nothing needs doing.',
         },
         discussedWith: {
           type: 'array',
@@ -193,15 +193,20 @@ export const SYSTEM_PROMPT = [
   'State only facts present in the material; use null when unsure rather than guessing.',
   'Never invent an email address.',
   '',
+  'WHO IS PASTING: the technician creating this ticket (named in the input as "Technician creating this ticket") pasted the material. They are the IT side of any chat — usually the "me" / right-hand bubbles in a screenshot — and they (or their team) will WORK this ticket. Creating the ticket is the hand-off.',
+  'So when the IT side says "I\'ll ask someone on the team to look into it", "we\'ll get someone on it" or similar, the next step is the WORK itself (e.g. "Troubleshoot the printer\'s network/firewall access so it can reach Bambu Studio"), never "<technician> to ask someone on the IT team".',
+  'A handler the REQUESTER suggests ("Can Syd fix this?") is only a suggestion: record it as a detail ("Requester suggested Syd") and set assigneeHint to that person ONLY when the IT side agrees or the technician notes say so.',
+  '',
   'Write like a ticket, not a story.',
   '`description.request` = ONE present-tense line stating who needs what and why.',
-  '`description.details` = short factual bullets (what was asked, what was already tried or explained, constraints, error text, quantities, dates).',
-  '`description.nextStep` = the agreed or implied next action, naming who does it.',
+  '`description.details` = short factual bullets, one fact each. Capture EVERY concrete detail a technician would need: device / model / software names, what works vs what fails ("Connects to the router but cannot reach the internet"), exact error text, what was already tried or explained, office / location, dates and deadlines, urgency in the requester\'s words ("Wants it working as soon as possible"), the requester\'s own diagnosis ("Requester suspects a firewall problem"), people they suggested. Prefer 3–8 bullets; never pad.',
+  '`description.nextStep` = the concrete work that resolves the request, as an imperative sentence for the handler ("Troubleshoot …", "Set up …", "Order …"). Do not name the technician creating the ticket; name another person only when the material or notes name them as the handler.',
   'Never narrate turn-by-turn ("X asked, Y replied"). Do not repeat the subject as a bullet.',
   'Bullets are facts, not dialogue: write "Has no BGC GPT account yet", not "Simon confirmed he has no account"; write "Explained: the app signs in with the BGC email plus a separate ChatGPT password", not "Vahid explained that...".',
   '',
   'The requester is the person who NEEDS something — not the IT agent and not people merely cc\'d.',
   'The IT/agent side of a chat (the person answering, the "me" side) is `conversingAgent`, never the requester.',
+  'requesterNameOrEmail: give the requester\'s FULL name exactly as shown (sender name in a chat header, From line, signature, Teams name) — or their email when one appears verbatim. Never leave it null when the material shows who needs help; never use a first name alone when a full name appears anywhere in the material.',
   '`assigneeHint` = the person the material says will handle or set up the request ("let me ask Soheil to help you"), if anyone is named; otherwise null.',
   '',
   'Category: when a top-level category has subcategories you MUST choose one "Top > Sub". Return a bare top ONLY when it is listed without subcategories. Prefer the most specific fit.',
@@ -466,25 +471,29 @@ export function renderDescription(description) {
   const nextStep = String(d.nextStep || '').trim();
   const meta = discussedWithLine(d.discussedWith);
 
-  const html = [];
+  // Sections are separated by an empty paragraph (1 Oct 2026, Vahid: the
+  // request, the bullets and the next step ran together in the editor and
+  // on the ticket). <p><br></p> is what the composer itself writes for a
+  // blank line, so it survives the sanitizer and round-trips.
+  const sections = [];
   const text = [];
   if (request) {
-    html.push(`<p><strong>Request:</strong> ${escapeHtml(request)}</p>`);
+    sections.push(`<p><strong>Request:</strong> ${escapeHtml(request)}</p>`);
     text.push(`Request: ${request}`);
   }
   if (details.length) {
-    html.push(`<ul>${details.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`);
+    sections.push(`<ul>${details.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`);
     text.push(details.map((item) => `- ${item}`).join('\n'));
   }
   if (nextStep) {
-    html.push(`<p><strong>Next step:</strong> ${escapeHtml(nextStep)}</p>`);
+    sections.push(`<p><strong>Next step:</strong> ${escapeHtml(nextStep)}</p>`);
     text.push(`Next step: ${nextStep}`);
   }
   if (meta) {
-    html.push(`<p class="tp-intake-meta">${escapeHtml(meta)}</p>`);
+    sections.push(`<p class="tp-intake-meta">${escapeHtml(meta)}</p>`);
     text.push(meta);
   }
-  return { html: html.join('\n'), text: text.join('\n\n') };
+  return { html: sections.join('\n<p><br></p>\n'), text: text.join('\n\n') };
 }
 
 // ----------------------------------------------------------- vocabulary
@@ -541,7 +550,7 @@ async function loadVocabulary(workspaceId) {
 }
 
 /** The text block sent to the model (exported for tests + prompt review). */
-export function buildIntakeText({ text, notes = '', imageCount, vocabulary }) {
+export function buildIntakeText({ text, notes = '', imageCount, vocabulary, actor = null }) {
   const categoryLines = vocabulary.categoryTree.length
     ? vocabulary.categoryTree.map((top) => (
       top.subcategories.length
@@ -555,7 +564,13 @@ export function buildIntakeText({ text, notes = '', imageCount, vocabulary }) {
 
   const body = clampText(text, INTAKE_LIMITS.MAX_TEXT_CHARS);
 
+  const actorLine = actor?.name
+    ? `Technician creating this ticket (the person who pasted the material, the IT side, the handler): ${actor.name}${actor.email ? ` <${actor.email}>` : ''}.`
+    : 'Technician creating this ticket: unknown — treat the IT side of the material as the handler.';
+
   return [
+    actorLine,
+    '',
     'Workspace vocabulary. categoryHint must be copied exactly from one of these entries or be null.',
     'Where a top-level category lists subcategories you MUST return one "Top > Sub" — the bare top is not a valid answer there:',
     ...categoryLines,
@@ -725,6 +740,48 @@ export function normalizeResult(parsed, vocabulary, { notes = '' } = {}) {
   };
 }
 
+/** The person pasting (name + email) — the prompt treats them as the handler. Never throws. */
+async function loadActor(workspaceId, technicianId, email) {
+  try {
+    if (technicianId) {
+      const t = await prisma.technician.findFirst({ where: { id: Number(technicianId), workspaceId }, select: { name: true, email: true } });
+      if (t) return { name: t.name, email: t.email || email || null };
+    }
+    if (email) {
+      const t = await prisma.technician.findFirst({ where: { workspaceId, email: { equals: email, mode: 'insensitive' } }, select: { name: true, email: true } });
+      return { name: t?.name || null, email };
+    }
+  } catch (err) {
+    logger.warn(`Intake actor lookup failed (non-fatal): ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * The requester hint, made as complete as the model's own output allows
+ * (1 Oct 2026: the requester came back empty though the model had listed
+ * them). Order: the model's hint → the "requester" in discussedWith /
+ * peopleMentioned. A bare first name is upgraded to the fuller name of the
+ * same person from those lists. The person pasting is never the requester.
+ */
+export function fillRequesterHint(data, actor = null) {
+  const actorKey = actor?.name ? String(actor.name).trim().toLowerCase() : null;
+  const notActor = (n) => n && String(n).trim().toLowerCase() !== actorKey;
+  const fromLists = [
+    ...((data.description?.discussedWith || []).filter((p) => p?.role === 'requester').map((p) => p.name)),
+    ...((data.peopleMentioned || []).filter((p) => p?.role === 'requester').map((p) => p.email || p.name)),
+  ].filter(notActor);
+  let hint = data.requesterNameOrEmail && notActor(data.requesterNameOrEmail) ? String(data.requesterNameOrEmail).trim() : null;
+  if (!hint) return fromLists[0] || null;
+  if (!hint.includes('@') && !/\s/.test(hint)) {
+    const first = hint.toLowerCase();
+    const fuller = [...(data.description?.discussedWith || []), ...(data.peopleMentioned || [])]
+      .map((p) => p?.name).find((n) => n && /\s/.test(n.trim()) && n.trim().toLowerCase().split(/\s+/)[0] === first);
+    if (fuller) hint = fuller.trim();
+  }
+  return hint;
+}
+
 const NONE_REQUESTER = Object.freeze({ status: 'none', candidate: null, candidates: [], reason: 'No requester was identified in the material' });
 const NONE_ASSIGNEE = Object.freeze({ status: 'none', technician: null, candidates: [], reason: 'No handler was named in the material' });
 
@@ -789,6 +846,7 @@ class TicketIntakeExtractService {
     }
 
     const vocabulary = await loadVocabulary(workspaceId);
+    const actor = await loadActor(workspaceId, actorTechnicianId, actorEmail);
 
     const imageBlocks = images.map((image) => ({
       type: 'image',
@@ -800,7 +858,7 @@ class TicketIntakeExtractService {
     }));
     const textBlock = {
       type: 'text',
-      text: buildIntakeText({ text: material, notes: technicianNotes, imageCount: images.length, vocabulary }),
+      text: buildIntakeText({ text: material, notes: technicianNotes, imageCount: images.length, vocabulary, actor }),
     };
 
     const startedAt = Date.now();
@@ -827,6 +885,7 @@ class TicketIntakeExtractService {
     const durationMs = Date.now() - startedAt;
 
     const normalized = normalizeResult(response.parsed, vocabulary, { notes: technicianNotes });
+    normalized.requesterNameOrEmail = fillRequesterHint(normalized, actor);
     const people = await resolvePeople(workspaceId, normalized, actorTechnicianId);
     const data = {
       ...normalized,

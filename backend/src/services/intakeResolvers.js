@@ -35,6 +35,55 @@ function nameTokens(value) {
   return normalizeName(value).split(' ').filter(Boolean);
 }
 
+// Short / familiar first names → the formal names they stand for (one-way;
+// compatibleFirst checks both directions). Kept small and common on purpose.
+const NICKNAMES = {
+  alex: ['alexander', 'alexandra', 'alexis'], andy: ['andrew'], bill: ['william'], bob: ['robert'], rob: ['robert'], bobby: ['robert'],
+  chris: ['christopher', 'christine', 'christina'], dan: ['daniel'], danny: ['daniel'], dave: ['david'], jim: ['james'], jimmy: ['james'],
+  joe: ['joseph'], jon: ['jonathan'], kate: ['katherine', 'kathryn', 'catherine'], katie: ['katherine', 'kathryn'], liz: ['elizabeth'],
+  matt: ['matthew'], mike: ['michael'], nick: ['nicholas'], pat: ['patrick', 'patricia'], rick: ['richard'], rich: ['richard'],
+  sam: ['samuel', 'samantha'], steve: ['stephen', 'steven'], tom: ['thomas'], tony: ['anthony'], will: ['william'], jen: ['jennifer'],
+  jenny: ['jennifer'], sue: ['susan'], becky: ['rebecca'], ben: ['benjamin'], greg: ['gregory'], jeff: ['jeffrey'], ken: ['kenneth'],
+};
+
+/** "Shinduke, Randy P." → ['randy', 'shinduke'] — order fixed, initials dropped. */
+function personTokens(value) {
+  const raw = String(value ?? '');
+  const comma = raw.indexOf(',');
+  const ordered = comma > 0 && !raw.includes('@') ? `${raw.slice(comma + 1)} ${raw.slice(0, comma)}` : raw;
+  return nameTokens(ordered).filter((t) => t.length > 1);
+}
+
+function firstLast(value) {
+  const t = personTokens(value);
+  return t.length >= 2 ? { first: t[0], last: t[t.length - 1] } : null;
+}
+
+/** Same first AND last name; middle names, initials and "Last, First" order ignored. */
+export function sameFirstLast(a, b) {
+  const x = firstLast(a);
+  const y = firstLast(b);
+  return Boolean(x && y && x.first === y.first && x.last === y.last);
+}
+
+/** Randy / Randall, Rob / Robert, Mike / Michael. */
+export function compatibleFirst(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 3 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (i >= 4) return true;
+  return (NICKNAMES[a] || []).includes(b) || (NICKNAMES[b] || []).includes(a);
+}
+
+/** Same last name and a compatible first name. */
+export function closeName(a, b) {
+  const x = firstLast(a);
+  const y = firstLast(b);
+  return Boolean(x && y && x.last === y.last && compatibleFirst(x.first, y.first));
+}
+
 function asEmail(value) {
   const text = String(value ?? '').trim().toLowerCase();
   return EMAIL_RE.test(text) ? text : null;
@@ -118,16 +167,18 @@ export async function resolveRequesterHint(workspaceId, hint, peopleMentioned = 
   // ---- name path: exact full name, unique, else ambiguous with candidates
   const wanted = normalizeName(raw);
   const tokens = wanted.split(' ').filter(Boolean);
+  const pt = personTokens(raw);
+  const searchTokens = [...new Set([pt[pt.length - 1], pt[0], tokens[tokens.length - 1]].filter((t) => t && t.length >= 2))];
   const requesters = await prisma.requester.findMany({
     where: {
       isActive: true,
-      // Broad contains on the LAST token keeps the scan cheap and index-friendly
-      // while still catching "Simon P. Dickinson" vs "Simon Dickinson".
-      name: { contains: tokens[tokens.length - 1], mode: 'insensitive' },
+      // Last OR first name (1 Oct 2026): "Shinduke, Randy", "Randall Shinduke"
+      // and "Simon P. Dickinson" all reach the candidate pool.
+      OR: searchTokens.map((t) => ({ name: { contains: t, mode: 'insensitive' } })),
     },
     select: { id: true, name: true, email: true },
     orderBy: { name: 'asc' },
-    take: 50,
+    take: 120,
   });
   const exactRequesters = requesters.filter((r) => normalizeName(r.name) === wanted);
   if (exactRequesters.length === 1) {
@@ -137,15 +188,69 @@ export async function resolveRequesterHint(workspaceId, hint, peopleMentioned = 
     return requesterResult('ambiguous', null, exactRequesters.map(requesterCandidate),
       `${exactRequesters.length} known requesters are named "${raw}"`);
   }
+  const sameRequesters = requesters.filter((r) => sameFirstLast(r.name, raw));
+  if (sameRequesters.length === 1) {
+    return requesterResult('matched', requesterCandidate(sameRequesters[0]), [], `Known requester "${sameRequesters[0].name}" (same first and last name)`);
+  }
 
-  const directory = tokens.length >= 2 || raw.length >= 3 ? await searchDirectory(raw, 8) : null;
-  const exactDirectory = (directory || []).filter((u) => normalizeName(u.displayName) === wanted);
+  let directory = tokens.length >= 2 || raw.length >= 3 ? await searchDirectory(raw, 8) : null;
+  // Nothing for the full name: try the last name alone (nicknames, "Last, First", middle names).
+  const lastName = pt.length >= 2 ? pt[pt.length - 1] : null;
+  if (directory !== null && lastName && lastName.length >= 3
+    && !(directory || []).some((u) => sameFirstLast(u.displayName, raw) || normalizeName(u.displayName) === wanted)) {
+    const byLast = await searchDirectory(lastName, 15);
+    if (byLast) {
+      const seenMail = new Set(directory.map((u) => String(u.mail || '').toLowerCase()));
+      directory = [...directory, ...byLast.filter((u) => !seenMail.has(String(u.mail || '').toLowerCase()))];
+    }
+  }
+  const exactDirectory = (directory || []).filter((u) => normalizeName(u.displayName) === wanted || sameFirstLast(u.displayName, raw));
   if (exactDirectory.length === 1) {
     return requesterResult('matched', directoryCandidate(exactDirectory[0]), [], `Directory person named "${exactDirectory[0].displayName}" (not yet a requester)`);
   }
   if (exactDirectory.length > 1) {
     return requesterResult('ambiguous', null, exactDirectory.map(directoryCandidate),
       `${exactDirectory.length} directory people are named "${raw}"`);
+  }
+
+  // Agents are people too: an exact / same-first-last technician with an email.
+  if (pt.length >= 2) {
+    let techs = [];
+    try {
+      techs = await prisma.technician.findMany({
+        where: { isActive: true, email: { not: null } },
+        select: { name: true, email: true },
+      });
+    } catch { techs = []; }
+    const techHits = techs.filter((t) => normalizeName(t.name) === wanted || sameFirstLast(t.name, raw));
+    const techEmails = [...new Set(techHits.map((t) => String(t.email).toLowerCase()))];
+    if (techEmails.length === 1) {
+      const byEmail = await prisma.requester.findFirst({ where: { isActive: true, email: { equals: techEmails[0], mode: 'insensitive' } }, select: { id: true, name: true, email: true } });
+      if (byEmail) return requesterResult('matched', requesterCandidate(byEmail), [], `Known requester "${byEmail.name}" (also a technician)`);
+      return requesterResult('matched', { requesterId: null, email: techEmails[0], name: techHits[0].name, source: 'directory' }, [],
+        `Technician "${techHits[0].name}" (not yet a requester)`);
+    }
+  }
+
+  // One person with the same last name and a compatible first name
+  // (Randy ↔ Randall, Mike ↔ Michael) across requesters + directory → match.
+  if (pt.length >= 2) {
+    const pool = [];
+    const keys = new Set();
+    const add = (c) => {
+      const key = c.email || `#${c.requesterId}`;
+      if (keys.has(key)) return;
+      keys.add(key);
+      pool.push(c);
+    };
+    for (const r of requesters) if (closeName(r.name, raw)) add(requesterCandidate(r));
+    for (const u of directory || []) if (closeName(u.displayName, raw)) add(directoryCandidate(u));
+    if (pool.length === 1) {
+      return requesterResult('matched', pool[0], [], `Closest match "${pool[0].name}" — same last name, "${pt[0]}" reads as a short form of their first name`);
+    }
+    if (pool.length > 1 && pool.length <= MAX_CANDIDATES) {
+      return requesterResult('ambiguous', null, pool, `${pool.length} people could be "${raw}"`);
+    }
   }
 
   // No exact identity anywhere. Offer similar names (never auto-match — a
@@ -160,7 +265,7 @@ export async function resolveRequesterHint(workspaceId, hint, peopleMentioned = 
   };
   const looksSimilar = (name) => {
     const theirs = nameTokens(name);
-    return tokens.length > 0 && tokens.every((t) => theirs.some((x) => x === t || x.startsWith(t)));
+    return (tokens.length > 0 && tokens.every((t) => theirs.some((x) => x === t || x.startsWith(t)))) || closeName(name, raw);
   };
   for (const r of requesters) if (looksSimilar(r.name)) consider(requesterCandidate(r));
   for (const u of directory || []) if (looksSimilar(u.displayName)) consider(directoryCandidate(u));
@@ -286,4 +391,4 @@ export async function resolveConversingAgent(workspaceId, name, { preferTechnici
   return { name: raw, technicianId: null, email: null };
 }
 
-export default { resolveRequesterHint, resolveAssigneeHint, resolveConversingAgent, normalizeName };
+export default { resolveRequesterHint, resolveAssigneeHint, resolveConversingAgent, normalizeName, sameFirstLast, compatibleFirst, closeName };
