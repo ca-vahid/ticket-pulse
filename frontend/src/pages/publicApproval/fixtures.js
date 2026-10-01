@@ -8,7 +8,9 @@
 const CREATED_AT = '2026-08-28T16:05:00.000Z';
 const SENT_AT = '2026-09-01T21:14:00.000Z';
 const DUE_AT = '2026-09-04T22:00:00.000Z';
-const EXPIRES_AT = '2026-10-01T21:14:00.000Z';
+// Far future on purpose: a real date here expired on 1 Oct 2026 and every
+// pending-approval test started rendering the 'link expired' page.
+const EXPIRES_AT = '2099-10-01T21:14:00.000Z';
 
 export const REQUEST_NOTE_HTML = `
 <p>Ingrid's laptop has failed repeatedly over six months. Requesting a replacement — quote below (CAD, incl. tax):</p>

@@ -10,7 +10,7 @@ import {
   GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
-import { statusDefsFromMeta, statusDotClass, statusNamesForBase } from './statusDefs';
+import { PARKED_STATUS, statusDefsFromMeta, statusDotClass, statusNamesForBase, withParkedDefault } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import 'react-day-picker/style.css';
@@ -133,9 +133,11 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
 }
 
 /** Checkbox facet row: label + optional adornment + optional count. */
-function Facet({ checked, onToggle, children, count }) {
+function Facet({ checked, onToggle, children, count, onOnly = null }) {
+  // A zero in the current view reads as "nothing here" without hiding the option (1 Oct 2026).
+  const empty = count === 0 && !checked;
   return (
-    <label className="flex items-center gap-2 px-1.5 py-[5px] rounded-md hover:bg-blue-50/70 dark:hover:bg-blue-500/10 cursor-pointer text-sm text-muted-foreground min-w-0">
+    <label className={`group/row flex items-center gap-2 px-1.5 py-[5px] rounded-md hover:bg-blue-50/70 dark:hover:bg-blue-500/10 cursor-pointer text-sm min-w-0 ${empty ? 'text-muted-foreground/55' : 'text-muted-foreground'}`}>
       <input
         type="checkbox"
         checked={checked}
@@ -143,7 +145,17 @@ function Facet({ checked, onToggle, children, count }) {
         className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300 flex-shrink-0"
       />
       <span className="flex items-center gap-1.5 min-w-0 flex-1 truncate">{children}</span>
-      {count != null && <span className="text-xs font-medium text-muted-foreground/80 tabular-nums flex-shrink-0 pl-1">{count}</span>}
+      {onOnly && (
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOnly(); }}
+          className="tp-focus-ring hidden group-hover/row:inline-flex group-focus-within/row:inline-flex flex-shrink-0 rounded px-1 text-[11px] font-semibold text-primary hover:underline"
+          title="Show only this"
+        >
+          only
+        </button>
+      )}
+      {count != null && <span className={`text-xs tabular-nums flex-shrink-0 pl-1 ${count > 0 ? 'font-semibold text-foreground/80' : 'font-medium text-muted-foreground/60'}`}>{count}</span>}
     </label>
   );
 }
@@ -413,13 +425,18 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   // until meta loads. Facets, defaults and the URL parser all key off it so
   // custom statuses round-trip through ?status=.
   const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
+  // Live counts (1 Oct 2026, QA "how many I have open, pending…"): the list
+  // sends per-status (not parked) + parked counts and per-priority counts for
+  // the CURRENT view, each facet's own pick dropped. null = not sent → no number.
+  const statusCountMap = useMemo(() => (Array.isArray(facets?.statuses) ? new Map(facets.statuses.map((x) => [x.value, x.count])) : null), [facets]);
+  const priorityCountMap = useMemo(() => (Array.isArray(facets?.priorities) ? new Map(facets.priorities.map((x) => [String(x.value), x.count])) : null), [facets]);
   const statusNames = useMemo(() => statusDefs.map((d) => d.name), [statusDefs]);
   // The default scope is every Open/Pending-BASE status (custom ones included).
   // QA 09-22 #4: no status is pre-selected (every status shows); "My open"
   // still pins the Open/Pending-BASE scope explicitly.
   const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
   // QA 09-23 #4: the workspace's default status filter ([] = every status).
-  const defaultStatuses = useMemo(() => (Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : []), [meta?.defaultStatuses]);
+  const defaultStatuses = useMemo(() => withParkedDefault(Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : [], statusDefs), [meta?.defaultStatuses, statusDefs]);
 
   // Status keeps its special default (Open+Pending bases when the param is
   // absent). The URL parser drops names the workspace doesn't define — but
@@ -429,7 +446,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   const statuses = statusRaw === 'any'
     ? []
     : (statusRaw
-      ? statusRaw.split(',').filter((s) => (meta?.statuses?.length ? statusNames.includes(s) : Boolean(s)))
+      ? statusRaw.split(',').filter((s) => s === PARKED_STATUS || (meta?.statuses?.length ? statusNames.includes(s) : Boolean(s)))
       : defaultStatuses);
   const segment = get('segment');
   const toggleStatus = (status) => {
@@ -791,11 +808,28 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             defaultOpen
           >
             {statusDefs.map((d) => (
-              <Facet key={d.name} checked={segment === '' && statuses.includes(d.name)} onToggle={() => toggleStatus(d.name)}>
+              <Facet
+                key={d.name}
+                checked={segment === '' && statuses.includes(d.name)}
+                onToggle={() => toggleStatus(d.name)}
+                count={statusCountMap ? (statusCountMap.get(d.name) || 0) : undefined}
+                onOnly={() => setParams({ segment: null, status: d.name })}
+              >
                 <span aria-hidden="true" className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDotClass(d)}`} />
                 <span className="truncate">{d.name}</span>
               </Facet>
             ))}
+            {/* Parked is its own option: a parked ticket keeps Pending underneath,
+                so the statuses above count it only when it is NOT parked. */}
+            <Facet
+              checked={segment === '' && statuses.includes(PARKED_STATUS)}
+              onToggle={() => toggleStatus(PARKED_STATUS)}
+              count={statusCountMap ? (facets?.statusParked || 0) : undefined}
+              onOnly={() => setParams({ segment: null, status: PARKED_STATUS })}
+            >
+              <PauseCircle className="w-3 h-3 flex-shrink-0 text-violet-500 dark:text-violet-300" aria-hidden="true" />
+              <span className="truncate">Parked</span>
+            </Facet>
           </Section>
         </SortableFacet>
 
@@ -857,7 +891,13 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         <SortableFacet {...facetProps('priority')}>
           <Section title="Priority" activeCount={priorities.length} onClear={() => setParams({ priority: null })} defaultOpen>
             {[4, 3, 2, 1].map((p) => (
-              <Facet key={p} checked={priorities.includes(String(p))} onToggle={() => toggleCsv('priority', String(p))}>
+              <Facet
+                key={p}
+                checked={priorities.includes(String(p))}
+                onToggle={() => toggleCsv('priority', String(p))}
+                count={priorityCountMap ? (priorityCountMap.get(String(p)) || 0) : undefined}
+                onOnly={() => setParams({ priority: String(p) })}
+              >
                 <span aria-hidden="true" className={`w-2 h-2 rounded-full ${PRIORITY_STRIP_COLORS[p] || 'bg-muted-foreground/40'}`} />
                 {PRIORITY_LABELS[p]}
               </Facet>
@@ -1312,7 +1352,7 @@ export function ActiveFilterBar({ meta }) {
   if (segment && segment !== 'all') chips.push({ label: SEGMENT_LABELS[segment] || segment, onRemove: () => patch({ segment: null }) });
   const statusRaw = searchParams.get('status');
   if (statusRaw === 'any') chips.push({ label: 'Any status', onRemove: () => patch({ status: null }) });
-  else if (statusRaw) for (const s of csvList(statusRaw)) chips.push({ label: s, onRemove: () => removeFromCsv('status', s) });
+  else if (statusRaw) for (const s of csvList(statusRaw)) chips.push({ label: s === PARKED_STATUS ? 'Parked' : s, onRemove: () => removeFromCsv('status', s) });
   for (const a of csvList(get('assignee'))) chips.push({ label: techName(a), onRemove: () => removeFromCsv('assignee', a) });
   for (const p of csvList(get('priority'))) chips.push({ label: PRIOS[p] || `P${p}`, onRemove: () => removeFromCsv('priority', p) });
   for (const t of csvList(get('type'))) chips.push({ label: t, onRemove: () => removeFromCsv('type', t) });
