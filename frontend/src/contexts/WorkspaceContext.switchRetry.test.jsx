@@ -6,6 +6,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   select: vi.fn(),
@@ -20,11 +21,13 @@ vi.mock('../services/api', () => ({
 }));
 vi.mock('./AuthContext', () => ({ useAuth: mocks.useAuth }));
 
-import { WorkspaceProvider, useWorkspace } from './WorkspaceContext';
+import { WorkspaceProvider, useWorkspace, readUrlWorkspaceId, withoutWorkspaceParam } from './WorkspaceContext';
 
 let ctx;
+let loc;
 function Probe() {
   ctx = useWorkspace();
+  loc = useLocation();
   return null;
 }
 
@@ -33,16 +36,18 @@ const workspaces = [
   { id: 2, name: 'Accounting', slug: 'ap', role: 'admin', nativeTicketingEnabled: true },
 ];
 
-function renderProvider() {
+function renderProvider(entry = '/') {
   mocks.useAuth.mockReturnValue({
     workspaceData: { availableWorkspaces: workspaces, selectedWorkspaceId: 1 },
     isAuthenticated: true,
     isLoading: false,
   });
   return render(
-    <WorkspaceProvider>
-      <Probe />
-    </WorkspaceProvider>,
+    <MemoryRouter initialEntries={[entry]}>
+      <WorkspaceProvider>
+        <Probe />
+      </WorkspaceProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -58,6 +63,7 @@ beforeEach(() => {
   mocks.select.mockReset();
   mocks.getAll.mockReset().mockResolvedValue({ data: workspaces });
   ctx = null;
+  loc = null;
 });
 
 afterEach(() => {
@@ -130,5 +136,38 @@ describe('switchWorkspace server-select retry + visible error', () => {
 
     expect(ctx.switchError).toBeNull();
     expect(sessionStorage.getItem('tp_wsSwitchError')).toBeNull();
+  });
+});
+
+describe('?ws=<id> on a link picks the workspace (e-mailed filter links)', () => {
+  test('parses only positive integer ids', () => {
+    expect(readUrlWorkspaceId('?assignee=5&ws=2')).toBe(2);
+    expect(readUrlWorkspaceId('?ws=abc')).toBeNull();
+    expect(readUrlWorkspaceId('?ws=0')).toBeNull();
+    expect(readUrlWorkspaceId('')).toBeNull();
+    expect(withoutWorkspaceParam('?assignee=5&ws=2&status=Open')).toBe('?assignee=5&status=Open');
+    expect(withoutWorkspaceParam('?ws=2')).toBe('');
+    expect(withoutWorkspaceParam('?status=Open')).toBe('?status=Open');
+  });
+
+  test('the link workspace beats the last-used one and the param is dropped', async () => {
+    mocks.select.mockImplementation(async (id) => okSelect(id));
+    localStorage.setItem('tp_selectedWorkspace', JSON.stringify({ id: 1, name: 'IT', slug: 'it' }));
+    renderProvider('/tickets?assignee=5&ws=2&status=Open');
+    await act(async () => {});
+    expect(ctx.currentWorkspace?.id).toBe(2);
+    expect(JSON.parse(localStorage.getItem('tp_selectedWorkspace')).id).toBe(2);
+    expect(mocks.select).toHaveBeenCalledWith(2);
+    expect(loc.pathname).toBe('/tickets');
+    expect(loc.search).toBe('?assignee=5&status=Open');
+  });
+
+  test('a workspace the user cannot see is ignored (and still stripped)', async () => {
+    localStorage.setItem('tp_selectedWorkspace', JSON.stringify({ id: 1, name: 'IT', slug: 'it' }));
+    renderProvider('/tickets?ws=9&status=Open');
+    await act(async () => {});
+    expect(ctx.currentWorkspace?.id).toBe(1);
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(loc.search).toBe('?status=Open');
   });
 });

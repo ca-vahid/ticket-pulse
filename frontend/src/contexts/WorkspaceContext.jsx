@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { workspaceAPI, setWorkspaceId, setAuthToken } from '../services/api';
 import { useAuth } from './AuthContext';
 
@@ -29,6 +30,31 @@ export function safeWorkspacePath(pathname = '/') {
   }
   return path;
 }
+/**
+ * A link can name its workspace with `?ws=<id>` (1 Oct 2026). Filtered list
+ * links in e-mails (`/tickets?assignee=…&status=Open`) carry no record the
+ * server could resolve to a workspace, so without this they opened in
+ * whichever workspace the browser used last and showed the wrong queue.
+ */
+export function readUrlWorkspaceId(search = '') {
+  try {
+    const raw = new URLSearchParams(search).get('ws');
+    if (!raw || !/^\d+$/.test(raw)) return null;
+    const id = Number(raw);
+    return id > 0 ? id : null;
+  } catch { return null; }
+}
+
+export function withoutWorkspaceParam(search = '') {
+  try {
+    const params = new URLSearchParams(search);
+    if (!params.has('ws')) return search;
+    params.delete('ws');
+    const rest = params.toString();
+    return rest ? `?${rest}` : '';
+  } catch { return search; }
+}
+
 // Sticky flag for "the server never learned about the last workspace switch".
 // sessionStorage because switchWorkspace() is usually followed by a full page
 // reload — a plain state flag would die with the old document.
@@ -60,6 +86,8 @@ function persistWorkspace(ws) {
 
 export function WorkspaceProvider({ children }) {
   const { workspaceData, isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [currentWorkspace, setCurrentWorkspace] = useState(() => loadPersistedWorkspace());
   const [availableWorkspaces, setAvailableWorkspaces] = useState([]);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -120,11 +148,28 @@ export function WorkspaceProvider({ children }) {
       const serverSelectedId = workspaceData.selectedWorkspaceId;
       const localWs = loadPersistedWorkspace();
       const serverWorkspace = workspaces.find(w => w.id === serverSelectedId);
+      const urlWsId = readUrlWorkspaceId(location.search);
+      const urlWs = urlWsId ? workspaces.find(w => w.id === urlWsId) : null;
+
+      // The param did its job (or names a workspace this user can't see) —
+      // drop it so later in-page navigation and switches don't carry it along.
+      if (urlWsId) {
+        navigate({ pathname: location.pathname, search: withoutWorkspaceParam(location.search), hash: location.hash }, { replace: true });
+      }
 
       // localStorage takes priority — it's updated synchronously during
       // switchWorkspace() before the page reload, while the server session
       // may lag behind due to cookie propagation timing.
-      if (localWs && workspaces.some(w => w.id === localWs.id)) {
+      if (urlWs) {
+        // A link that names its workspace wins over the last-used one.
+        const selected = { id: urlWs.id, name: urlWs.name, slug: urlWs.slug };
+        setCurrentWorkspace(selected);
+        setWorkspaceId(selected.id);
+        persistWorkspace(selected);
+        if (selected.id !== serverSelectedId) {
+          workspaceAPI.select(selected.id).catch(() => {});
+        }
+      } else if (localWs && workspaces.some(w => w.id === localWs.id)) {
         setCurrentWorkspace(localWs);
         setWorkspaceId(localWs.id);
         if (localWs.id !== serverSelectedId) {
@@ -151,6 +196,8 @@ export function WorkspaceProvider({ children }) {
     }
 
     setIsHydrated(true);
+  // One-shot hydration: the URL it reads is the one the app was opened with.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceData, isAuthenticated, isAuthLoading]);
 
   const selectWorkspace = useCallback(async (workspaceId) => {
@@ -258,8 +305,9 @@ export function WorkspaceProvider({ children }) {
     try {
       // Search v3: a cross-workspace search hit lands straight on its ticket.
       const target = landOn || (keepPath ? window.location.pathname : safeWorkspacePath(window.location.pathname));
-      if (target === window.location.pathname) window.location.reload();
-      else window.location.assign(`${target}${window.location.search || ''}`);
+      const search = withoutWorkspaceParam(window.location.search || '');
+      if (target === window.location.pathname && search === (window.location.search || '')) window.location.reload();
+      else window.location.assign(`${target}${search}`);
     } catch { /* non-browser context (tests) — the caller decides */ }
   }, [availableWorkspaces, selectWorkspaceWithRetry]);
 

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.27-preview';
+export const APP_VERSION = '4.1.28-preview';
 
 export const changelog = [
+  {
+    version: '4.1.28-preview',
+    date: 'October 1, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Links can name their workspace</strong> &mdash; a link ending in <code>ws=&lt;id&gt;</code> (for example <code>/tickets?assignee=12&amp;status=Open&amp;ws=1</code>) opens in that workspace, even if you were last working in another one. E-mailed filter links (briefs, follow-ups) used to open in your last workspace and show the wrong queue. Ticket links already switched on their own; this covers list and filter links. The <code>ws</code> part is removed from the address once it has done its job.' },
+    ],
+  },
   {
     version: '4.1.27-preview',
     date: 'October 1, 2026',
