@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.1.29-preview';
+export const APP_VERSION = '4.1.30-preview';
 
 export const changelog = [
+  {
+    version: '4.1.30-preview',
+    date: 'October 1, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Counts in the ticket filters</strong> &mdash; every status and every priority in the filter panel now shows how many tickets it has <em>in the view you are looking at</em> (your other filters applied), e.g. Open 45 · Pending 7 when you filter to your own tickets. Options with nothing in the current view are greyed out.' },
+      { type: 'new', html: '<strong>Parked is its own status option</strong> &mdash; Parked sits in the Status filter with its own count. Parked tickets no longer hide inside Pending: ticking Pending shows pending tickets that are not parked, ticking Parked shows the parked ones. A workspace default that includes Pending keeps parked tickets in view.' },
+      { type: 'improved', html: '<strong>&ldquo;only&rdquo; shortcut</strong> &mdash; hover any status or priority in the filters and click <em>only</em> to show just that one.' },
+    ],
+  },
   {
     version: '4.1.29-preview',
     date: 'October 1, 2026',

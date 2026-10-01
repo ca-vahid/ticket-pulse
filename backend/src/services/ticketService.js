@@ -1134,7 +1134,7 @@ class TicketService {
    */
   async _listFacets(workspaceId, query = {}) {
     const wanted = String(query.facets || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!wanted.includes('source') && !wanted.includes('parked')) return null;
+    if (!['source', 'parked', 'status', 'priority'].some((k) => wanted.includes(k))) return null;
     try {
       const out = {};
       if (wanted.includes('source')) {
@@ -1173,6 +1173,36 @@ class TicketService {
           waking7,
         };
       }
+      // Status facet (1 Oct 2026, QA: "how many I have open, pending…"):
+      // per-status counts of NOT-parked tickets + the parked count, the
+      // view's other filters applied and its own status pick dropped.
+      if (wanted.includes('status')) {
+        const rest = { ...query };
+        delete rest.status;
+        delete rest.facets;
+        if (rest.segment) delete rest.segment; // the rail's checkboxes replace a segment
+        const where = await this.buildListWhere(workspaceId, rest);
+        const parkedScope = where.parkedUntil;
+        delete where.parkedUntil;
+        const [rows, parked] = await Promise.all([
+          parkedScope && parkedScope.not === null
+            ? Promise.resolve([])
+            : prisma.ticket.groupBy({ by: ['status'], where: { ...where, parkedUntil: null }, _count: { _all: true } }),
+          parkedScope === null
+            ? Promise.resolve(0)
+            : prisma.ticket.count({ where: { ...where, parkedUntil: { not: null } } }),
+        ]);
+        out.statuses = rows.map((r) => ({ value: r.status, count: r._count._all }));
+        out.statusParked = parked;
+      }
+      if (wanted.includes('priority')) {
+        const rest = { ...query };
+        delete rest.priority;
+        delete rest.facets;
+        const where = await this.buildListWhere(workspaceId, rest);
+        const rows = await prisma.ticket.groupBy({ by: ['priority'], where, _count: { _all: true } });
+        out.priorities = rows.map((r) => ({ value: r.priority, count: r._count._all }));
+      }
       return out;
     } catch (err) {
       logger.warn(`list facets failed (non-fatal): ${err.message}`);
@@ -1184,7 +1214,28 @@ class TicketService {
     const where = { workspaceId };
 
     const asList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(',')).map((s) => String(s).trim()).filter(Boolean);
-    if (query.status) where.status = { in: asList(query.status) };
+    // Status filter (1 Oct 2026): "parked" is its own option. A parked ticket
+    // keeps its Pending status (FreshService sees Pending), so picking real
+    // statuses means "those statuses, not parked"; "parked" adds parked
+    // tickets whatever their status. Only the Tickets page opts in
+    // (parkedSplit=1 or the token); the public API / exports keep the old
+    // meaning, where Pending includes parked tickets.
+    if (query.status) {
+      const list = asList(query.status);
+      const wantsParked = list.some((s) => s.toLowerCase() === 'parked');
+      const real = list.filter((s) => s.toLowerCase() !== 'parked');
+      const split = wantsParked || String(query.parkedSplit || '') === '1';
+      if (!split) {
+        where.status = { in: real };
+      } else if (!wantsParked) {
+        where.status = { in: real };
+        where.parkedUntil = null;
+      } else if (real.length) {
+        where.AND = [...(where.AND || []), { OR: [{ status: { in: real }, parkedUntil: null }, { parkedUntil: { not: null } }] }];
+      } else {
+        where.parkedUntil = { not: null };
+      }
+    }
     // Parked filter (plans/PARKED_BUILD_PLAN.md): ?parked=any|none|until_date|waiting_on|eta|waking7
     if (query.parked) {
       const p = String(query.parked);
@@ -1210,7 +1261,7 @@ class TicketService {
     // same where, so they agree too.
     if (['1', 'true', 'yes'].includes(String(query.reopened ?? '').toLowerCase())) {
       where.reopenedAt = { not: null };
-      if (!query.status) where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
+      if (!query.status || !where.status?.in) where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
       const waitingIds = await this._reopenedWaitingTicketIds(workspaceId, where.status.in);
       if (waitingIds) where.AND = [...(where.AND || []), { id: { in: waitingIds.length ? waitingIds : [-1] } }];
     }

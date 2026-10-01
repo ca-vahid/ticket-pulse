@@ -29,7 +29,7 @@ import {
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkedMark } from '../components/tickets/ParkControls';
-import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
+import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs, PARKED_STATUS, withParkedDefault } from '../components/tickets/statusDefs';
 import {
   BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
   buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths, OccurrenceMark,
@@ -275,7 +275,7 @@ export default function Tickets() {
   const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
   // QA 09-23 #4: the workspace's default status filter (Settings → Ticket Ops);
   // empty = every status. The URL always wins (?status=any shows everything).
-  const defaultStatuses = useMemo(() => (Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : []), [meta?.defaultStatuses]);
+  const defaultStatuses = useMemo(() => withParkedDefault(Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : [], statusDefs), [meta?.defaultStatuses, statusDefs]);
   const metaStatusesLoaded = (meta?.statuses?.length || 0) > 0;
   // Keyed on the raw ?status VALUE, not the searchParams object — the object
   // changes identity on every unrelated URL write (?peek= open/close, page),
@@ -288,7 +288,7 @@ export default function Tickets() {
     // Drop names the workspace doesn't define — but only once meta has
     // loaded; before that, custom names in a shared URL must pass through
     // untouched instead of being silently dropped on first paint.
-    return statusesRaw.split(',').filter((s) => (metaStatusesLoaded ? statusFilterNames.includes(s) : Boolean(s)));
+    return statusesRaw.split(',').filter((s) => s === PARKED_STATUS || (metaStatusesLoaded ? statusFilterNames.includes(s) : Boolean(s)));
   }, [statusesRaw, metaStatusesLoaded, statusFilterNames, defaultStatuses]);
   const assignee = searchParams.get('assignee') || '';
   const priority = searchParams.get('priority') || '';
@@ -512,14 +512,18 @@ export default function Tickets() {
 
   const queryParams = useMemo(() => {
     // `facets=source`: the rail's Source counts follow this exact view (QA 09-18 #2).
-    const params = { page, pageSize: effectivePageSize, sort, dir, facets: 'source,parked' };
+    const params = { page, pageSize: effectivePageSize, sort, dir, facets: 'source,parked,status,priority' };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
     // Board mode sends the SAME status scope as the list (QA 08-04 #16/#15 —
     // silently fetching every status made the board disagree with the rail
     // and show closed cards under "My open"); its Closed column explains
     // itself when the scope excludes terminal statuses.
     if (segment !== 'all') params.segment = segment;
-    else if (statuses.length > 0 && statuses.length < statusFilterNames.length) params.status = statuses.join(',');
+    // Parked is a status option of its own (+1); picked statuses then mean "not parked".
+    else if (statuses.length > 0 && statuses.length < statusFilterNames.length + 1) {
+      params.status = statuses.join(',');
+      params.parkedSplit = '1';
+    }
     if (assignee) params.assignedTechId = assignee;
     if (priority) params.priority = priority;
     if (origin) params.origin = origin;

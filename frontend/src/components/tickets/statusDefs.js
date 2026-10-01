@@ -118,3 +118,17 @@ export function statusToneFromDefs(defs, name) {
 export function statusDotClass(def) {
   return STATUS_DOT_BY_COLOR[def?.color] || 'bg-muted-foreground/40';
 }
+
+
+// Parked as its own status option (1 Oct 2026). A parked ticket keeps its
+// Pending status underneath, so the Tickets page sends this token with
+// parkedSplit=1: real statuses then mean "not parked".
+export const PARKED_STATUS = 'parked';
+
+/** A default status filter that includes a Pending-base status keeps parked tickets in view. */
+export function withParkedDefault(defaultStatuses, defs) {
+  const list = Array.isArray(defaultStatuses) ? defaultStatuses : [];
+  if (!list.length || list.includes(PARKED_STATUS)) return list;
+  const pending = statusNamesForBase(defs, 'Pending');
+  return list.some((s) => pending.includes(s)) ? [...list, PARKED_STATUS] : list;
+}
