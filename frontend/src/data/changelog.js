@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.26-preview';
+export const APP_VERSION = '4.1.27-preview';
 
 export const changelog = [
+  {
+    version: '4.1.27-preview',
+    date: 'October 1, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Teams bell notifications</strong> &mdash; the Teams activity-feed alert for SLA breaches, urgent tickets and approvals was refused by Microsoft every time (it pointed at the Ticket Pulse website, and Teams only accepts its own links there). It now points at the Ticket Pulse app in Teams; clicking it opens your Ticket Pulse chat with the ticket card. The chat messages themselves were never affected.' },
+    ],
+  },
   {
     version: '4.1.26-preview',
     date: 'September 30, 2026',
