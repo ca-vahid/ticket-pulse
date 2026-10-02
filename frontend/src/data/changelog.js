@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.40-preview';
+export const APP_VERSION = '4.1.41-preview';
 
 export const changelog = [
+  {
+    version: '4.1.41-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Delete FreshService tickets from Ticket Pulse</strong> &mdash; a FreshService ticket&rsquo;s More menu has &ldquo;Delete in FreshService&hellip;&rdquo;: it moves the ticket to FreshService&rsquo;s trash (restorable there) and it leaves Ticket Pulse lists. Admins and reviewers only.' },
+      { type: 'feature', html: '<strong>Bulk delete</strong> &mdash; select tickets on the Tickets page and press Delete&hellip; (up to 25 at a time). Ticket Pulse and FreshService tickets can be mixed; FreshService ones go one at a time and a failure never stops the rest. More than 5 tickets shows a report of each one; 5 or fewer, a short summary. Tickets that failed stay selected so you can try again.' },
+    ],
+  },
   {
     version: '4.1.40-preview',
     date: 'October 2, 2026',

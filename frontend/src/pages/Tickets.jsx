@@ -19,6 +19,7 @@ import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
+import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
 import HandBackReasonDialog from '../components/tickets/HandBackReasonDialog';
 import BulkSelectionPanel from '../components/tickets/BulkSelectionPanel';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
@@ -48,6 +49,8 @@ import { useSSE } from '../hooks/useSSE';
 // Status vocabulary comes from the workspace registry in the queue meta
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
 const PAGE_SIZE = 25;
+// Bulk delete cap (2 Oct 2026) — matches the server's /tickets/bulk-delete cap.
+const BULK_DELETE_MAX = 25;
 
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last activity' },
@@ -778,6 +781,16 @@ export default function Tickets() {
     setToast({ message, undo, tone, action });
     toastTimerRef.current = setTimeout(() => setToast(null), undo || action || tone === 'red' ? 6000 : 3000);
   }, []);
+  // A message handed over by the ticket page on its way back here (e.g.
+  // "Deleted in FreshService", 2 Oct 2026): shown once, then cleared from
+  // history so Back/refresh never repeats it.
+  const arrivalToast = location.state?.toast;
+  useEffect(() => {
+    if (!arrivalToast?.message) return;
+    showToast(arrivalToast.message, null, { tone: arrivalToast.tone || 'emerald' });
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrivalToast]);
   // Mirror of the rendered list for diffing/lookup inside SSE callbacks.
   const ticketsRef = useRef([]);
   useEffect(() => { ticketsRef.current = tickets; }, [tickets]);
@@ -1262,6 +1275,59 @@ export default function Tickets() {
     setBulkAction(null);
     setSelectedIds(new Set());
     setBulkPanelOpen(false);
+    refreshAfterEdit();
+  };
+
+  // ---- Bulk delete (2 Oct 2026) ----
+  // Mixed selection: TP-born via the TP delete, FS-born in FreshService. The
+  // page walks the selection ONE ticket per request (strictly sequential —
+  // FreshService's API budget is account-wide), which gives exact progress
+  // and keeps every request short. A failure never stops the rest.
+  const canBulkDelete = meta?.actor?.kind === 'admin' || ['admin', 'reviewer'].includes(meta?.actor?.workspaceRole);
+  const deleteBlockedReason = selectedTickets.length > BULK_DELETE_MAX
+    ? `Delete up to ${BULK_DELETE_MAX} tickets at a time — FreshService deletes run one by one`
+    : null;
+  const [bulkDelete, setBulkDelete] = useState(null); // { phase, targets, current, results }
+  const openBulkDelete = () => setBulkDelete({
+    phase: 'confirm',
+    targets: selectedTickets.map((t) => ({ id: t.id, ref: t.displayRef || `#${t.id}`, origin: t.origin, subject: t.subject || '' })),
+    current: 0,
+    results: [],
+  });
+  const runBulkDelete = async () => {
+    const targets = bulkDelete?.targets || [];
+    if (!targets.length) return;
+    lastLocalMutationRef.current = Date.now();
+    const results = [];
+    for (let i = 0; i < targets.length; i += 1) {
+      const t = targets[i];
+      setBulkDelete((prev) => (prev ? { ...prev, phase: 'running', current: i + 1 } : prev));
+      try {
+        const res = await ticketsAPI.bulkDelete([t.id]);
+        const r = res.data?.results?.[0];
+        results.push({ ...t, ok: Boolean(r?.ok), ...(r?.ok ? {} : { error: r?.error || 'Delete failed' }) });
+      } catch (err) {
+        results.push({ ...t, ok: false, error: err.response?.data?.message || err.message || 'Delete failed' });
+      }
+    }
+    lastLocalMutationRef.current = Date.now();
+    const okIds = new Set(results.filter((r) => r.ok).map((r) => r.id));
+    const failed = results.filter((r) => !r.ok);
+    // Deleted rows leave the list now; failed ones stay selected for a retry.
+    setTickets((prev) => prev.filter((row) => !okIds.has(row.id)));
+    setTotal((n) => Math.max(0, n - okIds.size));
+    setSelectedIds(new Set(failed.map((r) => r.id)));
+    if (targets.length > 5) {
+      setBulkDelete((prev) => (prev ? { ...prev, phase: 'report', results } : prev));
+    } else {
+      setBulkDelete(null);
+      const head = `${okIds.size} deleted`;
+      showToast(
+        failed.length ? `${head}, ${failed.length} failed — ${failed[0].ref}: ${failed[0].error}` : head,
+        null,
+        { tone: failed.length ? 'red' : 'emerald' },
+      );
+    }
     refreshAfterEdit();
   };
 
@@ -2488,6 +2554,8 @@ export default function Tickets() {
               setBulkResult({ ok: 0, failed: [{ ref: 'unpark', message: err.response?.data?.message || err.message }], skipped: 0, label: 'unpark' });
             }
           } : null}
+          onDelete={canBulkDelete && selectedIds.size > 0 ? openBulkDelete : null}
+          deleteBlockedReason={deleteBlockedReason}
           onOpenDetails={() => setBulkPanelOpen((v) => !v)}
           detailsOpen={bulkPanelOpen}
           onClear={() => { setSelectedIds(new Set()); setQueryScope(null); setBulkPanelOpen(false); }}
@@ -2508,6 +2576,17 @@ export default function Tickets() {
         onSubmit={(reason) => runBulk(reason)}
         onCancel={() => setBulkHandBackOpen(false)}
       />
+      {bulkDelete && (
+        <BulkDeleteDialog
+          phase={bulkDelete.phase}
+          tpCount={bulkDelete.targets.filter((t) => t.origin === 'ticketpulse').length}
+          fsCount={bulkDelete.targets.filter((t) => t.origin !== 'ticketpulse').length}
+          current={bulkDelete.current}
+          results={bulkDelete.results}
+          onConfirm={runBulkDelete}
+          onClose={() => { if (bulkDelete.phase !== 'running') setBulkDelete(null); }}
+        />
+      )}
       {bulkPark && (
         <ParkDialog
           bulkCount={selectedIds.size}

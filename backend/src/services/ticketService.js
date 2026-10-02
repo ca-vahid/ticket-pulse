@@ -6,7 +6,7 @@ import { categoryTiers } from '../utils/approvalTiers.js';
 import logger from '../utils/logger.js';
 import { textToHtml } from '../utils/forwardedMailParser.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
-import { ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
+import { AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
@@ -959,6 +959,112 @@ class TicketService {
     this._broadcast(workspaceId, 'deleted', updated);
     logger.info(`TP ticket ${ticketDisplayRef(updated)} (id ${ticket.id}) deleted by ${actor?.email || 'unknown'}`);
     return { ...updated, displayRef: ticketDisplayRef(updated), deleted: true };
+  }
+
+  /**
+   * Delete an FS-born ticket IN FreshService (2 Oct 2026). FreshService owns
+   * the ticket, so the DELETE goes to FreshService first (it lands in FS's
+   * trash, restorable there); only once FS confirms (or answers 404 — already
+   * gone) is the TP row marked the way sync marks an FS-side deletion:
+   * status 'Deleted', queued AI work skipped, pending reviews superseded.
+   * An FS failure changes nothing here.
+   */
+  async deleteFsTicketInFreshService(ticketId, workspaceId, actor) {
+    const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId }, include: TICKET_INCLUDE });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE || !ticket.freshserviceTicketId) {
+      throw new ValidationError('This is a Ticket Pulse ticket — use "Delete ticket" instead; it removes the FreshService copy too.');
+    }
+    if (String(ticket.status) === 'Deleted') {
+      return { ...ticket, displayRef: ticketDisplayRef(ticket), deleted: true, alreadyDeleted: true };
+    }
+
+    const fsId = Number(ticket.freshserviceTicketId);
+    const client = await mirrorService.getInteractiveClient(workspaceId);
+    if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+    let fsResult;
+    try {
+      fsResult = await client.deleteTicket(fsId); // 404/405 → { alreadyGone: true }
+    } catch (err) {
+      if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+      const status = getFreshServiceStatus(err);
+      const detail = getFreshServiceDetail(err);
+      const reason = detail?.description || detail?.message || err?.message || 'no reason given';
+      const message = `FreshService refused the delete — ${reason}. Nothing was changed in Ticket Pulse.`;
+      if (status && status >= 400 && status < 500) throw new ValidationError(message);
+      throw new AppError(message, 502);
+    }
+
+    const who = actor?.name || actor?.email || 'a user';
+    const note = fsResult?.alreadyGone
+      ? `Deleted from Ticket Pulse by ${who} — it was already gone in FreshService`
+      : `Deleted in FreshService from Ticket Pulse by ${who} (moved to FreshService's trash)`;
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { status: 'Deleted', updatedAt: new Date() },
+      include: TICKET_INCLUDE,
+    });
+    await prisma.assignmentPipelineRun.updateMany({
+      where: { ticketId: ticket.id, status: 'queued' },
+      data: { status: 'skipped_stale', errorMessage: note },
+    }).catch(() => {});
+    await prisma.assignmentPipelineRun.updateMany({
+      where: { ticketId: ticket.id, status: 'completed', decision: 'pending_review' },
+      data: { status: 'superseded', errorMessage: note },
+    }).catch(() => {});
+    await this._audit(ticket.id, 'status_changed', actor, {
+      oldStatus: ticket.status,
+      newStatus: 'Deleted',
+      note,
+      deletedInFreshService: true,
+      freshserviceTicketId: fsId,
+    });
+    this._broadcast(workspaceId, 'deleted', updated);
+    logger.info(`FS #${fsId} (ticket ${ticket.id}) deleted in FreshService from Ticket Pulse by ${actor?.email || 'unknown'}${fsResult?.alreadyGone ? ' (already gone in FS)' : ''}`);
+    return { ...updated, displayRef: ticketDisplayRef(updated), deleted: true, alreadyGone: Boolean(fsResult?.alreadyGone) };
+  }
+
+  /**
+   * Bulk delete for a mixed selection (2 Oct 2026). TP-born → deleteTicket
+   * (needs native ticketing, like the single route); FS-born →
+   * deleteFsTicketInFreshService. Strictly one at a time — FreshService's API
+   * budget is account-wide — and a failure is recorded, never fatal: the rest
+   * still run. Returns [{ id, ref, origin, ok, error? }] in the order given.
+   */
+  async bulkDeleteTickets(ids, workspaceId, actor) {
+    const rows = await prisma.ticket.findMany({
+      where: { id: { in: ids }, workspaceId },
+      select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    let nativeOn = null;
+    const results = [];
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) {
+        results.push({ id, ref: `#${id}`, origin: null, ok: false, error: 'Ticket not found in this workspace' });
+        continue;
+      }
+      const ref = ticketDisplayRef(row);
+      const origin = row.origin;
+      try {
+        let r;
+        if (origin === TICKET_ORIGIN.TICKETPULSE) {
+          if (nativeOn === null) {
+            const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { nativeTicketingEnabled: true } });
+            nativeOn = Boolean(ws?.nativeTicketingEnabled);
+          }
+          if (!nativeOn) throw new ValidationError('Native ticketing is not enabled for this workspace');
+          r = await this.deleteTicket(id, workspaceId, actor);
+        } else {
+          r = await this.deleteFsTicketInFreshService(id, workspaceId, actor);
+        }
+        results.push({ id, ref, origin, ok: true, ...(r?.alreadyDeleted ? { alreadyDeleted: true } : {}), ...(r?.alreadyGone ? { alreadyGone: true } : {}) });
+      } catch (err) {
+        results.push({ id, ref, origin, ok: false, error: err?.message || 'Delete failed' });
+      }
+    }
+    return results;
   }
 
   async _notifyLifecycle(existingTicket, upsertedTicket, { allow = true, suppressRequesterAck = false, actorKind = null, actor = null } = {}) {

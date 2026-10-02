@@ -1036,6 +1036,16 @@ export const ticketsAPI = {
     return await apiLongTimeout.post(`/tickets/${id}/fs-update`, changes, { timeout: 120000 });
   },
 
+  /** FS-born delete: FreshService deletes it (to its trash) FIRST, then TP marks it Deleted. */
+  fsDelete: async (id) => {
+    return await apiLongTimeout.post(`/tickets/${id}/fs-delete`, {}, { timeout: 120000 });
+  },
+
+  /** Bulk delete (TP-born + FS-born), processed one at a time server-side; ≤25 ids per call. */
+  bulkDelete: async (ids) => {
+    return await apiLongTimeout.post('/tickets/bulk-delete', { ids }, { timeout: 120000 });
+  },
+
   setNoise: async (id, { noise = true, resolve = false } = {}) => {
     return await api.post(`/tickets/${id}/noise`, { noise, resolve });
   },
