@@ -150,7 +150,7 @@ export default function TicketAttachmentsTab({
         <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
           {shown.map(({ a, kind, who, at, entryId }) => (
             <li key={a.id} className="group flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-              <button type="button" onClick={() => onPreview?.(a)} title={`Preview ${a.fileName}`}
+              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} title={`Preview ${a.fileName}`}
                 className="tp-focus-ring flex h-28 items-center justify-center overflow-hidden bg-muted/50 transition-colors hover:bg-muted">
                 <Thumb a={a} url={urls[a.id]} />
               </button>
@@ -177,7 +177,7 @@ export default function TicketAttachmentsTab({
           {shown.map(({ a, kind, who, at, entryId }) => (
             <li key={a.id} className="flex items-center gap-3 py-2">
               {isImage(a) ? <ImageIcon className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" /> : <Paperclip className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" />}
-              <button type="button" onClick={() => onPreview?.(a)} className="tp-focus-ring min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:text-primary" title={`Preview ${a.fileName}`}>{a.fileName}</button>
+              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} className="tp-focus-ring min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:text-primary" title={`Preview ${a.fileName}`}>{a.fileName}</button>
               <span className="hidden flex-none text-xs text-muted-foreground sm:inline">{KIND_WORD[kind]}{who ? ` · ${who}` : ''}</span>
               <span className="hidden flex-none text-xs text-muted-foreground/75 md:inline">{formatDayTime(at)}</span>
               <span className="w-16 flex-none text-right text-xs text-muted-foreground/75">{formatBytes(a.sizeBytes)}</span>

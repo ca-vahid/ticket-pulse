@@ -117,6 +117,7 @@ function verbFor(item) {
   if (item.event === 'reopen') return 'reopened the ticket';
   if (item.event === 'assignment') {
     if (item.machine) return 'reconciled the assignee';
+    if (item.verb === 'reassigned') return 'reassigned';
     return item.to ? 'assigned' : 'unassigned the ticket';
   }
   if (item.event === 'priority') {

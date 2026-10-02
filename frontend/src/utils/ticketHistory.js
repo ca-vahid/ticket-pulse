@@ -184,6 +184,23 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         detail: d.pending ? null : d.note || null,
         machine: true,
       });
+    } else if (t === 'fs_write_back') {
+      // A person's change made in Ticket Pulse and written to FreshService
+      // (2 Oct 2026): this row carries the real actor and the before → after,
+      // so it IS the story — "Gaby reassigned Gaby → Marcus" — not a raw
+      // "fs write back". FreshService's echo of it is dropped below.
+      const c = d.changes && typeof d.changes === 'object' ? d.changes : {};
+      if (c.assignee) {
+        item = baseItem({ event: 'assignment', verb: c.assignee.to ? 'reassigned' : 'unassigned the ticket', from: c.assignee.from || null, to: c.assignee.to || null, machine: false });
+        if (c.assignee.to) attributed.assignment.push({ at, to: norm(c.assignee.to) });
+      } else if (c.status) {
+        item = baseItem({ event: 'status', verb: 'changed status', from: c.status.from || null, to: c.status.to || null, machine: false });
+      } else if (c.priority) {
+        item = baseItem({ event: 'priority', verb: 'set priority', from: c.priority.from || null, to: c.priority.to || null, machine: false });
+      } else {
+        const fields = Object.keys(c).map(humanize).join(', ');
+        item = baseItem({ event: 'system', verb: fields ? `updated ${fields} in FreshService` : 'updated the ticket in FreshService', machine: true });
+      }
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {
@@ -248,7 +265,17 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
   // Episode ↔ assignment duplicate: "took ownership" within ±3 min of an
   // assignment to the same person tells the same story — keep the assignment.
   const assignAt = items.filter((i) => i.event === 'assignment' && i.to).map((i) => ({ at: i.at, to: norm(i.to) }));
-  const deduped = items.filter((i) => !(i.event === 'ownership' && i.verb.startsWith('took ownership') && assignAt.some((s) => Math.abs(s.at - i.at) <= NEAR_MS && s.to === norm(i.to))));
+  // A person's reassignment (fs_write_back / native assign) is the one line
+  // for that moment (2 Oct 2026): the FreshService echo of the same change
+  // ("reconciled the assignee", status set by "Ticket Pulse") and the episode
+  // that closed with it ("ownership ended → Unassigned") only repeat it.
+  const humanChanges = items.filter((i) => !i.machine && (i.event === 'assignment' || i.event === 'status') && i.kind !== 'freshservice_sync');
+  const echoes = (i) => i.machine && (i.event === 'assignment' || i.event === 'status')
+    && humanChanges.some((h) => h.event === i.event && h !== i && Math.abs(h.at - i.at) <= NEAR_MS && norm(h.to) === norm(i.to));
+  const endedByReassign = (i) => i.event === 'ownership' && i.verb.startsWith('ownership ended')
+    && items.some((h) => h.event === 'assignment' && h.to && Math.abs(h.at - i.at) <= NEAR_MS && (!h.from || norm(h.from) === norm(i.from)));
+  const deduped = items.filter((i) => !(i.event === 'ownership' && i.verb.startsWith('took ownership') && assignAt.some((s) => Math.abs(s.at - i.at) <= NEAR_MS && s.to === norm(i.to)))
+    && !echoes(i) && !endedByReassign(i));
 
   deduped.sort((x, y) => y.at - x.at);
   return foldBursts(collapseSame(deduped));

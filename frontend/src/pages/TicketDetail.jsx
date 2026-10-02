@@ -142,10 +142,14 @@ const cleanRefName = (s) => String(s || '').replace(new RegExp('&nbsp;|&#160;|&#
  * clickable chips (click → onImageRef(name) opens a preview). Uses SafeHtml so
  * rich formatting is preserved; delegates the click via the wrapping div.
  */
-function RichBody({ html, text, onImageRef, className = '' }) {
+function RichBody({ html, text, onImageRef, className = '', shownImages = null }) {
+  // A picture that is shown as a thumbnail under the message keeps a short
+  // "🖼 picture" marker in the text instead of its file name again (2 Oct 2026).
   const injectRefs = (s) => String(s).replace(IMG_REF_RE, (_m, name) => {
-    const clean = escapeHtml(cleanRefName(name));
-    return `<span class="tp-img-ref" data-img="${clean}" role="button" tabindex="0">🖼 ${clean}</span>`;
+    const plain = cleanRefName(name);
+    const clean = escapeHtml(plain);
+    const shown = shownImages && shownImages.has(plain.toLowerCase());
+    return `<span class="tp-img-ref" data-img="${clean}" title="${clean}" role="button" tabindex="0">🖼 ${shown ? 'picture' : clean}</span>`;
   });
   // FR 09-11 #3: a text-only body used to become one <br> per newline, so mail
   // that separates every line with a blank line (Outlook's text down-conversion
@@ -270,7 +274,7 @@ const isImageAttachment = (a) =>
  * hiding only in the attachments rail. Click → the existing preview lightbox.
  * The rail stays the canonical list of everything attached.
  */
-function DescriptionImageStrip({ ticketId, images, onPreview }) {
+function DescriptionImageStrip({ ticketId, images, onPreview, className = 'mt-3 pt-3 border-t border-border/60', ariaLabel = 'Images attached to the description', onPreviewList = null }) {
   const [urls, setUrls] = useState({}); // attachmentId → object URL
   useEffect(() => {
     if (!images.length) return undefined;
@@ -290,12 +294,12 @@ function DescriptionImageStrip({ ticketId, images, onPreview }) {
 
   if (!images.length) return null;
   return (
-    <div className="mt-3 pt-3 border-t border-border/60 flex flex-wrap gap-2" aria-label="Images attached to the description">
+    <div className={`${className} flex flex-wrap gap-2`} aria-label={ariaLabel}>
       {images.map((a) => (
         <button
           key={a.id}
           type="button"
-          onClick={() => onPreview(a)}
+          onClick={() => (onPreviewList ? onPreviewList(a) : onPreview(a))}
           className="tp-focus-ring group relative rounded-lg overflow-hidden border border-border bg-muted/50 hover:border-blue-300 dark:hover:border-blue-500/40 transition-colors"
           title={`Preview ${a.fileName}`}
         >
@@ -365,8 +369,12 @@ export function forwardedMetaOf(entry) {
   return null;
 }
 
-export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null }) {
+export function ThreadEntry({ entry, attachments = [], ticketId = null, onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Stable lists: the thumbnail strip loads pictures per list identity.
+  const imageAttachments = useMemo(() => (ticketId ? attachments.filter(isImageAttachment) : []), [attachments, ticketId]);
+  const fileAttachments = useMemo(() => (ticketId ? attachments.filter((a) => !isImageAttachment(a)) : attachments), [attachments, ticketId]);
+  const shownImageNames = useMemo(() => (ticketId ? new Set(imageAttachments.map((a) => String(a.fileName || '').trim().toLowerCase())) : null), [imageAttachments, ticketId]);
   // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
   // small rich-text composer variant; Save PATCHes through the parent.
   const [editing, setEditing] = useState(false);
@@ -630,11 +638,21 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
             </div>
           </div>
         ) : (
-          <RichBody html={entry.bodyHtml} text={body} onImageRef={onImageRef} />
+          <RichBody html={entry.bodyHtml} text={body} onImageRef={onImageRef} shownImages={shownImageNames} />
         )}
-        {attachments.length > 0 && (
+        {/* Pictures as thumbnails (name on hover); other files as chips. */}
+        {imageAttachments.length > 0 && (
+          <DescriptionImageStrip
+            ticketId={ticketId}
+            images={imageAttachments}
+            onPreview={(a) => onPreview?.(a)}
+            className="mt-2"
+            ariaLabel="Pictures in this message"
+          />
+        )}
+        {fileAttachments.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {attachments.map((a) => (
+            {fileAttachments.map((a) => (
               <AttachmentChip
                 key={a.id}
                 attachment={a}
@@ -1381,28 +1399,41 @@ export default function TicketDetail() {
     return tree.filter((c) => !mapped.has(c.id) || allowed.has(c.id) || c.id === effectiveCategoryId);
   }, [meta?.categoryTree, meta?.categoryGroupLinks, ticket?.groupId, effectiveCategoryId]);
 
+  // One copy per file per message (2 Oct 2026): the FreshService conversation
+  // sync used to attach FS's copy of a file the agent had just uploaded in
+  // Ticket Pulse — same message, name and size. Keep the Ticket Pulse upload.
+  const ticketAttachments = useMemo(() => {
+    const seen = new Map();
+    for (const a of ticket?.attachments || []) {
+      const key = `${a.threadEntryId || 0}|${String(a.fileName || '').toLowerCase()}|${a.sizeBytes || 0}`;
+      const prev = seen.get(key);
+      if (!prev || (prev.source === 'freshservice' && a.source !== 'freshservice')) seen.set(key, a);
+    }
+    return [...seen.values()];
+  }, [ticket?.attachments]);
+
   const attachmentsByEntry = useMemo(() => {
     const map = new Map();
-    for (const a of ticket?.attachments || []) {
+    for (const a of ticketAttachments) {
       if (!a.threadEntryId) continue;
       if (!map.has(a.threadEntryId)) map.set(a.threadEntryId, []);
       map.get(a.threadEntryId).push(a);
     }
     return map;
-  }, [ticket?.attachments]);
+  }, [ticketAttachments]);
 
   // Ticket-level (description) image attachments — shown as an inline strip
   // under the description (QA 07-06 #9).
   const descriptionImages = useMemo(
-    () => (ticket?.attachments || []).filter((a) => !a.threadEntryId && isImageAttachment(a)),
-    [ticket?.attachments],
+    () => ticketAttachments.filter((a) => !a.threadEntryId && isImageAttachment(a)),
+    [ticketAttachments],
   );
   // Non-image ticket-level files (invoices, docs) — a chip row under the
   // description so the original message's files live with the message, not
   // only in the sidebar (QA 07-08).
   const descriptionFiles = useMemo(
-    () => (ticket?.attachments || []).filter((a) => !a.threadEntryId && !isImageAttachment(a)),
-    [ticket?.attachments],
+    () => ticketAttachments.filter((a) => !a.threadEntryId && !isImageAttachment(a)),
+    [ticketAttachments],
   );
 
   const techPhotoByEmail = useMemo(() => {
@@ -1563,22 +1594,32 @@ export default function TicketDetail() {
   }, [ticketId, fetchTicket, showToast]);
 
   const [previewAttachment, setPreviewAttachment] = useState(null);
+  const [previewList, setPreviewList] = useState(null);
   // Preview image attachments/refs in a lightbox instead of forcing a download.
-  const previewImage = useCallback((a) => {
-    if (a) setPreviewAttachment(a);
+  // `list` = what ‹ › steps through (the Attachments tab passes its filter);
+  // otherwise the ticket's files in conversation order.
+  const previewImage = useCallback((a, list = null) => {
+    if (!a) return;
+    setPreviewList(Array.isArray(list) ? list : null);
+    setPreviewAttachment(a);
   }, []);
+  const previewItems = useMemo(() => {
+    const at = new Map((ticket?.thread || []).map((e) => [e.id, new Date(e.occurredAt).getTime()]));
+    const created = ticket?.createdAt ? new Date(ticket.createdAt).getTime() : 0;
+    return [...ticketAttachments].sort((x, y) => ((x.threadEntryId ? at.get(x.threadEntryId) || 0 : created) - (y.threadEntryId ? at.get(y.threadEntryId) || 0 : created)) || (x.id - y.id));
+  }, [ticketAttachments, ticket?.thread, ticket?.createdAt]);
   // Resolve an inline "[Image: name]" reference to an attachment by file name
   // (case/space-insensitive) and preview it; fall back to a download if the
   // exact bytes aren't attached (e.g. an inline paste that didn't upload).
   const previewImageRef = useCallback((name) => {
     const wanted = String(name || '').trim().toLowerCase();
     if (!wanted) return;
-    const all = ticket?.attachments || [];
+    const all = ticketAttachments;
     const hit = all.find((a) => String(a.fileName || '').trim().toLowerCase() === wanted)
       || all.find((a) => String(a.fileName || '').trim().toLowerCase().includes(wanted));
     if (hit) setPreviewAttachment(hit);
     else showToast('sky', `No attachment named “${name}” on this ticket`);
-  }, [ticket?.attachments, showToast]);
+  }, [ticketAttachments, showToast]);
 
   const attachmentInputRef = useRef(null);
   const [uploadProgress, setUploadProgress] = useState(null); // { pct, name, count } | null
@@ -2732,7 +2773,7 @@ export default function TicketDetail() {
             <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-border mb-4 overflow-x-auto no-scrollbar print-hide">
               {[
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
-                { key: 'attachments', label: 'Attachments', icon: Paperclip, count: ticket.attachments?.length || 0 },
+                { key: 'attachments', label: 'Attachments', icon: Paperclip, count: ticketAttachments.length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
                 { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
                 { key: 'links', label: 'Related', icon: GitBranch, count: linkCount },
@@ -2917,6 +2958,7 @@ export default function TicketDetail() {
                                   <ThreadEntry
                                     entry={item.e}
                                     attachments={attachmentsByEntry.get(item.e.id) || []}
+                                    ticketId={ticketId}
                                     onPreview={previewImage}
                                     onImageRef={previewImageRef}
                                     photoFor={photoFor}
@@ -3512,7 +3554,7 @@ export default function TicketDetail() {
                 {pageTab === 'attachments' && (
                   <TicketAttachmentsTab
                     ticketId={ticketId}
-                    attachments={ticket.attachments || []}
+                    attachments={ticketAttachments}
                     entries={conversationEntries}
                     onPreview={previewImage}
                     onDownload={downloadAttachment}
@@ -3917,7 +3959,7 @@ export default function TicketDetail() {
                     <button type="button" onClick={() => setPageTab('attachments')} className="tp-focus-ring rounded text-left hover:text-primary" title="Open the Attachments tab">
                       <h2 className="text-sm font-bold text-foreground hover:text-primary">Attachments</h2>
                     </button>
-                    <span className="text-xs text-muted-foreground/75">({ticket.attachments?.length || 0})</span>
+                    <span className="text-xs text-muted-foreground/75">({ticketAttachments.length})</span>
                     {canWrite && (
                       <>
                         <input
@@ -3955,11 +3997,11 @@ export default function TicketDetail() {
                       </div>
                     </div>
                   )}
-                  {(ticket.attachments?.length || 0) === 0 ? (
+                  {ticketAttachments.length === 0 ? (
                     <p className="text-xs text-muted-foreground/75">No files attached{canWrite ? ' — drop something in with Add.' : '.'}</p>
                   ) : (
                     <ul className="space-y-1.5">
-                      {ticket.attachments.slice(0, 5).map((a) => (
+                      {ticketAttachments.slice(0, 5).map((a) => (
                         <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border/60 bg-muted/30">
                           {isImageAttachment(a)
                             ? <ImageIcon className="w-[18px] h-[18px] text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
@@ -4003,9 +4045,9 @@ export default function TicketDetail() {
                       ))}
                     </ul>
                   )}
-                  {(ticket.attachments?.length || 0) > 0 && (
+                  {ticketAttachments.length > 0 && (
                     <button type="button" onClick={() => setPageTab('attachments')} className="tp-focus-ring mt-2 text-xs font-semibold text-primary hover:underline">
-                      {ticket.attachments.length > 5 ? `View all ${ticket.attachments.length} in the Attachments tab →` : 'Open the Attachments tab →'}
+                      {ticketAttachments.length > 5 ? `View all ${ticketAttachments.length} in the Attachments tab →` : 'Open the Attachments tab →'}
                     </button>
                   )}
                 </div>
@@ -4121,7 +4163,9 @@ export default function TicketDetail() {
         <AttachmentPreviewModal
           ticketId={ticketId}
           attachment={previewAttachment}
-          onClose={() => setPreviewAttachment(null)}
+          items={previewList || previewItems}
+          onNavigate={setPreviewAttachment}
+          onClose={() => { setPreviewAttachment(null); setPreviewList(null); }}
         />
       )}
 

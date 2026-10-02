@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.1.35-preview';
+export const APP_VERSION = '4.1.36-preview';
 
 export const changelog = [
+  {
+    version: '4.1.36-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Pictures in messages show as pictures</strong> &mdash; images in a reply or note appear as thumbnails instead of a row of file names; the file name shows when you hover. Where the text marks a picture that sits right below, it now just says &ldquo;🖼 picture&rdquo; instead of repeating the name.' },
+      { type: 'new', html: '<strong>Step through attachments</strong> &mdash; the preview window has ‹ › buttons (or use the arrow keys) and shows &ldquo;2 of 5&rdquo;; from a message it steps through the ticket&rsquo;s files in conversation order, from the Attachments tab through the files in the filter you picked.' },
+      { type: 'fixed', html: '<strong>Pictures shown twice</strong> &mdash; a picture pasted into a note or reply in Ticket Pulse also came back from FreshService as a second copy on the same message. New copies are no longer stored, and existing ones are hidden.' },
+      { type: 'fixed', html: '<strong>Clearer Activity for reassignments</strong> &mdash; a reassignment made in Ticket Pulse now reads as one line, &ldquo;Gaby Tonnova reassigned Gaby Tonnova → Marcus Blackstock&rdquo;, instead of &ldquo;fs write back&rdquo;, &ldquo;reconciled the assignee&rdquo; and &ldquo;ownership ended → Unassigned&rdquo;. Status and priority changes made the same way read the same.' },
+    ],
+  },
   {
     version: '4.1.35-preview',
     date: 'October 2, 2026',
