@@ -1187,7 +1187,7 @@ class TicketService {
       }))
       .catch(() => null);
     if (!assignableOnly) throw new ValidationError('Technician not found in this workspace');
-    return assignableOnly;
+    return { ...assignableOnly, assignableOnly: true };
   }
 
   /**
@@ -3023,7 +3023,7 @@ class TicketService {
       Promise.resolve()
         .then(() => prisma.technician.findMany({
           where: { workspaceId, isActive: false, assignableOnly: true },
-          select: { id: true, name: true, email: true, photoUrl: true, origin: true },
+          select: { id: true, name: true, email: true, photoUrl: true, origin: true, freshserviceId: true },
           orderBy: { name: 'asc' },
         }))
         .then((rows) => (Array.isArray(rows) ? rows : []))
@@ -3032,8 +3032,24 @@ class TicketService {
         .then(({ default: teamForwardService }) => teamForwardService.listForMeta(workspaceId))
         .catch(() => []),
     ]);
+    // Their own FreshService group, so the confirm can show the group move.
+    // Never waits on FreshService: a cold cache warms in the background.
+    let homeGroups = {};
+    if (assignableOnlyTechs.length) {
+      homeGroups = await import('./fsHomeGroupService.js')
+        .then(async ({ getFsGroups, homeGroupsByTech }) => {
+          const client = await mirrorService.getInteractiveClient(workspaceId).catch(() => null);
+          const groups = await getFsGroups(workspaceId, client, { wait: false });
+          return homeGroupsByTech(groups, assignableOnlyTechs);
+        })
+        .catch(() => ({}));
+    }
     const pickerTechnicians = assignableOnlyTechs.length
-      ? [...technicians, ...assignableOnlyTechs.map((t) => ({ ...t, assignableOnly: true }))]
+      ? [...technicians, ...assignableOnlyTechs.map(({ freshserviceId: _fsId, ...t }) => ({
+        ...t,
+        assignableOnly: true,
+        ...(homeGroups[t.id] ? { homeGroup: homeGroups[t.id] } : {}),
+      }))]
       : technicians;
 
     const tops = categories.filter((c) => c.parentId === null);
@@ -4057,6 +4073,20 @@ class TicketService {
         }
         fsPayload.responder_id = Number(assignee.freshserviceId);
         localPatch.assignedTechId = assignee.id;
+        // "Other teams" people are not in IT's groups; FreshService refuses
+        // them on an "Everyone IT" ticket. Move it to their own group (e.g.
+        // Coreshack) in the same write-back (2 Oct 2026).
+        if (assignee.assignableOnly && ticket.groupId) {
+          const { getFsGroups, pickHomeGroup } = await import('./fsHomeGroupService.js');
+          const groups = await getFsGroups(workspaceId, client).catch(() => null);
+          const home = pickHomeGroup(groups, assignee.freshserviceId, ticket.groupId);
+          if (home) {
+            const fromName = groups.find((g) => g.fsId === String(ticket.groupId))?.name || null;
+            fsPayload.group_id = Number(home.fsId);
+            localPatch.groupId = BigInt(home.fsId);
+            changes.group = { from: fromName, to: home.name };
+          }
+        }
       }
       changes.assignee = { from: ticket.assignedTech?.name || null, to: assignee?.name || null };
     }
@@ -4259,6 +4289,7 @@ class TicketService {
     }
     if (fsPayload.priority !== undefined && fsTicket.priority !== fsPayload.priority) rejected.push('priority');
     if (fsPayload.responder_id !== undefined && String(fsTicket.responder_id ?? '') !== String(fsPayload.responder_id ?? '')) rejected.push('assignee');
+    if (fsPayload.group_id !== undefined && fsTicket.group_id !== undefined && String(fsTicket.group_id ?? '') !== String(fsPayload.group_id)) rejected.push('group');
     if (fsPayload.cc_emails !== undefined) {
       const echoed = (Array.isArray(fsTicket.cc_emails) ? fsTicket.cc_emails : []).map((e) => String(e).trim().toLowerCase());
       const wanted = fsPayload.cc_emails;

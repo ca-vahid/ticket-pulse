@@ -349,3 +349,98 @@ describe('hand-back list date range (review S2)', () => {
     expect(parseRangeBound('nope', 'UTC')).toBeNull();
   });
 });
+
+// 2 Oct 2026: "Other teams" people sit in their own FreshService group
+// (Coreshack). Assigning one of them an "Everyone IT" ticket moves the ticket
+// to that group in the same write-back instead of FreshService refusing it.
+describe('updateFsTicket — Other teams person moves the ticket to their group', () => {
+  const fsTicket = {
+    ...tpTicket, id: 601, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: BigInt(245373), groupId: BigInt(1000205455),
+    assignedTechId: null, assignedTech: null,
+  };
+  const GROUPS = [
+    { id: 1000205455, name: 'Everyone IT', members: [1, 2, 3, 4, 5, 6] },
+    { id: 1000206163, name: 'Coreshack', members: [9001, 9002, 9003] },
+  ];
+  let resetCache;
+  beforeAll(async () => {
+    ({ _resetFsGroupCache: resetCache } = await import('../src/services/fsHomeGroupService.js'));
+  });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetCache();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...fsTicket, ...data }));
+    prismaMock.group.findMany.mockResolvedValue([
+      { freshserviceId: BigInt(1000205455), name: 'Everyone IT', isActive: true },
+      { freshserviceId: BigInt(1000206163), name: 'Coreshack', isActive: true },
+    ]);
+    prismaMock.technician.findFirst.mockImplementation(({ where }) => Promise.resolve(where.assignableOnly
+      ? { id: 40, name: 'Reid Laird', freshserviceId: BigInt(9001), origin: 'freshservice' }
+      : null));
+    fsClientMock.listGroups = jest.fn().mockResolvedValue(GROUPS);
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: 9001, group_id: 1000206163, updated_at: '2026-10-02T23:00:00Z' });
+  });
+
+  test('group + assignee go to FreshService in one PUT, and both land locally', async () => {
+    const res = await ticketService.updateFsTicket(601, 1, { assignedTechId: 40 }, coordinator, { allowAssignableOnly: true });
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledTimes(1);
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(245373, expect.objectContaining({ responder_id: 9001, group_id: 1000206163 }));
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ assignedTechId: 40, groupId: BigInt(1000206163) }),
+    }));
+    expect(res.synced).toEqual(expect.arrayContaining(['group', 'assignee']));
+  });
+
+  test('already in their group: assignee only', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket, groupId: BigInt(1000206163) });
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: 9001, group_id: 1000206163 });
+    await ticketService.updateFsTicket(601, 1, { assignedTechId: 40 }, coordinator, { allowAssignableOnly: true });
+    expect(fsClientMock.updateTicketFields.mock.calls[0][1]).not.toHaveProperty('group_id');
+  });
+
+  test('no group on the ticket: assignee only', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsTicket, groupId: null });
+    await ticketService.updateFsTicket(601, 1, { assignedTechId: 40 }, coordinator, { allowAssignableOnly: true });
+    expect(fsClientMock.updateTicketFields.mock.calls[0][1]).not.toHaveProperty('group_id');
+  });
+
+  test('IT team members never get their group changed for them', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue({ id: 7, name: 'Terry Tech', freshserviceId: BigInt(9002), origin: 'freshservice' });
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: 9002 });
+    await ticketService.updateFsTicket(601, 1, { assignedTechId: 7 }, coordinator, { allowAssignableOnly: true });
+    expect(fsClientMock.listGroups).not.toHaveBeenCalled();
+    expect(fsClientMock.updateTicketFields.mock.calls[0][1]).not.toHaveProperty('group_id');
+  });
+
+  test('FreshService group list unavailable: falls back to today (assignee only)', async () => {
+    fsClientMock.listGroups = jest.fn().mockRejectedValue(new Error('FS down'));
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: 9001 });
+    await ticketService.updateFsTicket(601, 1, { assignedTechId: 40 }, coordinator, { allowAssignableOnly: true });
+    expect(fsClientMock.updateTicketFields.mock.calls[0][1]).not.toHaveProperty('group_id');
+  });
+
+  test('FreshService keeping the old group is a refusal, nothing changes locally', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: 9001, group_id: 1000205455 });
+    await expect(ticketService.updateFsTicket(601, 1, { assignedTechId: 40 }, coordinator, { allowAssignableOnly: true }))
+      .rejects.toThrow(/group/);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('getMeta gives each Other teams person their group once the cache is warm', async () => {
+    prismaMock.competencyCategory.findMany.mockResolvedValue([]);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.teamForward.findMany.mockResolvedValue([]);
+    prismaMock.technician.findMany.mockImplementation(({ where }) => Promise.resolve(where.assignableOnly
+      ? [{ id: 40, name: 'Reid Laird', email: 'r@x.io', photoUrl: null, origin: 'freshservice', freshserviceId: BigInt(9001) }]
+      : [{ id: 7, name: 'Terry Tech', email: 't@x.io', photoUrl: null, origin: 'freshservice' }]));
+    const { getFsGroups } = await import('../src/services/fsHomeGroupService.js');
+    await getFsGroups(1, fsClientMock);
+    const meta = await ticketService.getMeta(1);
+    const reid = meta.technicians.find((t) => t.id === 40);
+    expect(reid.homeGroup).toEqual({ id: '1000206163', name: 'Coreshack', memberOf: ['1000206163'] });
+    expect(reid).not.toHaveProperty('freshserviceId');
+  });
+});
