@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.42-preview';
+export const APP_VERSION = '4.1.43-preview';
 
 export const changelog = [
+  {
+    version: '4.1.43-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Deleting a ticket keeps your filters</strong> &mdash; after deleting a ticket you opened from a filtered list, you go back to that same list with its filters instead of the plain Tickets page.' },
+    ],
+  },
   {
     version: '4.1.42-preview',
     date: 'October 2, 2026',

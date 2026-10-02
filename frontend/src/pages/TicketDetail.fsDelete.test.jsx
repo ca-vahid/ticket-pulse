@@ -126,9 +126,9 @@ vi.mock('../components/tickets/RichTextEditor', async () => {
 
 import TicketDetail from './TicketDetail';
 
-function renderPage() {
+function renderPage(entry = '/tickets/501') {
   return render(
-    <MemoryRouter initialEntries={['/tickets/501']}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/tickets/:id" element={<TicketDetail />} />
         <Route path="/tickets" element={<LocationProbe />} />
@@ -138,7 +138,7 @@ function renderPage() {
 }
 function LocationProbe() {
   const loc = useLocation();
-  return <div data-testid="tickets-list">{loc.state?.toast?.message || ''}</div>;
+  return <div data-testid="tickets-list" data-search={loc.search}>{loc.state?.toast?.message || ''}</div>;
 }
 const openMore = async () => {
   renderPage();
@@ -168,6 +168,20 @@ describe('Delete in FreshService (2 Oct 2026)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete in FreshService' }));
     await waitFor(() => expect(apiOverrides.fsDelete).toHaveBeenCalledWith(501));
     expect(await screen.findByTestId('tickets-list')).toHaveTextContent('FreshService #243555 deleted in FreshService');
+  });
+
+  // 2 Oct 2026: deleting from a filtered view dropped every filter.
+  test('opened from a filtered list: the delete returns to that list, filters kept', async () => {
+    renderPage({ pathname: '/tickets/501', state: { from: '/tickets?assignee=59&status=Pending' } });
+    await screen.findByRole('region', { name: 'Ticket description' });
+    fireEvent.click(screen.getByTestId('more-actions'));
+    const menu = await screen.findByTestId('more-actions-menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Delete in FreshService/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete in FreshService?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete in FreshService' }));
+    const list = await screen.findByTestId('tickets-list');
+    expect(list.getAttribute('data-search')).toBe('?assignee=59&status=Pending');
+    expect(list).toHaveTextContent('FreshService #243555 deleted in FreshService');
   });
 
   test('Cancel closes the dialog without calling the API', async () => {
