@@ -41,11 +41,15 @@ export function _resetRelationCache() { recent.clear(); }
  */
 export async function fetchFsRelations(client, fsTicketId) {
   const res = await client._get(`/tickets/${Number(fsTicketId)}?include=related_tickets`);
-  const related = res?.data?.ticket?.related_tickets || {};
+  const fsTicket = res?.data?.ticket || {};
+  const related = fsTicket.related_tickets || {};
   const details = Array.isArray(related.child_tickets_details) ? related.child_tickets_details : [];
   const byId = new Map(details.map((d) => [Number(d.id), d]));
   const ids = Array.isArray(related.child_ids) ? related.child_ids.map(Number) : [...byId.keys()];
   return {
+    // 2 Oct 2026: the same read tells us whether FreshService has trashed it.
+    deleted: fsTicket.deleted === true,
+    spam: fsTicket.spam === true,
     parentFsId: related.parent_id ? Number(related.parent_id) : null,
     children: ids.filter(Number.isFinite).map((fsId) => {
       const d = byId.get(fsId) || {};
@@ -98,6 +102,13 @@ export async function syncFsRelations(ticketId, workspaceId, { force = false, cl
   } catch (err) {
     logger.warn(`FS relations: could not read #${ticket.freshserviceTicketId} (non-fatal): ${err.message}`);
     return null;
+  }
+
+  // Trashed or spammed in FreshService: mark it now instead of waiting for
+  // the hourly reconciliation (2 Oct 2026 — deleted FS tickets lingered).
+  if (relations.deleted || relations.spam) {
+    const { default: ticketService } = await import('./ticketService.js');
+    await ticketService.markGoneInFreshService(ticket.id, workspaceId, { spam: !relations.deleted && relations.spam });
   }
 
   const lookupIds = [...relations.children.map((c) => c.fsId), ...(relations.parentFsId ? [relations.parentFsId] : [])];
