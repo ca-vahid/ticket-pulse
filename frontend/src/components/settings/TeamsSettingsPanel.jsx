@@ -23,6 +23,8 @@ export default function TeamsSettingsPanel() {
   const [busy, setBusy] = useState(null);
   const [notice, setNotice] = useState(null);
   const [webhook, setWebhook] = useState('');
+  // QA 10-01 #4: Disconnect asks once, inline (no browser dialog).
+  const [confirmDisconnect, setConfirmDisconnect] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -58,13 +60,31 @@ export default function TeamsSettingsPanel() {
     try {
       const res = await teamsAdminAPI.install(technicianIds ? { technicianIds } : {});
       const r = res.data || res;
-      setNotice(`Connected ${r.connected}${r.failed?.length ? ` · ${r.failed.length} could not be connected` : ''}`);
+      setNotice(`Connected ${r.connected}${r.skippedDisconnected ? ` · ${r.skippedDisconnected} disconnected by an admin left alone` : ''}${r.failed?.length ? ` · ${r.failed.length} could not be connected` : ''}`);
       if (r.failed?.length) setError(r.failed.slice(0, 3).map((f) => `${f.email}: ${f.error}`).join(' · '));
       await load();
     } catch (err) {
       setError(err.response?.data?.message || err.message);
     } finally {
       setBusy(null);
+    }
+  };
+
+  const disconnect = async (agent) => {
+    setBusy(`disconnect-${agent.id}`);
+    setNotice(null);
+    setError(null);
+    try {
+      const res = await teamsAdminAPI.disconnect([agent.id]);
+      const r = res.data || res;
+      setNotice(`${agent.name} is disconnected — Ticket Pulse will not message them in Teams until someone connects them again`);
+      if (r.failed?.length) setError(r.failed.map((f) => f.error).join(' · '));
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    } finally {
+      setBusy(null);
+      setConfirmDisconnect(null);
     }
   };
 
@@ -130,12 +150,27 @@ export default function TeamsSettingsPanel() {
                   <span className="flex min-w-0 items-center gap-2">
                     <span className={`h-2 w-2 flex-shrink-0 rounded-full ${a.connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
                     <span className="truncate text-foreground">{a.name}</span>
-                    {a.lastError && !a.connected && <span className="truncate text-xs text-red-700 dark:text-red-200">{a.lastError}</span>}
+                    {a.disconnected && <span className="flex-shrink-0 text-xs text-muted-foreground">Disconnected{a.disconnectedBy ? ` by ${a.disconnectedBy}` : ''}</span>}
+                    {a.lastError && !a.connected && !a.disconnected && <span className="truncate text-xs text-red-700 dark:text-red-200">{a.lastError}</span>}
                   </span>
                   {!a.connected && (
                     <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-50">
-                      {busy === `install-${a.id}` ? 'Connecting…' : 'Connect'}
+                      {busy === `install-${a.id}` ? 'Connecting…' : a.disconnected ? 'Connect again' : 'Connect'}
                     </button>
+                  )}
+                  {a.connected && confirmDisconnect !== a.id && (
+                    <button type="button" disabled={!!busy} onClick={() => setConfirmDisconnect(a.id)} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-red-700 dark:hover:text-red-200 disabled:opacity-50" data-testid={`teams-disconnect-${a.id}`}>
+                      Disconnect
+                    </button>
+                  )}
+                  {a.connected && confirmDisconnect === a.id && (
+                    <span className="flex flex-shrink-0 items-center gap-1 text-xs" role="group" aria-label={`Disconnect ${a.name}?`}>
+                      <span className="text-muted-foreground">Remove the app from their Teams?</span>
+                      <button type="button" disabled={!!busy} onClick={() => disconnect(a)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-red-700 hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/15 disabled:opacity-50" data-testid={`teams-disconnect-confirm-${a.id}`}>
+                        {busy === `disconnect-${a.id}` ? 'Disconnecting…' : 'Disconnect'}
+                      </button>
+                      <button type="button" disabled={!!busy} onClick={() => setConfirmDisconnect(null)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-muted-foreground hover:bg-muted">Keep</button>
+                    </span>
                   )}
                 </li>
               ))}

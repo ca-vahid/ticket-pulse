@@ -4,6 +4,8 @@ import { ticketDisplayRef, ticketSourceLabel } from '../utils/ticketOrigin.js';
 import notificationWorkflowEngine from './notificationWorkflowEngine.js';
 import statusService, { TERMINAL_BASE_STATUSES } from './statusService.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
+import { resolvePublicBaseUrl, PRODUCTION_PUBLIC_URL } from '../utils/publicBaseUrl.js';
+import hrLifecycleService from './hrLifecycleService.js';
 
 const TERMINAL_STATUS_VALUES = new Set(['resolved', 'closed', '4', '5']);
 
@@ -79,6 +81,53 @@ async function workspaceTerminalResolver(workspaceId) {
     if (knownTerminal.has(value)) return knownTerminal.get(value);
     return isTerminalStatus(value);
   };
+}
+
+const PRIORITY_WORDS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+
+/** Agent-facing ticket page in Ticket Pulse (QA 10-01 #10: `{{ ticket.url }}`). */
+export function ticketAppUrl(ticketId) {
+  if (!ticketId) return null;
+  const base = resolvePublicBaseUrl({ fallback: PRODUCTION_PUBLIC_URL }) || PRODUCTION_PUBLIC_URL;
+  return `${String(base).replace(/\/+$/, '')}/tickets/${ticketId}`;
+}
+
+/**
+ * QA 10-01 #9: "Priority changed" rides on the field-change event — the one
+ * place that already knows a real update from Ticket Pulse's own write-back
+ * echo (TP-native edits, the API and FreshService-side edits all reach it;
+ * sync/mirror/AI writes are echoes and never do). Returns the event.extra for
+ * ticket.priority_changed, or null when priority did not move.
+ */
+export function priorityChangedExtra(fieldsExtra) {
+  const change = fieldsExtra?.changes?.priority;
+  if (!change) return null;
+  const from = Number(change.from);
+  const to = Number(change.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0 || to <= 0 || from === to) return null;
+  return {
+    from,
+    to,
+    fromLabel: PRIORITY_WORDS[from] || String(from),
+    toLabel: PRIORITY_WORDS[to] || String(to),
+    raised: to > from,
+    direction: to > from ? 'raised' : 'lowered',
+    actorKind: fieldsExtra.actorKind || null,
+    actorName: fieldsExtra.actorName || null,
+    source: fieldsExtra.source || null,
+    ...(fieldsExtra.workflowId ? { workflowId: fieldsExtra.workflowId } : {}),
+  };
+}
+
+function emitPriorityChangedFrom(ticketId, fieldsExtra, stamp, source) {
+  const extra = priorityChangedExtra(fieldsExtra);
+  if (!extra) return;
+  // A workflow's own priority write does not fire it (workflows must not
+  // cascade into each other — the same standing rule as status_changed).
+  if (extra.workflowId) return;
+  Promise.resolve()
+    .then(() => emitTicketEvent('ticket.priority_changed', ticketId, { source, dedupeStamp: `priority:${stamp}`, extra }))
+    .catch((err) => logger.warn(`ticket.priority_changed dispatch failed for ticket ${ticketId} (non-fatal): ${err.message}`));
 }
 
 function priorityLabel(ticket) {
@@ -589,6 +638,9 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
       // Human-facing reference (QA 08-06 #4): "TP-1070" for TP-born tickets,
       // "#225001" for FS-born — the number templates should print.
       displayRef: ticketDisplayRef(ticket),
+      // QA 10-01 #10: the agent-facing link to the ticket in Ticket Pulse
+      // (webhooks, Teams posts, agent mail). Requesters get publicStatusUrl.
+      url: ticketAppUrl(ticket.id),
       nativeNumber: ticket.nativeNumber ?? null,
       subject: ticket.subject,
       descriptionText: ticket.descriptionText,
@@ -819,6 +871,18 @@ export async function emitTicketLifecycleNotifications({
       .then(({ default: followUp }) => followUp.onReassigned(asNumber(upsertedTicket.id) || asNumber(existingTicket.id), asNumber(upsertedTicket.workspaceId) || asNumber(existingTicket.workspaceId), ahNewTech))
       .catch((err) => logger.warn(`Auto-help reassignment check skipped: ${err.message}`));
   }
+  // HR lifecycle (Onboarding / Offboarding, plans/HR_LIFECYCLE_PLAN.md): a NEW
+  // ticket may start or change a family — before the workflow gate, because
+  // FreshService sync ingests HR notices with workflows off. Fire-and-forget:
+  // the service never throws and returns at once where the mode is off.
+  if (!existingTicket && asNumber(upsertedTicket?.id) && asNumber(upsertedTicket?.workspaceId)) {
+    try {
+      Promise.resolve(hrLifecycleService.onTicketCreated(asNumber(upsertedTicket.id), asNumber(upsertedTicket.workspaceId)))
+        .catch((err) => logger.warn(`HR lifecycle hook skipped: ${err.message}`));
+    } catch (err) {
+      logger.warn(`HR lifecycle hook skipped: ${err.message}`);
+    }
+  }
   if (!allowNotificationWorkflows) {
     return { status: 'skipped', reason: 'Notification workflows disabled for this ingest path' };
   }
@@ -861,6 +925,7 @@ export async function emitTicketLifecycleNotifications({
       const extra = await finalizeFsFieldsUpdatedEvent(event, ticket, upsertedTicket);
       if (!extra) continue; // our own write-back echo — not an update
       event.extra = extra;
+      emitPriorityChangedFrom(ticket.id, extra, event.dedupeStamp, source);
     } else {
       // Provenance on every lifecycle event (TU-10): lets admins filter the
       // Closed→Open→Closed sync echoes from human/API changes.
@@ -940,6 +1005,7 @@ export async function emitTicketEvent(eventType, ticketId, {
   if (!ticket) return { status: 'skipped', reason: 'Ticket not found' };
 
   const stamp = dedupeStamp || `${eventType}:${ticket.id}:${new Date().toISOString()}`;
+  if (eventType === 'ticket.fields_updated' && extra) emitPriorityChangedFrom(ticket.id, extra, stamp, source);
   const event = {
     type: eventType,
     occurredAt: new Date().toISOString(),

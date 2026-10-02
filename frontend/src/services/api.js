@@ -1874,6 +1874,8 @@ export const teamsAdminAPI = {
   status: () => api.get('/teams-notifications/status'),
   saveSettings: (data) => api.put('/teams-notifications/settings', data),
   install: (data = {}) => api.post('/teams-notifications/install', data),
+  // QA 10-01 #4: removes the app for these agents and stops every send.
+  disconnect: (technicianIds) => api.post('/teams-notifications/disconnect', { technicianIds }),
   // Static copy of backend/teams-app/ticket-pulse-teams.zip (manifest + icons only).
   packageUrl: () => '/downloads/ticket-pulse-teams.zip',
 };
@@ -2035,3 +2037,28 @@ export const healthCheck = async () => {
 };
 
 export default api;
+
+/**
+ * QA 10-01 #3: the Autofill draft the Teams bot made for this person
+ * (/tickets/new?autofill=<token>). 404 = not theirs / unknown, 410 = expired
+ * or discarded, 409 = still being read.
+ */
+export const teamsAutofillAPI = {
+  get: async (token) => await api.get(`/teams-autofill/${encodeURIComponent(token)}`),
+};
+
+/**
+ * Onboarding / Offboarding (HR lifecycle, plans/HR_LIFECYCLE_PLAN.md).
+ * /status is open to members; everything else is workspace-admin only.
+ */
+export const hrLifecycleAPI = {
+  status: () => api.get('/hr-lifecycle/status'),
+  getSettings: () => api.get('/hr-lifecycle/settings'),
+  updateSettings: (data) => api.put('/hr-lifecycle/settings', data),
+  settingsChanges: (params = {}) => api.get('/hr-lifecycle/settings/changes', { params }),
+  families: (params = {}) => api.get('/hr-lifecycle/families', { params }),
+  family: (id) => api.get(`/hr-lifecycle/families/${id}`),
+  switchToAfterTheFact: (id) => api.post(`/hr-lifecycle/families/${id}/after-the-fact`),
+  events: (params = {}) => api.get('/hr-lifecycle/events', { params }),
+  preview: (ref) => api.post('/hr-lifecycle/preview', { ref }),
+};

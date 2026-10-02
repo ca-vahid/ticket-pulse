@@ -4253,6 +4253,10 @@ model TeamsConversation {
   tenantId       String?   @map("tenant_id") @db.VarChar(64)
   installedAt    DateTime? @map("installed_at")
   lastError      String?   @map("last_error") @db.Text
+  // QA 10-01 #4: set when an admin disconnects the person; nothing is sent
+  // (and the app is not re-installed) until someone connects them again.
+  disconnectedAt DateTime? @map("disconnected_at")
+  disconnectedBy String?   @map("disconnected_by") @db.VarChar(255)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -4320,4 +4324,141 @@ model TeamsDelivery {
   @@index([workspaceId, createdAt])
   @@index([technicianId, status, createdAt])
   @@map("teams_deliveries")
+}
+
+/// QA 10-01 #3: Autofill from the Teams bot. One row per message an agent
+/// sends the bot: the extraction (data), the pictures (base64, ≤ 15 MB, wiped
+/// once used/discarded) and the card it lives on. The random token (stored
+/// hashed) opens /tickets/new?autofill=… for the same person, 30 minutes.
+model TeamsAutofillDraft {
+  id             Int       @id @default(autoincrement())
+  tokenHash      String    @unique @map("token_hash") @db.VarChar(64)
+  email          String    @db.VarChar(255) // lower-cased
+  workspaceId    Int       @map("workspace_id")
+  technicianId   Int?      @map("technician_id")
+  intakeRunId    Int?      @map("intake_run_id")
+  status         String    @default("reading") @db.VarChar(20) // reading | ready | failed | created | discarded
+  data           Json?
+  images         Json? // [{ fileName, mimeType, base64 }]
+  sourceText     String?   @map("source_text") @db.Text
+  notes          Json? // { skipped: n, ignoredFiles: n, workspaces: [{id,name}] }
+  serviceUrl     String?   @map("service_url") @db.VarChar(255)
+  conversationId String?   @map("conversation_id") @db.VarChar(255)
+  activityId     String?   @map("activity_id") @db.VarChar(255)
+  ticketId       Int?      @map("ticket_id")
+  error          String?   @db.Text
+  expiresAt      DateTime  @map("expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([email, createdAt])
+  @@index([expiresAt])
+  @@map("teams_autofill_drafts")
+}
+
+// ---------------------------------------------------------------------------
+// HR lifecycle: Onboarding / Offboarding (plans/HR_LIFECYCLE_PLAN.md, QA 10-01 #8).
+// Ships disabled: mode off | observe | live per workspace, default off. No
+// relations to Ticket on purpose (ids only) so the feature degrades cleanly
+// while the hand-applied migration is missing.
+
+/// One row per workspace: the switch, the parent assignee and the child lists.
+model HrLifecycleSettings {
+  workspaceId          Int      @id @map("workspace_id")
+  mode                 String   @default("off") @db.VarChar(10) // off | observe | live
+  parentAssigneeTechId Int?     @map("parent_assignee_tech_id")
+  /// { offboarding_standard, offboarding_after_fact, onboarding }: ordered lists of
+  /// { key, title, dueOffsetDays, assigneeTechId?, groupId? }
+  templates            Json?
+  leave                Json? // { assigneeTechId?, park }
+  officeChange         Json?    @map("office_change") // { assigneeTechId?, park }
+  updatedBy            String?  @map("updated_by") @db.VarChar(255)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("hr_lifecycle_settings")
+}
+
+/// Append-only settings audit: who, when, field path, before and after.
+model HrLifecycleSettingsChange {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  changedBy     String?  @map("changed_by") @db.VarChar(255)
+  changedByName String?  @map("changed_by_name") @db.VarChar(255)
+  field         String   @db.VarChar(200)
+  before        Json?
+  after         Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_hr_lifecycle_settings_changes_ws")
+  @@map("hr_lifecycle_settings_changes")
+}
+
+/// One per person event (offboarding | onboarding). The HR notice is the parent.
+model HrLifecycleFamily {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  kind            String    @db.VarChar(20) // offboarding | onboarding | leave | office_change
+  parentTicketId  Int?      @map("parent_ticket_id")
+  personName      String    @map("person_name") @db.VarChar(255)
+  personKey       String    @map("person_key") @db.VarChar(255) // normalised name
+  personEmail     String?   @map("person_email") @db.VarChar(255)
+  employeeId      String?   @map("employee_id") @db.VarChar(40) // BambooHR id, the stable key
+  office          String?   @db.VarChar(120)
+  effectiveDate   DateTime? @map("effective_date") @db.Date
+  afterTheFact    Boolean   @default(false) @map("after_the_fact")
+  status          String    @default("open") @db.VarChar(20) // open | closed | cancelled
+  template        String    @db.VarChar(40)
+  sourceTicketIds Json      @default("[]") @map("source_ticket_ids")
+  details         Json?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  closedAt        DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  members HrLifecycleFamilyMember[]
+
+  @@index([workspaceId, status], map: "idx_hr_lifecycle_families_ws_status")
+  @@index([workspaceId, employeeId], map: "idx_hr_lifecycle_families_ws_emp")
+  @@index([workspaceId, personKey], map: "idx_hr_lifecycle_families_ws_person")
+  @@map("hr_lifecycle_families")
+}
+
+/// Tickets in a family: children (TP-born) and linked tickets (NH automation, change notices).
+model HrLifecycleFamilyMember {
+  id            Int               @id @default(autoincrement())
+  familyId      Int               @map("family_id")
+  family        HrLifecycleFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  workspaceId   Int               @map("workspace_id")
+  ticketId      Int               @map("ticket_id")
+  role          String            @default("child") @db.VarChar(20) // child | linked | notice
+  templateKey   String?           @map("template_key") @db.VarChar(60)
+  title         String?           @db.VarChar(200)
+  dueOffsetDays Int?              @map("due_offset_days")
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([familyId, ticketId], map: "uq_hr_lifecycle_family_members")
+  @@index([ticketId], map: "idx_hr_lifecycle_family_members_ticket")
+  @@map("hr_lifecycle_family_members")
+}
+
+/// Every notice handled, the decision and the outcome. Observe mode writes only here.
+model HrLifecycleEvent {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  ticketId    Int?     @map("ticket_id")
+  familyId    Int?     @map("family_id")
+  mode        String   @db.VarChar(10) // observe | live | manual
+  noticeType  String   @map("notice_type") @db.VarChar(40)
+  subject     String?  @db.VarChar(500)
+  person      String?  @db.VarChar(255)
+  decision    String   @db.VarChar(40)
+  outcome     String   @db.VarChar(20) // done | recorded | skipped | failed
+  summary     String?  @db.Text
+  details     Json?
+  actor       String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_hr_lifecycle_events_ws")
+  @@index([ticketId], map: "idx_hr_lifecycle_events_ticket")
+  @@map("hr_lifecycle_events")
 }

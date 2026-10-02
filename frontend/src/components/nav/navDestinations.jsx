@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
 import { writeRoleHint } from '../../utils/roleHint';
-import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket } from 'lucide-react';
+import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket, UserRoundPlus } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { AssignmentNavIcon, KnowledgeNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
+import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
 
 // Single source of truth for the primary navigation destinations, shared by the
 // desktop header rail (AppHeader) and the mobile bottom tab bar (MobileTabBar).
@@ -16,6 +17,8 @@ import { AssignmentNavIcon, KnowledgeNavIcon, MapNavIcon, WorkflowNavIcon } from
 //   gate: 'manage'  -> visible to workspace admins (Dashboard, Timeline,
 //                      Analytics, Assignment, Mail Workflows, Agent Maps)
 //   gate: 'tickets' -> visible when the workspace has native ticketing enabled
+//   gate: 'hrLifecycle' -> workspace admins, and only where the server says the
+//                      Onboarding section exists (GET /hr-lifecycle/status)
 //   gate: null      -> visible to everyone (Tickets, Approvals)
 //
 // ROLE MODEL (QA 08-24 #3, v3.7.02): viewers and reviewers get the ticket
@@ -81,6 +84,18 @@ export const NAV_DESTINATIONS = [
     hover: 'hover:border-teal-300 hover:bg-teal-100',
     bar: 'bg-teal-600',
     gate: 'view',
+  },
+  {
+    // Onboarding / Offboarding (plans/HR_LIFECYCLE_PLAN.md): HR notice families.
+    // Admin-only, and only in the workspaces the server enables (IT for now).
+    id: 'onboarding',
+    label: 'Onboarding',
+    path: '/onboarding',
+    Icon: UserRoundPlus,
+    tile: 'border-[#f1dca8] bg-[#fcf5e3] text-[#a16207] dark:border-[#eab308]/35 dark:bg-[#eab308]/15 dark:text-[#fde68a]',
+    hover: 'hover:border-[#e9cc85] hover:bg-[#f8ecca]',
+    bar: 'bg-[#a16207]',
+    gate: 'hrLifecycle',
   },
   {
     id: 'assignments',
@@ -215,6 +230,8 @@ export function useNavDestinations() {
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
   const canManage = wsRole === 'admin';
   const canView = canManage || wsRole === 'readonly';
+  // Only admins ask the server whether Onboarding exists here.
+  const hrLifecycle = useHrLifecycleStatus({ enabled: canManage && user?.role !== 'agent' });
 
   // Agent-role users only work tickets + approvals — everything else in the app
   // is coordinator/manager territory and would just bounce them. Agents can be
@@ -227,6 +244,7 @@ export function useNavDestinations() {
     if (dest.gate === 'review') return canReview;
     if (dest.gate === 'manage') return canManage;
     if (dest.gate === 'view') return canView;
+    if (dest.gate === 'hrLifecycle') return canManage && hrLifecycle.available;
     return true;
   });
 }

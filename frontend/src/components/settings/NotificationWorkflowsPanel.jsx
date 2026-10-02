@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit';
 import MonacoEditor from '@monaco-editor/react';
 
 import {
+  ArrowUpDown,
   Activity,
   AlertCircle,
   ArrowLeft,
@@ -91,6 +92,7 @@ const EVENT_LABELS = {
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
   'ticket.reopened': 'Ticket reopened',
+  'ticket.priority_changed': 'Priority changed',
   'ticket.parked': 'Ticket parked',
   'ticket.woke': 'Parked ticket woke',
   'ticket.park_due_soon': 'Parked ticket wakes within a day',
@@ -130,6 +132,8 @@ export const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.resolved_closed', hint: 'Ticket reaches Resolved or Closed' },
       // FR 09-11 #4 — the named reopen trigger QA asked for.
       { value: 'ticket.reopened', hint: 'A resolved or closed ticket goes back to an open state — by a requester reply, an agent, or the API' },
+      // QA 10-01 #9.
+      { value: 'ticket.priority_changed', hint: 'The priority moved — in FreshService, in Ticket Pulse or through the API. event.extra has from/to (1–4), fromLabel/toLabel and raised (true when it went up). Not fired by workflow edits' },
       // QA 09-23 #1: the moment a "received" mail can name the category.
       { value: 'ticket.categorized', hint: 'The category is set — by the AI (about a minute after arrival) or by a person. Use it for mail that should name the category' },
       // Auto-help integration W1: after category, priority, noise and the decision are all saved.
@@ -200,6 +204,7 @@ const TRIGGER_VISUALS = {
   'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600 dark:text-indigo-300', chip: 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 ring-indigo-200 dark:ring-indigo-500/30', rail: 'bg-indigo-400' },
   'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600 dark:text-violet-300', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 ring-violet-200 dark:ring-violet-500/30', rail: 'bg-violet-400' },
   'ticket.fields_updated': { icon: Pencil, icon_: 'text-rose-600 dark:text-rose-300', chip: 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-200 ring-rose-200 dark:ring-rose-500/30', rail: 'bg-rose-400' },
+  'ticket.priority_changed': { icon: ArrowUpDown, icon_: 'text-orange-600 dark:text-orange-300', chip: 'bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-200 ring-orange-200 dark:ring-orange-500/30', rail: 'bg-orange-400' },
   'ticket.reopened': { icon: RotateCcw, icon_: 'text-emerald-600 dark:text-emerald-300', chip: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 ring-emerald-200 dark:ring-emerald-500/30', rail: 'bg-emerald-400' },
   'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600 dark:text-cyan-300', chip: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 ring-cyan-200 dark:ring-cyan-500/30', rail: 'bg-cyan-400' },
 };
@@ -2480,6 +2485,224 @@ function addNoteSampleValue(definition) {
  * structured Field Card built from the workspace's custom-field definitions,
  * with a live preview rendering the real FieldCardNote card.
  */
+/**
+ * The "Recipients" step inspector (extracted 1 Oct 2026 so it can be tested
+ * on its own). QA 10-01 #7 added To/Cc/Bcc "From custom fields".
+ */
+export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = [], groups = [] }) {
+  const setRecipientList = (field, value, checked) => {
+    const current = Array.isArray(data?.[field]) ? data[field] : [];
+    const next = checked ? [...new Set([...current, value])] : current.filter((item) => item !== value);
+    onChange({ [field]: next });
+  };
+  const to = data.to || [];
+  const cc = data.cc || [];
+  const bcc = data.bcc || [];
+  const customEmails = data.customEmails || [];
+  // QA 10-01 #7: addresses kept in ticket custom fields (to_recipients,
+  // cc_recipients, bcc_recipients, and any field added later) — read at
+  // send time as a comma-separated list. Every field the workspace
+  // defines is offered; tokens for a deleted field stay visible.
+  const fieldDefs = (customFieldDefs || []).filter((d) => d.isActive !== false);
+  const fieldTokens = (list) => list.filter((t) => /^custom_field:/.test(String(t)));
+  const showCustomEmailInput = to.includes('custom_emails') || customEmails.length > 0;
+  // "Internal group members" (Phase RL, RL-6): `internal_group:<id>`
+  // tokens resolve to the group's ACTIVE member emails at send time —
+  // replaces hand-maintained custom_emails lists that go stale.
+  const internalGroups = (groups || []).filter((g) => g.origin === 'local');
+  const groupTokens = (list) => list.filter((t) => /^internal_group:\d+$/.test(String(t)));
+  const setGroupToken = (key, groupId) => {
+    const current = data[key] || [];
+    const next = [...current.filter((t) => !/^internal_group:\d+$/.test(String(t))), ...(groupId ? [`internal_group:${groupId}`] : [])];
+    onChange({ [key]: next });
+  };
+  const recipientGroups = [
+    {
+      key: 'to',
+      label: 'To Recipients',
+      values: to,
+      options: [
+        ['requester', 'Requester'],
+        ['assigned_agent', 'Assigned agent'],
+        ['last_replying_agent', 'Last replying agent (newest agent reply on the thread)'],
+        ['watchers', 'Category / group watchers'],
+        ['approval_requester', 'Approval requester (approval events)'],
+        ['custom_emails', 'Custom emails'],
+      ],
+    },
+    {
+      key: 'cc',
+      label: 'Cc Recipients',
+      values: cc,
+      options: [
+        ['original_ccs', 'Original CCs'],
+      ],
+    },
+    {
+      key: 'bcc',
+      label: 'Bcc Recipients',
+      values: bcc,
+      options: [],
+    },
+  ];
+  return (
+    <div className="space-y-4">
+      {recipientGroups.map((group) => (
+        <div key={group.key}>
+          <label className="text-xs font-medium uppercase text-muted-foreground">{group.label}</label>
+          <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
+            {group.options.map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={group.values.includes(value)}
+                  onChange={(event) => setRecipientList(group.key, value, event.target.checked)}
+                  className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+            <label className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
+              <span className="text-sm">Internal group members</span>
+              <select
+                aria-label={`${group.label}: internal group members`}
+                value={groupTokens(group.values)[0]?.replace('internal_group:', '') || ''}
+                onChange={(event) => setGroupToken(group.key, event.target.value)}
+                className="ml-auto rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground"
+              >
+                <option value="">None</option>
+                {internalGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                {groupTokens(group.values).map((t) => t.replace('internal_group:', ''))
+                  .filter((id) => !internalGroups.some((g) => String(g.id) === id))
+                  .map((id) => <option key={`missing-${id}`} value={id}>Group #{id}</option>)}
+              </select>
+              <span className="basis-full text-[11px] text-muted-foreground/75">Resolves to the group&apos;s active members at send time — no address list to maintain.</span>
+            </label>
+            {(fieldDefs.length > 0 || fieldTokens(group.values).length > 0) && (
+              <div className="rounded-md border border-border px-3 py-2" data-testid={`recipients-custom-fields-${group.key}`}>
+                <span className="text-sm">From custom fields</span>
+                <div className="mt-1.5 grid grid-cols-1 gap-1">
+                  {fieldDefs.map((d) => (
+                    <label key={d.key} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        aria-label={`${group.label}: custom field ${d.label || d.key}`}
+                        checked={group.values.includes(`custom_field:${d.key}`)}
+                        onChange={(event) => setRecipientList(group.key, `custom_field:${d.key}`, event.target.checked)}
+                        className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                      />
+                      <span>{d.label || d.key}</span>
+                      <code className="ml-auto text-[11px] text-muted-foreground/75">{d.key}</code>
+                    </label>
+                  ))}
+                  {fieldTokens(group.values)
+                    .map((t) => t.replace('custom_field:', ''))
+                    .filter((key) => !fieldDefs.some((d) => d.key === key))
+                    .map((key) => (
+                      <label key={`missing-${key}`} className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input type="checkbox" checked onChange={() => setRecipientList(group.key, `custom_field:${key}`, false)} className="h-4 w-4 rounded border-input" />
+                        <span>{key} (field no longer defined)</span>
+                      </label>
+                    ))}
+                </div>
+                <span className="mt-1 block text-[11px] text-muted-foreground/75">Reads the ticket&apos;s value when the e-mail is sent — addresses separated by commas, semicolons or spaces; anything that is not an address is skipped.</span>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+      {showCustomEmailInput && (
+        <div>
+          <label className="text-xs font-medium uppercase text-muted-foreground">Custom Emails</label>
+          {/* QA 08-18 #1: chips input — the old controlled join/split
+              round-trip ate the comma on every keystroke. Persistence
+              contract unchanged: customEmails stays a string array. */}
+          <EmailChipsInput
+            value={customEmails}
+            onChange={(list) => onChange({ customEmails: list })}
+            placeholder="ops@example.com, lead@example.com"
+            label="Custom email recipients"
+            className="mt-1"
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground/75">Type or paste addresses — commas, semicolons and spaces all separate.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+/**
+ * The "Call webhook" step inspector (extracted 1 Oct 2026). QA 10-01 #10: the
+ * same variables as the e-mail template sit under the body — a click inserts
+ * one where the cursor is.
+ */
+export function WebhookNodeEditor({ data = {}, onChange, variables = [] }) {
+  const bodyRef = useRef(null);
+  // The cursor only counts once the person has been in the body; before
+  // that a click appends (an untouched textarea reports position 0).
+  const placedRef = useRef(false);
+  const [search, setSearch] = useState('');
+  const insert = (variable) => {
+    const token = variable?.token || variable;
+    const value = String(data.bodyTemplate || '');
+    const el = placedRef.current ? bodyRef.current : null;
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? start;
+    onChange({ bodyTemplate: `${value.slice(0, start)}${token}${value.slice(end)}` });
+  };
+  return (
+    <div className="space-y-3">
+      <label className="block text-xs font-medium uppercase text-muted-foreground">
+        URL
+        <input
+          value={data.url || ''}
+          onChange={(event) => onChange({ url: event.target.value })}
+          placeholder="https://example.com/hook"
+          className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block text-xs font-medium uppercase text-muted-foreground">
+          Method
+          <select
+            value={data.method || 'POST'}
+            onChange={(event) => onChange({ method: event.target.value })}
+            className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+          >
+            {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
+        <label className="block text-xs font-medium uppercase text-muted-foreground">
+          On error
+          <select
+            value={data.onError || 'continue'}
+            onChange={(event) => onChange({ onError: event.target.value })}
+            className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+          >
+            <option value="continue">Continue the workflow</option>
+            <option value="fail">Fail the workflow</option>
+          </select>
+        </label>
+      </div>
+      <label className="block text-xs font-medium uppercase text-muted-foreground">
+        Body template (Liquid, JSON)
+        <textarea
+          ref={bodyRef}
+          onFocus={() => { placedRef.current = true; }}
+          value={data.bodyTemplate || ''}
+          onChange={(event) => onChange({ bodyTemplate: event.target.value })}
+          className="mt-1 h-28 w-full rounded-md border border-border px-3 py-2 font-mono text-xs normal-case"
+        />
+      </label>
+      <div data-testid="webhook-variables">
+        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Variables</p>
+        <VariablePicker variables={variables} search={search} onSearch={setSearch} onInsert={insert} activeTarget="webhook-body" />
+        <p className="mt-1 text-[11px] text-muted-foreground/75">For a text value write <code>{'{{ ticket.subject | json }}'}</code> with no quotes around it — the filter adds them, so a quote inside the subject can&apos;t break the JSON.</p>
+      </div>
+      <p className="text-[11px] text-muted-foreground/75">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
+    </div>
+  );
+}
+
 export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workflowName = 'This workflow', onChange }) {
   const [variableSearch, setVariableSearch] = useState('');
   const [activeField, setActiveField] = useState(null); // 'title' | 'intro' | 'body'
@@ -4808,10 +5031,14 @@ function NotificationToast({ message, onDismiss }) {
  * summaries, nudges, SLA digests). Installing creates a DISABLED draft to
  * review + publish — a template never starts running by itself.
  */
-function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
+export function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState(null);
   const [installing, setInstalling] = useState(null);
+  // QA 10-01 #1: the button has lived on both sides of the toolbar (09-28 left,
+  // 10-01 right), and a fixed anchor clipped the panel each time. The panel
+  // now opens toward whichever side has room.
+  const [alignRight, setAlignRight] = useState(false);
   const rootRef = useRef(null);
 
   useEffect(() => {
@@ -4846,7 +5073,11 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          const rect = rootRef.current?.getBoundingClientRect();
+          if (rect && typeof window !== 'undefined') setAlignRight(rect.left + 384 > window.innerWidth - 16);
+          setOpen((v) => !v);
+        }}
         disabled={saving}
         className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2.5 text-sm font-medium text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20 disabled:opacity-50"
       >
@@ -4854,9 +5085,7 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
         Templates
       </button>
       {open && (
-        // QA 09-28 #5: the button sits near the LEFT of the toolbar, so a
-        // right-anchored panel ran off the left edge and was clipped.
-        <div className="absolute left-0 z-40 mt-1 w-96 max-w-[calc(100vw-5rem)] rounded-xl border border-border bg-card p-2 shadow-lg" data-testid="workflow-templates-panel">
+        <div className={`absolute ${alignRight ? 'right-0' : 'left-0'} z-40 mt-1 w-96 max-w-[calc(100vw-5rem)] rounded-xl border border-border bg-card p-2 shadow-lg`} data-testid="workflow-templates-panel" data-align={alignRight ? 'right' : 'left'}>
           <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">AI email workflow templates</p>
           {templates === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
           {templates?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No templates available.</p>}
@@ -7770,7 +7999,7 @@ export default function NotificationWorkflowsPanel({
 
   useEffect(() => {
     if (!selectedNode || customFieldDefs) return;
-    if (!['update_ticket', 'add_note'].includes(selectedNode.type)) return;
+    if (!['update_ticket', 'add_note', 'recipient_resolver'].includes(selectedNode.type)) return;
     ticketsAPI.customFieldDefinitions()
       .then((res) => setCustomFieldDefs(res?.data || []))
       .catch(() => setCustomFieldDefs([]));
@@ -9456,12 +9685,6 @@ export default function NotificationWorkflowsPanel({
     setEmailBlockDraft((current) => ({ ...current, enabled: true, html, text: stripHtmlClient(html) }));
   }
 
-  function setRecipientList(field, value, checked) {
-    const current = Array.isArray(selectedNode?.data?.[field]) ? selectedNode.data[field] : [];
-    const next = checked ? [...new Set([...current, value])] : current.filter((item) => item !== value);
-    updateNodeData({ [field]: next });
-  }
-
   function renderRoutingSettingsPanel() {
     if (!selected) return null;
     const metadataFields = Array.isArray(routingMetadata.fields) && routingMetadata.fields.length > 0
@@ -10355,51 +10578,7 @@ export default function NotificationWorkflowsPanel({
     }
 
     if (selectedNode.type === 'call_webhook') {
-      return (
-        <div className="space-y-3">
-          <label className="block text-xs font-medium uppercase text-muted-foreground">
-            URL
-            <input
-              value={selectedNode.data?.url || ''}
-              onChange={(event) => updateNodeData({ url: event.target.value })}
-              placeholder="https://example.com/hook"
-              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
-            />
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs font-medium uppercase text-muted-foreground">
-              Method
-              <select
-                value={selectedNode.data?.method || 'POST'}
-                onChange={(event) => updateNodeData({ method: event.target.value })}
-                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
-              >
-                {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </label>
-            <label className="block text-xs font-medium uppercase text-muted-foreground">
-              On error
-              <select
-                value={selectedNode.data?.onError || 'continue'}
-                onChange={(event) => updateNodeData({ onError: event.target.value })}
-                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
-              >
-                <option value="continue">Continue the workflow</option>
-                <option value="fail">Fail the workflow</option>
-              </select>
-            </label>
-          </div>
-          <label className="block text-xs font-medium uppercase text-muted-foreground">
-            Body template (Liquid, JSON)
-            <textarea
-              value={selectedNode.data?.bodyTemplate || ''}
-              onChange={(event) => updateNodeData({ bodyTemplate: event.target.value })}
-              className="mt-1 h-28 w-full rounded-md border border-border px-3 py-2 font-mono text-xs normal-case"
-            />
-          </label>
-          <p className="text-[11px] text-muted-foreground/75">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
-        </div>
-      );
+      return <WebhookNodeEditor data={selectedNode.data || {}} onChange={updateNodeData} variables={availableVariables} />;
     }
 
     if (selectedNode.type === 'park_ticket') {
@@ -10426,8 +10605,9 @@ export default function NotificationWorkflowsPanel({
                   onChange={(event) => updateNodeData({ kind: event.target.value })}
                   className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                 >
-                  <option value="until_date">Waiting until a date</option>
-                  <option value="eta">In progress, with an ETA</option>
+                  {/* QA 10-01 #6: one choice for a date or an ETA; 'eta' shows only on older nodes. */}
+                  <option value="until_date">Waiting until a date or an ETA</option>
+                  {selectedNode.data?.kind === 'eta' && <option value="eta">In progress, with an ETA (older)</option>}
                 </select>
               </label>
               <label className="block text-xs font-medium uppercase text-muted-foreground">
@@ -10586,96 +10766,13 @@ export default function NotificationWorkflowsPanel({
     }
 
     if (selectedNode.type === 'recipient_resolver') {
-      const to = selectedNode.data?.to || [];
-      const cc = selectedNode.data?.cc || [];
-      const customEmails = selectedNode.data?.customEmails || [];
-      const showCustomEmailInput = to.includes('custom_emails') || customEmails.length > 0;
-      // "Internal group members" (Phase RL, RL-6): `internal_group:<id>`
-      // tokens resolve to the group's ACTIVE member emails at send time —
-      // replaces hand-maintained custom_emails lists that go stale.
-      const internalGroups = (ticketMeta?.groups || []).filter((g) => g.origin === 'local');
-      const groupTokens = (list) => list.filter((t) => /^internal_group:\d+$/.test(String(t)));
-      const setGroupToken = (key, groupId) => {
-        const current = selectedNode.data?.[key] || [];
-        const next = [...current.filter((t) => !/^internal_group:\d+$/.test(String(t))), ...(groupId ? [`internal_group:${groupId}`] : [])];
-        updateNodeData({ [key]: next });
-      };
-      const recipientGroups = [
-        {
-          key: 'to',
-          label: 'To Recipients',
-          values: to,
-          options: [
-            ['requester', 'Requester'],
-            ['assigned_agent', 'Assigned agent'],
-            ['last_replying_agent', 'Last replying agent (newest agent reply on the thread)'],
-            ['watchers', 'Category / group watchers'],
-            ['approval_requester', 'Approval requester (approval events)'],
-            ['custom_emails', 'Custom emails'],
-          ],
-        },
-        {
-          key: 'cc',
-          label: 'Cc Recipients',
-          values: cc,
-          options: [
-            ['original_ccs', 'Original CCs'],
-          ],
-        },
-      ];
       return (
-        <div className="space-y-4">
-          {recipientGroups.map((group) => (
-            <div key={group.key}>
-              <label className="text-xs font-medium uppercase text-muted-foreground">{group.label}</label>
-              <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
-                {group.options.map(([value, label]) => (
-                  <label key={value} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={group.values.includes(value)}
-                      onChange={(event) => setRecipientList(group.key, value, event.target.checked)}
-                      className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
-                    />
-                    <span>{label}</span>
-                  </label>
-                ))}
-                <label className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
-                  <span className="text-sm">Internal group members</span>
-                  <select
-                    aria-label={`${group.label}: internal group members`}
-                    value={groupTokens(group.values)[0]?.replace('internal_group:', '') || ''}
-                    onChange={(event) => setGroupToken(group.key, event.target.value)}
-                    className="ml-auto rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground"
-                  >
-                    <option value="">None</option>
-                    {internalGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                    {groupTokens(group.values).map((t) => t.replace('internal_group:', ''))
-                      .filter((id) => !internalGroups.some((g) => String(g.id) === id))
-                      .map((id) => <option key={`missing-${id}`} value={id}>Group #{id}</option>)}
-                  </select>
-                  <span className="basis-full text-[11px] text-muted-foreground/75">Resolves to the group&apos;s active members at send time — no address list to maintain.</span>
-                </label>
-              </div>
-            </div>
-          ))}
-          {showCustomEmailInput && (
-            <div>
-              <label className="text-xs font-medium uppercase text-muted-foreground">Custom Emails</label>
-              {/* QA 08-18 #1: chips input — the old controlled join/split
-                  round-trip ate the comma on every keystroke. Persistence
-                  contract unchanged: customEmails stays a string array. */}
-              <EmailChipsInput
-                value={customEmails}
-                onChange={(list) => updateNodeData({ customEmails: list })}
-                placeholder="ops@example.com, lead@example.com"
-                label="Custom email recipients"
-                className="mt-1"
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground/75">Type or paste addresses — commas, semicolons and spaces all separate.</p>
-            </div>
-          )}
-        </div>
+        <RecipientsNodeEditor
+          data={selectedNode.data || {}}
+          onChange={updateNodeData}
+          customFieldDefs={customFieldDefs || []}
+          groups={ticketMeta?.groups || []}
+        />
       );
     }
 

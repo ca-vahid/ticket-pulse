@@ -189,6 +189,24 @@ export async function installForUser(aadObjectId) {
   }
 }
 
+/**
+ * Remove the Ticket Pulse app for a user (QA 10-01 #4, admin "Disconnect").
+ * Returns 'removed' | 'not_installed'.
+ */
+export async function uninstallForUser(aadObjectId) {
+  installationCache.delete(aadObjectId);
+  const installationId = await userInstallationId(aadObjectId);
+  if (!installationId) return 'not_installed';
+  try {
+    await graph('delete', `/users/${encodeURIComponent(aadObjectId)}/teamwork/installedApps/${installationId}`);
+  } catch (err) {
+    if (err.response?.status !== 404) throw err;
+  } finally {
+    installationCache.delete(aadObjectId);
+  }
+  return 'removed';
+}
+
 /** A line in the user's Teams bell list; the app must be installed for them. */
 const installationCache = new Map(); // aadObjectId -> installedApps id
 
@@ -240,9 +258,55 @@ export function describeError(err) {
   return String(d?.error?.message || d?.message || d?.error_description || err?.message || err).slice(0, 400);
 }
 
+// ---------------------------------------------------------------- inbound files (QA 10-01 #3)
+
+/**
+ * Which credential a file URL from an inbound Teams message may be fetched
+ * with. Pasted pictures live on the Bot Connector (smba…), which wants the
+ * BOT token; Graph hosted contents want the Graph token; a file the person
+ * attached arrives with a pre-signed SharePoint downloadUrl (no token). Any
+ * other host is refused so neither token ever leaves for a stranger.
+ * Returns 'bot' | 'graph' | 'none' | null (refused).
+ */
+export function attachmentAuthFor(url, serviceUrl = null) {
+  let u;
+  try { u = new URL(String(url)); } catch { return null; }
+  if (u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  let serviceHost = null;
+  try { serviceHost = serviceUrl ? new URL(String(serviceUrl)).hostname.toLowerCase() : null; } catch { serviceHost = null; }
+  if (host === 'smba.trafficmanager.net' || host.endsWith('.botframework.com') || /^smba\.[a-z0-9.-]+\.teams\.microsoft\.com$/.test(host)
+    || (serviceHost && host === serviceHost && serviceHost !== 'graph.microsoft.com')) return 'bot';
+  if (host === 'graph.microsoft.com') return 'graph';
+  if (host.endsWith('.sharepoint.com')) return 'none';
+  return null;
+}
+
+/**
+ * Download one file from an inbound Teams message (bounded). Returns
+ * { buffer, contentType }. Throws on a refused host, over-size file or HTTP error.
+ */
+export async function downloadAttachment(url, { serviceUrl = null, maxBytes = 5 * 1024 * 1024 } = {}) {
+  const auth = attachmentAuthFor(url, serviceUrl);
+  if (!auth) throw new Error('This file is not on a Microsoft Teams host');
+  const token = auth === 'bot' ? await botToken() : auth === 'graph' ? await graphToken() : null;
+  const res = await axios.get(String(url), {
+    responseType: 'arraybuffer',
+    timeout: 20_000,
+    maxContentLength: maxBytes,
+    maxBodyLength: maxBytes,
+    maxRedirects: 3,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const buffer = Buffer.from(res.data);
+  if (buffer.length > maxBytes) throw new Error('File is too large');
+  return { buffer, contentType: String(res.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase() || null };
+}
+
 export default {
   teamsConfig, isTeamsConfigured, verifyInbound, createPersonalConversation, cardActivity,
   sendToConversation, updateActivity, replyToActivity, findUser, catalogAppId, installForUser,
-  sendActivityFeed, postToWorkflowWebhook, probe, describeError, DEFAULT_SERVICE_URL,
+  uninstallForUser, sendActivityFeed, postToWorkflowWebhook, probe, describeError, DEFAULT_SERVICE_URL,
+  attachmentAuthFor, downloadAttachment,
 };
 

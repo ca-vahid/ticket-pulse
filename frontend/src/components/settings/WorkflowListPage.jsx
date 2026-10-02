@@ -84,7 +84,7 @@ function ListRow({ workflow, name, onOpen, onRowAction, isAfterHours }) {
       <button
         type="button"
         onClick={() => onOpen(workflow.id)}
-        className="tp-focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 px-4 py-2.5 text-left transition-colors hover:bg-muted/60 md:grid-cols-[minmax(0,1fr)_9rem_8rem_4rem_8rem_1.5rem]"
+        className="tp-focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 py-2.5 pl-10 pr-4 text-left transition-colors hover:bg-muted/60 md:grid-cols-[minmax(0,1fr)_9rem_8rem_4rem_8rem_1.5rem]"
       >
         <span className="min-w-0">
           <span className={cx('block truncate text-sm font-semibold', muted ? 'text-muted-foreground' : 'text-foreground')}>{name}</span>
@@ -218,10 +218,15 @@ export default function WorkflowListPage({
           const label = eventLabels[triggerType] || triggerType;
           return (
             <section key={triggerType} aria-label={label} data-testid="workflow-list-group">
-              <div className="group/grp sticky top-0 z-10 flex items-center gap-2 border-y border-border/70 bg-muted/90 px-4 py-1.5 backdrop-blur-sm">
+              {/* QA 10-01 #2: the header was a full-width grey band — the same
+                  look as a hovered or selected row. It is now a title on the
+                  page background followed by a hairline rule, and the
+                  workflows under it are indented as its members. */}
+              <div className="group/grp sticky top-0 z-10 flex items-center gap-2 bg-card/95 px-4 pb-1 pt-4 backdrop-blur-sm" data-testid="workflow-list-group-header">
                 {GroupIcon && <GroupIcon className={cx('h-4 w-4 flex-shrink-0', visuals.icon_ || 'text-primary/80')} aria-hidden="true" />}
-                <h3 className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-[0.06em] text-foreground/80">{label}</h3>
+                <h3 className="min-w-0 max-w-[60%] truncate text-xs font-bold uppercase tracking-[0.06em] text-primary">{label}</h3>
                 <span className="text-xs font-semibold tabular-nums text-muted-foreground">{list.length}</span>
+                <span className="h-px min-w-[2rem] flex-1 bg-border" aria-hidden="true" />
                 {onCreateForTrigger && triggerType !== 'other' && (
                   <button
                     type="button"

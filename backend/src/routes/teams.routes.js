@@ -56,4 +56,15 @@ teamsAdminRouter.post('/install', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// QA 10-01 #4: disconnect named agents (removes the app, stops every send).
+teamsAdminRouter.post('/disconnect', asyncHandler(async (req, res) => {
+  const ids = req.body?.technicianIds;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'technicianIds is required' });
+  }
+  const email = (req.session?.user ?? req.user)?.email || null;
+  const result = await teamsNotificationService.disconnectAgents(req.workspaceId, ids, email);
+  return res.json({ success: true, data: result });
+}));
+
 export default { teamsBotRouter, teamsAdminRouter };

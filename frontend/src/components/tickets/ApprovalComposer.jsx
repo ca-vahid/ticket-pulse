@@ -225,7 +225,9 @@ export default function ApprovalComposer({
   const [submitting, setSubmitting] = useState(null);
   const [error, setError] = useState(null);
   const [pending, setPending] = useState(null); // { decision, note, noteHtml, conditionNote, toEmail, toName, amountLabel }
-  const [askMode, setAskMode] = useState('requester');
+  // QA 10-01 #5: a question stays internal unless the approver chooses to
+  // bring the requester in — the safer default, listed first.
+  const [askMode, setAskMode] = useState('internal');
   const [picked, setPicked] = useState({});
   // QA 09-18 #1: off by default — the requester hears the verdict from the agent.
   const [notifyRequester, setNotifyRequester] = useState(false);
@@ -402,8 +404,8 @@ export default function ApprovalComposer({
                 <div className="mb-3 rounded-xl border border-violet-200/80 bg-violet-50/50 p-2.5 dark:border-violet-500/25 dark:bg-violet-500/10">
                   <div role="radiogroup" aria-label="Who should answer?" className="flex flex-wrap gap-1.5">
                     {[
-                      { k: 'requester', label: 'Ask the requester', hint: 'Cc the agent and the approvers', Icon: Users },
                       { k: 'internal', label: 'Ask the approvers / agent only', hint: 'The requester is not copied', Icon: Lock },
+                      { k: 'requester', label: 'Ask the requester', hint: 'Cc the agent and the approvers', Icon: Users },
                     ].map((m) => (
                       <button
                         key={m.k}

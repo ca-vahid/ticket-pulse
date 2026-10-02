@@ -135,6 +135,14 @@ function eventText(eventKey, ctx) {
   }
 }
 
+/** QA 10-01 #4: the person was disconnected by an admin - skip, never re-install. */
+export class TeamsDisconnectedError extends Error {
+  constructor(email) {
+    super(`${email} is disconnected from Teams notifications`);
+    this.name = 'TeamsDisconnectedError';
+  }
+}
+
 class TeamsNotificationService {
   constructor() {
     this.pending = new Map(); // `${email}|${ticketId}` → { tech, lines, ctx, timer, urgent }
@@ -189,10 +197,16 @@ class TeamsNotificationService {
   // ------------------------------------------------------------ conversations
 
   /** The person's chat with the bot; installs the app for them first when needed. */
-  async ensureConversation(email, { install = true } = {}) {
+  async ensureConversation(email, { install = true, reconnect = false } = {}) {
     const key = lc(email);
     if (!key) throw new Error('No e-mail address');
-    const row = await prisma.teamsConversation.findUnique({ where: { email: key } });
+    let row = await prisma.teamsConversation.findUnique({ where: { email: key } });
+    // QA 10-01 #4: a disconnected person is never re-installed behind the
+    // admin's back - only an explicit Connect (reconnect) clears the mark.
+    if (row?.disconnectedAt) {
+      if (!reconnect) throw new TeamsDisconnectedError(key);
+      row = await prisma.teamsConversation.update({ where: { email: key }, data: { disconnectedAt: null, disconnectedBy: null } });
+    }
     if (row?.conversationId) return row;
     let aad = row?.aadObjectId;
     try {
@@ -223,7 +237,14 @@ class TeamsNotificationService {
   }
 
   async _send(email, card, { summary, workspaceId = null, technicianId = null, ticketId = null, eventKey = 'test', bell = null } = {}) {
-    const conv = await this.ensureConversation(email);
+    let conv;
+    try {
+      conv = await this.ensureConversation(email);
+    } catch (err) {
+      if (!(err instanceof TeamsDisconnectedError)) throw err;
+      await this._record({ workspaceId, email, technicianId, ticketId, eventKey, status: 'skipped', reason: 'disconnected', summary });
+      return null;
+    }
     let activityId = null;
     try {
       activityId = await bot.sendToConversation(conv, bot.cardActivity(card, { summary }));
@@ -563,10 +584,13 @@ class TeamsNotificationService {
     const prev = await prisma.teamsConversation.findUnique({ where: { email } });
     await prisma.teamsConversation.upsert({
       where: { email },
-      update: { aadObjectId: aad, conversationId: activity.conversation.id, serviceUrl: activity.serviceUrl, tenantId: activity.conversation.tenantId || activity.channelData?.tenant?.id || null, installedAt: prev?.installedAt || new Date(), lastError: null },
+      // The person adding the app back themselves (installationUpdate add) is
+      // their own reconnect; any other update keeps an admin's disconnect.
+      update: { aadObjectId: aad, conversationId: activity.conversation.id, serviceUrl: activity.serviceUrl, tenantId: activity.conversation.tenantId || activity.channelData?.tenant?.id || null, installedAt: prev?.installedAt || new Date(), lastError: null, ...(activity.type === 'installationUpdate' ? { disconnectedAt: null, disconnectedBy: null } : {}) },
       create: { email, aadObjectId: aad, conversationId: activity.conversation.id, serviceUrl: activity.serviceUrl, tenantId: activity.conversation.tenantId || activity.channelData?.tenant?.id || null, installedAt: new Date() },
     });
-    if (prev?.conversationId !== activity.conversation.id) {
+    const stillDisconnected = prev?.disconnectedAt && activity.type !== 'installationUpdate';
+    if (prev?.conversationId !== activity.conversation.id && !stillDisconnected) {
       await bot.sendToConversation({ serviceUrl: activity.serviceUrl, conversationId: activity.conversation.id }, bot.cardActivity(this._helpCard(), { summary: 'Ticket Pulse is connected' })).catch(() => {});
     }
   }
@@ -575,12 +599,20 @@ class TeamsNotificationService {
     return textCard('Ticket Pulse is connected', [
       'You will get a message here when a ticket is assigned to you, the requester replies, an SLA is close to breaching, an approval waits for you, and more.',
       'Take a ticket, add a note, reply or snooze straight from the card. Type **my tickets** for your open tickets.',
+      'New: paste a screenshot or a chat here and Ticket Pulse fills in a ticket for you to create in one click.',
     ], [{ type: 'Action.OpenUrl', title: 'Choose what you are told about', url: `${baseUrl()}/mail-alerts` }]);
   }
 
   async _onMessage(activity) {
     const text = lc(String(activity.text || '').replace(/<[^>]+>/g, ''));
     const email = await this._emailForActivity(activity);
+    // QA 10-01 #3: a screenshot or a pasted chat (not a command) → Autofill.
+    // It answers with its own card and fills it in the background.
+    const intake = await import('./teamsIntakeService.js');
+    if (intake.wantsAutofill(activity)) {
+      intake.default.handleMessage(activity, email).catch((err) => logger.warn(`Teams Autofill failed: ${err.message}`));
+      return;
+    }
     let card;
     if (text.includes('my tickets') && email) {
       card = await this._digestCardFor(email).catch(() => null);
@@ -606,6 +638,10 @@ class TeamsNotificationService {
 
     try {
       if (verb.startsWith('approval.')) return cardRes(await this._approvalAction(verb, data, email));
+      if (verb.startsWith('autofill.')) {
+        const { default: teamsIntakeService } = await import('./teamsIntakeService.js');
+        return cardRes(await teamsIntakeService.handleAction(verb, data, email, activity));
+      }
 
       const tech = await prisma.technician.findFirst({ where: { workspaceId, email: { equals: email, mode: 'insensitive' } }, select: { id: true, name: true, email: true } });
       if (!tech) return toast('You are not an agent in this workspace.');
@@ -746,7 +782,7 @@ class TeamsNotificationService {
     return {
       configured: bot.isTeamsConfigured(),
       enabled: ws.teamsEnabled,
-      connection: { connected: Boolean(conv?.conversationId), installedAt: conv?.installedAt || null, lastError: conv?.lastError || null },
+      connection: { connected: Boolean(conv?.conversationId) && !conv?.disconnectedAt, disconnected: Boolean(conv?.disconnectedAt), installedAt: conv?.installedAt || null, lastError: conv?.lastError || null },
       events: EVENTS.map((e) => ({ key: e.key, label: e.label, group: e.group, mode: events[e.key], workspaceDefault: effectivePrefs(ws.defaults, null).events[e.key] })),
       options,
       mutes: mutes.map((m) => ({ ticketId: m.ticketId, until: m.until, forever: m.until >= MUTE_FOREVER, ref: byId.get(m.ticketId) ? ticketDisplayRef(byId.get(m.ticketId)) : `#${m.ticketId}`, subject: byId.get(m.ticketId)?.subject || null })),
@@ -767,7 +803,7 @@ class TeamsNotificationService {
 
   async connectMe(email, workspaceId) {
     const tech = await this._tech(email, workspaceId);
-    await this.ensureConversation(tech.email);
+    await this.ensureConversation(tech.email, { reconnect: true });
     return this.myStatus(email, tech.workspaceId);
   }
 
@@ -803,7 +839,14 @@ class TeamsNotificationService {
       events: EVENTS,
       agents: techs.map((t) => {
         const c = byEmail.get(lc(t.email));
-        return { id: t.id, name: t.name, email: t.email, connected: Boolean(c?.conversationId), lastError: c?.lastError || null };
+        return {
+          id: t.id, name: t.name, email: t.email,
+          connected: Boolean(c?.conversationId) && !c?.disconnectedAt,
+          disconnected: Boolean(c?.disconnectedAt),
+          disconnectedAt: c?.disconnectedAt || null,
+          disconnectedBy: c?.disconnectedBy || null,
+          lastError: c?.lastError || null,
+        };
       }),
       last24h: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
       lastFailure,
@@ -816,10 +859,57 @@ class TeamsNotificationService {
       where: { workspaceId: Number(workspaceId), isActive: true, email: { not: null }, ...(Array.isArray(technicianIds) && technicianIds.length ? { id: { in: technicianIds.map(Number) } } : {}) },
       select: { id: true, email: true },
     });
-    const out = { connected: 0, failed: [] };
+    // "Connect all agents" leaves people an admin disconnected alone; naming
+    // someone (the row's Connect) is the explicit reconnect.
+    const explicit = Array.isArray(technicianIds) && technicianIds.length > 0;
+    const out = { connected: 0, failed: [], skippedDisconnected: 0 };
     for (const t of techs) {
-      try { await this.ensureConversation(t.email); out.connected++; } catch (err) { out.failed.push({ email: t.email, error: err.message }); }
+      try {
+        await this.ensureConversation(t.email, { reconnect: explicit });
+        out.connected++;
+      } catch (err) {
+        if (err instanceof TeamsDisconnectedError) out.skippedDisconnected++;
+        else out.failed.push({ email: t.email, error: err.message });
+      }
     }
+    return out;
+  }
+
+  /**
+   * QA 10-01 #4: disconnect agents from the bot. Removes the Ticket Pulse app
+   * from their Teams (best effort - a Graph refusal still disconnects them
+   * here) and marks the row so nothing is sent or re-installed until someone
+   * connects them again.
+   */
+  async disconnectAgents(workspaceId, technicianIds, actorEmail = null) {
+    const ids = (Array.isArray(technicianIds) ? technicianIds : []).map(Number).filter(Number.isInteger);
+    if (!ids.length) return { disconnected: 0, appRemoved: 0, failed: [] };
+    const techs = await prisma.technician.findMany({
+      where: { workspaceId: Number(workspaceId), id: { in: ids }, email: { not: null } },
+      select: { id: true, email: true },
+    });
+    const out = { disconnected: 0, appRemoved: 0, failed: [] };
+    for (const t of techs) {
+      const key = lc(t.email);
+      const row = await prisma.teamsConversation.findUnique({ where: { email: key } }).catch(() => null);
+      let aad = row?.aadObjectId || null;
+      try {
+        if (!aad && bot.isTeamsConfigured()) aad = (await bot.findUser(key).catch(() => null))?.id || null;
+        if (aad && bot.isTeamsConfigured()) {
+          const r = await bot.uninstallForUser(aad);
+          if (r === 'removed') out.appRemoved++;
+        }
+      } catch (err) {
+        out.failed.push({ email: key, error: `App not removed from Teams: ${bot.describeError(err)}` });
+      }
+      await prisma.teamsConversation.upsert({
+        where: { email: key },
+        update: { conversationId: null, disconnectedAt: new Date(), disconnectedBy: actorEmail ? lc(actorEmail) : null, lastError: null },
+        create: { email: key, aadObjectId: aad, disconnectedAt: new Date(), disconnectedBy: actorEmail ? lc(actorEmail) : null },
+      });
+      out.disconnected++;
+    }
+    logger.info(`Teams: ${out.disconnected} agent(s) disconnected in workspace ${workspaceId} by ${actorEmail || 'unknown'} (app removed for ${out.appRemoved})`);
     return out;
   }
 }

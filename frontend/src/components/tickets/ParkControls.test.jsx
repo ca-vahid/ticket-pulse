@@ -73,3 +73,29 @@ describe('ParkLine / ParkSuggestion / ParkedMark', () => {
     expect(screen.getByTestId('parked-mark')).toHaveTextContent(/Nov 16/);
   });
 });
+
+// QA 10-01 #6: "Waiting until a date" and "In progress, with an ETA" merged.
+describe('ParkDialog — one choice for a date or an ETA', () => {
+  test('two reasons only, and the merged one is the default', () => {
+    render(<ParkDialog ticketRef="TP-1741" onSubmit={() => {}} onClose={() => {}} />);
+    const radios = screen.getAllByRole('radio');
+    expect(radios).toHaveLength(2);
+    expect(screen.getByLabelText(/Waiting until a date or an ETA/)).toBeChecked();
+    expect(screen.queryByText('In progress, with an ETA')).toBeNull();
+  });
+
+  test('changing the date of an older ETA park opens on the merged choice and saves it as until_date', () => {
+    const onSubmit = vi.fn();
+    render(<ParkDialog ticketRef="TP-1741" initial={{ kind: 'eta', until: inDays(20), reason: 'Rollout' }} onSubmit={onSubmit} onClose={() => {}} />);
+    expect(screen.getByLabelText(/Waiting until a date or an ETA/)).toBeChecked();
+    fireEvent.change(screen.getByLabelText(/Until/), { target: { value: inDays(21) } });
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Rollout moved' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Park$/ }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'until_date', until: inDays(21) }));
+  });
+
+  test('an older ETA park still reads as "In progress, with an ETA" on the ticket', () => {
+    render(<ParkLine park={{ kind: 'eta', until: new Date(Date.now() + 5 * 86400e3).toISOString(), reason: 'Rollout' }} />);
+    expect(screen.getByTestId('park-line')).toHaveTextContent('In progress, with an ETA');
+  });
+});

@@ -164,6 +164,10 @@ function ArticleList({ categories, canManage }) {
   const [techs, setTechs] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  // QA 10-01 #11: drafts can be published or deleted from the list.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [rowBusy, setRowBusy] = useState(null);
+  const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(null);
   const query = q.trim();
   const searching = query.length > 0 && !showArchived && !needsReview;
 
@@ -204,7 +208,35 @@ function ArticleList({ categories, canManage }) {
         .catch((err) => { if (!cancelled) setError(err?.message || 'Could not load articles'); });
     }, query ? 250 : 0);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [query, searching, status, showArchived, needsReview, categoryId, topic, owner, source, sort]);
+  }, [query, searching, status, showArchived, needsReview, categoryId, topic, owner, source, sort, reloadKey]);
+
+  const publishDraft = async (article) => {
+    setRowBusy(`publish-${article.id}`);
+    setError(null);
+    try {
+      await knowledgeAPI.updateArticle(article.id, { status: 'published' });
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setError(err?.message || 'Could not publish');
+    } finally {
+      setRowBusy(null);
+    }
+  };
+  const deleteDraft = async () => {
+    const article = confirmDeleteDraft;
+    setConfirmDeleteDraft(null);
+    if (!article) return;
+    setRowBusy(`delete-${article.id}`);
+    setError(null);
+    try {
+      await knowledgeAPI.deleteArticle(article.id);
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setError(err?.message || 'Could not delete');
+    } finally {
+      setRowBusy(null);
+    }
+  };
 
   const categoryOptions = useMemo(() => categories.flatMap((c) => [
     { value: c.id, label: c.name },
@@ -298,9 +330,10 @@ function ArticleList({ categories, canManage }) {
           {data.items.map((a) => {
             const topics = articleTopics(a);
             const reach = Array.isArray(a.quotedBy) ? a.quotedBy : [];
+            const draftActions = canManage && a.status === 'draft' && !a.readOnly && !data.searched;
             return (
-              <li key={a.id}>
-                <Link to={`/knowledge/articles/${a.id}`} className="tp-card tp-focus-ring flex items-start gap-3.5 px-4 py-3.5 transition-shadow hover:shadow-soft">
+              <li key={a.id} className="relative">
+                <Link to={`/knowledge/articles/${a.id}`} className={`tp-card tp-focus-ring flex items-start gap-3.5 px-4 py-3.5 transition-shadow hover:shadow-soft${draftActions ? ' pb-10 sm:pb-3.5 sm:pr-44' : ''}`}>
                   <IconTile icon={FileText} size="sm" tone={a.status === 'published' ? 'primary' : 'muted'} className="mt-0.5" />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-3">
@@ -337,11 +370,40 @@ function ArticleList({ categories, canManage }) {
                     )}
                   </span>
                 </Link>
+                {draftActions && (
+                  <span className="absolute bottom-3 right-4 flex items-center gap-1" data-testid={`draft-actions-${a.id}`}>
+                    <button
+                      type="button"
+                      onClick={() => publishDraft(a)}
+                      disabled={!!rowBusy}
+                      className="tp-focus-ring inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {rowBusy === `publish-${a.id}` ? 'Publishing…' : 'Publish'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteDraft(a)}
+                      disabled={!!rowBusy}
+                      className="tp-focus-ring rounded-md px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50"
+                    >
+                      {rowBusy === `delete-${a.id}` ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </span>
+                )}
               </li>
             );
           })}
         </ul>
       )}
+      <ConfirmDialog
+        open={Boolean(confirmDeleteDraft)}
+        title="Delete this draft?"
+        confirmLabel="Delete draft"
+        onCancel={() => setConfirmDeleteDraft(null)}
+        onConfirm={deleteDraft}
+      >
+        It leaves the list and is never quoted by Auto-help. It stays under Show archived in case you want it back.
+      </ConfirmDialog>
       {data && !data.searched && data.total > data.items.length && (
         <p className="px-1 text-xs text-muted-foreground">Showing {data.items.length} of {data.total}. Narrow the search to see the rest.</p>
       )}
@@ -567,6 +629,28 @@ function ArticleEditor({ articleId, categories, canManage }) {
     }
   };
 
+  const publishNow = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = dirty
+        ? {
+          title: form.title, bodyHtml: form.bodyHtml, status: 'published', tags: form.tags || [],
+          categoryId: form.categoryId || null, subcategoryId: form.subcategoryId || null,
+          ownerEmail: String(form.ownerEmail || '').trim() || undefined, reviewEveryDays: Number(form.reviewEveryDays) || 180,
+        }
+        : { status: 'published' };
+      const res = await knowledgeAPI.updateArticle(articleId, payload);
+      setSavedAt(new Date());
+      setDirty(false);
+      setForm(res.data);
+    } catch (err) {
+      setError(err?.message || 'Could not publish');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const markVerified = async () => {
     setVerifying(true);
     setError(null);
@@ -608,13 +692,25 @@ function ArticleEditor({ articleId, categories, canManage }) {
             </div>
             <div className="flex flex-shrink-0 items-center gap-2 pt-1">
               <ArticleStatus status={form.status} />
+              {/* QA 10-01 #11: publishing was a dropdown deep in the form. */}
+              {editable && !isNew && form.status === 'draft' && (
+                <button
+                  type="button"
+                  onClick={publishNow}
+                  disabled={saving}
+                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  data-testid="article-publish"
+                >
+                  {saving ? 'Publishing…' : dirty ? 'Save & publish' : 'Publish'}
+                </button>
+              )}
               {editable && !isNew && (
                 <Menu
                   label="Article actions"
                   testId="article-menu"
                   items={[
                     form.status === 'published' && { id: 'verify', label: verifying ? 'Marking…' : 'Mark as verified', hint: 'You checked it is still right today', icon: BadgeCheck, onSelect: markVerified, disabled: verifying },
-                    form.status !== 'archived' && { id: 'archive', label: 'Archive…', hint: 'Auto-help stops quoting it', icon: Archive, onSelect: () => setConfirmArchive(true) },
+                    form.status !== 'archived' && { id: 'archive', label: form.status === 'draft' ? 'Delete draft…' : 'Archive…', hint: form.status === 'draft' ? 'It leaves the list; kept under Show archived' : 'Auto-help stops quoting it', icon: Archive, onSelect: () => setConfirmArchive(true) },
                   ]}
                 />
               )}
@@ -784,12 +880,14 @@ function ArticleEditor({ articleId, categories, canManage }) {
 
       <ConfirmDialog
         open={confirmArchive}
-        title="Archive this article?"
-        confirmLabel="Archive"
+        title={form.status === 'draft' ? 'Delete this draft?' : 'Archive this article?'}
+        confirmLabel={form.status === 'draft' ? 'Delete draft' : 'Archive'}
         onCancel={() => setConfirmArchive(false)}
         onConfirm={archive}
       >
-        Auto-help stops quoting it and it leaves search. Past runs still link to it, and you can find it under Show archived.
+        {form.status === 'draft'
+          ? 'It leaves the list and is never quoted by Auto-help. It stays under Show archived in case you want it back.'
+          : 'Auto-help stops quoting it and it leaves search. Past runs still link to it, and you can find it under Show archived.'}
       </ConfirmDialog>
     </div>
   );

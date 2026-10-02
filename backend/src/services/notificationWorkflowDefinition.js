@@ -34,6 +34,8 @@ export const NOTIFICATION_EVENT_TYPES = [
   // FR 09-11 #4: terminal -> non-terminal, whatever reopened it. A named
   // trigger because nobody found status_changed + the `reopened` condition.
   'ticket.reopened',
+  // QA 10-01 #9: priority moved (from/to/raised on event.extra).
+  'ticket.priority_changed',
   // Parked tickets (plans/PARKED_BUILD_PLAN.md): parked / woke on its date /
   // wakes within a day. Fired by ticketParkService.
   'ticket.parked',
@@ -1435,6 +1437,7 @@ function eventLabel(triggerType) {
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
     'ticket.reopened': 'Ticket reopened',
+    'ticket.priority_changed': 'Priority changed',
     'ticket.parked': 'Ticket parked',
     'ticket.woke': 'Parked ticket woke',
     'ticket.park_due_soon': 'Parked ticket wakes within a day',
@@ -1463,7 +1466,8 @@ function eventLabel(triggerType) {
 
 function defaultRecipients(triggerType) {
   if (triggerType === 'ticket.assigned' || triggerType === 'ticket.reassigned'
-    || triggerType === 'ticket.fields_updated' || triggerType === 'ticket.reopened') {
+    || triggerType === 'ticket.fields_updated' || triggerType === 'ticket.reopened'
+    || triggerType === 'ticket.priority_changed') {
     // FR 09-11 #4 asked for the assigned agent specifically: a reopen is a
     // ticket landing back on somebody's plate, not news for the requester.
     return ['assigned_agent'];
@@ -1486,6 +1490,15 @@ function defaultTemplate(triggerType) {
       html: '<p>A ticket assigned to you has been <strong>reopened</strong>.</p>'
         + '<p><strong>{{ ticket.subject }}</strong><br>Status went from {{ event.extra.from }} to {{ event.extra.to }}.</p>',
       text: 'A ticket assigned to you has been reopened.\n\n{{ ticket.subject }}\nStatus went from {{ event.extra.from }} to {{ event.extra.to }}.',
+    };
+  }
+
+  if (triggerType === 'ticket.priority_changed') {
+    return {
+      subject: 'Priority {{ event.extra.direction }} to {{ event.extra.toLabel }}: {{ ticket.subject }}',
+      html: '<p>The priority of a ticket assigned to you went from <strong>{{ event.extra.fromLabel }}</strong> to <strong>{{ event.extra.toLabel }}</strong>.</p>'
+        + '<p><strong>{{ ticket.subject }}</strong></p>',
+      text: 'The priority of a ticket assigned to you went from {{ event.extra.fromLabel }} to {{ event.extra.toLabel }}.\n\n{{ ticket.subject }}',
     };
   }
 
@@ -1990,6 +2003,7 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('ticket.freshserviceTicketId', 'FreshService ticket number', 'Ticket', 'FreshService ticket number — blank for Ticket Pulse-born tickets (use Ticket number instead).', '225001'),
     variable('ticket.nativeNumber', 'Native ticket number', 'Ticket', 'Ticket Pulse native number (without the TP- prefix) — blank for FreshService-born tickets.', '1070'),
     variable('ticket.id', 'Internal ticket id', 'Ticket', 'Ticket Pulse internal database id (stable across both origins).', '4821'),
+    variable('ticket.url', 'Ticket link (agents)', 'Ticket', 'Link to the ticket page in Ticket Pulse — for agents, webhooks and Teams posts. Requester-facing mail uses the public status link instead.', 'https://ticketpulse.bgcsaas.com/tickets/4821'),
     variable('ticket.origin', 'Ticket origin', 'Ticket', 'Where the ticket was born: ticketpulse or freshservice.', 'ticketpulse'),
     variable('ticket.createdVia', 'Created via', 'Ticket', 'How the ticket came to exist: app, email, api, freshservice_sync, held_reply (resolved from the mailbox hold queue), agent_cc (agent reply-all with the mailbox in Cc) or forward.', 'email'),
     variable('ticket.subject', 'Subject', 'Ticket', 'Ticket subject line.', 'VPN access problem'),

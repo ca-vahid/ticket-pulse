@@ -33,12 +33,15 @@ describe('#4 Settings long sections do not stretch the page', () => {
   });
 });
 
-describe('#5 Workflow templates panel is not clipped on the left', () => {
+describe('#5 Workflow templates panel is not clipped (QA 09-28 #5, QA 10-01 #1)', () => {
   const src = read('src/components/settings/NotificationWorkflowsPanel.jsx');
 
-  test('anchors left and caps its width to the viewport', () => {
-    const cls = /<div className="([^"]*)" data-testid="workflow-templates-panel"/.exec(src)[1].split(/\s+/);
-    expect(cls).toEqual(expect.arrayContaining(['absolute', 'left-0', 'z-40', 'w-96', 'max-w-[calc(100vw-5rem)]']));
-    expect(cls).not.toContain('right-0');
+  test('opens toward the side with room and caps its width to the viewport', () => {
+    // The button has sat on both sides of the toolbar; a fixed anchor clipped
+    // the panel each time (left edge on 09-28, right edge on 10-01).
+    const cls = /<div className={`absolute \$\{alignRight \? 'right-0' : 'left-0'\} ([^`]*)`} data-testid="workflow-templates-panel"/.exec(src);
+    expect(cls).not.toBeNull();
+    expect(cls[1].split(/\s+/)).toEqual(expect.arrayContaining(['z-40', 'w-96', 'max-w-[calc(100vw-5rem)]']));
+    expect(src).toContain('setAlignRight(rect.left + 384 > window.innerWidth - 16)');
   });
 });
