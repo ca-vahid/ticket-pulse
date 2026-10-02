@@ -94,7 +94,26 @@ class SyncHealthService {
    *   completions AND stale ingest. Workspaces with no ticket data fall back
    *   to completions-only.
    */
-  async getHealth(now = Date.now()) {
+  /**
+   * Perf (2 Oct 2026): every open admin page re-asks on each sync completion
+   * (~5 a minute across workspaces) and each answer scans the ticket table for
+   * the newest ingest — ~1.8 s apiece, 54 slow calls an hour. One shared
+   * answer per 30 s (single-flight) is fresh enough for a 1-minute sync
+   * cadence. Callers passing their own `now` (tests) bypass the cache.
+   */
+  async getHealth(now) {
+    if (now !== undefined) return this._computeHealth(now);
+    const ttl = Number(process.env.SYNC_HEALTH_CACHE_MS ?? (process.env.NODE_ENV === 'test' ? 0 : 30_000)) || 0;
+    if (!ttl) return this._computeHealth(Date.now());
+    if (this._healthCache && Date.now() - this._healthCache.at < ttl) return this._healthCache.value;
+    if (this._healthInflight) return this._healthInflight;
+    this._healthInflight = this._computeHealth(Date.now())
+      .then((value) => { this._healthCache = { value, at: Date.now() }; return value; })
+      .finally(() => { this._healthInflight = null; });
+    return this._healthInflight;
+  }
+
+  async _computeHealth(now = Date.now()) {
     const workspaces = await workspaceRepository.getAllActive();
     const workspaceIds = workspaces.map((ws) => ws.id);
     // Both helpers swallow their own DB errors into an empty Map — a failed
