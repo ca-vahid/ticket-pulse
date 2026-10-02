@@ -9,6 +9,7 @@ import photosRoutes from './photos.routes.js';
 import webhookRoutes from './webhook.routes.js';
 import freshserviceWebhookRoutes from './freshserviceWebhook.routes.js';
 import { teamsBotRouter, teamsAdminRouter } from './teams.routes.js';
+import teamsAutofillRoutes from './teamsAutofill.routes.js';
 import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import aiUsageRoutes from './aiUsage.routes.js';
@@ -34,6 +35,7 @@ import knowledgeRoutes from './knowledge.routes.js';
 import toneRoutes from './tone.routes.js';
 import handBacksRoutes from './handBacks.routes.js';
 import teamRoutingSettingsRoutes from './teamRoutingSettings.routes.js';
+import hrLifecycleRoutes from './hrLifecycle.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAdmin, requireAdminOrObserver, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
@@ -89,6 +91,9 @@ router.use((req, _res, next) => {
 // check the user's email against the DB.
 router.use(requireAuth);
 router.use('/agent', agentRoutes);
+// QA 10-01 #3: the Teams Autofill draft for /tickets/new?autofill=… (the
+// draft names its workspace; only its sender may read it).
+router.use('/teams-autofill', teamsAutofillRoutes);
 // Native ticketing: mounted before global workspace-access enforcement because
 // agent-role users (no workspace_access rows) are first-class here — the router
 // applies requireWorkspace + its own access resolution internally.
@@ -149,5 +154,8 @@ router.use('/backup', backupRoutes);
 router.use('/knowledge', knowledgeRoutes);
 router.use('/tone', toneRoutes);
 router.use('/hand-backs', handBacksRoutes); // QA 09-25 item 3
+// Onboarding / Offboarding (plans/HR_LIFECYCLE_PLAN.md): /status for members,
+// everything else workspace-admin + HR_LIFECYCLE_WORKSPACE_IDS inside the router.
+router.use('/hr-lifecycle', hrLifecycleRoutes);
 
 export default router;

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, ArrowLeft, Building2, Check, ChevronDown, Clock, Loader2, MapPin, StickyNote,
   Paperclip, Send, Sparkles, Ticket, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
-import { ticketsAPI } from '../services/api';
+import { ticketsAPI, teamsAutofillAPI, getWorkspaceId } from '../services/api';
 import CcChips from '../components/tickets/CcChips';
 import RichTextEditor, { isRichContent, sanitizeRichHtml } from '../components/tickets/RichTextEditor';
 import StagedFileChip from '../components/tickets/StagedFileChip';
@@ -18,6 +18,22 @@ import { useTicketTypes } from '../hooks/useTicketTypes';
 
 const MAX_FILES = 5;
 const MAX_FILE_MB = 100;
+
+// QA 10-01 #3: the agent already reviewed the Teams card — every proposal is applied
+// (applyAutofill still never overwrites a field the agent set, nor guesses a person).
+const TEAMS_AUTOFILL_FIELDS = { subject: true, description: true, requester: true, category: true, priority: true, type: true, assignee: true };
+
+/** A picture from the Teams draft ({ fileName, mimeType, base64 }) → a File for the attachment list. */
+const base64ToFile = (img) => {
+  try {
+    const bin = atob(String(img?.base64 || ''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new File([bytes], img?.fileName || 'teams-picture.png', { type: img?.mimeType || 'image/png' });
+  } catch {
+    return null;
+  }
+};
 
 // Selected-state classes per registry color token (Tailwind needs literals).
 const TYPE_SELECTED_CLASSES = {
@@ -452,6 +468,59 @@ export default function TicketCreate() {
     if (customFieldDefs.some((d) => d.isRequiredOnCreate === true)) setCustomFieldsOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customFieldDefs]);
+
+  // QA 10-01 #3: /tickets/new?autofill=<token> — the draft the Teams bot made
+  // (extraction + pasted text + pictures) lands on the form exactly like the
+  // Autofill dialog's Apply. The server only hands it to the person who sent
+  // it. Runs after the config seed above so the draft's values win.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const teamsTokenRef = useRef(null);
+  useEffect(() => {
+    const token = searchParams.get('autofill');
+    if (!token || !meta || teamsTokenRef.current === token) return;
+    teamsTokenRef.current = token;
+    (async () => {
+      try {
+        const res = await teamsAutofillAPI.get(token);
+        const draft = res?.data;
+        if (!draft) return;
+        if (draft.status === 'created' && draft.ticketId) {
+          navigate(`/tickets/${draft.ticketId}`, { replace: true });
+          return;
+        }
+        const current = getWorkspaceId();
+        if (draft.workspace?.id && current && Number(current) !== Number(draft.workspace.id)) {
+          // The ?ws= param switches workspace on load; try that once.
+          const guard = `tp_teams_autofill_ws_${token}`;
+          let tried = false;
+          try { tried = sessionStorage.getItem(guard) === '1'; sessionStorage.setItem(guard, '1'); } catch { /* ignore */ }
+          if (!tried) {
+            setAutofillNotice(`This Teams draft is for ${draft.workspace.name} — switching workspace…`);
+            window.location.assign(`/tickets/new?autofill=${encodeURIComponent(token)}&ws=${draft.workspace.id}`);
+            return;
+          }
+          setError(`This Teams draft is for the ${draft.workspace.name} workspace. Switch to ${draft.workspace.name} and open the link again.`);
+          return;
+        }
+        const sourceText = String(draft.sourceText || '');
+        await applyAutofill({
+          result: draft.data || {},
+          meta: { runId: draft.runId },
+          selected: TEAMS_AUTOFILL_FIELDS,
+          sourceHtml: narrativeToHtml(sourceText),
+          sourceText,
+          files: (draft.images || []).map(base64ToFile).filter(Boolean),
+        });
+        setAutofillNotice((prev) => ['Filled in from your Teams message: check the fields, then create.', prev].filter(Boolean).join(' '));
+        const next = new URLSearchParams(searchParams);
+        next.delete('autofill');
+        setSearchParams(next, { replace: true });
+      } catch (err) {
+        setError(err?.message || 'Could not load the Autofill draft from Teams');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta, searchParams]);
 
   const goBack = () => navigate('/tickets');
 

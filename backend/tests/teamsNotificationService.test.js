@@ -198,3 +198,53 @@ describe('card actions', () => {
     expect(JSON.stringify(refused.value)).toContain('Only the named approver');
   });
 });
+
+describe('disconnect (QA 10-01 #4)', () => {
+  beforeEach(() => {
+    botMock.uninstallForUser = jest.fn().mockResolvedValue('removed');
+    botMock.installForUser.mockClear();
+    prismaMock.teamsConversation.upsert.mockReset().mockResolvedValue({});
+    prismaMock.teamsConversation.update.mockReset().mockImplementation(({ data }) => Promise.resolve({ email: 'adrian@x.io', conversationId: null, aadObjectId: 'aad-7', ...data }));
+  });
+
+  test('removes the app, clears the chat and marks the person disconnected', async () => {
+    prismaMock.technician.findMany.mockResolvedValue([{ id: 7, email: 'Adrian@x.io' }]);
+    const out = await svc.disconnectAgents(1, [7], 'boss@x.io');
+    expect(botMock.uninstallForUser).toHaveBeenCalledWith('aad-7');
+    expect(prismaMock.teamsConversation.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { email: 'adrian@x.io' },
+      update: expect.objectContaining({ conversationId: null, disconnectedBy: 'boss@x.io', disconnectedAt: expect.any(Date) }),
+    }));
+    expect(out).toEqual({ disconnected: 1, appRemoved: 1, failed: [] });
+  });
+
+  test('a Graph refusal still disconnects here and reports why the app stayed', async () => {
+    prismaMock.technician.findMany.mockResolvedValue([{ id: 7, email: 'adrian@x.io' }]);
+    botMock.uninstallForUser.mockRejectedValue(new Error('Forbidden'));
+    const out = await svc.disconnectAgents(1, [7], 'boss@x.io');
+    expect(out.disconnected).toBe(1);
+    expect(out.failed[0].error).toContain('Forbidden');
+  });
+
+  test('a disconnected person gets nothing and the app is NOT re-installed (recorded as skipped)', async () => {
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'adrian@x.io', conversationId: null, aadObjectId: 'aad-7', disconnectedAt: new Date() });
+    const sent = await svc._send('adrian@x.io', { type: 'AdaptiveCard' }, { summary: 'x', workspaceId: 1, technicianId: 7, eventKey: 'assigned' });
+    expect(sent).toBeNull();
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+    expect(botMock.sendToConversation).not.toHaveBeenCalled();
+    expect(prismaMock.teamsDelivery.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'skipped', reason: 'disconnected' }) });
+  });
+
+  test('"Connect all" leaves disconnected people alone; the row\'s Connect reconnects them', async () => {
+    prismaMock.technician.findMany.mockResolvedValue([{ id: 7, email: 'adrian@x.io' }]);
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'adrian@x.io', conversationId: null, aadObjectId: 'aad-7', disconnectedAt: new Date() });
+    const all = await svc.installForAgents(1);
+    expect(all).toMatchObject({ connected: 0, skippedDisconnected: 1, failed: [] });
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+
+    const one = await svc.installForAgents(1, [7]);
+    expect(one).toMatchObject({ connected: 1, skippedDisconnected: 0 });
+    expect(prismaMock.teamsConversation.update).toHaveBeenCalledWith({ where: { email: 'adrian@x.io' }, data: { disconnectedAt: null, disconnectedBy: null } });
+    expect(botMock.installForUser).toHaveBeenCalledWith('aad-7');
+  });
+});

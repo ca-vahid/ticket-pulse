@@ -352,3 +352,127 @@ export function textCard(title, lines = [], actions = [], { icon = '👋', word 
 }
 
 export default { EVENT_META, OUTCOMES, ticketCard, approvalCard, digestCard, textCard, htmlToCardMarkdown, textToCardMarkdown, splitLong };
+
+// ---------------------------------------------------------------- Autofill (QA 10-01 #3)
+
+const AUTOFILL_PRIORITY_CHOICES = [
+  { title: 'Low', value: '1' }, { title: 'Medium', value: '2' }, { title: 'High', value: '3' }, { title: 'Urgent', value: '4' },
+];
+
+/**
+ * The Autofill card an agent gets back after sending the bot a screenshot or
+ * a pasted chat. One card, updated in place through its life:
+ *   stage 'reading'   - the AI is reading it
+ *   stage 'ready'     - the proposal + small inputs + Create / Open / Discard
+ *   stage 'error'     - plain words, plus the web link when it helps
+ *   stage 'created'   - "Created TP-1234" + Open
+ *   stage 'discarded' / 'expired'
+ *
+ * m: { draftId, t, workspaceName, otherWorkspaces: [{id,name}], canCreate, openUrl, ticketsUrl,
+ *      subject, requesterName, requesterEmail, requesterCandidates: [{name,email}],
+ *      categoryTop, categorySub, priority, descriptionMd, missing: [label], notes: [text],
+ *      assignOptions: [{title,value}], assignDefault, ticketRef, ticketUrl, message, error, title }
+ */
+export function autofillCard(m = {}, stage = 'ready') {
+  const data = { draftId: m.draftId, t: m.t };
+  const sub = ['Autofill', m.workspaceName].filter(Boolean).join(' · ');
+
+  if (stage === 'reading') {
+    return wrapCard([
+      banner({ title: 'Reading your message…', subline: sub, icon: '⏳', word: 'Autofill' }),
+      text(m.message || 'Ticket Pulse is reading the text and pictures you sent. This takes a few seconds; the card fills in by itself.', { spacing: 'Medium' }),
+    ], []);
+  }
+  if (stage === 'error') {
+    const actions = [];
+    if (m.openUrl) actions.push({ type: 'Action.OpenUrl', title: 'Open in Ticket Pulse', url: m.openUrl });
+    else if (m.ticketsUrl) actions.push({ type: 'Action.OpenUrl', title: 'Open Ticket Pulse', url: m.ticketsUrl });
+    return wrapCard([
+      banner({ style: 'attention', title: m.title || 'Autofill could not help with that', subline: sub, icon: '⚠️', word: 'Autofill' }),
+      text(m.error || 'Something went wrong.', { spacing: 'Medium' }),
+    ], actions);
+  }
+  if (stage === 'created') {
+    return wrapCard([
+      banner({ style: 'good', title: `Created ${m.ticketRef || 'the ticket'}`, url: m.ticketUrl, subline: [m.subject ? clip(m.subject, 90) : null, m.workspaceName].filter(Boolean).join(' · '), icon: '✅', word: 'Created' }),
+      text(m.message || 'The ticket is in Ticket Pulse with your pictures attached.', { spacing: 'Medium' }),
+    ], m.ticketUrl ? [{ type: 'Action.OpenUrl', title: 'Open', url: m.ticketUrl }] : []);
+  }
+  if (stage === 'discarded' || stage === 'expired') {
+    const expired = stage === 'expired';
+    return wrapCard([
+      banner({ style: 'emphasis', title: expired ? 'This draft has expired' : 'Discarded', subline: sub, icon: expired ? '⌛' : '🗑️', word: expired ? 'Expired' : 'Discarded' }),
+      text(expired ? 'Drafts last 30 minutes. Send the pictures or text again for a fresh one.' : 'Nothing was created. Send the bot another screenshot or chat whenever you need a ticket.', { spacing: 'Medium' }),
+    ], []);
+  }
+
+  // ---- ready
+  const [pw, pc] = PRIORITY[m.priority] || ['Medium', 'Good'];
+  const who = m.requesterName || m.requesterEmail
+    ? `👤 ${mdSafe(m.requesterName || m.requesterEmail)}${m.requesterName && m.requesterEmail ? ` · ${m.requesterEmail}` : ''}`
+    : '👤 Not sure yet';
+  const cat = m.categoryTop
+    ? `🗂️ ${mdSafe(m.categoryTop)}${m.categorySub ? ` › **${mdSafe(m.categorySub)}**` : ''}`
+    : '🗂️ AI will classify it';
+  const body = [
+    banner({ title: m.subject || 'New ticket', subline: sub, icon: '✨', word: 'Autofill' }),
+    {
+      type: 'Container',
+      showBorder: true,
+      roundedCorners: true,
+      spacing: 'Medium',
+      items: [{
+        type: 'ColumnSet',
+        columns: [
+          { type: 'Column', width: 'stretch', items: [label('REQUESTER'), text(who, { spacing: 'None' })] },
+          { type: 'Column', width: 'stretch', items: [label('CATEGORY'), text(cat, { spacing: 'None' })] },
+          { type: 'Column', width: 'auto', items: [label('PRIORITY'), text(`● ${pw}`, { color: pc, weight: 'Bolder', spacing: 'None', wrap: false })] },
+        ],
+      }],
+    },
+  ];
+  if (m.descriptionMd) {
+    const [head] = splitLong(m.descriptionMd, 600);
+    body.push({ type: 'Container', style: 'emphasis', showBorder: true, roundedCorners: true, spacing: 'Medium', items: [label('DESCRIPTION'), text(head, { spacing: 'Small' })] });
+  }
+  if (m.missing?.length) body.push(text(`⚠️ **Still needed:** ${m.missing.join(', ')}`, { color: 'Warning', spacing: 'Medium' }));
+  for (const n of m.notes || []) body.push(text(`ℹ️ ${n}`, { size: 'Small', isSubtle: true, spacing: 'Small' }));
+  if (m.error) body.push(text(`⚠️ ${m.error}`, { color: 'Attention', spacing: 'Medium' }));
+
+  const actions = [];
+  if (m.canCreate) {
+    // Small, pre-filled inputs: fix the obvious without leaving Teams.
+    body.push({ type: 'Input.Text', id: 'subject', label: 'Subject', value: m.subject || '', maxLength: 500, spacing: 'Medium' });
+    const picks = (m.requesterCandidates || []).filter((c) => c?.email);
+    if (picks.length) {
+      body.push({
+        type: 'Input.ChoiceSet', id: 'requesterPick', label: 'Requester (a few people fit)', style: 'compact', placeholder: 'Pick the requester',
+        choices: picks.map((c) => ({ title: `${c.name || c.email} (${c.email})`, value: c.email })),
+      });
+    }
+    body.push({ type: 'Input.Text', id: 'requesterEmail', label: picks.length ? '…or their e-mail' : 'Requester e-mail', value: m.requesterEmail || '', placeholder: 'name@company.com', style: 'Email' });
+    body.push({
+      type: 'ColumnSet',
+      spacing: 'Small',
+      columns: [
+        { type: 'Column', width: 'stretch', items: [{ type: 'Input.ChoiceSet', id: 'priority', label: 'Priority', style: 'compact', value: String(m.priority || 2), choices: AUTOFILL_PRIORITY_CHOICES }] },
+        { type: 'Column', width: 'stretch', items: [{ type: 'Input.ChoiceSet', id: 'assign', label: 'Assign to', style: 'compact', value: m.assignDefault || 'me', choices: m.assignOptions?.length ? m.assignOptions : [{ title: 'Me', value: 'me' }] }] },
+      ],
+    });
+    actions.push({ type: 'Action.Execute', title: 'Create ticket', verb: 'autofill.create', data, style: 'positive' });
+  }
+  if (m.openUrl) actions.push({ type: 'Action.OpenUrl', title: 'Open in Ticket Pulse', url: m.openUrl });
+  if (m.otherWorkspaces?.length) {
+    actions.push({
+      type: 'Action.ShowCard',
+      title: 'Another workspace',
+      card: {
+        type: 'AdaptiveCard',
+        body: [{ type: 'Input.ChoiceSet', id: 'workspaceId', label: 'Read it again for', style: 'compact', value: String(m.otherWorkspaces[0].id), choices: m.otherWorkspaces.map((w) => ({ title: w.name, value: String(w.id) })) }],
+        actions: [{ type: 'Action.Execute', title: 'Read again', verb: 'autofill.rerun', data }],
+      },
+    });
+  }
+  actions.push({ type: 'Action.Execute', title: 'Discard', verb: 'autofill.discard', data, associatedInputs: 'none', mode: 'secondary' });
+  return wrapCard(body, actions);
+}

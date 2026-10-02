@@ -8,6 +8,15 @@
 //   NH Laptop/Workstation   Start date: 2026-10-19
 //   BambooHR "New Hire"     Start Date: Tue October 13        (no year: the weekday fixes it)
 //   Start date change       The start date has changed from 2026-07-20 to 2027-03-01
+//                           (old order: "has changed to 2027-03-01 from 2026-07-20")
+// Added 1 Oct 2026 (plans/HR_LIFECYCLE_RESEARCH.md §4 gaps):
+//   Departure date change   The departure date has changed from 2026-05-14 to 2026-05-15
+//                           (old: "has changed to 2025-05-02 for …")
+//   Contract end change     The contract end date has changed from 2026-10-02 to 2027-02-26
+//   On Leave (table)        New Leave Records … 2026-09-21 2027-10-12 Removed Leave Records …
+//                           → the leave START (IT's work is at the start: product decision)
+//   On Leave (labelled)     Expected Leave Date: … is preferred over Expected Return Date:
+//   New-hire office change  … has changed to Vancouver from Fredericton who is due to start on 2026-06-01
 // Returns null when the notice is not one of these or the date is not clear.
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
@@ -20,13 +29,13 @@ function isoDate(y, m, d) {
   return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-function fromIso(text) {
+export function fromIso(text) {
   const m = String(text || '').match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   return m ? isoDate(Number(m[1]), Number(m[2]), Number(m[3])) : null;
 }
 
 /** "Tue October 13" with no year: the year whose date falls on that weekday, nearest after `ref` (within a year). */
-function fromWeekdayMonthDay(weekday, monthName, day, ref) {
+export function fromWeekdayMonthDay(weekday, monthName, day, ref) {
   const month = MONTHS.indexOf(String(monthName).toLowerCase()) + 1;
   const wd = WEEKDAYS.indexOf(String(weekday).slice(0, 3).toLowerCase());
   if (month < 1 || wd < 0) return null;
@@ -67,19 +76,49 @@ export function readHrNoticeDate({ subject = '', text = '', createdAt = new Date
     return iso ? { kind: 'transfer', date: iso, reason: `Transfer effective ${label(iso)} (from the HR notice)`, source: 'hr_notice' } : null;
   }
   if (/^departure notification\b/i.test(subj) || /departure notification:/i.test(subj)) {
+    if (/will no longer be departing/i.test(`${subj} ${body}`)) return null; // a cancellation has no date
     const m = body.match(/departure date\s*:\s*(20\d{2}-\d{2}-\d{2})/i);
     const iso = m ? fromIso(m[1]) : null;
-    return iso ? { kind: 'departure', date: iso, reason: `Last day ${label(iso)} — offboarding (from the HR notice)`, source: 'hr_notice' } : null;
+    if (iso) return { kind: 'departure', date: iso, reason: `Last day ${label(iso)} — offboarding (from the HR notice)`, source: 'hr_notice' };
+    // "departure / contract end date has changed (from X) to Y" → Y.
+    const changed = body.match(/(departure|contract end) date has changed (?:from\s+20\d{2}-\d{2}-\d{2}\s+)?to\s+(20\d{2}-\d{2}-\d{2})/i)
+      || subj.match(/(contract end) date has changed to\s+(20\d{2}-\d{2}-\d{2})/i);
+    const moved = changed ? fromIso(changed[2]) : null;
+    if (!moved) return null;
+    const what = /contract/i.test(changed[1]) ? 'Contract end' : 'Last day';
+    return { kind: 'departure', date: moved, reason: `${what} moved to ${label(moved)} — offboarding (from the HR notice)`, source: 'hr_notice' };
   }
   if (/on leave notification\b/i.test(subj)) {
-    const m = body.match(/expected return date\s*:\s*(20\d{2}-\d{2}-\d{2})/i);
+    // Current table format (since Mar 2026): the first two ISO dates of the
+    // NEW records are the leave start and the expected return.
+    if (/new leave records/i.test(body)) {
+      const section = (body.split(/new leave records/i)[1] || '').split(/removed leave records/i)[0];
+      const dates = [...section.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((x) => fromIso(x[1])).filter(Boolean);
+      if (!dates.length) return null;
+      const back = dates[1] ? ` (back ${label(dates[1])})` : '';
+      return { kind: 'leave', date: dates[0], reason: `Leave starts ${label(dates[0])}${back} (from the HR notice)`, source: 'hr_notice' };
+    }
+    // Old labelled format: the leave start when it is stated, else the return.
+    const start = body.match(/expected leave date\s*:\s*(20\d{2}-\d{2}-\d{2})/i)
+      || `${subj} ${body}`.match(/expected leave date has changed to\s+(20\d{2}-\d{2}-\d{2})/i);
+    const startIso = start ? fromIso(start[1]) : null;
+    if (startIso) return { kind: 'leave', date: startIso, reason: `Leave starts ${label(startIso)} (from the HR notice)`, source: 'hr_notice' };
+    const m = body.match(/expected return date\s*:\s*(20\d{2}-\d{2}-\d{2})/i)
+      || `${subj} ${body}`.match(/expected return date has changed to\s+(20\d{2}-\d{2}-\d{2})/i);
     const iso = m ? fromIso(m[1]) : null;
     return iso ? { kind: 'leave', date: iso, reason: `On leave until ${label(iso)} (from the HR notice)`, source: 'hr_notice' } : null;
   }
   if (/start date has changed/i.test(body)) {
-    const m = body.match(/start date has changed from\s+20\d{2}-\d{2}-\d{2}\s+to\s+(20\d{2}-\d{2}-\d{2})/i);
+    // New order "from X to Y", old order "to Y from X": Y either way.
+    const m = body.match(/start date has changed from\s+20\d{2}-\d{2}-\d{2}\s+to\s+(20\d{2}-\d{2}-\d{2})/i)
+      || body.match(/start date has changed to\s+(20\d{2}-\d{2}-\d{2})\s+from\s+20\d{2}-\d{2}-\d{2}/i);
     const iso = m ? fromIso(m[1]) : null;
     return iso ? { kind: 'start_change', date: iso, reason: `New start date ${label(iso)} (from the HR notice)`, source: 'hr_notice' } : null;
+  }
+  if (/office location for .+ has changed/i.test(body)) {
+    const m = body.match(/due to start on\s+(20\d{2}-\d{2}-\d{2})/i);
+    const iso = m ? fromIso(m[1]) : null;
+    return iso ? { kind: 'start_change', date: iso, reason: `Starts ${label(iso)} — office changed (from the HR notice)`, source: 'hr_notice' } : null;
   }
   if (/^NH\s/i.test(subj) || /^new hire\b/i.test(subj)) {
     const isoM = body.match(/start date\s*:\s*(20\d{2}-\d{2}-\d{2})/i);

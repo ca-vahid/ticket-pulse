@@ -8,12 +8,14 @@ import { CalendarClock, Loader2, PauseCircle, Plus, Sparkles, X } from 'lucide-r
  * any status change ends it early.
  */
 
+// QA 10-01 #6: "Waiting until a date" and "In progress, with an ETA" were too
+// alike — one choice now covers both. 'eta' stays a valid kind for parks made
+// before (and for the API), and still reads as "In progress, with an ETA".
 export const PARK_KINDS = [
-  { value: 'until_date', label: 'Waiting until a date', hint: 'Nothing to do before then — a transfer, a start date, a return from leave.' },
+  { value: 'until_date', label: 'Waiting until a date or an ETA', hint: 'Nothing to do before then, or work that is moving — a transfer, a start date, a return from leave, a rollout. It comes back to you on the date.' },
   { value: 'waiting_on', label: 'Waiting on someone', hint: 'A colleague, a vendor, HR, another team. It comes back to you to chase them.' },
-  { value: 'eta', label: 'In progress, with an ETA', hint: 'Real work that is moving. It comes back to you for an update on the ETA.' },
 ];
-const KIND_LABEL = Object.fromEntries(PARK_KINDS.map((k) => [k.value, k.label]));
+const KIND_LABEL = { ...Object.fromEntries(PARK_KINDS.map((k) => [k.value, k.label])), eta: 'In progress, with an ETA' };
 const MAX_DAYS = 184;
 
 function isoDay(d) {
@@ -87,7 +89,7 @@ export function ParkedMark({ until, kind }) {
 export default function ParkDialog({
   ticketRef, requesterEmail = null, initial = null, busy = false, error = null, onSubmit, onClose, onUsePendingResponse, bulkCount = null,
 }) {
-  const [kind, setKind] = useState(initial?.kind || 'until_date');
+  const [kind, setKind] = useState(initial?.kind === 'waiting_on' ? 'waiting_on' : 'until_date');
   const [until, setUntil] = useState(initial?.until ? isoDay(initial.until) : '');
   const [reason, setReason] = useState(initial?.reason || '');
   const [people, setPeople] = useState(Array.isArray(initial?.waitingOn) && initial.waitingOn.length ? initial.waitingOn.map((p) => p.name || p.email || '') : ['']);
@@ -179,7 +181,7 @@ export default function ParkDialog({
 
         <div className="mt-3">
           <label className="block text-xs font-medium text-muted-foreground" htmlFor="park-until">
-            {kind === 'waiting_on' ? 'Chase on' : kind === 'eta' ? 'ETA' : 'Until'} <span className="font-normal">(up to six months)</span>
+            {kind === 'waiting_on' ? 'Chase on' : 'Until / ETA'} <span className="font-normal">(up to six months)</span>
           </label>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <input
@@ -206,7 +208,7 @@ export default function ParkDialog({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             maxLength={500}
-            placeholder={kind === 'eta' ? 'e.g. DarkTrace rollout — ETA end of October' : kind === 'waiting_on' ? 'e.g. Needs Alexa and Kirsten to review the list' : 'e.g. Transfer effective Oct 5'}
+            placeholder={kind === 'waiting_on' ? 'e.g. Needs Alexa and Kirsten to review the list' : 'e.g. Transfer effective Oct 5, or DarkTrace rollout — ETA end of October'}
             className="tp-focus-ring mt-1 w-full rounded-lg border border-input bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60"
           />
         </div>

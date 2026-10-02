@@ -1084,9 +1084,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             {[
               { value: 'none', label: 'Not parked' },
               { value: 'any', label: 'Parked (all)' },
-              { value: 'until_date', label: 'Waiting until a date' },
+              { value: 'until_date', label: 'Waiting until a date or an ETA' },
               { value: 'waiting_on', label: 'Waiting on someone' },
-              { value: 'eta', label: 'In progress, with an ETA' },
+              // QA 10-01 #6: parks made before the two choices merged.
+              { value: 'eta', label: 'With an ETA (older parks)' },
               { value: 'waking7', label: 'Waking in the next 7 days' },
             ].map((opt) => (
               <Facet

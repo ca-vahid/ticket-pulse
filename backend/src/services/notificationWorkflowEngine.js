@@ -1989,9 +1989,28 @@ function nextNodeIds(definition, node, output = {}) {
     .map((edge) => edge.target);
 }
 
+const EMAIL_IN_FIELD = /^[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]+$/;
+
+/**
+ * QA 10-01 #7: addresses held in a ticket custom field (to_recipients,
+ * cc_recipients, bcc_recipients, or any field added later). The value is read
+ * at send time; commas, semicolons, spaces and new lines all separate, an
+ * array value is taken as is, and anything that is not an address is dropped.
+ */
+export function emailsFromCustomField(context, key) {
+  const raw = context?.ticket?.customFields?.[key];
+  if (raw === null || raw === undefined || raw === '') return [];
+  const parts = Array.isArray(raw) ? raw : String(raw).split(/[\s,;]+/);
+  return parts
+    .map((part) => String(part || '').trim().replace(/^<|>$/g, ''))
+    .filter((part) => EMAIL_IN_FIELD.test(part));
+}
+
 function recipientFromToken(token, context, customEmails) {
   const value = String(token || '').trim();
   if (!value) return [];
+  const customField = value.match(/^custom_field:([a-z][a-z0-9_]{1,59})$/);
+  if (customField) return emailsFromCustomField(context, customField[1]);
   // Simorgh A4: an unattended requester (an automation's mailbox) never
   // receives requester-facing mail — acks, status changes, CSAT, the lot.
   if (value === 'requester') return context.requester?.unattended ? [] : [context.requester?.email];

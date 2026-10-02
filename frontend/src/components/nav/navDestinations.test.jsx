@@ -10,6 +10,10 @@ const authState = { user: { email: 'me@x.com', role: 'viewer' } };
 const wsState = { currentWorkspace: { id: 1 }, availableWorkspaces: [{ id: 1, role: 'viewer' }] };
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authState }));
 vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => wsState }));
+// Onboarding (HR lifecycle): the server says per workspace whether it exists.
+const hrStatus = { available: false, mode: 'off', loading: false };
+const hrHook = vi.fn(() => hrStatus);
+vi.mock('../../hooks/useHrLifecycleStatus', () => ({ useHrLifecycleStatus: (opts) => hrHook(opts) }));
 
 const {
   NAV_DESTINATIONS, canAccessSettings, homePathFor, isWorkspaceAdmin, resolveWorkspaceRole,
@@ -77,6 +81,8 @@ describe('isWorkspaceAdmin / canAccessSettings / homePathFor', () => {
 describe('NAV_DESTINATIONS gates', () => {
   test('only Tickets and Approvals are ungated; watch pages are "view", the rest "manage" (Sep 2026)', () => {
     const open = NAV_DESTINATIONS.filter((d) => d.gate === null).map((d) => d.id).sort();
+    // Onboarding has its own gate: admins, where the server enables it.
+    expect(NAV_DESTINATIONS.filter((d) => d.gate === 'hrLifecycle').map((d) => d.id)).toEqual(['onboarding']);
     expect(open).toEqual(['approvals', 'tickets']);
     // 'view' = admins AND the read-only observer grant (watch, don't touch).
     const viewGated = NAV_DESTINATIONS.filter((d) => d.gate === 'view').map((d) => d.id).sort();
@@ -103,10 +109,22 @@ describe('hooks', () => {
     expect(renderHook(() => useCanAccessSettings()).result.current).toBe(false);
   });
 
-  test('useNavDestinations: workspace admin → everything', () => {
+  test('useNavDestinations: workspace admin → everything (Onboarding where the server enables it)', () => {
     wsState.availableWorkspaces = [{ id: 1, role: 'admin' }];
+    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(NAV_DESTINATIONS.map((d) => d.id).filter((id) => id !== 'onboarding'));
+    expect(hrHook).toHaveBeenLastCalledWith({ enabled: true });
+    hrStatus.available = true;
     expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(NAV_DESTINATIONS.map((d) => d.id));
+    hrStatus.available = false;
     expect(renderHook(() => useCanAccessSettings()).result.current).toBe(true);
+  });
+
+  test('Onboarding: non-admins never ask the server and never see it', () => {
+    wsState.availableWorkspaces = [{ id: 1, role: 'readonly' }];
+    hrStatus.available = true;
+    expect(ids(renderHook(() => useNavDestinations()).result)).not.toContain('onboarding');
+    expect(hrHook).toHaveBeenLastCalledWith({ enabled: false });
+    hrStatus.available = false;
   });
 
   test('useWorkspaceRole fails closed to null before the workspace list is known', () => {

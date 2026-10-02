@@ -90,3 +90,16 @@ describe('Mail Workflows list page', () => {
     expect(workflowKind({ routingRule: {} }, { isAfterHours: () => true })).toBe('Routed · after-hours');
   });
 });
+
+// QA 10-01 #2: group headers must not look like a hovered/selected row.
+describe('group headers (QA 10-01 #2)', () => {
+  test('a title with a hairline rule on the page background — no grey band — and indented members', () => {
+    renderList();
+    const header = screen.getAllByTestId('workflow-list-group-header')[0];
+    expect(header.className).toContain('bg-card');
+    expect(header.className).not.toContain('bg-muted');
+    expect(header.querySelector('span.h-px')).not.toBeNull();
+    const row = screen.getAllByTestId('workflow-list-row')[0].querySelector('button');
+    expect(row.className).toContain('pl-10');
+  });
+});

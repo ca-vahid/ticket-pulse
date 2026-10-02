@@ -55,7 +55,7 @@ function loadCollapsed(storageKey) {
  */
 export const TRIGGER_ORDER = [
   'ticket.created', 'ticket.assigned', 'ticket.reassigned', 'ticket.unassigned_for',
-  'ticket.status_changed', 'ticket.fields_updated',
+  'ticket.status_changed', 'ticket.priority_changed', 'ticket.fields_updated',
   'ticket.reply_received', 'ticket.public_reply_added', 'ticket.note_added', 'ticket.requester_silent_for',
   'ticket.aging', 'ticket.sla_pre_breach', 'ticket.sla_breach',
   'ticket.categorized', 'ticket.intake_settled', 'ticket.ready', 'ticket.parked', 'ticket.park_due_soon', 'ticket.woke',

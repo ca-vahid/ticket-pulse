@@ -435,9 +435,10 @@ describe('Knowledge page', () => {
     renderAt('/knowledge/articles/7');
     await screen.findByLabelText('Title');
     fireEvent.click(screen.getByRole('button', { name: 'Article actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Archive/ }));
+    // QA 10-01 #11: on a draft the same action reads "Delete draft".
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Archive|Delete draft/ }));
     const dialog = await screen.findByRole('alertdialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^(Archive|Delete draft)$/ }));
     await waitFor(() => expect(api.deleteArticle).toHaveBeenCalledWith('7'));
     expect(confirmSpy).not.toHaveBeenCalled();
     confirmSpy.mockRestore();

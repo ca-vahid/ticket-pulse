@@ -31,6 +31,7 @@ import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import Knowledge from './pages/Knowledge';
+import Onboarding from './pages/Onboarding';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import PublicApprovalReply from './pages/PublicApprovalReply';
 import RequesterDetail from './pages/RequesterDetail';
@@ -296,6 +297,17 @@ function App() {
                           <ViewRoute>
                             <Knowledge />
                           </ViewRoute>
+                        }
+                      />
+
+                      {/* Onboarding / Offboarding (HR lifecycle): admin-only; the page itself
+                          says so when the server has not enabled it for this workspace. */}
+                      <Route
+                        path="/onboarding/:tab?"
+                        element={
+                          <AdminRoute>
+                            <Onboarding />
+                          </AdminRoute>
                         }
                       />
 

@@ -1,6 +1,23 @@
-export const APP_VERSION = '4.1.31-preview';
+export const APP_VERSION = '4.1.32-preview';
 
 export const changelog = [
+  {
+    version: '4.1.32-preview',
+    date: 'October 1, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Onboarding / Offboarding</strong> &mdash; a new section (IT) that turns HR and BambooHR notices into ticket families: a departure gets Laptop, Phone, iPad, Disable Account and Decommissioning Account child tickets (Laptop, Phone and iPad when the account was already disabled), a new hire gets Laptop and Workstation. Date changes move every due date with a note; a cancellation closes the family. Every list, due offset and default assignee is editable, and every change is recorded. <em>Ships switched off</em> &mdash; FreshService stays the organiser until it is turned on; Observe mode shows what it would do first.' },
+      { type: 'feature', html: '<strong>Autofill in Teams</strong> &mdash; paste a screenshot or a chat into the Ticket Pulse bot and it fills in the ticket: requester, category, priority and description, with Create ticket, Open in Ticket Pulse (pre-filled) and Discard on the card.' },
+      { type: 'feature', html: '<strong>Disconnect an agent from the Teams bot</strong> &mdash; Settings &rarr; Teams has a Disconnect next to each connected agent. It removes the app from their Teams and nothing is sent to them until someone connects them again; &ldquo;Connect all agents&rdquo; leaves them alone.' },
+      { type: 'feature', html: '<strong>&ldquo;Priority changed&rdquo; workflow trigger</strong> &mdash; fires when a ticket&rsquo;s priority moves in Ticket Pulse, FreshService or the API, with the old and new priority and whether it went up.' },
+      { type: 'feature', html: '<strong>Workflow recipients from custom fields</strong> &mdash; To, Cc and Bcc can read addresses from any ticket custom field (to_recipients, cc_recipients, bcc_recipients, or one added later), comma-separated, at send time.' },
+      { type: 'improvement', html: '<strong>Variables in the Call webhook step</strong> &mdash; the variables list sits under the body; a click inserts one. New <code>{{ ticket.url }}</code>: the link to the ticket in Ticket Pulse.' },
+      { type: 'improvement', html: '<strong>Publish or delete a draft article</strong> &mdash; drafts have Publish and Delete on the Knowledge list and in the article header.' },
+      { type: 'improvement', html: '<strong>Asking a question on an approval</strong> starts on &ldquo;Ask the approvers / agent only&rdquo;; the requester is a deliberate choice.' },
+      { type: 'improvement', html: '<strong>Parking: one choice for a date or an ETA</strong> &mdash; &ldquo;Waiting until a date&rdquo; and &ldquo;In progress, with an ETA&rdquo; are one option now.' },
+      { type: 'improvement', html: '<strong>Workflow list group headers</strong> read as titles with a thin rule, no longer like a highlighted row; the workflows under them are indented.' },
+      { type: 'fix', html: '<strong>Templates panel</strong> opens toward the side with room, so it is no longer cut off on the right.' },
+    ],
+  },
   {
     version: '4.1.31-preview',
     date: 'October 1, 2026',

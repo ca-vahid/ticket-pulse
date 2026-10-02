@@ -501,3 +501,29 @@ describe('Activity: Send to me', () => {
     api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
   });
 });
+
+// QA 10-01 #11: "Add a button somewhere to publish the draft or delete the draft article."
+describe('drafts: Publish and Delete from the list and the article', () => {
+  const DRAFT = { id: 91, title: 'Install DT Logger from Company Portal', status: 'draft', snippet: 'Use Company Portal', tags: [] };
+
+  test('a draft row offers Publish and Delete; Publish publishes and reloads', async () => {
+    api.updateArticle = vi.fn(() => Promise.resolve({ success: true, data: { ...DRAFT, status: 'published' } }));
+    api.listArticles.mockResolvedValueOnce({ success: true, data: { items: [DRAFT], total: 1 } });
+    renderAt('/knowledge/articles');
+    const actions = await screen.findByTestId('draft-actions-91');
+    fireEvent.click(within(actions).getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(api.updateArticle).toHaveBeenCalledWith(91, { status: 'published' }));
+    await waitFor(() => expect(api.listArticles.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  test('Delete asks first, then removes the draft', async () => {
+    api.deleteArticle = vi.fn(() => Promise.resolve({ success: true, data: { id: 91, archived: true } }));
+    api.listArticles.mockResolvedValueOnce({ success: true, data: { items: [DRAFT], total: 1 } });
+    renderAt('/knowledge/articles');
+    const actions = await screen.findByTestId('draft-actions-91');
+    fireEvent.click(within(actions).getByRole('button', { name: 'Delete' }));
+    expect(api.deleteArticle).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete draft' }));
+    await waitFor(() => expect(api.deleteArticle).toHaveBeenCalledWith(91));
+  });
+});

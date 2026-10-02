@@ -226,6 +226,9 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.postMessage.mockReturnValue(ok({ message: { id: 77, kind: 'question', audience: 'requester', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Is a refurbished unit an option?', bodyHtml: null, to: ['iberrugarcia@bgcengineering.ca'], cc: ['mblackstock@bgcengineering.ca'], createdAt: '2026-09-02T16:30:00.000Z' } }));
     renderPage();
     fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    // QA 10-01 #5: internal is the default; the requester is a deliberate choice.
+    expect(screen.getByRole('radio', { name: /Ask the approvers \/ agent only/ })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: /Ask the requester/ }));
     expect(screen.getByRole('radio', { name: /Ask the requester/ })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('button', { name: /Send to the requester/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Type your question/);
@@ -268,6 +271,8 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.postMessage.mockReturnValue(ok({ message: { id: 79, kind: 'question', audience: 'requester', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield' }, bodyText: 'q', to: [], cc: [], createdAt: '2026-09-02T16:30:00.000Z' } }));
     renderPage();
     fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    // QA 10-01 #5: internal is the default — pick the requester mode first.
+    fireEvent.click(screen.getByRole('radio', { name: /Ask the requester/ }));
     const chips = screen.getByTestId('audience-chips');
     expect(within(chips).getByRole('checkbox', { name: /Ingrid Berru Garcia/ })).toHaveAttribute('aria-checked', 'true');
     expect(within(chips).getByRole('checkbox', { name: /Marcus Blackstock/ })).toBeInTheDocument();
