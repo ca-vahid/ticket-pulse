@@ -8,9 +8,10 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 1 Oct 2026 (Thu standup, 48 h window after the Sep 30 holiday; holiday drain clean — IT all assigned, AP 155 runs to pending_review by design, AP 257 unassigned; daily cron live to Wed Oct 7, weekly fires Fri Oct 2 14:02)._
+_Last updated: 2 Oct 2026 PM (weekly Sep 28–Oct 2 sent; ROPC pentest HIGH closed; Hedberg #16 spam-closed; TP-1766 opened for the 128-day Azure Backup failure; AP pile 281→186; weekly cron re-armed)._
 
 ## Probe read rules (do not remove)
+- Oct 2 2026: agentReview urgent lane now requires status Open/Pending (Deleted RTBT tickets had leaked in as urgent_no_action). Read requester customer_reply before escalating anything (laptop false alarm).
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
 - Failed pipeline runs with "server restarted / orphaned-run recovery" that have later completed runs = recovered, benign.
 - `stale3d` is artifact-inflated (Aug-31 sync-touch cohort) — trust named lists and episodes, never the raw count.
@@ -33,15 +34,16 @@ _Last updated: 1 Oct 2026 (Thu standup, 48 h window after the Sep 30 holiday; ho
 
 ## Active threads
 ### (a) Security
-- Pentest HIGHs #241753 (ROPC → Anton) and #241754 (TLS/SSL → Muhammad), landed Sep 11, unmoved — named the natural next pull now the Monday fires are out.
+- Pentest HIGHs: #241753 ROPC CLOSED Oct 2 (Anton, after 7-day sign-in review). #241754 TLS/SSL (Mo) Pending on Cambio sprint planning since Sep 16 — ask for a date.
 - RTBT-2026 burn-down flat at 11 open + 1 pending since Aug 28 (Mehdi 7, Muhammad 3) — cyber load concentrated on three people; who-takes-what ask stands.
 - CLEARED Sep 14 (mention only on relapse): #242218 CRITICAL defense-evasion (closed same-day, Anton), #241869 Darktrace 100-score (closed, Anton), #242225 suspicious-CAPTCHA report (same-day).
 
 ### (b) Hedberg BEC campaign — NOW 16 INSTANCES
+- Oct 2: #16 SPAM-CLOSED (day 2).
 - Instance #16 = #244809 "FWD: CONFIDENTIAL: Initial Retainer Billing – Executive Search Engagement 'Steve Hedberg'" (Sep 30 12:05 PT, ws2), from christina@tcgglobal-usa.com ("Christina Graham") — NEW domain, 6th in the tcg-global lookalike family; zero-width characters between letters (same trick as #8). Open + UNASSIGNED over the holiday. Flagged Oct 1: spam-close + block domain; transport-rule argument (persona + external sender) restated. Exit when spam-closed and domain blocked.
 - Instance #15 = #242789 "Outstanding Fee – Invoice 80044710620" (Sep 16, ws2), sender m@emsgdirect.com — one of the four KNOWN fake "Steve Hedberg" requester records from the PDF. Spam-marked SAME-DAY (vs 5 days for #14). Two lessons: vocabulary drifted again ("outstanding fee"), and the actor REUSES old infrastructure — the block list has real teeth.
 - FOLLOW-THROUGH still needs owners (ask weekly until landed): transport rule, tenant blocks (7 domains + 2 Gmails + the 4 fake senders incl. m@emsgdirect.com), consolidated incident record, AP brief-in, CAFC report. #241544 spam-closed Sep 14.
-- Briefing PDF: `reports/Hedberg BEC Campaign - Cyber Ops Briefing (2026-09-11).pdf` (14 instances; #15 above is new). Watch for #17.
+- Briefing PDF: `reports/Hedberg BEC Campaign - Cyber Ops Briefing (2026-09-11).pdf` (14 instances; #15 above is new). Watch for #17. Oct 2: #16 still open/unassigned in ws2 (day 2).
 - FALSE-POSITIVE GUARD: #241803 is a legitimate internal Stornoway-Renard retainer request — any mail/noise rule must key persona + external sender, never bare payment vocabulary. #241803 is the standing test case a rule must NOT catch.
 
 ### (c) Storage
@@ -101,11 +103,15 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (m) Parked usage (Sep 24–25)
 - Manual parks began: Anton 1, Andrii 2, Marcus 3 (real reasons). HR lead-time wake shipped (departures/transfers wake days BEFORE the date — answers Vahid's Sep 24 question). 21 parked in IT on Sep 25. Anton's #173857/#228595: mentioned for the LAST time Sep 28 — retired from the brief (Vahid's to finish if he wants).
 
-### (n) Stolen laptop + holiday-hold gap (Oct 1)
-- #244718 "Urgent – stolen laptop" (Urgent) + #244717 "Disable or locate computer" = same event, Tyler Southam's laptop, reported Tue Sep 29 ~20:00–21:00 PT. Held as after-hours then holiday ~37 h; auto-assigned to Mo Oct 1 morning, no human action at brief time. Asked: account disabled, device locked/wiped (Intune, BitLocker key), merge the pair.
-- Product recommendation raised in brief: holiday/after-hours queues should pass Urgent or security-worded tickets to on-call. Not yet sent to dev thread — offer it. Exit when tickets actioned AND product decision taken.
+### (n) Stolen laptop — FALSE ALARM (corrected Oct 2)
+- #244718/#244717: Tyler Southam replied Sep 29 20:06 PT "backpack and computer turned up, disregard", and again Oct 1 to Mo ("you can close"). Oct 1 brief raised it as an urgent security gap — wrong; corrected in Oct 2 briefs. Ask: Mo closes both. Exit when closed.
+- LESSON (probe read rule): before calling anything urgent, read the REQUESTER's latest customer_reply, not just assignment/agent notes.
+- Product point (urgent/security tickets bypass holiday hold) kept as a soft recommendation only.
 ### (o) AD replication alert storm (Oct 1) — load concentrated on Mo
+- Oct 2: #244933 (VAN-DC1 replication failing) AUTO-RESOLVED by monitor (two clean probes). Five integrity-error tickets + FDR/OTT topology pair each logged repeat occurrence #2 overnight (VAN-DC1: 3,874 new events). Still no Mo note on any, nor on #244687.
 - From Sep 30 ~15:45 PT: #244831/#244832 (topology/DNS FDR-DC1, OTT-DC1), #244835 #244845 #244846 #244847 #244855 (integrity errors, Urgent: VAN-DC1/DC2, OTT-DC1, HFX-DC2, SA-DC2), #244933 (VAN-DC1 replication failing, Oct 1 08:30). All Mo, no notes. Coincides with Mo's #244687 "DC baseline remediation" (no note). Asked at standup: remediation side-effect or real fault; group into one incident; second pair of hands for Mo. KAM-DC2 (#244103) may be part of it. Exit when notes/closures land.
+### (p) AP review backlog after the holiday (Oct 2)
+- ws2 open+unassigned by arrival day (PT): Sep 29 22, Sep 30 64, Oct 1 87, Oct 2 (to 9 AM) 107 → 281 total (257 Oct 1; ~1/day before). All runs end pending_review correctly — bottleneck is human review. Recommended: review push or auto-assign high-confidence categories; ties to rota/weekend-route ledger item. Exit when the pile trends down.
 ### (k) TO FIX LATER (Vahid, Sep 24)
 - FS notes on OLDER tickets don't reach TP threads (thread hydration at resolution isn't covering them): 47 of 64 flagged closes had FS notes TP never saw. Raise with the dev team.
 - FS deletions don't sync back:
@@ -124,8 +130,10 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - Per-workspace fast-sync cadence exists (Settings → Workspaces); all five workspaces still on 1 minute.
 
 ## Weekly-only carry-overs
+- Sep 28–Oct 2 memo: short week (Sep 30 holiday). IT 219 new / 220 resolved, 0 unassigned. ROPC #241753 CLOSED Oct 2 (Anton); TLS/SSL #241754 (Mo) last pentest item, pending Cambio sprint date since Sep 16. Mo's #244687 got a real write-up Oct 2: time sync fixed on 15 DCs; stale-DC removal (FDR-DC2/EDM-DC2/KAM-DC1) approved by Vahid → expected root of AD integrity errors; watch the 5 integrity tickets close mid-week, else real fault. AP review pile 281 (Fri AM) → 186 (PM); Thanksgiving Oct 12 = next long-weekend test. Two corrections owned (laptop false alarm, Deleted tickets in probe). Per-agent: Mo heaviest open load (9 overdue = machine-dated AD alerts); pending piles Gaby 19 / Marcus 13 / Vahid 21 (old departure notices). 39 releases v4.1.00–4.1.38. Next: /ticket-followups ~Wed Oct 7.
+- STANDING DEFAULT ACTION used Oct 2: opened TP-1766 "Azure Backup failing daily for sharepointfilesync01 since May 28 (128 alerts, consolidated)" via ticketService (pipeline assigns). Track owner + first note.
 - Sep 21–25 memo: IT 385 resolved / 291 new; team overdue fell from dozens to 6 (none >2 — Vahid 2; Mo 10→0, Sam 5→1, Gaby 3→0) after the Sep 23 follow-ups; closure review (FS-checked) 68/89 real notes; notes-gap discovery + fix; Parked idea→daily use in 3 days; Sentinel/[Infra] intake found CAL-DC1/KAM-DC2/VAN-HV41. Per-agent weight now: open work Mehdi 17 / Mo 16 / Anton 13; pending piles Gaby 19 / Marcus 17; Andrii mostly parked. Recommended a 2nd /ticket-followups run ~Oct 7 (fortnightly), not sooner. Standing risk now includes the HV40+HV41 cluster (two unhealthy hosts).
 - Sep 14–18 memo highlights (context for next week): 70 releases (v3.8.81→3.9.43); AP board week 551 in/551 out; two failed runs all week (both auto-recovered); "excellent at fires, stuck on projects" pattern named re pentest HIGHs + RTBT; no housekeeping ticket opened (all alert streams owned — bar is unowned+unswept); v3.9.42 = readonly observers actually see Dashboard/Analytics (Bryan Baker role now delivers).
 - Standing default action: promised ticket lists — confirm prod state; if unswept AND unowned, open consolidated owned housekeeping tickets via `ticketService` (TP-1120/TP-1294 pattern; `backend/scripts/weekly-0911-housekeeping.mjs`: DATABASE_URL=prod before the service import, requester ticketpulse@, `suppressRequesterAck: true`). Document the reasoning if not opened.
-- Standing risk line: Azure Backup leg of TP-1120 + TP-1294 until both stop alerting or carry accepted-risk notes.
+- Standing risk line (Oct 2): Azure Backup sharepointfilesync01 (TP-1766) until alerts stop or a written retire decision. TP-1294/LCD1 EXITED (fixed Sep 23 by Mehdi, quiet since). New: RAID fault KAM-HV02 #245153 (Anton, open); VAN-HV33 #245317 closed same day (Mehdi).
 - Accepted-risk ledger exits after the Sep 11 sweep: bank #238335 (closed, Dominic), choppy-video #240835, cambioearth #239761, Vancouver voicemail #239030.
