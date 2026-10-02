@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.45-preview';
+export const APP_VERSION = '4.1.46-preview';
 
 export const changelog = [
+  {
+    version: '4.1.46-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Onboarding is now &ldquo;Comings &amp; Goings&rdquo;</strong> &mdash; the section covers new hires and people leaving, so the side rail, page title and icon now say so. Hover the icon for &ldquo;Onboarding &amp; offboarding&rdquo;. Same place, same address.' },
+    ],
+  },
   {
     version: '4.1.45-preview',
     date: 'October 2, 2026',

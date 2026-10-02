@@ -96,7 +96,7 @@ export default function SideRail() {
         type="button"
         onClick={() => { if (!isActive) navigate(dest.path); }}
         aria-current={isActive ? 'page' : undefined}
-        title={dest.label}
+        title={dest.hint ? `${dest.label} — ${dest.hint}` : dest.label}
         className={cn(
           'group/row relative mx-[9px] flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[13.5px] font-semibold transition-colors tp-focus-ring',
           isActive
