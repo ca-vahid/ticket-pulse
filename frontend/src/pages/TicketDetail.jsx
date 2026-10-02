@@ -1682,6 +1682,14 @@ export default function TicketDetail() {
     applyChange('pickup', () => ticketsAPI.assign(ticketId, meta.actor.technicianId));
   };
 
+  // After a delete, go back to the list the ticket was opened from — with its
+  // filters (2 Oct 2026: deleting from a filtered view dropped every filter).
+  // Only a /tickets address counts; anything else falls back to the queue.
+  const returnToQueue = (state) => {
+    const target = backTo && /^\/tickets(?:[/?#]|$)/.test(backTo) && !backTo.startsWith(`/tickets/${ticketId}`) ? backTo : '/tickets';
+    navigate(target, state ? { state } : undefined);
+  };
+
   // Delete a TP-born ticket (soft-delete). Two-click confirm; navigates back to the queue.
   const deleteTicket = () => {
     if (!confirmDelete) { setConfirmDelete(true); return; }
@@ -1689,7 +1697,7 @@ export default function TicketDetail() {
     applyChange('delete', async () => {
       await ticketsAPI.remove(ticketId);
       showToast('red', 'Ticket deleted');
-      navigate('/tickets');
+      returnToQueue();
     });
   };
 
@@ -1702,7 +1710,7 @@ export default function TicketDetail() {
     try {
       await ticketsAPI.fsDelete(ticketId);
       setFsDelete(null);
-      navigate('/tickets', { state: { toast: { tone: 'emerald', message: `FreshService #${ticket?.freshserviceTicketId} deleted in FreshService` } } });
+      returnToQueue({ toast: { tone: 'emerald', message: `FreshService #${ticket?.freshserviceTicketId} deleted in FreshService` } });
     } catch (err) {
       setFsDelete({ busy: false, error: err.response?.data?.message || err.message || 'FreshService did not delete the ticket' });
     }
