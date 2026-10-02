@@ -44,7 +44,7 @@ export default function Onboarding() {
   const loadSettings = useCallback(() => {
     hrLifecycleAPI.getSettings()
       .then((res) => setSettingsData(res?.data || null))
-      .catch((err) => setError(err?.message || 'Could not load Onboarding settings'));
+      .catch((err) => setError(err?.message || 'Could not load Comings & Goings settings'));
   }, []);
 
   useEffect(() => {
@@ -60,14 +60,14 @@ export default function Onboarding() {
   const info = MODE_INFO[mode] || MODE_INFO.off;
 
   let body;
-  if (status.loading) body = <Loading label="Loading Onboarding…" />;
+  if (status.loading) body = <Loading label="Loading Comings & Goings…" />;
   else if (!status.available) {
     body = (
       <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-subtle">
-        Onboarding / Offboarding is not switched on for {currentWorkspace?.name || 'this workspace'}.
+        Comings &amp; Goings (onboarding and offboarding) is not switched on for {currentWorkspace?.name || 'this workspace'}.
       </div>
     );
-  } else if (!settingsData && !error) body = <Loading label="Loading Onboarding…" />;
+  } else if (!settingsData && !error) body = <Loading label="Loading Comings & Goings…" />;
   else if (settingsData) {
     body = (
       <section role="tabpanel" id={`onboarding-panel-${tab}`} aria-labelledby={`onboarding-tab-${tab}`} tabIndex={-1} className="animate-fadeIn focus:outline-none">
@@ -90,7 +90,7 @@ export default function Onboarding() {
     <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
       <AppHeader activePage="onboarding" />
       <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-        <LightTabBar tabs={TABS} activeId={tab} onSelect={(id) => navigate(`/onboarding/${id}`)} ariaLabel="Onboarding sections" idPrefix="onboarding">
+        <LightTabBar tabs={TABS} activeId={tab} onSelect={(id) => navigate(`/onboarding/${id}`)} ariaLabel="Comings & Goings sections" idPrefix="onboarding">
           {status.available && (
             <span className="flex items-center gap-2 text-xs text-muted-foreground" title={info.hint} data-testid="onboarding-mode">
               Mode <StatusDot tone={info.tone} label={info.label} />
