@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.39-preview';
+export const APP_VERSION = '4.1.40-preview';
 
 export const changelog = [
+  {
+    version: '4.1.40-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>No more stale &ldquo;ready to close&rdquo; e-mails for FreshService tickets</strong> &mdash; opening an older FreshService parent ticket could send a &ldquo;ready to close&rdquo; e-mail for children that closed long ago. It is still marked ready to close, but the e-mail only goes out when a child actually finished in the last day. Ticket Pulse tickets are unchanged.' },
+    ],
+  },
   {
     version: '4.1.39-preview',
     date: 'October 2, 2026',

@@ -25,7 +25,20 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
  */
 export const OPEN_CHILDREN = 'open_children';
 
-const CHILD_SELECT = { id: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, externalRef: true };
+const CHILD_SELECT = { id: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, externalRef: true, closedAt: true, resolvedAt: true, updatedAt: true };
+
+// A FreshService parent whose children all closed longer ago than this was not
+// "just finished" — its links were only discovered now (opening the ticket
+// fetches them from FreshService). Mark it ready, but don't e-mail (2 Oct 2026).
+const STALE_DISCOVERY_MS = 24 * 3600 * 1000;
+
+export function isStaleDiscovery(parent, children, now = Date.now()) {
+  if (parent?.origin !== 'freshservice' || !children.length) return false;
+  return children.every((c) => {
+    const at = c.closedAt || c.resolvedAt || c.updatedAt;
+    return at && now - new Date(at).getTime() > STALE_DISCOVERY_MS;
+  });
+}
 
 async function isTerminal(workspaceId, status) {
   const base = await statusService.baseStatusOf(workspaceId, status);
@@ -105,7 +118,11 @@ export async function recomputeReadiness(parentId, workspaceId, { actor = null }
         performedAt: now,
         details: { source: 'ticketpulse_native', actorKind: 'system', children: counted.map((c) => ({ id: c.id, ref: ticketDisplayRef(c), status: c.status })), triggeredBy: actor?.name || actor?.email || null },
       }).catch((err) => logger.warn(`ready_to_close history write failed for ticket ${parent.id} (non-fatal): ${err.message}`));
-      await notifyOwnerReady(parent, counted).catch((err) => logger.warn(`ready_to_close e-mail failed for ticket ${parent.id} (non-fatal): ${err.message}`));
+      if (isStaleDiscovery(parent, counted)) {
+        logger.info(`Roll-up: ${ticketDisplayRef(parent)} ready to close, but every child closed over a day ago (links just discovered) — no e-mail`);
+      } else {
+        await notifyOwnerReady(parent, counted).catch((err) => logger.warn(`ready_to_close e-mail failed for ticket ${parent.id} (non-fatal): ${err.message}`));
+      }
       await emitReady(parent, counted).catch(() => {});
       logger.info(`Roll-up: ${ticketDisplayRef(parent)} is ready to close — all ${counted.length} child ticket(s) are done`);
       return { changed: true, readyToClose: true };
