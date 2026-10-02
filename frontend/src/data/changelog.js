@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.43-preview';
+export const APP_VERSION = '4.1.44-preview';
 
 export const changelog = [
+  {
+    version: '4.1.44-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Close a ticket from the header</strong> &mdash; a green Close button now leads the action row on any ticket that is not closed yet. Ticket Pulse tickets ask you to confirm; FreshService tickets show the usual &ldquo;Sync change to FreshService&rdquo; check and close once FreshService confirms. Either way you go back to the list you came from, filters kept.' },
+    ],
+  },
   {
     version: '4.1.43-preview',
     date: 'October 2, 2026',

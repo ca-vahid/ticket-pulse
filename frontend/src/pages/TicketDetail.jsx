@@ -1210,6 +1210,15 @@ export default function TicketDetail() {
   const [teamForward, setTeamForward] = useState(null);
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  // Header Close (2 Oct 2026): any ticket that is not Closed yet, either origin.
+  const canCloseFromHeader = Boolean(ticket) && (canWrite || fsEditable) && wsRole !== 'readonly'
+    && meta?.actor?.workspaceRole !== 'readonly' && meta?.actor?.role !== 'readonly'
+    && !['Deleted', 'Spam'].includes(ticket?.status) && baseStatusOf(statusDefs, ticket?.status) !== 'Closed';
+  const closedStatusName = useMemo(
+    () => (statusDefs || []).find((d) => d.baseStatus === 'Closed')?.name || 'Closed',
+    [statusDefs],
+  );
+  const [closeConfirm, setCloseConfirm] = useState(false);
   // "Delete in FreshService" (2 Oct 2026): FS-born only, same people as the
   // TP delete (reviewer/admin); TP-born tickets keep their own Delete button.
   const canDeleteInFs = fsEditable && canReview && !['Deleted', 'Spam'].includes(ticket?.status);
@@ -1978,7 +1987,21 @@ export default function TicketDetail() {
         .catch(() => null);
     }
   };
-  const resolveTicket = () => changeStatusGated('Resolved', ticket?.status, 'resolve');
+  // Header Close: TP-born confirms in-app, FS-born goes through the FreshService
+  // write-back confirm; both return to the list the ticket was opened from.
+  const closedToast = () => ({ toast: { tone: 'emerald', message: `${ticket?.displayRef || 'Ticket'} closed` } });
+  const closeFromHeader = () => {
+    if (canWrite) { setCloseConfirm(true); return; }
+    requestFsSync([{ field: 'Status', from: ticket.status, to: 'Closed' }], { status: 'Closed' })
+      .then(() => returnToQueue(closedToast()))
+      .catch(() => {});
+  };
+  const confirmCloseTp = () => {
+    setCloseConfirm(false);
+    changeStatusGated(closedStatusName, ticket?.status, 'resolve', {
+      onDone: (ok) => { if (ok) returnToQueue(closedToast()); },
+    });
+  };
   // Team forward's "Resolve as forwarded": resolves true only once the ticket
   // really is resolved (reason prompt confirmed + write landed).
   const resolveTicketConfirmed = () => new Promise((done) => {
@@ -2353,6 +2376,18 @@ export default function TicketDetail() {
                       utilities (Print, Copy link, Clone, Merge, Split) live behind
                       More. Pick up sits under the status badges, not here. */}
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 print-hide" data-testid="ticket-actions">
+                    {canCloseFromHeader && (
+                      <button
+                        onClick={closeFromHeader}
+                        disabled={savingField === 'resolve' || Boolean(fsConfirm)}
+                        data-testid="header-close"
+                        title={isNative ? 'Close this ticket' : 'Close this ticket — written to FreshService first'}
+                        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-subtle hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="resolve" className="h-[18px] w-[18px] brightness-0 invert" />}
+                        Close
+                      </button>
+                    )}
                     {canConverse && ticket.status !== 'Deleted' && (
                       <button
                         onClick={() => setEditOpen(true)}
@@ -2361,17 +2396,6 @@ export default function TicketDetail() {
                       >
                         <ActionIcon name="edit" />
                         Edit
-                      </button>
-                    )}
-                    {canWrite && !ticketTerminal && (
-                      <button
-                        onClick={resolveTicket}
-                        disabled={savingField === 'resolve'}
-                        title="Close this ticket (marks it resolved)"
-                        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
-                      >
-                        {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="resolve" />}
-                        Close
                       </button>
                     )}
                     {isNative && canReview && (
@@ -4323,6 +4347,35 @@ export default function TicketDetail() {
               >
                 {savingField === `approval-${deleteApprovalTarget.id}` ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Trash2 className="w-4 h-4" aria-hidden="true" />}
                 Delete request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {closeConfirm && ticket && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="close-ticket-title">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setCloseConfirm(false)} aria-hidden="true" />
+          <div className="relative tp-card rounded-2xl shadow-soft w-full max-w-md p-5 animate-scaleIn">
+            <h2 id="close-ticket-title" className="text-base font-bold text-foreground">Close {ticket.displayRef || 'this ticket'}?</h2>
+            <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
+              The status moves from <strong>{ticket.status}</strong> to <strong>{closedStatusName}</strong> and you go back to your ticket list.
+            </p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCloseConfirm(false)}
+                className="tp-focus-ring px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={confirmCloseTp}
+                className="tp-focus-ring px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                Close ticket
               </button>
             </div>
           </div>
