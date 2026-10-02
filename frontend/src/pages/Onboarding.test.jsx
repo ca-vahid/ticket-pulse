@@ -147,3 +147,23 @@ describe('Onboarding page', () => {
     expect(api.getSettings).not.toHaveBeenCalled();
   });
 });
+
+// 2 Oct 2026: in Shadow, People lists the families Shadow recorded.
+describe('People in Shadow', () => {
+  test('a shadow family shows as Shadow with the children Live would create', async () => {
+    api.families.mockResolvedValueOnce({ success: true, data: [{
+      id: 'shadow-12', shadow: true, kind: 'onboarding', personName: 'Isabela Sousa', office: 'Montreal', effectiveDate: '2026-10-12',
+      afterTheFact: false, status: 'open', progress: { done: 0, total: 2 }, linked: 2, parent: { id: 61323, ref: '#245148' }, parentAssignee: 'Vahid Haeri',
+      plannedChildren: [{ title: 'Laptop', dueDate: '2026-10-12', assignee: null }, { title: 'Workstation', dueDate: '2026-10-12', assignee: null }],
+    }] });
+    renderAt('/onboarding/people');
+    expect(await screen.findByText('Isabela Sousa')).toBeInTheDocument();
+    expect(screen.getAllByText('Shadow').length).toBeGreaterThanOrEqual(2); // the mode + the row
+    expect(screen.getByText(/2 would be created · 2 linked/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Show Isabela Sousa's tickets/ }));
+    const detail = screen.getByTestId('shadow-family-detail');
+    expect(within(detail).getByText('Workstation')).toBeInTheDocument();
+    expect(within(detail).getAllByText('AI routing')).toHaveLength(2);
+    expect(api.family).not.toHaveBeenCalled();
+  });
+});

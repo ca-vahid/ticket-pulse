@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.34-preview';
+export const APP_VERSION = '4.1.35-preview';
 
 export const changelog = [
+  {
+    version: '4.1.35-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Onboarding: Shadow families show under People</strong> &mdash; in Shadow, each person a departure or new-hire notice was recorded for is listed under People with an amber &ldquo;Shadow&rdquo; status; open a row to see the child tickets Live would create (title, due date, assignee) and the NH tickets it would link. Nothing is created.' },
+    ],
+  },
   {
     version: '4.1.34-preview',
     date: 'October 2, 2026',

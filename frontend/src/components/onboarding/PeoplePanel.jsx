@@ -12,6 +12,31 @@ const FILTERS = [
   { id: 'all', label: 'All' },
 ];
 
+/** A family Shadow recorded: the children Live would create (2 Oct 2026). */
+function ShadowFamilyDetail({ family }) {
+  return (
+    <div className="px-4 pb-4 pt-1" data-testid="shadow-family-detail">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>Parent <TicketRef ticket={family.parent} /></span>
+        {family.parentAssignee && <span>would be assigned to {family.parentAssignee}</span>}
+        {family.employeeId && <span>BambooHR #{family.employeeId}</span>}
+        {family.dateMoved && <span>date changed by a later notice</span>}
+        {family.linked > 0 && <span>{family.linked} NH {family.linked === 1 ? 'ticket' : 'tickets'} would be linked</span>}
+      </div>
+      <p className="mb-2 text-xs text-muted-foreground">Shadow: nothing below exists yet. Live would create these child tickets.</p>
+      <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+        {(family.plannedChildren || []).map((c) => (
+          <li key={c.title} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
+            <span className="min-w-[10rem] font-medium text-foreground">{c.title}</span>
+            <span className="text-muted-foreground">{c.dueDate ? `due ${fmtDate(c.dueDate, { withYear: true })}` : 'no date'}</span>
+            <span className="text-muted-foreground">{c.assignee || 'AI routing'}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** One family's members: the children, the linked NH tickets and the re-sent / change notices. */
 function FamilyDetail({ familyId, onChanged }) {
   const [family, setFamily] = useState(null);
@@ -123,8 +148,8 @@ export default function PeoplePanel() {
       {error && <p className="mb-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
       {rows === null ? <Loading label="Loading people…" /> : !rows.length ? (
         <EmptyState icon={UserRoundPlus} title="No families here">
-          A family appears when an HR departure or new-hire notice arrives while the section is live.
-          In Shadow the would-be families are under Activity.
+          A family appears when an HR departure or new-hire notice arrives. In Shadow it is listed
+          here with the child tickets Live would create; nothing is created.
         </EmptyState>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
@@ -143,7 +168,9 @@ export default function PeoplePanel() {
               {rows.map((f) => {
                 const open = openId === f.id;
                 const pct = f.progress.total ? Math.round((f.progress.done / f.progress.total) * 100) : 0;
-                const status = FAMILY_STATUS[f.status] || FAMILY_STATUS.open;
+                const status = f.shadow
+                  ? { tone: 'amber', label: f.status === 'cancelled' ? 'Shadow · cancelled' : 'Shadow' }
+                  : (FAMILY_STATUS[f.status] || FAMILY_STATUS.open);
                 const KindIcon = f.kind === 'offboarding' ? UserRoundMinus : UserRoundPlus;
                 return (
                   <Fragment key={f.id}>
@@ -173,14 +200,14 @@ export default function PeoplePanel() {
                           <span className="h-1.5 w-20 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                             <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
                           </span>
-                          <span className="text-xs text-muted-foreground">{f.progress.done}/{f.progress.total} closed{f.linked ? ` · ${f.linked} linked` : ''}</span>
+                          <span className="text-xs text-muted-foreground">{f.shadow ? `${f.progress.total} would be created` : `${f.progress.done}/${f.progress.total} closed`}{f.linked ? ` · ${f.linked} linked` : ''}</span>
                         </div>
                       </td>
                       <td className="px-2 py-2"><StatusDot tone={status.tone} label={status.label} /></td>
                     </tr>
                     {open && (
                       <tr className="bg-muted/30">
-                        <td colSpan={6}><FamilyDetail familyId={f.id} onChanged={load} /></td>
+                        <td colSpan={6}>{f.shadow ? <ShadowFamilyDetail family={f} /> : <FamilyDetail familyId={f.id} onChanged={load} />}</td>
                       </tr>
                     )}
                   </Fragment>

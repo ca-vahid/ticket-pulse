@@ -1060,6 +1060,84 @@ class HrLifecycleService {
 
   async listFamilies(workspaceId, { status = null, kind = null, limit = 100 } = {}) {
     const ws = Number(workspaceId);
+    const real = await this._listRealFamilies(ws, { status, kind, limit });
+    // 2 Oct 2026 (Vahid: "I don't see anyone under People"): Shadow builds no
+    // real families, so People also lists the families Shadow recorded —
+    // marked shadow, with the children it would create.
+    const shadow = await this._shadowFamilies(ws, { status, kind });
+    return [...real, ...shadow];
+  }
+
+  /**
+   * Families Shadow recorded (create_family events), one per person and kind,
+   * with what later Shadow notices did to them: linked NH tickets, a moved
+   * date, a cancellation. Read-only.
+   */
+  async _shadowFamilies(workspaceId, { status = null, kind = null } = {}) {
+    const ws = Number(workspaceId);
+    if (status && !['open', 'cancelled'].includes(status)) return [];
+    const events = await soft(() => prisma.hrLifecycleEvent.findMany({
+      where: { workspaceId: ws, mode: 'observe', createdAt: { gte: new Date(Date.now() - 180 * 86400e3) } },
+      orderBy: { id: 'asc' },
+      take: 500,
+      select: { id: true, ticketId: true, person: true, decision: true, details: true, createdAt: true },
+    }), []);
+    const creates = events.filter((e) => ['create_family', 'create_family_after_the_fact'].includes(e.decision) && e.details?.plan?.familyKind);
+    if (!creates.length) return [];
+    // Newest create per person + kind wins (a re-sent notice is a duplicate).
+    const byKey = new Map();
+    for (const e of creates) {
+      const k = `${e.details.plan.familyKind}:${normalizePersonName(e.person || '') || `t${e.ticketId}`}`;
+      byKey.set(k, e);
+    }
+    const techs = await this._technicians(ws);
+    const techName = new Map(techs.map((t) => [t.id, t.name]));
+    const parentIds = [...byKey.values()].map((e) => e.ticketId).filter(Boolean);
+    const parents = parentIds.length ? await soft(() => prisma.ticket.findMany({
+      where: { id: { in: parentIds }, workspaceId: ws },
+      select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, status: true, dueBy: true, parkedUntil: true },
+    }), []) : [];
+    const parentById = new Map(parents.map((t) => [t.id, t]));
+    const out = [];
+    for (const e of byKey.values()) {
+      const plan = e.details.plan;
+      const follow = events.filter((x) => x.details?.plan?.shadowOf === e.id);
+      const cancelled = follow.some((x) => x.decision === 'cancel_family');
+      const moved = [...follow].reverse().find((x) => x.decision === 'move_dates' && x.details?.plan?.toDate);
+      const famStatus = cancelled ? 'cancelled' : 'open';
+      if (status && status !== famStatus) continue;
+      if (kind && plan.familyKind !== kind) continue;
+      const shiftDays = moved && plan.effectiveDate ? Math.round((new Date(moved.details.plan.toDate) - new Date(plan.effectiveDate)) / 86400e3) : 0;
+      const children = (plan.children || []).map((c) => ({
+        title: c.title,
+        dueDate: c.dueDate && shiftDays ? addDays(c.dueDate, shiftDays) : (c.dueDate || null),
+        assignee: c.assigneeTechId ? techName.get(c.assigneeTechId) || null : null,
+      }));
+      out.push({
+        id: `shadow-${e.id}`,
+        shadow: true,
+        kind: plan.familyKind,
+        personName: e.person || null,
+        employeeId: e.details?.classification?.employeeId || null,
+        office: e.details?.classification?.office || null,
+        effectiveDate: moved ? moved.details.plan.toDate : (plan.effectiveDate || plan.parent?.dueDate || null),
+        afterTheFact: Boolean(plan.afterTheFact),
+        status: famStatus,
+        template: plan.template || null,
+        createdAt: e.createdAt,
+        parent: this._ticketCard(parentById.get(e.ticketId) || null),
+        parentAssignee: plan.parent?.assigneeTechId ? techName.get(plan.parent.assigneeTechId) || null : null,
+        progress: { done: 0, total: children.length },
+        linked: follow.filter((x) => x.decision === 'link_nh').length,
+        plannedChildren: children,
+        dateMoved: Boolean(moved),
+      });
+    }
+    return out.sort((a, b) => String(a.effectiveDate || '').localeCompare(String(b.effectiveDate || '')));
+  }
+
+  async _listRealFamilies(workspaceId, { status = null, kind = null, limit = 100 } = {}) {
+    const ws = Number(workspaceId);
     const rows = await soft(() => prisma.hrLifecycleFamily.findMany({
       where: { workspaceId: ws, ...(status ? { status } : {}), ...(kind ? { kind } : {}) },
       orderBy: [{ status: 'desc' }, { effectiveDate: 'asc' }, { id: 'desc' }],
