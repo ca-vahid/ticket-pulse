@@ -91,7 +91,9 @@ export function errorHandler(err, req, res, _next) {
   res.status(statusCode).json(response);
 
   // If it's a non-operational error, we might want to restart the process
-  if (!isOperationalError(err)) {
+  // A 4xx (a foreign library's "not found", a bad request) is the caller's
+  // problem, never a reason to restart the process.
+  if (!isOperationalError(err) && statusCode >= 500) {
     logger.error('Non-operational error detected. Consider restarting the process.');
     // In production, you might want to:
     // 1. Send alert to monitoring service

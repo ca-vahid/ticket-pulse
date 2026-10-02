@@ -700,6 +700,23 @@ export function isNativeSandbox(workspace) {
   return workspace.nativeTicketingEnabled === true && !bound;
 }
 
+// Queue-stats cache (see getQueueStats). Per workspace: { value, version, at }.
+const queueStatsCache = new Map();
+const queueStatsInflight = new Map();
+const queueStatsVersion = new Map();
+function queueStatsDefaultTtl() {
+  const raw = process.env.QUEUE_STATS_CACHE_MS;
+  if (raw !== undefined && raw !== '') return Math.max(0, Number(raw) || 0);
+  return process.env.NODE_ENV === 'test' ? 0 : 15_000;
+}
+/** A ticket in this workspace changed — the next stats ask recomputes. */
+export function markQueueStatsDirty(workspaceId) {
+  const key = Number(workspaceId);
+  if (!Number.isFinite(key)) return;
+  queueStatsVersion.set(key, (queueStatsVersion.get(key) || 0) + 1);
+  queueStatsCache.delete(key);
+}
+
 class TicketService {
   // ---------------------------------------------------------------- helpers
 
@@ -744,6 +761,7 @@ class TicketService {
   }
 
   _broadcast(workspaceId, action, ticket, extra = {}) {
+    markQueueStatsDirty(workspaceId);
     try {
       sseManager.broadcast('ticket-change', {
         action,
@@ -2090,7 +2108,38 @@ class TicketService {
   }
 
   /** Segment counts for the stat-card row. */
+  /**
+   * Perf (2 Oct 2026): the Tickets page counts are one ~2–3 s scan at the
+   * morning peak and every agent's page asks for them on each ticket event.
+   * They are kept per workspace for a short while (QUEUE_STATS_CACHE_MS,
+   * default 15 s; off under tests) and one recompute is shared by everyone
+   * who asks meanwhile. Any ticket change Ticket Pulse broadcasts bumps the
+   * workspace's version, so the next ask recomputes — the cards never stay
+   * wrong after somebody acts. FreshService-side changes show within the TTL.
+   */
   async getQueueStats(workspaceId) {
+    const ttl = this.queueStatsTtlMs ?? queueStatsDefaultTtl();
+    if (!ttl) return this._computeQueueStats(workspaceId);
+    const key = Number(workspaceId);
+    const version = queueStatsVersion.get(key) || 0;
+    const hit = queueStatsCache.get(key);
+    if (hit && hit.version === version && Date.now() - hit.at < ttl) return hit.value;
+    const inflight = queueStatsInflight.get(key);
+    if (inflight && inflight.version === version) return inflight.promise;
+    const promise = this._computeQueueStats(workspaceId)
+      .then((value) => {
+        // Only keep it if nothing changed while it was computing.
+        if ((queueStatsVersion.get(key) || 0) === version) queueStatsCache.set(key, { value, version, at: Date.now() });
+        return value;
+      })
+      .finally(() => {
+        if (queueStatsInflight.get(key)?.promise === promise) queueStatsInflight.delete(key);
+      });
+    queueStatsInflight.set(key, { promise, version });
+    return promise;
+  }
+
+  async _computeQueueStats(workspaceId) {
     const now = new Date();
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
     // Registry-resolved scopes (Phase 8b) so custom statuses count where their

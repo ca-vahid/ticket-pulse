@@ -1565,6 +1565,39 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
     ]));
   });
 
+  // Perf (2 Oct 2026): the counts are shared per workspace for a short TTL,
+  // one recompute serves concurrent asks, and a ticket change forces the next
+  // ask to recompute.
+  test('getQueueStats: cached per workspace, shared while computing, refreshed after a ticket change', async () => {
+    const { markQueueStatsDirty } = await import('../src/services/ticketService.js');
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    let scans = 0;
+    prismaMock.$queryRaw.mockImplementation(async (strings) => {
+      if (!String(strings?.join?.('') || '').includes('FILTER')) return [];
+      scans += 1;
+      return [{ all: scans, openCount: 1, unassigned: 0, dueToday: 0, overdue: 0, resolved: 0, deleted: 0, noise: 0, createdThisWeek: 0, createdThisMonth: 0, createdThisYear: 0, parked: 0, parkedWakingWeek: 0 }];
+    });
+    ticketService.queueStatsTtlMs = 15_000;
+    try {
+      markQueueStatsDirty(42);
+      const [a, b] = await Promise.all([ticketService.getQueueStats(42), ticketService.getQueueStats(42)]);
+      expect(scans).toBe(1);
+      expect(a.all).toBe(1);
+      expect(b.all).toBe(1);
+      expect((await ticketService.getQueueStats(42)).all).toBe(1); // cached
+      expect(scans).toBe(1);
+      ticketService._broadcast(42, 'updated', { id: 9, origin: 'ticketpulse', status: 'Open' });
+      expect((await ticketService.getQueueStats(42)).all).toBe(2); // recomputed after the change
+      expect(scans).toBe(2);
+      // Another workspace is independent.
+      markQueueStatsDirty(43);
+      expect((await ticketService.getQueueStats(43)).all).toBe(3);
+    } finally {
+      ticketService.queueStatsTtlMs = undefined;
+    }
+  });
+
   test('registry lookups are served from the statusService cache — one DB read per request burst', async () => {
     prismaMock.ticket.count.mockResolvedValue(0);
     prismaMock.ticket.groupBy.mockResolvedValue([]);

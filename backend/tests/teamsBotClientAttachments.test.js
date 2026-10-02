@@ -43,3 +43,13 @@ test('a SharePoint download link is fetched without any token; a stranger host n
   await expect(downloadAttachment('https://evil.example/x.png')).rejects.toThrow(/not on a Microsoft Teams host/);
   expect(axiosMock.get).toHaveBeenCalledTimes(1);
 });
+
+describe('pasted pictures on the Teams media service (2 Oct 2026, first real use)', () => {
+  test('asm.skype.com and asyncgw.teams.microsoft.com are fetched with the bot token; strangers still refused', async () => {
+    const { attachmentAuthFor } = await import('../src/integrations/teamsBotClient.js');
+    expect(attachmentAuthFor('https://us-api.asm.skype.com/v1/objects/0-wus-d1-abc/views/imgo')).toBe('bot');
+    expect(attachmentAuthFor('https://eu-prod.asyncgw.teams.microsoft.com/v1/objects/0-neu-d1-abc/views/imgo')).toBe('bot');
+    expect(attachmentAuthFor('https://asm.skype.com.evil.example/v1/objects/x')).toBeNull();
+    expect(attachmentAuthFor('http://us-api.asm.skype.com/v1/objects/x')).toBeNull();
+  });
+});
