@@ -40,6 +40,7 @@ import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/
 import { ticketsAPI } from '../services/api';
 import HeldRepliesPanel from '../components/tickets/HeldRepliesPanel';
 import FilterReliefNotice from '../components/tickets/FilterReliefNotice';
+import { groupMoveFor } from '../components/tickets/assigneeGroupMove';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
@@ -1025,13 +1026,16 @@ export default function Tickets() {
       setFsConfirm({
         ticketId: ticket.id,
         fsRef: String(ticket.freshserviceTicketId),
-        changes: [{ field: 'Assignee', from: ticket.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
+        changes: [
+          ...(groupMoveFor(tech, ticket.groupId, meta?.groups) ? [groupMoveFor(tech, ticket.groupId, meta?.groups)] : []),
+          { field: 'Assignee', from: ticket.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' },
+        ],
         payload: { assignedTechId: techId, ...(extra?.handBack ? { handBack: extra.handBack } : {}) },
         resolve,
         reject,
       });
     });
-  }, [meta?.technicians]);
+  }, [meta?.technicians, meta?.groups]);
   // FS-born status change from the queue: same confirmed write-back flow
   // (fails first if FreshService rejects), per QA 07-06 #2.
   const fsStatusChange = useCallback((ticket, nextStatus) => new Promise((resolve, reject) => {

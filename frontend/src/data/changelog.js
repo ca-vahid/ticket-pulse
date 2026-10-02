@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.44-preview';
+export const APP_VERSION = '4.1.45-preview';
 
 export const changelog = [
+  {
+    version: '4.1.45-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Assigning people from other teams</strong> &mdash; picking someone listed under &ldquo;Other teams&rdquo; for a FreshService ticket now moves the ticket to their own group (for example Coreshack) in the same step, instead of FreshService refusing because they are not in &ldquo;Everyone IT&rdquo;. The FreshService confirmation shows the group change before anything is written. IT team assignments are unchanged.' },
+    ],
+  },
   {
     version: '4.1.44-preview',
     date: 'October 2, 2026',

@@ -73,6 +73,7 @@ import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
 import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
 import EditTicketModal from '../components/tickets/EditTicketModal';
+import { groupMoveFor } from '../components/tickets/assigneeGroupMove';
 import FsDeleteDialog from '../components/tickets/FsDeleteDialog';
 import TeamForwardDialog from '../components/tickets/TeamForwardDialog';
 import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
@@ -1282,11 +1283,15 @@ export default function TicketDetail() {
   // extra.handBack (QA 09-25 item 3) rides the write-back so the reason is kept.
   const fsAssign = useCallback((techId, extra = null) => {
     const tech = techId ? (meta?.technicians || []).find((t) => t.id === techId) : null;
+    const groupMove = groupMoveFor(tech, ticket?.groupId, meta?.groups);
     return requestFsSync(
-      [{ field: 'Assignee', from: ticket?.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' }],
+      [
+        ...(groupMove ? [groupMove] : []),
+        { field: 'Assignee', from: ticket?.assignedTech?.name || 'Unassigned', to: tech?.name || 'Unassigned' },
+      ],
       { assignedTechId: techId, ...(extra?.handBack ? { handBack: extra.handBack } : {}) },
     );
-  }, [requestFsSync, meta?.technicians, ticket?.assignedTech?.name]);
+  }, [requestFsSync, meta?.technicians, meta?.groups, ticket?.assignedTech?.name, ticket?.groupId]);
 
   // FS tickets often carry TP taxonomy only as names (tp_skill) — resolve them
   // against the canonical tree so the editable selects show the true value.
