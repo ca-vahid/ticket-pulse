@@ -134,7 +134,7 @@ for (const ws of wss) {
         t.created_at::date AS created, c.last_agent_at, ls.last_status_at,
         ln.snippet AS last_note, ln.occurred_at AS last_note_at,
         CASE
-          WHEN t.priority >= 3 AND t.status NOT IN ('Resolved','Closed') AND c.last_agent_at IS NULL THEN 'urgent_no_action'
+          WHEN t.priority >= 3 AND t.status IN ('Open','Pending') AND c.last_agent_at IS NULL THEN 'urgent_no_action'
           WHEN t.due_by IS NOT NULL AND t.due_by < now() AND t.status = 'Open' THEN 'overdue'
           ELSE 'stale_pending' END AS lane
       FROM tickets t
@@ -145,7 +145,7 @@ for (const ws of wss) {
       WHERE t.workspace_id = 1 AND COALESCE(t.is_noise, false) = false
         AND t.parked_until IS NULL  -- parked tickets wait on purpose (v3.9.78)
         AND (
-          (t.priority >= 3 AND t.status NOT IN ('Resolved','Closed') AND c.last_agent_at IS NULL)
+          (t.priority >= 3 AND t.status IN ('Open','Pending') AND c.last_agent_at IS NULL)
           OR (t.due_by IS NOT NULL AND t.due_by < now() AND t.status = 'Open')
           OR (t.status = 'Pending'
               AND COALESCE(c.last_agent_at, t.created_at) < now() - interval '5 days')
