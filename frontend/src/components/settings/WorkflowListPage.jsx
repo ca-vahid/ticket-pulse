@@ -18,7 +18,7 @@ import { groupByTrigger, relativeTime, runFailed, workflowState } from './Workfl
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'on', label: 'Enabled' },
-  { key: 'observe', label: 'Observe-only' },
+  { key: 'observe', label: 'Shadow' },
   { key: 'failing', label: 'Failing' },
   { key: 'off', label: 'Off' },
 ];

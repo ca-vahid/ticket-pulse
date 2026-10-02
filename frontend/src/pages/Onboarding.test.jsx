@@ -92,7 +92,7 @@ describe('Onboarding page', () => {
     const tabs = await screen.findAllByRole('tab');
     expect(tabs.map((t) => t.getAttribute('aria-label'))).toEqual(['People', 'Activity', 'Settings']);
     expect(await screen.findByText('Jamie Gill')).toBeInTheDocument();
-    expect(screen.getByTestId('onboarding-mode')).toHaveTextContent('Observe');
+    expect(screen.getByTestId('onboarding-mode')).toHaveTextContent('Shadow');
     expect(screen.getByText('2/5 closed')).toBeInTheDocument();
     // Expanding a family shows its children with assignee and status.
     fireEvent.click(screen.getByRole('button', { name: /Show Jamie Gill's tickets/ }));

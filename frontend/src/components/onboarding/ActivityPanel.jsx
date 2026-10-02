@@ -59,7 +59,7 @@ export default function ActivityPanel({ techById = new Map() }) {
       {error && <p className="mb-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
       {!rows.length ? (
         <EmptyState icon={History} title="No notices handled yet">
-          Every HR notice the section reads lands here with its decision — in observe mode, with the family it would have built.
+          Every HR notice the section reads lands here with its decision — in Shadow, with the family it would have built.
         </EmptyState>
       ) : (
         <ol className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card shadow-subtle">

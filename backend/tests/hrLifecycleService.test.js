@@ -235,6 +235,38 @@ describe('modes', () => {
     expect(db.events).toHaveLength(1);
   });
 
+  // 2 Oct 2026: Shadow has no real families, so follow-ups used to read
+  // "no open family". They now find the family Shadow recorded.
+  test('shadow: NH tickets, date changes and cancellations act on the family Shadow recorded', async () => {
+    await setMode('observe');
+    const hire = fsNotice({ subject: 'New Hire: Isabela Sousa', sender: BAMBOO, text: `Start Date: ${day(10)} Employee #: 2371 Position: Engineer Location: Montreal` });
+    await hr.onTicketCreated(hire.id, 1);
+    const nh = fsNotice({ subject: `NH Laptop - Montreal - CA - isousa - ${day(10)}`, sender: 'isousa@bgcengineering.ca', text: `Start Date: ${day(10)} Username: isousa Full Name: Isabela Sousa ID: 2371 Password: Secret1!` });
+    const link = await hr.onTicketCreated(nh.id, 1);
+    expect(link).toMatchObject({ decision: 'link_nh', outcome: 'recorded' });
+    expect(link.summary).toMatch(/would be linked to the onboarding family.*Shadow recorded/);
+    expect(link.summary).not.toMatch(/Secret1/);
+
+    const dep = departure('Jamie Gill', day(10));
+    await hr.onTicketCreated(dep.id, 1);
+    const change = fsNotice({ subject: "Departure Notification: Jamie Gill's departure date has changed", text: `The departure date has changed from ${day(10)} to ${day(20)} ${PROFILE}` });
+    const moved = await hr.onTicketCreated(change.id, 1);
+    expect(moved).toMatchObject({ decision: 'move_dates', outcome: 'recorded' });
+    expect(moved.summary).toMatch(/would move 6 open tickets/);
+    const cancel = fsNotice({ subject: 'Departure Notification: Jamie Gill will no longer be departing', text: `Jamie Gill will no longer be departing ${PROFILE}` });
+    const closed = await hr.onTicketCreated(cancel.id, 1);
+    expect(closed).toMatchObject({ decision: 'cancel_family', outcome: 'recorded' });
+    expect(closed.summary).toMatch(/would close the parent and 5 children/);
+    expect(db.families).toHaveLength(0);
+    for (const fn of Object.values(ticketSvc)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  test('shadow: a follow-up for someone Shadow never saw still says "no open family"', async () => {
+    await setMode('observe');
+    const nh = fsNotice({ subject: `NH Workstation - Perth - AU - nobody - ${day(5)}`, sender: 'nobody@x.ca', text: `Start Date: ${day(5)} Username: nobody Full Name: No Body ID: 9999` });
+    expect(await hr.onTicketCreated(nh.id, 1)).toMatchObject({ decision: 'no_family' });
+  });
+
   test('old tickets (history backfill) are ignored', async () => {
     await setMode('live');
     const t = departure('Old Person', '2024-01-10');

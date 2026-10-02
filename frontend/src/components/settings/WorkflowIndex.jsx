@@ -92,7 +92,7 @@ export function workflowState(workflow) {
   if (workflow.archivedAt) return { key: 'archived', label: 'Archived', dot: 'border border-muted-foreground/50 bg-transparent' };
   const lastRun = workflow.runs?.[0];
   if (workflow.isEnabled && lastRun && runFailed(lastRun.status)) return { key: 'failing', label: 'Failing', dot: 'bg-red-500' };
-  if (workflow.isEnabled && workflow.mockModeEnabled) return { key: 'observe', label: 'Observe-only', dot: 'bg-amber-500' };
+  if (workflow.isEnabled && workflow.mockModeEnabled) return { key: 'observe', label: 'Shadow', dot: 'bg-amber-500' };
   if (workflow.isEnabled) return { key: 'on', label: 'Enabled', dot: 'bg-emerald-500' };
   if (!(workflow.publishedVersion > 0)) return { key: 'draft', label: 'Draft', dot: 'bg-muted-foreground/40' };
   return { key: 'off', label: 'Off', dot: 'bg-muted-foreground/40' };

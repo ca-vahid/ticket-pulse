@@ -8,12 +8,14 @@ export const FAMILY_STATUS = {
 
 export const MODE_INFO = {
   off: { tone: 'grey', label: 'Off', hint: 'Nothing happens. FreshService stays the organiser.' },
-  observe: { tone: 'amber', label: 'Observe', hint: 'Every HR notice is read and the family it would build is recorded under Activity. No ticket is touched.' },
+  // 2 Oct 2026 (Vahid): "Shadow", the word Auto-help uses for the same idea.
+  // The stored value stays 'observe'.
+  observe: { tone: 'amber', label: 'Shadow', hint: 'Every HR notice is read and the family it would build is recorded under Activity. No ticket is touched.' },
   live: { tone: 'green', label: 'Live', hint: 'Families are built and kept in step: children, due dates, date changes, cancellations.' },
 };
 
 export const EVENT_MODE = {
-  observe: { tone: 'amber', label: 'Observed' },
+  observe: { tone: 'amber', label: 'Shadow' },
   live: { tone: 'green', label: 'Live' },
   manual: { tone: 'blue', label: 'Manual' },
 };

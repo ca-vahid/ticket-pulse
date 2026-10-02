@@ -478,6 +478,28 @@ class HrLifecycleService {
     }));
   }
 
+  /**
+   * The newest family Shadow recorded for this person and kind (employee id
+   * first, then the normalised name), excluding the ticket being handled.
+   * Returns { eventId, ref, plan } or null.
+   */
+  async _findShadowFamily(workspaceId, kind, c, ticketId) {
+    const ws = Number(workspaceId);
+    const rows = await soft(() => prisma.hrLifecycleEvent.findMany({
+      where: { workspaceId: ws, mode: 'observe', decision: { in: ['create_family', 'create_family_after_the_fact'] }, ticketId: { not: Number(ticketId) || undefined }, createdAt: { gte: new Date(Date.now() - 180 * 86400e3) } },
+      orderBy: { id: 'desc' },
+      take: 200,
+      select: { id: true, ticketId: true, person: true, details: true },
+    }), []);
+    const key = normalizePersonName(c?.person || c?.username || '');
+    const emp = c?.employeeId ? String(c.employeeId) : null;
+    const hit = rows.find((r) => r.details?.plan?.familyKind === kind && emp && String(r.details?.classification?.employeeId || '') === emp)
+      || rows.find((r) => r.details?.plan?.familyKind === kind && key && normalizePersonName(r.person || '') === key);
+    if (!hit) return null;
+    const parent = hit.ticketId ? await soft(() => prisma.ticket.findUnique({ where: { id: hit.ticketId }, select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true } })) : null;
+    return { eventId: hit.id, ref: parent ? ticketDisplayRef(parent) : `ticket ${hit.ticketId}`, plan: hit.details?.plan || null };
+  }
+
   /** Family members with their live ticket rows (+ the parent as role 'parent'). */
   async _familyTickets(family) {
     const members = await soft(() => prisma.hrLifecycleFamilyMember.findMany({ where: { familyId: family.id }, orderBy: { id: 'asc' } }), []);
@@ -526,7 +548,8 @@ class HrLifecycleService {
     const c = this.classify(ticket, tz);
     if (!c) return { ticketId: ticket.id, ref: ticketDisplayRef(ticket), classification: null, plan: null };
     const settings = await this.getSettings(workspaceId);
-    return { ticketId: ticket.id, ref: ticketDisplayRef(ticket), classification: c, plan: await this.plan(ticket, c, settings, tz) };
+    const shadow = (await this.getMode(workspaceId)) !== 'live';
+    return { ticketId: ticket.id, ref: ticketDisplayRef(ticket), classification: c, plan: await this.plan(ticket, c, settings, tz, { shadow }) };
   }
 
   classify(ticket, tz) {
@@ -556,7 +579,7 @@ class HrLifecycleService {
       }));
       if (seen && !force) return null;
       const settings = await this.getSettings(ws);
-      const plan = await this.plan(ticket, c, settings, tz);
+      const plan = await this.plan(ticket, c, settings, tz, { shadow: mode !== 'live' });
       if (mode !== 'live') {
         return this._record(ws, { ticket, c, plan, mode: 'observe', outcome: 'recorded', summary: `Would: ${plan.summary}` });
       }
@@ -567,7 +590,7 @@ class HrLifecycleService {
   }
 
   /** What a notice would do. Reads only. */
-  async plan(ticket, c, settings, _tz) {
+  async plan(ticket, c, settings, _tz, { shadow = false } = {}) {
     const ws = ticket.workspaceId;
     const fx = NOTICE_EFFECT[c.type];
     const person = c.person || c.username || 'this person';
@@ -585,6 +608,41 @@ class HrLifecycleService {
     }
 
     const family = await this.findOpenFamily(ws, fx.family, c);
+    // Shadow (1 Oct 2026): no real families exist, so a follow-up notice
+    // looks for the family Shadow RECORDED for the same person and says what
+    // Live would do to it — otherwise every NH ticket, date change and
+    // cancellation would read "no family" and the rehearsal would mislead.
+    const shadowFamily = !family && shadow ? await this._findShadowFamily(ws, fx.family, c, ticket.id) : null;
+    if (shadowFamily) {
+      const sp = shadowFamily.plan;
+      const from = shadowFamily.ref;
+      const tag = ` (from the family Shadow recorded on ${from})`;
+      if (fx.effect === 'create') {
+        return { decision: 'duplicate_linked', familyKind: fx.family, shadowOf: shadowFamily.eventId, summary: `${person}: HR sent this ${FAMILY_KIND_LABEL[fx.family]} notice again — would link to the open family, no new children${tag}` };
+      }
+      if (fx.effect === 'link') {
+        return { decision: 'link_nh', familyKind: fx.family, shadowOf: shadowFamily.eventId, parentTicketId: sp?.parent?.ticketId || null, nhKind: c.nhKind, summary: `${person}: NH ${c.nhKind === 'workstation' ? 'Workstation' : 'Laptop'} ticket would be linked to the onboarding family, no new child${tag}` };
+      }
+      if (fx.effect === 'cancel') {
+        const n = (sp?.children || []).length;
+        return { decision: 'cancel_family', familyKind: fx.family, shadowOf: shadowFamily.eventId, closes: [], summary: `${person}: ${fx.family === 'onboarding' ? 'no longer starting' : 'no longer departing'} — would close the parent and ${n} ${n === 1 ? 'child' : 'children'}${tag}` };
+      }
+      if (fx.effect === 'move' || fx.effect === 'office') {
+        if (!c.date && fx.effect === 'move') return { decision: 'no_date', familyKind: fx.family, shadowOf: shadowFamily.eventId, summary: `${person}: the change notice has no clear new date — left for a person${tag}` };
+        const moves = c.date ? [
+          ...(sp?.parent ? [{ ticketId: sp.parent.ticketId, role: 'parent', dueDate: c.date }] : []),
+          ...(sp?.children || []).map((ch) => ({ ticketId: null, title: ch.title, role: 'child', dueDate: addDays(c.date, ch.dueOffsetDays || 0) })),
+        ] : [];
+        const fromDate = sp?.effectiveDate || sp?.parent?.dueDate || null;
+        return {
+          decision: fx.effect === 'office' ? 'office_changed' : 'move_dates',
+          familyKind: fx.family, shadowOf: shadowFamily.eventId, fromDate, toDate: c.date || null, office: c.office || null, moves,
+          summary: moves.length
+            ? `${person}: would move ${moves.length} open tickets${fromDate ? ` from ${fmtDay(fromDate)}` : ''} to ${fmtDay(c.date)} and note each${fx.effect === 'office' && c.office ? `; office now ${c.office}` : ''}${tag}`
+            : `${person}: office changed${c.office ? ` to ${c.office}` : ''} — would note every open ticket${tag}`,
+        };
+      }
+    }
 
     if (fx.effect === 'create') {
       if (family) {

@@ -387,10 +387,10 @@ describe('WorkflowEnableMockConfirmModal (QA 08-06 mock-mode visibility)', () =>
   test('explains observe-only mode and offers both choices', () => {
     renderModal();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByText('Observe-only (mock) mode is on')).toBeInTheDocument();
+    expect(screen.getByText('Shadow mode is on')).toBeInTheDocument();
     expect(screen.getByText(/no real actions/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Enable \+ turn off mock/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Keep observe-only/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Keep it in Shadow/ })).toBeInTheDocument();
   });
 
   test('"Enable + turn off mock" fires onEnableLive only', () => {
@@ -402,7 +402,7 @@ describe('WorkflowEnableMockConfirmModal (QA 08-06 mock-mode visibility)', () =>
 
   test('"Keep observe-only" fires onKeepObserveOnly only', () => {
     const props = renderModal();
-    fireEvent.click(screen.getByRole('button', { name: /Keep observe-only/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Keep it in Shadow/ }));
     expect(props.onKeepObserveOnly).toHaveBeenCalledTimes(1);
     expect(props.onEnableLive).not.toHaveBeenCalled();
   });
