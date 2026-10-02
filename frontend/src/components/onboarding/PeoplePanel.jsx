@@ -124,7 +124,7 @@ export default function PeoplePanel() {
       {rows === null ? <Loading label="Loading people…" /> : !rows.length ? (
         <EmptyState icon={UserRoundPlus} title="No families here">
           A family appears when an HR departure or new-hire notice arrives while the section is live.
-          In observe mode the would-be families are under Activity.
+          In Shadow the would-be families are under Activity.
         </EmptyState>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card shadow-subtle">

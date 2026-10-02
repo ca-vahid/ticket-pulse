@@ -90,7 +90,7 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     const row = rowFor('Assignment notice');
     expect(row).toHaveAttribute('data-state', 'on');
     expect(within(row).getByText('Default · v3 · ran 6h ago')).toBeInTheDocument();
-    expect(screen.queryByText('Observe-only')).toBeNull();
+    expect(screen.queryByText('Shadow')).toBeNull();
     expect(screen.queryByText('Routed')).toBeNull();
     // the same facts live in the meta line and the state, not in chips
     expect(rowFor('VIP variant')).toHaveAttribute('data-state', 'draft');

@@ -4925,7 +4925,8 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
   const words = [
     { key: 'live', dot: enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40', text: enabled ? 'Enabled' : published ? 'Off' : 'Draft' },
     // Mock mode IS observe-only (runs, records, sends nothing) — one word for it (Vahid, 22 Sep 2026).
-    ...(mock ? [{ key: 'observe', dot: 'bg-amber-500', text: 'Observe-only', testId: observe ? 'observe-only-warning' : undefined }] : []),
+    // 2 Oct 2026 (Vahid): that word is "Shadow", the same as Auto-help and Onboarding.
+    ...(mock ? [{ key: 'observe', dot: 'bg-amber-500', text: 'Shadow', testId: observe ? 'observe-only-warning' : undefined }] : []),
   ];
   return (
     <div ref={rootRef} className="relative">
@@ -4934,7 +4935,7 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Live, mock and observe-only — click to change"
+        title="Live, off or shadow — click to change"
         className="tp-focus-ring inline-flex h-8 items-center gap-2.5 rounded-md border border-transparent px-2 text-xs font-semibold text-foreground/85 hover:border-border hover:bg-muted/50"
         data-testid="workflow-state-line"
       >
@@ -4966,15 +4967,15 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
           </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold text-foreground">Observe-only</div>
+              <div className="text-xs font-semibold text-foreground">Shadow</div>
               <div className="text-[11px] leading-4 text-muted-foreground">Runs and records every step, but takes no real actions — no e-mails, no ticket updates.</div>
             </div>
-            <WorkflowToggle label="Observe-only" tone="sky" compact checked={mock} onClick={onToggleMock} disabled={saving || !canToggleMock} title={mockTitle} />
+            <WorkflowToggle label="Shadow" tone="sky" compact checked={mock} onClick={onToggleMock} disabled={saving || !canToggleMock} title={mockTitle} />
           </div>
           {observe && (
             <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
               <FlaskConical className="mr-1 inline h-3 w-3" aria-hidden="true" />
-              <strong>Live and observe-only.</strong> It runs on matching tickets and only records what it would have done. Turn observe-only off to make it act.
+              <strong>Live in shadow.</strong> It runs on matching tickets and only records what it would have done. Turn Shadow off to make it act.
             </p>
           )}
         </div>
@@ -5879,12 +5880,12 @@ export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onE
             <FlaskConical className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Observe-only (mock) mode is on</div>
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Shadow mode is on</div>
             <h3 id="workflow-enable-mock-confirm-title" className="mt-1 break-words text-lg font-semibold text-foreground">
               Enable {workflowName}?
             </h3>
             <p className="mt-1 text-sm leading-5 text-muted-foreground">
-              This workflow is in observe-only (mock) mode — it will run on matching tickets but take
+              This workflow is in Shadow — it will run on matching tickets but take
               <span className="font-semibold"> no real actions</span> (no emails, no ticket changes).
               Turn off mock mode too?
             </p>
@@ -5915,7 +5916,7 @@ export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onE
             className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-3 text-sm font-semibold text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-50"
           >
             <FlaskConical className="h-4 w-4" />
-            Keep observe-only
+            Keep it in Shadow
           </button>
           <button
             type="button"
@@ -9010,7 +9011,7 @@ export default function NotificationWorkflowsPanel({
         type: 'success',
         text: alsoDisableMock
           ? 'Workflow enabled — mock mode is off, real actions will run.'
-          : 'Workflow enabled in observe-only (mock) mode — it runs but takes no real actions.',
+          : 'Workflow enabled in Shadow — it runs but takes no real actions.',
       });
       setEnableMockConfirm(null);
       await refreshHealth();

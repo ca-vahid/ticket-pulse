@@ -41,7 +41,7 @@ describe('Mail Workflows list page', () => {
     expect(rows[0]).toHaveTextContent('v4');
     expect(rows[0]).toHaveTextContent('Ran 2h ago');
     expect(rows[1]).toHaveTextContent('Night and holiday acknowledgement');
-    expect(rows[1]).toHaveTextContent('Observe-only');
+    expect(rows[1]).toHaveTextContent('Shadow');
     expect(rows[1]).toHaveTextContent('Routed');
     expect(within(groups[1]).getByTestId('workflow-list-row')).toHaveTextContent('Failed 1h ago');
     expect(within(groups[2]).getByTestId('workflow-list-row')).toHaveTextContent('draft');
@@ -63,7 +63,7 @@ describe('Mail Workflows list page', () => {
     expect(screen.getAllByTestId('workflow-list-row').map((r) => r.getAttribute('data-state'))).toEqual(['failing']);
     fireEvent.click(screen.getByRole('button', { name: 'Off' }));
     expect(screen.getAllByTestId('workflow-list-row')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Observe-only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shadow' }));
     expect(screen.getAllByTestId('workflow-list-row')[0]).toHaveTextContent('after-hours');
   });
 

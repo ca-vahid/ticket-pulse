@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.32-preview';
+export const APP_VERSION = '4.1.33-preview';
 
 export const changelog = [
+  {
+    version: '4.1.33-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>&ldquo;Shadow&rdquo; everywhere</strong> &mdash; the dry-run mode (runs, records what it would do, sends and changes nothing) is called Shadow in Mail Workflows and Onboarding, the same word as Auto-help. It was &ldquo;Observe-only&rdquo; in Mail Workflows and &ldquo;Observe&rdquo; in Onboarding; nothing else changed.' },
+      { type: 'fix', html: '<strong>Onboarding in Shadow follows the whole family</strong> &mdash; a follow-up notice (Sam&rsquo;s NH Laptop/Workstation tickets, a date change, a cancellation, a re-sent notice) now shows what Live would do to the family Shadow recorded for that person, instead of &ldquo;no open family&rdquo;.' },
+    ],
+  },
   {
     version: '4.1.32-preview',
     date: 'October 1, 2026',
