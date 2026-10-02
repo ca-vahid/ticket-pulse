@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.36-preview';
+export const APP_VERSION = '4.1.37-preview';
 
 export const changelog = [
+  {
+    version: '4.1.37-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>New side-rail icons</strong> &mdash; a new icon for every page in the left rail (Dashboard, Tickets, Timeline, Analytics, Knowledge, Onboarding, Assignment, Mail Workflows, Agent Maps, Approvals), shown a little larger (24 px) with more room between them, and slightly larger labels when the rail is open. They take the page colour when active and work in dark mode.' },
+    ],
+  },
   {
     version: '4.1.36-preview',
     date: 'October 2, 2026',

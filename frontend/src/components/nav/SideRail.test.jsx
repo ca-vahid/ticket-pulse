@@ -161,3 +161,23 @@ describe('SideRail', () => {
     expect(screen.getByText('4')).toBeInTheDocument();
   });
 });
+
+// 2 Oct 2026 (option I): the new icon set, 24 px, 16 px between rows, larger labels.
+describe('SideRail — new icons (option I)', () => {
+  test('every destination draws its PNG silhouette at 24 px, coloured by the row', () => {
+    const { container } = renderRail('/tickets');
+    const icons = [...container.querySelectorAll('[data-nav-icon]')];
+    expect(icons.map((i) => i.getAttribute('data-nav-icon'))).toEqual(expect.arrayContaining(['dashboard', 'tickets', 'timeline', 'analytics', 'assignments', 'workflows', 'approvals']));
+    const tickets = container.querySelector('[data-nav-icon="tickets"]');
+    expect(tickets.className).toContain('h-6 w-6');
+    expect(tickets.style.backgroundColor).toBe('currentcolor');
+    expect(tickets.getAttribute('style')).toContain('/brand/nav/tickets.png');
+  });
+
+  test('rows sit 16 px apart and labels are 13.5 px', () => {
+    const { container } = renderRail('/dashboard');
+    const list = container.querySelector('.tp-side-rail .overflow-y-auto');
+    expect(list.className).toContain('gap-4');
+    expect(container.querySelector('button[title="Tickets"]').className).toContain('text-[13.5px]');
+  });
+});

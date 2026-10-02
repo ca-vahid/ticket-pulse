@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { writeRoleHint } from '../../utils/roleHint';
-import { BarChart3, Clock, LayoutDashboard, Stamp, Ticket, UserRoundPlus } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
-import { AssignmentNavIcon, KnowledgeNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
+import {
+  AnalyticsNavIcon, ApprovalsNavIcon, AssignmentNavIcon, DashboardNavIcon, KnowledgeNavIcon, MapNavIcon,
+  OnboardingNavIcon, TicketsNavIcon, TimelineNavIcon, WorkflowNavIcon,
+} from './NavIcons';
 import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
 
 // Single source of truth for the primary navigation destinations, shared by the
@@ -34,7 +36,7 @@ export const NAV_DESTINATIONS = [
     id: 'dashboard',
     label: 'Dashboard',
     path: '/dashboard',
-    Icon: LayoutDashboard,
+    Icon: DashboardNavIcon,
     tile: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200',
     hover: 'hover:border-blue-300 hover:bg-blue-100',
     bar: 'bg-blue-600',
@@ -44,7 +46,7 @@ export const NAV_DESTINATIONS = [
     id: 'tickets',
     label: 'Tickets',
     path: '/tickets',
-    Icon: Ticket,
+    Icon: TicketsNavIcon,
     tile: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-500/15 dark:text-sky-200',
     hover: 'hover:border-sky-300 hover:bg-sky-100',
     bar: 'bg-sky-600',
@@ -57,7 +59,7 @@ export const NAV_DESTINATIONS = [
     id: 'timeline',
     label: 'Timeline',
     path: '/timeline',
-    Icon: Clock,
+    Icon: TimelineNavIcon,
     tile: 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/15 dark:text-indigo-200',
     hover: 'hover:border-indigo-300 hover:bg-indigo-100',
     bar: 'bg-indigo-600',
@@ -67,7 +69,7 @@ export const NAV_DESTINATIONS = [
     id: 'analytics',
     label: 'Analytics',
     path: '/analytics',
-    Icon: BarChart3,
+    Icon: AnalyticsNavIcon,
     tile: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200',
     hover: 'hover:border-emerald-300 hover:bg-emerald-100',
     bar: 'bg-emerald-600',
@@ -91,7 +93,7 @@ export const NAV_DESTINATIONS = [
     id: 'onboarding',
     label: 'Onboarding',
     path: '/onboarding',
-    Icon: UserRoundPlus,
+    Icon: OnboardingNavIcon,
     tile: 'border-[#f1dca8] bg-[#fcf5e3] text-[#a16207] dark:border-[#eab308]/35 dark:bg-[#eab308]/15 dark:text-[#fde68a]',
     hover: 'hover:border-[#e9cc85] hover:bg-[#f8ecca]',
     bar: 'bg-[#a16207]',
@@ -131,7 +133,7 @@ export const NAV_DESTINATIONS = [
     id: 'approvals',
     label: 'Approvals',
     path: '/approvals',
-    Icon: Stamp,
+    Icon: ApprovalsNavIcon,
     tile: 'border-[#c9e2d4] bg-[#e9f6ef] text-[#0f7b52] dark:border-[#10b981]/35 dark:bg-[#10b981]/15 dark:text-[#6ee7b7]',
     hover: 'hover:border-[#aed6c1] hover:bg-[#ddf0e6]',
     bar: 'bg-[#0f7b52]',
