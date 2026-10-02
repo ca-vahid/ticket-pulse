@@ -20,6 +20,8 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMo
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 jest.unstable_mockModule('../src/services/ticketRollUpService.js', () => ({ default: { assertNoOpenChildren, recomputeReadiness } }));
 jest.unstable_mockModule('../src/services/mirrorService.js', () => ({ default: { getInteractiveClient: jest.fn() } }));
+const markGoneInFreshService = jest.fn(async () => ({}));
+jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { markGoneInFreshService } }));
 
 const svc = await import('../src/services/fsTicketRelationService.js');
 
@@ -59,7 +61,7 @@ test('fetchFsRelations reads child ids + details, and a parent id', async () => 
   expect(parent.parentFsId).toBeNull();
   expect(parent.children.map((c) => [c.fsId, c.status])).toEqual([[241814, 'Open'], [241815, 'Pending'], [241818, 'Closed'], [299999, 'Resolved']]);
   const child = await svc.fetchFsRelations(client, 241818);
-  expect(child).toEqual({ parentFsId: 241813, children: [] });
+  expect(child).toEqual({ deleted: false, spam: false, parentFsId: 241813, children: [] });
 });
 
 test('sync links the children TP has, lists the one it does not, and marks them as FreshService links', async () => {
@@ -128,5 +130,29 @@ describe('assertNoOpenFsChildren', () => {
     const client = { _get: jest.fn().mockRejectedValue(new Error('FS 503')) };
     await svc.assertNoOpenFsChildren({ id: 44395 }, 1, client);
     expect(assertNoOpenChildren).toHaveBeenCalledWith(44395, 1);
+  });
+});
+
+// 2 Oct 2026: tickets trashed in FreshService lingered up to an hour; opening
+// one now marks it straight away from the same read.
+describe('opening a ticket FreshService has trashed', () => {
+  test('deleted in FreshService → marked deleted in Ticket Pulse', async () => {
+    svc._resetRelationCache();
+    markGoneInFreshService.mockClear();
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 6369, origin: 'freshservice', freshserviceTicketId: 184319n });
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    const client = { _get: jest.fn().mockResolvedValue({ data: { ticket: { deleted: true, related_tickets: {} } } }) };
+    await svc.syncFsRelations(6369, 1, { client, force: true });
+    expect(markGoneInFreshService).toHaveBeenCalledWith(6369, 1, { spam: false });
+  });
+
+  test('a live ticket is left alone', async () => {
+    svc._resetRelationCache();
+    markGoneInFreshService.mockClear();
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 6370, origin: 'freshservice', freshserviceTicketId: 184320n });
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    const client = { _get: jest.fn().mockResolvedValue({ data: { ticket: { deleted: false, related_tickets: {} } } }) };
+    await svc.syncFsRelations(6370, 1, { client, force: true });
+    expect(markGoneInFreshService).not.toHaveBeenCalled();
   });
 });

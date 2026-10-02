@@ -1025,6 +1025,47 @@ class TicketService {
   }
 
   /**
+   * 2 Oct 2026: an FS-born ticket that FreshService already reports as
+   * deleted (or spam) — seen when someone opened it in Ticket Pulse — is
+   * marked here straight away instead of waiting for the hourly
+   * reconciliation (which only rechecks each open ticket once an hour).
+   * Same marking as a sync-observed FS deletion. Never throws.
+   */
+  async markGoneInFreshService(ticketId, workspaceId, { spam = false, via = 'ticket_open' } = {}) {
+    try {
+      const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId }, include: TICKET_INCLUDE });
+      if (!ticket || ticket.origin === 'ticketpulse') return null;
+      const newStatus = spam ? 'Spam' : 'Deleted';
+      if (['Deleted', 'Spam'].includes(String(ticket.status))) return null;
+      const note = spam
+        ? 'Marked as spam in FreshService (seen when the ticket was opened in Ticket Pulse)'
+        : 'Deleted in FreshService (seen when the ticket was opened in Ticket Pulse)';
+      const updated = await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { status: newStatus, lastReconciledAt: new Date() },
+        include: TICKET_INCLUDE,
+      });
+      await prisma.assignmentPipelineRun.updateMany({
+        where: { ticketId: ticket.id, status: 'queued' },
+        data: { status: 'skipped_stale', errorMessage: note },
+      }).catch(() => {});
+      await prisma.assignmentPipelineRun.updateMany({
+        where: { ticketId: ticket.id, status: 'completed', decision: 'pending_review' },
+        data: { status: 'superseded', errorMessage: note },
+      }).catch(() => {});
+      await this._audit(ticket.id, 'status_changed', { name: 'FreshService' }, {
+        oldStatus: ticket.status, newStatus, note, seenVia: via,
+      });
+      this._broadcast(workspaceId, 'deleted', updated);
+      logger.info(`FS #${ticket.freshserviceTicketId} (ticket ${ticket.id}) is ${newStatus.toLowerCase()} in FreshService — marked on open`);
+      return updated;
+    } catch (err) {
+      logger.warn(`Marking ticket ${ticketId} gone in FreshService failed (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Bulk delete for a mixed selection (2 Oct 2026). TP-born → deleteTicket
    * (needs native ticketing, like the single route); FS-born →
    * deleteFsTicketInFreshService. Strictly one at a time — FreshService's API

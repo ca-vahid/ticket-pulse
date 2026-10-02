@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.41-preview';
+export const APP_VERSION = '4.1.42-preview';
 
 export const changelog = [
+  {
+    version: '4.1.42-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Tickets deleted in FreshService leave Ticket Pulse sooner</strong> &mdash; opening a FreshService ticket that was already deleted (or marked spam) in FreshService now marks it straight away, instead of waiting for the hourly check.' },
+    ],
+  },
   {
     version: '4.1.41-preview',
     date: 'October 2, 2026',
