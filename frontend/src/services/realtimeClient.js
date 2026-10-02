@@ -1034,6 +1034,20 @@ export class RealtimeClient {
    * catch-up paths already handle.
    */
   _emitResync(reason) {
+    // Perf (2 Oct 2026): after a deploy every open page reconnects at once and
+    // each resync reloads the ticket list, counts, dashboards… in the same
+    // second, while the new server is still warming up — the worst slow-request
+    // bursts of the day lined up with container starts. Spread the reloads over
+    // up to 15 s (no delay under tests).
+    const jitterMs = import.meta.env?.MODE === 'test' ? 0 : Math.floor(Math.random() * 15_000);
+    if (jitterMs > 0) {
+      setTimeout(() => this._fanOutResync(reason), jitterMs);
+      return;
+    }
+    this._fanOutResync(reason);
+  }
+
+  _fanOutResync(reason) {
     const payload = { resync: true, reason };
     for (const sub of this.subscribers.values()) {
       if (!sub.enabled) continue;

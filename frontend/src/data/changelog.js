@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.38-preview';
+export const APP_VERSION = '4.1.39-preview';
 
 export const changelog = [
+  {
+    version: '4.1.39-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Fewer slow moments after an update</strong> &mdash; after Ticket Pulse restarts, open pages now refresh over a few seconds instead of all at once, and the sync-health check behind the admin banner is shared for 30 seconds instead of recomputed for every page.' },
+    ],
+  },
   {
     version: '4.1.38-preview',
     date: 'October 2, 2026',

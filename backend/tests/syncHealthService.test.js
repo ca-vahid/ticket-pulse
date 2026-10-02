@@ -389,3 +389,25 @@ describe('checkAndAlert — debounced, one alert per stale incident', () => {
     expect(sendTransactionalEmailMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// Perf (2 Oct 2026): one shared answer per 30 s, single-flight.
+describe('getHealth cache', () => {
+  test('callers without a clock share one computation for 30 s; a passed clock bypasses it', async () => {
+    getAllActiveMock.mockResolvedValue([{ id: 1, name: 'IT', syncIntervalMinutes: 5 }]);
+    getLatestSuccessfulMock.mockResolvedValue({ completedAt: new Date().toISOString() });
+    const prev = process.env.SYNC_HEALTH_CACHE_MS;
+    process.env.SYNC_HEALTH_CACHE_MS = '30000';
+    try {
+      const service = new SyncHealthService();
+      getAllActiveMock.mockClear();
+      const [a, b] = await Promise.all([service.getHealth(), service.getHealth()]);
+      await service.getHealth();
+      expect(getAllActiveMock).toHaveBeenCalledTimes(1);
+      expect(a).toBe(b);
+      await service.getHealth(NOW);
+      expect(getAllActiveMock).toHaveBeenCalledTimes(2);
+    } finally {
+      if (prev === undefined) delete process.env.SYNC_HEALTH_CACHE_MS; else process.env.SYNC_HEALTH_CACHE_MS = prev;
+    }
+  });
+});
