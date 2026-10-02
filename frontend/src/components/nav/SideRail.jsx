@@ -98,14 +98,16 @@ export default function SideRail() {
         aria-current={isActive ? 'page' : undefined}
         title={dest.label}
         className={cn(
-          'group/row relative mx-[9px] flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
+          'group/row relative mx-[9px] flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[13.5px] font-semibold transition-colors tp-focus-ring',
           isActive
             ? `${dest.tile} cursor-default`
             : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >
-        <span className="relative inline-flex h-5 w-5 flex-none items-center justify-center">
-          <Icon className="h-5 w-5" />
+        {/* 2 Oct 2026 (option I): new icon set at 24 px, 16 px between rows,
+            labels 13.5 px. */}
+        <span className="relative inline-flex h-6 w-6 flex-none items-center justify-center">
+          <Icon className="h-6 w-6" />
           {dest.badgeKey === 'approvals' && approvalCount > 0 && (
             <span className="absolute -top-1.5 -right-1.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-600 px-0.5 text-[8.5px] font-bold text-white shadow-sm ring-1 ring-card">
               {approvalCount > 99 ? '99+' : approvalCount}
@@ -164,7 +166,7 @@ export default function SideRail() {
             <span className="tp-rail-label text-[15px] font-extrabold tracking-tight text-foreground">ticket pulse</span>
           </button>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {destinations.map(renderRow)}
           </div>
 
@@ -175,7 +177,7 @@ export default function SideRail() {
               type="button"
               onClick={(e) => { e.stopPropagation(); setPeekPinned(false); setExpanded(false); setCollapsed(!railCollapsed); }}
               title={railCollapsed ? 'Keep the navigation expanded' : 'Collapse the navigation to a thin edge'}
-              className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[12px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground tp-focus-ring"
+              className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[13px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground tp-focus-ring"
             >
               <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
                 {railCollapsed ? <ChevronsRight className="h-[18px] w-[18px]" /> : <ChevronsLeft className="h-[18px] w-[18px]" />}
@@ -191,14 +193,14 @@ export default function SideRail() {
               aria-current={settingsActive ? 'page' : undefined}
               title="Settings"
               className={cn(
-                'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
+                'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[13.5px] font-semibold transition-colors tp-focus-ring',
                 settingsActive
                   ? 'border-input bg-muted text-foreground cursor-default'
                   : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
               )}
             >
-              <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
-                <Settings className="h-5 w-5" />
+              <span className="inline-flex h-6 w-6 flex-none items-center justify-center">
+                <Settings className="h-6 w-6" />
               </span>
               <span className="tp-rail-label flex-1 truncate">Settings</span>
             </button>
