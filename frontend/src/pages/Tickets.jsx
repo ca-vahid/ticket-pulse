@@ -13,6 +13,7 @@ import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import TicketSearchBox from '../components/tickets/TicketSearchBox';
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
+import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
@@ -435,6 +436,29 @@ export default function Tickets() {
         const next = normalizeColumnKeys(value);
         setColumnKeys(next);
         try { localStorage.setItem('tp_queue_columns', JSON.stringify(next)); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+  // Column map (2 Oct 2026): jump links + a mini-map over a list that scrolls
+  // sideways. Opt-in per person (Columns menu) — it costs a row, so it is off
+  // until someone wants it. Same mirror + server-wins choreography as above.
+  const [columnMap, setColumnMap] = useState(() => {
+    try { return localStorage.getItem('tp_queue_column_map') === '1'; } catch { return false; }
+  });
+  const updateColumnMap = useCallback((on) => {
+    setColumnMap(on);
+    try { localStorage.setItem('tp_queue_column_map', on ? '1' : '0'); } catch { /* no-op */ }
+    ticketsAPI.setQueuePreference('queue.columnMap', Boolean(on)).catch(() => { /* local mirror still applies */ });
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference('queue.columnMap')
+      .then((res) => {
+        const value = res?.data?.value;
+        if (cancelled || typeof value !== 'boolean') return;
+        setColumnMap(value);
+        try { localStorage.setItem('tp_queue_column_map', value ? '1' : '0'); } catch { /* no-op */ }
       })
       .catch(() => { /* offline/legacy backend — the mirror already painted */ });
     return () => { cancelled = true; };
@@ -1429,6 +1453,10 @@ export default function Tickets() {
   const widthsPinned = Object.keys(colWidths).length > 0 || dense || listOverflows;
   const listMinWidth = Math.max(gridMinWidth, listOverflows ? floorMinWidth : 0);
   const scrollWrapRef = useRef(null);
+  // F (2 Oct 2026): the checkbox + subject stay put while the columns slide —
+  // compact/dense lists whose leftmost column is the subject (roomy's title
+  // spans the whole row, and a reordered subject is not at the edge).
+  const pinSubject = !roomy && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
   // Live drag preview (QR2): write the recomputed template straight onto the
   // list card's CSS vars — zero React renders per pointermove; the commit on
   // pointerup re-renders once with the identical values.
@@ -1466,7 +1494,7 @@ export default function Tickets() {
   const headerColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.key !== 'subject' && colMeta[c.key]?.headerRender), [colMeta]);
   const headerPad = roomy ? 'py-2' : cellPad;
   const headerCell = (col) => (
-    <span key={col.key} className={`${CELL} relative ${colMeta[col.key].headerCls} ${headerPad} ${col.headerClass || ''}`} style={colMeta[col.key].style}>
+    <span key={col.key} data-qcol={col.key} data-qlabel={col.label} className={`${CELL} relative ${colMeta[col.key].headerCls} ${headerPad} ${col.headerClass || ''}`} style={colMeta[col.key].style}>
       {col.sortField ? (
         <button
           onClick={() => headerSort(col.sortField)}
@@ -1689,7 +1717,7 @@ export default function Tickets() {
                       custom columns apply at xl+ and mobile keeps its cards. */}
                   {!boardMode && (
                     <div className="hidden md:block order-2">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} />
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} />
                     </div>
                   )}
                   {/* View — two list densities plus the drag-drop board
@@ -1876,21 +1904,22 @@ export default function Tickets() {
                           appeared at the foot, 16 Sep 2026). */}
                       {/* md, not xl (QA 09-21 #12): an iPad is 1024–1180 px wide and had no
                           way to reach the columns past the edge. */}
-                      <div ref={scrollWrapRef} className={widthsPinned ? 'md:overflow-x-auto tp-scrollbar-none' : ''}>
-                        <div className={widthsPinned ? 'md:min-w-[var(--tp-q-minw)]' : ''}>
-                          {/* Header */}
-                          <div className="hidden md:flex items-stretch border-b border-border bg-muted/40">
-                            <span className="flex items-center justify-center w-9 flex-shrink-0">
-                              <input
-                                type="checkbox"
-                                checked={allSelected}
-                                onChange={toggleSelectAll}
-                                aria-label="Select all tickets on this page"
-                                title="Select page"
-                                className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
-                              />
-                            </span>
-                            {roomy ? (
+                      <QueueSideScroll targetRef={scrollWrapRef} pinned={pinSubject && widthsPinned} showMap={columnMap && widthsPinned} deps={[tickets.length, gridTemplate, widthsPinned, layout]}>
+                        <div ref={scrollWrapRef} className={widthsPinned ? `md:overflow-x-auto tp-scrollbar-none ${pinSubject ? 'tp-q-pin' : ''}` : ''}>
+                          <div className={widthsPinned ? 'md:min-w-[var(--tp-q-minw)]' : ''}>
+                            {/* Header */}
+                            <div className="tp-q-head hidden md:flex items-stretch border-b border-border bg-muted/40">
+                              <span className="tp-pin tp-pin-0 flex items-center justify-center w-9 flex-shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={allSelected}
+                                  onChange={toggleSelectAll}
+                                  aria-label="Select all tickets on this page"
+                                  title="Select page"
+                                  className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
+                                />
+                              </span>
+                              {roomy ? (
                               /* Roomy header rides the SAME grid as the rows so every
                                  label sits over its column — the old flat flex shoved
                                  one "Status · Due · Updated" clump into the corner
@@ -1898,274 +1927,275 @@ export default function Tickets() {
                                  tracks; at xl it sits on the slim type slot and every
                                  chosen column gets its own label (the columns are
                                  user-ordered now, so no fixed span can cover them). */
-                              <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
-                                <span aria-hidden="true" />
-                                <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/3] xl:row-start-1 xl:!px-1.5`}>
-                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded whitespace-nowrap">
+                                <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
+                                  <span aria-hidden="true" />
+                                  <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/3] xl:row-start-1 xl:!px-1.5`}>
+                                    <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded whitespace-nowrap">
                                     Ticket{sortIndicator('subject')}
-                                  </button>
-                                </span>
-                                {headerColumns.map(headerCell)}
-                              </div>
-                            ) : (
-                              <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
-                                <span aria-hidden="true" />
-                                <span className={`${CELL} relative ${cellPad} ${colMeta.subject.headerCls}`} style={colMeta.subject.style}>
-                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
+                                    </button>
+                                  </span>
+                                  {headerColumns.map(headerCell)}
+                                </div>
+                              ) : (
+                                <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
+                                  <span aria-hidden="true" className="tp-pin tp-pin-accent self-stretch" />
+                                  <span data-qcol="subject" data-qlabel="Subject" data-pin-end="" className={`${CELL} tp-pin tp-pin-subject relative ${cellPad} ${colMeta.subject.headerCls}`} style={colMeta.subject.style}>
+                                    <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
                                     Subject{sortIndicator('subject')}
-                                  </button>
-                                  {/* Subject is resizable in compact only — roomy's
+                                    </button>
+                                    {/* Subject is resizable in compact only — roomy's
                                       col 2 is the fixed 60px type slot (QR2). */}
-                                  <ColumnResizeHandle
-                                    colKey="subject"
-                                    label="Subject"
-                                    minPx={QUEUE_COLUMNS[0].minPx}
-                                    value={colWidths.subject}
-                                    onPreview={previewColumnWidth}
-                                    onCommit={commitColumnWidth}
-                                    onReset={resetColumnWidth}
-                                  />
-                                </span>
-                                {headerColumns.map(headerCell)}
-                              </div>
-                            )}
-                          </div>
+                                    <ColumnResizeHandle
+                                      colKey="subject"
+                                      label="Subject"
+                                      minPx={QUEUE_COLUMNS[0].minPx}
+                                      value={colWidths.subject}
+                                      onPreview={previewColumnWidth}
+                                      onCommit={commitColumnWidth}
+                                      onReset={resetColumnWidth}
+                                    />
+                                  </span>
+                                  {headerColumns.map(headerCell)}
+                                </div>
+                              )}
+                            </div>
 
-                          {/* Row dividers ride the --border token (Phase QX, QA 08-27 #4):
+                            {/* Row dividers ride the --border token (Phase QX, QA 08-27 #4):
                               slate-100 on white measured ≈1.08:1 — invisible on most
                               panels; the token (214 32% 88%) lands ≈1.25:1. Decorative
                               lines, so this is "measurably more visible", not a WCAG
                               claim. Mobile cards share these <li>s — one change, both. */}
-                          <ul className="divide-y divide-border" data-density={layout}>
-                            {tickets.map((ticket, rowIndex) => {
-                              const previewing = previewId === ticket.id;
-                              // The AI assignment pipeline is deciding this ticket RIGHT NOW —
-                              // the row gets a live indigo aura so watchers see it happening.
-                              // Held rows (run done, assignee write-back still in flight) stay
-                              // live so the treatment runs straight through to the name + flash.
-                              const aiLive = (ticket.ai?.state === 'analyzing' || aiHoldIds.has(ticket.id)) && !manualWinIds.has(ticket.id);
-                              // Post-refresh flash: this row just arrived / changed.
-                              const fx = rowFx.get(ticket.id) || null;
-                              // Left accent bar: blue when this row is the open preview (focus without
-                              // washing the whole row), flowing indigo while AI is assigning, blue for
-                              // fresh arrivals, otherwise the priority strip for High/Urgent.
-                              const accent = previewing
-                                ? 'bg-blue-500'
-                                : aiLive ? 'tp-ai-accent'
-                                  : fx === 'new' ? 'bg-blue-400'
-                                    : ticket.priority >= 3 ? (PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-transparent') : 'bg-transparent';
-                              const isEditable = ticket.origin === 'ticketpulse' && ticketingOn;
-                              // FS-born rows can be reassigned too, via a confirmed FreshService write-back.
-                              const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId);
-                              const resolvedLike = isTerminalStatus(statusDefs, ticket.status);
-                              // Deleted/Spam are removed — no SLA/due date applies.
-                              const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
-                              const mobileAssignable = isEditable || fsRowEditable;
-                              // Assignee not in the active team list = deactivated / FS-only (read-only here).
-                              const assigneeReadOnly = ticket.assignedTech
+                            <ul className="divide-y divide-border" data-density={layout}>
+                              {tickets.map((ticket, rowIndex) => {
+                                const previewing = previewId === ticket.id;
+                                // The AI assignment pipeline is deciding this ticket RIGHT NOW —
+                                // the row gets a live indigo aura so watchers see it happening.
+                                // Held rows (run done, assignee write-back still in flight) stay
+                                // live so the treatment runs straight through to the name + flash.
+                                const aiLive = (ticket.ai?.state === 'analyzing' || aiHoldIds.has(ticket.id)) && !manualWinIds.has(ticket.id);
+                                // Post-refresh flash: this row just arrived / changed.
+                                const fx = rowFx.get(ticket.id) || null;
+                                // Left accent bar: blue when this row is the open preview (focus without
+                                // washing the whole row), flowing indigo while AI is assigning, blue for
+                                // fresh arrivals, otherwise the priority strip for High/Urgent.
+                                const accent = previewing
+                                  ? 'bg-blue-500'
+                                  : aiLive ? 'tp-ai-accent'
+                                    : fx === 'new' ? 'bg-blue-400'
+                                      : ticket.priority >= 3 ? (PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-transparent') : 'bg-transparent';
+                                const isEditable = ticket.origin === 'ticketpulse' && ticketingOn;
+                                // FS-born rows can be reassigned too, via a confirmed FreshService write-back.
+                                const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId);
+                                const resolvedLike = isTerminalStatus(statusDefs, ticket.status);
+                                // Deleted/Spam are removed — no SLA/due date applies.
+                                const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
+                                const mobileAssignable = isEditable || fsRowEditable;
+                                // Assignee not in the active team list = deactivated / FS-only (read-only here).
+                                const assigneeReadOnly = ticket.assignedTech
                                 && !(meta?.technicians || []).some((t) => t.id === ticket.assignedTechId);
 
-                              // ---- Row cell pieces, arranged per layout below (compact:
-                              //      one tight line, type folded into the title; roomy:
-                              //      title on its own line, everything else beneath). ----
-                              const typePill = <TypePill type={ticket.ticketType} />;
-                              const priorityDot = isEditable
-                                ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
-                                : <PriorityDot priority={ticket.priority} title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — synced from FreshService, read-only here`} />;
-                              const priorityEl = priorityColumnOn
-                                ? <span className="xl:hidden inline-flex" data-testid="subject-priority-dot">{priorityDot}</span>
-                                : priorityDot;
-                              // Real anchor (QA 08-07 #7): right-click → "Open in
-                              // new tab" and modified clicks work natively; a plain
-                              // left-click preventDefaults into the peek flow.
-                              const ticketHref = `/tickets/${ticket.id}`;
-                              const subjectBtn = (
-                                <Link
-                                  to={ticketHref}
-                                  state={linkState}
-                                  onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                  onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
-                                  className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : dense ? 'text-[12.5px]' : 'text-sm'}`}
-                                >
-                                  {ticket.subject || '(no subject)'}
-                                </Link>
-                              );
-                              const subjectChips = (
-                                <>
-                                  {fx === 'new' && (
-                                    <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
-                                      New
-                                    </span>
-                                  )}
-                                  {ticket.isExternal && <ExternalChip />}
-                                  {ticket.solutionVerifiedAt && <SolutionMark />}
-                                  {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
-                                  <OccurrenceMark ticket={ticket} />
-                                  <StateChip state={ticket.stateChip} />
-                                  {ticket.hasProposedReply && (
-                                    <span
-                                      className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-[9px] font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wide"
-                                      title="A workflow-drafted reply is waiting for approval on this ticket"
-                                    >
-                                      <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Draft
-                                    </span>
-                                  )}
-                                  {presenceMap[ticket.id]?.length > 0 && (
-                                    <span
-                                      className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200 dark:ring-violet-500/30"
-                                      title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
-                                      role="img"
-                                      aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
-                                    />
-                                  )}
-                                  {(ticket.tags || []).slice(0, 3).map((tag) => (
-                                    <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
-                                  ))}
-                                  {(ticket.tags || []).length > 3 && (
-                                    <span className="shrink-0 text-[10px] text-muted-foreground/75" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
-                                      +{ticket.tags.length - 3}
-                                    </span>
-                                  )}
-                                  {/* Featured custom field (Phase 2): quiet slate chip on rows with a value */}
-                                  {featuredDef && <FeaturedFieldChip def={featuredDef} value={ticket.customFields?.[featuredDef.key]} />}
-                                </>
-                              );
-                              const subjectMeta = (
-                                <span className="block w-full text-[11px] text-muted-foreground/75 truncate pl-4">
-                                  {/* Ref is an anchor too (QA 08-07 #7) — same
-                                      modifier-aware behavior as the subject. */}
+                                // ---- Row cell pieces, arranged per layout below (compact:
+                                //      one tight line, type folded into the title; roomy:
+                                //      title on its own line, everything else beneath). ----
+                                const typePill = <TypePill type={ticket.ticketType} />;
+                                const priorityDot = isEditable
+                                  ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
+                                  : <PriorityDot priority={ticket.priority} title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — synced from FreshService, read-only here`} />;
+                                const priorityEl = priorityColumnOn
+                                  ? <span className="xl:hidden inline-flex" data-testid="subject-priority-dot">{priorityDot}</span>
+                                  : priorityDot;
+                                // Real anchor (QA 08-07 #7): right-click → "Open in
+                                // new tab" and modified clicks work natively; a plain
+                                // left-click preventDefaults into the peek flow.
+                                const ticketHref = `/tickets/${ticket.id}`;
+                                const subjectBtn = (
                                   <Link
                                     to={ticketHref}
                                     state={linkState}
                                     onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                    className="tp-focus-ring rounded font-mono hover:text-blue-600 dark:hover:text-blue-300"
+                                    onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
+                                    className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : dense ? 'text-[12.5px]' : 'text-sm'}`}
                                   >
-                                    {ticket.displayRef}
+                                    {ticket.subject || '(no subject)'}
                                   </Link>
-                                  {/* At xl the requester has a real column (QA 08-07
+                                );
+                                const subjectChips = (
+                                  <>
+                                    {fx === 'new' && (
+                                      <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
+                                      New
+                                      </span>
+                                    )}
+                                    {ticket.isExternal && <ExternalChip />}
+                                    {ticket.solutionVerifiedAt && <SolutionMark />}
+                                    {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
+                                    <OccurrenceMark ticket={ticket} />
+                                    <StateChip state={ticket.stateChip} />
+                                    {ticket.hasProposedReply && (
+                                      <span
+                                        className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-[9px] font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wide"
+                                        title="A workflow-drafted reply is waiting for approval on this ticket"
+                                      >
+                                        <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Draft
+                                      </span>
+                                    )}
+                                    {presenceMap[ticket.id]?.length > 0 && (
+                                      <span
+                                        className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200 dark:ring-violet-500/30"
+                                        title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                        role="img"
+                                        aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                      />
+                                    )}
+                                    {(ticket.tags || []).slice(0, 3).map((tag) => (
+                                      <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
+                                    ))}
+                                    {(ticket.tags || []).length > 3 && (
+                                      <span className="shrink-0 text-[10px] text-muted-foreground/75" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
+                                      +{ticket.tags.length - 3}
+                                      </span>
+                                    )}
+                                    {/* Featured custom field (Phase 2): quiet slate chip on rows with a value */}
+                                    {featuredDef && <FeaturedFieldChip def={featuredDef} value={ticket.customFields?.[featuredDef.key]} />}
+                                  </>
+                                );
+                                const subjectMeta = (
+                                  <span className="block w-full text-[11px] text-muted-foreground/75 truncate pl-4">
+                                    {/* Ref is an anchor too (QA 08-07 #7) — same
+                                      modifier-aware behavior as the subject. */}
+                                    <Link
+                                      to={ticketHref}
+                                      state={linkState}
+                                      onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                      className="tp-focus-ring rounded font-mono hover:text-blue-600 dark:hover:text-blue-300"
+                                    >
+                                      {ticket.displayRef}
+                                    </Link>
+                                    {/* At xl the requester has a real column (QA 08-07
                                       #6); below xl the meta line keeps name+office
                                       so the tablet band loses nothing. */}
-                                  <span className="xl:hidden">
-                                    {' · '}
-                                    {ticket.requester?.name || 'Unknown requester'}
-                                    {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
-                                      ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
-                                  </span>
-                                  {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
-                                    <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
-                                  )}
-                                  {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 dark:text-sky-300 font-medium">· TP-born</span>}
-                                  {/* Below xl the Updated column is dropped (tablet band) —
+                                    <span className="xl:hidden">
+                                      {' · '}
+                                      {ticket.requester?.name || 'Unknown requester'}
+                                      {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
+                                        ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
+                                    </span>
+                                    {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
+                                      <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
+                                    )}
+                                    {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 dark:text-sky-300 font-medium">· TP-born</span>}
+                                    {/* Below xl the Updated column is dropped (tablet band) —
                                       its relative time folds into this meta line instead. */}
-                                  <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
-                                </span>
-                              );
-                              // Everything the registry cell renderers need
-                              // (queueColumns.jsx) — built per row, per the ctx
-                              // contract documented there.
-                              const rowCtx = {
-                                cell: (key) => `${CELL} ${colMeta[key]?.cls || ''}`,
-                                cellStyle: (key) => colMeta[key]?.style,
-                                cellPad,
-                                roomy,
-                                technicians: meta?.technicians || [],
-                                statusDefs,
-                                groupNames,
-                                slaCalendarAware: meta?.slaCalendarAware === true,
-                                canReview,
-                                canSeeAi,
-                                fx,
-                                aiLive,
-                                aiProgress: aiProgress.get(ticket.id),
-                                isEditable,
-                                fsRowEditable,
-                                removedLike,
-                                resolvedLike,
-                                priorityColumnOn,
-                                ticketHref,
-                                linkState,
-                                refreshAfterEdit,
-                                showToast,
-                                setAiTicket,
-                                fsAssign,
-                                fsStatusChange,
-                                onManualAssigned,
-                                onOpenFull: openTicket,
-                              };
-                              const columnCells = rowColumns.map((c) => (
-                                <Fragment key={c.key}>{c.render(ticket, rowCtx)}</Fragment>
-                              ));
-                              return (
-                                <motion.li
-                                  key={ticket.id}
-                                  initial={fx === 'new' ? { opacity: 0, y: -14 } : false}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-                                  className={`group flex items-stretch transition-colors cursor-pointer ${
-                                    fx === 'new' ? 'tp-fx1' : fx === 'updated' ? 'tp-fx1 tp-fx1-updated' : ''
-                                  } ${
-                                    aiLive ? 'tp-ai-live'
-                                      : previewing ? 'bg-blue-50/50 dark:bg-blue-500/10'
-                                        : selectedIds.has(ticket.id) ? 'bg-blue-50/40 dark:bg-blue-500/10' : 'hover:bg-muted/70'
-                                  }`}
-                                  /* Stagger the sweep so 83 refreshed rows read as a wave.
+                                    <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
+                                  </span>
+                                );
+                                // Everything the registry cell renderers need
+                                // (queueColumns.jsx) — built per row, per the ctx
+                                // contract documented there.
+                                const rowCtx = {
+                                  cell: (key) => `${CELL} ${colMeta[key]?.cls || ''}`,
+                                  cellStyle: (key) => colMeta[key]?.style,
+                                  cellPad,
+                                  roomy,
+                                  technicians: meta?.technicians || [],
+                                  statusDefs,
+                                  groupNames,
+                                  slaCalendarAware: meta?.slaCalendarAware === true,
+                                  canReview,
+                                  canSeeAi,
+                                  fx,
+                                  aiLive,
+                                  aiProgress: aiProgress.get(ticket.id),
+                                  isEditable,
+                                  fsRowEditable,
+                                  removedLike,
+                                  resolvedLike,
+                                  priorityColumnOn,
+                                  ticketHref,
+                                  linkState,
+                                  refreshAfterEdit,
+                                  showToast,
+                                  setAiTicket,
+                                  fsAssign,
+                                  fsStatusChange,
+                                  onManualAssigned,
+                                  onOpenFull: openTicket,
+                                };
+                                const columnCells = rowColumns.map((c) => (
+                                  <Fragment key={c.key}>{c.render(ticket, rowCtx)}</Fragment>
+                                ));
+                                return (
+                                  <motion.li
+                                    key={ticket.id}
+                                    initial={fx === 'new' ? { opacity: 0, y: -14 } : false}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                                    className={`group flex items-stretch transition-colors cursor-pointer ${
+                                      fx === 'new' ? 'tp-fx1' : fx === 'updated' ? 'tp-fx1 tp-fx1-updated' : ''
+                                    } ${
+                                      aiLive ? 'tp-ai-live'
+                                        : previewing ? 'bg-blue-50/50 dark:bg-blue-500/10'
+                                          : selectedIds.has(ticket.id) ? 'bg-blue-50/40 dark:bg-blue-500/10' : 'hover:bg-muted/70'
+                                    }`}
+                                    /* Stagger the sweep so 83 refreshed rows read as a wave.
                                      Capped at 12 rows (660ms) so the last row's 1.1s sweep
                                      still finishes before rowFx clears at 3.2s. */
-                                  style={fx === 'new' || fx === 'updated'
-                                    ? { '--tp-fx-delay': `${Math.min(rowIndex, 12) * 55}ms` }
-                                    : undefined}
-                                  onClick={() => onRowClick(ticket.id)}
-                                  onDoubleClick={() => onRowDoubleClick(ticket.id)}
-                                  title="Click to open · double-click to preview"
-                                >
-                                  <span
-                                    className="hidden md:flex items-center justify-center w-9 flex-shrink-0"
-                                    onClick={(e) => e.stopPropagation()}
-                                    onDoubleClick={(e) => e.stopPropagation()}
+                                    style={fx === 'new' || fx === 'updated'
+                                      ? { '--tp-fx-delay': `${Math.min(rowIndex, 12) * 55}ms` }
+                                      : undefined}
+                                    onClick={() => onRowClick(ticket.id)}
+                                    onDoubleClick={() => onRowDoubleClick(ticket.id)}
+                                    title="Click to open · double-click to preview"
+                                    data-row={aiLive ? 'ai' : previewing ? 'preview' : selectedIds.has(ticket.id) ? 'selected' : 'idle'}
                                   >
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedIds.has(ticket.id)}
-                                      onChange={() => toggleSelect(ticket.id)}
-                                      aria-label={`Select ${ticket.displayRef}`}
-                                      className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
-                                    />
-                                  </span>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="hidden md:flex">
-                                      {roomy ? (
-                                        <div className={`flex-1 ${GRID_ROOMY}`}>
-                                          <span aria-hidden="true" className={`self-stretch ${accent}`} style={{ gridRow: '1 / 3' }} />
-                                          {/* Roomy: the title (+ ref/requester) spans the full width on line 1.
+                                    <span
+                                      className="tp-pin tp-pin-0 hidden md:flex items-center justify-center w-9 flex-shrink-0"
+                                      onClick={(e) => e.stopPropagation()}
+                                      onDoubleClick={(e) => e.stopPropagation()}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedIds.has(ticket.id)}
+                                        onChange={() => toggleSelect(ticket.id)}
+                                        aria-label={`Select ${ticket.displayRef}`}
+                                        className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
+                                      />
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="hidden md:flex">
+                                        {roomy ? (
+                                          <div className={`flex-1 ${GRID_ROOMY}`}>
+                                            <span aria-hidden="true" className={`self-stretch ${accent}`} style={{ gridRow: '1 / 3' }} />
+                                            {/* Roomy: the title (+ ref/requester) spans the full width on line 1.
                                               Tightened (QA 07-30 #1): the old py-2 + py-1.5 stack read as
                                               dead space — title now hugs its detail line. */}
-                                          <span className="px-3 pt-1.5 pb-0.5 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
-                                            {/* Wrap below xl: chips fall to a second line in normal
+                                            <span className="px-3 pt-1.5 pb-0.5 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
+                                              {/* Wrap below xl: chips fall to a second line in normal
                                                 flow instead of overlaying the neighbour column when
                                                 the tablet-band subject track runs out (QA 08-04 #6).
                                                 The dot+subject stay one non-wrapping unit so the
                                                 priority dot never strands on a line of its own. */}
-                                            <span className="flex flex-wrap xl:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
-                                              <span className="flex items-center gap-1.5 min-w-0">
-                                                {priorityEl}
-                                                {subjectBtn}
+                                              <span className="flex flex-wrap xl:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
+                                                <span className="flex items-center gap-1.5 min-w-0">
+                                                  {priorityEl}
+                                                  {subjectBtn}
+                                                </span>
+                                                {subjectChips}
                                               </span>
-                                              {subjectChips}
+                                              {subjectMeta}
                                             </span>
-                                            {subjectMeta}
-                                          </span>
-                                          {/* Row 2: the slim type slot, then the chosen
+                                            {/* Row 2: the slim type slot, then the chosen
                                               columns (canonical DOM order; xl placement
                                               via --tp-q-col — see colMeta). */}
-                                          <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-2`}>{typePill}</span>
-                                          {columnCells}
-                                        </div>
-                                      ) : (
-                                        <div className={`flex-1 ${GRID_COMPACT}`}>
-                                          <span aria-hidden="true" className={`self-stretch ${accent}`} />
-                                          {/* Compact: type folds into the title line so the subject gets the width */}
-                                          <span className={`${CELL} ${cellPad} ${colMeta.subject.cls} flex-col !items-start justify-center gap-0.5`} style={colMeta.subject.style}>
-                                            {/* Wrap below xl — same rationale as the roomy row: pills
+                                            <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-2`}>{typePill}</span>
+                                            {columnCells}
+                                          </div>
+                                        ) : (
+                                          <div className={`flex-1 ${GRID_COMPACT}`}>
+                                            <span aria-hidden="true" className={`self-stretch tp-pin-accent ${accent} ${accent === 'bg-transparent' || accent === 'tp-ai-accent' ? 'tp-pin' : ''}`} />
+                                            {/* Compact: type folds into the title line so the subject gets the width */}
+                                            <span className={`${CELL} tp-pin tp-pin-subject ${cellPad} ${colMeta.subject.cls} flex-col !items-start justify-center gap-0.5`} style={colMeta.subject.style}>
+                                              {/* Wrap below xl — same rationale as the roomy row: pills
                                                 wrap under the subject rather than colliding into the
                                                 category column on iPad widths (QA 08-04 #6). The
                                                 dot+type+subject group never wraps internally, so the
@@ -2173,149 +2203,150 @@ export default function Tickets() {
                                                 Dense (16 Sep 2026): ONE line — the ref follows the
                                                 subject the FreshService way, nothing wraps, the list
                                                 scrolls sideways instead. */}
-                                            <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap xl:flex-nowrap'}`}>
-                                              <span className="flex items-center gap-1.5 min-w-0">
-                                                {priorityEl}
-                                                <span className="shrink-0">{typePill}</span>
-                                                {subjectBtn}
-                                                {dense && (
-                                                  <Link
-                                                    to={ticketHref}
-                                                    state={linkState}
-                                                    onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                                    className="tp-focus-ring shrink-0 rounded font-mono text-[11px] text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300"
-                                                    data-testid="dense-ref"
-                                                  >
-                                                    {ticket.displayRef}
-                                                  </Link>
-                                                )}
+                                              <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap xl:flex-nowrap'}`}>
+                                                <span className="flex items-center gap-1.5 min-w-0">
+                                                  {priorityEl}
+                                                  <span className="shrink-0">{typePill}</span>
+                                                  {subjectBtn}
+                                                  {dense && (
+                                                    <Link
+                                                      to={ticketHref}
+                                                      state={linkState}
+                                                      onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                                      className="tp-focus-ring shrink-0 rounded font-mono text-[11px] text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300"
+                                                      data-testid="dense-ref"
+                                                    >
+                                                      {ticket.displayRef}
+                                                    </Link>
+                                                  )}
+                                                </span>
+                                                {subjectChips}
                                               </span>
-                                              {subjectChips}
+                                              {!dense && subjectMeta}
                                             </span>
-                                            {!dense && subjectMeta}
-                                          </span>
-                                          {columnCells}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* Mobile card */}
-                                    <div className="md:hidden relative px-4 py-3">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <PriorityDot priority={ticket.priority} />
-                                        <span className="font-mono text-[11px] font-semibold text-muted-foreground">{ticket.displayRef}</span>
-                                        <StateChip state={ticket.stateChip} />
-                                        {fx === 'new' && (
-                                          <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
-                                            New
-                                          </span>
+                                            {columnCells}
+                                          </div>
                                         )}
-                                        {aiLive && (canReview ? (
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
-                                            title="AI is picking the best technician right now"
-                                            className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
-                                          >
-                                            <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                            AI
-                                          </button>
-                                        ) : (
-                                          /* Read-only for non-reviewers — no modal behind it (QA 08-19 #2). */
-                                          <span
-                                            onClick={(e) => e.stopPropagation()}
-                                            title="AI is picking the best technician right now"
-                                            className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
-                                          >
-                                            <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                            AI
-                                          </span>
-                                        ))}
-                                        <StatusPill status={ticket.parkedUntil ? 'Parked' : ticket.status} className="ml-auto" tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
                                       </div>
-                                      {/* Anchor for long-press / new-tab on touch +
+
+                                      {/* Mobile card */}
+                                      <div className="md:hidden relative px-4 py-3">
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <PriorityDot priority={ticket.priority} />
+                                          <span className="font-mono text-[11px] font-semibold text-muted-foreground">{ticket.displayRef}</span>
+                                          <StateChip state={ticket.stateChip} />
+                                          {fx === 'new' && (
+                                            <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
+                                            New
+                                            </span>
+                                          )}
+                                          {aiLive && (canReview ? (
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
+                                              title="AI is picking the best technician right now"
+                                              className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                            >
+                                              <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                            AI
+                                            </button>
+                                          ) : (
+                                          /* Read-only for non-reviewers — no modal behind it (QA 08-19 #2). */
+                                            <span
+                                              onClick={(e) => e.stopPropagation()}
+                                              title="AI is picking the best technician right now"
+                                              className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                            >
+                                              <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                            AI
+                                            </span>
+                                          ))}
+                                          <StatusPill status={ticket.parkedUntil ? 'Parked' : ticket.status} className="ml-auto" tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
+                                        </div>
+                                        {/* Anchor for long-press / new-tab on touch +
                                           right-click on small windows (QA 08-07 #7);
                                           plain tap keeps the card's open behavior. */}
-                                      <Link
-                                        to={ticketHref}
-                                        state={linkState}
-                                        onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                        className="text-sm font-medium text-foreground line-clamp-2"
-                                      >
-                                        {ticket.subject || '(no subject)'}
-                                      </Link>
-                                      {(() => {
-                                        const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
-                                        const label = subLabel || catLabel;
-                                        return (
-                                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/75 min-w-0">
-                                            <span className="truncate">{ticket.requester?.name || 'Unknown requester'}</span>
-                                            {label && (<><span aria-hidden="true">·</span><span className="truncate text-muted-foreground">{label}</span></>)}
+                                        <Link
+                                          to={ticketHref}
+                                          state={linkState}
+                                          onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                          className="text-sm font-medium text-foreground line-clamp-2"
+                                        >
+                                          {ticket.subject || '(no subject)'}
+                                        </Link>
+                                        {(() => {
+                                          const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
+                                          const label = subLabel || catLabel;
+                                          return (
+                                            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/75 min-w-0">
+                                              <span className="truncate">{ticket.requester?.name || 'Unknown requester'}</span>
+                                              {label && (<><span aria-hidden="true">·</span><span className="truncate text-muted-foreground">{label}</span></>)}
+                                            </div>
+                                          );
+                                        })()}
+                                        {(ticket.tags || []).length > 0 && (
+                                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                                            {ticket.tags.slice(0, 3).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
+                                            {ticket.tags.length > 3 && (
+                                              <span className="text-[10px] text-muted-foreground/75" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>+{ticket.tags.length - 3}</span>
+                                            )}
                                           </div>
-                                        );
-                                      })()}
-                                      {(ticket.tags || []).length > 0 && (
-                                        <div className="mt-1 flex flex-wrap items-center gap-1">
-                                          {ticket.tags.slice(0, 3).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
-                                          {ticket.tags.length > 3 && (
-                                            <span className="text-[10px] text-muted-foreground/75" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>+{ticket.tags.length - 3}</span>
-                                          )}
-                                        </div>
-                                      )}
-                                      <div className={`relative mt-2 flex items-center gap-2 ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
-                                        {mobileAssignable ? (
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); setAssignSheetTicket(ticket); }}
-                                            aria-label={ticket.assignedTech ? `Assignee ${ticket.assignedTech.name} — tap to change` : 'Assign this ticket'}
-                                            className="tp-focus-ring flex items-center gap-1.5 min-w-0 max-w-[70%] min-h-[36px] pl-1 pr-2 rounded-lg border border-border bg-card active:bg-muted transition-colors"
-                                          >
-                                            {ticket.assignedTech ? (
-                                              <>
-                                                <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                                                <span className="text-xs font-medium text-foreground/85 truncate">{ticket.assignedTech.name}</span>
-                                                {assigneeReadOnly && (
-                                                  <span className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200">read-only</span>
-                                                )}
-                                              </>
-                                            ) : canSeeAi && ticket.ai?.state === 'suggested' ? (
+                                        )}
+                                        <div className={`relative mt-2 flex items-center gap-2 ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
+                                          {mobileAssignable ? (
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); setAssignSheetTicket(ticket); }}
+                                              aria-label={ticket.assignedTech ? `Assignee ${ticket.assignedTech.name} — tap to change` : 'Assign this ticket'}
+                                              className="tp-focus-ring flex items-center gap-1.5 min-w-0 max-w-[70%] min-h-[36px] pl-1 pr-2 rounded-lg border border-border bg-card active:bg-muted transition-colors"
+                                            >
+                                              {ticket.assignedTech ? (
+                                                <>
+                                                  <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                                                  <span className="text-xs font-medium text-foreground/85 truncate">{ticket.assignedTech.name}</span>
+                                                  {assigneeReadOnly && (
+                                                    <span className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200">read-only</span>
+                                                  )}
+                                                </>
+                                              ) : canSeeAi && ticket.ai?.state === 'suggested' ? (
                                               /* Visible to every member; the sheet it opens keeps
                                                  approve reviewer-only (read/act split, QA 08-19 #2). */
-                                              <>
-                                                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-indigo-300 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-500 inline-flex items-center justify-center flex-shrink-0">
-                                                  <Sparkles className="w-3 h-3" aria-hidden="true" />
-                                                </span>
-                                                <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 truncate">AI: {ticket.ai.techName || 'suggestion'}</span>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
-                                                  <UserRound className="w-3 h-3" aria-hidden="true" />
-                                                </span>
-                                                <span className="text-xs font-medium text-muted-foreground">Assign</span>
-                                              </>
-                                            )}
-                                            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" aria-hidden="true" />
-                                          </button>
-                                        ) : (
-                                          <span className="flex items-center gap-1.5 min-w-0 max-w-[70%] text-xs text-muted-foreground">
-                                            {ticket.assignedTech ? (
-                                              <>
-                                                <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                                                <span className="truncate">{ticket.assignedTech.name}</span>
-                                              </>
-                                            ) : <span className="text-muted-foreground/75">Unassigned</span>}
-                                          </span>
-                                        )}
-                                        {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
-                                        <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground/75">{timeAgo(ticket.lastActivityAt || ticket.updatedAt)}</span>
+                                                <>
+                                                  <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-indigo-300 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-500 inline-flex items-center justify-center flex-shrink-0">
+                                                    <Sparkles className="w-3 h-3" aria-hidden="true" />
+                                                  </span>
+                                                  <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 truncate">AI: {ticket.ai.techName || 'suggestion'}</span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
+                                                    <UserRound className="w-3 h-3" aria-hidden="true" />
+                                                  </span>
+                                                  <span className="text-xs font-medium text-muted-foreground">Assign</span>
+                                                </>
+                                              )}
+                                              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" aria-hidden="true" />
+                                            </button>
+                                          ) : (
+                                            <span className="flex items-center gap-1.5 min-w-0 max-w-[70%] text-xs text-muted-foreground">
+                                              {ticket.assignedTech ? (
+                                                <>
+                                                  <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                                                  <span className="truncate">{ticket.assignedTech.name}</span>
+                                                </>
+                                              ) : <span className="text-muted-foreground/75">Unassigned</span>}
+                                            </span>
+                                          )}
+                                          {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
+                                          <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground/75">{timeAgo(ticket.lastActivityAt || ticket.updatedAt)}</span>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                </motion.li>
-                              );
-                            })}
-                          </ul>
+                                  </motion.li>
+                                );
+                              })}
+                            </ul>
+                          </div>
                         </div>
-                      </div>
+                      </QueueSideScroll>
                       <StickyScrollbar targetRef={scrollWrapRef} deps={[tickets.length, gridTemplate, widthsPinned]} />
 
                       {/* Full pagination */}

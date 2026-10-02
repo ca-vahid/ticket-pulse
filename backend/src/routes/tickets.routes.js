@@ -398,7 +398,7 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 
 // 'composer.greeting' (QA 09-18 #4): 'auto' adds the workspace greeting the
 // moment a reply starts; 'manual' waits for the Greeting button.
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
 const PREFERENCE_VALIDATORS = {
@@ -408,6 +408,8 @@ const PREFERENCE_VALIDATORS = {
   'ui.layoutWidth': (v) => ['full', 'comfortable', 'classic'].includes(v),
   'composer.greeting': (v) => ['auto', 'manual'].includes(v),
   'ui.ticketDensity': (v) => ['compact', 'roomy', 'dense'].includes(v),
+  // Column map over the wide Tickets list (2 Oct 2026): on / off.
+  'queue.columnMap': (v) => typeof v === 'boolean',
 };
 const PREFERENCE_VALUE_MAX_BYTES = 8 * 1024;
 
