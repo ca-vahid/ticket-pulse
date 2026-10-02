@@ -73,6 +73,7 @@ import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
 import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
 import EditTicketModal from '../components/tickets/EditTicketModal';
+import FsDeleteDialog from '../components/tickets/FsDeleteDialog';
 import TeamForwardDialog from '../components/tickets/TeamForwardDialog';
 import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
@@ -877,6 +878,8 @@ export default function TicketDetail() {
   }, [ticketId]);
   const [editFile, setEditFile] = useState(null);
   const [cloneConfirm, setCloneConfirm] = useState(false);
+  // "Delete in FreshService" (2 Oct 2026): { busy, error } while the confirm is open.
+  const [fsDelete, setFsDelete] = useState(null);
   const [mergeOpen, setMergeOpen] = useState(false); // multi-merge modal (QA 07-13 #1)
   const [splitOpen, setSplitOpen] = useState(false); // split into a new ticket (QA 09-08)
   const [splitFromId, setSplitFromId] = useState(null); // QA 09-18 #6: opened from a message's "Split from here"
@@ -1207,6 +1210,9 @@ export default function TicketDetail() {
   const [teamForward, setTeamForward] = useState(null);
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  // "Delete in FreshService" (2 Oct 2026): FS-born only, same people as the
+  // TP delete (reviewer/admin); TP-born tickets keep their own Delete button.
+  const canDeleteInFs = fsEditable && canReview && !['Deleted', 'Spam'].includes(ticket?.status);
   // Why this ticket cannot RECEIVE a merge (Phase MB1) — null when it can.
   // Same copy as the survivor radios in MergeTicketsModal.
   const mergeBlockedReason = !ticket ? null
@@ -1685,6 +1691,21 @@ export default function TicketDetail() {
       showToast('red', 'Ticket deleted');
       navigate('/tickets');
     });
+  };
+
+  // Delete an FS-born ticket IN FreshService (2 Oct 2026): FreshService first
+  // (to its trash); Ticket Pulse marks it Deleted only after FS confirms. On a
+  // refusal the dialog stays open with FreshService's reason.
+  const confirmFsDelete = async () => {
+    setFsDelete({ busy: true, error: null });
+    lastLocalMutationRef.current = Date.now();
+    try {
+      await ticketsAPI.fsDelete(ticketId);
+      setFsDelete(null);
+      navigate('/tickets', { state: { toast: { tone: 'emerald', message: `FreshService #${ticket?.freshserviceTicketId} deleted in FreshService` } } });
+    } catch (err) {
+      setFsDelete({ busy: false, error: err.response?.data?.message || err.message || 'FreshService did not delete the ticket' });
+    }
   };
 
   const [noiseMenuOpen, setNoiseMenuOpen] = useState(false);
@@ -2529,6 +2550,20 @@ export default function TicketDetail() {
                                 className={moreItemClass}
                               >
                                 <ActionIcon name="split" className="h-5 w-5" /> Split
+                              </button>
+                            </>
+                          )}
+                          {canDeleteInFs && (
+                            <>
+                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                              <button
+                                onClick={() => { setFsDelete({ busy: false, error: null }); setNoiseMenuOpen(false); }}
+                                role="menuitem"
+                                data-testid="fs-delete-item"
+                                title="Delete this ticket in FreshService (moves it to FreshService's trash)"
+                                className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15 dark:hover:text-red-200"
+                              >
+                                <Trash2 className="h-5 w-5" aria-hidden="true" /> Delete in FreshService…
                               </button>
                             </>
                           )}
@@ -4284,6 +4319,17 @@ export default function TicketDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {fsDelete && ticket && (
+        <FsDeleteDialog
+          fsRef={String(ticket.freshserviceTicketId)}
+          subject={ticket.subject || ''}
+          busy={fsDelete.busy}
+          error={fsDelete.error}
+          onConfirm={confirmFsDelete}
+          onClose={() => { if (!fsDelete.busy) setFsDelete(null); }}
+        />
       )}
 
       {cloneConfirm && ticket && (

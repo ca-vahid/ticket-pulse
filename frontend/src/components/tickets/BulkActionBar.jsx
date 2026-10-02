@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, Check, ChevronUp, FolderTree, GitMerge, Loader2, PanelRight, PauseCircle, Play, Search, Tag as TagIcon, UserRound, Workflow, X,
+  AlertCircle, Check, ChevronUp, FolderTree, GitMerge, Loader2, PanelRight, PauseCircle, Play, Search, Tag as TagIcon, Trash2, UserRound, Workflow, X,
 } from 'lucide-react';
 
 /**
@@ -133,6 +133,8 @@ export default function BulkActionBar({
   onMerge,
   onPark,
   onUnpark,
+  onDelete = null,
+  deleteBlockedReason = null,
   onOpenDetails,
   detailsOpen = false,
   onClear,
@@ -321,6 +323,22 @@ export default function BulkActionBar({
                 </button>
               )}
             </>
+          )}
+          {/* Bulk delete (2 Oct 2026): TP-born via the TP delete, FS-born in
+              FreshService. Reviewer/admin only — the page passes onDelete. */}
+          {onDelete && !queryScope && (
+            <button
+              type="button"
+              onClick={deleteBlockedReason ? undefined : onDelete}
+              disabled={Boolean(deleteBlockedReason)}
+              aria-disabled={Boolean(deleteBlockedReason)}
+              title={deleteBlockedReason || 'Delete the selected tickets — Ticket Pulse tickets here, FreshService tickets in FreshService'}
+              data-testid="bulk-delete"
+              className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-300 dark:hover:bg-red-500/15"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              Delete…
+            </button>
           )}
           {!queryScope && (
             <button

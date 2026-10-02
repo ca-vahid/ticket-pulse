@@ -472,3 +472,24 @@ describe('user_id attribution falls back to the API-key owner on 403 (17 Sep 202
     expect(client._post.mock.calls[1][1].getBuffer().toString('utf8')).not.toContain('name="user_id"');
   });
 });
+
+describe('FreshServiceClient.deleteTicket (Delete in FreshService, 2 Oct 2026)', () => {
+  test('DELETEs /tickets/{id}', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._delete = jest.fn().mockResolvedValue({ status: 204 });
+    await expect(client.deleteTicket(243555)).resolves.toEqual({ id: 243555, deleted: true });
+    expect(client._delete).toHaveBeenCalledWith('/tickets/243555');
+  });
+
+  test('a 404 (already gone) counts as deleted', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._delete = jest.fn().mockRejectedValue(Object.assign(new Error('not found'), { freshserviceStatus: 404 }));
+    await expect(client.deleteTicket(243555)).resolves.toEqual({ id: 243555, deleted: true, alreadyGone: true });
+  });
+
+  test('any other failure is thrown', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._delete = jest.fn().mockRejectedValue(Object.assign(new Error('forbidden'), { freshserviceStatus: 403 }));
+    await expect(client.deleteTicket(243555)).rejects.toThrow('forbidden');
+  });
+});

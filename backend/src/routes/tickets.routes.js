@@ -998,6 +998,30 @@ router.post('/bulk-park', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { done: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), results } });
 }));
 
+// Bulk delete (2 Oct 2026): a mixed selection — TP-born via the TP delete,
+// FS-born deleted IN FreshService — one at a time, continue-on-failure.
+// Same people as the single deletes (reviewer/admin). Synchronous, capped at
+// BULK_DELETE_MAX so a request stays well inside the client timeout even
+// when every FreshService call waits its full interactive queue budget; the
+// Tickets page sends one id per request so it can show exact progress.
+const BULK_DELETE_MAX = 25;
+router.post('/bulk-delete', asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  const allowed = actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.workspaceRole === 'reviewer';
+  if (!allowed) throw new AuthorizationError('Deleting tickets requires reviewer or admin access.', 'delete_requires_reviewer');
+  const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw new ValidationError('Choose at least one ticket');
+  if (ids.length > BULK_DELETE_MAX) {
+    throw new ValidationError(`Delete up to ${BULK_DELETE_MAX} tickets at a time — FreshService deletes run one by one.`);
+  }
+  const results = await ticketService.bulkDeleteTickets(ids, req.workspaceId, actor);
+  res.json({
+    success: true,
+    data: { deleted: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results },
+  });
+}));
+
 router.post('/bulk-by-query', asyncHandler(async (req, res) => {
   if (req.ticketActor.kind === 'agent') {
     throw new ValidationError('Bulk editing requires coordinator or admin access');
@@ -1582,6 +1606,18 @@ router.delete('/:id', requireNativeTicketing, asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: 'Deleting tickets requires reviewer or admin access.' });
   }
   const ticket = await ticketService.deleteTicket(parseTicketId(req), req.workspaceId, actor);
+  res.json({ success: true, data: ticket });
+}));
+
+// Delete an FS-born ticket IN FreshService (2 Oct 2026): FS first (to its
+// trash), then the TP row is marked Deleted. Same people as the TP delete
+// (reviewer/admin); NOT behind requireNativeTicketing — FS-born tickets exist
+// in every workspace (sibling of /:id/fs-update).
+router.post('/:id/fs-delete', asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  const allowed = actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.workspaceRole === 'reviewer';
+  if (!allowed) throw new AuthorizationError('Deleting tickets requires reviewer or admin access.', 'delete_requires_reviewer');
+  const ticket = await ticketService.deleteFsTicketInFreshService(parseTicketId(req), req.workspaceId, actor);
   res.json({ success: true, data: ticket });
 }));
 
