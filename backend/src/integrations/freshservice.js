@@ -100,9 +100,24 @@ export function getFreshServiceDetail(error) {
 export const BLANK_DESCRIPTION_PLACEHOLDER = '<p>(This e-mail arrived with no message body — see the attachments.)</p>';
 
 export function isBlankDescriptionRejection(error) {
-  if (Number(getFreshServiceStatus(error)) !== 400) return false;
+  return blankFieldsRejected(error).includes('description');
+}
+
+/**
+ * Which mandatory ticket fields FreshService refused because they are blank
+ * on the ticket itself (400 "It should not be blank"). FreshService validates
+ * the WHOLE ticket on every PUT, so a ticket that arrived with no subject (or
+ * no body) rejects every later field update (1 Oct 2026, #244922: the AI's
+ * type / priority / category write-back all failed on a blank subject).
+ */
+export const BLANK_SUBJECT_PLACEHOLDER = 'No Subject';
+export function blankFieldsRejected(error) {
+  if (Number(getFreshServiceStatus(error)) !== 400) return [];
   const errs = getFreshServiceDetail(error)?.errors;
-  return Array.isArray(errs) && errs.some((e) => e?.field === 'description' && /blank/i.test(String(e?.message || '')));
+  if (!Array.isArray(errs)) return [];
+  return errs
+    .filter((e) => (e?.field === 'description' || e?.field === 'subject') && /blank/i.test(String(e?.message || '')))
+    .map((e) => e.field);
 }
 
 export function wrapFreshServiceError(error) {
@@ -304,9 +319,17 @@ class FreshServiceClient {
       return await this._throttledRequest('put', url, data, config);
     } catch (error) {
       const isTicketUpdate = /^\/tickets\/\d+$/.test(String(url)) && data && typeof data.ticket === 'object' && data.ticket !== null;
-      if (isTicketUpdate && !data.ticket.description && isBlankDescriptionRejection(error)) {
-        logger.info(`FreshService refused the update on ${url} because the ticket has no description; retrying once with a placeholder description`);
-        return this._throttledRequest('put', url, { ...data, ticket: { ...data.ticket, description: BLANK_DESCRIPTION_PLACEHOLDER } }, config);
+      if (isTicketUpdate) {
+        // Fill only the blank fields FreshService named that this update isn't already setting.
+        const blank = blankFieldsRejected(error).filter((field) => !data.ticket[field]);
+        if (blank.length) {
+          const fill = {
+            ...(blank.includes('description') ? { description: BLANK_DESCRIPTION_PLACEHOLDER } : {}),
+            ...(blank.includes('subject') ? { subject: BLANK_SUBJECT_PLACEHOLDER } : {}),
+          };
+          logger.info(`FreshService refused the update on ${url} because the ticket has no ${blank.join(' or ')}; retrying once with a placeholder`);
+          return this._throttledRequest('put', url, { ...data, ticket: { ...data.ticket, ...fill } }, config);
+        }
       }
       throw error;
     }

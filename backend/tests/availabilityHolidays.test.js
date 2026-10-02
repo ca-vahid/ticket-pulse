@@ -136,6 +136,20 @@ describe('loadCanadianHolidays — idempotent with counts', () => {
     expect(prismaMock.holiday.create).not.toHaveBeenCalled();
   });
 
+  test('a company-wide load dedupes against company-wide rows only (a workspace copy must not block it)', async () => {
+    prismaMock.holiday.findFirst.mockResolvedValue(null);
+    prismaMock.holiday.create.mockImplementation(({ data }) => Promise.resolve({ id: 1, ...data }));
+
+    await availabilityService.loadCanadianHolidays(2028, null);
+
+    expect(prismaMock.holiday.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({ name: 'Labour Day', date: new Date('2028-09-04T00:00:00.000Z'), workspaceId: null }),
+    });
+    const thanksgiving = prismaMock.holiday.create.mock.calls.map(([arg]) => arg.data).find((d) => d.name === 'Thanksgiving');
+    expect(thanksgiving.date).toEqual(new Date('2028-10-09T00:00:00.000Z'));
+    expect(thanksgiving.workspaceId ?? null).toBeNull(); // shared row (column default null)
+  });
+
   test('recurring holidays dedupe by name (any year) so a second year does not duplicate Canada Day', async () => {
     // Existing rows: the 6 recurring ones (loaded with 2025 dates). The 6 floating 2026 ones are new.
     prismaMock.holiday.findFirst.mockImplementation(({ where }) => Promise.resolve(where.isRecurring ? { id: 1 } : null));

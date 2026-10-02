@@ -500,6 +500,14 @@ describe('ticketApprovalService.getByToken (Phase AP payload)', () => {
     prismaMock.approvalCategory.findUnique.mockResolvedValue({ name: 'Laptop purchase', description: 'Hardware over $1k' });
   });
 
+  test('the description text shows entities as characters (FreshService &nbsp;, 1 Oct 2026)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...fullTicket, descriptionText: 'TEst&nbsp;' });
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    prismaMock.ticketApproval.findMany.mockResolvedValue([]);
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.ticket.descriptionText).toBe('TEst ');
+  });
+
   test('shapes the contract: resolved names, category path, priority label, sanitized description, no sibling emails', async () => {
     const decidedAt = new Date('2026-09-01T12:00:00Z');
     prismaMock.ticketApproval.findUnique.mockResolvedValue(row({

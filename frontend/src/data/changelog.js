@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.1.30-preview';
+export const APP_VERSION = '4.1.31-preview';
 
 export const changelog = [
+  {
+    version: '4.1.31-preview',
+    date: 'October 1, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Ticket descriptions show &amp;nbsp; and other codes as normal text</strong> &mdash; a description sent as plain text with codes in it (TP-1742 showed &ldquo;TEst&amp;nbsp;&rdquo; on the approval page) now reads as written, on the approval page and the ticket page.' },
+      { type: 'improvement', html: '<strong>Tickets page counts load in one pass</strong> &mdash; the cards above the queue used twelve separate counts; they are one now, so the page is faster at the morning peak.' },
+      { type: 'fix', html: '<strong>Updating a FreshService ticket with a blank subject no longer fails</strong> &mdash; FreshService refuses an empty subject or description; Ticket Pulse fills a placeholder and tries once more.' },
+      { type: 'improvement', html: '<strong>Moving holidays are added once for the whole company</strong> &mdash; Family Day, Good Friday, Victoria Day, Civic Holiday, Labour Day and Thanksgiving are added each year as one company-wide entry instead of one per workspace.' },
+    ],
+  },
   {
     version: '4.1.30-preview',
     date: 'October 1, 2026',

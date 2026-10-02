@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { decodeBasicEntities } from '../utils/htmlContent.js';
 import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
 import { categoryTiers } from '../utils/approvalTiers.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
@@ -682,7 +683,8 @@ class TicketApprovalService {
         createdAt: ticket.createdAt,
         dueBy: ticket.dueBy || null,
         descriptionHtml: ticket.description ? sanitizeDescriptionHtml(ticket.description) : null,
-        descriptionText: ticket.descriptionText || null,
+        // Stored plain text can carry entities (&nbsp; from FreshService or an API sender).
+        descriptionText: ticket.descriptionText ? decodeBasicEntities(ticket.descriptionText) : null,
         requester: requester ? {
           name: requester.name || null,
           email: showEmail ? (requester.email || null) : null,

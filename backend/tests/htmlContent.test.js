@@ -1,6 +1,16 @@
 // QA 08-06 #5 — shared real-HTML detector: plain text carrying angle-bracket
 // tokens (<Processed>) must NOT be treated as HTML, while genuine markup must.
-import { escapeHtml, looksLikeRealHtml, plainTextToHtml } from '../src/utils/htmlContent.js';
+import { decodeBasicEntities, escapeHtml, looksLikeRealHtml, plainTextToHtml } from '../src/utils/htmlContent.js';
+
+// 1 Oct 2026: the public approval page showed "TEst&nbsp;".
+describe('decodeBasicEntities', () => {
+  test('named and numeric entities become characters; unknown ones and bare & stay', () => {
+    expect(decodeBasicEntities('TEst&nbsp;')).toBe('TEst ');
+    expect(decodeBasicEntities('A &amp; B &lt;x&gt; &quot;q&quot; &#39;s&#39; &#x2014; &#8212;')).toBe(`A & B <x> "q" 's' — —`);
+    expect(decodeBasicEntities('R&D &unknown; &')).toBe('R&D &unknown; &');
+    expect(decodeBasicEntities(null)).toBeNull();
+  });
+});
 
 describe('looksLikeRealHtml', () => {
   test('plain text with bracketed tokens is NOT html', () => {

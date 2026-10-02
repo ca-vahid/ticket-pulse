@@ -9,11 +9,16 @@ import logger from '../utils/logger.js';
  * `holidays` table — so a year whose floating holidays were never loaded
  * treats Labour Day / Thanksgiving / Good Friday as working days. Before
  * this, "Load Canadian" was a manual, single-year button; prod held 2025
- * only. This service keeps the CURRENT and NEXT year loaded for every
- * active workspace with business hours configured:
+ * only. This service keeps the CURRENT and NEXT year loaded, company-wide
+ * (one shared row per holiday, workspaceId null — 1 Oct 2026: every
+ * workspace is the same company and closes on the same days; per-workspace
+ * loads had left five copies of each holiday), whenever at least one active
+ * workspace has business hours configured:
  *   - at boot (a server down on Jan 1 self-heals on its next start), and
  *   - on the Jan-1 cron in scheduledSyncService.
- * Idempotent (the loader dedupes by name+date / name+recurring in scope).
+ * Idempotent (the loader dedupes by name+date / name+recurring among the
+ * company-wide rows). Workspace-only holidays (e.g. an Accounting Summit)
+ * are still added by hand in Settings.
  * Kill switch: HOLIDAY_AUTOLOAD=false.
  */
 export function isHolidayAutoloadEnabled(env = process.env) {
@@ -23,12 +28,12 @@ export function isHolidayAutoloadEnabled(env = process.env) {
 class HolidayAutoloadService {
   /**
    * @param {{years?: number[]|null, reason?: string}} options
-   * @returns {Promise<{skipped: boolean, years: number[], workspaces: Array<{workspaceId:number, created:number, skipped:number}>, created: number}>}
+   * @returns {Promise<{skipped: boolean, years: number[], workspaceCount: number, created: number, skippedRows?: number, error?: string}>}
    */
   async ensureHolidaysLoaded({ years = null, reason = 'manual' } = {}) {
     if (!isHolidayAutoloadEnabled()) {
       logger.info('Holiday auto-load disabled by HOLIDAY_AUTOLOAD=false', { reason });
-      return { skipped: true, years: [], workspaces: [], created: 0 };
+      return { skipped: true, years: [], workspaceCount: 0, created: 0 };
     }
 
     // "Workspaces with business hours configured" — app boot seeds Mon–Fri
@@ -39,28 +44,20 @@ class HolidayAutoloadService {
       distinct: ['workspaceId'],
       select: { workspaceId: true },
     });
-    const workspaceIds = rows.map((row) => row.workspaceId).filter((id) => Number.isInteger(id));
-
-    const workspaces = [];
-    let created = 0;
-    let loadedYears = [];
-    for (const workspaceId of workspaceIds) {
-      try {
-        const result = await availabilityService.loadCanadianHolidaysForYears(years, workspaceId);
-        loadedYears = result.years;
-        workspaces.push({ workspaceId, created: result.created, skipped: result.skipped });
-        created += result.created;
-        if (result.created > 0) {
-          logger.info(`Holiday auto-load (${reason}): workspace ${workspaceId} +${result.created} for ${result.years.join(', ')}`);
-        }
-      } catch (error) {
-        logger.warn(`Holiday auto-load (${reason}) failed for workspace ${workspaceId} (non-fatal): ${error.message}`);
-        workspaces.push({ workspaceId, created: 0, skipped: 0, error: error.message });
-      }
+    const workspaceCount = rows.map((row) => row.workspaceId).filter((id) => Number.isInteger(id)).length;
+    if (workspaceCount === 0) {
+      logger.info(`Holiday auto-load (${reason}): no active workspace has business hours — nothing to load`);
+      return { skipped: false, years: [], workspaceCount: 0, created: 0 };
     }
 
-    logger.info(`Holiday auto-load (${reason}): ${workspaceIds.length} workspace(s), ${created} holiday(s) created`, { years: loadedYears });
-    return { skipped: false, years: loadedYears, workspaces, created };
+    try {
+      const result = await availabilityService.loadCanadianHolidaysForYears(years, null);
+      logger.info(`Holiday auto-load (${reason}): ${result.created} company-wide holiday(s) created for ${result.years.join(', ')}`);
+      return { skipped: false, years: result.years, workspaceCount, created: result.created, skippedRows: result.skipped };
+    } catch (error) {
+      logger.warn(`Holiday auto-load (${reason}) failed (non-fatal): ${error.message}`);
+      return { skipped: false, years: [], workspaceCount, created: 0, error: error.message };
+    }
   }
 }
 
