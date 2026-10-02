@@ -444,6 +444,9 @@ class AttachmentService {
         const { Readable } = await import('node:stream');
         return { attachment, stream: Readable.from(buffer) };
       }
+      // The row exists but the file is gone from storage: an ordinary
+      // "not found", not a crash (2 Oct 2026: two "consider restarting" lines).
+      if (err?.statusCode === 404) throw new NotFoundError('This attachment is no longer in storage');
       throw err;
     }
   }

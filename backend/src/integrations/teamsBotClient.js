@@ -275,7 +275,11 @@ export function attachmentAuthFor(url, serviceUrl = null) {
   const host = u.hostname.toLowerCase();
   let serviceHost = null;
   try { serviceHost = serviceUrl ? new URL(String(serviceUrl)).hostname.toLowerCase() : null; } catch { serviceHost = null; }
+  // 2 Oct 2026 (first real use): a picture pasted INTO the chat is stored by
+  // Teams' media service — *.asm.skype.com, or *.asyncgw.teams.microsoft.com
+  // on newer tenants — and is fetched with the bot token too.
   if (host === 'smba.trafficmanager.net' || host.endsWith('.botframework.com') || /^smba\.[a-z0-9.-]+\.teams\.microsoft\.com$/.test(host)
+    || host.endsWith('.asm.skype.com') || host.endsWith('.asyncgw.teams.microsoft.com')
     || (serviceHost && host === serviceHost && serviceHost !== 'graph.microsoft.com')) return 'bot';
   if (host === 'graph.microsoft.com') return 'graph';
   if (host.endsWith('.sharepoint.com')) return 'none';
@@ -288,7 +292,11 @@ export function attachmentAuthFor(url, serviceUrl = null) {
  */
 export async function downloadAttachment(url, { serviceUrl = null, maxBytes = 5 * 1024 * 1024 } = {}) {
   const auth = attachmentAuthFor(url, serviceUrl);
-  if (!auth) throw new Error('This file is not on a Microsoft Teams host');
+  if (!auth) {
+    let host = '?';
+    try { host = new URL(String(url)).hostname; } catch { /* keep '?' */ }
+    throw new Error(`This file is not on a Microsoft Teams host (${host})`);
+  }
   const token = auth === 'bot' ? await botToken() : auth === 'graph' ? await graphToken() : null;
   const res = await axios.get(String(url), {
     responseType: 'arraybuffer',

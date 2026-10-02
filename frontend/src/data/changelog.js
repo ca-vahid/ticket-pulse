@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.1.33-preview';
+export const APP_VERSION = '4.1.34-preview';
 
 export const changelog = [
+  {
+    version: '4.1.34-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Tickets page counts load fast at the busiest times</strong> &mdash; they are shared for a few seconds between everyone in the workspace and refresh the moment a ticket changes, so no more 3&ndash;8 second waits in the morning.' },
+      { type: 'fix', html: '<strong>Teams Autofill reads pictures pasted into the chat</strong> &mdash; a screenshot pasted straight into the Ticket Pulse chat was skipped (only attached files were read). It is read and attached now.' },
+      { type: 'fix', html: '<strong>A missing attachment file shows as &ldquo;not found&rdquo;</strong> instead of raising an alarm in the server log.' },
+    ],
+  },
   {
     version: '4.1.33-preview',
     date: 'October 2, 2026',
