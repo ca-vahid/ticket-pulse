@@ -207,7 +207,7 @@ def main():
             f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#475569;margin:24px 0 6px;">TICKETS TO RAISE '
             f'<span style="font-weight:400;letter-spacing:0;color:{FAINT};">&nbsp;{label}</span></div>'
             f'{ticket_table(ws1.get("agentReview") or [], args.me, args.standup, exclude, asks, inactive)}'
-            f'<div style="font-size:12px;color:{FAINT};margin-top:10px;">Every name and number opens that exact list in Ticket Pulse (keep IT selected). '
+            f'<div style="font-size:12px;color:{FAINT};margin-top:10px;">Every name and number opens that exact list in Ticket Pulse, in the IT workspace. '
             f'&ldquo;This week&rdquo; is the last 7 days; its &ldquo;out&rdquo; link opens all resolved tickets for that person.</div>')
     # Windows consoles default to cp1252, which mangles em dashes in subjects.
     sys.stdout.reconfigure(encoding='utf-8')
