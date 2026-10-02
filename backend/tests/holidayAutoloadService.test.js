@@ -3,7 +3,7 @@ import { jest } from '@jest/globals';
 /**
  * Phase HD4 (QA 08-25 #3) — holidayAutoloadService: boot + Jan-1 backfill
  * that keeps this year + next loaded for every active workspace with
- * business hours. Idempotent, per-workspace fault-isolated, kill switch.
+ * business hours — one company-wide load since 1 Oct 2026. Idempotent, kill switch.
  */
 
 const prismaMock = {
@@ -32,46 +32,43 @@ beforeEach(() => {
 });
 
 describe('holidayAutoloadService.ensureHolidaysLoaded', () => {
-  test('loads this year + next for every active workspace with business hours', async () => {
+  test('loads this year + next ONCE, company-wide, when any active workspace has business hours (1 Oct 2026)', async () => {
     const result = await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'boot' });
 
     expect(prismaMock.businessHour.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { workspace: { isActive: true } },
       distinct: ['workspaceId'],
     }));
-    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledTimes(2);
-    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledWith(null, 1);
-    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledWith(null, 2);
-    expect(result).toEqual(expect.objectContaining({
-      skipped: false,
-      years: [thisYear, thisYear + 1],
-      created: 12,
-      workspaces: [{ workspaceId: 1, created: 6, skipped: 18 }, { workspaceId: 2, created: 6, skipped: 18 }],
-    }));
+    // One shared load — not one per workspace (that left five copies of each holiday).
+    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledTimes(1);
+    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledWith(null, null);
+    expect(result).toEqual({ skipped: false, years: [thisYear, thisYear + 1], workspaceCount: 2, created: 6, skippedRows: 18 });
   });
 
-  test('is idempotent: a second run creates nothing and stays quiet', async () => {
+  test('no active workspace with business hours: nothing is loaded', async () => {
+    prismaMock.businessHour.findMany.mockResolvedValue([]);
+    const result = await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'boot' });
+    expect(result).toEqual({ skipped: false, years: [], workspaceCount: 0, created: 0 });
+    expect(availabilityServiceMock.loadCanadianHolidaysForYears).not.toHaveBeenCalled();
+  });
+
+  test('is idempotent: a second run creates nothing and logs one summary line', async () => {
     availabilityServiceMock.loadCanadianHolidaysForYears.mockResolvedValue({ years: [thisYear, thisYear + 1], created: 0, skipped: 24, perYear: [] });
 
     const result = await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'yearly-cron' });
 
     expect(result.created).toBe(0);
-    // No per-workspace "+N" lines when nothing changed; one summary line only.
     expect(loggerMock.info).toHaveBeenCalledTimes(1);
-    expect(loggerMock.info.mock.calls[0][0]).toContain('0 holiday(s) created');
+    expect(loggerMock.info.mock.calls[0][0]).toContain('0 company-wide holiday(s) created');
   });
 
-  test('one workspace failing does not stop the others', async () => {
-    availabilityServiceMock.loadCanadianHolidaysForYears
-      .mockRejectedValueOnce(new Error('db hiccup'))
-      .mockResolvedValueOnce({ years: [thisYear, thisYear + 1], created: 2, skipped: 22, perYear: [] });
+  test('a failing load is non-fatal and reported', async () => {
+    availabilityServiceMock.loadCanadianHolidaysForYears.mockRejectedValueOnce(new Error('db hiccup'));
 
     const result = await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'boot' });
 
-    expect(result.created).toBe(2);
-    expect(result.workspaces[0]).toEqual(expect.objectContaining({ workspaceId: 1, error: 'db hiccup' }));
-    expect(result.workspaces[1]).toEqual({ workspaceId: 2, created: 2, skipped: 22 });
-    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('workspace 1'));
+    expect(result).toEqual(expect.objectContaining({ created: 0, error: 'db hiccup' }));
+    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('db hiccup'));
   });
 
   test('HOLIDAY_AUTOLOAD=false is a hard kill switch', async () => {
@@ -80,13 +77,13 @@ describe('holidayAutoloadService.ensureHolidaysLoaded', () => {
 
     const result = await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'boot' });
 
-    expect(result).toEqual({ skipped: true, years: [], workspaces: [], created: 0 });
+    expect(result).toEqual({ skipped: true, years: [], workspaceCount: 0, created: 0 });
     expect(prismaMock.businessHour.findMany).not.toHaveBeenCalled();
     expect(availabilityServiceMock.loadCanadianHolidaysForYears).not.toHaveBeenCalled();
   });
 
   test('explicit years are passed through (used by the prod repair)', async () => {
     await holidayAutoloadService.ensureHolidaysLoaded({ years: [2026, 2027], reason: 'manual' });
-    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledWith([2026, 2027], 1);
+    expect(availabilityServiceMock.loadCanadianHolidaysForYears).toHaveBeenCalledWith([2026, 2027], null);
   });
 });

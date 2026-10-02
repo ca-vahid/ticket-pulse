@@ -469,6 +469,9 @@ class AvailabilityService {
   async loadCanadianHolidays(year = new Date().getUTCFullYear(), workspaceId = null) {
     const holidays = this.canadianHolidaysForYear(year);
 
+    // Company-wide load (workspaceId null) dedupes against company-wide rows
+    // only — a workspace-only copy must not stop the shared row from being
+    // created, or every other workspace would miss that holiday.
     const dedupScope = workspaceId !== null
       ? {
         OR: [
@@ -476,7 +479,7 @@ class AvailabilityService {
           { workspaceId: null },
         ],
       }
-      : {};
+      : { workspaceId: null };
 
     let created = 0;
     let skipped = 0;

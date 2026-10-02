@@ -394,6 +394,44 @@ describe('FreshServiceClient._put — blank-description retry (15 Sep 2026)', ()
   });
 });
 
+describe('FreshServiceClient._put — blank-subject retry (1 Oct 2026, #244922)', () => {
+  const rejection = (fields) => Object.assign(new Error('Request failed with status code 400'), {
+    response: { status: 400, data: { description: 'Validation failed', errors: fields.map((field) => ({ field, message: 'It should not be blank as this is a mandatory field', code: 'invalid_value' })) } },
+  });
+
+  test('an update refused for a blank subject is retried once with "No Subject"', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._throttledRequest = jest.fn()
+      .mockRejectedValueOnce(rejection(['subject']))
+      .mockResolvedValueOnce({ data: { ticket: { id: 244922, type: 'Incident' } } });
+    const ticket = await client.updateTicketType(244922, 'Incident');
+    expect(ticket.id).toBe(244922);
+    const [, url, body] = client._throttledRequest.mock.calls[1];
+    expect(url).toBe('/tickets/244922');
+    expect(body.ticket).toEqual({ type: 'Incident', subject: 'No Subject' });
+  });
+
+  test('blank subject AND body: one retry fills both', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._throttledRequest = jest.fn()
+      .mockRejectedValueOnce(rejection(['subject', 'description']))
+      .mockResolvedValueOnce({ data: { ticket: { id: 1 } } });
+    await client.updateTicketPriority(1, 3);
+    expect(client._throttledRequest).toHaveBeenCalledTimes(2);
+    const body = client._throttledRequest.mock.calls[1][2];
+    expect(body.ticket.subject).toBe('No Subject');
+    expect(body.ticket.description).toContain('no message body');
+    expect(body.ticket.priority).toBe(3);
+  });
+
+  test('an update that already sets the subject is not retried', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._throttledRequest = jest.fn().mockRejectedValue(rejection(['subject']));
+    await expect(client._put('/tickets/1', { ticket: { subject: 'x' } })).rejects.toBeTruthy();
+    expect(client._throttledRequest).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('user_id attribution falls back to the API-key owner on 403 (17 Sep 2026)', () => {
   const forbidden = () => Object.assign(new Error('Request failed with status code 403'), { response: { status: 403, data: {} } });
 

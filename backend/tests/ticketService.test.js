@@ -1534,6 +1534,37 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
     }
   });
 
+  // Perf (1 Oct 2026): the plain counts come from ONE filtered scan; the
+  // per-count queries above are only the fallback. Checked identical on prod.
+  test('getQueueStats reads the plain counts from one scan, with the same status scopes', async () => {
+    prismaMock.ticket.count.mockResolvedValue(7);
+    prismaMock.ticket.groupBy.mockResolvedValue([{ assignedTechId: 5, _count: { _all: 2 } }]);
+    const scanRow = {
+      all: 30, openCount: 12, unassigned: 3, dueToday: 1, overdue: 2, resolved: 9, deleted: 1, noise: 4,
+      createdThisWeek: 5, createdThisMonth: 6, createdThisYear: 20, parked: 2, parkedWakingWeek: 1,
+    };
+    prismaMock.$queryRaw.mockImplementation(async (strings) => (
+      String(strings?.join?.('') || '').includes('FILTER') ? [scanRow] : []
+    ));
+
+    const stats = await ticketService.getQueueStats(1);
+
+    expect(stats).toMatchObject({
+      all: 30, open: 12, unassigned: 3, dueToday: 1, overdue: 2, resolved: 9, deleted: 1, noise: 4,
+      createdThisWeek: 5, createdThisMonth: 6, createdThisYear: 20, parked: 2, parkedWakingWeek: 1, byTechnician: { 5: 2 },
+    });
+    // Only the relation count (awaiting AI approval) still uses ticket.count.
+    expect(prismaMock.ticket.count).toHaveBeenCalledTimes(1);
+    const scanCall = prismaMock.$queryRaw.mock.calls.find(([strings]) => String(strings.join('')).includes('FILTER'));
+    const values = scanCall.slice(1);
+    expect(values).toEqual(expect.arrayContaining([
+      ['Open', 'Pending', 'Needs Rework', 'In Triage'],
+      ['Open', 'In Triage'],
+      ['Resolved', 'Closed', 'Fixed'],
+      1,
+    ]));
+  });
+
   test('registry lookups are served from the statusService cache — one DB read per request burst', async () => {
     prismaMock.ticket.count.mockResolvedValue(0);
     prismaMock.ticket.groupBy.mockResolvedValue([]);
@@ -1731,6 +1762,20 @@ describe('ticketService plain-text descriptions (QA 08-06 #5)', () => {
     expect(data.description).toContain('&lt;Processed&gt;');
     expect(data.description).toContain('<br>');
     expect(data.description).not.toContain('<Processed>');
+  });
+
+  // 1 Oct 2026 (TP-1742): "TEst&nbsp;" has an entity but no tags — it used
+  // to be stored verbatim as text and double-escaped (&amp;nbsp;) as HTML.
+  test('plain text carrying entities is decoded, not double-escaped', async () => {
+    await ticketService.createTicket(1, {
+      subject: 'Test Approval Ticket2',
+      description: 'TEst&nbsp;and R&amp;D',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.descriptionText).toBe('TEst and R&D');
+    expect(data.description).toBe('TEst and R&amp;D');
+    expect(data.description).not.toContain('&amp;nbsp;');
   });
 
   test('real HTML keeps the historical behavior (html stored, text stripped)', async () => {

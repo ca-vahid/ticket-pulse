@@ -36,7 +36,7 @@ import queueCardConfigService from './queueCardConfigService.js';
 import ticketFormConfigService from './ticketFormConfigService.js';
 import { zonedStartOfMonth, zonedStartOfWeek, zonedStartOfYear } from '../utils/zonedBoundaries.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
-import { looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
+import { decodeBasicEntities, looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
 import { appendSignatureToEmail, getEnabledSignatureForSend } from './userSignatureService.js';
 import { sseManager } from '../routes/sse.routes.js';
@@ -503,7 +503,10 @@ function normalizeDescriptionInput(raw) {
   if (looksLikeRealHtml(value)) {
     return { description: value, descriptionText: stripHtml(value) };
   }
-  return { description: plainTextToHtml(value), descriptionText: String(value).trim() || null };
+  // 1 Oct 2026: plain text from an API / app caller can carry entities
+  // ("TEst&nbsp;", TP-1742) — decode them so they are not double-escaped.
+  const text = decodeBasicEntities(String(value));
+  return { description: plainTextToHtml(text), descriptionText: text.trim() || null };
 }
 
 /**
@@ -2106,8 +2109,97 @@ class TicketService {
     // where-clauses exactly so a card's count always equals its click.
     const visible = { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } };
 
-    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise, awaitingIds, awaitingApproval, technicianOpen,
-      createdThisWeek, createdThisMonth, createdThisYear] = await Promise.all([
+    const weekStart = zonedStartOfWeek(now, timezone);
+    const monthStart = zonedStartOfMonth(now, timezone);
+    const yearStart = zonedStartOfYear(now, timezone);
+    const weekAhead = new Date(now.getTime() + 7 * 86400e3);
+    // Perf (1 Oct 2026): the twelve plain counts used to be twelve queries run
+    // at once — one stats load held most of the 9-connection pool and the
+    // Tickets page cards took 2.5–7 s at the morning peak. They are one
+    // FILTERed scan now; on any error the per-count queries below still run.
+    const [counts, awaitingIds, awaitingApproval, technicianOpen] = await Promise.all([
+      this._queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead })
+        .catch((err) => {
+          logger.warn(`Queue stats single scan failed (ws ${workspaceId}), using per-count queries: ${err.message}`);
+          return this._queueCountsSeparate(workspaceId, { open, visible, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead });
+        }),
+      this._awaitingReplyTicketIds(workspaceId),
+      // "Awaiting AI approval": unassigned Open/Pending tickets with a pending
+      // human decision on their AI recommendation (drives the rail view count).
+      prisma.ticket.count({
+        where: { ...open, assignedTechId: null, pipelineRuns: { some: { status: 'completed', decision: 'pending_review' } } },
+      }),
+      // Per-technician OPEN workload (Open/Pending, non-noise). Returned as a
+      // {techId: count} map — NOT sorted/ranked; the UI keeps its own order so
+      // this reads as a workload signal, not a leaderboard (team-safe rule).
+      prisma.ticket.groupBy({
+        by: ['assignedTechId'],
+        where: { ...open, assignedTechId: { not: null } },
+        _count: { _all: true },
+      }),
+    ]);
+    const {
+      all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
+      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek,
+    } = counts;
+
+    const byTechnician = {};
+    for (const row of technicianOpen) {
+      if (row.assignedTechId !== null) byTechnician[row.assignedTechId] = row._count._all;
+    }
+
+    return {
+      all,
+      open: openCount,
+      unassigned,
+      awaiting: awaitingIds.length,
+      awaitingApproval,
+      dueToday,
+      overdue,
+      resolved,
+      deleted,
+      noise,
+      createdThisWeek,
+      createdThisMonth,
+      createdThisYear,
+      byTechnician,
+      parked,
+      parkedWakingWeek,
+    };
+  }
+
+  /** The plain queue counts in ONE scan of the workspace's tickets (FILTER per count). */
+  async _queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead }) {
+    const ws = Number(workspaceId);
+    const rows = await prisma.$queryRaw`
+      SELECT
+        count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam'))::int AS "all",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL)::int AS "openCount",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND assigned_tech_id IS NULL)::int AS "unassigned",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND status = ANY(${openBaseNames})
+          AND ((due_by >= ${now} AND due_by <= ${endOfDay})
+            OR (fr_due_by >= ${now} AND fr_due_by <= ${endOfDay} AND first_public_agent_reply_at IS NULL)))::int AS "dueToday",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND status = ANY(${openBaseNames})
+          AND (due_by < ${now} OR (fr_due_by < ${now} AND first_public_agent_reply_at IS NULL)))::int AS "overdue",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${resolvedNames}))::int AS "resolved",
+        count(*) FILTER (WHERE status IN ('Deleted', 'Spam'))::int AS "deleted",
+        count(*) FILTER (WHERE is_noise)::int AS "noise",
+        count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${weekStart})::int AS "createdThisWeek",
+        count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${monthStart})::int AS "createdThisMonth",
+        count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${yearStart})::int AS "createdThisYear",
+        count(*) FILTER (WHERE NOT is_noise AND parked_until IS NOT NULL)::int AS "parked",
+        count(*) FILTER (WHERE NOT is_noise AND parked_until IS NOT NULL AND parked_until <= ${weekAhead})::int AS "parkedWakingWeek"
+      FROM tickets
+      WHERE workspace_id = ${ws}`;
+    const row = rows?.[0];
+    if (!row) throw new Error('no row');
+    return Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Number(v) || 0]));
+  }
+
+  /** The same counts as separate queries — the fallback (and the reference the scan is checked against). */
+  async _queueCountsSeparate(workspaceId, { open, visible, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead }) {
+    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
+      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek] = await Promise.all([
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
@@ -2136,49 +2228,15 @@ class TicketService {
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: resolvedNames } } }),
       prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: { workspaceId, isNoise: true } }),
-      this._awaitingReplyTicketIds(workspaceId),
-      // "Awaiting AI approval": unassigned Open/Pending tickets with a pending
-      // human decision on their AI recommendation (drives the rail view count).
-      prisma.ticket.count({
-        where: { ...open, assignedTechId: null, pipelineRuns: { some: { status: 'completed', decision: 'pending_review' } } },
-      }),
-      // Per-technician OPEN workload (Open/Pending, non-noise). Returned as a
-      // {techId: count} map — NOT sorted/ranked; the UI keeps its own order so
-      // this reads as a workload signal, not a leaderboard (team-safe rule).
-      prisma.ticket.groupBy({
-        by: ['assignedTechId'],
-        where: { ...open, assignedTechId: { not: null } },
-        _count: { _all: true },
-      }),
-      prisma.ticket.count({ where: { ...visible, createdAt: { gte: zonedStartOfWeek(now, timezone) } } }),
-      prisma.ticket.count({ where: { ...visible, createdAt: { gte: zonedStartOfMonth(now, timezone) } } }),
-      prisma.ticket.count({ where: { ...visible, createdAt: { gte: zonedStartOfYear(now, timezone) } } }),
+      prisma.ticket.count({ where: { ...visible, createdAt: { gte: weekStart } } }),
+      prisma.ticket.count({ where: { ...visible, createdAt: { gte: monthStart } } }),
+      prisma.ticket.count({ where: { ...visible, createdAt: { gte: yearStart } } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null } } }).catch(() => 0),
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null, lte: weekAhead } } }).catch(() => 0),
     ]);
-
-    const byTechnician = {};
-    for (const row of technicianOpen) {
-      if (row.assignedTechId !== null) byTechnician[row.assignedTechId] = row._count._all;
-    }
-
     return {
-      all,
-      open: openCount,
-      unassigned,
-      awaiting: awaitingIds.length,
-      awaitingApproval,
-      dueToday,
-      overdue,
-      resolved,
-      deleted,
-      noise,
-      createdThisWeek,
-      createdThisMonth,
-      createdThisYear,
-      byTechnician,
-      ...(await Promise.all([
-        prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null } } }),
-        prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null, lte: new Date(now.getTime() + 7 * 86400e3) } } }),
-      ]).then(([parked, parkedWakingWeek]) => ({ parked, parkedWakingWeek })).catch(() => ({ parked: 0, parkedWakingWeek: 0 }))),
+      all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
+      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek,
     };
   }
 

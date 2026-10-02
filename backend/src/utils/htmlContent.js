@@ -24,6 +24,24 @@ export function looksLikeRealHtml(value) {
   return KNOWN_HTML_TAG_RE.test(String(value || ''));
 }
 
+/**
+ * Common HTML entities → characters, for PLAIN text that carries them (an API
+ * description "TEst&nbsp;" with no tags; FreshService description_text often
+ * keeps &nbsp;). 1 Oct 2026: the public approval page showed "TEst&nbsp;".
+ * Unknown entities are left alone.
+ */
+const NAMED_ENTITIES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'" };
+export function decodeBasicEntities(value) {
+  if (value === null || value === undefined) return value;
+  return String(value).replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]{2,6});/gi, (whole, code) => {
+    const key = code.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, key)) return NAMED_ENTITIES[key];
+    if (key.startsWith('#x')) { const n = parseInt(key.slice(2), 16); return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : whole; }
+    if (key.startsWith('#')) { const n = parseInt(key.slice(1), 10); return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : whole; }
+    return whole;
+  });
+}
+
 export function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
