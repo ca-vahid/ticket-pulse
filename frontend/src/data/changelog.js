@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.37-preview';
+export const APP_VERSION = '4.1.38-preview';
 
 export const changelog = [
+  {
+    version: '4.1.38-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Scrolling the Tickets list sideways</strong> &mdash; when the list is wider than the screen, soft edge fades show there is more, and round arrows glide in on the edges to page one screen of columns (hold to keep going). The checkbox and Subject stay pinned while the rest slides, and the left arrow starts after them. You can also drag the list with the mouse, or press &larr; / &rarr; (Shift for a page).' },
+      { type: 'feature', html: '<strong>Column map (optional)</strong> &mdash; turn it on under <em>Columns &rarr; Column map</em> for jump-to-column links and a mini-map above a wide list. Off by default, and only for you.' },
+    ],
+  },
   {
     version: '4.1.37-preview',
     date: 'October 2, 2026',

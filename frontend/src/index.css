@@ -1035,6 +1035,82 @@ html[data-motion="reduce"] .tp-ai-live::before {
   animation: none; opacity: 0.8;
 }
 
+/* ---- Wide Tickets list: sideways scrolling (2 Oct 2026, C + E + F) ------- */
+/* F: the checkbox, accent strip and subject stay put while the columns slide
+   (Tickets.jsx stamps .tp-q-pin on the scroller when the subject is the
+   leftmost column of a compact/dense list). A pinned cell paints the card
+   under the row's own tint so the sliding columns never show through it.
+   xl only: below it the list keeps its essentials template. */
+@media (min-width: 1280px) {
+  .tp-q-pin .tp-pin {
+    position: sticky;
+    z-index: 2;
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(var(--tp-row-tint, transparent), var(--tp-row-tint, transparent));
+  }
+  .tp-q-pin .tp-pin-0 { left: 0; }
+  .tp-q-pin .tp-pin-accent { position: sticky; z-index: 2; left: 36px; }
+  .tp-q-pin .tp-pin-subject { left: 42px; }
+  /* overflow:hidden would make the flashing row its own scroll box and
+     un-stick its cells for the 3 s of the flash — clip paints the same. */
+  .tp-q-pin .tp-fx1 { overflow: clip; }
+  .tp-q-pin .tp-q-head { --tp-row-tint: hsl(var(--muted) / 0.4); }
+  .tp-q-pin [data-row="idle"]:hover { --tp-row-tint: hsl(var(--muted) / 0.7); }
+  .tp-q-pin [data-row="preview"] { --tp-row-tint: rgb(239 246 255 / 0.5); }
+  .tp-q-pin [data-row="selected"] { --tp-row-tint: rgb(239 246 255 / 0.4); }
+  .tp-q-pin [data-row="ai"] { --tp-row-tint: rgb(124 58 237 / 0.12); }
+  .dark .tp-q-pin [data-row="preview"],
+  .dark .tp-q-pin [data-row="selected"] { --tp-row-tint: rgb(59 130 246 / 0.1); }
+  .dark .tp-q-pin [data-row="ai"] { --tp-row-tint: rgb(124 58 237 / 0.18); }
+  /* Once columns slide under it, the pinned block casts a soft edge. */
+  .tp-q-pin .tp-pin-subject { transition: box-shadow 0.25s ease; }
+  .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
+  .dark .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 12px -8px rgb(0 0 0 / 0.7); }
+}
+/* E: dragging the list sideways. */
+[data-dragging] { cursor: grabbing; user-select: none; }
+
+/* C: edge fades + round arrows. They glide in from their own edge instead of
+   popping, and follow the visible middle of the list with an eased top. */
+.tp-side-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.tp-side-fade-l { background: linear-gradient(90deg, hsl(var(--card)), hsl(var(--card) / 0)); }
+.tp-side-fade-r { right: 0; background: linear-gradient(270deg, hsl(var(--card)), hsl(var(--card) / 0)); }
+.tp-side-fade.is-on { opacity: 1; }
+.tp-side-arrow {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow: 0 4px 14px rgb(15 23 42 / 0.14);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease, transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1), top 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), left 0.25s ease, color 0.15s, border-color 0.15s;
+}
+@media (min-width: 768px) { .tp-side-arrow { display: flex; } }
+.tp-side-arrow-l { transform: translateX(-10px) scale(0.92); }
+.tp-side-arrow-r { right: 10px; transform: translateX(10px) scale(0.92); }
+.tp-side-arrow.is-on { opacity: 1; pointer-events: auto; transform: none; }
+.tp-side-arrow.is-on:hover { transform: scale(1.07); color: hsl(var(--primary)); border-color: hsl(var(--primary)); }
+.dark .tp-side-arrow { box-shadow: 0 4px 16px rgb(0 0 0 / 0.5); border-color: hsl(var(--input)); }
+html[data-motion="reduce"] .tp-side-arrow,
+html[data-motion="reduce"] .tp-side-fade { transition: none; }
+
 /* "AI choosing…" shimmer slot (assignee cell) */
 .tp-ai-think {
   border: 1.5px dashed rgb(196 181 253);

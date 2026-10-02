@@ -1077,7 +1077,7 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
  * "Always shown", Reset-to-default footer. Same shell as FilterFlyout.
  * Hidden in board mode (the board has status columns, not these).
  */
-export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths }) {
+export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null }) {
   const [open, setOpen] = useState(false);
   // QA 09-21 #12: on a touch screen (iPad) a `draggable` row swallows the tap
   // as a drag start and the checkbox never toggles. Coarse pointers get
@@ -1244,6 +1244,23 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               );
             })}
           </ul>
+          {/* Column map (2 Oct 2026): a personal, opt-in row of jump links +
+              a mini-map over the list when it scrolls sideways. */}
+          {onColumnMapChange && (
+            <label className="mt-1 flex items-start gap-2 px-1.5 py-1.5 rounded-md border-t border-border/60 pt-2 cursor-pointer hover:bg-muted/60">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={columnMap}
+                onChange={(e) => onColumnMapChange(e.target.checked)}
+                className="tp-focus-ring mt-0.5 rounded border-input text-blue-600 dark:text-blue-300"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm text-foreground/85">Column map</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground/75">Jump links and a mini-map above the list when it scrolls sideways. Just for you.</span>
+              </span>
+            </label>
+          )}
           {/* Footer: column-set reset (QC4) beside the width reset (QR3) —
               two different customizations, two explicit ways back. */}
           <div className="mt-1.5 flex items-stretch gap-1 border-t border-border/60 pt-1">
