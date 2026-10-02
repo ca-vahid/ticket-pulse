@@ -261,6 +261,27 @@ describe('modes', () => {
     for (const fn of Object.values(ticketSvc)) expect(fn).not.toHaveBeenCalled();
   });
 
+  test('shadow families are listed under People with the children Live would create, linked NH and a cancellation', async () => {
+    await setMode('observe');
+    const hire = fsNotice({ subject: 'New Hire: Isabela Sousa', sender: BAMBOO, text: `Start Date: ${day(10)} Employee #: 2371 Position: Engineer Location: Montreal` });
+    await hr.onTicketCreated(hire.id, 1);
+    const nh = fsNotice({ subject: `NH Laptop - Montreal - CA - isousa - ${day(10)}`, sender: 'isousa@x.ca', text: `Start Date: ${day(10)} Username: isousa Full Name: Isabela Sousa ID: 2371` });
+    await hr.onTicketCreated(nh.id, 1);
+    const dep = departure('Jamie Gill', day(10));
+    await hr.onTicketCreated(dep.id, 1);
+    await hr.onTicketCreated(fsNotice({ subject: 'Departure Notification: Jamie Gill will no longer be departing', text: `Jamie Gill will no longer be departing ${PROFILE}` }).id, 1);
+
+    const open = await hr.listFamilies(1, { status: 'open' });
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ shadow: true, kind: 'onboarding', personName: 'Isabela Sousa', status: 'open', linked: 1, progress: { done: 0, total: 2 } });
+    expect(open[0].plannedChildren.map((c) => c.title)).toEqual(['Laptop', 'Workstation']);
+    expect(open[0].parent).toMatchObject({ id: hire.id });
+    const all = await hr.listFamilies(1, {});
+    expect(all.find((f) => f.personName === 'Jamie Gill')).toMatchObject({ shadow: true, status: 'cancelled', progress: { total: 5 } });
+    expect(await hr.listFamilies(1, { status: 'closed' })).toEqual([]);
+    expect(db.families).toHaveLength(0);
+  });
+
   test('shadow: a follow-up for someone Shadow never saw still says "no open family"', async () => {
     await setMode('observe');
     const nh = fsNotice({ subject: `NH Workstation - Perth - AU - nobody - ${day(5)}`, sender: 'nobody@x.ca', text: `Start Date: ${day(5)} Username: nobody Full Name: No Body ID: 9999` });
