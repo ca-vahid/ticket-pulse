@@ -181,3 +181,24 @@ describe('friendlyDays', () => {
     expect(friendlyDays(null)).toBeNull();
   });
 });
+
+describe('a reassignment made in Ticket Pulse reads as one line (2 Oct 2026, #245218)', () => {
+  test('fs_write_back → "reassigned Gaby → Marcus"; the FS echo and the "ownership ended → Unassigned" episode are dropped', () => {
+    const at = '2026-10-02T22:37:45.000Z';
+    const items = buildHistoryItems({
+      activities: [
+        { id: 1, activityType: 'fs_write_back', performedBy: 'Gaby Tonnova', performedAt: '2026-10-02T22:37:45.674Z', details: { source: 'ticketpulse_native', actorKind: 'human', changes: { assignee: { from: 'Gaby Tonnova', to: 'Marcus Blackstock' } } } },
+        { id: 2, activityType: 'coordinator_assigned', performedBy: 'Ticket Pulse', performedAt: at, details: { via: 'freshservice', actorKind: 'freshservice_sync', agentName: 'Marcus Blackstock' } },
+      ],
+      assignmentEpisodes: [
+        { id: 9, technician: { name: 'Gaby Tonnova' }, startMethod: 'ai_auto', startedAt: '2026-10-02T22:19:00.000Z', endedAt: at, endMethod: 'reassigned', endActorName: 'Ticket Pulse' },
+      ],
+    });
+    const flat = items.flatMap((i) => (i.items ? i.items : [i]));
+    const reassign = flat.filter((i) => i.event === 'assignment');
+    expect(reassign).toHaveLength(1);
+    expect(reassign[0]).toMatchObject({ verb: 'reassigned', from: 'Gaby Tonnova', to: 'Marcus Blackstock', actor: 'Gaby Tonnova', machine: false });
+    expect(flat.some((i) => i.verb?.startsWith('ownership ended'))).toBe(false);
+    expect(flat.some((i) => /fs write back/i.test(i.verb || ''))).toBe(false);
+  });
+});

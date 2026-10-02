@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FileText, File as FileIcon, Loader2, Maximize2, Minus, Plus, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, FileText, File as FileIcon, Loader2, Maximize2, Minus, Plus, X } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { ticketsAPI } from '../../services/api';
 import { formatBytes } from './ticketUi';
@@ -41,9 +41,17 @@ export function previewKind(a) {
  * SheetJS (both lazy-loaded); plain text in a scrollable pane; audio/video in
  * native players. Anything else gets a friendly download card. The download
  * button is always present.
+ *
+ * `items` (2 Oct 2026): the list the preview was opened from (the ticket's
+ * files in conversation order, or the Attachments tab's current filter);
+ * ‹ › buttons and the arrow keys step through it, `onNavigate` swaps the file.
  */
-export default function AttachmentPreviewModal({ ticketId, attachment, onClose }) {
+export default function AttachmentPreviewModal({ ticketId, attachment, onClose, items = null, onNavigate = null }) {
   const kind = previewKind(attachment);
+  const list = Array.isArray(items) && items.length > 1 && onNavigate ? items : null;
+  const index = list ? list.findIndex((a) => a.id === attachment.id) : -1;
+  const prev = list && index > 0 ? list[index - 1] : null;
+  const next = list && index >= 0 && index < list.length - 1 ? list[index + 1] : null;
   const [url, setUrl] = useState(null);
   const [rich, setRich] = useState(null); // { html } for docx/sheet, { text } for text
   const [error, setError] = useState(null);
@@ -104,13 +112,15 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose }
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft' && prev && !e.target.closest?.('input, textarea, [contenteditable="true"]')) { e.preventDefault(); onNavigate(prev); }
+      else if (e.key === 'ArrowRight' && next && !e.target.closest?.('input, textarea, [contenteditable="true"]')) { e.preventDefault(); onNavigate(next); }
       else if (kind === 'image' && (e.key === '+' || e.key === '=')) zoomBy(ZOOM_STEP);
       else if (kind === 'image' && (e.key === '-' || e.key === '_')) zoomBy(-ZOOM_STEP);
       else if (kind === 'image' && e.key === '0') resetView();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose, zoomBy, resetView, kind]);
+  }, [onClose, zoomBy, resetView, kind, prev, next, onNavigate]);
 
   const onWheel = (e) => {
     e.preventDefault();
@@ -226,6 +236,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose }
             <FileText className="mr-1.5 inline h-4 w-4 align-[-2px] text-muted-foreground/75" aria-hidden="true" />
             {attachment.fileName}
             {attachment.sizeBytes ? <span className="ml-2 text-xs font-normal text-muted-foreground/75">{formatBytes(attachment.sizeBytes)}</span> : null}
+            {list && index >= 0 && <span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground/75">{index + 1} of {list.length}</span>}
           </span>
           <div className="flex items-center gap-1 shrink-0">
             {kind === 'image' && (
@@ -280,6 +291,28 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose }
           onWheel={kind === 'image' && url ? onWheel : undefined}
         >
           {body()}
+          {prev && (
+            <button
+              type="button"
+              onClick={() => onNavigate(prev)}
+              aria-label={`Previous: ${prev.fileName}`}
+              title={`Previous: ${prev.fileName} (←)`}
+              className="tp-focus-ring absolute left-2 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card"
+            >
+              <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+            </button>
+          )}
+          {next && (
+            <button
+              type="button"
+              onClick={() => onNavigate(next)}
+              aria-label={`Next: ${next.fileName}`}
+              title={`Next: ${next.fileName} (→)`}
+              className="tp-focus-ring absolute right-2 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card"
+            >
+              <ChevronRight className="h-5 w-5" aria-hidden="true" />
+            </button>
+          )}
           {kind === 'image' && url && !error && (
             <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-slate-900/55 px-2.5 py-1 text-[10px] font-medium text-white/90 dark:bg-slate-950/75 dark:ring-1 dark:ring-white/10">
               <Maximize2 className="w-3 h-3" aria-hidden="true" />

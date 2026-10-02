@@ -161,6 +161,17 @@ class AttachmentService {
     const safeName = sanitizeFileName(fsAttachment.name);
     if (BLOCKED_EXTENSIONS.has(fileExtension(safeName))) return null;
     const blobName = `fs/ws-${workspaceId}/att-${fsId}-${safeName}`.slice(0, 500);
+    // FreshService's copy of a file an agent uploaded in Ticket Pulse (the reply
+    // or note was mirrored to FS, the conversation sync brings it back) is the
+    // same file — the message already has it. Same entry + name + size = skip
+    // (2 Oct 2026: 73 messages showed every pasted picture twice).
+    if (threadEntryId) {
+      const twin = await prisma.ticketAttachment.findFirst({
+        where: { threadEntryId, fileName: safeName, sizeBytes: Number(fsAttachment.size) || 0 },
+        select: { id: true },
+      }).catch(() => null);
+      if (twin) return null;
+    }
     try {
       return await prisma.ticketAttachment.create({
         data: {
