@@ -1212,8 +1212,12 @@ export default function Dashboard() {
     : viewMode === 'weekly'
       ? (displayStats.weeklyAppAssigned || 0)
       : (displayStats.appAssignedToday || 0);
-  const selfPickPercentage = totalTicketsToday > 0
-    ? Math.round((selfPickedToday / totalTicketsToday) * 100)
+  // 2 Oct 2026 (Vahid): the band used to push self-pick (goal 70%), from
+  // before AI assignment. The goal now runs the other way: AI-assigned share
+  // ("App" = assigned by the Ticket Pulse service account), goal 90%.
+  const AI_ASSIGNED_GOAL = 90;
+  const aiAssignedPercentage = totalTicketsToday > 0
+    ? Math.round((appAssignedTotal / totalTicketsToday) * 100)
     : 0;
   // ---- Stats band (flat typographic redesign) ----------------------------
   // One list drives the desktop stat row, the mobile sheet grid, and their
@@ -1266,12 +1270,13 @@ export default function Dashboard() {
     }] : []),
   ];
   const maxDayCount = Math.max(1, ...(weeklyStats || []).map((d) => d?.count || 0));
-  const selfPickBarClass = selfPickPercentage >= 70 ? 'bg-green-400' : selfPickPercentage >= 50 ? 'bg-yellow-400' : 'bg-red-400';
-  const selfPickSheetBarClass = selfPickPercentage >= 70 ? 'bg-green-500' : selfPickPercentage >= 50 ? 'bg-yellow-500' : 'bg-red-500';
-  const selfPickRingStroke = selfPickPercentage >= 70 ? '#4ade80' : selfPickPercentage >= 50 ? '#facc15' : '#fca5a5';
+  const aiTier = aiAssignedPercentage >= AI_ASSIGNED_GOAL ? 'good' : aiAssignedPercentage >= 70 ? 'near' : 'low';
+  const aiBarClass = { good: 'bg-green-400', near: 'bg-yellow-400', low: 'bg-red-400' }[aiTier];
+  const aiSheetBarClass = { good: 'bg-green-500', near: 'bg-yellow-500', low: 'bg-red-500' }[aiTier];
+  const aiRingStroke = { good: '#4ade80', near: '#facc15', low: '#fca5a5' }[aiTier];
   const loadMixTitle = isToday
     ? `Techs by load — light: ${displayStats.lightLoad || 0} · medium: ${displayStats.mediumLoad || 0} · heavy: ${displayStats.heavyLoad || 0}`
-    : 'Team self-pick rate for this period';
+    : `AI-assigned: ${appAssignedTotal} of ${totalTicketsToday} tickets this period (goal ${AI_ASSIGNED_GOAL}%)`;
   const bandRangeLabel = viewMode === 'daily'
     ? selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     : viewMode === 'weekly'
@@ -1586,15 +1591,15 @@ export default function Dashboard() {
 
             <div className="w-28 flex-none cursor-default 2xl:w-36" title={loadMixTitle}>
               <div className="mb-1 flex items-baseline justify-between text-[11px]">
-                <span className="font-semibold">Self-Pick <span className="font-extrabold tabular-nums">{selfPickPercentage}%</span></span>
-                <span className="hidden font-medium opacity-75 2xl:inline">goal 70</span>
+                <span className="font-semibold">AI-assigned <span className="font-extrabold tabular-nums">{aiAssignedPercentage}%</span></span>
+                <span className="hidden font-medium opacity-75 2xl:inline">goal {AI_ASSIGNED_GOAL}</span>
               </div>
               <div className="relative h-1.5 rounded-full bg-white/20">
                 <div
-                  className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${selfPickBarClass}`}
-                  style={{ width: `${Math.min(100, selfPickPercentage)}%` }}
+                  className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${aiBarClass}`}
+                  style={{ width: `${Math.min(100, aiAssignedPercentage)}%` }}
                 />
-                <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-white/85" style={{ left: '70%' }} />
+                <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-white/85" style={{ left: `${AI_ASSIGNED_GOAL}%` }} />
               </div>
             </div>
 
@@ -1677,16 +1682,16 @@ export default function Dashboard() {
                   </span>
                 ))}
               </span>
-              <span className="relative h-10 w-10 flex-none" aria-label={`Team self-pick ${selfPickPercentage}%`}>
+              <span className="relative h-10 w-10 flex-none" aria-label={`AI-assigned ${aiAssignedPercentage}% (goal ${AI_ASSIGNED_GOAL}%)`}>
                 <svg viewBox="0 0 40 40" className="h-10 w-10 -rotate-90" aria-hidden="true">
                   <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="5" />
                   <circle
                     cx="20" cy="20" r="16" fill="none"
-                    stroke={selfPickRingStroke} strokeWidth="5" strokeLinecap="round"
-                    strokeDasharray={`${(Math.min(100, selfPickPercentage) / 100) * 100.53} 100.53`}
+                    stroke={aiRingStroke} strokeWidth="5" strokeLinecap="round"
+                    strokeDasharray={`${(Math.min(100, aiAssignedPercentage) / 100) * 100.53} 100.53`}
                   />
                 </svg>
-                <span className="absolute inset-0 grid place-items-center text-[10px] font-extrabold tabular-nums">{selfPickPercentage}%</span>
+                <span className="absolute inset-0 grid place-items-center text-[10px] font-extrabold tabular-nums">{aiAssignedPercentage}%</span>
               </span>
               <ChevronDown className="h-4 w-4 flex-none text-blue-100" aria-hidden="true" />
             </button>
@@ -1779,15 +1784,15 @@ export default function Dashboard() {
 
               <div className="px-4 py-2">
                 <div className="mb-1 flex items-baseline justify-between text-xs font-semibold text-foreground/85">
-                  <span>Team Self-Pick <span className="font-extrabold tabular-nums">{selfPickPercentage}%</span></span>
-                  <span className="font-medium text-muted-foreground/75">goal 70%</span>
+                  <span>AI-assigned <span className="font-extrabold tabular-nums">{aiAssignedPercentage}%</span></span>
+                  <span className="font-medium text-muted-foreground/75">goal {AI_ASSIGNED_GOAL}%</span>
                 </div>
                 <div className="relative h-2 rounded-full bg-muted">
                   <div
-                    className={`absolute inset-y-0 left-0 rounded-full ${selfPickSheetBarClass}`}
-                    style={{ width: `${Math.min(100, selfPickPercentage)}%` }}
+                    className={`absolute inset-y-0 left-0 rounded-full ${aiSheetBarClass}`}
+                    style={{ width: `${Math.min(100, aiAssignedPercentage)}%` }}
                   />
-                  <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-muted-foreground/60" style={{ left: '70%' }} />
+                  <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-muted-foreground/60" style={{ left: `${AI_ASSIGNED_GOAL}%` }} />
                 </div>
                 {isToday && (
                   <div className="mt-1.5 flex items-center gap-3 text-[10px] font-semibold text-muted-foreground">

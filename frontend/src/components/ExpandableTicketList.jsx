@@ -142,7 +142,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
               {categoryLabel}
             </span>
           )}
-          {isSelf && variant !== 'closed' && (
+          {isSelf && (
             <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
               <Star className="w-2 h-2 fill-purple-600" />
               Self
@@ -180,7 +180,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
           {categoryLabel}
         </span>
       )}
-      {isSelf && variant !== 'closed' && (
+      {isSelf && (
         <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
           <Star className="w-2 h-2 fill-purple-600" />
           Self
