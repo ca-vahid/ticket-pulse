@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.01-preview';
+export const APP_VERSION = '4.2.02-preview';
 
 export const changelog = [
+  {
+    version: '4.2.02-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Availability lists everyone from the start</strong> &mdash; the team calendar now includes every Ticket Pulse user as soon as Availability is opened (and refreshes every few hours), instead of only the people who had visited it.' },
+    ],
+  },
   {
     version: '4.2.01-preview',
     date: 'October 3, 2026',
