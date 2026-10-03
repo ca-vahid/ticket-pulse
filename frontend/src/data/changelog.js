@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.50-preview';
+export const APP_VERSION = '4.1.51-preview';
 
 export const changelog = [
+  {
+    version: '4.1.51-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Background checks never crowd out your clicks</strong> &mdash; the 15-minute check for tickets deleted in FreshService now runs at an even pace and pauses whenever FreshService is busy or someone is waiting, so assigning or updating a FreshService ticket stays quick.' },
+    ],
+  },
   {
     version: '4.1.50-preview',
     date: 'October 3, 2026',

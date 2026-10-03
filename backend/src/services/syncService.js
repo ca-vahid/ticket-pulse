@@ -141,6 +141,27 @@ export const SYNC_LOCK_STALE_MS = 20 * 60 * 1000;
 // leave Ticket Pulse sooner. ~800 open FS tickets -> ~50 low-priority
 // calls/min, which always yield to interactive requests.
 export const RECONCILE_RECHECK_MS = 15 * 60 * 1000;
+// 3 Oct 2026: at 15 min the per-workspace loops (250 ms apart) burst to ~100
+// calls/min while a 429 had cut the account cap to 134/min, and a person's
+// request timed out in the queue. All workspaces now share one pace (1 call
+// per RECONCILE_MIN_GAP_MS), and a batch stops early whenever the limiter is
+// busy; the rest is picked up next cycle.
+export const RECONCILE_MIN_GAP_MS = process.env.NODE_ENV === 'test' ? 0 : 1000;
+let reconcileNextSlotAt = 0;
+async function reconcileSlot(sleep) {
+  const now = Date.now();
+  const at = Math.max(now, reconcileNextSlotAt);
+  reconcileNextSlotAt = at + RECONCILE_MIN_GAP_MS;
+  if (at > now) await sleep(at - now);
+}
+/** True when reconcile should yield the FreshService budget to people. */
+export function reconcileShouldYield(stats) {
+  if (!stats) return false;
+  if (stats.slowdownActive) return true;
+  if ((stats.queueDepthByPriority?.high || 0) > 0) return true;
+  const cap = Number(stats.maxRequestsPerMinute) || 0;
+  return cap > 0 && Number(stats.requestsLastMinute || 0) >= cap * 0.6;
+}
 
 /**
  * Service for syncing data from FreshService
@@ -4605,10 +4626,12 @@ class SyncService {
     let spamCount = 0;
     let verifiedCount = 0;
     let forbiddenCount = 0;
+    let yielded = false;
     for (const ticket of ticketsToCheck) {
+      if (reconcileShouldYield(client.limiter?.getStats?.())) { yielded = true; break; }
       try {
+        await reconcileSlot(sleep);
         const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
-        await sleep(250);
 
         // 403 from FS — ticket exists but this API key can't see it (e.g.
         // moved to a workspace we're not authorized for). Don't mark as
@@ -4750,6 +4773,7 @@ class SyncService {
         spam: spamCount,
         verified: verifiedCount,
         forbidden: forbiddenCount,
+        ...(yielded ? { yieldedToPeople: true } : {}),
       });
     }
   }
