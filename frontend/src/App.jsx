@@ -32,6 +32,7 @@ import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import Knowledge from './pages/Knowledge';
 import Onboarding from './pages/Onboarding';
+import Availability from './pages/Availability';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import PublicApprovalReply from './pages/PublicApprovalReply';
 import RequesterDetail from './pages/RequesterDetail';
@@ -308,6 +309,17 @@ function App() {
                           <AdminRoute>
                             <Onboarding />
                           </AdminRoute>
+                        }
+                      />
+
+                      {/* Availability (native Vacation Tracker replacement): every signed-in
+                          person, agents included; the page gates Approvals / Settings itself. */}
+                      <Route
+                        path="/availability/:tab?"
+                        element={
+                          <TicketsRoute>
+                            <Availability />
+                          </TicketsRoute>
                         }
                       />
 

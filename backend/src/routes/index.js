@@ -10,6 +10,7 @@ import webhookRoutes from './webhook.routes.js';
 import freshserviceWebhookRoutes from './freshserviceWebhook.routes.js';
 import { teamsBotRouter, teamsAdminRouter } from './teams.routes.js';
 import teamsAutofillRoutes from './teamsAutofill.routes.js';
+import availabilityRoutes from './availability.routes.js';
 import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
 import aiUsageRoutes from './aiUsage.routes.js';
@@ -94,6 +95,9 @@ router.use('/agent', agentRoutes);
 // QA 10-01 #3: the Teams Autofill draft for /tickets/new?autofill=… (the
 // draft names its workspace; only its sender may read it).
 router.use('/teams-autofill', teamsAutofillRoutes);
+// Availability (Oct 2026): company-level time away, open to every signed-in
+// Ticket Pulse user (agents included); admin and approver checks inside.
+router.use('/availability', availabilityRoutes);
 // Native ticketing: mounted before global workspace-access enforcement because
 // agent-role users (no workspace_access rows) are first-class here — the router
 // applies requireWorkspace + its own access resolution internally.

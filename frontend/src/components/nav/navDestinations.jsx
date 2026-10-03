@@ -3,7 +3,7 @@ import { writeRoleHint } from '../../utils/roleHint';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
-  AnalyticsNavIcon, ApprovalsNavIcon, AssignmentNavIcon, DashboardNavIcon, KnowledgeNavIcon, MapNavIcon,
+  AnalyticsNavIcon, ApprovalsNavIcon, AssignmentNavIcon, AvailabilityNavIcon, DashboardNavIcon, KnowledgeNavIcon, MapNavIcon,
   OnboardingNavIcon, TicketsNavIcon, TimelineNavIcon, WorkflowNavIcon,
 } from './NavIcons';
 import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
@@ -21,6 +21,9 @@ import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
 //   gate: 'tickets' -> visible when the workspace has native ticketing enabled
 //   gate: 'hrLifecycle' -> workspace admins, and only where the server says the
 //                      Onboarding section exists (GET /hr-lifecycle/status)
+//   gate: 'signedIn' -> every signed-in person, agents included, even before
+//                      the workspace role resolves (Availability: your own time
+//                      away is not workspace-scoped)
 //   gate: null      -> visible to everyone (Tickets, Approvals)
 //
 // ROLE MODEL (QA 08-24 #3, v3.7.02): viewers and reviewers get the ticket
@@ -142,6 +145,19 @@ export const NAV_DESTINATIONS = [
     gate: null,
     badgeKey: 'approvals', // pending-count overlay (see AppHeader useApprovalCount)
   },
+  {
+    // Availability (native Vacation Tracker replacement): book time away, WFH
+    // and site visits; team calendar; approvals. Everyone signed in, agents too.
+    id: 'availability',
+    label: 'Availability',
+    hint: 'Time away, WFH and site visits',
+    path: '/availability',
+    Icon: AvailabilityNavIcon,
+    tile: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/30 dark:bg-cyan-500/15 dark:text-cyan-200',
+    hover: 'hover:border-cyan-300 hover:bg-cyan-100',
+    bar: 'bg-cyan-600',
+    gate: 'signedIn',
+  },
 ];
 
 // Session-scoped marker written by AdminRoute when it bounces a non-admin off
@@ -241,7 +257,7 @@ export function useNavDestinations() {
   // is coordinator/manager territory and would just bounce them. Agents can be
   // approval managers and request approvals, so the Approvals inbox is theirs too.
   if (user?.role === 'agent') {
-    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' || dest.id === 'approvals');
+    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' || dest.id === 'approvals' || dest.id === 'availability');
   }
 
   return NAV_DESTINATIONS.filter((dest) => {
@@ -249,6 +265,7 @@ export function useNavDestinations() {
     if (dest.gate === 'manage') return canManage;
     if (dest.gate === 'view') return canView;
     if (dest.gate === 'hrLifecycle') return canManage && hrLifecycle.available;
+    if (dest.gate === 'signedIn') return Boolean(user);
     return true;
   });
 }

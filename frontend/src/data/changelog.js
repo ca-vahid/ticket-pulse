@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.1.51-preview';
+export const APP_VERSION = '4.2.01-preview';
 
 export const changelog = [
+  {
+    version: '4.2.01-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Availability</strong> &mdash; Ticket Pulse now has its own time-away tracker (side rail &rarr; Availability). Book vacation, sick days, WFH, site visits, training and appointments in days, half days or hours; see your balances; and follow each request with the reason it was auto-approved or sent for approval.' },
+      { type: 'feature', html: '<strong>Rules you can set per office, group or person</strong> &mdash; for example &ldquo;WFH no more than 4 weeks ahead&rdquo; or &ldquo;Vancouver: more than 3 people WFH in a week needs approval&rdquo;, plus blackout dates, minimum notice, maximum length and balance checks. Each rule can approve, send for approval, refuse or just warn, and the request shows which rule decided.' },
+      { type: 'feature', html: '<strong>Approval groups</strong> &mdash; admins build groups of people with their own approvers (and delegates for when they are away). Groups can auto-approve some leave types. Approvers decide in the Approvals tab and get an e-mail when a request needs them.' },
+      { type: 'feature', html: '<strong>Team calendar</strong> &mdash; a month view of who is away, working from home or on site, with &ldquo;out today&rdquo; at the top. Sick days and other private types show to colleagues only as &ldquo;Away&rdquo;.' },
+      { type: 'feature', html: '<strong>Moving off Vacation Tracker</strong> &mdash; admins can import past and upcoming leave from Vacation Tracker and paste its balance report to set opening balances. Approved time away feeds the dashboard and AI assignment exactly as Vacation Tracker leave does today.' },
+    ],
+  },
   {
     version: '4.1.51-preview',
     date: 'October 3, 2026',

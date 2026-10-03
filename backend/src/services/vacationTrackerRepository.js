@@ -149,6 +149,9 @@ class VacationTrackerRepository {
       where: {
         workspaceId,
         leaveDate: { gte: startDate, lte: endDate },
+        // Availability (Oct 2026) projects its own approved requests as
+        // 'av:' rows; they are not Vacation Tracker's to remove.
+        NOT: { vtLeaveId: { startsWith: 'av:' } },
       },
       select: { id: true, vtLeaveId: true, leaveDate: true },
     });
