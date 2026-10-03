@@ -144,6 +144,26 @@ describe('reading Teams activities', () => {
     expect(ignored).toBe(0);
   });
 
+  // 2 Oct 2026: the <img> copy lives on the media service under the same
+  // object id and refuses the bot (401) — it must not count as a 2nd picture.
+  test('pasted picture: the media-service <img> copy of the attachment counts once, either order', () => {
+    const id = SMBA.match(/attachments\/([^/]+)\/views/)[1];
+    const asm = `https://us-api.asm.skype.com/v1/objects/${id}/views/imgo`;
+    const img = { contentType: 'text/html', content: `<div><img src="${asm}" alt="image"></div>` };
+    const att = { contentType: 'image/*', contentUrl: SMBA };
+    expect(collectImageRefs(message({ attachments: [att, img] })).refs).toEqual([{ url: SMBA, name: null, kind: 'image' }]);
+    expect(collectImageRefs(message({ attachments: [img, att] })).refs).toEqual([{ url: SMBA, name: null, kind: 'image' }]);
+  });
+
+  test('two different pictures stay two', () => {
+    const other = SMBA.replace(/attachments\/[^/]+/, 'attachments/0-xyz');
+    const { refs } = collectImageRefs(message({ attachments: [
+      { contentType: 'image/*', contentUrl: SMBA },
+      { contentType: 'image/*', contentUrl: other },
+    ] }));
+    expect(refs).toHaveLength(2);
+  });
+
   test('inline picture only in the HTML (Graph hosted content) is found', () => {
     const url = 'https://graph.microsoft.com/v1.0/chats/19:x/messages/1/hostedContents/aGk=/$value';
     const { refs } = collectImageRefs(message({ attachments: [{ contentType: 'text/html', content: `<p>see</p><img src="${url}" width="300">` }] }));

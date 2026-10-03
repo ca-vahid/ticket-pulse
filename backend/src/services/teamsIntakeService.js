@@ -119,13 +119,25 @@ const IMAGE_FILE_TYPES = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
  */
 export function collectImageRefs(activity) {
   const refs = [];
-  const seen = new Set();
+  const seen = new Map(); // dedupe key -> index in refs
   let ignored = 0;
   const add = (url, name, kind) => {
-    const key = String(url || '').trim();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    refs.push({ url: key, name: name || null, kind });
+    const clean = String(url || '').trim();
+    if (!clean) return;
+    // The same pasted picture comes as the Bot Connector attachment
+    // (/v3/attachments/<id>/views/original) and as an <img> on the media
+    // service (/v1/objects/<id>/views/imgo), which refuses the bot (401) —
+    // so one picture showed as "1 attached, 1 could not be read" (2 Oct 2026).
+    // Key both by the Teams object id and keep the attachment copy.
+    const objectId = (clean.match(/\/(?:attachments|objects)\/([^/?#]+)\/views\//i) || [])[1];
+    const key = objectId ? `obj:${objectId}` : clean;
+    if (seen.has(key)) {
+      const at = seen.get(key);
+      if (refs[at].kind === 'inline' && kind !== 'inline') refs[at] = { url: clean, name: name || refs[at].name || null, kind };
+      return;
+    }
+    seen.set(key, refs.length);
+    refs.push({ url: clean, name: name || null, kind });
   };
   for (const a of activity?.attachments || []) {
     const type = lc(a?.contentType);
