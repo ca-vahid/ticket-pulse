@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.49-preview';
+export const APP_VERSION = '4.1.50-preview';
 
 export const changelog = [
+  {
+    version: '4.1.50-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Deleted FreshService tickets leave sooner</strong> &mdash; open FreshService tickets are now re-checked every 15 minutes (was hourly), so a ticket deleted or marked spam in FreshService leaves Ticket Pulse lists within about 15 minutes.' },
+    ],
+  },
   {
     version: '4.1.49-preview',
     date: 'October 2, 2026',
