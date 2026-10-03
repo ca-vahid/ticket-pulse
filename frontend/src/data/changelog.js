@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.1.46-preview';
+export const APP_VERSION = '4.1.47-preview';
 
 export const changelog = [
+  {
+    version: '4.1.47-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Dashboard goal is now AI-assigned, 90%</strong> &mdash; the band&rsquo;s Self-Pick gauge (goal 70%) dated from before AI assignment. It now shows the share of tickets the AI assigned (the App count over Total), with a 90% goal marker. Hover it for the counts.' },
+      { type: 'fix', html: '<strong>Self tag on closed tickets</strong> &mdash; when you expand an agent on the Dashboard, tickets they picked up themselves now show the Self tag in the Closed / Resolved list too, not just in the open ones.' },
+    ],
+  },
   {
     version: '4.1.46-preview',
     date: 'October 2, 2026',
