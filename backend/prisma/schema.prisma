@@ -4462,3 +4462,204 @@ model HrLifecycleEvent {
   @@index([ticketId], map: "idx_hr_lifecycle_events_ticket")
   @@map("hr_lifecycle_events")
 }
+
+// ---------------------------------------------------------------------------
+// Availability (plans/AVAILABILITY_TRACKER_PLAN.md, Oct 2026): the native
+// Vacation Tracker replacement. Company-level (not per workspace), keyed by a
+// person's e-mail. Approved requests project into technician_leaves (vt_leave_id
+// 'av:<id>' or the imported VT id) so the dashboard and AI assignment read
+// them unchanged.
+// ---------------------------------------------------------------------------
+
+model AvSettings {
+  id                   Int      @id @default(1)
+  yearStartMonth       Int      @default(1) @map("year_start_month")
+  outlookEventsEnabled Boolean  @default(false) @map("outlook_events_enabled")
+  autoRepliesEnabled   Boolean  @default(false) @map("auto_replies_enabled")
+  purposeNotice        String?  @map("purpose_notice") @db.Text
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("av_settings")
+}
+
+model AvOffice {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(120)
+  province  String?  @db.VarChar(10)
+  timezone  String   @default("America/Vancouver") @db.VarChar(50)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  people AvPerson[]
+
+  @@unique([name])
+  @@map("av_offices")
+}
+
+model AvPerson {
+  id         Int       @id @default(autoincrement())
+  email      String    @db.VarChar(255)
+  name       String    @db.VarChar(255)
+  officeId   Int?      @map("office_id")
+  office     AvOffice? @relation(fields: [officeId], references: [id])
+  startDate  DateTime? @map("start_date") @db.Date
+  workdays   Json? // ISO weekdays worked, default [1,2,3,4,5]
+  dailyHours Decimal   @default(8) @map("daily_hours") @db.Decimal(4, 2)
+  isActive   Boolean   @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@unique([email])
+  @@index([officeId])
+  @@map("av_people")
+}
+
+model AvLeaveType {
+  id               Int      @id @default(autoincrement())
+  key              String   @db.VarChar(40)
+  name             String   @db.VarChar(80)
+  icon             String?  @db.VarChar(40)
+  color            String   @default("blue") @db.VarChar(20)
+  unit             String   @default("day") @db.VarChar(10) // day | hour
+  allowHalfDays    Boolean  @default(true) @map("allow_half_days")
+  requiresApproval Boolean  @default(true) @map("requires_approval")
+  availability     String   @default("OFF") @db.VarChar(10) // OFF | WFH | ONSITE | PARTIAL | NONE
+  visibility       String   @default("public") @db.VarChar(10) // public | away | private
+  requiresNote     Boolean  @default(false) @map("requires_note")
+  allowPastDated   Boolean  @default(false) @map("allow_past_dated")
+  tracksBalance    Boolean  @default(false) @map("tracks_balance")
+  balancePolicy    Json?    @map("balance_policy") // { annualDays, tenureTiers:[{afterYears,days}], prorate, carryOverCap, eligibleAfterDays }
+  vtLeaveTypeNames Json?    @map("vt_leave_type_names") // Vacation Tracker type names that import as this type
+  sortOrder        Int      @default(100) @map("sort_order")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([key])
+  @@map("av_leave_types")
+}
+
+model AvApprovalGroup {
+  id                 Int      @id @default(autoincrement())
+  name               String   @db.VarChar(120)
+  description        String?  @db.Text
+  autoApproveTypeIds Json?    @map("auto_approve_type_ids") // number[]; ["*"] = every type
+  requireAll         Boolean  @default(false) @map("require_all")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  members   AvApprovalGroupMember[]
+  approvers AvApprovalGroupApprover[]
+
+  @@unique([name])
+  @@map("av_approval_groups")
+}
+
+model AvApprovalGroupMember {
+  id        Int             @id @default(autoincrement())
+  groupId   Int             @map("group_id")
+  group     AvApprovalGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  email     String          @db.VarChar(255)
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@unique([groupId, email])
+  @@index([email])
+  @@map("av_approval_group_members")
+}
+
+model AvApprovalGroupApprover {
+  id            Int             @id @default(autoincrement())
+  groupId       Int             @map("group_id")
+  group         AvApprovalGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  email         String          @db.VarChar(255)
+  isDelegate    Boolean         @default(false) @map("is_delegate")
+  delegateFrom  DateTime?       @map("delegate_from") @db.Date
+  delegateUntil DateTime?       @map("delegate_until") @db.Date
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  @@unique([groupId, email])
+  @@index([email])
+  @@map("av_approval_group_approvers")
+}
+
+model AvRule {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(160)
+  scopeType    String   @default("company") @map("scope_type") @db.VarChar(10) // company | office | group | person
+  scopeRef     String?  @map("scope_ref") @db.VarChar(255) // office id | group id | e-mail
+  leaveTypeIds Json?    @map("leave_type_ids") // number[]; null = every type
+  condition    Json // { kind, ...params }
+  outcome      String   @db.VarChar(16) // auto_approve | needs_approval | refuse | warn
+  message      String?  @db.Text
+  priority     Int      @default(100)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("av_rules")
+}
+
+model AvRequest {
+  id                Int       @id @default(autoincrement())
+  email             String    @db.VarChar(255)
+  leaveTypeId       Int       @map("leave_type_id")
+  startDate         DateTime  @map("start_date") @db.Date
+  endDate           DateTime  @map("end_date") @db.Date
+  dayPart           String    @default("full") @map("day_part") @db.VarChar(8) // full | am | pm | hours
+  startMinute       Int?      @map("start_minute")
+  endMinute         Int?      @map("end_minute")
+  days              Decimal   @default(0) @db.Decimal(6, 2)
+  hours             Decimal   @default(0) @db.Decimal(7, 2)
+  note              String?   @db.Text
+  status            String    @default("pending") @db.VarChar(16) // pending | approved | denied | cancelled
+  decision          Json? // { outcome, fired:[{ruleId,name,outcome,message}], approvers:[...] }
+  decidedBy         String?   @map("decided_by") @db.VarChar(255)
+  decidedAt         DateTime? @map("decided_at")
+  decisionNote      String?   @map("decision_note") @db.Text
+  source            String    @default("app") @db.VarChar(20) // app | vacation_tracker | import
+  externalId        String?   @map("external_id") @db.VarChar(255)
+  wantsOutlookEvent Boolean   @default(false) @map("wants_outlook_event")
+  wantsAutoReply    Boolean   @default(false) @map("wants_auto_reply")
+  createdBy         String?   @map("created_by") @db.VarChar(255)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  events AvRequestEvent[]
+
+  @@index([email, startDate])
+  @@index([status, startDate])
+  @@index([startDate, endDate])
+  @@index([externalId])
+  @@map("av_requests")
+}
+
+model AvRequestEvent {
+  id        Int       @id @default(autoincrement())
+  requestId Int       @map("request_id")
+  request   AvRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  kind      String    @db.VarChar(30) // created | auto_approved | sent_for_approval | approved | denied | cancelled | imported
+  actor     String?   @db.VarChar(255)
+  details   Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([requestId])
+  @@map("av_request_events")
+}
+
+model AvBalanceAdjustment {
+  id          Int      @id @default(autoincrement())
+  email       String   @db.VarChar(255)
+  leaveTypeId Int      @map("leave_type_id")
+  year        Int
+  kind        String   @db.VarChar(16) // adjustment | carryover | import
+  days        Decimal  @db.Decimal(7, 2)
+  note        String?  @db.Text
+  actor       String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([email, year])
+  @@map("av_balance_adjustments")
+}

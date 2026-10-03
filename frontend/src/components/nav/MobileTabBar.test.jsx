@@ -40,10 +40,10 @@ const renderBar = (path = '/tickets') => render(
 const tabLabels = () => within(screen.getByRole('navigation')).getAllByRole('button').map((b) => b.textContent.trim());
 
 describe('MobileTabBar', () => {
-  test.each(['viewer', 'reviewer'])('%s: Tickets + Approvals tabs, More sheet without Settings', (role) => {
+  test.each(['viewer', 'reviewer'])('%s: Tickets + Approvals + Availability tabs, More sheet without Settings', (role) => {
     wsState.availableWorkspaces = [{ id: 1, name: 'IT', role }];
     renderBar();
-    expect(tabLabels()).toEqual(['Tickets', 'Approvals', 'More']);
+    expect(tabLabels()).toEqual(['Tickets', 'Approvals', 'Availability', 'More']);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     const sheet = screen.getByRole('dialog', { name: 'More navigation' });
     expect(within(sheet).queryByText('Settings')).not.toBeInTheDocument();
@@ -70,14 +70,14 @@ describe('MobileTabBar', () => {
   test('unresolved role fails closed to the ticket surface', () => {
     wsState.availableWorkspaces = [];
     renderBar();
-    expect(tabLabels()).toEqual(['Tickets', 'Approvals', 'More']);
+    expect(tabLabels()).toEqual(['Tickets', 'Approvals', 'Availability', 'More']);
   });
 
-  test('agents unchanged: Tickets + Approvals, no Settings', () => {
+  test('agents: Tickets + Approvals + Availability, no Settings', () => {
     authState.user = { email: 'tech@x.com', role: 'agent' };
     wsState.availableWorkspaces = [{ id: 1, name: 'IT', role: 'agent' }];
     renderBar();
-    expect(tabLabels()).toEqual(['Tickets', 'Approvals', 'More']);
+    expect(tabLabels()).toEqual(['Tickets', 'Approvals', 'Availability', 'More']);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     expect(within(screen.getByRole('dialog')).queryByText('Settings')).not.toBeInTheDocument();
   });

@@ -2072,3 +2072,37 @@ export const hrLifecycleAPI = {
   events: (params = {}) => api.get('/hr-lifecycle/events', { params }),
   preview: (ref) => api.post('/hr-lifecycle/preview', { ref }),
 };
+
+/**
+ * Availability (native Vacation Tracker replacement): time away, WFH and site
+ * visits. Everyone books and sees the team calendar; approvers decide; the
+ * /admin/* routes are Availability-admin only. Responses are { success, data }.
+ */
+export const availabilityAPI = {
+  me: () => api.get('/availability/me'),
+  myRequests: (params = {}) => api.get('/availability/requests/mine', { params }),
+  preview: (data) => api.post('/availability/requests/preview', data),
+  createRequest: (data) => api.post('/availability/requests', data),
+  getRequest: (id) => api.get(`/availability/requests/${id}`),
+  cancelRequest: (id, reason) => api.post(`/availability/requests/${id}/cancel`, { reason }),
+  calendar: (params = {}) => api.get('/availability/calendar', { params }),
+  outToday: () => api.get('/availability/out-today'),
+  approvals: () => api.get('/availability/approvals'),
+  decide: (id, action, note) => api.post(`/availability/requests/${id}/decision`, { action, note }),
+
+  adminConfig: () => api.get('/availability/admin/config'),
+  updateSettings: (data) => api.patch('/availability/admin/settings', data),
+  saveOffice: (data) => api.post('/availability/admin/offices', data),
+  saveLeaveType: (data) => api.post('/availability/admin/leave-types', data),
+  saveGroup: (data) => api.post('/availability/admin/groups', data),
+  deleteGroup: (id) => api.delete(`/availability/admin/groups/${id}`),
+  saveRule: (data) => api.post('/availability/admin/rules', data),
+  deleteRule: (id) => api.delete(`/availability/admin/rules/${id}`),
+  updatePerson: (id, data) => api.patch(`/availability/admin/people/${id}`, data),
+  syncPeople: () => api.post('/availability/admin/people/sync'),
+  balances: (params = {}) => api.get('/availability/admin/balances', { params }),
+  adjustBalance: (data) => api.post('/availability/admin/balances/adjust', data),
+  importBalances: (data) => apiLongTimeout.post('/availability/admin/balances/import', data),
+  importVacationTracker: (data) => apiLongTimeout.post('/availability/admin/import/vacation-tracker', data),
+  reproject: (data = {}) => apiLongTimeout.post('/availability/admin/reproject', data),
+};

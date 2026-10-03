@@ -103,9 +103,9 @@ describe('NAV_DESTINATIONS gates', () => {
 describe('hooks', () => {
   const ids = (result) => result.current.map((d) => d.id);
 
-  test.each(['viewer', 'reviewer'])('useNavDestinations: %s → Tickets + Approvals only', (role) => {
+  test.each(['viewer', 'reviewer'])('useNavDestinations: %s → Tickets + Approvals + Availability only', (role) => {
     wsState.availableWorkspaces = [{ id: 1, role }];
-    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals']);
+    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals', 'availability']);
     expect(renderHook(() => useCanAccessSettings()).result.current).toBe(false);
   });
 
@@ -130,13 +130,13 @@ describe('hooks', () => {
   test('useWorkspaceRole fails closed to null before the workspace list is known', () => {
     wsState.availableWorkspaces = [];
     expect(renderHook(() => useWorkspaceRole()).result.current).toBeNull();
-    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals']);
+    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals', 'availability']);
   });
 
-  test('agents keep Tickets + Approvals regardless of workspace role label', () => {
+  test('agents keep Tickets + Approvals (+ Availability) regardless of workspace role label', () => {
     authState.user = agent;
     wsState.availableWorkspaces = [{ id: 1, role: 'agent' }];
-    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals']);
+    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals', 'availability']);
     expect(renderHook(() => useCanAccessSettings()).result.current).toBe(false);
     authState.user = viewer;
   });

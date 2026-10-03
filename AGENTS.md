@@ -90,7 +90,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - **Ticket Threads**: `ticket_thread_entries` caches FreshService activity/conversation bodies for review evidence.
 - **Assignment Episodes**: `ticket_assignment_episodes` tracks ownership windows, reassignments, rejected/bounced tickets, and active ownership state.
 - **Noise Filtering**: `noise_rules` and ticket `isNoise` fields identify low-value tickets that should not distort operational metrics.
-- **Vacation/Availability**: Vacation Tracker tables and technician schedule fields provide leave/capacity context.
+- **Vacation/Availability**: technician_leaves feeds leave/capacity context; it is written by the native **Availability** module (v4.2, see below), the Vacation Tracker sync (being retired), and the Accounting Graph group-calendar reader.
 
 ### Custom Mail Notification Workflows
 - **Settings Surface**: Workspace admins manage mail workflows from Settings > Mail Workflows.
@@ -140,6 +140,29 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
   - **Reply ownership** (`autoHelpReplyOwner.js`, `tickets.reply_owner` + `reply_owner_ref`, under the proposal advisory lock): agent > auto_help > workflow_draft. A workflow `propose_reply` / auto-send downgrade never supersedes a waiting Auto-help answer nor takes an unanswered first reply from a higher owner (node output `yieldedToHigherOwner`); an agent's own public reply supersedes a staged Auto-help draft (run `outcome = 'superseded_by'`). `withdrawn` / `superseded_by` are `PRE_SEND_OUTCOMES` (final, kept out of the loop metrics). The "AI first-reply draft" template is retired (`deprecated`, hidden from the gallery, install refused; installed copies still load).
   - **Workflow awareness**: `ticket.autoHelp.{state, expected, playbook, mode, sentAt, outcome}` (looked up only for workflows that name `autoHelp`; `autoHelpContextService`), `ticket.parkKind` (+ `auto_help`), `ticket.resolvedByKind`, intake + reply-verdict condition fields; triggers `auto_help.staged|answered|nudged|help_requested|resolved` (`autoHelpEvents.js`). Every run resumed after a delay (incl. a coalesced fields_updated run) re-reads the live ticket (`refreshLiveTicketFields`: status + base, priority, assignee, group, isNoise, park, resolver, internal category, resolvedAt / closedAt / dueBy / frDueBy) — the rest of the stored copy stays and `event.*` is the trigger-time record (a coalesced run's merged `event.extra.changes`). Ack merge: send-email option `autoHelpMerge { enabled, waitMinutes (5, max 15) }` holds the ack (`auto_help_pending_acks`: pending → merging → consumed | released) only when Auto-help is EXPECTED to send by itself (auto mode — locked, so never in this build; approve mode never holds an ack); the delivery service puts the ack on top of the answer, the woken node then sends nothing. Seeded guards: Follow-up nudge skips `parkKind = auto_help` and `resolvedByKind = auto_help`; Resolution summary skips Auto-help closes; reopen-on-reply requires `event.extra.autoHelpReplyVerdict` not `confirmed` / `auto_reply` (the reply to a ticket Auto-help closed within 7 days is classified first in `emitTicketEvent`). Installed copies: `backend/scripts/auto-help-workflow-guards.mjs` (dry-run by default; never workspaces 6-9; only workspaces with Auto-help on unless `--workspace N`; name / step-id matches need `--include <ids>`; selection is `selectGuardTargets`, pure).
   - **Pipeline + first response**: an "## Auto-help Context" block in the pipeline's first message (state, staged / sent answer fenced, requester replied); a noise verdict on a ticket with a SENT answer (or a reply to it) becomes `pending_review` + step `auto_help_guard`. First response counts only when a person sends it: `addReply(…, options.automatedReply)` stamps `tickets.first_automated_reply_at` for an automated answer and leaves `first_public_agent_reply_at` alone unless `auto_help_settings.counts_as_first_response` (default off); check-ins stamp neither. API v1 tickets carry `firstAutomatedReplyAt`.
+
+### Availability (v4.2, 2026-10)
+- **The native Vacation Tracker replacement.** Plan, research and Vahid's decisions are in `plans/AVAILABILITY_TRACKER_PLAN.md`. It's on the main rail as **Availability** (`/availability/:tab`: My time, Team calendar, Approvals, Settings).
+- **Company-level, keyed by e-mail (not per workspace).** Mounted right after `requireAuth`, before workspace enforcement, so every Ticket Pulse user (agents included) can book time away. Admins: global admin or a `workspace_access` admin in any workspace.
+- **Tables (`av_*`)**:
+  - `av_settings`: year start month, Outlook switches (both OFF; the person confirms each time).
+  - `av_offices`, `av_people`: office, start date, workdays, daily hours.
+  - `av_leave_types`: unit day/hour, half days, needs-approval default, availability OFF/WFH/ONSITE/PARTIAL/NONE, visibility public/away/private, balance policy with tenure tiers, pro-rata and eligible-after-days, VT name mapping.
+  - `av_approval_groups` + members + approvers: hand-made groups, auto-approve per type or `["*"]`, delegates with date windows. There are **no Entra managers**.
+  - `av_rules`, `av_requests` + `av_request_events` (audit), `av_balance_adjustments`.
+- **Rules engine** (`services/availability/availabilityRules.js`) is pure and deterministic with no LLM:
+  - Scope is company / office / group / person.
+  - Conditions: `always`, `advance_notice`, `capacity` (people per office/group/company per day or week, counting approved and pending), `duration`, `blackout`, `balance`, `past_dated`.
+  - Outcomes: refuse > needs_approval > auto_approve > group auto-approve > the type default; `warn` never decides.
+  - Every request stores the rules that fired.
+- **Projection.** Approved requests write `technician_leaves` rows for every workspace the person is a technician in (`vt_leave_id = 'av:<request>:w<ws>'`; OFF→OFF, WFH→WFH, ONSITE/PARTIAL→OTHER, NONE skipped), so the dashboard, Analytics and AI assignment read them unchanged. Cancel or deny removes them.
+  - The Vacation Tracker sync's stale-row delete skips `av:` rows.
+  - Requests imported from VT (`source = vacation_tracker`, `external_id = vt:<id>`) are not projected while that workspace's VT sync is on. After cut-over, use **Settings → Import → Rebuild**.
+- **Migration from Vacation Tracker.**
+  - `POST /api/availability/admin/import/vacation-tracker` reads the VT v1 API (read-only). It's idempotent, unknown VT types become new types, and partial leaves of 3 h or more import as AM/PM.
+  - `POST /admin/balances/import` takes VT's Leave Balance Report as CSV and writes `import` adjustments so remaining matches VT.
+- **Notifications.** Approvers get an e-mail when a request needs them; requesters get one on approve / deny / cancel-by-someone-else. The e-mails are Outlook-safe (no gradients). Teams cards and a daily "who's out" digest are v2.
+- **Privacy (BC PIPA).** `away` types (sick, bereavement, appointment) show as "Away" to colleagues; the type is visible only to the person, their approvers and admins. `private` types are hidden from colleagues entirely.
 
 ## Planned Architecture
 
@@ -342,6 +365,7 @@ npm run lint
 - `GET/POST/PUT /api/notification-workflows*` - Workspace-admin mail workflow drafts, publishing, enablement, previews, health, run audit, and delivery retry
 - `GET/PATCH/POST /api/visuals*` - Agent map/location/visibility/schedule data
 - `GET/POST/PUT /api/vacation-tracker*` - Vacation Tracker config, sync, leave types, and user mappings
+- `/api/availability/*` - native Availability: `me`, `requests` (preview / submit / cancel / decision), `calendar`, `approvals`, `admin/*` (settings, offices, leave types, approval groups, rules, people, balances, VT import, reproject)
 - `GET/POST/PUT/DELETE /api/noise-rules*` - Noise rule management, test, seed, and backfill
 - `GET/POST /api/autoresponse*` - Auto-response tooling
 - `GET /api/sse/events` - SSE stream for real-time updates
