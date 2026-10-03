@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.47-preview';
+export const APP_VERSION = '4.1.48-preview';
 
 export const changelog = [
+  {
+    version: '4.1.48-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Teams Autofill: assign to anyone</strong> &mdash; the card&rsquo;s Assign to list now starts with Let AI decide, Me and Leave unassigned, followed by every agent in the workspace A&ndash;Z. Type in the box to find someone quickly.' },
+    ],
+  },
   {
     version: '4.1.47-preview',
     date: 'October 2, 2026',

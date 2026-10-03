@@ -428,3 +428,27 @@ describe('prefill token for /tickets/new?autofill=', () => {
     expect(allText(out)).toContain('already created from Ticket Pulse');
   });
 });
+
+// 2 Oct 2026 (Vahid): Assign to = Let AI decide, Me, Leave unassigned, then
+// every agent A-Z, type-to-search.
+describe('Assign to list on the Autofill card', () => {
+  test('AI, Me, Unassigned first, then the workspace agents (not me)', async () => {
+    const base = prismaMock.technician.findMany.getMockImplementation();
+    prismaMock.technician.findMany.mockImplementation((args) => (args?.where?.id?.not === 7
+      ? Promise.resolve([{ id: 21, name: 'Bea Brown' }, { id: 22, name: 'Cal Chen' }])
+      : (base ? base(args) : Promise.resolve([ADRIAN]))));
+    const { card } = await readyDraft();
+    const assign = JSON.parse(allText(card).match(/\{"type":"Input\.ChoiceSet","id":"assign"[^\]]*\][^}]*\}/)[0]);
+    expect(assign.style).toBe('filtered');
+    expect(assign.choices.map((c) => c.value)).toEqual(['ai', 'me', 'none', 'tech:21', 'tech:22']);
+    expect(assign.choices[0].title).toBe('Let AI decide');
+    expect(assign.value).toBe('me');
+  });
+
+  test('picking an agent from the list assigns the new ticket to them', async () => {
+    const { data } = await readyDraft();
+    await intake.handleAction('autofill.create', { ...data, subject: 'Outlook crashes on start', requesterEmail: 'rita@x.io', assign: 'tech:21' }, 'adrian@x.io');
+    expect(createTicket).toHaveBeenCalledTimes(1);
+    expect(createTicket.mock.calls[0][1]).toMatchObject({ assignedTechId: 21, runAiTriage: false });
+  });
+});

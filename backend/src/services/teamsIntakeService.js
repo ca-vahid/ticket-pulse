@@ -447,11 +447,27 @@ class TeamsIntakeService {
     const me = draft.technicianId;
     const am = d.assigneeMatch || {};
     const other = am.status === 'matched' && am.technician?.id && am.technician.id !== me ? am.technician : null;
+    // 2 Oct 2026 (Vahid): AI first, then Me, Unassigned and every agent in
+    // the workspace A-Z (was: Me / AI / Unassigned only). A person Autofill
+    // recognised stays the preselected choice.
+    const agents = await Promise.resolve()
+      .then(() => prisma.technician.findMany({
+        where: { workspaceId: draft.workspaceId, isActive: true, ...(me ? { id: { not: me } } : {}) },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+        take: 200,
+      }))
+      .then((rows) => (Array.isArray(rows) ? rows : []))
+      .catch(() => []);
+    const agentOptions = agents.filter((a) => a.name).map((a) => ({ title: a.name, value: `tech:${a.id}` }));
+    if (other && !agentOptions.some((o) => o.value === `tech:${other.id}`)) {
+      agentOptions.unshift({ title: other.name || 'The named person', value: `tech:${other.id}` });
+    }
     const assignOptions = [
-      ...(other ? [{ title: other.name || 'The named person', value: `tech:${other.id}` }] : []),
+      { title: 'Let AI decide', value: 'ai' },
       { title: 'Me', value: 'me' },
-      { title: 'Let AI route it', value: 'ai' },
       { title: 'Leave unassigned', value: 'none' },
+      ...agentOptions,
     ];
     const notes = [];
     const n = draft.notes || {};
