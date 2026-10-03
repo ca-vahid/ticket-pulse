@@ -20,9 +20,21 @@ const me = (req) => {
 const ok = (res, data) => res.json({ success: true, data });
 
 let seeded = null;
+// Every Ticket Pulse user is a person here: the roster refreshes on first use
+// and every 6 h (3 Oct 2026 — the calendar showed only whoever had visited).
+const PEOPLE_SYNC_MS = 6 * 60 * 60 * 1000;
+let peopleSyncedAt = 0;
+let peopleSync = null;
 router.use(asyncHandler(async (_req, _res, next) => {
   if (!seeded) seeded = availabilityService.ensureSeed().catch((err) => { seeded = null; throw err; });
   await seeded;
+  if (!peopleSync && Date.now() - peopleSyncedAt > PEOPLE_SYNC_MS) {
+    peopleSync = availabilityService.syncPeople()
+      .then(() => { peopleSyncedAt = Date.now(); })
+      .catch(() => {})
+      .finally(() => { peopleSync = null; });
+    if (!peopleSyncedAt) await peopleSync; // first time: wait so the calendar is complete
+  }
   next();
 }));
 

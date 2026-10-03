@@ -7,6 +7,7 @@ import request from 'supertest';
 
 const svc = {
   ensureSeed: jest.fn().mockResolvedValue(),
+  syncPeople: jest.fn().mockResolvedValue({ created: 3, total: 4 }),
   ensurePerson: jest.fn().mockResolvedValue({ id: 1, email: 'ana@bgc.ca', name: 'Ana', dailyHours: '8' }),
   getSettings: jest.fn().mockResolvedValue({ yearStartMonth: 1, outlookEventsEnabled: false, autoRepliesEnabled: false, purposeNotice: null }),
   listLeaveTypes: jest.fn().mockResolvedValue([{ id: 3, name: 'WFH' }]),
@@ -47,6 +48,8 @@ test('GET /me works for an agent (no workspace needed) and seeds once', async ()
   expect(res.body.data).toMatchObject({ person: { email: 'ana@bgc.ca', dailyHours: 8 }, isAdmin: false, pendingApprovals: 1 });
   await request(app()).get('/api/availability/me');
   expect(svc.ensureSeed).toHaveBeenCalledTimes(1);
+  // the roster is filled from Ticket Pulse users on first use, not again within 6 h
+  expect(svc.syncPeople).toHaveBeenCalledTimes(1);
 });
 
 test('no session → 401', async () => {
