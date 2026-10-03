@@ -137,7 +137,10 @@ const getSSEManager = async () => {
 // "a sync is running" credit for hung runs.
 export const SYNC_LOCK_STALE_MS = 20 * 60 * 1000;
 // Open-ticket reconcile: re-check an open FS ticket at most this often.
-export const RECONCILE_RECHECK_MS = 60 * 60 * 1000;
+// 3 Oct 2026 (Vahid): 15 min (was 1 h) so tickets deleted in FreshService
+// leave Ticket Pulse sooner. ~800 open FS tickets -> ~50 low-priority
+// calls/min, which always yield to interactive requests.
+export const RECONCILE_RECHECK_MS = 15 * 60 * 1000;
 
 /**
  * Service for syncing data from FreshService
@@ -4567,7 +4570,8 @@ class SyncService {
         // pruning a TP-born ticket's mirror copy must not delete the original.
         origin: TICKET_ORIGIN.FRESHSERVICE,
         status: { notIn: TERMINAL_STATUSES },
-        // 25 Sep 2026 (Vahid): each open ticket at most once an hour. This
+        // 25 Sep 2026 (Vahid): each open ticket at most once an hour (15 min
+        // since 3 Oct 2026). This
         // check re-read every open ticket every few minutes — 60–78 of the
         // old 110 calls a minute — only to catch deletions and silent
         // reassignments, which the 5-minute sync cannot see.
