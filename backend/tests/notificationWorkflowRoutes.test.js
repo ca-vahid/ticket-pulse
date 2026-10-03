@@ -667,6 +667,12 @@ describe('notification workflow routes', () => {
         errorClass: 'bad_request',
         _count: { _all: 2 },
       },
+      {
+        provider: 'anthropic',
+        model: 'claude-sonnet-test',
+        errorClass: 'api_timeout',
+        _count: { _all: 3 },
+      },
     ]);
 
     const response = await request(buildApp())
@@ -690,7 +696,14 @@ describe('notification workflow routes', () => {
       },
     ]);
     expect(response.body.data.providerSchemaFailures7d).toBe(2);
+    expect(response.body.data.providerTimeoutFailures7d).toBe(3);
     expect(response.body.data.providerFailuresSummary7d).toEqual([
+      {
+        provider: 'anthropic',
+        model: 'claude-sonnet-test',
+        errorClass: 'api_timeout',
+        count: 3,
+      },
       {
         provider: 'openai',
         model: 'gpt-test',
@@ -706,6 +719,10 @@ describe('notification workflow routes', () => {
       expect.objectContaining({
         type: 'provider_schema_failures',
         count: 2,
+      }),
+      expect.objectContaining({
+        type: 'provider_timeout_failures',
+        count: 3,
       }),
     ]);
     expect(prismaMock.notificationDelivery.groupBy).toHaveBeenCalledWith(expect.objectContaining({
