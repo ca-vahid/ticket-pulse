@@ -16,7 +16,9 @@ function RequestRow({ r, type, onCancel }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const status = REQUEST_STATUS[r.status] || REQUEST_STATUS.cancelled;
-  const cancellable = (r.status === 'pending' || r.status === 'approved') && r.endDate >= todayKey();
+  // Leave synced from Vacation Tracker is changed there while people use both.
+  const fromVt = r.source === 'vacation_tracker';
+  const cancellable = !fromVt && (r.status === 'pending' || r.status === 'approved') && r.endDate >= todayKey();
   const reason = r.decision?.reason || null;
   const fired = (r.decision?.fired || []).filter((f) => f.message);
   const hasDetail = Boolean(reason || fired.length || r.note || r.decisionNote);
@@ -32,6 +34,7 @@ function RequestRow({ r, type, onCancel }) {
         <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
           <ColorSwatch color={type?.color} />
           <span className="truncate">{type?.name || 'Time away'}</span>
+          {fromVt && <span className="shrink-0 text-xs text-muted-foreground" title="Booked in Vacation Tracker; change it there">· Vacation Tracker</span>}
         </span>
         <span className="order-3 col-span-2 text-sm text-foreground/85 sm:order-none sm:col-span-1">{fmtRange(r)}</span>
         <span className="hidden text-sm tabular-nums text-muted-foreground sm:block">{fmtAmount(r, type?.unit)}</span>

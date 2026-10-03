@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.02-preview';
+export const APP_VERSION = '4.2.03-preview';
 
 export const changelog = [
+  {
+    version: '4.2.03-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>More Availability rules</strong> &mdash; &ldquo;Booked too far ahead&rdquo; (for example WFH only this week and next), &ldquo;Too many days per person&rdquo; (for example one WFH day a week), and office limits with a different number per office (for example Vancouver 3 a day, every other office 1). People&rsquo;s offices come from their location.' },
+      { type: 'feature', html: '<strong>Vacation days per person</strong> &mdash; admins can set each person&rsquo;s yearly allowance under Availability &rarr; Settings &rarr; People (vacation is set by seniority). Empty means the leave type&rsquo;s default.' },
+      { type: 'feature', html: '<strong>Vacation Tracker keeps Availability up to date</strong> &mdash; while people still use Vacation Tracker, Ticket Pulse copies its leave every hour: new leave appears, changed dates follow, and cancelled or deleted leave is removed. Leave that came from Vacation Tracker is marked as such and is changed there.' },
+    ],
+  },
   {
     version: '4.2.02-preview',
     date: 'October 3, 2026',

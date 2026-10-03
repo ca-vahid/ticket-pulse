@@ -4506,6 +4506,9 @@ model AvPerson {
   startDate  DateTime? @map("start_date") @db.Date
   workdays   Json? // ISO weekdays worked, default [1,2,3,4,5]
   dailyHours Decimal   @default(8) @map("daily_hours") @db.Decimal(4, 2)
+  // Per-person yearly allowance by leave type id, e.g. {"1": 20} (vacation
+  // is 3-5 weeks by seniority, set per person; Vahid, 3 Oct 2026).
+  entitlementOverrides Json? @map("entitlement_overrides")
   isActive   Boolean   @default(true) @map("is_active")
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")

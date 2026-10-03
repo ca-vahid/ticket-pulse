@@ -14,12 +14,19 @@
  *   blackout        — overlaps from..to
  *   balance         — not enough balance left (allowNegativeDays grace)
  *   past_dated      — starts before today
+ *   booking_window  — ends after the end of the week N weeks from now
+ *                     (weeksAhead 1 = this week and next only)
+ *   per_person      — the person would have more than maxDays of these
+ *                     types in one day|week (their own bookings)
+ *
+ * capacity takes officeMax { <officeId>: max } to set a different cap per
+ * office (e.g. Vancouver 3 a day, every other office 1).
  *
  * Order: refuse > needs_approval > auto_approve > group auto-approve > the
  * leave type's own "needs approval" default. warn rules never decide.
  */
 
-export const RULE_KINDS = ['always', 'advance_notice', 'capacity', 'duration', 'blackout', 'balance', 'past_dated'];
+export const RULE_KINDS = ['always', 'advance_notice', 'capacity', 'duration', 'blackout', 'balance', 'past_dated', 'booking_window', 'per_person'];
 export const RULE_OUTCOMES = ['auto_approve', 'needs_approval', 'refuse', 'warn'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -150,7 +157,10 @@ export function evaluateCondition(rule, ctx) {
     return { match: false, detail: null };
   }
   case 'capacity': {
-    const max = Number(c.max);
+    const officeKey = ctx.person?.officeId === null || ctx.person?.officeId === undefined ? null : String(ctx.person.officeId);
+    const raw = officeKey !== null && c.officeMax ? c.officeMax[officeKey] : undefined;
+    const override = raw === undefined || raw === null || raw === '' ? null : Number(raw);
+    const max = override !== null && Number.isFinite(override) ? override : Number(c.max);
     if (!Number.isFinite(max)) return { match: false, detail: null };
     const windows = (ctx.capacity ? ctx.capacity(rule) : []) || [];
     const over = windows.find((w) => w.others + 1 > max);
@@ -185,6 +195,25 @@ export function evaluateCondition(rule, ctx) {
   case 'past_dated':
     if (toDay(ctx.startDate) < toDay(ctx.today)) return { match: true, detail: 'It starts in the past.' };
     return { match: false, detail: null };
+  case 'booking_window': {
+    const weeks = Math.max(0, Number(c.weeksAhead ?? 1));
+    const lastDay = addDays(toDay(weekKey(ctx.today)), 7 * (weeks + 1) - 1); // that week's Sunday
+    if (toDay(ctx.endDate) > lastDay) {
+      const span = weeks === 0 ? 'this week' : weeks === 1 ? 'this week and next' : `this week and the next ${weeks}`;
+      return { match: true, detail: `It can be booked for ${span} only (up to ${dayKey(lastDay)}).` };
+    }
+    return { match: false, detail: null };
+  }
+  case 'per_person': {
+    const max = Number(c.maxDays);
+    if (!Number.isFinite(max)) return { match: false, detail: null };
+    const windows = (ctx.ownUsage ? ctx.ownUsage(rule) : []) || [];
+    const over = windows.find((w) => w.used + w.adding > max);
+    if (!over) return { match: false, detail: null };
+    const when = c.window === 'day' ? `on ${over.window}` : `in the week of ${over.window}`;
+    const already = over.used ? ` You already have ${over.used} day${over.used === 1 ? '' : 's'} booked ${when}.` : '';
+    return { match: true, detail: `The limit is ${max} day${max === 1 ? '' : 's'} per ${c.window === 'day' ? 'day' : 'week'}.${already}` };
+  }
   default:
     return { match: false, detail: null };
   }
