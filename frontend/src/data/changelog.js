@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.1.48-preview';
+export const APP_VERSION = '4.1.49-preview';
 
 export const changelog = [
+  {
+    version: '4.1.49-preview',
+    date: 'October 2, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Teams Autofill: no false &ldquo;picture could not be read&rdquo;</strong> &mdash; Teams sends a pasted picture twice (as an attachment and inside the message). The second copy was counted as another picture that failed to download. It is now recognised as the same picture.' },
+    ],
+  },
   {
     version: '4.1.48-preview',
     date: 'October 2, 2026',
