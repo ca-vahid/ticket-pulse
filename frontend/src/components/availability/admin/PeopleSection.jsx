@@ -11,7 +11,7 @@ import { TD, TH } from './adminUi';
  * daily hours. Each change saves on its own (PATCH per person).
  */
 
-function PersonRow({ p, officeOptions, onSave }) {
+function PersonRow({ p, officeOptions, tracked = [], onSave }) {
   const [busy, setBusy] = useState(false);
   const workdays = Array.isArray(p.workdays) && p.workdays.length ? p.workdays.map(Number) : [1, 2, 3, 4, 5];
   const save = async (patch) => {
@@ -31,7 +31,7 @@ function PersonRow({ p, officeOptions, onSave }) {
         </span>
       </td>
       <td className={TD}>
-        <FancySelect value={p.officeId == null ? '' : String(p.officeId)} onChange={(v) => save({ officeId: v ? Number(v) : null })} options={officeOptions} aria-label={`${p.name || p.email} office`} className="w-40" />
+        <div className="w-40"><FancySelect value={p.officeId == null ? '' : String(p.officeId)} onChange={(v) => save({ officeId: v ? Number(v) : null })} options={officeOptions} aria-label={`${p.name || p.email} office`} /></div>
       </td>
       <td className={TD}>
         <input type="date" className={`${INPUT} w-36`} defaultValue={p.startDate ? String(p.startDate).slice(0, 10) : ''} onBlur={(e) => { const v = e.target.value || null; if (v !== (p.startDate ? String(p.startDate).slice(0, 10) : null)) save({ startDate: v }); }} aria-label={`${p.name || p.email} start date`} />
@@ -59,6 +59,30 @@ function PersonRow({ p, officeOptions, onSave }) {
       <td className={TD}>
         <input type="number" min={1} max={24} step="0.25" className={`${INPUT} w-20`} defaultValue={p.dailyHours ?? 8} onBlur={(e) => { const v = Number(e.target.value); if (v && v !== Number(p.dailyHours)) save({ dailyHours: v }); }} aria-label={`${p.name || p.email} daily hours`} />
       </td>
+      {tracked.map((t) => {
+        const own = p.entitlementOverrides ? p.entitlementOverrides[String(t.id)] : undefined;
+        const current = own === undefined || own === null ? '' : String(own);
+        return (
+          <td key={t.id} className={TD}>
+            <input
+              type="number"
+              min={0}
+              max={366}
+              step="0.5"
+              className={`${INPUT} w-20`}
+              defaultValue={current}
+              placeholder={t.balancePolicy?.annualDays != null ? String(t.balancePolicy.annualDays) : ''}
+              title="Days per year for this person. Empty = the leave type's default (with its seniority tiers)."
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v === current) return;
+                save({ entitlementOverrides: { ...(p.entitlementOverrides || {}), [t.id]: v === '' ? null : Number(v) } });
+              }}
+              aria-label={`${p.name || p.email} ${t.name} days per year`}
+            />
+          </td>
+        );
+      })}
     </tr>
   );
 }
@@ -67,6 +91,7 @@ export default function PeopleSection({ config, reload, toast }) {
   const [q, setQ] = useState('');
   const [syncing, setSyncing] = useState(false);
   const officeOptions = [{ value: '', label: 'No office' }, ...(config.offices || []).map((o) => ({ value: String(o.id), label: o.name }))];
+  const tracked = (config.leaveTypes || []).filter((t) => t.isActive !== false && t.tracksBalance);
   const people = useMemo(() => {
     const term = q.trim().toLowerCase();
     const all = [...(config.people || [])].sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
@@ -116,9 +141,9 @@ export default function PeopleSection({ config, reload, toast }) {
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[46rem] text-sm">
-          <thead><tr><th className={TH}>Person</th><th className={TH}>Office</th><th className={TH}>Start date</th><th className={TH}>Working days</th><th className={TH}>Hours/day</th></tr></thead>
+          <thead><tr><th className={TH}>Person</th><th className={TH}>Office</th><th className={TH}>Start date</th><th className={TH}>Working days</th><th className={TH}>Hours/day</th>{tracked.map((t) => <th key={t.id} className={TH} title="Days per year; empty uses the leave type's default">{t.name} days/yr</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
-            {people.map((p) => <PersonRow key={p.id} p={p} officeOptions={officeOptions} onSave={savePerson} />)}
+            {people.map((p) => <PersonRow key={p.id} p={p} officeOptions={officeOptions} tracked={tracked} onSave={savePerson} />)}
           </tbody>
         </table>
       </div>

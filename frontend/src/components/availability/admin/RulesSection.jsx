@@ -15,6 +15,8 @@ export const CONDITION_KINDS = [
   { value: 'always', label: 'Always' },
   { value: 'advance_notice', label: 'Notice period' },
   { value: 'capacity', label: 'Too many away at once' },
+  { value: 'booking_window', label: 'Booked too far ahead (weeks)' },
+  { value: 'per_person', label: 'Too many days per person' },
   { value: 'duration', label: 'Longer than' },
   { value: 'blackout', label: 'Blackout dates' },
   { value: 'balance', label: 'Not enough balance' },
@@ -39,6 +41,8 @@ const DEFAULT_CONDITION = {
   always: {},
   advance_notice: { minDaysAhead: 14 },
   capacity: { window: 'day', max: 2, scope: 'office' },
+  booking_window: { weeksAhead: 1 },
+  per_person: { window: 'week', maxDays: 1 },
   duration: { maxDays: 10 },
   blackout: { from: '', to: '', label: '' },
   balance: { allowNegativeDays: 0 },
@@ -51,7 +55,15 @@ export function describeCondition(c = {}) {
   switch (c.kind) {
   case 'always': return 'always';
   case 'advance_notice': return [c.minDaysAhead != null && `less than ${c.minDaysAhead} days' notice`, c.maxDaysAhead != null && `more than ${c.maxDaysAhead} days ahead`].filter(Boolean).join(' or ') || 'notice period';
-  case 'capacity': return `more than ${c.max} away per ${c.window === 'week' ? 'week' : 'day'} in the ${c.scope || 'office'}`;
+  case 'capacity': {
+    const extra = c.officeMax && Object.keys(c.officeMax).length ? ` (${Object.keys(c.officeMax).length} office${Object.keys(c.officeMax).length === 1 ? '' : 's'} with their own limit)` : '';
+    return `more than ${c.max} away per ${c.window === 'week' ? 'week' : 'day'} in the ${c.scope || 'office'}${extra}`;
+  }
+  case 'booking_window': {
+    const n = Number(c.weeksAhead ?? 1);
+    return n === 0 ? 'booked beyond this week' : n === 1 ? 'booked beyond this week and next' : `booked beyond this week and the next ${n} weeks`;
+  }
+  case 'per_person': return `more than ${c.maxDays} day${Number(c.maxDays) === 1 ? '' : 's'} per ${c.window === 'day' ? 'day' : 'week'} for one person`;
   case 'duration': return `longer than ${c.maxDays} working days`;
   case 'blackout': return `overlaps ${c.from || '?'} – ${c.to || '?'}${c.label ? ` (${c.label})` : ''}`;
   case 'balance': return c.allowNegativeDays ? `balance would go below −${c.allowNegativeDays}` : 'balance would go negative';
@@ -62,7 +74,33 @@ export function describeCondition(c = {}) {
 
 const num = (v) => (v === '' || v == null ? null : Number(v));
 
-function ConditionFields({ condition, onChange }) {
+function OfficeLimits({ value = {}, offices = [], onChange }) {
+  const rows = Object.entries(value || {});
+  const used = new Set(rows.map(([k]) => k));
+  const free = offices.filter((o) => !used.has(String(o.id)));
+  const nameOf = (id) => offices.find((o) => String(o.id) === String(id))?.name || `Office ${id}`;
+  const setRow = (id, v) => onChange({ ...value, [id]: v });
+  const drop = (id) => { const next = { ...value }; delete next[id]; onChange(next); };
+  return (
+    <div className="space-y-2" data-testid="office-limits">
+      <p className="text-xs text-muted-foreground">Offices with their own limit (everyone else uses the number above).</p>
+      {rows.map(([id, v]) => (
+        <div key={id} className="flex items-center gap-2 text-sm">
+          <span className="w-40 truncate text-foreground">{nameOf(id)}</span>
+          <input type="number" min={0} className={`${INPUT} w-24`} value={v ?? ''} onChange={(e) => setRow(id, num(e.target.value))} aria-label={`${nameOf(id)} limit`} />
+          <button type="button" className={BTN_QUIET} onClick={() => drop(id)}>Remove</button>
+        </div>
+      ))}
+      {free.length > 0 && (
+        <div className="w-56">
+          <FancySelect value="" onChange={(id) => id && setRow(id, 1)} options={[{ value: '', label: 'Add an office…' }, ...free.map((o) => ({ value: String(o.id), label: o.name }))]} aria-label="Add an office limit" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConditionFields({ condition, onChange, offices = [] }) {
   const c = condition || {};
   const set = (patch) => onChange({ ...c, ...patch });
   switch (c.kind) {
@@ -82,6 +120,26 @@ function ConditionFields({ condition, onChange }) {
         </Field>
         <Field label="Counted across">
           <FancySelect value={c.scope || 'office'} onChange={(v) => set({ scope: v })} options={[{ value: 'office', label: 'Their office' }, { value: 'group', label: 'Their group' }, { value: 'company', label: 'The company' }]} aria-label="Capacity scope" />
+        </Field>
+        {(c.scope || 'office') === 'office' && (
+          <div className="sm:col-span-3">
+            <OfficeLimits value={c.officeMax || {}} offices={offices} onChange={(officeMax) => set({ officeMax })} />
+          </div>
+        )}
+      </div>
+    );
+  case 'booking_window':
+    return (
+      <Field label="Weeks ahead after this week (1 = this week and next)">
+        <input type="number" min={0} className={`${INPUT} w-28`} value={c.weeksAhead ?? 1} onChange={(e) => set({ weeksAhead: num(e.target.value) ?? 0 })} aria-label="Weeks ahead" />
+      </Field>
+    );
+  case 'per_person':
+    return (
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="At most (days)"><input type="number" min={0} step="0.5" className={INPUT} value={c.maxDays ?? ''} onChange={(e) => set({ maxDays: num(e.target.value) })} aria-label="Maximum days per person" /></Field>
+        <Field label="Per">
+          <FancySelect value={c.window || 'week'} onChange={(v) => set({ window: v })} options={[{ value: 'week', label: 'Week' }, { value: 'day', label: 'Day' }]} aria-label="Per person window" />
         </Field>
       </div>
     );
@@ -220,7 +278,7 @@ export default function RulesSection({ config, reload, toast }) {
             <Field label="When">
               <FancySelect value={draft.condition?.kind || 'always'} onChange={(v) => set({ condition: { kind: v, ...DEFAULT_CONDITION[v] } })} options={CONDITION_KINDS} aria-label="Condition" />
             </Field>
-            <ConditionFields condition={draft.condition} onChange={(condition) => set({ condition })} />
+            <ConditionFields condition={draft.condition} offices={config.offices || []} onChange={(condition) => set({ condition })} />
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Then">
                 <FancySelect value={draft.outcome} onChange={(v) => set({ outcome: v })} options={OUTCOMES.map(({ value, label }) => ({ value, label }))} aria-label="Outcome" />

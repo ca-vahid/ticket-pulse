@@ -129,3 +129,42 @@ describe('entitlement', () => {
     expect(leaveYearRange(2026, 4).end.toISOString().slice(0, 10)).toBe('2027-03-31');
   });
 });
+
+// 3 Oct 2026 (Vahid): WFH this week and next only; 1 WFH day per week;
+// Vancouver 3 a day, every other office 1 a day.
+describe('WFH rules, 3 Oct 2026', () => {
+  const window = { id: 20, name: 'WFH window', condition: { kind: 'booking_window', weeksAhead: 1 }, outcome: 'refuse' };
+  const perWeek = { id: 21, name: 'WFH 1 day a week', condition: { kind: 'per_person', window: 'week', maxDays: 1 }, outcome: 'needs_approval' };
+  const cap = { id: 22, name: 'WFH office cap', condition: { kind: 'capacity', window: 'day', max: 1, scope: 'office', officeMax: { 7: 3 } }, outcome: 'needs_approval' };
+  // today = Mon 5 Oct 2026; this week ends Sun 11 Oct, next week Sun 18 Oct
+  const at = (d, over = {}) => baseCtx({ today: toDay('2026-10-05'), startDate: toDay(d), endDate: toDay(d), dates: [d], ...over });
+
+  test('booking window: next Friday is fine, the week after is refused', () => {
+    expect(decide({ rules: [window], leaveType: WFH, person, ctx: at('2026-10-16') }).outcome).toBe('approved');
+    const v = decide({ rules: [window], leaveType: WFH, person, ctx: at('2026-10-19') });
+    expect(v.outcome).toBe('refused');
+    expect(v.reason).toMatch(/this week and next only \(up to 2026-10-18\)/);
+  });
+  test('weeksAhead 0 = this week only', () => {
+    const v = decide({ rules: [{ ...window, condition: { kind: 'booking_window', weeksAhead: 0 } }], leaveType: WFH, person, ctx: at('2026-10-12') });
+    expect(v.reason).toMatch(/this week only/);
+  });
+  test('1 day per week: a second WFH day that week needs approval', () => {
+    const second = decide({ rules: [perWeek], leaveType: WFH, person, ctx: at('2026-10-08', { ownUsage: () => [{ window: '2026-10-05', used: 1, adding: 1 }] }) });
+    expect(second.outcome).toBe('pending');
+    expect(second.reason).toMatch(/limit is 1 day per week\. You already have 1 day booked in the week of 2026-10-05/);
+    const first = decide({ rules: [perWeek], leaveType: WFH, person, ctx: at('2026-10-08', { ownUsage: () => [{ window: '2026-10-05', used: 0, adding: 1 }] }) });
+    expect(first.outcome).toBe('approved');
+  });
+  test('Vancouver allows 3 a day; any other office 1', () => {
+    const van = { ...person, officeId: 7 };
+    const cal = { ...person, officeId: 9 };
+    const two = () => [{ window: '2026-10-08', others: 2 }];
+    const one = () => [{ window: '2026-10-08', others: 1 }];
+    expect(decide({ rules: [cap], leaveType: WFH, person: van, ctx: at('2026-10-08', { person: van, capacity: two }) }).outcome).toBe('approved');
+    expect(decide({ rules: [cap], leaveType: WFH, person: van, ctx: at('2026-10-08', { person: van, capacity: () => [{ window: '2026-10-08', others: 3 }] }) }).outcome).toBe('pending');
+    const calgary = decide({ rules: [cap], leaveType: WFH, person: cal, ctx: at('2026-10-08', { person: cal, capacity: one }) });
+    expect(calgary.outcome).toBe('pending');
+    expect(calgary.reason).toMatch(/1 other is already booked in your office on 2026-10-08 \(limit 1\)/);
+  });
+});

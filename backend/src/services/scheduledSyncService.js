@@ -190,6 +190,14 @@ class ScheduledSyncService {
             techniciansSynced: result.leavesProcessed || 0,
           });
           logger.info(`Scheduled VT sync completed for workspace "${wsName}": ${result.leaveDaysCreated} leave-days`);
+          // Availability keeps a copy of Vacation Tracker leave while people
+          // can use either (3 Oct 2026). Never fails the VT sync.
+          try {
+            const { default: availabilityService } = await import('./availability/availabilityService.js');
+            await availabilityService.syncFromVacationTracker(wsId);
+          } catch (avErr) {
+            logger.warn(`Availability: Vacation Tracker sync failed for workspace "${wsName}" (non-fatal): ${avErr.message}`);
+          }
         } catch (error) {
           logger.error(`Scheduled VT sync failed for workspace "${wsName}":`, error);
           await syncLogRepository.failLog(logEntry.id, error.message);

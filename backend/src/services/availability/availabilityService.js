@@ -164,14 +164,25 @@ class AvailabilityService {
       const e = lc(a.email);
       if (e && !byEmail.has(e)) byEmail.set(e, { email: e, name: e.split('@')[0], officeId: null });
     }
-    const existing = new Set((await prisma.avPerson.findMany({ select: { email: true } })).map((p) => p.email));
+    const existingRows = await prisma.avPerson.findMany({ select: { id: true, email: true, officeId: true } });
+    const existing = new Map(existingRows.map((p) => [p.email, p]));
     let created = 0;
+    let officesFilled = 0;
     for (const p of byEmail.values()) {
-      if (existing.has(p.email)) continue;
+      const row = existing.get(p.email);
+      if (row) {
+        // Offices come from the person's location (Vahid, 3 Oct 2026); an
+        // office an admin set by hand is never overwritten.
+        if (!row.officeId && p.officeId) {
+          await prisma.avPerson.update({ where: { id: row.id }, data: { officeId: p.officeId } }).catch(() => null);
+          officesFilled += 1;
+        }
+        continue;
+      }
       await prisma.avPerson.create({ data: p }).catch(() => null);
       created += 1;
     }
-    return { created, total: byEmail.size };
+    return { created, officesFilled, total: byEmail.size };
   }
 
   async ensurePerson(user) {
@@ -192,7 +203,7 @@ class AvailabilityService {
     return prisma.avPerson.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
-      select: { id: true, email: true, name: true, officeId: true, startDate: true, workdays: true, dailyHours: true },
+      select: { id: true, email: true, name: true, officeId: true, startDate: true, workdays: true, dailyHours: true, entitlementOverrides: true },
       take: 2000,
     });
   }
@@ -212,6 +223,16 @@ class AvailabilityService {
       data.dailyHours = h;
     }
     if (patch.isActive !== undefined) data.isActive = Boolean(patch.isActive);
+    if (patch.entitlementOverrides !== undefined) {
+      const clean = {};
+      for (const [k, v] of Object.entries(patch.entitlementOverrides || {})) {
+        if (v === null || v === '' || v === undefined) continue;
+        const n = Number(v);
+        if (!(n >= 0 && n <= 366)) throw new ValidationError('Allowances must be between 0 and 366 days');
+        clean[String(Number(k))] = n;
+      }
+      data.entitlementOverrides = Object.keys(clean).length ? clean : null;
+    }
     return prisma.avPerson.update({ where: { id: Number(id) }, data });
   }
 
@@ -420,6 +441,48 @@ class AvailabilityService {
     return [...windows.entries()].map(([window, set]) => ({ window, others: set.size }));
   }
 
+  /**
+   * The person's own booked days (approved + pending) of the rule's types per
+   * day|week window this request touches, and what this request adds there.
+   */
+  async _ownUsage(rule, person, shaped, excludeRequestId = null) {
+    const c = rule.condition || {};
+    const types = Array.isArray(rule.leaveTypeIds) && rule.leaveTypeIds.length ? rule.leaveTypeIds.map(Number) : [shaped.leaveType.id];
+    if (!types.includes(shaped.leaveType.id)) return [];
+    const byWeek = c.window !== 'day';
+    const keyOf = (d) => (byWeek ? weekKey(d) : dayKey(d));
+    const perDay = shaped.dayPart === 'am' || shaped.dayPart === 'pm' ? 0.5 : shaped.dates.length ? shaped.days / shaped.dates.length : 1;
+    const windows = new Map();
+    for (const d of shaped.dates) {
+      const k = keyOf(d);
+      const w = windows.get(k) || { window: k, used: 0, adding: 0 };
+      w.adding = Math.round((w.adding + perDay) * 100) / 100;
+      windows.set(k, w);
+    }
+    const from = byWeek ? toDay(weekKey(shaped.startDate)) : shaped.startDate;
+    const to = byWeek ? addDays(toDay(weekKey(shaped.endDate)), 6) : shaped.endDate;
+    const mine = await prisma.avRequest.findMany({
+      where: {
+        email: person.email, status: { in: ACTIVE }, leaveTypeId: { in: types }, startDate: { lte: to }, endDate: { gte: from },
+        ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
+      },
+      select: { startDate: true, endDate: true, dayPart: true, days: true },
+      take: 500,
+    });
+    if (mine.length) {
+      const isHoliday = holidayMatcher(await this._holidays());
+      for (const r of mine) {
+        const dates = workingDates({ startDate: r.startDate, endDate: r.endDate, workdays: person.workdays, isHoliday });
+        const each = r.dayPart === 'am' || r.dayPart === 'pm' ? 0.5 : dates.length ? num(r.days) / dates.length : 1;
+        for (const d of dates) {
+          const w = windows.get(keyOf(d));
+          if (w) w.used = Math.round((w.used + each) * 100) / 100;
+        }
+      }
+    }
+    return [...windows.values()];
+  }
+
   async _decideFor(person, shaped, { excludeRequestId = null, today = new Date() } = {}) {
     const [rules, groups, settings] = await Promise.all([
       prisma.avRule.findMany({ where: { isActive: true } }),
@@ -438,14 +501,20 @@ class AvailabilityService {
       remaining = b.remaining;
     }
     const capacityCache = new Map();
+    const usageCache = new Map();
     for (const rule of rules) {
       if (rule.condition?.kind === 'capacity') {
         capacityCache.set(rule.id, await this._capacityWindows(rule, person, shaped, excludeRequestId));
       }
+      if (rule.condition?.kind === 'per_person') {
+        usageCache.set(rule.id, await this._ownUsage(rule, person, shaped, excludeRequestId));
+      }
     }
     const ctx = {
       today: toDay(today), startDate: shaped.startDate, endDate: shaped.endDate, dates: shaped.dates, days: shaped.days,
+      person,
       capacity: (rule) => capacityCache.get(rule.id) || [],
+      ownUsage: (rule) => usageCache.get(rule.id) || [],
       remaining,
     };
     const verdict = decide({ rules, leaveType: shaped.leaveType, person, groupIds, groupAutoApprove, ctx });
@@ -558,6 +627,9 @@ class AvailabilityService {
     const mine = lc(r.email) === lc(user.email);
     if (!mine && !(await this.isAdmin(user)) && !(await this.canDecide(user, r))) throw new AuthorizationError('You can only cancel your own requests', 'availability_not_owner');
     if (!ACTIVE.includes(r.status)) throw new ValidationError(`This request is already ${r.status}`);
+    if (r.source === 'vacation_tracker' && await this._vtSyncOnFor(r.email)) {
+      throw new ValidationError('This came from Vacation Tracker. Change or cancel it there; Ticket Pulse follows within the hour.');
+    }
     const updated = await prisma.avRequest.update({
       where: { id: r.id },
       data: { status: 'cancelled', events: { create: { kind: 'cancelled', actor: lc(user.email), details: reason ? { reason } : null } } },
@@ -565,6 +637,15 @@ class AvailabilityService {
     await this.unproject(updated).catch((err) => logger.warn(`Availability: unprojection failed for request ${r.id}: ${err.message}`));
     if (!mine) this._notifyRequester(updated, user).catch(() => {});
     return this.getRequest(r.id, user);
+  }
+
+  /** Is Vacation Tracker still syncing for a workspace this person works in? */
+  async _vtSyncOnFor(email) {
+    const techs = await prisma.technician.findMany({ where: { email: { equals: email, mode: 'insensitive' } }, select: { workspaceId: true }, take: 20 });
+    const ws = [...new Set(techs.map((t) => t.workspaceId))];
+    if (!ws.length) return false;
+    const on = await prisma.vacationTrackerConfig.count({ where: { workspaceId: { in: ws }, syncEnabled: true } });
+    return on > 0;
   }
 
   async listMine(user, { year = null } = {}) {
@@ -601,7 +682,14 @@ class AvailabilityService {
 
   async _balanceFor(person, leaveType, year, settings, { excludeRequestId = null } = {}) {
     const { start, end } = leaveYearRange(year, settings.yearStartMonth);
-    const entitled = entitlementFor(leaveType.balancePolicy, { startDate: person.startDate, year, yearStartMonth: settings.yearStartMonth });
+    // A per-person allowance (e.g. 3-5 weeks of vacation by seniority) replaces
+    // the type's annual days and tenure tiers; pro-rating still applies.
+    const own = person.entitlementOverrides && typeof person.entitlementOverrides === 'object'
+      ? person.entitlementOverrides[String(leaveType.id)] : undefined;
+    const policy = own !== undefined && own !== null && own !== '' && Number.isFinite(Number(own))
+      ? { ...(leaveType.balancePolicy || {}), annualDays: Number(own), tenureTiers: [] }
+      : leaveType.balancePolicy;
+    const entitled = entitlementFor(policy, { startDate: person.startDate, year, yearStartMonth: settings.yearStartMonth });
     const [adj, reqs] = await Promise.all([
       prisma.avBalanceAdjustment.findMany({ where: { email: person.email, leaveTypeId: leaveType.id, year }, select: { days: true, kind: true } }),
       prisma.avRequest.findMany({
@@ -826,16 +914,31 @@ class AvailabilityService {
    * leave types are created as new (inactive-for-requests) types so nothing
    * is lost; people are matched by e-mail.
    */
-  async importFromVacationTracker(actor, { workspaceId, from, to }, { client: injected = null } = {}) {
+  async importFromVacationTracker(actor, { workspaceId, from, to }, { client = null } = {}) {
     await this.assertAdmin(actor);
-    let client = injected;
+    return this.syncFromVacationTracker(Number(workspaceId), { from, to, client, actorEmail: lc(actor.email) });
+  }
+
+  /**
+   * One-way Vacation Tracker -> Availability sync (Vahid, 3 Oct 2026: people
+   * may keep using VT until Availability is ready; like FreshService, either
+   * works). Runs after every hourly VT sync for workspaces with VT on, and
+   * from Settings -> Import. Idempotent on externalId 'vt:<leaveId>':
+   *   - new approved VT leave       -> approved request (source vacation_tracker)
+   *   - changed dates / type / part -> request updated, projection rebuilt
+   *   - no longer approved, or gone from VT within the window -> cancelled
+   * Unknown VT leave types become new types so nothing is lost; people are
+   * matched by e-mail.
+   */
+  async syncFromVacationTracker(workspaceId, { from = null, to = null, client = null, actorEmail = 'vacation_tracker' } = {}) {
     if (!client) {
       const config = await prisma.vacationTrackerConfig.findUnique({ where: { workspaceId: Number(workspaceId) } });
       if (!config?.apiKey) throw new ValidationError('Vacation Tracker is not set up for that workspace');
       const { default: VacationTrackerClient } = await import('../../integrations/vacationTracker.js');
       client = new VacationTrackerClient(config.apiKey);
     }
-    const start = dayKey(from ? toDay(from) : addDays(toDay(new Date()), -365));
+    await this.ensureSeed();
+    const start = dayKey(from ? toDay(from) : addDays(toDay(new Date()), -60));
     const end = dayKey(to ? toDay(to) : addDays(toDay(new Date()), 365));
     const [vtTypes, vtUsers, vtLeaves] = await Promise.all([client.fetchLeaveTypes(), client.fetchUsers(), client.fetchLeaves(start, end)]);
     const types = await prisma.avLeaveType.findMany();
@@ -857,22 +960,39 @@ class AvailabilityService {
       typeForVt.set(vt.id, match);
     }
     const emailForVtUser = new Map((vtUsers || []).map((u) => [u.id, lc(u.email)]));
+    const nameForVtUser = new Map((vtUsers || []).map((u) => [u.id, u.name || null]));
     await this.syncPeople();
     const people = new Map((await prisma.avPerson.findMany({ select: { email: true, workdays: true, dailyHours: true } })).map((p) => [p.email, p]));
     const isHoliday = holidayMatcher(await this._holidays());
+    const existing = new Map((await prisma.avRequest.findMany({
+      where: { source: 'vacation_tracker', externalId: { not: null } },
+      select: { id: true, externalId: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true },
+      take: 50000,
+    })).map((r) => [r.externalId, r]));
+
     let created = 0;
+    let updated = 0;
+    let cancelled = 0;
     let skipped = 0;
     let unmatched = 0;
+    const seen = new Set();
     for (const leave of vtLeaves || []) {
-      if (leave.status && String(leave.status).toUpperCase() !== 'APPROVED') { skipped += 1; continue; }
+      const externalId = `vt:${leave.id}`;
+      const approved = !leave.status || String(leave.status).toUpperCase() === 'APPROVED';
+      const mine = existing.get(externalId);
+      seen.add(externalId); // handled here; never cancelled again below as "gone"
+      if (!approved) {
+        if (mine && ACTIVE.includes(mine.status)) {
+          await this._cancelSynced(mine, `Vacation Tracker status ${leave.status}`, actorEmail);
+          cancelled += 1;
+        } else skipped += 1;
+        continue;
+      }
       const email = emailForVtUser.get(leave.userId);
       const type = typeForVt.get(leave.leaveTypeId);
       if (!email || !type) { unmatched += 1; continue; }
-      const externalId = `vt:${leave.id}`;
-      const exists = await prisma.avRequest.findFirst({ where: { externalId }, select: { id: true } });
-      if (exists) { skipped += 1; continue; }
       if (!people.has(email)) {
-        const p = await prisma.avPerson.create({ data: { email, name: email.split('@')[0] } }).catch(() => null);
+        const p = await prisma.avPerson.create({ data: { email, name: nameForVtUser.get(leave.userId) || email.split('@')[0] } }).catch(() => null);
         if (p) people.set(email, p);
       }
       const person = people.get(email) || {};
@@ -883,22 +1003,69 @@ class AvailabilityService {
       const dayPart = partial ? (endMinute - startMinute >= 180 ? (((startMinute + endMinute) / 2) < 720 ? 'am' : 'pm') : 'hours') : 'full';
       const dates = workingDates({ startDate: leave.startDate, endDate: leave.endDate, workdays: person.workdays, isHoliday });
       const size = requestSize({ dates, dayPart, startMinute, endMinute, dailyHours: num(person.dailyHours) || 8 });
+      const fields = {
+        email, leaveTypeId: type.id, startDate: toDay(leave.startDate), endDate: toDay(leave.endDate), dayPart,
+        startMinute: dayPart === 'hours' ? startMinute : null, endMinute: dayPart === 'hours' ? endMinute : null,
+        days: size.days, hours: size.hours,
+      };
+      if (mine) {
+        const same = mine.leaveTypeId === fields.leaveTypeId && dayKey(mine.startDate) === dayKey(fields.startDate)
+          && dayKey(mine.endDate) === dayKey(fields.endDate) && mine.dayPart === fields.dayPart
+          && (mine.startMinute ?? null) === (fields.startMinute ?? null) && (mine.endMinute ?? null) === (fields.endMinute ?? null)
+          && mine.status === 'approved';
+        if (same) { skipped += 1; continue; }
+        const row = await prisma.avRequest.update({
+          where: { id: mine.id },
+          data: {
+            ...fields, status: 'approved',
+            events: { create: { kind: 'synced_update', actor: actorEmail, details: { vtLeaveId: leave.id, from: { start: dayKey(mine.startDate), end: dayKey(mine.endDate), status: mine.status } } } },
+          },
+        });
+        await this.unproject(row).catch(() => null);
+        await this.project(row).catch(() => null);
+        updated += 1;
+        continue;
+      }
       const request = await prisma.avRequest.create({
         data: {
-          email, leaveTypeId: type.id, startDate: toDay(leave.startDate), endDate: toDay(leave.endDate), dayPart,
-          startMinute: dayPart === 'hours' ? startMinute : null, endMinute: dayPart === 'hours' ? endMinute : null,
-          days: size.days, hours: size.hours, note: leave.reason ? String(leave.reason).slice(0, 2000) : null,
+          ...fields, note: leave.reason ? String(leave.reason).slice(0, 2000) : null,
           status: 'approved', decidedBy: 'vacation_tracker', decidedAt: new Date(), source: 'vacation_tracker', externalId,
-          decision: { outcome: 'approved', reason: 'Imported from Vacation Tracker', fired: [] },
-          createdBy: lc(actor.email),
-          events: { create: { kind: 'imported', actor: lc(actor.email), details: { vtLeaveId: leave.id, vtLeaveType: type.name } } },
+          decision: { outcome: 'approved', reason: 'Approved in Vacation Tracker', fired: [] },
+          createdBy: actorEmail,
+          events: { create: { kind: 'imported', actor: actorEmail, details: { vtLeaveId: leave.id, vtLeaveType: type.name } } },
         },
       });
       await this.project(request).catch(() => null);
       created += 1;
     }
-    logger.info(`Availability: Vacation Tracker import (ws ${workspaceId}, ${start}..${end}) — ${created} created, ${skipped} skipped, ${unmatched} unmatched`);
-    return { created, skipped, unmatched, from: start, to: end };
+
+    // Gone from VT: an active synced request starting inside the window that
+    // VT no longer returns was deleted there. Guard against an empty or
+    // failed listing wiping everything.
+    const windowStart = toDay(start);
+    const windowEnd = toDay(end);
+    const candidates = [...existing.values()].filter((r) => ACTIVE.includes(r.status) && !seen.has(r.externalId)
+      && toDay(r.startDate) >= windowStart && toDay(r.startDate) <= windowEnd);
+    const listedApproved = (vtLeaves || []).filter((l) => !l.status || String(l.status).toUpperCase() === 'APPROVED').length;
+    if (candidates.length && listedApproved === 0) {
+      logger.warn(`Availability: VT sync ws ${workspaceId} listed no approved leaves; not cancelling ${candidates.length} synced request(s)`);
+    } else {
+      for (const r of candidates) {
+        await this._cancelSynced(r, 'No longer in Vacation Tracker', actorEmail);
+        cancelled += 1;
+      }
+    }
+    const summary = { created, updated, cancelled, skipped, unmatched, from: start, to: end };
+    if (created || updated || cancelled) logger.info(`Availability: Vacation Tracker sync ws ${workspaceId} (${start}..${end})`, summary);
+    return summary;
+  }
+
+  async _cancelSynced(request, reason, actorEmail) {
+    const row = await prisma.avRequest.update({
+      where: { id: request.id },
+      data: { status: 'cancelled', events: { create: { kind: 'cancelled', actor: actorEmail, details: { reason, source: 'vacation_tracker' } } } },
+    });
+    await this.unproject(row).catch(() => null);
   }
 
   /**
