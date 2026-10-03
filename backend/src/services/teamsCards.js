@@ -456,7 +456,7 @@ export function autofillCard(m = {}, stage = 'ready') {
       spacing: 'Small',
       columns: [
         { type: 'Column', width: 'stretch', items: [{ type: 'Input.ChoiceSet', id: 'priority', label: 'Priority', style: 'compact', value: String(m.priority || 2), choices: AUTOFILL_PRIORITY_CHOICES }] },
-        { type: 'Column', width: 'stretch', items: [{ type: 'Input.ChoiceSet', id: 'assign', label: 'Assign to', style: 'compact', value: m.assignDefault || 'me', choices: m.assignOptions?.length ? m.assignOptions : [{ title: 'Me', value: 'me' }] }] },
+        { type: 'Column', width: 'stretch', items: [{ type: 'Input.ChoiceSet', id: 'assign', label: 'Assign to', style: 'filtered', value: m.assignDefault || 'me', choices: m.assignOptions?.length ? m.assignOptions : [{ title: 'Me', value: 'me' }] }] },
       ],
     });
     actions.push({ type: 'Action.Execute', title: 'Create ticket', verb: 'autofill.create', data, style: 'positive' });
