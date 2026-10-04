@@ -1662,6 +1662,7 @@ export const vacationTrackerAPI = {
   getConfig: () => api.get('/vacation-tracker/config'),
   updateConfig: (data) => api.put('/vacation-tracker/config', data),
   testConnection: (apiKey) => api.post('/vacation-tracker/config/test', { apiKey }),
+  testConnectionV2: (apiKey) => api.post('/vacation-tracker/config/test-v2', { apiKey }),
 
   getLeaveTypes: () => api.get('/vacation-tracker/leave-types'),
   syncLeaveTypes: () => api.post('/vacation-tracker/leave-types/sync'),

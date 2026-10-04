@@ -2152,6 +2152,9 @@ model VacationTrackerConfig {
   workspaceId Int       @unique @map("workspace_id")
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
   apiKey      String    @map("api_key") @db.Text
+  // API v2 key (vt_live_…, read + write) for Availability's two-way sync;
+  // the v1 key above keeps the hourly read-only sync (Oct 2026).
+  apiKeyV2    String?   @map("api_key_v2") @db.Text
   syncEnabled Boolean   @default(false) @map("sync_enabled")
   lastSyncAt  DateTime? @map("last_sync_at")
   createdAt   DateTime  @default(now()) @map("created_at")

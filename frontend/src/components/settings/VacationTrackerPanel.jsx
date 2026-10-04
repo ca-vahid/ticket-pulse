@@ -16,6 +16,11 @@ export default function VacationTrackerPanel() {
   const [tab, setTab] = useState('connection');
   const [config, setConfig] = useState(null);
   const [apiKey, setApiKey] = useState('');
+  // API v2 key (vt_live_…) for Availability two-way sync — kept apart from the
+  // v1 key, which runs the hourly sync (3 Oct 2026).
+  const [apiKeyV2, setApiKeyV2] = useState('');
+  const [v2Result, setV2Result] = useState(null);
+  const [v2Busy, setV2Busy] = useState(null);
   const [testResult, setTestResult] = useState(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -80,6 +85,34 @@ export default function VacationTrackerPanel() {
       setTestResult({ success: false, error: err.message });
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleTestV2 = async () => {
+    setV2Busy('test');
+    setV2Result(null);
+    try {
+      const res = await vacationTrackerAPI.testConnectionV2(apiKeyV2 || undefined);
+      setV2Result(res?.success ? { ok: true, text: 'API v2 connection works' } : { ok: false, text: `API v2 test failed: ${res?.error || 'unknown error'}` });
+    } catch (err) {
+      setV2Result({ ok: false, text: err.message });
+    } finally {
+      setV2Busy(null);
+    }
+  };
+
+  const handleSaveV2 = async () => {
+    setV2Busy('save');
+    setV2Result(null);
+    try {
+      await vacationTrackerAPI.updateConfig({ apiKeyV2 });
+      setV2Result({ ok: true, text: 'API v2 key saved' });
+      setApiKeyV2('');
+      fetchConfig();
+    } catch (err) {
+      setV2Result({ ok: false, text: err.message });
+    } finally {
+      setV2Busy(null);
     }
   };
 
@@ -240,6 +273,39 @@ export default function VacationTrackerPanel() {
                   Save
                 </button>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground/85 mb-1">API v2 key <span className="font-normal text-muted-foreground">(read + write, for two-way sync with Availability)</span></label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={apiKeyV2}
+                  onChange={(e) => setApiKeyV2(e.target.value)}
+                  placeholder={config?.hasApiKeyV2 ? '••••••••••••• (saved)' : 'vt_live_… (Vacation Tracker → Add-ons → Open API)'}
+                  aria-label="Vacation Tracker API v2 key"
+                  className="flex-1 px-3 py-2 border border-input rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                />
+                <button
+                  onClick={handleTestV2}
+                  disabled={Boolean(v2Busy) || (!apiKeyV2 && !config?.hasApiKeyV2)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-sm font-medium rounded-lg border border-input transition-colors"
+                >
+                  {v2Busy === 'test' ? <Loader className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                  Test
+                </button>
+                <button
+                  onClick={handleSaveV2}
+                  disabled={Boolean(v2Busy) || !apiKeyV2}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  {v2Busy === 'save' ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save
+                </button>
+              </div>
+              {v2Result && (
+                <p className={`mt-1.5 text-sm ${v2Result.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`} role="status">{v2Result.text}</p>
+              )}
             </div>
 
             {testResult && (

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.03-preview';
+export const APP_VERSION = '4.2.04-preview';
 
 export const changelog = [
+  {
+    version: '4.2.04-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Vacation Tracker API v2 key</strong> &mdash; Settings &rarr; Vacation Tracker has a separate &ldquo;API v2 key&rdquo; field with its own Test, for two-way sync with Availability. The existing key keeps running the hourly sync, and pasting a v2 key into it is now refused instead of breaking the sync.' },
+    ],
+  },
   {
     version: '4.2.03-preview',
     date: 'October 3, 2026',
