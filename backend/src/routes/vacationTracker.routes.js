@@ -35,10 +35,6 @@ router.put(
   asyncHandler(async (req, res) => {
     const { apiKey, apiKeyV2, syncEnabled } = req.body;
     const data = {};
-    // A v2 key in the v1 slot would stop the hourly sync (3 Oct 2026).
-    if (apiKey !== undefined && looksLikeV2Key(apiKey)) {
-      return res.status(400).json({ success: false, error: 'That is an API v2 key (vt_live_…). Paste it in the "API v2 key" field; this field keeps the v1 key.' });
-    }
     if (apiKeyV2 !== undefined && apiKeyV2 && !looksLikeV2Key(apiKeyV2)) {
       return res.status(400).json({ success: false, error: 'An API v2 key starts with vt_live_. Create one in Vacation Tracker under Add-ons → Open API.' });
     }
@@ -88,9 +84,7 @@ router.post(
     if (!key) {
       return res.status(400).json({ success: false, error: 'No API key provided' });
     }
-    if (looksLikeV2Key(key)) {
-      return res.json({ success: false, error: 'That is an API v2 key (vt_live_…) — use the "API v2 key" field below. This test checks the v1 key.' });
-    }
+    // v1 and v2 keys both work here (the client follows the key, 4 Oct 2026).
     const result = await vtService.testConnection(key);
     res.json({ success: result.success, error: result.error });
   }),
