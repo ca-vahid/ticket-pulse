@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.04-preview';
+export const APP_VERSION = '4.2.05-preview';
 
 export const changelog = [
+  {
+    version: '4.2.05-preview',
+    date: 'October 3, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Vacation Tracker works with an API v2 key</strong> &mdash; the Vacation Tracker connection now accepts either key type in its main field and talks to the matching API, so a v2 key keeps the hourly sync (and Availability&rsquo;s copy) running. No old key is needed.' },
+    ],
+  },
   {
     version: '4.2.04-preview',
     date: 'October 3, 2026',

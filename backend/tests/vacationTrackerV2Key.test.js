@@ -37,17 +37,17 @@ beforeEach(() => {
   vtRepo.upsertConfig.mockImplementation(async (_ws, data) => ({ syncEnabled: true, lastSyncAt: null, apiKey: 'v1key', apiKeyV2: data.apiKeyV2 ?? null }));
 });
 
-test('a v2 key in the v1 field is refused and never saved', async () => {
+// 4 Oct 2026: the main field accepts a v2 key — the client follows the key
+// (v2 serves the same ids and fields), so the hourly sync keeps running.
+test('a v2 key in the main field is saved as the main key', async () => {
   const res = await request(app()).put('/api/vacation-tracker/config').send({ apiKey: 'vt_live_abc', syncEnabled: true });
-  expect(res.status).toBe(400);
-  expect(res.body.error).toMatch(/API v2 key/);
-  expect(vtRepo.upsertConfig).not.toHaveBeenCalled();
+  expect(res.status).toBe(200);
+  expect(vtRepo.upsertConfig).toHaveBeenCalledWith(1, { apiKey: 'vt_live_abc', syncEnabled: true });
 });
 
-test('the v1 test explains a v2 key instead of failing obscurely', async () => {
+test('the main test runs for a v2 key too', async () => {
   const res = await request(app()).post('/api/vacation-tracker/config/test').send({ apiKey: 'vt_live_abc' });
-  expect(res.body).toMatchObject({ success: false });
-  expect(res.body.error).toMatch(/API v2 key/);
+  expect(res.body).toEqual({ success: true });
 });
 
 test('the v2 key saves to its own field and leaves the v1 key alone', async () => {

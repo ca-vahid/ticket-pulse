@@ -247,7 +247,7 @@ export default function VacationTrackerPanel() {
         <div className="space-y-4">
           <div className="bg-card border border-border rounded-lg p-4 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-foreground/85 mb-1">API Key</label>
+              <label className="block text-sm font-medium text-foreground/85 mb-1">API key <span className="font-normal text-muted-foreground">(v1 or v2 — a v2 key also enables two-way sync)</span></label>
               <div className="flex gap-2">
                 <input
                   type="password"
@@ -276,7 +276,7 @@ export default function VacationTrackerPanel() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground/85 mb-1">API v2 key <span className="font-normal text-muted-foreground">(read + write, for two-way sync with Availability)</span></label>
+              <label className="block text-sm font-medium text-foreground/85 mb-1">Separate API v2 key <span className="font-normal text-muted-foreground">(only needed when the key above is a v1 key)</span></label>
               <div className="flex gap-2">
                 <input
                   type="password"
