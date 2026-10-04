@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.05-preview';
+export const APP_VERSION = '4.2.06-preview';
 
 export const changelog = [
+  {
+    version: '4.2.06-preview',
+    date: 'October 4, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Vacation Tracker sync catches up after a missed hour</strong> &mdash; the hourly sync occasionally skipped its slot. A check every few minutes now runs it whenever the last sync is more than 70 minutes old, so leave in Ticket Pulse is never more than a little over an hour behind.' },
+    ],
+  },
   {
     version: '4.2.05-preview',
     date: 'October 3, 2026',

@@ -16,10 +16,15 @@ import logger from '../utils/logger.js';
  */
 
 
+// VT catch-up (4 Oct 2026): check every 5 min; run when the last sync is over 70 min old.
+export const VT_CATCHUP_CHECK_MS = 5 * 60 * 1000;
+export const VT_STALE_MS = 70 * 60 * 1000;
+
 class ScheduledSyncService {
   constructor() {
     this.cronJobs = new Map();
     this.vtCronJobs = new Map();
+    this.vtRunning = new Set();
     this.calendarLeaveCronJobs = new Map();
     this.assignmentFastSyncCronJobs = new Map();
     this.assignmentFastSyncInProgress = new Set();
@@ -176,40 +181,69 @@ class ScheduledSyncService {
 
     const job = cron.schedule(
       '0 * * * *',
-      async () => {
-        const logEntry = await syncLogRepository.createLog({
-          syncType: 'vacation-tracker',
-          status: 'started',
-          workspaceId: wsId,
-        });
-        try {
-          logger.info(`Scheduled VT sync triggered for workspace "${wsName}"`);
-          const result = await vtService.fullSync(wsId);
-          await syncLogRepository.completeLog(logEntry.id, {
-            ticketsSynced: result.leaveDaysCreated || 0,
-            techniciansSynced: result.leavesProcessed || 0,
-          });
-          logger.info(`Scheduled VT sync completed for workspace "${wsName}": ${result.leaveDaysCreated} leave-days`);
-          // Availability keeps a copy of Vacation Tracker leave while people
-          // can use either (3 Oct 2026). Never fails the VT sync.
-          try {
-            const { default: availabilityService } = await import('./availability/availabilityService.js');
-            await availabilityService.syncFromVacationTracker(wsId);
-          } catch (avErr) {
-            logger.warn(`Availability: Vacation Tracker sync failed for workspace "${wsName}" (non-fatal): ${avErr.message}`);
-          }
-        } catch (error) {
-          logger.error(`Scheduled VT sync failed for workspace "${wsName}":`, error);
-          await syncLogRepository.failLog(logEntry.id, error.message);
-        }
-      },
+      () => this.runVTSync(wsId, wsName, 'scheduled'),
       {
         scheduled: true,
         timezone: workspace.defaultTimezone || 'America/Los_Angeles',
       },
     );
 
-    this.vtCronJobs.set(wsId, { job, workspaceName: wsName });
+    // 4 Oct 2026: the top-of-hour cron silently skipped two slots (01:00 and
+    // 15:00 UTC, no restart, no error). Every 5 minutes, a sync older than 70
+    // minutes is run as a catch-up, so a missed slot costs minutes, not hours.
+    const watchdog = setInterval(() => {
+      this.vtCatchUp(wsId, wsName).catch((err) => logger.warn(`VT catch-up check failed for workspace "${wsName}": ${err.message}`));
+    }, VT_CATCHUP_CHECK_MS);
+    watchdog.unref?.();
+
+    this.vtCronJobs.set(wsId, { job, watchdog, workspaceName: wsName });
+  }
+
+  /** Run a catch-up VT sync when the last successful one is older than VT_STALE_MS. */
+  async vtCatchUp(wsId, wsName, now = Date.now()) {
+    const config = await vtRepo.getConfig(wsId);
+    if (!config?.apiKey || !config?.syncEnabled) return false;
+    const last = config.lastSyncAt ? new Date(config.lastSyncAt).getTime() : 0;
+    if (now - last < VT_STALE_MS) return false;
+    logger.warn(`VT sync for workspace "${wsName}" is ${last ? Math.round((now - last) / 60000) : '∞'} min old; running a catch-up`);
+    await this.runVTSync(wsId, wsName, 'catch-up');
+    return true;
+  }
+
+  /** One VT sync (+ the Availability copy). Never two at once per workspace. */
+  async runVTSync(wsId, wsName, trigger = 'scheduled') {
+    if (this.vtRunning.has(wsId)) return { skipped: true };
+    this.vtRunning.add(wsId);
+    let logEntry = null;
+    try {
+      logEntry = await syncLogRepository.createLog({
+        syncType: 'vacation-tracker',
+        status: 'started',
+        workspaceId: wsId,
+      });
+      logger.info(`${trigger === 'catch-up' ? 'Catch-up' : 'Scheduled'} VT sync triggered for workspace "${wsName}"`);
+      const result = await vtService.fullSync(wsId);
+      await syncLogRepository.completeLog(logEntry.id, {
+        ticketsSynced: result.leaveDaysCreated || 0,
+        techniciansSynced: result.leavesProcessed || 0,
+      });
+      logger.info(`Scheduled VT sync completed for workspace "${wsName}": ${result.leaveDaysCreated} leave-days`);
+      // Availability keeps a copy of Vacation Tracker leave while people
+      // can use either (3 Oct 2026). Never fails the VT sync.
+      try {
+        const { default: availabilityService } = await import('./availability/availabilityService.js');
+        await availabilityService.syncFromVacationTracker(wsId);
+      } catch (avErr) {
+        logger.warn(`Availability: Vacation Tracker sync failed for workspace "${wsName}" (non-fatal): ${avErr.message}`);
+      }
+      return result;
+    } catch (error) {
+      logger.error(`Scheduled VT sync failed for workspace "${wsName}":`, error);
+      if (logEntry) await syncLogRepository.failLog(logEntry.id, error.message).catch(() => {});
+      return { error: error.message };
+    } finally {
+      this.vtRunning.delete(wsId);
+    }
   }
 
   async startAssignmentFastSyncForWorkspace(workspace) {
@@ -325,6 +359,7 @@ class ScheduledSyncService {
     if (entry) {
       logger.info(`Stopping VT sync for workspace "${entry.workspaceName}"`);
       entry.job.stop();
+      if (entry.watchdog) clearInterval(entry.watchdog);
       this.vtCronJobs.delete(wsId);
     }
   }
