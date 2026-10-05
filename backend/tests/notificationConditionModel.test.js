@@ -359,3 +359,41 @@ describe('fields_updated condition fields (TU-7)', () => {
     expect(jsonLogic.apply(compileConditionGroup({ logic: 'all', conditions: [{ field: 'event.reopened', operator: 'is_false' }] }), { event: {} })).toBe(true);
   });
 });
+
+// QA 10-05 #5: a stopped run must say what was checked and what the ticket had.
+const { explainConditionGroup, ruleVarPaths } = await import('../src/services/notificationConditionModel.js');
+
+describe('explainConditionGroup', () => {
+  const apply = (rule, scope) => jsonLogic.apply(rule, scope);
+  const scope = { ticket: { priorityLabel: 'Medium', isNoise: false, subject: 'Laptop camera stopped working' } };
+
+  test('each clause carries the expected and the actual value, in words', () => {
+    const out = explainConditionGroup({ logic: 'all', conditions: [
+      { field: 'ticket.priorityLabel', operator: 'is', value: 'Urgent' },
+      { field: 'ticket.isNoise', operator: 'is_false', value: null },
+    ] }, scope, { apply });
+    expect(out.passed).toBe(false);
+    expect(out.clauses.map((c) => [c.label, c.passed, c.text])).toEqual([
+      ['Priority', false, 'Priority is Urgent (this ticket: Medium)'],
+      ['Is noise/spam', true, 'Is noise/spam is not true (this ticket: false)'],
+    ]);
+  });
+
+  test('"any" passes on one match; a nested group is one clause; an unknown field never throws', () => {
+    const any = explainConditionGroup({ logic: 'any', conditions: [
+      { field: 'ticket.priorityLabel', operator: 'is', value: 'Urgent' },
+      { logic: 'all', conditions: [{ field: 'ticket.subject', operator: 'contains', value: 'camera' }] },
+    ] }, scope, { apply });
+    expect(any.passed).toBe(true);
+    expect(any.clauses[1].clauses).toHaveLength(1);
+    const bad = explainConditionGroup({ logic: 'all', conditions: [{ field: 'ticket.nope', operator: 'is', value: 1 }] }, scope, { apply });
+    expect(bad.passed).toBe(false);
+    expect(bad.clauses[0].text).toContain('could not be checked');
+  });
+
+  test('ruleVarPaths lists what a raw rule reads', () => {
+    expect(ruleVarPaths({ '!=': [{ var: 'ticket.isNoise' }, true] })).toEqual(['ticket.isNoise']);
+    expect(ruleVarPaths({ and: [{ '==': [{ var: 'a.b' }, 1] }, { in: [{ var: ['c'] }, ['x']] }] })).toEqual(['a.b', 'c']);
+    expect(ruleVarPaths(true)).toEqual([]);
+  });
+});

@@ -1053,6 +1053,15 @@ describe('notification workflow engine persistence', () => {
     expect(email.html).toContain(publicStatusUrl);
     expect(email.html).toContain('Check your ticket status');
     expect(email.html).not.toContain('Raise urgency');
+    // QA 10-05 #6: the on-call number is the tel: link; the icon sits outside
+    // any link in a cell with a real height, so Outlook's narrow reading pane
+    // cannot cut it in half. No badge cell is left at line-height 0.
+    if (email.html.includes('tel:')) {
+      expect(email.html).not.toMatch(/<a href="tel:[^"]*" style="display:block/);
+      expect(email.html).toMatch(/<a href="tel:[^"]+" style="color:#c0392f;text-decoration:none;">/);
+    }
+    expect(email.html).not.toContain('line-height:0;font-size:0;"><img');
+    expect(email.html).toContain('height:40px;line-height:40px;font-size:1px;');
   });
 
   test('audit HTML sanitization redacts embedded image data without dropping the email body', () => {

@@ -129,15 +129,19 @@ router.post('/requests/:id/decision', asyncHandler(async (req, res) => {
 router.get('/admin/config', asyncHandler(async (req, res) => {
   const user = me(req);
   await availabilityService.assertAdmin(user);
-  const [settings, types, offices, groups, rules, people] = await Promise.all([
+  // QA 10-05 #2: every person still comes back (approver pickers and names
+  // need the whole company), each marked inWorkspace so the People and
+  // Balances lists show only the workspace the admin is in.
+  const [settings, types, offices, groups, rules, people, roster] = await Promise.all([
     availabilityService.getSettings(),
     availabilityService.listLeaveTypes({ includeInactive: true }),
     availabilityService.listOffices(),
     availabilityService.listGroups(),
     availabilityService.listRules(),
     availabilityService.listPeople(),
+    availabilityService.rosterFor(user, wsOf(req)),
   ]);
-  ok(res, { settings, leaveTypes: types, offices, groups, rules, people: people.map((p) => ({ ...p, dailyHours: Number(p.dailyHours) })) });
+  ok(res, { settings, leaveTypes: types, offices, groups, rules, people: people.map((p) => ({ ...p, dailyHours: Number(p.dailyHours), inWorkspace: roster.has(String(p.email).toLowerCase()) })) });
 }));
 
 router.patch('/admin/settings', asyncHandler(async (req, res) => ok(res, await availabilityService.updateSettings(req.body || {}, me(req)))));
@@ -153,7 +157,7 @@ router.post('/admin/people/sync', asyncHandler(async (req, res) => {
   await availabilityService.assertAdmin(user);
   ok(res, await availabilityService.syncPeople());
 }));
-router.get('/admin/balances', asyncHandler(async (req, res) => ok(res, await availabilityService.balanceReport(me(req), { year: req.query.year ? Number(req.query.year) : null }))));
+router.get('/admin/balances', asyncHandler(async (req, res) => ok(res, await availabilityService.balanceReport(me(req), { year: req.query.year ? Number(req.query.year) : null, workspaceId: wsOf(req) }))));
 router.post('/admin/balances/adjust', asyncHandler(async (req, res) => ok(res, await availabilityService.adjustBalance(req.body || {}, me(req)))));
 router.post('/admin/balances/import', asyncHandler(async (req, res) => ok(res, await availabilityService.importBalancesCsv(me(req), req.body || {}))));
 router.post('/admin/import/vacation-tracker', asyncHandler(async (req, res) => ok(res, await availabilityService.importFromVacationTracker(me(req), req.body || {}))));

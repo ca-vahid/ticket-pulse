@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, MoreHorizontal, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { groupByTrigger, relativeTime, runFailed, workflowState } from './WorkflowIndex';
 
 /**
@@ -89,6 +89,13 @@ function ListRow({ workflow, name, onOpen, onRowAction, isAfterHours }) {
         <span className="min-w-0">
           <span className={cx('block truncate text-sm font-semibold', muted ? 'text-muted-foreground' : 'text-foreground')}>{name}</span>
           {workflow.description && <span className="block truncate text-xs text-muted-foreground">{workflow.description}</span>}
+          {/* QA 10-05 #5: workflow watch — say when a workflow quietly stopped doing its job. */}
+          {(workflow.watchSignals || []).slice(0, 2).map((signal) => (
+            <span key={`${signal.code}-${signal.nodeId || ''}`} data-testid="workflow-watch-signal" className="mt-0.5 flex items-start gap-1 text-xs text-amber-800 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden="true" />
+              <span className="min-w-0">{signal.message}</span>
+            </span>
+          ))}
         </span>
         <span className="flex items-center gap-1.5 text-xs text-foreground/85">
           <span className={cx('h-2 w-2 flex-shrink-0 rounded-full', state.dot)} aria-hidden="true" />

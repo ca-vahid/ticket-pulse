@@ -67,6 +67,7 @@ import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowListPage from './WorkflowListPage';
 import { useTheme } from '../../contexts/ThemeContext';
+import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
 
 // Inspector width (px) and the minimap choice are remembered per browser.
 const WORKFLOW_INSPECTOR_WIDTH_KEY = 'ticket-pulse-notification-workflow-inspector-w';
@@ -2579,9 +2580,21 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
               <span className="basis-full text-[11px] text-muted-foreground/75">Resolves to the group&apos;s active members at send time — no address list to maintain.</span>
             </label>
             {(fieldDefs.length > 0 || fieldTokens(group.values).length > 0) && (
-              <div className="rounded-md border border-border px-3 py-2" data-testid={`recipients-custom-fields-${group.key}`}>
-                <span className="text-sm">From custom fields</span>
-                <div className="mt-1.5 grid grid-cols-1 gap-1">
+              // QA 10-05 #3: a long list (30+ fields in IT) pushed everything else
+              // off the panel — collapsed by default, open when something is picked.
+              <details
+                className="group/cf rounded-md border border-border px-3 py-2"
+                data-testid={`recipients-custom-fields-${group.key}`}
+                open={fieldTokens(group.values).length > 0 ? true : undefined}
+              >
+                <summary className="tp-focus-ring flex cursor-pointer list-none items-center gap-2 rounded text-sm [&::-webkit-details-marker]:hidden">
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open/cf:rotate-90" aria-hidden="true" />
+                  <span>From custom fields</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {fieldTokens(group.values).length > 0 ? `${fieldTokens(group.values).length} selected` : `${fieldDefs.length} available`}
+                  </span>
+                </summary>
+                <div className="mt-2 grid grid-cols-1 gap-1">
                   {fieldDefs.map((d) => (
                     <label key={d.key} className="flex items-center gap-2 text-sm">
                       <input
@@ -2606,7 +2619,7 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
                     ))}
                 </div>
                 <span className="mt-1 block text-[11px] text-muted-foreground/75">Reads the ticket&apos;s value when the e-mail is sent — addresses separated by commas, semicolons or spaces; anything that is not an address is skipped.</span>
-              </div>
+              </details>
             )}
           </div>
         </div>
@@ -2931,7 +2944,12 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
 function summarizePreviewStep(step) {
   const output = step?.output || {};
   if (step?.nodeType === 'trigger') return output.eventType || 'Workflow started';
-  if (step?.nodeType === 'condition') return output.passed ? 'Condition passed - true branch' : 'Condition failed - false branch';
+  if (step?.nodeType === 'condition') {
+    // QA 10-05 #5: say what was checked and what the ticket had.
+    const why = output.explain?.summary;
+    if (output.passed) return why ? `Passed: ${why}` : 'Condition passed - true branch';
+    return why ? `Did not pass: ${why}` : 'Condition failed - false branch';
+  }
   if (step?.nodeType === 'recipient_resolver') {
     const recipients = output.recipients || {};
     return `To: ${(recipients.to || []).join(', ') || 'none'}`;
@@ -3033,7 +3051,11 @@ function previewStepIssue(step) {
     return {
       tone: 'amber',
       label: output.stopped ? 'Stopped' : 'Skipped',
-      detail: output.reason || 'Step did not continue the workflow.',
+      // QA 10-05 #5: the condition that sent the run here is the cause; the
+      // Stop step's own fixed note ("Noise ticket skipped") only follows it.
+      detail: output.cause
+        ? `${output.cause}${output.reason ? ` (the Stop step is labelled "${output.reason}")` : ''}`
+        : output.reason || 'Step did not continue the workflow.',
     };
   }
   return null;
@@ -7888,7 +7910,10 @@ export default function NotificationWorkflowsPanel({
   function openContentEditor({ field, title, description, language = 'html' }) {
     if (!selectedNode) return;
     setContentEditor({ field, title, description, language, nodeId: selectedNode.id });
-    setContentEditorValue(String(selectedNode.data?.[field] || ''));
+    const value = String(selectedNode.data?.[field] || '');
+    // QA 10-05 #4: HTML stored as one long line opens with a line per block
+    // (nothing changes until Apply; HTML with its own line breaks is untouched).
+    setContentEditorValue(field === 'html' && language === 'html' ? formatTemplateHtml(value) : value);
   }
 
   function applyContentEditor() {
@@ -7945,7 +7970,8 @@ export default function NotificationWorkflowsPanel({
     onUpdate: ({ editor: activeEditor }) => {
       if (selectedNode?.type === 'template_render' && !templateHtmlIsAdvanced(selectedNode.data?.html)) {
         richEditorDirtyRef.current = true;
-        updateNodeData({ html: activeEditor.getHTML() });
+        // QA 10-05 #4: TipTap returns one long line — keep a line per block.
+        updateNodeData({ html: formatTemplateHtml(activeEditor.getHTML()) });
       }
     },
   }, [selectedNodeId]);
@@ -7968,7 +7994,9 @@ export default function NotificationWorkflowsPanel({
         richEditorDirtyRef.current = false;
         return;
       }
-      if (editor.getHTML() !== html) {
+      // Compare without the line breaks between blocks, or the formatted copy
+      // in node data would reset the editor (and the caret) on every keystroke.
+      if (compactTemplateHtml(editor.getHTML()) !== compactTemplateHtml(html)) {
         editor.commands.setContent(html, false);
         // Programmatic replace (node switch, Monaco apply, source-tab edit) —
         // the editor now mirrors node data; nothing user-typed is pending.
@@ -9405,7 +9433,7 @@ export default function NotificationWorkflowsPanel({
       dirty: richEditorDirtyRef.current,
       nodeHtml: activeNode?.data?.html,
     })) {
-      activeNode.data = { ...(activeNode.data || {}), html: editor.getHTML() };
+      activeNode.data = { ...(activeNode.data || {}), html: formatTemplateHtml(editor.getHTML()) };
     }
 
     if (contentEditor?.nodeId && contentEditor.field) {
@@ -10209,6 +10237,7 @@ export default function NotificationWorkflowsPanel({
               value={selectedNode.data?.conditionGroup}
               onChange={(group) => updateNodeData({ conditionGroup: group })}
               onClear={() => updateNodeData({ conditionGroup: null })}
+              rawRule={selectedNode.data?.rule}
             />
           </div>
 
@@ -10238,7 +10267,12 @@ export default function NotificationWorkflowsPanel({
             </div>
           </div>
 
-          <label className="text-xs font-medium uppercase text-muted-foreground">Advanced JSONLogic Rule</label>
+          <label className="text-xs font-medium uppercase text-muted-foreground">
+            Advanced JSONLogic Rule
+            {selectedNode.data?.conditionGroup && (
+              <span className="ml-2 normal-case font-normal text-amber-700 dark:text-amber-300" data-testid="raw-rule-ignored">not used while the conditions above are set</span>
+            )}
+          </label>
           <textarea
             value={conditionText}
             onChange={(event) => setConditionText(event.target.value)}

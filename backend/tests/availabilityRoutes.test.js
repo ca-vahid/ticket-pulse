@@ -74,3 +74,22 @@ test('admin config refuses a non-admin with 403', async () => {
   const res = await request(app()).get('/api/availability/admin/config');
   expect(res.status).toBe(403);
 });
+
+// QA 10-05 #2: Settings → People / Balances show the workspace the admin is in.
+test('admin config marks who is in the current workspace; balances ask for that workspace', async () => {
+  svc.listGroups = jest.fn().mockResolvedValue([]);
+  svc.listRules = jest.fn().mockResolvedValue([]);
+  svc.listPeople = jest.fn().mockResolvedValue([
+    { id: 1, email: 'ana@bgc.ca', name: 'Ana', dailyHours: '8' },
+    { id: 2, email: 'Zed@bgc.ca', name: 'Zed', dailyHours: '8' },
+  ]);
+  svc.rosterFor = jest.fn().mockResolvedValue(new Set(['ana@bgc.ca']));
+  svc.balanceReport = jest.fn().mockResolvedValue([]);
+  const a = app({ email: 'ana@bgc.ca', role: 'admin' });
+  const res = await request(a).get('/api/availability/admin/config').set('X-Workspace-Id', '5');
+  expect(res.status).toBe(200);
+  expect(svc.rosterFor).toHaveBeenCalledWith(expect.objectContaining({ email: 'ana@bgc.ca' }), 5);
+  expect(res.body.data.people.map((p) => [p.email, p.inWorkspace])).toEqual([['ana@bgc.ca', true], ['Zed@bgc.ca', false]]);
+  await request(a).get('/api/availability/admin/balances?year=2026').set('X-Workspace-Id', '5').expect(200);
+  expect(svc.balanceReport).toHaveBeenCalledWith(expect.anything(), { year: 2026, workspaceId: 5 });
+});

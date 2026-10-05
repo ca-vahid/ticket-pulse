@@ -1,6 +1,20 @@
-export const APP_VERSION = '4.2.10-preview';
+export const APP_VERSION = '4.2.11-preview';
 
 export const changelog = [
+  {
+    version: '4.2.11-preview',
+    date: 'October 5, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Workflow runs say why they stopped</strong> &mdash; a run that stopped at a condition always read &ldquo;Noise ticket skipped&rdquo;, because that is the fixed note on the Stop step, whatever the real reason. The run report now names the condition and what the ticket had, for example &ldquo;Skip noise tickets did not pass: Priority is Urgent (this ticket: Medium)&rdquo;.' },
+      { type: 'fix', html: '<strong>Adding conditions no longer drops the noise check</strong> &mdash; conditions added to a &ldquo;Skip noise tickets&rdquo; step replaced its built-in noise rule without saying so. New conditions now start with &ldquo;Is noise/spam is not true&rdquo;; a step that lost its noise check shows a warning with a one-click fix; and the advanced rule is marked &ldquo;not used&rdquo; while conditions are set.' },
+      { type: 'feature', html: '<strong>Workflow watch</strong> &mdash; the Mail Workflows list now flags a workflow whose noise check was replaced, or that keeps running but has sent nothing in 24 hours after sending regularly the week before. The same check is written to the server log every hour.' },
+      { type: 'improvement', html: '<strong>On/Offboarding</strong> &mdash; &ldquo;Comings &amp; Goings&rdquo; is now &ldquo;On/Offboarding&rdquo;, and Assignment and Mail Workflows have new side-rail icons.' },
+      { type: 'fix', html: '<strong>Availability settings show your workspace</strong> &mdash; Settings &rarr; People and Balances listed everyone from every workspace. They now list the people of the workspace you are in.' },
+      { type: 'improvement', html: '<strong>Recipients: custom fields fold away</strong> &mdash; the &ldquo;From custom fields&rdquo; list in a workflow&rsquo;s Recipients step is collapsed until a field is picked, with a count of how many are selected.' },
+      { type: 'fix', html: '<strong>Template HTML keeps its line breaks</strong> &mdash; editing a template in the rich editor rewrote its HTML as one long line. It now keeps one block per line, and HTML stored as one line opens in the code editor with a line per block. HTML that already has line breaks is left as written.' },
+      { type: 'fix', html: '<strong>On-call phone icon in Outlook</strong> &mdash; the phone icon in the after-hours e-mail could be cut in half in Outlook&rsquo;s reading pane. The icon no longer sits inside the phone link and its cell has a fixed height; the same change is applied to every action row.' },
+    ],
+  },
   {
     version: '4.2.10-preview',
     date: 'October 5, 2026',

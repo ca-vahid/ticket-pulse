@@ -117,3 +117,20 @@ describe('WebhookNodeEditor — insert at the cursor once placed', () => {
     expect(onChange).toHaveBeenCalledWith({ bodyTemplate: '{"a": {{ ticket.id }}, "b": 1}' });
   });
 });
+
+// QA 10-05 #3: the custom-field list is collapsed until something is picked.
+describe('RecipientsNodeEditor — custom fields collapse', () => {
+  const defs = [{ key: 'approver_email', label: 'Approver e-mail' }, { key: 'site_contact', label: 'Site contact' }];
+  test('closed with a count when nothing is picked; open with "1 selected" when one is', () => {
+    const { unmount } = render(<RecipientsNodeEditor data={{ to: ['requester'] }} onChange={() => {}} customFieldDefs={defs} />);
+    const closed = screen.getByTestId('recipients-custom-fields-to');
+    expect(closed.tagName).toBe('DETAILS');
+    expect(closed).not.toHaveAttribute('open');
+    expect(closed).toHaveTextContent('2 available');
+    unmount();
+    render(<RecipientsNodeEditor data={{ to: ['requester', 'custom_field:approver_email'] }} onChange={() => {}} customFieldDefs={defs} />);
+    const open = screen.getByTestId('recipients-custom-fields-to');
+    expect(open).toHaveAttribute('open');
+    expect(open).toHaveTextContent('1 selected');
+  });
+});
