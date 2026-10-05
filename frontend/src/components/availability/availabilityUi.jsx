@@ -125,6 +125,9 @@ export const HATCH = { backgroundImage: 'repeating-linear-gradient(135deg, rgba(
 export const WEEKEND_BG = 'bg-muted/60';
 export const HOLIDAY_BG = 'bg-rose-50/80 dark:bg-rose-500/10';
 export const HOLIDAY_DOT = 'bg-rose-400 dark:bg-rose-300';
+// Today's column (5 Oct 2026, Vahid: the old faint tint read like a weekend):
+// a clear blue tint with thin primary edges, header to last row.
+export const TODAY_COL = 'bg-blue-100/80 shadow-[inset_1.5px_0_0_hsl(var(--primary)/0.55),inset_-1.5px_0_0_hsl(var(--primary)/0.55)] dark:bg-blue-500/20';
 // Coverage: how many of the team are away that day (workload colours).
 export const COVERAGE_BG = { none: 'bg-muted', light: 'bg-emerald-500', medium: 'bg-amber-500', heavy: 'bg-red-500' };
 

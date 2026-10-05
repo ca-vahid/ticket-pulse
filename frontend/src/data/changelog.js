@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.09-preview';
+export const APP_VERSION = '4.2.10-preview';
 
 export const changelog = [
+  {
+    version: '4.2.10-preview',
+    date: 'October 5, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Today stands out on the wallchart</strong> &mdash; today&rsquo;s column had a faint tint that looked like a weekend. It is now a clear blue column with blue edges, from the date down to the last row, in light and dark.' },
+    ],
+  },
   {
     version: '4.2.09-preview',
     date: 'October 5, 2026',
