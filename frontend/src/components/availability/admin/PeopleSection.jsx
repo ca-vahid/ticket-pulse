@@ -94,7 +94,8 @@ export default function PeopleSection({ config, reload, toast }) {
   const tracked = (config.leaveTypes || []).filter((t) => t.isActive !== false && t.tracksBalance);
   const people = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const all = [...(config.people || [])].sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
+    // QA 10-05 #2: the people of the workspace you are in (older servers send no flag: show all).
+    const all = (config.people || []).filter((p) => p.inWorkspace !== false).sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
     return term ? all.filter((p) => `${p.name} ${p.email}`.toLowerCase().includes(term)) : all;
   }, [config.people, q]);
 

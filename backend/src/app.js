@@ -21,6 +21,7 @@ import availabilityService from './services/availabilityService.js';
 import llmConfigService from './services/llmConfigService.js';
 import noiseRuleService from './services/noiseRuleService.js';
 import notificationWorkflowRunWatchdogService from './services/notificationWorkflowRunWatchdogService.js';
+import notificationWorkflowWatchService from './services/notificationWorkflowWatchService.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
@@ -371,6 +372,7 @@ async function initialize() {
         logger.warn(`Marked ${staleRuns.runCount} stale notification workflow run(s) as failed on startup`);
       }
       notificationWorkflowRunWatchdogService.start();
+      notificationWorkflowWatchService.start();
     } catch (e) {
       logger.warn('Notification workflow stale-run reconciliation failed (non-fatal):', e.message);
     }
@@ -594,6 +596,7 @@ process.on('SIGTERM', () => {
 
   scheduledSyncService.stop();
   notificationWorkflowRunWatchdogService.stop();
+  notificationWorkflowWatchService.stop();
   pgPool.end();
 
   process.exit(0);
@@ -604,6 +607,7 @@ process.on('SIGINT', () => {
 
   scheduledSyncService.stop();
   notificationWorkflowRunWatchdogService.stop();
+  notificationWorkflowWatchService.stop();
   pgPool.end();
 
   process.exit(0);

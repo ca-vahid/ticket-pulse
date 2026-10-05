@@ -828,9 +828,11 @@ class AvailabilityService {
     return out;
   }
 
-  async balanceReport(user, { year = null } = {}) {
+  async balanceReport(user, { year = null, workspaceId = null } = {}) {
     await this.assertAdmin(user);
-    const people = await this.listPeople();
+    // QA 10-05 #2: the workspace's own people, not the whole company.
+    const roster = await this.rosterFor(user, workspaceId);
+    const people = (await this.listPeople()).filter((p) => roster.has(lc(p.email)));
     const out = [];
     for (const p of people) out.push({ email: p.email, name: p.name, balances: await this.balances(p.email, { year }) });
     return out;

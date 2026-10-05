@@ -189,6 +189,11 @@ export function emptyRow() {
   return { field: 'ticket.status', operator: 'is', value: 'Open' };
 }
 
+/** "Is noise/spam is not true" — the row that keeps a step's noise check. */
+export function noiseRow() {
+  return { field: 'ticket.isNoise', operator: 'is_false', value: null };
+}
+
 export function emptyGroup() {
   return { logic: 'all', conditions: [emptyRow()] };
 }
@@ -398,7 +403,14 @@ function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
   );
 }
 
-export default function ConditionGroupBuilder({ value, onChange, onClear }) {
+export default function ConditionGroupBuilder({ value, onChange, onClear, rawRule = null }) {
+  // QA 10-05 #5: a step's built-in rule is often "skip noise tickets". Adding
+  // conditions here replaces that rule, which silently stopped the noise check
+  // (and made every stop read "Noise ticket skipped"). Keep the check when
+  // conditions are first added, and say so plainly when it is missing.
+  const ruleChecksNoise = JSON.stringify(rawRule || '').includes('ticket.isNoise');
+  const groupChecksNoise = (g) => Boolean(g && Array.isArray(g.conditions)) && g.conditions.some((e) => (Array.isArray(e?.conditions) ? groupChecksNoise(e) : e?.field === 'ticket.isNoise'));
+  const noiseDropped = ruleChecksNoise && Boolean(value) && !groupChecksNoise(value);
   const fields = useConditionFields();
   const group = isGroup(value) ? value : null;
 
@@ -406,7 +418,7 @@ export default function ConditionGroupBuilder({ value, onChange, onClear }) {
     return (
       <button
         type="button"
-        onClick={() => onChange(emptyGroup())}
+        onClick={() => onChange(ruleChecksNoise ? { logic: 'all', conditions: [noiseRow(), emptyRow()] } : emptyGroup())}
         className="w-full rounded-lg border border-dashed border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/50 dark:bg-indigo-500/10 px-3 py-2.5 text-left text-sm font-medium text-indigo-700 dark:text-indigo-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
       >
         + Build conditions visually (AND/OR groups)
@@ -417,8 +429,20 @@ export default function ConditionGroupBuilder({ value, onChange, onClear }) {
   return (
     <div className="space-y-2">
       <GroupEditor group={group} onChange={onChange} fields={fields} />
+      {noiseDropped && (
+        <div role="alert" data-testid="noise-check-dropped" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+          <p><strong>This step no longer skips noise tickets.</strong> Its built-in rule (the ticket is not noise) was replaced by the conditions above, so noise is not checked here.</p>
+          <button
+            type="button"
+            onClick={() => onChange({ ...group, conditions: [noiseRow(), ...(group.conditions || [])] })}
+            className="tp-focus-ring mt-1.5 rounded-md border border-amber-400 px-2 py-1 font-semibold hover:bg-amber-100 dark:border-amber-500/50 dark:hover:bg-amber-500/20"
+          >
+            Also skip noise tickets
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
-        <p className="text-[11px] text-muted-foreground/75">Structured conditions override the raw JSONLogic rule below.</p>
+        <p className="text-[11px] text-muted-foreground/75">Only these conditions are checked. The advanced rule below is not used while they are set.</p>
         <button
           type="button"
           onClick={onClear}

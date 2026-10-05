@@ -65,6 +65,8 @@ import {
 
 import {
   compileConditionGroup,
+  explainConditionGroup,
+  ruleVarPaths,
   groupReferencesCustomFields,
   registerCustomFieldConditionOps,
 } from './notificationConditionModel.js';
@@ -1078,7 +1080,7 @@ function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null
   return [
     `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;${mb ? 'margin-bottom:10px;' : ''}">`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${tint};${borderStyle}border-radius:12px;"><tr>`,
-    `<td width="58" valign="middle" style="padding:8px 0 8px 14px;line-height:0;font-size:0;"><img src="${badge}" width="40" height="40" alt="" style="display:block;border:0;"></td>`,
+    `<td width="58" height="56" valign="middle" style="padding:8px 0 8px 14px;height:40px;line-height:40px;font-size:1px;"><img src="${badge}" width="40" height="40" alt="" style="display:block;border:0;width:40px;height:40px;"></td>`,
     `<td valign="middle" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:15px;line-height:20px;font-weight:700;color:${color};">${escapeHtml(title)}</div><div style="font-size:12.5px;line-height:17px;color:#64748b;margin-top:1px;">${escapeHtml(subtitle)}</div></td>`,
     `<td width="42" align="right" valign="middle" style="padding-right:16px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:${color};">&rarr;</span></td>`,
     '</tr></table></a>',
@@ -1290,11 +1292,15 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
   let phoneRow = '';
   if (phone) {
     phoneRow = [
-      `<a href="tel:${escapeHtml(phoneHref)}" style="display:block;text-decoration:none;">`,
+      // QA 10-05 #6: this row used to sit inside one block <a href="tel:">.
+      // Outlook's reading pane rewrites phone links (click-to-call) and, with
+      // the icon cell at line-height 0, cut the icon in half when the pane was
+      // narrow. The icon is now outside any link in a cell with a real height;
+      // only the number itself is the tel: link.
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>',
-      `<td width="58" valign="middle" style="padding:10px 0 10px 14px;line-height:0;font-size:0;"><img src="${EMAIL_BADGE_PHONE}" width="40" height="40" alt="" style="display:block;border:0;"></td>`,
-      `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;">${escapeHtml(phoneDisplay)}</div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
-      '</tr></table></a>',
+      `<td width="58" height="60" valign="middle" style="padding:10px 0 10px 14px;height:40px;line-height:40px;font-size:1px;"><img src="${EMAIL_BADGE_PHONE}" width="40" height="40" alt="" style="display:block;border:0;width:40px;height:40px;"></td>`,
+      `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
+      '</tr></table>',
     ].join('');
   }
 
@@ -2326,6 +2332,41 @@ async function recordNotificationToolEvent({ workflow, run, event }) {
   };
 }
 
+/**
+ * What a condition step checked, in words (QA 10-05 #5). With structured
+ * conditions the step's raw rule is NOT evaluated; `ignoredRule` says so when
+ * that raw rule was a real check (the default "skip noise" rule being replaced
+ * by "Priority is Urgent" is how every stop came to read "Noise ticket skipped").
+ */
+export function explainConditionStep(node, { passed, compileError = null, evalScope = {}, customFieldTypes = null } = {}) {
+  const group = node?.data?.conditionGroup || null;
+  const rawRule = node?.data?.rule;
+  const rawPaths = rawRule && typeof rawRule === 'object' ? ruleVarPaths(rawRule) : [];
+  if (compileError) return { source: 'conditions', summary: `the conditions could not be read (${compileError})`, clauses: [] };
+  if (group) {
+    const detail = explainConditionGroup(group, evalScope, { customFieldTypes, apply: (r, sc) => jsonLogic.apply(r, sc) });
+    const shown = passed ? detail.clauses : detail.clauses.filter((c) => !c.passed);
+    const joiner = detail.logic === 'any' ? ' or ' : ' and ';
+    const summary = detail.clauses.length === 0
+      ? 'no conditions are set, so every ticket passes'
+      : (shown.length ? shown : detail.clauses).map((c) => c.text).join(joiner);
+    return {
+      source: 'conditions',
+      logic: detail.logic,
+      clauses: detail.clauses,
+      summary,
+      ...(rawPaths.length ? { ignoredRule: true, ignoredRuleReads: rawPaths } : {}),
+    };
+  }
+  const reads = rawPaths.map((path) => ({ path, value: path.split('.').reduce((acc, k) => (acc === null || acc === undefined ? undefined : acc[k]), evalScope) }));
+  const text = reads.length
+    ? reads.map((r) => `${r.path} = ${r.value === undefined || r.value === null || r.value === '' ? 'empty' : String(r.value).slice(0, 80)}`).join(', ')
+    : 'the rule has no ticket fields';
+  const noise = reads.find((r) => r.path === 'ticket.isNoise');
+  const summary = !passed && noise && noise.value === true ? 'this ticket is marked as noise' : `advanced rule read ${text}`;
+  return { source: 'rule', reads, summary };
+}
+
 async function executeNode({
   workflow,
   run,
@@ -2367,9 +2408,11 @@ async function executeNode({
     let rule = node.data?.rule || true;
     let compileError = null;
     let evalScope = scope;
+    let conditionTypes = null;
     if (node.data?.conditionGroup) {
       try {
         const customFieldTypes = await conditionCustomFieldTypes(node.data.conditionGroup, eventContext);
+        conditionTypes = customFieldTypes;
         rule = compileConditionGroup(node.data.conditionGroup, { customFieldTypes });
         if (groupReferencesReplyClocks(node.data.conditionGroup)) evalScope = await withReplyClocks(scope, eventContext);
       } catch (error) {
@@ -2378,7 +2421,13 @@ async function executeNode({
       }
     }
     const passed = compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
-    return { passed, rule, ...(compileError ? { compileError } : {}) };
+    // QA 10-05 #5: say what was checked and what the ticket had, so a stop is
+    // never explained by the Stop step's fixed note alone.
+    const explain = explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
+    if (state && typeof state === 'object') {
+      state.lastCondition = { nodeId: node.id, label: node.data?.label || node.id, passed, summary: explain.summary };
+    }
+    return { passed, rule, explain, ...(compileError ? { compileError } : {}) };
   }
 
   if (node.type === 'update_ticket') {
@@ -3315,7 +3364,11 @@ async function executeNode({
   }
 
   if (node.type === 'stop') {
-    return { stopped: true, reason: node.data?.reason || 'Workflow stopped' };
+    // `reason` is the step's own fixed note (kept for audit history); `cause`
+    // is what actually happened: the condition that sent the run here.
+    const last = state?.lastCondition;
+    const cause = last && last.passed === false ? `Condition "${last.label}" did not pass: ${last.summary}` : null;
+    return { stopped: true, reason: node.data?.reason || 'Workflow stopped', ...(cause ? { cause, causeNodeId: last.nodeId } : {}) };
   }
 
   throw new Error(`Unsupported notification workflow node type: ${node.type}`);

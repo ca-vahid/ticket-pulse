@@ -224,3 +224,36 @@ describe('fields_updated condition fields (TU-7)', () => {
     expect(screen.getByLabelText('Values (comma-separated)')).toHaveValue('priority');
   });
 });
+
+// QA 10-05 #5: adding conditions to the default "skip noise" step replaced its
+// noise rule without saying so.
+describe('ConditionGroupBuilder — the step\'s noise check', () => {
+  const NOISE_RULE = { '!=': [{ var: 'ticket.isNoise' }, true] };
+
+  test('first conditions on a noise step keep the noise check', () => {
+    const onChange = vi.fn();
+    render(<ConditionGroupBuilder value={null} onChange={onChange} onClear={() => {}} rawRule={NOISE_RULE} />);
+    fireEvent.click(screen.getByRole('button', { name: /Build conditions visually/ }));
+    const group = onChange.mock.calls[0][0];
+    expect(group.conditions[0]).toEqual({ field: 'ticket.isNoise', operator: 'is_false', value: null });
+    expect(group.conditions).toHaveLength(2);
+  });
+
+  test('conditions without a noise row warn, and one click adds it back', () => {
+    const onChange = vi.fn();
+    const group = { logic: 'all', conditions: [{ field: 'ticket.priorityLabel', operator: 'is', value: 'Urgent' }] };
+    render(<ConditionGroupBuilder value={group} onChange={onChange} onClear={() => {}} rawRule={NOISE_RULE} />);
+    expect(screen.getByTestId('noise-check-dropped')).toHaveTextContent('This step no longer skips noise tickets');
+    fireEvent.click(screen.getByRole('button', { name: 'Also skip noise tickets' }));
+    expect(onChange.mock.calls[0][0].conditions.map((c) => c.field)).toEqual(['ticket.isNoise', 'ticket.priorityLabel']);
+  });
+
+  test('no warning when the conditions already check noise, or the step never did', () => {
+    const withNoise = { logic: 'all', conditions: [{ field: 'ticket.isNoise', operator: 'is_false', value: null }] };
+    const { unmount } = render(<ConditionGroupBuilder value={withNoise} onChange={() => {}} onClear={() => {}} rawRule={NOISE_RULE} />);
+    expect(screen.queryByTestId('noise-check-dropped')).not.toBeInTheDocument();
+    unmount();
+    render(<ConditionGroupBuilder value={{ logic: 'all', conditions: [{ field: 'ticket.subject', operator: 'contains', value: 'x' }] }} onChange={() => {}} onClear={() => {}} rawRule={true} />);
+    expect(screen.queryByTestId('noise-check-dropped')).not.toBeInTheDocument();
+  });
+});

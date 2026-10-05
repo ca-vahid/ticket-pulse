@@ -93,9 +93,10 @@ export const NAV_DESTINATIONS = [
   {
     // Onboarding / Offboarding (plans/HR_LIFECYCLE_PLAN.md): HR notice families.
     // Admin-only, and only in the workspaces the server enables (IT for now).
-    // Named "Comings & Goings" (2 Oct 2026, Vahid): it covers both directions.
+    // "On/Offboarding" (QA 10-05 #1; was "Comings & Goings" for three days):
+    // says both directions in plain words and still fits the rail.
     id: 'onboarding',
-    label: 'Comings & Goings',
+    label: 'On/Offboarding',
     hint: 'Onboarding & offboarding',
     path: '/onboarding',
     Icon: OnboardingNavIcon,

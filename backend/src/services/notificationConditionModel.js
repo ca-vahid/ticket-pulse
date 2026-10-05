@@ -297,6 +297,75 @@ export function compileConditionGroup(group, { customFieldTypes = null } = {}) {
   return compileGroup(group, 1, customFieldTypes);
 }
 
+const OPERATOR_WORDS = Object.freeze({
+  is: 'is', is_not: 'is not', contains: 'contains', not_contains: 'does not contain', in: 'is one of', not_in: 'is not one of',
+  is_empty: 'is empty', is_not_empty: 'is not empty', is_true: 'is true', is_false: 'is not true',
+  gt: 'is more than', lt: 'is less than', gte: 'is at least', lte: 'is at most', before: 'is before', after: 'is after',
+  matches_regex: 'matches', has_any: 'has any of', has_all: 'has all of', has_none: 'has none of',
+});
+
+function valueAtPath(scope, path) {
+  return String(path || '').split('.').reduce((acc, key) => (acc === null || acc === undefined ? undefined : acc[key]), scope);
+}
+
+function shortValue(value) {
+  if (value === undefined || value === null || value === '') return 'empty';
+  if (Array.isArray(value)) return value.length ? value.map((v) => String(v)).join(', ').slice(0, 80) : 'empty';
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 80);
+  const text = String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+/**
+ * Say what a condition group checked and what the ticket actually had
+ * (QA 10-05 #5: a run that stopped at a condition only said "false", and the
+ * Stop step's fixed note — "Noise ticket skipped" — was read as the cause).
+ * `apply` is the engine's jsonLogic.apply (it carries the custom operators).
+ * Returns { logic, passed, clauses: [{ label, operator, expected, actual, passed, text }] };
+ * a nested group is one clause with its own `clauses`. Never throws.
+ */
+export function explainConditionGroup(group, scope, { customFieldTypes = null, apply } = {}) {
+  const walk = (g, depth) => {
+    const clauses = (g?.conditions || []).map((entry) => {
+      if (isGroup(entry)) {
+        const inner = walk(entry, depth + 1);
+        return { label: entry.logic === 'any' ? 'Any of' : 'All of', passed: inner.passed, clauses: inner.clauses, text: `${entry.logic === 'any' ? 'any of' : 'all of'}: ${inner.clauses.map((c) => c.text).join('; ')}` };
+      }
+      try {
+        const spec = fieldSpec(entry.field, customFieldTypes);
+        const rule = compileRow(entry, customFieldTypes);
+        const passed = Boolean(apply(rule, scope));
+        const actual = shortValue(valueAtPath(scope, spec.path));
+        const word = OPERATOR_WORDS[entry.operator] || entry.operator;
+        const expected = VALUELESS_OPERATORS.has(entry.operator) ? null : shortValue(entry.value);
+        const text = `${spec.label} ${word}${expected === null ? '' : ` ${expected}`} (this ticket: ${actual})`;
+        return { field: entry.field, label: spec.label, operator: entry.operator, expected, actual, passed, text };
+      } catch (error) {
+        return { field: entry?.field || null, label: String(entry?.field || 'condition'), operator: entry?.operator || null, expected: null, actual: null, passed: false, text: `could not be checked (${error.message})` };
+      }
+    });
+    const passed = clauses.length === 0 ? true : g.logic === 'any' ? clauses.some((c) => c.passed) : clauses.every((c) => c.passed);
+    return { logic: g.logic === 'any' ? 'any' : 'all', passed, clauses };
+  };
+  try {
+    return walk(group, 1);
+  } catch {
+    return { logic: 'all', passed: false, clauses: [] };
+  }
+}
+
+/** Every `{ var: 'a.b' }` path a raw json-logic rule reads. */
+export function ruleVarPaths(rule, out = new Set()) {
+  if (Array.isArray(rule)) rule.forEach((r) => ruleVarPaths(r, out));
+  else if (rule && typeof rule === 'object') {
+    for (const [op, arg] of Object.entries(rule)) {
+      if (op === 'var') out.add(String(Array.isArray(arg) ? arg[0] : arg));
+      else ruleVarPaths(arg, out);
+    }
+  }
+  return [...out];
+}
+
 /**
  * Validate a condition group for save-time feedback. Returns a string[] of
  * problems (empty = valid). Lenient about value shapes — the compiler coerces.

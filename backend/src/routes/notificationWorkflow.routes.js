@@ -1029,7 +1029,12 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const workflows = await notificationWorkflowRepository.listWorkflows(req.workspaceId);
-    res.json({ success: true, data: workflows });
+    // QA 10-05 #5: watch signals (noise check replaced, went quiet …) ride on
+    // each row; a failure here never breaks the list.
+    const signals = await import('../services/notificationWorkflowWatchService.js')
+      .then(({ default: watch }) => watch.signalsForWorkspace(req.workspaceId))
+      .catch(() => ({}));
+    res.json({ success: true, data: workflows.map((w) => ({ ...w, watchSignals: signals?.[w.id] || [] })) });
   }),
 );
 
