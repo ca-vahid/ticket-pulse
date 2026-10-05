@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.07-preview';
+export const APP_VERSION = '4.2.08-preview';
 
 export const changelog = [
+  {
+    version: '4.2.08-preview',
+    date: 'October 5, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Team calendar shows your own team</strong> &mdash; Availability&rsquo;s team calendar and &ldquo;Out today&rdquo; listed every Ticket Pulse user from every workspace. They now show the active agents of the workspace you are in (people kept under &ldquo;Other teams&rdquo; are left out), plus you.' },
+    ],
+  },
   {
     version: '4.2.07-preview',
     date: 'October 5, 2026',
