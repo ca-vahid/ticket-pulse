@@ -2088,6 +2088,8 @@ export const availabilityAPI = {
   cancelRequest: (id, reason) => api.post(`/availability/requests/${id}/cancel`, { reason }),
   calendar: (params = {}) => api.get('/availability/calendar', { params }),
   outToday: () => api.get('/availability/out-today'),
+  roster: () => api.get('/availability/roster'),
+  upcomingHolidays: (limit = 4) => api.get('/availability/holidays/upcoming', { params: { limit } }),
   approvals: () => api.get('/availability/approvals'),
   decide: (id, action, note) => api.post(`/availability/requests/${id}/decision`, { action, note }),
 

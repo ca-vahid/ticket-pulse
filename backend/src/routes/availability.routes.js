@@ -101,6 +101,14 @@ router.get('/calendar', asyncHandler(async (req, res) => {
   }));
 }));
 
+router.get('/roster', asyncHandler(async (req, res) => {
+  ok(res, await availabilityService.roster(me(req), wsOf(req)));
+}));
+
+router.get('/holidays/upcoming', asyncHandler(async (req, res) => {
+  ok(res, await availabilityService.upcomingHolidays({ limit: req.query.limit ? Number(req.query.limit) : 4 }));
+}));
+
 router.get('/out-today', asyncHandler(async (req, res) => {
   ok(res, await availabilityService.outToday(me(req), { workspaceId: wsOf(req) }));
 }));
