@@ -18,6 +18,13 @@ const me = (req) => {
   return user;
 };
 const ok = (res, data) => res.json({ success: true, data });
+// 5 Oct 2026: the team calendar shows the workspace you are in (the app sends
+// X-Workspace-Id on every call); the service checks you belong to it.
+const wsOf = (req) => {
+  const raw = req.headers['x-workspace-id'] ?? me(req).selectedWorkspaceId ?? null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
 
 let seeded = null;
 // Every Ticket Pulse user is a person here: the roster refreshes on first use
@@ -90,12 +97,12 @@ router.post('/requests/:id/cancel', asyncHandler(async (req, res) => {
 
 router.get('/calendar', asyncHandler(async (req, res) => {
   ok(res, await availabilityService.calendar(me(req), {
-    from: req.query.from, to: req.query.to, officeId: req.query.officeId || null, groupId: req.query.groupId || null,
+    from: req.query.from, to: req.query.to, officeId: req.query.officeId || null, groupId: req.query.groupId || null, workspaceId: wsOf(req),
   }));
 }));
 
 router.get('/out-today', asyncHandler(async (req, res) => {
-  ok(res, await availabilityService.outToday(me(req)));
+  ok(res, await availabilityService.outToday(me(req), { workspaceId: wsOf(req) }));
 }));
 
 // --- approvers --------------------------------------------------------------

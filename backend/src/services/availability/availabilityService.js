@@ -102,6 +102,41 @@ class AvailabilityService {
     return Boolean(row);
   }
 
+  /**
+   * Who the team calendar shows (5 Oct 2026, Vahid): the active agents of the
+   * workspace the viewer is in, never the whole company. "Other teams" people
+   * kept as assignable-only (isActive false) are not part of the team. The
+   * viewer must belong to that workspace (admin, member, or active agent);
+   * otherwise, or with no workspace, the workspaces they are an active agent
+   * in. The viewer is always included. Returns a Set of e-mails.
+   */
+  async rosterFor(user, workspaceId = null) {
+    const email = lc(user?.email);
+    const ws = Number(workspaceId);
+    let workspaceIds = [];
+    if (Number.isInteger(ws) && ws > 0) {
+      let allowed = user?.role === 'admin';
+      if (!allowed) {
+        const [access, tech] = await Promise.all([
+          prisma.workspaceAccess.findFirst({ where: { workspaceId: ws, email: { equals: email, mode: 'insensitive' } }, select: { id: true } }),
+          prisma.technician.findFirst({ where: { workspaceId: ws, isActive: true, email: { equals: email, mode: 'insensitive' } }, select: { id: true } }),
+        ]);
+        allowed = Boolean(access || tech);
+      }
+      if (allowed) workspaceIds = [ws];
+    }
+    if (!workspaceIds.length) {
+      const mine = await prisma.technician.findMany({ where: { isActive: true, email: { equals: email, mode: 'insensitive' } }, select: { workspaceId: true }, take: 20 });
+      workspaceIds = [...new Set(mine.map((t) => t.workspaceId))];
+    }
+    const techs = workspaceIds.length
+      ? await prisma.technician.findMany({ where: { workspaceId: { in: workspaceIds }, isActive: true, email: { not: null } }, select: { email: true }, take: 2000 })
+      : [];
+    const roster = new Set(techs.map((t) => lc(t.email)).filter(Boolean));
+    if (email) roster.add(email);
+    return roster;
+  }
+
   async assertAdmin(user) {
     if (!(await this.isAdmin(user))) throw new AuthorizationError('Only administrators can change Availability settings', 'availability_admin');
   }
@@ -748,13 +783,14 @@ class AvailabilityService {
   // ------------------------------------------------------------------ calendar
 
   /** Team calendar: people + their approved/pending entries in [from, to], redacted by visibility. */
-  async calendar(user, { from, to, officeId = null, groupId = null }) {
+  async calendar(user, { from, to, officeId = null, groupId = null, workspaceId = null }) {
     const start = toDay(from);
     const end = toDay(to);
     if (!start || !end || end < start) throw new ValidationError('Pick a date range');
     if (daysSpan(start, end) > 93) throw new ValidationError('Show at most three months at a time');
     const admin = await this.isAdmin(user);
-    let people = await prisma.avPerson.findMany({ where: { isActive: true, ...(officeId ? { officeId: Number(officeId) } : {}) }, orderBy: { name: 'asc' }, select: { email: true, name: true, officeId: true }, take: 2000 });
+    const roster = await this.rosterFor(user, workspaceId);
+    let people = await prisma.avPerson.findMany({ where: { isActive: true, email: { in: [...roster] }, ...(officeId ? { officeId: Number(officeId) } : {}) }, orderBy: { name: 'asc' }, select: { email: true, name: true, officeId: true }, take: 2000 });
     if (groupId) {
       const members = new Set((await prisma.avApprovalGroupMember.findMany({ where: { groupId: Number(groupId) }, select: { email: true } })).map((m) => m.email));
       people = people.filter((p) => members.has(p.email));
@@ -802,9 +838,9 @@ class AvailabilityService {
   }
 
   /** Who is out today (OFF / WFH / ONSITE) — for the dashboard strip and Teams digest. */
-  async outToday(user, { date = new Date() } = {}) {
+  async outToday(user, { date = new Date(), workspaceId = null } = {}) {
     const d = dayKey(date);
-    const cal = await this.calendar(user, { from: d, to: d });
+    const cal = await this.calendar(user, { from: d, to: d, workspaceId });
     return cal.entries;
   }
 
