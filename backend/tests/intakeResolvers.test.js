@@ -11,6 +11,7 @@ const requesterFindFirst = jest.fn();
 const requesterFindMany = jest.fn();
 const technicianFindMany = jest.fn();
 const searchUsersMock = jest.fn();
+const resolveAddressMock = jest.fn();
 const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
@@ -20,7 +21,7 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({
   },
 }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock }));
-jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: { searchUsers: searchUsersMock } }));
+jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: { searchUsers: searchUsersMock, resolveAddress: resolveAddressMock } }));
 
 const { resolveRequesterHint, resolveAssigneeHint, resolveConversingAgent, normalizeName } = await import('../src/services/intakeResolvers.js');
 
@@ -38,6 +39,7 @@ beforeEach(() => {
   requesterFindMany.mockResolvedValue([]);
   technicianFindMany.mockResolvedValue(TECHS);
   searchUsersMock.mockResolvedValue([]);
+  resolveAddressMock.mockResolvedValue({ status: 'absent' });
 });
 
 describe('normalizeName', () => {
@@ -246,5 +248,59 @@ describe('name matching helpers (1 Oct 2026)', () => {
     expect(compatibleFirst('sam', 'mark')).toBe(false);
     expect(closeName('Randy Shinduke', 'Randall Shinduke')).toBe(true);
     expect(closeName('Randy Shinduke', 'Randy Smith')).toBe(false);
+  });
+});
+
+describe('same person, several addresses (5 Oct 2026)', () => {
+  const KATIES = [
+    { id: 11, name: 'Katie Burkell', email: 'katie.burkell@cambioearth.com' },
+    { id: 12, name: 'Katie Burkell', email: 'KBurkell@bgcengineering.ca' },
+  ];
+
+  test('two requester rows whose addresses share one mailbox → matched on the mailbox address', async () => {
+    requesterFindMany.mockResolvedValue(KATIES);
+    resolveAddressMock.mockImplementation(async (email) => (
+      email === 'kburkell@bgcengineering.ca'
+        ? { status: 'found', owner: 'KBurkell@bgcengineering.ca' }
+        : { status: 'alias', owner: 'KBurkell@bgcengineering.ca' }));
+    const out = await resolveRequesterHint(1, 'Katie Burkell');
+    expect(out.status).toBe('matched');
+    expect(out.candidate).toEqual({ requesterId: 12, email: 'kburkell@bgcengineering.ca', name: 'Katie Burkell', source: 'requester' });
+    expect(out.reason).toContain('katie.burkell@cambioearth.com is an alias');
+  });
+
+  test('two different people with the same name stay a choice', async () => {
+    requesterFindMany.mockResolvedValue([
+      { id: 21, name: 'Sam Lee', email: 'slee@example.com' },
+      { id: 22, name: 'Sam Lee', email: 'samuel.lee@example.com' },
+    ]);
+    resolveAddressMock.mockImplementation(async (email) => ({ status: 'found', owner: email }));
+    const out = await resolveRequesterHint(1, 'Sam Lee');
+    expect(out.status).toBe('ambiguous');
+    expect(out.candidates).toHaveLength(2);
+  });
+
+  test('three candidates, two on one mailbox → still a choice, that person shown once', async () => {
+    requesterFindMany.mockResolvedValue([...KATIES, { id: 13, name: 'Katie Burkell', email: 'katie.b@other.com' }]);
+    resolveAddressMock.mockImplementation(async (email) => (
+      email === 'katie.b@other.com' ? { status: 'found', owner: 'katie.b@other.com' } : { status: 'alias', owner: 'kburkell@bgcengineering.ca' }));
+    const out = await resolveRequesterHint(1, 'Katie Burkell');
+    expect(out.status).toBe('ambiguous');
+    expect(out.candidates.map((c) => c.requesterId).sort()).toEqual([12, 13]);
+  });
+
+  test('Entra unavailable → the choice is left exactly as it was', async () => {
+    requesterFindMany.mockResolvedValue(KATIES);
+    resolveAddressMock.mockResolvedValue({ status: 'unavailable' });
+    const out = await resolveRequesterHint(1, 'Katie Burkell');
+    expect(out.status).toBe('ambiguous');
+    expect(out.candidates).toHaveLength(2);
+  });
+
+  test('a lookup that throws is treated as unknown, never as the same person', async () => {
+    requesterFindMany.mockResolvedValue(KATIES);
+    resolveAddressMock.mockRejectedValue(new Error('graph down'));
+    const out = await resolveRequesterHint(1, 'Katie Burkell');
+    expect(out.status).toBe('ambiguous');
   });
 });

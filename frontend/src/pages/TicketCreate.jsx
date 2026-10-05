@@ -511,6 +511,19 @@ export default function TicketCreate() {
           sourceText,
           files: (draft.images || []).map(base64ToFile).filter(Boolean),
         });
+        // 5 Oct 2026: the assignment chosen on the Teams card ("Open in Ticket
+        // Pulse" saves the card's choices first) wins over the form default.
+        const cardAssign = String(draft.data?.cardAssign || '');
+        if (cardAssign === 'ai' || cardAssign === 'me' || cardAssign === 'none') {
+          setAssignMode(cardAssign);
+          setAssignTechId('');
+        } else if (cardAssign.startsWith('tech:')) {
+          const id = cardAssign.slice(5);
+          if ((meta?.technicians || []).some((t) => String(t.id) === id)) {
+            setAssignMode('pick');
+            setAssignTechId(id);
+          }
+        }
         setAutofillNotice((prev) => ['Filled in from your Teams message: check the fields, then create.', prev].filter(Boolean).join(' '));
         const next = new URLSearchParams(searchParams);
         next.delete('autofill');

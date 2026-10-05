@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.06-preview';
+export const APP_VERSION = '4.2.07-preview';
 
 export const changelog = [
+  {
+    version: '4.2.07-preview',
+    date: 'October 5, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Teams cards stay in step with Ticket Pulse</strong> &mdash; an approval card in Teams now changes by itself when the approval is decided, cancelled, handed on or withdrawn anywhere else (Ticket Pulse, the e-mail link, another approver), so nobody acts on a stale card. An Autofill card turns into &ldquo;Created TP-&hellip;&rdquo; when you finish the ticket in Ticket Pulse instead.' },
+      { type: 'fix', html: '<strong>Teams Autofill: Open in Ticket Pulse keeps your choices</strong> &mdash; the subject, requester, priority and Assign to you picked on the card were lost when you opened the draft in Ticket Pulse (a link cannot read the card). The button now saves them first and then shows the link, so the New Ticket page opens with the same choices, Let AI decide included.' },
+      { type: 'fix', html: '<strong>Teams Autofill knows one person with two addresses</strong> &mdash; when a requester has a second address that is an alias on the same mailbox (for example an old company domain), Ticket Pulse kept one requester per address, so the card asked you to pick between two copies of the same person. It now asks the directory who owns each address and picks the person straight away, on their main address. Two different people with the same name are still offered as a choice.' },
+    ],
+  },
   {
     version: '4.2.06-preview',
     date: 'October 4, 2026',

@@ -236,7 +236,7 @@ class TeamsNotificationService {
     }
   }
 
-  async _send(email, card, { summary, workspaceId = null, technicianId = null, ticketId = null, eventKey = 'test', bell = null } = {}) {
+  async _send(email, card, { summary, workspaceId = null, technicianId = null, ticketId = null, eventKey = 'test', bell = null, refKey = null } = {}) {
     let conv;
     try {
       conv = await this.ensureConversation(email);
@@ -261,7 +261,9 @@ class TeamsNotificationService {
     if (bell && conv.aadObjectId) {
       bot.sendActivityFeed(conv.aadObjectId, bell).catch((err) => logger.warn(`Teams bell notification failed for ${email}: ${bot.describeError(err)}`));
     }
-    await prisma.teamsDelivery.create({ data: { workspaceId, email: lc(email), technicianId, ticketId, eventKey, status: 'sent', activityId, conversationId: conv.conversationId, summary: summary ? String(summary).slice(0, 500) : null } }).catch(() => {});
+    // refKey (5 Oct 2026): what the card is about (e.g. approval:<id>), kept in
+    // `reason` on sent rows so the card can be updated when that thing changes.
+    await prisma.teamsDelivery.create({ data: { workspaceId, email: lc(email), technicianId, ticketId, eventKey, status: 'sent', activityId, conversationId: conv.conversationId, ...(refKey ? { reason: String(refKey).slice(0, 120) } : {}), summary: summary ? String(summary).slice(0, 500) : null } }).catch(() => {});
     return activityId;
   }
 
@@ -519,7 +521,7 @@ class TeamsNotificationService {
     };
     await this._send(email, approvalCard(a), {
       summary: `Approval waiting: ${categoryName || ticket.subject || ''}`,
-      workspaceId: ticket.workspaceId, technicianId: tech?.id || null, ticketId: ticket.id, eventKey: 'approval_waiting',
+      workspaceId: ticket.workspaceId, technicianId: tech?.id || null, ticketId: ticket.id, eventKey: 'approval_waiting', refKey: `approval:${approval.id}`,
       bell: { title: `Approval waiting: ${categoryName || ticket.subject || ''}`.slice(0, 150), preview: note || ticket.subject, webUrl: decisionUrl },
     });
   }
@@ -541,6 +543,63 @@ class TeamsNotificationService {
         lastDeliveryId: last?.id || null,
       },
     };
+  }
+
+  /**
+   * Approval cards follow the approval (5 Oct 2026). When an approval on this
+   * ticket is decided, cancelled, superseded, handed on or withdrawn anywhere
+   * (Ticket Pulse, the e-mail link, another approver), every approval card
+   * already sent for it is rewritten in place so nobody acts on a stale card.
+   * Cards still waiting (pending / question asked) are left alone.
+   * Fire-and-forget; never throws.
+   */
+  refreshApprovalCards(ticketId) {
+    if (!bot.isTeamsConfigured() || !Number(ticketId)) return;
+    this._refreshApprovalCards(Number(ticketId)).catch((err) => logger.warn(`Teams approval cards for ticket ${ticketId} not refreshed: ${err.message}`));
+  }
+
+  async _refreshApprovalCards(ticketId) {
+    const rows = await prisma.teamsDelivery.findMany({
+      where: { ticketId, eventKey: 'approval_waiting', status: 'sent', activityId: { not: null }, createdAt: { gte: new Date(Date.now() - 45 * 86400_000) } },
+      orderBy: { id: 'asc' },
+      take: 25,
+    });
+    if (!rows.length) return 0;
+    const approvals = await prisma.ticketApproval.findMany({ where: { ticketId }, orderBy: { id: 'asc' } });
+    let updated = 0;
+    for (const row of rows) {
+      const ref = /^approval:(\d+)$/.exec(String(row.reason || ''));
+      let ap = null;
+      if (ref) {
+        ap = approvals.find((a) => a.id === Number(ref[1])) || null;
+      } else {
+        // Cards sent before refKey existed: the latest approval addressed to
+        // this person that existed when the card went out.
+        const sentAt = new Date(row.createdAt).getTime() + 60_000;
+        ap = approvals.filter((a) => lc(a.approverEmail) === lc(row.email) && new Date(a.createdAt).getTime() <= sentAt).pop() || null;
+        if (!ap) continue;
+      }
+      let card;
+      if (!ap) {
+        card = textCard('This approval request was withdrawn', ['Nothing is needed from you.']);
+      } else {
+        const stage = approvalClosedStage(ap, row.email);
+        if (!stage) continue;
+        const found = await this._approvalModel(ap.id, ap.ticketId, ap.workspaceId);
+        if (!found) continue;
+        card = approvalCard(found.model, stage);
+      }
+      const conv = await prisma.teamsConversation.findUnique({ where: { email: lc(row.email) } }).catch(() => null);
+      if (!conv?.serviceUrl || !row.conversationId) continue;
+      try {
+        await bot.updateActivity({ serviceUrl: conv.serviceUrl, conversationId: row.conversationId, activityId: row.activityId }, bot.cardActivity(card, { summary: 'Approval updated' }));
+        updated++;
+      } catch (err) {
+        logger.warn(`Teams approval card ${row.id} (${row.email}) not updated: ${bot.describeError(err)}`);
+      }
+    }
+    if (updated) logger.info(`Teams: ${updated} approval card(s) on ticket ${ticketId} updated`);
+    return updated;
   }
 
   // ------------------------------------------------------------ bot endpoint
@@ -926,6 +985,32 @@ export function cleanPrefs(input = {}) {
   if (o.groupMinPriority !== undefined) options.groupMinPriority = Math.min(4, Math.max(1, Number(o.groupMinPriority) || 3));
   if (typeof o.digestTime === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(o.digestTime)) options.digestTime = o.digestTime;
   return { events, options };
+}
+
+/**
+ * The closed state for an approval card addressed to `email`, or null while it
+ * still waits for that person. Exported for tests.
+ */
+export function approvalClosedStage(ap, email) {
+  const when = ap.decidedAt ? new Date(ap.decidedAt).toLocaleString('en-US', { timeZone: 'America/Vancouver', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+  const where = ap.decidedVia === 'link' ? 'from the e-mail link' : 'in Ticket Pulse or Teams';
+  const mine = lc(ap.approverEmail) === lc(email);
+  if (ap.status === 'pending' || ap.status === 'info_requested') return null;
+  if (ap.status === 'approved' || ap.status === 'rejected') {
+    const verb = ap.status === 'approved' ? 'Approved' : 'Not approved';
+    return {
+      done: ap.status,
+      headline: mine ? (ap.status === 'approved' ? 'You approved this' : 'You did not approve this') : verb,
+      detail: [`Recorded ${where}${when ? ` on ${when}` : ''}`, ap.conditionNote ? `Condition: ${ap.conditionNote}` : null].filter(Boolean).join('. '),
+    };
+  }
+  if (ap.status === 'escalated' || ap.status === 'forwarded') {
+    const log = Array.isArray(ap.escalationLog) ? ap.escalationLog : [];
+    const last = log[log.length - 1] || {};
+    const to = Array.isArray(last.toEmails) && last.toEmails.length ? last.toEmails.join(', ') : 'the next approver';
+    return { done: 'closed', word: 'Handed on', headline: 'Handed on', detail: `${ap.status === 'forwarded' ? 'Forwarded' : 'Escalated'} to ${to}${last.byName ? ` by ${last.byName}` : ''}. Nothing is needed from you.` };
+  }
+  return { done: 'closed', word: 'Closed', headline: 'No longer needed', detail: ap.decisionNote || 'The request was cancelled.' };
 }
 
 const teamsNotificationService = new TeamsNotificationService();

@@ -28,6 +28,10 @@ const draftTable = {
     return hit ? { ...hit } : null;
   }),
   deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+  findFirst: jest.fn(async ({ where }) => {
+    const hit = [...drafts.values()].find((d) => d.intakeRunId === where.intakeRunId && d.status === where.status);
+    return hit ? { ...hit } : null;
+  }),
 };
 
 const ADRIAN = { id: 7, name: 'Adrian Lo', email: 'adrian@x.io', workspaceId: 1 };
@@ -273,12 +277,17 @@ describe('the Autofill card', () => {
     expect(s).toContain('1 picture will be attached');
     expect(findAction(card, 'autofill.create')).toBeTruthy();
     expect(findAction(card, 'autofill.discard')).toBeTruthy();
-    const open = card.actions.find((a) => a.title === 'Open in Ticket Pulse');
-    expect(open.url).toMatch(/^https:\/\/tp\.example\.com\/tickets\/new\?autofill=[A-Za-z0-9_-]+&ws=1$/);
+    // 5 Oct 2026: Open saves the card's choices first, then hands out the link.
+    const open = findAction(card, 'autofill.open');
+    expect(open).toMatchObject({ type: 'Action.Execute', title: 'Open in Ticket Pulse' });
     const draft = [...drafts.values()][0];
     expect(draft).toMatchObject({ status: 'ready', intakeRunId: 555, workspaceId: 1, technicianId: 7 });
     expect(draft.images).toHaveLength(1);
-    expect(draft.tokenHash).toBe(hashToken(decodeURIComponent(open.url.match(/autofill=([^&]+)/)[1])));
+    expect(draft.tokenHash).toBe(hashToken(open.data.t));
+    const opened = await intake.handleAction('autofill.open', { ...open.data, assign: 'ai' }, 'adrian@x.io');
+    const link = opened.actions.find((a) => a.type === 'Action.OpenUrl');
+    expect(link.url).toMatch(/^https:\/\/tp\.example\.com\/tickets\/new\?autofill=[A-Za-z0-9_-]+&ws=1$/);
+    expect(link.url).toContain(encodeURIComponent(open.data.t));
     expect(prismaMock.teamsDelivery.create).toHaveBeenCalledWith({ data: expect.objectContaining({ eventKey: 'autofill', status: 'sent', email: 'adrian@x.io' }) });
   });
 
@@ -412,7 +421,7 @@ describe('Create ticket from the card', () => {
 describe('prefill token for /tickets/new?autofill=', () => {
   test('the sender reads the draft (pictures included); anyone else gets a 404', async () => {
     const { card } = await readyDraft();
-    const token = decodeURIComponent(card.actions.find((a) => a.title === 'Open in Ticket Pulse').url.match(/autofill=([^&]+)/)[1]);
+    const token = findAction(card, 'autofill.open').data.t;
     const out = await intake.getPrefill(token, 'ADRIAN@x.io');
     expect(out).toMatchObject({ status: 'ready', workspace: { id: 1, name: 'IT' }, runId: 555 });
     expect(out.data.subject).toBe(EXTRACTED.subject);
@@ -424,7 +433,7 @@ describe('prefill token for /tickets/new?autofill=', () => {
 
   test('expires after 30 minutes; a created draft points at its ticket', async () => {
     const { card, draft } = await readyDraft();
-    const token = decodeURIComponent(card.actions.find((a) => a.title === 'Open in Ticket Pulse').url.match(/autofill=([^&]+)/)[1]);
+    const token = findAction(card, 'autofill.open').data.t;
     expect(draft.expiresAt.getTime() - Date.now()).toBeGreaterThan(DRAFT_TTL_MS - 60_000);
     drafts.get(draft.id).expiresAt = new Date(Date.now() - 1000);
     await expect(intake.getPrefill(token, 'adrian@x.io')).rejects.toMatchObject({ statusCode: 410 });
@@ -470,5 +479,53 @@ describe('Assign to list on the Autofill card', () => {
     await intake.handleAction('autofill.create', { ...data, subject: 'Outlook crashes on start', requesterEmail: 'rita@x.io', assign: 'tech:21' }, 'adrian@x.io');
     expect(createTicket).toHaveBeenCalledTimes(1);
     expect(createTicket.mock.calls[0][1]).toMatchObject({ assignedTechId: 21, runAiTriage: false });
+  });
+});
+
+// 5 Oct 2026 (Vahid): the card and Ticket Pulse stay in step.
+describe('Open in Ticket Pulse carries the card\'s choices; a web create closes the card', () => {
+  test('choices saved on Open reach the New Ticket page (AI assignment, subject, priority, picked requester)', async () => {
+    const { card } = await readyDraft();
+    const open = findAction(card, 'autofill.open');
+    const out = await intake.handleAction('autofill.open', { ...open.data, subject: 'Switch account back to BGC', priority: '2', assign: 'ai', requesterEmail: '' }, 'adrian@x.io');
+    expect(allText(out)).toContain('Your choices are saved');
+    expect(out.body.find((b) => b.id === 'subject').value).toBe('Switch account back to BGC');
+    const assignInput = JSON.stringify(out.body).includes('"value":"ai"');
+    expect(assignInput).toBe(true);
+    const prefill = await intake.getPrefill(open.data.t, 'adrian@x.io');
+    expect(prefill.data).toMatchObject({ subject: 'Switch account back to BGC', priorityHint: 2, cardAssign: 'ai', assigneeMatch: null });
+    expect(prefill.data.cardInputs).toBeUndefined();
+    expect(prefill.data.requesterMatch.candidate.email).toBe('rita@x.io');
+  });
+
+  test('a ticket created in Ticket Pulse from the draft\'s run turns the Teams card into Created', async () => {
+    const { draft } = await readyDraft();
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 950, nativeNumber: 1400, origin: 'ticketpulse', subject: 'Outlook' });
+    botMock.updateActivity.mockClear();
+    await expect(intake.onRunLinked(555, { id: 950 })).resolves.toBe(true);
+    expect(drafts.get(draft.id)).toMatchObject({ status: 'created', ticketId: 950, images: [] });
+    const [where, activity] = botMock.updateActivity.mock.calls[0];
+    expect(where).toEqual({ serviceUrl: 'https://smba.trafficmanager.net/amer/', conversationId: 'conv-1', activityId: 'reply-1' });
+    expect(allText(activity.card)).toContain('Created TP-1400');
+    expect(allText(activity.card)).toContain('Finished in Ticket Pulse');
+    await expect(intake.onRunLinked(555, { id: 950 })).resolves.toBe(false);
+  });
+
+  test('Create from the card claims the draft, so its own run link is not read as a web create', async () => {
+    const { data, draft } = await readyDraft();
+    createTicket.mockImplementation(async () => {
+      await expect(intake.onRunLinked(555, { id: 900 })).resolves.toBe(false);
+      return { id: 900, nativeNumber: 1234, origin: 'ticketpulse', subject: EXTRACTED.subject };
+    });
+    const out = await intake.handleAction('autofill.create', { ...data, requesterEmail: 'rita@x.io', assign: 'me' }, 'adrian@x.io');
+    expect(allText(out)).toContain('Created TP-1234');
+    expect(drafts.get(draft.id).status).toBe('created');
+  });
+
+  test('a failed create gives the draft back to the card', async () => {
+    const { data, draft } = await readyDraft();
+    createTicket.mockRejectedValue(Object.assign(new Error('Requester is required'), { statusCode: 400 }));
+    await intake.handleAction('autofill.create', { ...data, requesterEmail: 'rita@x.io' }, 'adrian@x.io');
+    expect(drafts.get(draft.id).status).toBe('ready');
   });
 });

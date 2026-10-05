@@ -135,6 +135,59 @@ async function searchDirectory(query, top = 8) {
  *   person with a verbatim address.
  */
 export async function resolveRequesterHint(workspaceId, hint, peopleMentioned = []) {
+  const out = await resolveRequesterHintRaw(workspaceId, hint, peopleMentioned);
+  return out.status === 'ambiguous' ? collapseSameMailbox(out) : out;
+}
+
+/**
+ * One person, several addresses (5 Oct 2026). Some people have a second
+ * address that is an alias on the same mailbox (katie.burkell@cambioearth.com
+ * → KBurkell@bgcengineering.ca), and each address became its own requester
+ * row, so "Katie Burkell" read as two people. Before offering a choice, ask
+ * Entra who owns each candidate's address and keep one candidate per mailbox,
+ * preferring the address that IS the mailbox's own (UPN). An address Entra
+ * cannot place stays as its own candidate; Entra being unavailable leaves the
+ * result exactly as it was.
+ */
+async function mailboxOwner(email) {
+  if (!email) return null;
+  try {
+    const { default: azureAdService } = await import('./azureAdService.js');
+    if (typeof azureAdService.resolveAddress !== 'function') return null;
+    const res = await azureAdService.resolveAddress(email);
+    if (res && (res.status === 'found' || res.status === 'alias') && res.owner) return String(res.owner).toLowerCase();
+  } catch (err) {
+    logger.debug(`Intake mailbox owner lookup failed for ${email}: ${err.message}`);
+  }
+  return null;
+}
+
+export async function collapseSameMailbox(result) {
+  const candidates = result.candidates || [];
+  if (candidates.length < 2) return result;
+  const owners = await Promise.all(candidates.map((c) => mailboxOwner(c.email)));
+  const groups = new Map();
+  candidates.forEach((c, i) => {
+    const key = owners[i] ? `owner:${owners[i]}` : `own:${c.email || c.requesterId || i}`;
+    if (!groups.has(key)) groups.set(key, { owner: owners[i], members: [] });
+    groups.get(key).members.push(c);
+  });
+  if (groups.size === candidates.length) return result;
+  const pick = ({ owner, members }) => members.find((c) => owner && c.email === owner)
+    || members.find((c) => c.requesterId)
+    || members[0];
+  const merged = [...groups.values()].map((g) => ({ ...g, chosen: pick(g) }));
+  if (merged.length === 1) {
+    const { chosen, members } = merged[0];
+    const others = members.filter((c) => c !== chosen).map((c) => c.email).filter(Boolean);
+    return requesterResult('matched', chosen, [],
+      `${chosen.source === 'requester' ? 'Known requester' : 'Directory person'} "${chosen.name}" — ${others.join(', ')} ${others.length === 1 ? 'is an alias' : 'are aliases'} on the same mailbox (${chosen.email})`);
+  }
+  return requesterResult('ambiguous', null, merged.map((g) => g.chosen),
+    `${result.reason} (addresses on the same mailbox shown once)`);
+}
+
+async function resolveRequesterHintRaw(workspaceId, hint, peopleMentioned = []) {
   const raw = String(hint ?? '').trim();
   if (!raw) return requesterResult('none', null, [], 'No requester was identified in the material');
 
@@ -391,4 +444,4 @@ export async function resolveConversingAgent(workspaceId, name, { preferTechnici
   return { name: raw, technicianId: null, email: null };
 }
 
-export default { resolveRequesterHint, resolveAssigneeHint, resolveConversingAgent, normalizeName, sameFirstLast, compatibleFirst, closeName };
+export default { resolveRequesterHint, collapseSameMailbox, resolveAssigneeHint, resolveConversingAgent, normalizeName, sameFirstLast, compatibleFirst, closeName };
