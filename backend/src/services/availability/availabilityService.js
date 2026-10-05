@@ -21,6 +21,7 @@ import {
 const lc = (s) => String(s || '').trim().toLowerCase();
 const num = (d) => ((d === null || d === undefined) ? 0 : Number(d));
 const ACTIVE = ['approved', 'pending'];
+const SERVICE_ACCOUNT_RE = /^ticket ?pulse$|\bdomain admin\b|^adm[_-]/i;
 const AVAILABILITY_TO_CATEGORY = { OFF: 'OFF', WFH: 'WFH', ONSITE: 'OTHER', PARTIAL: 'OTHER' };
 
 // Defaults seeded on first use. Numbers are placeholders an admin edits under
@@ -130,9 +131,11 @@ class AvailabilityService {
       workspaceIds = [...new Set(mine.map((t) => t.workspaceId))];
     }
     const techs = workspaceIds.length
-      ? await prisma.technician.findMany({ where: { workspaceId: { in: workspaceIds }, isActive: true, email: { not: null } }, select: { email: true }, take: 2000 })
+      ? await prisma.technician.findMany({ where: { workspaceId: { in: workspaceIds }, isActive: true, email: { not: null } }, select: { email: true, name: true }, take: 2000 })
       : [];
-    const roster = new Set(techs.map((t) => lc(t.email)).filter(Boolean));
+    // Service accounts are agents in FreshService but not people who take time
+    // off (the "Ticket Pulse" automation agent, admin twins of real people).
+    const roster = new Set(techs.filter((t) => !SERVICE_ACCOUNT_RE.test(String(t.name || ''))).map((t) => lc(t.email)).filter(Boolean));
     if (email) roster.add(email);
     return roster;
   }
@@ -397,7 +400,71 @@ class AvailabilityService {
   // ------------------------------------------------------------------ requests
 
   async _holidays() {
-    return prisma.holiday.findMany({ where: { workspaceId: null, isEnabled: true }, select: { date: true, isRecurring: true, isEnabled: true }, take: 2000 });
+    return prisma.holiday.findMany({ where: { workspaceId: null, isEnabled: true }, select: { date: true, name: true, isRecurring: true, isEnabled: true }, take: 2000 });
+  }
+
+  /** { 'YYYY-MM-DD': name } for the holidays in [start, end] (recurring ones by month-day). */
+  async _holidayNames(start, end) {
+    const rows = await this._holidays();
+    const exact = new Map();
+    const recurring = new Map();
+    for (const h of rows) {
+      const k = dayKey(h.date);
+      if (h.isRecurring) recurring.set(k.slice(5), h.name || 'Holiday');
+      else exact.set(k, h.name || 'Holiday');
+    }
+    const out = {};
+    for (let d = start; d <= end; d = addDays(d, 1)) {
+      const k = dayKey(d);
+      const name = exact.get(k) || recurring.get(k.slice(5));
+      if (name) out[k] = name;
+    }
+    return out;
+  }
+
+  /** The next `limit` holidays from today (within a year), for the Overview. */
+  async upcomingHolidays({ from = new Date(), limit = 4 } = {}) {
+    const start = toDay(dayKey(from));
+    const names = await this._holidayNames(start, addDays(start, 365));
+    return Object.entries(names).slice(0, Math.max(1, Math.min(10, Number(limit) || 4))).map(([date, name]) => ({ date, name }));
+  }
+
+  /**
+   * The people the team views show (5 Oct 2026): the workspace roster
+   * (rosterFor) with their office, approval groups and directory photo.
+   * Photos come once per page here, never per calendar entry. Groups are
+   * only the approval groups that have someone on this roster.
+   */
+  async roster(user, workspaceId = null) {
+    const emails = [...(await this.rosterFor(user, workspaceId))];
+    const ws = Number(workspaceId);
+    const [people, techs, members, groups, offices] = await Promise.all([
+      prisma.avPerson.findMany({ where: { isActive: true, email: { in: emails } }, orderBy: { name: 'asc' }, select: { email: true, name: true, officeId: true }, take: 2000 }),
+      prisma.technician.findMany({
+        where: { isActive: true, email: { in: emails, mode: 'insensitive' }, ...(Number.isInteger(ws) && ws > 0 ? { workspaceId: ws } : {}) },
+        select: { email: true, name: true, photoUrl: true },
+        take: 2000,
+      }),
+      prisma.avApprovalGroupMember.findMany({ where: { email: { in: emails } }, select: { email: true, groupId: true }, take: 5000 }),
+      prisma.avApprovalGroup.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      prisma.avOffice.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    ]);
+    const techByEmail = new Map();
+    for (const t of techs) if (t.email && !techByEmail.has(lc(t.email))) techByEmail.set(lc(t.email), t);
+    const groupIdsByEmail = new Map();
+    for (const m of members) {
+      if (!groupIdsByEmail.has(m.email)) groupIdsByEmail.set(m.email, []);
+      groupIdsByEmail.get(m.email).push(m.groupId);
+    }
+    const usedGroups = new Set(members.map((m) => m.groupId));
+    return {
+      people: people.map((p) => {
+        const t = techByEmail.get(lc(p.email));
+        return { email: p.email, name: t?.name || p.name, officeId: p.officeId, photoUrl: t?.photoUrl || null, groupIds: groupIdsByEmail.get(p.email) || [] };
+      }),
+      groups: groups.filter((g) => usedGroups.has(g.id)),
+      offices,
+    };
   }
 
   /** Normalise input and compute dates/size. Throws ValidationError on bad input. */
@@ -814,6 +881,8 @@ class AvailabilityService {
       const t = typeById.get(r.leaveTypeId);
       const privileged = admin || lc(r.email) === lc(user.email) || approverOf.has(r.email);
       if (!t) continue;
+      // Waiting requests are for the people who decide them (Vahid, 5 Oct 2026).
+      if (r.status === 'pending' && !privileged) continue;
       if (t.visibility === 'private' && !privileged) continue;
       const redact = t.visibility === 'away' && !privileged;
       entries.push({
@@ -831,10 +900,9 @@ class AvailabilityService {
         availability: t.availability,
       });
     }
-    const isHoliday = holidayMatcher(await this._holidays());
-    const holidays = [];
-    for (let d = start; d <= end; d = addDays(d, 1)) if (isHoliday(d)) holidays.push(dayKey(d));
-    return { from: dayKey(start), to: dayKey(end), people, entries, holidays };
+    const holidayNames = await this._holidayNames(start, end);
+    const holidays = Object.keys(holidayNames);
+    return { from: dayKey(start), to: dayKey(end), people, entries, holidays, holidayNames, canSeePending: admin || approverOf.size > 0 };
   }
 
   /** Who is out today (OFF / WFH / ONSITE) — for the dashboard strip and Teams digest. */

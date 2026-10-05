@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { CalendarDays, CalendarRange, Inbox, Settings2 } from 'lucide-react';
+import { CalendarDays, CalendarRange, Inbox, LayoutDashboard, Rows3, Settings2 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import LightTabBar from '../components/common/LightTabBar';
@@ -9,14 +9,18 @@ import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { ErrorNote, Loading, useToast } from '../components/availability/availabilityUi';
 import MyTimePanel from '../components/availability/MyTimePanel';
 import TeamCalendarPanel from '../components/availability/TeamCalendarPanel';
+import MonthCalendarPanel from '../components/availability/MonthCalendarPanel';
+import OverviewPanel from '../components/availability/OverviewPanel';
 import ApprovalsPanel from '../components/availability/ApprovalsPanel';
 import AdminSettingsPanel from '../components/availability/AdminSettingsPanel';
 
 /**
  * Availability — the native Vacation Tracker replacement.
  *
+ *   /availability/overview   who is out this week, my balance, holidays, coverage (default)
+ *   /availability/calendar   wallchart: people by day, grouped by office / approval group
+ *   /availability/month      the month with named bars
  *   /availability/my-time    balances, book time away (live verdict), my requests
- *   /availability/calendar   team month grid + who's out today
  *   /availability/approvals  pending requests I may decide (approvers / admins)
  *   /availability/settings   types, groups, rules, offices, people, balances, import
  *
@@ -25,7 +29,7 @@ import AdminSettingsPanel from '../components/availability/AdminSettingsPanel';
  * waiting (or admins); Settings only to Availability admins.
  */
 
-const TAB_IDS = ['my-time', 'calendar', 'approvals', 'settings'];
+const TAB_IDS = ['overview', 'calendar', 'month', 'my-time', 'approvals', 'settings'];
 
 export default function Availability() {
   const { tab } = useParams();
@@ -56,19 +60,22 @@ export default function Availability() {
 
   const pending = Number(me?.pendingApprovals) || 0;
   const tabs = useMemo(() => {
+    // 5 Oct 2026 (Vahid): Overview first and the default; the old team grid is the Wallchart.
     const list = [
+      { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+      { id: 'calendar', label: 'Wallchart', icon: Rows3 },
+      { id: 'month', label: 'Calendar', icon: CalendarRange },
       { id: 'my-time', label: 'My time', icon: CalendarDays },
-      { id: 'calendar', label: 'Team calendar', icon: CalendarRange },
     ];
-    if (me && (pending > 0 || me.isAdmin)) list.push({ id: 'approvals', label: pending > 0 ? `Approvals ${pending}` : 'Approvals', icon: Inbox });
+    if (me && (pending > 0 || me.isAdmin)) list.push({ id: 'approvals', label: 'Approvals', icon: Inbox, badge: pending, badgeLabel: 'waiting' });
     if (me?.isAdmin) list.push({ id: 'settings', label: 'Settings', icon: Settings2 });
     return list;
   }, [me, pending]);
 
   const nameByEmail = useMemo(() => (config?.people ? new Map(config.people.map((p) => [p.email, p.name])) : null), [config]);
 
-  if (!tab || !TAB_IDS.includes(tab)) return <Navigate to="/availability/my-time" replace />;
-  if (me && !tabs.some((t) => t.id === tab)) return <Navigate to="/availability/my-time" replace />;
+  if (!tab || !TAB_IDS.includes(tab)) return <Navigate to="/availability/overview" replace />;
+  if (me && !tabs.some((t) => t.id === tab)) return <Navigate to="/availability/overview" replace />;
 
   let body;
   if (!me && error) body = <ErrorNote>{error}</ErrorNote>;
@@ -76,8 +83,10 @@ export default function Availability() {
   else {
     body = (
       <section role="tabpanel" id={`availability-panel-${tab}`} aria-labelledby={`availability-tab-${tab}`} tabIndex={-1} className="animate-fadeIn focus:outline-none">
+        {tab === 'overview' && <OverviewPanel me={me} />}
+        {tab === 'calendar' && <TeamCalendarPanel me={me} />}
+        {tab === 'month' && <MonthCalendarPanel me={me} />}
         {tab === 'my-time' && <MyTimePanel me={me} onChanged={loadMe} toast={toast.show} />}
-        {tab === 'calendar' && <TeamCalendarPanel me={me} groups={config?.groups || null} />}
         {tab === 'approvals' && <ApprovalsPanel me={me} nameByEmail={nameByEmail} toast={toast.show} onChanged={loadMe} />}
         {tab === 'settings' && <AdminSettingsPanel config={config} error={configError} reload={reloadAdmin} toast={toast.show} />}
       </section>

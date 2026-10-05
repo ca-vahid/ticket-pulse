@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.2.08-preview';
+export const APP_VERSION = '4.2.09-preview';
 
 export const changelog = [
+  {
+    version: '4.2.09-preview',
+    date: 'October 5, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Availability Overview</strong> &mdash; Availability now opens on an Overview: who is out this week with their photo, what kind of time away and when they are back; your balance (left, taken, booked, waiting) and your next time away; the holidays coming up (&ldquo;in 7 days&rdquo;); and how many of the team are away on each of the next ten working days, in the workload colours.' },
+      { type: 'feature', html: '<strong>Wallchart</strong> &mdash; the team calendar is now a wallchart: faces next to names in a narrow column, rows grouped by office (or by approval group where a workspace uses them), one bar per leave split around weekends and holidays, a strip under the dates showing how many are away, today marked, weekends grey and holidays named. Choose the month or the next four weeks; the view is kept in the address so it can be shared.' },
+      { type: 'feature', html: '<strong>Calendar</strong> &mdash; a new month view with each leave as a bar carrying the person&rsquo;s name, holidays named on their day and weekends grey. On a phone, the wallchart and the calendar show the same time away as a list by day.' },
+      { type: 'feature', html: '<strong>Waiting requests for approvers only</strong> &mdash; requests still waiting for approval show (as a dashed outline) only to the people who decide them, the person who asked, and admins. Everyone else sees approved time away.' },
+      { type: 'fix', html: '<strong>Service accounts left off the team</strong> &mdash; the &ldquo;Ticket Pulse&rdquo; automation agent and admin twins of real people no longer appear on the team views.' },
+    ],
+  },
   {
     version: '4.2.08-preview',
     date: 'October 5, 2026',

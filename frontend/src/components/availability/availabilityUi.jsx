@@ -75,6 +75,59 @@ export const COLOR_STRIPE = {
 };
 export const STRIPES = { backgroundImage: 'repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 6px)' };
 
+// Wallchart / month bars (5 Oct 2026): approved = a soft fill with readable
+// text in the same hue; waiting = a dashed outline in the hue, no fill.
+export const COLOR_BAR = {
+  emerald: 'bg-emerald-200 text-emerald-950 dark:bg-emerald-500/30 dark:text-emerald-50',
+  green: 'bg-green-200 text-green-950 dark:bg-green-500/30 dark:text-green-50',
+  teal: 'bg-teal-200 text-teal-950 dark:bg-teal-500/30 dark:text-teal-50',
+  cyan: 'bg-cyan-200 text-cyan-950 dark:bg-cyan-500/30 dark:text-cyan-50',
+  sky: 'bg-sky-200 text-sky-950 dark:bg-sky-500/30 dark:text-sky-50',
+  blue: 'bg-blue-200 text-blue-950 dark:bg-blue-500/30 dark:text-blue-50',
+  indigo: 'bg-indigo-200 text-indigo-950 dark:bg-indigo-500/30 dark:text-indigo-50',
+  violet: 'bg-violet-200 text-violet-950 dark:bg-violet-500/30 dark:text-violet-50',
+  purple: 'bg-purple-200 text-purple-950 dark:bg-purple-500/30 dark:text-purple-50',
+  fuchsia: 'bg-fuchsia-200 text-fuchsia-950 dark:bg-fuchsia-500/30 dark:text-fuchsia-50',
+  pink: 'bg-pink-200 text-pink-950 dark:bg-pink-500/30 dark:text-pink-50',
+  rose: 'bg-rose-200 text-rose-950 dark:bg-rose-500/30 dark:text-rose-50',
+  red: 'bg-red-200 text-red-950 dark:bg-red-500/30 dark:text-red-50',
+  orange: 'bg-orange-200 text-orange-950 dark:bg-orange-500/30 dark:text-orange-50',
+  amber: 'bg-amber-200 text-amber-950 dark:bg-amber-500/30 dark:text-amber-50',
+  yellow: 'bg-yellow-200 text-yellow-950 dark:bg-yellow-500/30 dark:text-yellow-50',
+  lime: 'bg-lime-200 text-lime-950 dark:bg-lime-500/30 dark:text-lime-50',
+  slate: 'bg-muted-foreground/25 text-foreground',
+  gray: 'bg-muted-foreground/25 text-foreground',
+};
+export const COLOR_BAR_PENDING = {
+  emerald: 'border-emerald-500 text-emerald-700 dark:border-emerald-400 dark:text-emerald-200',
+  green: 'border-green-500 text-green-700 dark:border-green-400 dark:text-green-200',
+  teal: 'border-teal-500 text-teal-700 dark:border-teal-400 dark:text-teal-200',
+  cyan: 'border-cyan-500 text-cyan-700 dark:border-cyan-400 dark:text-cyan-200',
+  sky: 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-200',
+  blue: 'border-blue-500 text-blue-700 dark:border-blue-400 dark:text-blue-200',
+  indigo: 'border-indigo-500 text-indigo-700 dark:border-indigo-400 dark:text-indigo-200',
+  violet: 'border-violet-500 text-violet-700 dark:border-violet-400 dark:text-violet-200',
+  purple: 'border-purple-500 text-purple-700 dark:border-purple-400 dark:text-purple-200',
+  fuchsia: 'border-fuchsia-500 text-fuchsia-700 dark:border-fuchsia-400 dark:text-fuchsia-200',
+  pink: 'border-pink-500 text-pink-700 dark:border-pink-400 dark:text-pink-200',
+  rose: 'border-rose-500 text-rose-700 dark:border-rose-400 dark:text-rose-200',
+  red: 'border-red-500 text-red-700 dark:border-red-400 dark:text-red-200',
+  orange: 'border-orange-500 text-orange-700 dark:border-orange-400 dark:text-orange-200',
+  amber: 'border-amber-500 text-amber-700 dark:border-amber-400 dark:text-amber-200',
+  yellow: 'border-yellow-500 text-yellow-700 dark:border-yellow-400 dark:text-yellow-200',
+  lime: 'border-lime-500 text-lime-700 dark:border-lime-400 dark:text-lime-200',
+  slate: 'border-muted-foreground/60 text-muted-foreground',
+  gray: 'border-muted-foreground/60 text-muted-foreground',
+};
+/** Half days and hours: light diagonal hatching over the bar's own fill. */
+export const HATCH = { backgroundImage: 'repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px)' };
+// Weekend and holiday columns, the same way across Overview, Wallchart and Calendar.
+export const WEEKEND_BG = 'bg-muted/60';
+export const HOLIDAY_BG = 'bg-rose-50/80 dark:bg-rose-500/10';
+export const HOLIDAY_DOT = 'bg-rose-400 dark:bg-rose-300';
+// Coverage: how many of the team are away that day (workload colours).
+export const COVERAGE_BG = { none: 'bg-muted', light: 'bg-emerald-500', medium: 'bg-amber-500', heavy: 'bg-red-500' };
+
 export const COLOR_NAMES = ['emerald', 'teal', 'sky', 'blue', 'indigo', 'violet', 'fuchsia', 'rose', 'red', 'orange', 'amber', 'lime', 'slate'];
 
 export function ColorSwatch({ color, className = '' }) {

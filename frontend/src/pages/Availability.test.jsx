@@ -58,6 +58,8 @@ Object.assign(api, {
     holidays: [],
   } })),
   outToday: vi.fn(async () => ({ success: true, data: [{ id: 5, email: 'pat@x.ca', startDate: TODAY, endDate: TODAY, dayPart: 'full', status: 'approved', label: 'Vacation', color: 'emerald' }] })),
+  roster: vi.fn(async () => ({ success: true, data: { people: [{ email: 'kim@x.ca', name: 'Kim Lee', officeId: 1, photoUrl: null, groupIds: [] }, { email: 'pat@x.ca', name: 'Pat Ruiz', officeId: 1, photoUrl: null, groupIds: [] }], groups: [], offices: [{ id: 1, name: 'Vancouver' }] } })),
+  upcomingHolidays: vi.fn(async () => ({ success: true, data: [] })),
   approvals: vi.fn(async () => ({ success: true, data: [
     { id: 41, email: 'jo.smith@x.ca', leaveTypeId: 1, startDate: '2099-03-02', endDate: '2099-03-06', dayPart: 'full', days: 5, hours: 40, status: 'pending', note: 'Family trip', decision: { outcome: 'pending', reason: 'Vacation needs approval.', fired: [] } },
     { id: 42, email: 'ali.k@x.ca', leaveTypeId: 1, startDate: '2099-04-01', endDate: '2099-04-01', dayPart: 'full', days: 1, hours: 8, status: 'pending', note: null, decision: { outcome: 'pending', reason: 'Less than 14 days notice.', fired: [] } },
@@ -69,7 +71,7 @@ Object.assign(api, {
   } })),
 });
 
-vi.mock('../services/api', () => ({ get availabilityAPI() { return api; } }));
+vi.mock('../services/api', () => ({ get availabilityAPI() { return api; }, getWorkspaceId: () => 1 }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../components/nav/MobileTabBar', () => ({ default: () => null }));
 
@@ -97,7 +99,7 @@ afterEach(() => cleanup());
 
 describe('My time', () => {
   test('shows balances, the purpose notice and my requests', async () => {
-    renderAt('/availability');
+    renderAt('/availability/my-time');
     const balances = await screen.findByTestId('availability-balances');
     expect(within(balances).getByText('9')).toBeInTheDocument();
     expect(balances).toHaveTextContent('of 15 · 3 taken · 2 booked · 1 pending');
@@ -168,14 +170,20 @@ describe('My time', () => {
   });
 });
 
-describe('Team calendar', () => {
-  test('renders a row per person and marks the entry cell', async () => {
+describe('Overview (default) and Wallchart', () => {
+  test('/availability opens the Overview with who is out this week', async () => {
+    renderAt('/availability');
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true'));
+    const out = await screen.findByTestId('out-this-week');
+    await waitFor(() => expect(within(out).getByText('Pat Ruiz')).toBeInTheDocument());
+  });
+
+  test('wallchart: a row per person and a bar for the leave', async () => {
     renderAt('/availability/calendar');
     expect(await screen.findByTestId('cal-row-kim@x.ca')).toBeInTheDocument();
     expect(screen.getByTestId('cal-row-pat@x.ca')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId(`cal-cell-pat@x.ca-${TODAY}`)).toHaveAttribute('data-entry', 'Vacation'));
-    expect(screen.getByTestId(`cal-cell-kim@x.ca-${TODAY}`)).not.toHaveAttribute('data-entry');
-    expect(within(screen.getByTestId('out-today')).getByText('Pat Ruiz')).toBeInTheDocument();
+    expect(await screen.findByTestId(`cal-bar-pat@x.ca-${TODAY}`)).toHaveAttribute('aria-label', expect.stringContaining('Pat Ruiz, Vacation'));
+    expect(screen.queryByTestId(`cal-bar-kim@x.ca-${TODAY}`)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Only people who are away'));
     expect(screen.queryByTestId('cal-row-kim@x.ca')).not.toBeInTheDocument();
@@ -187,7 +195,7 @@ describe('Approvals', () => {
   test('tab shows with the count; approve removes the row', async () => {
     me = baseMe({ pendingApprovals: 2 });
     renderAt('/availability/approvals');
-    expect(await screen.findByRole('tab', { name: 'Approvals 2' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Approvals, 2 waiting' })).toBeInTheDocument();
     const row = await screen.findByTestId('approval-41');
     expect(row).toHaveTextContent('Jo Smith');
     expect(row).toHaveTextContent('Family trip');
@@ -214,11 +222,11 @@ describe('Approvals', () => {
 });
 
 describe('Settings visibility', () => {
-  test('non-admins see no Settings or Approvals tab and are sent back to My time', async () => {
+  test('non-admins see no Settings or Approvals tab and are sent back to the Overview', async () => {
     renderAt('/availability/settings');
-    // The redirect to My time re-renders the page; wait for the settled state.
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'My time' })).toHaveAttribute('aria-selected', 'true'));
-    expect(screen.getAllByRole('tab').map((t) => t.getAttribute('aria-label'))).toEqual(['My time', 'Team calendar']);
+    // The redirect re-renders the page; wait for the settled state.
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getAllByRole('tab').map((t) => t.getAttribute('aria-label'))).toEqual(['Overview', 'Wallchart', 'Calendar', 'My time']);
     expect(api.adminConfig).not.toHaveBeenCalled();
   });
 
