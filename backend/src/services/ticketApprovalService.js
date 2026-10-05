@@ -910,6 +910,7 @@ class TicketApprovalService {
     }
 
     logger.info(`Approval ${kind} on ticket ${approval.ticketId} by ${actorName} → ${targets.join(', ')} (tier ${fromTier} → ${toTier})`);
+    this._syncTeamsCards(approval.ticketId);
     return { ...updated, handoff: { kind, fromTier, toTier, to: targets, created } };
   }
 
@@ -1354,6 +1355,7 @@ class TicketApprovalService {
     });
     if (ticket) this._broadcast(ticket, 'approval');
     assetronReservationService.touch(approval.requestGroupId);
+    this._syncTeamsCards(ticketId);
     return { cancelled: true, requestGroupId: approval.requestGroupId || null };
   }
 
@@ -1393,6 +1395,7 @@ class TicketApprovalService {
     if (ticket) this._broadcast(ticket, 'approval');
     logger.info(`Approval request deleted on ticket ${ticketId} by ${actor?.email || 'unknown'} (${count} row${count === 1 ? '' : 's'})`);
     assetronReservationService.touch(approval.requestGroupId);
+    this._syncTeamsCards(ticketId);
     return { deleted: true, count, requestGroupId: approval.requestGroupId || null };
   }
 
@@ -1683,10 +1686,18 @@ class TicketApprovalService {
 
     logger.info(`Approval ${normalized} (${via}) on ticket ${approval.ticketId} by ${actorLabel}`);
     assetronReservationService.touch(approval.requestGroupId);
+    this._syncTeamsCards(approval.ticketId);
     return updated;
   }
 
   /** Workspace display name for e-mail chrome — from the loaded relation, else a cheap lookup. */
+  /** 5 Oct 2026: Teams approval cards follow the approval (fire-and-forget). */
+  _syncTeamsCards(ticketId) {
+    import('./teamsNotificationService.js')
+      .then(({ default: teams }) => teams.refreshApprovalCards(ticketId))
+      .catch((err) => logger.warn(`Teams approval card sync skipped for ticket ${ticketId}: ${err.message}`));
+  }
+
   async _workspaceName(ticket) {
     if (ticket?.workspace?.name) return ticket.workspace.name;
     try {

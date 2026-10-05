@@ -234,7 +234,8 @@ export const OUTCOMES = {
 /**
  * Approval card for the named approver.
  * a: { approvalId, ticketId, workspaceId, categoryName, ref, subject, requesterName, askedByName, noteMd, decisionUrl, tierLabel }
- * stage: 'ask' | { confirm: 'approved'|'rejected' } | { done: 'approved'|'rejected'|'closed', detail }
+ * stage: 'ask' | { confirm: 'approved'|'rejected' } | { done: 'approved'|'rejected'|'closed', detail, headline?, word? }
+ *   (headline/word: a card closed from somewhere else — 5 Oct 2026)
  */
 export function approvalCard(a, stage = 'ask', { error = null } = {}) {
   const data = { approvalId: a.approvalId, ticketId: a.ticketId, workspaceId: a.workspaceId, decisionUrl: a.decisionUrl };
@@ -243,7 +244,7 @@ export function approvalCard(a, stage = 'ask', { error = null } = {}) {
   let style = 'accent';
   if (stage?.done) {
     icon = stage.done === 'approved' ? '👍' : stage.done === 'rejected' ? '⛔' : 'ℹ️';
-    word = stage.done === 'approved' ? 'Approved' : stage.done === 'rejected' ? 'Declined' : 'Closed';
+    word = stage.word || (stage.done === 'approved' ? 'Approved' : stage.done === 'rejected' ? 'Declined' : 'Closed');
     style = 'emphasis';
   } else if (stage?.confirm) {
     icon = stage.confirm === 'approved' ? '👍' : '⛔';
@@ -278,7 +279,7 @@ export function approvalCard(a, stage = 'ask', { error = null } = {}) {
 
   const actions = [];
   if (stage?.done) {
-    body.push(text(`**${stage.done === 'approved' ? 'You approved this' : stage.done === 'rejected' ? 'You did not approve this' : 'Already decided'}**${stage.detail ? ` — ${stage.detail}` : ''}`, { spacing: 'Medium' }));
+    body.push(text(`**${stage.headline || (stage.done === 'approved' ? 'You approved this' : stage.done === 'rejected' ? 'You did not approve this' : 'Already decided')}**${stage.detail ? ` — ${stage.detail}` : ''}`, { spacing: 'Medium' }));
     actions.push({ type: 'Action.OpenUrl', title: 'Open the approval', url: a.decisionUrl });
   } else {
     if (a.noteMd) body.push(...longText('n', a.noteMd, { heading: `WHY ${String(a.askedByName || 'THE AGENT').split(' ')[0].toUpperCase()} IS ASKING`, framed: true }));
@@ -371,7 +372,11 @@ const AUTOFILL_PRIORITY_CHOICES = [
  * m: { draftId, t, workspaceName, otherWorkspaces: [{id,name}], canCreate, openUrl, ticketsUrl,
  *      subject, requesterName, requesterEmail, requesterCandidates: [{name,email}],
  *      categoryTop, categorySub, priority, descriptionMd, missing: [label], notes: [text],
- *      assignOptions: [{title,value}], assignDefault, ticketRef, ticketUrl, message, error, title }
+ *      assignOptions: [{title,value}], assignDefault, requesterPickDefault, opened, ticketRef, ticketUrl, message, error, title }
+ *
+ * 5 Oct 2026: on a card that can create, "Open in Ticket Pulse" is an Execute
+ * that saves the card's choices onto the draft first (a link cannot read the
+ * inputs), then the card comes back with the link itself (opened: true).
  */
 export function autofillCard(m = {}, stage = 'ready') {
   const data = { draftId: m.draftId, t: m.t };
@@ -438,8 +443,10 @@ export function autofillCard(m = {}, stage = 'ready') {
   if (m.missing?.length) body.push(text(`⚠️ **Still needed:** ${m.missing.join(', ')}`, { color: 'Warning', spacing: 'Medium' }));
   for (const n of m.notes || []) body.push(text(`ℹ️ ${n}`, { size: 'Small', isSubtle: true, spacing: 'Small' }));
   if (m.error) body.push(text(`⚠️ ${m.error}`, { color: 'Attention', spacing: 'Medium' }));
+  if (m.opened) body.push(text('✅ **Your choices are saved.** Open Ticket Pulse to finish there; this card updates once the ticket exists.', { color: 'Good', spacing: 'Medium' }));
 
   const actions = [];
+  if (m.opened && m.openUrl) actions.push({ type: 'Action.OpenUrl', title: 'Open in Ticket Pulse ↗', url: m.openUrl, style: 'positive' });
   if (m.canCreate) {
     // Small, pre-filled inputs: fix the obvious without leaving Teams.
     body.push({ type: 'Input.Text', id: 'subject', label: 'Subject', value: m.subject || '', maxLength: 500, spacing: 'Medium' });
@@ -447,6 +454,7 @@ export function autofillCard(m = {}, stage = 'ready') {
     if (picks.length) {
       body.push({
         type: 'Input.ChoiceSet', id: 'requesterPick', label: 'Requester (a few people fit)', style: 'compact', placeholder: 'Pick the requester',
+        ...(m.requesterPickDefault ? { value: m.requesterPickDefault } : {}),
         choices: picks.map((c) => ({ title: `${c.name || c.email} (${c.email})`, value: c.email })),
       });
     }
@@ -459,9 +467,11 @@ export function autofillCard(m = {}, stage = 'ready') {
         { type: 'Column', width: 'stretch', items: [{ type: 'Input.ChoiceSet', id: 'assign', label: 'Assign to', style: 'filtered', value: m.assignDefault || 'me', choices: m.assignOptions?.length ? m.assignOptions : [{ title: 'Me', value: 'me' }] }] },
       ],
     });
-    actions.push({ type: 'Action.Execute', title: 'Create ticket', verb: 'autofill.create', data, style: 'positive' });
+    actions.push({ type: 'Action.Execute', title: 'Create ticket', verb: 'autofill.create', data, style: m.opened ? 'default' : 'positive' });
+    if (!m.opened && m.openUrl) actions.push({ type: 'Action.Execute', title: 'Open in Ticket Pulse', verb: 'autofill.open', data });
+  } else if (m.openUrl && !m.opened) {
+    actions.push({ type: 'Action.OpenUrl', title: 'Open in Ticket Pulse', url: m.openUrl });
   }
-  if (m.openUrl) actions.push({ type: 'Action.OpenUrl', title: 'Open in Ticket Pulse', url: m.openUrl });
   if (m.otherWorkspaces?.length) {
     actions.push({
       type: 'Action.ShowCard',

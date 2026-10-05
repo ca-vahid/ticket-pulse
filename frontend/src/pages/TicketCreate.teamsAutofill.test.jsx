@@ -122,6 +122,26 @@ describe('TicketCreate — Autofill draft from Teams', () => {
     expect(files[0].name).toBe('teams-picture-1.png');
   });
 
+  // 5 Oct 2026: "Open in Ticket Pulse" saves the card's choices; the form follows them.
+  test('the assignment chosen on the Teams card wins over the form default', async () => {
+    teamsAutofillAPI.get.mockResolvedValue({ success: true, data: { ...DRAFT, data: { ...DRAFT.data, cardAssign: 'ai' } } });
+    renderAt('/tickets/new?autofill=tok_abcdefghijklmnop');
+    await waitFor(() => expect(screen.getByTestId('requester-chip')).toHaveTextContent('Rita Moreno'));
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0]).toMatchObject({ runAiTriage: true });
+    expect(ticketsAPI.create.mock.calls[0][0].assignedTechId).toBeUndefined();
+  });
+
+  test('"Me" from the card assigns the agent', async () => {
+    teamsAutofillAPI.get.mockResolvedValue({ success: true, data: { ...DRAFT, data: { ...DRAFT.data, cardAssign: 'me' } } });
+    renderAt('/tickets/new?autofill=tok_abcdefghijklmnop');
+    await waitFor(() => expect(screen.getByTestId('requester-chip')).toHaveTextContent('Rita Moreno'));
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0]).toMatchObject({ assignedTechId: 7, runAiTriage: false });
+  });
+
   test('no token → the draft API is never called', async () => {
     renderAt('/tickets/new');
     await waitFor(() => expect(ticketsAPI.meta).toHaveBeenCalled());

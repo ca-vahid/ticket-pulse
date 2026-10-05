@@ -444,13 +444,15 @@ class TeamsIntakeService {
   }
 
   /** The card model for a ready draft. */
-  async _readyModel(draft, token, { error = null, inputs = null } = {}) {
+  async _readyModel(draft, token, { error = null, inputs: given = null, opened = false } = {}) {
     const d = draft.data || {};
+    // The card's own choices win; else the ones saved by "Open in Ticket Pulse".
+    const inputs = given || (d.cardInputs && typeof d.cardInputs === 'object' ? d.cardInputs : null);
     const ws = await prisma.workspace.findUnique({ where: { id: draft.workspaceId }, select: { id: true, name: true, nativeTicketingEnabled: true } });
     const rm = d.requesterMatch || {};
     const matchedEmail = rm.status === 'matched' ? validEmail(rm.candidate?.email) : null;
     const hintEmail = validEmail(d.requesterNameOrEmail);
-    const requesterEmail = validEmail(inputs?.requesterEmail) || matchedEmail || hintEmail || null;
+    const requesterEmail = validEmail(inputs?.requesterEmail) || validEmail(inputs?.requesterPick) || matchedEmail || hintEmail || null;
     const subject = inputs?.subject ?? d.subject ?? '';
     const images = Array.isArray(draft.images) ? draft.images : [];
     const { missing, blocking } = await this._missing(draft, { requesterEmail, subject, hasImages: images.length > 0 });
@@ -509,7 +511,9 @@ class TeamsIntakeService {
       missing,
       notes,
       assignOptions,
-      assignDefault: other ? `tech:${other.id}` : 'me',
+      assignDefault: assignOptions.some((o) => o.value === inputs?.assign) ? inputs.assign : (other ? `tech:${other.id}` : 'me'),
+      requesterPickDefault: validEmail(inputs?.requesterPick),
+      opened,
       error,
     };
   }
@@ -539,7 +543,9 @@ class TeamsIntakeService {
         return autofillCard({ workspaceName: null }, 'discarded');
       }
       if (draft.status === 'reading') return autofillCard({}, 'reading');
+      if (draft.status === 'creating') return autofillCard({ message: 'Ticket Pulse is creating this ticket. The card updates by itself in a moment.' }, 'reading');
       if (verb === 'autofill.rerun') return await this._rerun(draft, token, data, activity);
+      if (verb === 'autofill.open') return await this._saveAndOpen(draft, token, data);
       if (verb === 'autofill.create') {
         if (draft.status !== 'ready') return autofillCard({ error: 'This draft could not be read. Send the message again.' }, 'error');
         return await this._create(draft, token, data);
@@ -553,9 +559,48 @@ class TeamsIntakeService {
     }
   }
 
-  async _createdCard(draft) {
+  /**
+   * "Open in Ticket Pulse" (5 Oct 2026): a link cannot read the card's inputs,
+   * so the button saves them onto the draft first and the card comes back with
+   * the link. The New Ticket page then opens with the same subject, requester,
+   * priority and assignment the agent chose here.
+   */
+  async _saveAndOpen(draft, token, input) {
+    if (draft.status !== 'ready') return autofillCard(await this._readyModel(draft, token), 'ready');
+    const cardInputs = pickCardInputs(input);
+    const saved = await prisma.teamsAutofillDraft.update({ where: { id: draft.id }, data: { data: { ...(draft.data || {}), cardInputs } } });
+    return autofillCard(await this._readyModel(saved, token, { opened: true }), 'ready');
+  }
+
+  /**
+   * A ticket was created from an Autofill run (ticketIntakeRunService.linkToTicket).
+   * When that run belongs to a Teams draft still waiting on its card (the
+   * agent finished in Ticket Pulse), close the draft and turn the Teams card
+   * into "Created", so it no longer offers Create. Never throws.
+   */
+  async onRunLinked(runId, ticket) {
+    try {
+      const id = Number(runId);
+      if (!Number.isInteger(id) || id <= 0 || !ticket?.id) return false;
+      const draft = await prisma.teamsAutofillDraft.findFirst({ where: { intakeRunId: id, status: 'ready' } });
+      if (!draft) return false; // not from Teams, or the card itself is creating it
+      await prisma.teamsAutofillDraft.update({ where: { id: draft.id }, data: { status: 'created', ticketId: ticket.id, images: [] } });
+      const card = await this._createdCard({ ...draft, ticketId: ticket.id }, 'Finished in Ticket Pulse, so this card is closed.');
+      if (draft.activityId && draft.conversationId && draft.serviceUrl) {
+        await bot.updateActivity({ serviceUrl: draft.serviceUrl, conversationId: draft.conversationId, activityId: draft.activityId }, bot.cardActivity(card, { summary: 'Autofill: created in Ticket Pulse' }))
+          .catch((err) => logger.warn(`Teams Autofill: card for draft ${draft.id} not updated after the web create: ${bot.describeError(err)}`));
+      }
+      logger.info(`Teams Autofill: draft ${draft.id} finished in Ticket Pulse as ticket ${ticket.id}; Teams card closed`);
+      return true;
+    } catch (err) {
+      logger.warn(`Teams Autofill: web create for run ${runId} not reflected in Teams: ${err.message}`);
+      return false;
+    }
+  }
+
+  async _createdCard(draft, message = null) {
     const t = draft.ticketId ? await prisma.ticket.findFirst({ where: { id: draft.ticketId }, select: { id: true, subject: true, nativeNumber: true, origin: true, freshserviceTicketId: true } }).catch(() => null) : null;
-    return autofillCard({ ticketRef: t ? ticketDisplayRef(t) : null, subject: t?.subject || null, ticketUrl: t ? `${baseUrl()}/tickets/${t.id}` : null }, 'created');
+    return autofillCard({ ticketRef: t ? ticketDisplayRef(t) : null, subject: t?.subject || null, ticketUrl: t ? `${baseUrl()}/tickets/${t.id}` : null, ...(message ? { message } : {}) }, 'created');
   }
 
   async _rerun(draft, token, data, activity) {
@@ -635,11 +680,20 @@ class TeamsIntakeService {
     const actor = { email: lc(tech.email), name: tech.name, role: 'agent', workspaceRole: workspaceRole || null, technicianId: tech.id, kind: workspaceRole ? 'member' : 'agent', via: 'teams' };
 
     const { default: ticketService } = await import('./ticketService.js');
-    const ticket = await ticketService.createTicket(draft.workspaceId, body, actor, {
-      enforceRequired: true,
-      allowAssignableOnly: true,
-      ...(intakeRunId ? { intakeRunId } : {}),
-    });
+    // Claim the draft first: linking the run fires onRunLinked, which must not
+    // mistake this create for one finished in Ticket Pulse.
+    await prisma.teamsAutofillDraft.update({ where: { id: draft.id }, data: { status: 'creating' } });
+    let ticket;
+    try {
+      ticket = await ticketService.createTicket(draft.workspaceId, body, actor, {
+        enforceRequired: true,
+        allowAssignableOnly: true,
+        ...(intakeRunId ? { intakeRunId } : {}),
+      });
+    } catch (err) {
+      await prisma.teamsAutofillDraft.update({ where: { id: draft.id }, data: { status: 'ready' } }).catch(() => {});
+      throw err;
+    }
 
     // Pictures → normal ticket attachments (best effort, like the web form).
     let attached = 0;
@@ -694,17 +748,62 @@ class TeamsIntakeService {
     }
     if (draft.expiresAt < new Date()) throw new AppError('This Autofill draft has expired. Send the bot your message again.', 410);
     if (draft.status === 'discarded') throw new AppError('This Autofill draft was discarded in Teams.', 410);
+    if (draft.status === 'creating') throw new AppError('This ticket is being created from Teams right now. Try again in a few seconds.', 409);
     if (draft.status !== 'ready') throw new AppError(draft.status === 'reading' ? 'Ticket Pulse is still reading this message. Try again in a few seconds.' : 'This message could not be read. Send it to the bot again.', 409);
     return {
       status: 'ready',
       workspace,
       runId: draft.intakeRunId || null,
-      data: draft.data || {},
+      data: withCardInputs(draft.data || {}),
       sourceText: draft.sourceText || '',
       images: (Array.isArray(draft.images) ? draft.images : []).map((i) => ({ fileName: i.fileName, mimeType: i.mimeType, base64: i.base64 })),
       expiresAt: draft.expiresAt,
     };
   }
+}
+
+const CARD_INPUT_KEYS = ['subject', 'requesterEmail', 'requesterPick', 'priority', 'assign'];
+
+/** The card's inputs worth keeping (strings only, bounded). */
+export function pickCardInputs(input = {}) {
+  const out = {};
+  for (const k of CARD_INPUT_KEYS) {
+    if (input?.[k] === undefined || input[k] === null) continue;
+    out[k] = String(input[k]).slice(0, k === 'subject' ? 500 : 255);
+  }
+  return out;
+}
+
+/**
+ * The draft as the New Ticket page reads it, with the choices saved from the
+ * card applied: subject, priority, requester (a picked candidate keeps its
+ * requester id), and `cardAssign` (ai | me | none | tech:<id>) for the form.
+ */
+export function withCardInputs(data = {}) {
+  const ci = data.cardInputs;
+  if (!ci || typeof ci !== 'object') return data;
+  const out = { ...data };
+  delete out.cardInputs;
+  const subject = String(ci.subject ?? '').trim();
+  if (subject) out.subject = subject.slice(0, 500);
+  const p = Number(ci.priority);
+  if (p >= 1 && p <= 4) out.priorityHint = p;
+  const email = validEmail(ci.requesterEmail) || validEmail(ci.requesterPick);
+  if (email) {
+    const rm = data.requesterMatch || {};
+    const same = rm.status === 'matched' && validEmail(rm.candidate?.email) === email;
+    if (!same) {
+      const picked = (rm.candidates || []).find((c) => validEmail(c?.email) === email);
+      out.requesterMatch = picked ? { status: 'matched', candidate: picked, candidates: [], reason: 'Picked on the Teams card' } : null;
+      out.requesterNameOrEmail = picked ? (picked.name || email) : email;
+    }
+  }
+  const assign = String(ci.assign || '');
+  if (['ai', 'me', 'none'].includes(assign) || /^tech:[0-9]+$/.test(assign)) {
+    out.cardAssign = assign;
+    if (!assign.startsWith('tech:')) out.assigneeMatch = null;
+  }
+  return out;
 }
 
 function escapeHtml(value) {

@@ -16,7 +16,7 @@ const prismaMock = {
   technicianNotificationPreference: { findUnique: jest.fn().mockResolvedValue(null) },
   ticket: { findFirst: jest.fn(), findMany: jest.fn() },
   ticketThreadEntry: { findUnique: jest.fn() },
-  ticketApproval: { findFirst: jest.fn() },
+  ticketApproval: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   approvalCategory: { findUnique: jest.fn() },
   workspace: { findUnique: jest.fn().mockResolvedValue({ nativeTicketingEnabled: true }) },
   group: { findFirst: jest.fn() },
@@ -33,6 +33,7 @@ const botMock = {
   createPersonalConversation: jest.fn().mockResolvedValue({ conversationId: 'conv-1', serviceUrl: 'https://smba/' }),
   postToWorkflowWebhook: jest.fn().mockResolvedValue(),
   describeError: (e) => e.message,
+  updateActivity: jest.fn().mockResolvedValue(),
 };
 const assignTicket = jest.fn().mockResolvedValue({});
 const addPrivateNote = jest.fn().mockResolvedValue({});
@@ -44,7 +45,7 @@ jest.unstable_mockModule('../src/integrations/teamsBotClient.js', () => ({ defau
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { assignTicket, addPrivateNote, addReply: jest.fn() } }));
 jest.unstable_mockModule('../src/services/ticketApprovalService.js', () => ({ default: { decideInApp } }));
 
-const { default: svc, effectivePrefs, cleanPrefs, eventActor, EVENTS } = await import('../src/services/teamsNotificationService.js');
+const { default: svc, effectivePrefs, cleanPrefs, eventActor, EVENTS, approvalClosedStage } = await import('../src/services/teamsNotificationService.js');
 const { ticketCard, approvalCard } = await import('../src/services/teamsCards.js');
 
 const ctx = (type, extra = {}, over = {}) => ({
@@ -246,5 +247,80 @@ describe('disconnect (QA 10-01 #4)', () => {
     expect(one).toMatchObject({ connected: 1, skippedDisconnected: 0 });
     expect(prismaMock.teamsConversation.update).toHaveBeenCalledWith({ where: { email: 'adrian@x.io' }, data: { disconnectedAt: null, disconnectedBy: null } });
     expect(botMock.installForUser).toHaveBeenCalledWith('aad-7');
+  });
+});
+
+// 5 Oct 2026 (Vahid): an approval card in Teams follows the approval.
+describe('approval cards follow the approval', () => {
+  const AP = {
+    id: 31, ticketId: 50, workspaceId: 1, status: 'approved', approverEmail: 'sam@x.io', approvalCategoryId: null, tier: 1,
+    requestNote: null, decidedAt: new Date('2026-10-05T16:41:00Z'), decidedVia: 'app', createdAt: new Date('2026-10-05T15:00:00Z'), escalationLog: null,
+  };
+  const DELIVERY = { id: 9, email: 'sam@x.io', ticketId: 50, eventKey: 'approval_waiting', status: 'sent', activityId: 'act-31', conversationId: 'conv-s', reason: 'approval:31', createdAt: new Date('2026-10-05T15:00:05Z') };
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(() => {
+    botMock.updateActivity.mockClear();
+    prismaMock.teamsDelivery.findMany.mockResolvedValue([DELIVERY]);
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'sam@x.io', conversationId: 'conv-s', serviceUrl: 'https://smba/' });
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 50, subject: 'New laptop', nativeNumber: 1500, origin: 'ticketpulse', requester: { name: 'Rita' } });
+    prismaMock.teamsDelivery.findFirst.mockResolvedValue(null);
+  });
+
+  test('the approval card is sent with the approval it is about', async () => {
+    prismaMock.notificationPreference.findUnique.mockResolvedValue(null);
+    await svc._notifyApproval({ approval: { ...AP, status: 'pending', approverEmail: 'adrian@x.io' }, ticket: { id: 50, workspaceId: 1, subject: 'New laptop' }, decisionUrl: 'https://tp/a', categoryName: 'Laptop' });
+    expect(prismaMock.teamsDelivery.create).toHaveBeenCalledWith({ data: expect.objectContaining({ eventKey: 'approval_waiting', reason: 'approval:31' }) });
+  });
+
+  test('decided in Ticket Pulse → the Teams card is rewritten as decided, without buttons to decide', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValue([AP]);
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(AP);
+    await expect(svc._refreshApprovalCards(50)).resolves.toBe(1);
+    const [where, activity] = botMock.updateActivity.mock.calls[0];
+    expect(where).toEqual({ serviceUrl: 'https://smba/', conversationId: 'conv-s', activityId: 'act-31' });
+    const text = JSON.stringify(activity.card);
+    expect(text).toContain('You approved this');
+    expect(text).not.toContain('approval.prepare');
+  });
+
+  test('still waiting → the card is left alone', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValue([{ ...AP, status: 'pending', decidedAt: null }]);
+    await expect(svc._refreshApprovalCards(50)).resolves.toBe(0);
+    expect(botMock.updateActivity).not.toHaveBeenCalled();
+  });
+
+  test('withdrawn (row deleted) → "withdrawn" card', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValue([]);
+    await svc._refreshApprovalCards(50);
+    expect(JSON.stringify(botMock.updateActivity.mock.calls[0][1].card)).toContain('withdrawn');
+  });
+
+  test('cards sent before the approval id was recorded match the approver and send time', async () => {
+    prismaMock.teamsDelivery.findMany.mockResolvedValue([{ ...DELIVERY, reason: null }]);
+    prismaMock.ticketApproval.findMany.mockResolvedValue([{ ...AP, approverEmail: 'other@x.io' }]);
+    await expect(svc._refreshApprovalCards(50)).resolves.toBe(0);
+    prismaMock.ticketApproval.findMany.mockResolvedValue([AP]);
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(AP);
+    await expect(svc._refreshApprovalCards(50)).resolves.toBe(1);
+  });
+
+  test('a failed Teams update is logged, never thrown', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValue([AP]);
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(AP);
+    botMock.updateActivity.mockRejectedValueOnce(new Error('gone'));
+    await expect(svc._refreshApprovalCards(50)).resolves.toBe(0);
+    svc.refreshApprovalCards(50);
+    await flush();
+  });
+
+  test('closed states read plainly', () => {
+    expect(approvalClosedStage({ ...AP, status: 'pending' }, 'sam@x.io')).toBeNull();
+    expect(approvalClosedStage({ ...AP, status: 'info_requested' }, 'sam@x.io')).toBeNull();
+    expect(approvalClosedStage({ ...AP, status: 'rejected', decidedVia: 'link' }, 'sam@x.io')).toMatchObject({ done: 'rejected', headline: 'You did not approve this', detail: expect.stringContaining('from the e-mail link') });
+    expect(approvalClosedStage({ ...AP, status: 'cancelled', decisionNote: 'Superseded — approved by Jane Doe' }, 'sam@x.io')).toMatchObject({ done: 'closed', headline: 'No longer needed', detail: 'Superseded — approved by Jane Doe' });
+    expect(approvalClosedStage({ ...AP, status: 'forwarded', escalationLog: [{ kind: 'forwarded', toEmails: ['cfo@x.io'], byName: 'Sam' }] }, 'sam@x.io'))
+      .toMatchObject({ word: 'Handed on', detail: 'Forwarded to cfo@x.io by Sam. Nothing is needed from you.' });
+    expect(approvalClosedStage({ ...AP, conditionNote: 'Under 2k' }, 'sam@x.io').detail).toContain('Condition: Under 2k');
   });
 });

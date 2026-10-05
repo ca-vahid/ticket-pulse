@@ -145,6 +145,10 @@ class TicketIntakeRunService {
         },
         select: { id: true, ticketId: true, resolved: true },
       });
+      // 5 Oct 2026: a Teams Autofill draft finished here closes its Teams card.
+      import('./teamsIntakeService.js')
+        .then(({ default: teamsIntake }) => teamsIntake.onRunLinked(run.id, ticket))
+        .catch((err) => logger.warn(`Teams Autofill card sync skipped for run ${run.id}: ${err.message}`));
       return updated;
     } catch (err) {
       logger.warn(`Intake run ${runId} not linked to ticket ${ticket?.id} (non-fatal): ${err.message}`);
