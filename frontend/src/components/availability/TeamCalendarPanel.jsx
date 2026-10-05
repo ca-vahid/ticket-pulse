@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import FancySelect from '../common/FancySelect';
 import { availabilityAPI } from '../../services/api';
 import {
-  BTN_QUIET, CARD, COVERAGE_BG, ErrorNote, HOLIDAY_BG, HOLIDAY_DOT, MONTHS, Toggle, WEEKEND_BG,
+  BTN_QUIET, CARD, COVERAGE_BG, ErrorNote, HOLIDAY_BG, HOLIDAY_DOT, MONTHS, TODAY_COL, Toggle, WEEKEND_BG,
   fmtDay, parseDay, todayKey,
 } from './availabilityUi';
 import {
@@ -155,7 +155,7 @@ export default function TeamCalendarPanel({ me }) {
                     role="columnheader"
                     aria-current={isToday ? 'date' : undefined}
                     title={holiday ? `${fmtDay(d.key)} · ${holiday}` : fmtDay(d.key)}
-                    className={`relative border-b border-border pb-1 pt-2 text-center leading-none ${holiday ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}`}
+                    className={`relative border-b border-border pb-1 pt-2 text-center leading-none ${isToday ? TODAY_COL : holiday ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}`}
                   >
                     {holiday && <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${HOLIDAY_DOT}`} aria-hidden="true" />}
                     <span className="block text-[10px] text-muted-foreground">{WEEKDAY_LETTER[d.dow]}</span>
@@ -173,7 +173,7 @@ export default function TeamCalendarPanel({ me }) {
                 const tone = isNonWorking(d) ? 'none' : coverageTone(out.length, teamSize);
                 const names = out.map((e) => personName(e, byEmail)).join(', ');
                 return (
-                  <div key={d.key} role="gridcell" className="px-[3px] py-1.5" title={out.length ? `${out.length} away: ${names}` : 'Nobody away'}>
+                  <div key={d.key} role="gridcell" className={`px-[3px] py-1.5 ${d.key === today ? TODAY_COL : ''}`} title={out.length ? `${out.length} away: ${names}` : 'Nobody away'}>
                     <span className={`block h-1.5 rounded-full ${COVERAGE_BG[tone]}`} aria-hidden="true" />
                     <span className="sr-only">{out.length ? `${out.length} away: ${names}` : 'Nobody away'}</span>
                   </div>
@@ -200,7 +200,8 @@ export default function TeamCalendarPanel({ me }) {
                           key={d.key}
                           role="gridcell"
                           data-testid={`cal-cell-${p.email}-${d.key}`}
-                          className={`${holidayNames[d.key] ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''} ${d.key === today ? 'bg-primary/[0.07]' : ''}`}
+                          data-today={d.key === today ? 'true' : undefined}
+                          className={d.key === today ? TODAY_COL : holidayNames[d.key] ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}
                         />
                       ))}
                       {(entriesByEmail.get(p.email) || []).flatMap((e, ei) => entrySegments(e, days, isNonWorking).map((seg) => {

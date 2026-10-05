@@ -99,6 +99,15 @@ describe('Wallchart', () => {
     expect(screen.getByText('Infrastructure')).toBeInTheDocument();
   });
 
+  test('today has its own column look, never the weekend grey', async () => {
+    inRouter(<TeamCalendarPanel me={ME} />);
+    await screen.findAllByText('Ann Lo');
+    const cell = screen.getByTestId(`cal-cell-a@x.ca-${todayK}`);
+    expect(cell).toHaveAttribute('data-today', 'true');
+    expect(cell.className).toContain('bg-blue-100/80');
+    expect(cell.className).not.toContain('bg-muted/60');
+  });
+
   test('the strip under the dates counts who is away', async () => {
     inRouter(<TeamCalendarPanel me={ME} />);
     await screen.findAllByText('Ann Lo');
