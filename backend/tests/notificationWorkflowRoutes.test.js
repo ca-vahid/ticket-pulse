@@ -134,7 +134,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { default: notificationWorkflowRoutes, duplicateReminderWarning } = await import('../src/routes/notificationWorkflow.routes.js');
+const { default: notificationWorkflowRoutes, duplicateReminderWarning, buildPreviewEventContext } = await import('../src/routes/notificationWorkflow.routes.js');
 
 const sampleTicket = {
   id: 501,
@@ -1437,5 +1437,49 @@ describe('duplicateReminderWarning', () => {
     await expect(duplicateReminderWarning(1, { ...live, triggerType: 'ticket.created' })).resolves.toBeNull();
     prismaMock.ticketStatusDefinition.findFirst.mockResolvedValue(null);
     await expect(duplicateReminderWarning(1, live)).resolves.toBeNull();
+  });
+});
+
+// QA 10-05 #5: Preview kept its own copy of the ticket fields and it fell
+// behind live runs — "Ticket source is Email" was false in every preview.
+describe('buildPreviewEventContext mirrors the live ticket context', () => {
+  const TICKET = {
+    id: 61708, workspaceId: 1, workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' },
+    freshserviceTicketId: 245533n, origin: 'freshservice', nativeNumber: null,
+    subject: 'Laptop camera stopped working', descriptionText: 'cannot be found', status: 'Open', priority: 2,
+    source: 1, impact: 2, urgency: 1, ticketType: 'Incident', groupId: 1000210021n,
+    customFields: { source_request_type: 'Proposal Setup' },
+    tagLinks: [{ tag: { name: 'VIP' } }],
+    isNoise: false, createdAt: new Date('2026-10-05T16:00:00Z'), dueBy: new Date('2026-10-06T16:00:00Z'),
+    requester: { id: 9, name: 'Alma Ornes', email: 'alma@example.com' },
+    assignedTech: { id: 4, name: 'Reza Zaim', email: 'rzaim@example.com' },
+  };
+
+  test('a preview ticket carries source, tags, custom fields, type, group and due date like a live run', async () => {
+    const ctx = await buildPreviewEventContext({ ticket: TICKET, triggerType: 'ticket.assigned' });
+    expect(ctx.event).toMatchObject({ type: 'ticket.assigned', source: 'preview' });
+    expect(ctx.ticket).toMatchObject({
+      id: 61708,
+      displayRef: '#245533',
+      source: 1,
+      sourceLabel: 'Email',
+      createdVia: 'freshservice_sync',
+      impact: 2,
+      urgency: 1,
+      ticketType: 'Incident',
+      groupId: '1000210021',
+      customFields: { source_request_type: 'Proposal Setup' },
+      tags: ['vip'],
+      isNoise: false,
+    });
+    expect(ctx.ticket.dueBy).toBeTruthy();
+  });
+
+  test('"Ticket source is Email" passes on that preview ticket', async () => {
+    const { compileConditionGroup } = await import('../src/services/notificationConditionModel.js');
+    const { default: jsonLogic } = await import('json-logic-js');
+    const ctx = await buildPreviewEventContext({ ticket: TICKET, triggerType: 'ticket.assigned' });
+    const rule = compileConditionGroup({ logic: 'all', conditions: [{ field: 'ticket.sourceLabel', operator: 'is', value: 'Email' }] });
+    expect(jsonLogic.apply(rule, ctx)).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ import notificationWorkflowEngine, {
 import { processDelivery } from '../services/notificationDeliveryService.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
+import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import {
   notificationVariableCatalog,
@@ -461,9 +462,51 @@ function previewTicketSearchWhere(workspaceId, search, filters = {}) {
   return and.length > 0 ? { ...where, AND: and } : where;
 }
 
+/**
+ * The ticket as a LIVE run sees it, for Preview (QA 10-05 #5).
+ *
+ * Preview kept its own hand-written copy of the ticket fields, and it fell
+ * behind the live event context: no source / sourceLabel, status base, impact,
+ * urgency, ticket type, custom fields, tags, group, parked state or due dates.
+ * A condition on any of those (IT's "Ticket source is Email") was false in
+ * every preview while the same workflow passed on real tickets, so previews
+ * stopped at the first condition. The ticket block now comes from the live
+ * builder (buildEventContext); Preview only adds what it always added on top.
+ * Never throws: a failure falls back to the fields Preview had before.
+ */
+async function liveTicketFieldsForPreview(ticket, { triggerType, occurredAt }) {
+  try {
+    const { buildEventContext } = await import('../services/ticketLifecycleNotificationService.js');
+    let tagLinks = ticket.tagLinks;
+    if (!Array.isArray(tagLinks)) {
+      tagLinks = await Promise.resolve()
+        .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, select: { tagLinks: { select: { tag: { select: { name: true } } } } } }))
+        .then((row) => row?.tagLinks || [])
+        .catch(() => []);
+    }
+    let statusBase = null;
+    try {
+      const { default: statusService } = await import('../services/statusService.js');
+      statusBase = await statusService.resolveBaseStatus(Number(ticket.workspaceId) || 0, ticket.status);
+    } catch { statusBase = null; }
+    const live = buildEventContext({
+      event: { type: triggerType, occurredAt, dedupeStamp: `preview:${ticket.id}:${triggerType}:${occurredAt}` },
+      ticket: { ...ticket, tagLinks },
+      previousAgent: null,
+      source: 'preview',
+      statusBase,
+    });
+    return live?.ticket && typeof live.ticket === 'object' ? live.ticket : {};
+  } catch (error) {
+    logger.warn(`Workflow preview: live ticket fields unavailable for ticket ${ticket?.id} (preview keeps its basic fields): ${error.message}`);
+    return {};
+  }
+}
+
 // Exported for scripts/replay-workflow-generation.mjs (model comparison replays).
 export async function buildPreviewEventContext({ ticket, triggerType }) {
   const occurredAt = ticketEventTimestamp(ticket, triggerType) || new Date().toISOString();
+  const liveTicket = await liveTicketFieldsForPreview(ticket, { triggerType, occurredAt });
   const policyContext = await enrichEventContextWithNotificationPolicy({
     event: {
       type: triggerType,
@@ -477,6 +520,8 @@ export async function buildPreviewEventContext({ ticket, triggerType }) {
       timezone: ticket.workspace?.defaultTimezone || 'America/Los_Angeles',
     },
     ticket: {
+      // Everything a live run has (QA 10-05 #5); the fields below stay as they were.
+      ...liveTicket,
       id: ticket.id,
       freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
       // Mirror the live event context (QA 08-06 #4) so previews render the
