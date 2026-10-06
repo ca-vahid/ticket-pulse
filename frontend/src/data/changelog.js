@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.11-preview';
+export const APP_VERSION = '4.2.12-preview';
 
 export const changelog = [
+  {
+    version: '4.2.12-preview',
+    date: 'October 5, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Workflow Preview sees the whole ticket</strong> &mdash; Preview built its own, shorter copy of the ticket, without its source, tags, custom fields, type, group, impact, urgency or due dates. A condition on any of those (for example &ldquo;Ticket source is Email&rdquo;) was false in every preview and the run stopped, while the same workflow passed on real tickets. Preview now uses the same ticket a live run does.' },
+    ],
+  },
   {
     version: '4.2.11-preview',
     date: 'October 5, 2026',
