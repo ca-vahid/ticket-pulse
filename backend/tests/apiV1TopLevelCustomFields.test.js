@@ -127,6 +127,18 @@ describe('PATCH /api/v1/tickets/:id — top-level custom-field keys (QA 10-06)',
     expect(response.body.meta).toEqual({ ignoredFields: ['something_else'] });
   });
 
+  test('an assigneeEmail that is not an active agent is reported, not a failed call', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue(null);
+    const response = await request(buildApp())
+      .patch('/api/v1/tickets/501')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ status: 'closed', assigneeEmail: 'nobody@bgcengineering.ca' })
+      .expect(200);
+    expect(ticketServiceMock.assignTicket).not.toHaveBeenCalled();
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalled();
+    expect(response.body.meta).toEqual({ ignoredFields: ['assigneeEmail'] });
+  });
+
   test('custom fields and the assignee are written before the status change', async () => {
     await request(buildApp())
       .patch('/api/v1/tickets/501')

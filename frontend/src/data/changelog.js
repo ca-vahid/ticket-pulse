@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.14-preview';
+export const APP_VERSION = '4.2.15-preview';
 
 export const changelog = [
+  {
+    version: '4.2.15-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>API: an unknown <code>assigneeEmail</code> no longer fails the update</strong> &mdash; when the address is not an active agent in the workspace, the rest of the update (status, fields, note) still goes through and <code>assigneeEmail</code> is listed in <code>meta.ignoredFields</code>.' },
+    ],
+  },
   {
     version: '4.2.14-preview',
     date: 'October 7, 2026',
