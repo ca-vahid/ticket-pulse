@@ -8,9 +8,10 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 2 Oct 2026 PM (weekly Sep 28–Oct 2 sent; ROPC pentest HIGH closed; Hedberg #16 spam-closed; TP-1766 opened for the 128-day Azure Backup failure; AP pile 281→186; weekly cron re-armed)._
+_Last updated: 7 Oct 2026 (Wed daily — final firing of cron 38eb7e18, re-armed after; AP holiday backlog CLEARED (3–7d tail 2); SSL-certificate ownership gap; Mehdi concentration; AD thread exited)._
 
 ## Probe read rules (do not remove)
+- 'No business hours configured for this day' = the WEEKEND queue reason (in use since Apr) — by design, not a regression (checked Oct 5).
 - Oct 2 2026: agentReview urgent lane now requires status Open/Pending (Deleted RTBT tickets had leaked in as urgent_no_action). Read requester customer_reply before escalating anything (laptop false alarm).
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
 - Failed pipeline runs with "server restarted / orphaned-run recovery" that have later completed runs = recovered, benign.
@@ -103,16 +104,21 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (m) Parked usage (Sep 24–25)
 - Manual parks began: Anton 1, Andrii 2, Marcus 3 (real reasons). HR lead-time wake shipped (departures/transfers wake days BEFORE the date — answers Vahid's Sep 24 question). 21 parked in IT on Sep 25. Anton's #173857/#228595: mentioned for the LAST time Sep 28 — retired from the brief (Vahid's to finish if he wants).
 
-### (n) Stolen laptop — FALSE ALARM (corrected Oct 2)
-- #244718/#244717: Tyler Southam replied Sep 29 20:06 PT "backpack and computer turned up, disregard", and again Oct 1 to Mo ("you can close"). Oct 1 brief raised it as an urgent security gap — wrong; corrected in Oct 2 briefs. Ask: Mo closes both. Exit when closed.
-- LESSON (probe read rule): before calling anything urgent, read the REQUESTER's latest customer_reply, not just assignment/agent notes.
-- Product point (urgent/security tickets bypass holiday hold) kept as a soft recommendation only.
-### (o) AD replication alert storm (Oct 1) — load concentrated on Mo
-- Oct 2: #244933 (VAN-DC1 replication failing) AUTO-RESOLVED by monitor (two clean probes). Five integrity-error tickets + FDR/OTT topology pair each logged repeat occurrence #2 overnight (VAN-DC1: 3,874 new events). Still no Mo note on any, nor on #244687.
-- From Sep 30 ~15:45 PT: #244831/#244832 (topology/DNS FDR-DC1, OTT-DC1), #244835 #244845 #244846 #244847 #244855 (integrity errors, Urgent: VAN-DC1/DC2, OTT-DC1, HFX-DC2, SA-DC2), #244933 (VAN-DC1 replication failing, Oct 1 08:30). All Mo, no notes. Coincides with Mo's #244687 "DC baseline remediation" (no note). Asked at standup: remediation side-effect or real fault; group into one incident; second pair of hands for Mo. KAM-DC2 (#244103) may be part of it. Exit when notes/closures land.
-### (p) AP review backlog after the holiday (Oct 2)
-- ws2 open+unassigned by arrival day (PT): Sep 29 22, Sep 30 64, Oct 1 87, Oct 2 (to 9 AM) 107 → 281 total (257 Oct 1; ~1/day before). All runs end pending_review correctly — bottleneck is human review. Recommended: review push or auto-assign high-confidence categories; ties to rota/weekend-route ledger item. Exit when the pile trends down.
-### (k) TO FIX LATER (Vahid, Sep 24)
+### (o-tail) Vancouver hypervisors + DC follow-ups
+- VAN-HV46 hardware fault #245431 (Mehdi, since Oct 3) = 3rd VAN hypervisor alert in 2 weeks (HV40/41). FDR-DC1 'DC service not answering' #245903 Oct 6 16:31–17:01 PT, auto-resolved — likely planned DC work (stale-DC removal item 2 on #244687, still open); ask Mo one line. AD storm itself EXITED (fixed Oct 2, written up Oct 5).
+### (p) AP review backlog — RECOVERED Oct 7 (exited)
+- 281 (Oct 2 AM) → 269 (Oct 5, 127 aged 3–7d) → 198 → 156 (Oct 7, only 2 aged 3–7d). Lesson for Thanksgiving Oct 12: review step absorbs ~2 days before aging; four-day weekend needs a Tuesday push or auto-assign of high-acceptance categories. Re-open only if 3–7d tail >30 again.
+### (r) SSL certificate ownership + Mehdi concentration (Oct 7)
+- #245983 DigiCert 'CTE API SSL certificate' notice (Oct 7) → Anton noted "not to me or to Calgary" (bounce risk). #240981 GoDaddy wildcard *.bgcengineering.ca reissue (Mehdi) ready since Sep 7, overdue since Sep 26, NO note. Ask: name one cert owner (Mehdi natural), route #245983, confirm wildcard installed, recurring expiry check. Exit when owned + noted.
+- Mehdi concentration: #245867 W: drive access (UNASSIGNED after first agent lacked security-tab rights), #245961 BST prebill/invoicing/bank recs (Accounting month-end, 2 reboots failed), TP-1766 (day 5 no note), HV46. Coaching/structural: second person with file-share security-group rights.
+- #245974 Teams search bounced 2x (Soheil now) — wanderer watch.
+### (q) Small loose ends (Oct 6)
+- Oct 7: MikroTik serial (#245402) still not posted.
+- #245402 year-end serials (Reza): 2 of 3 posted (ECS-Core); MikroTik CRS812 missing, Accounting date was Oct 5.
+- #240709 Dec printer lease (Gaby) — waiting on VAHID per note; raised at Oct 6 standup.
+- #245159 On-Leave notice ws1 sat in pending_review since Oct 2 (unassigned) — minor.
+### (k) TO FIX LATER
+- Oct 5: FS-deleted ticket handling SHIPPED — v4.1.41 delete FS tickets from TP (+bulk), v4.1.42 FS-trashed tickets marked when opened. Retire the #243816-style item once confirmed in use. (Vahid, Sep 24)
 - FS notes on OLDER tickets don't reach TP threads (thread hydration at resolution isn't covering them): 47 of 64 flagged closes had FS notes TP never saw. Raise with the dev team.
 - FS deletions don't sync back:
 - #243816 "Keeping our IT tickets up to date" (Vahid) was DELETED in FreshService but still shows Open + overdue in Ticket Pulse's Tickets page (Overdue + assignee filter showed 4 instead of 3). Same family as the #222020 closed-in-FS drift and the known FS record-deletion gap (memory ap-category-reorg). Ask the dev team: detect FS 404/deleted on reconcile and mark the TP row Deleted. Until fixed, brief counts must not trust a single oddball overdue on a freshly-touched ticket.
@@ -131,6 +137,8 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 
 ## Weekly-only carry-overs
 - Sep 28–Oct 2 memo: short week (Sep 30 holiday). IT 219 new / 220 resolved, 0 unassigned. ROPC #241753 CLOSED Oct 2 (Anton); TLS/SSL #241754 (Mo) last pentest item, pending Cambio sprint date since Sep 16. Mo's #244687 got a real write-up Oct 2: time sync fixed on 15 DCs; stale-DC removal (FDR-DC2/EDM-DC2/KAM-DC1) approved by Vahid → expected root of AD integrity errors; watch the 5 integrity tickets close mid-week, else real fault. AP review pile 281 (Fri AM) → 186 (PM); Thanksgiving Oct 12 = next long-weekend test. Two corrections owned (laptop false alarm, Deleted tickets in probe). Per-agent: Mo heaviest open load (9 overdue = machine-dated AD alerts); pending piles Gaby 19 / Marcus 13 / Vahid 21 (old departure notices). 39 releases v4.1.00–4.1.38. Next: /ticket-followups ~Wed Oct 7.
+- Oct 6: TP-1766 still no note (alert day 131).
+- TP-1766 = FS #245376, auto-assigned Mehdi; no note by Oct 5 (alerts continued Sat/Sun, 130 days). Expect first note by Wed Oct 7.
 - STANDING DEFAULT ACTION used Oct 2: opened TP-1766 "Azure Backup failing daily for sharepointfilesync01 since May 28 (128 alerts, consolidated)" via ticketService (pipeline assigns). Track owner + first note.
 - Sep 21–25 memo: IT 385 resolved / 291 new; team overdue fell from dozens to 6 (none >2 — Vahid 2; Mo 10→0, Sam 5→1, Gaby 3→0) after the Sep 23 follow-ups; closure review (FS-checked) 68/89 real notes; notes-gap discovery + fix; Parked idea→daily use in 3 days; Sentinel/[Infra] intake found CAL-DC1/KAM-DC2/VAN-HV41. Per-agent weight now: open work Mehdi 17 / Mo 16 / Anton 13; pending piles Gaby 19 / Marcus 17; Andrii mostly parked. Recommended a 2nd /ticket-followups run ~Oct 7 (fortnightly), not sooner. Standing risk now includes the HV40+HV41 cluster (two unhealthy hosts).
 - Sep 14–18 memo highlights (context for next week): 70 releases (v3.8.81→3.9.43); AP board week 551 in/551 out; two failed runs all week (both auto-recovered); "excellent at fires, stuck on projects" pattern named re pentest HIGHs + RTBT; no housekeeping ticket opened (all alert streams owned — bar is unowned+unswept); v3.9.42 = readonly observers actually see Dashboard/Analytics (Bryan Baker role now delivers).
