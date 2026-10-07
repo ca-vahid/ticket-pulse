@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.18-preview';
+export const APP_VERSION = '4.2.19-preview';
 
 export const changelog = [
+  {
+    version: '4.2.19-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Approvals: the category stands out</strong> &mdash; the approval category (for example &ldquo;Exceptional Phone Purchase&rdquo;) is now its own highlighted line above each request, on For you, All approvals and Needs your info, and stays visible when the request is open.' },
+      { type: 'improvement', html: '<strong>Approvals open and close smoothly</strong> &mdash; opening a request glides open instead of snapping (off when Motion is set to Off in your preferences).' },
+      { type: 'improvement', html: '<strong>One row per request in All approvals</strong> &mdash; a request sent to several approvers is one row that names them all (&ldquo;approvers Reza Zaim or Vahid Haeri&rdquo;). Once one of them decides, the others&rsquo; &ldquo;Superseded&rdquo; cancellations no longer show &mdash; just the decision (&ldquo;approved by Reza Zaim&rdquo;).' },
+    ],
+  },
   {
     version: '4.2.18-preview',
     date: 'October 7, 2026',

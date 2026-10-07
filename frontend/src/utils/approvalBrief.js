@@ -21,3 +21,27 @@ export function briefDescription(ticket) {
     .trim();
 }
 
+
+/**
+ * One request sent to several approvers is one row (Vahid, 7 Oct 2026). The
+ * rows of a request share requestGroupId (older ones: same ticket, category,
+ * asker and note). A row cancelled because a sibling decided ("Superseded")
+ * is dropped; the row that matters most leads.
+ */
+const STATUS_RANK = { approved: 0, rejected: 0, info_requested: 1, pending: 2, escalated: 3, forwarded: 3, cancelled: 4 };
+export function groupApprovals(items = []) {
+  const groups = new Map();
+  for (const a of items) {
+    const key = a.requestGroupId || `${a.ticketId}|${a.categoryName || ''}|${String(a.requestedBy || '').trim().toLowerCase()}|${String(a.requestNote || '').trim()}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(a);
+  }
+  return [...groups.entries()].map(([key, rows]) => {
+    const live = rows.some((r) => r.status !== 'cancelled');
+    const members = live ? rows.filter((r) => r.status !== 'cancelled') : rows;
+    const primary = [...members].sort((x, y) => (STATUS_RANK[x.status] ?? 5) - (STATUS_RANK[y.status] ?? 5)
+      || new Date(y.decidedAt || y.createdAt) - new Date(x.decidedAt || x.createdAt))[0];
+    return { key, primary, members };
+  });
+}
+
