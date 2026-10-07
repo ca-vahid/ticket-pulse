@@ -85,3 +85,42 @@ describe('mirror reconcile sweep — deferral has a ceiling (15 Sep 2026, 3–4 
     expect(clientMock.fetchTicketConversations).toHaveBeenCalledTimes(1);
   });
 });
+
+// 6 Oct 2026 — the sweep fired ~50 conversation reads back to back every
+// 3 minutes; with the 15-minute deleted-ticket check in the same minute
+// FreshService answered 429 (Retry-After 24 s) and an agent's ticket page
+// timed out in the queue (#245779).
+describe('mirror reconcile sweep — shared pace and yielding to people', () => {
+  const tickets = [1, 2, 3, 4, 5].map((n) => ({ ...openTicket, id: 600 + n, freshserviceTicketId: BigInt(232000 + n) }));
+
+  test('it stops when a person is waiting and the next pass resumes where it stopped', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue(tickets);
+    mirrorService._reconcileResume?.delete(9);
+    // quiet for the defer check and the first two tickets, then a person's request is queued
+    let calls = 0;
+    clientMock.getLimiterStats.mockImplementation(() => {
+      calls += 1;
+      return calls <= 2 ? { queueDepth: 0 } : { queueDepth: 1, queueDepthByPriority: { high: 1 } };
+    });
+    const first = await mirrorService.reconcile(9, { activeOnly: true, limit: 30, deferWhenBusy: true });
+    expect(first).toMatchObject({ checked: 2, yielded: true, remaining: 3 });
+    expect(clientMock.fetchTicketConversations).toHaveBeenCalledTimes(2);
+    expect(loggerMock.info).toHaveBeenCalledWith(expect.stringContaining('2 tickets checked of 5 (yielded to people; the rest next pass)'));
+
+    clientMock.fetchTicketConversations.mockClear();
+    clientMock.getLimiterStats.mockReturnValue({ queueDepth: 0 });
+    const second = await mirrorService.reconcile(9, { activeOnly: true, limit: 30, deferWhenBusy: true });
+    expect(second).toMatchObject({ checked: 5 });
+    expect(second.yielded).toBeUndefined();
+    // the pass started at the third ticket, so the tail was reached first
+    expect(clientMock.fetchTicketConversations.mock.calls[0][0]).toBe(232003);
+  });
+
+  test('at least one ticket is always checked, so a busy limiter cannot stall the sweep forever', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue(tickets);
+    mirrorService._reconcileResume?.delete(10);
+    clientMock.getLimiterStats.mockReturnValue({ queueDepth: 2, slowdownActive: true });
+    const out = await mirrorService.reconcile(10, { activeOnly: true, limit: 30 });
+    expect(out).toMatchObject({ checked: 1, yielded: true, remaining: 4 });
+  });
+});

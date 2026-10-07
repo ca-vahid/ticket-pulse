@@ -1,3 +1,4 @@
+import { RECONCILE_MIN_GAP_MS, reconcileShouldYield, reconcileSlot } from '../utils/fsBackgroundPace.js';
 import { createFreshServiceClient, FORBIDDEN_TICKET } from '../integrations/freshservice.js';
 import {
   transformTickets,
@@ -146,22 +147,9 @@ export const RECONCILE_RECHECK_MS = 15 * 60 * 1000;
 // request timed out in the queue. All workspaces now share one pace (1 call
 // per RECONCILE_MIN_GAP_MS), and a batch stops early whenever the limiter is
 // busy; the rest is picked up next cycle.
-export const RECONCILE_MIN_GAP_MS = process.env.NODE_ENV === 'test' ? 0 : 1000;
-let reconcileNextSlotAt = 0;
-async function reconcileSlot(sleep) {
-  const now = Date.now();
-  const at = Math.max(now, reconcileNextSlotAt);
-  reconcileNextSlotAt = at + RECONCILE_MIN_GAP_MS;
-  if (at > now) await sleep(at - now);
-}
-/** True when reconcile should yield the FreshService budget to people. */
-export function reconcileShouldYield(stats) {
-  if (!stats) return false;
-  if (stats.slowdownActive) return true;
-  if ((stats.queueDepthByPriority?.high || 0) > 0) return true;
-  const cap = Number(stats.maxRequestsPerMinute) || 0;
-  return cap > 0 && Number(stats.requestsLastMinute || 0) >= cap * 0.6;
-}
+// 6 Oct 2026: the pace is shared with mirrorService.reconcile, so it lives in
+// utils/fsBackgroundPace.js (re-exported here for existing imports).
+export { RECONCILE_MIN_GAP_MS, reconcileShouldYield };
 
 /**
  * Service for syncing data from FreshService
