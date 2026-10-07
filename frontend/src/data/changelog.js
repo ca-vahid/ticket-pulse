@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.15-preview';
+export const APP_VERSION = '4.2.16-preview';
 
 export const changelog = [
+  {
+    version: '4.2.16-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Approvals: decide with the ticket in view</strong> &mdash; on <em>For you</em>, each request now reads at full size, and who asked and for whom is one quiet line instead of a column of names. <strong>Decide</strong> opens the request in two halves: on the left, what is being asked (with its pictures) and a summary of the ticket &mdash; description, type, category, priority, agent and requester; on the right, your decision as four clear choices with Forward and Escalate underneath. No more opening the ticket to get context.' },
+      { type: 'improvement', html: '<strong>All approvals in the same style</strong> &mdash; the full-size request, the one-line people and the ticket number as a link; <strong>Details</strong> opens the request, the ticket summary and what was decided, by whom and when.' },
+    ],
+  },
   {
     version: '4.2.15-preview',
     date: 'October 7, 2026',

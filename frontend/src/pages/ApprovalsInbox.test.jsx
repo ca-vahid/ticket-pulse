@@ -123,27 +123,30 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith({}));
   });
 
-  test('For you (A1, 20 Sep 2026): one Decide button, no Ask / Escalate / Forward, the ticket is an icon after the title', async () => {
+  test('For you: one Decide button, no Ask / Escalate / Forward until it opens; the ticket number is a link after the title (option A, 7 Oct 2026)', async () => {
     renderPage();
     await screen.findByText('New laptop for Rita');
     expect(screen.getByRole('button', { name: /Decide/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Escalate|Forward|^Ask/ })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open ticket TP-77' })).toHaveAttribute('href', '/tickets/501?tab=approvals');
-    expect(screen.queryByText('TP-77')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open ticket TP-77' })).toHaveTextContent('TP-77');
   });
 
-  test('For you: a long request note opens in full on More (21 Sep 2026 — approvers could not read the whole request)', async () => {
-    const longNote = 'Ray has asked us to move our Microsoft 365 tenant to Unified App Management (UAM). UAM is a Microsoft change that puts app management for Teams, Outlook, Word, Excel, PowerPoint and Copilot under one set of controls.';
+  test('For you (option A, 7 Oct 2026): the request reads at full size, and Decide opens it in full beside the decision', async () => {
+    const longNote = 'Ray has asked us to move our Microsoft 365 tenant to Unified App Management (UAM). UAM is a Microsoft change that puts app management for Teams, Outlook, Word, Excel, PowerPoint and Copilot under one set of controls. [Image: pasted-image-1.png]';
     apiOverrides.approvalInbox = vi.fn(() => Promise.resolve([{ ...pendingRow, requestNote: longNote }]));
     renderPage();
-    const more = await screen.findByRole('button', { name: /More$/ });
-    expect(more).toHaveAttribute('aria-expanded', 'false');
-    expect(more.querySelector('span')).toHaveClass('truncate');
-    fireEvent.click(more);
-    const less = screen.getByRole('button', { name: /Less$/ });
-    expect(less).toHaveAttribute('aria-expanded', 'true');
-    expect(less.querySelector('span')).toHaveClass('whitespace-pre-line');
-    expect(less).toHaveTextContent(longNote);
+    const line = await screen.findByTestId('approval-request');
+    expect(line).toHaveClass('line-clamp-2');
+    expect(line).toHaveTextContent('Unified App Management');
+    expect(line).toHaveTextContent('1 picture');
+    expect(line).not.toHaveTextContent('[Image:');
+    expect(screen.queryByRole('button', { name: /More$/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Decide/ }));
+    const brief = await screen.findByTestId('approval-brief');
+    expect(brief).toHaveTextContent('one set of controls.');
+    expect(screen.getByTestId('approval-choices')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Close/ })).toBeInTheDocument();
     apiOverrides.approvalInbox = vi.fn(() => Promise.resolve([pendingRow]));
   });
 

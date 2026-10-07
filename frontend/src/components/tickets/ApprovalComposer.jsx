@@ -209,6 +209,10 @@ export default function ApprovalComposer({
   canDecide = true,
   // The choice the approver already made in the e-mail (?intent=), e.g. 'rejected'.
   initialTab = null,
+  // 'choices' (Approvals page option A, 7 Oct 2026): the four decisions as a
+  // 2x2 grid of buttons and Forward / Escalate as quiet links, no outer card —
+  // the row it sits in is the card. 'tabs' is the ticket page's tab bar.
+  layout = 'tabs',
 }) {
   const [tab, setTab] = useState(() => {
     const fallback = canDecide ? 'approved' : 'forward';
@@ -359,31 +363,61 @@ export default function ApprovalComposer({
   const isHandoff = tab === 'escalate' || tab === 'forward';
   const isDecision = tab === 'approved' || tab === 'condition' || tab === 'rejected';
 
-  return (
-    <section aria-labelledby="composer-heading" className={compact ? '' : 'mt-5'} data-testid="approval-composer">
-      <div className={`rounded-2xl border border-border bg-card shadow-subtle ${compact ? '' : 'min-[800px]:shadow-soft'}`}>
-        {/* Tabs */}
-        <div role="tablist" aria-label="What do you want to do?" className="flex flex-wrap items-end gap-x-1 border-b border-border px-2 pt-1">
-          <h3 id="composer-heading" className="sr-only">Your decision</h3>
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => { setTab(t.key); setTabChosen(true); setError(null); }}
-              disabled={busy}
-              className={`tp-focus-ring -mb-px inline-flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-[13px] font-semibold transition-colors ${tab === t.key ? t.active : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-            >
-              <t.Icon className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden="true" />
-              {t.label}
-              {showShortcuts && t.key === 'approved' && <Kbd>A</Kbd>}
-              {showShortcuts && t.key === 'rejected' && <Kbd>R</Kbd>}
-            </button>
-          ))}
-        </div>
+  const choices = layout === 'choices';
+  const CHOICE_TONE = {
+    approved: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/45 dark:bg-emerald-500/15 dark:text-emerald-200',
+    condition: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/45 dark:bg-emerald-500/15 dark:text-emerald-200',
+    question: 'border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-500/45 dark:bg-violet-500/15 dark:text-violet-200',
+    rejected: 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/45 dark:bg-red-500/15 dark:text-red-200',
+  };
+  const pick = (key) => { setTab(key); setTabChosen(true); setError(null); };
 
-        <div className={compact ? 'px-3 py-3' : 'px-4 py-4 min-[800px]:px-[18px]'}>
+  return (
+    <section aria-labelledby="composer-heading" className={compact || choices ? '' : 'mt-5'} data-testid="approval-composer">
+      <div className={choices ? '' : `rounded-2xl border border-border bg-card shadow-subtle ${compact ? '' : 'min-[800px]:shadow-soft'}`}>
+        {choices ? (
+          <div role="tablist" aria-label="What do you want to do?" data-testid="approval-choices">
+            <h3 id="composer-heading" className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Your decision</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {tabs.filter((t) => t.key !== 'escalate' && t.key !== 'forward').map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.key}
+                  onClick={() => pick(t.key)}
+                  disabled={busy}
+                  className={`tp-focus-ring inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border px-3 py-2 text-left text-[13px] font-semibold transition-colors ${tab === t.key ? CHOICE_TONE[t.key] : 'border-border bg-card text-foreground/85 hover:bg-muted/60'}`}
+                >
+                  <t.Icon className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.25} aria-hidden="true" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div role="tablist" aria-label="What do you want to do?" className="flex flex-wrap items-end gap-x-1 border-b border-border px-2 pt-1">
+            <h3 id="composer-heading" className="sr-only">Your decision</h3>
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => { setTab(t.key); setTabChosen(true); setError(null); }}
+                disabled={busy}
+                className={`tp-focus-ring -mb-px inline-flex items-center gap-1.5 border-b-2 px-2.5 py-2 text-[13px] font-semibold transition-colors ${tab === t.key ? t.active : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+              >
+                <t.Icon className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden="true" />
+                {t.label}
+                {showShortcuts && t.key === 'approved' && <Kbd>A</Kbd>}
+                {showShortcuts && t.key === 'rejected' && <Kbd>R</Kbd>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className={choices ? 'pt-3' : compact ? 'px-3 py-3' : 'px-4 py-4 min-[800px]:px-[18px]'}>
           {isHandoff ? (
             <HandoffPanel
               mode={tab}
@@ -534,6 +568,15 @@ export default function ApprovalComposer({
                 {tab === 'condition' && !hasNote && <span className="text-xs text-muted-foreground">Type the condition to continue</span>}
               </div>
             </>
+          )}
+
+          {choices && (canForward || canEscalate) && (
+            <p className="mt-3 border-t border-border/70 pt-2 text-[12px] text-muted-foreground" data-testid="approval-handoff-links">
+              Not yours to decide?{' '}
+              {canForward && <button type="button" onClick={() => pick('forward')} disabled={busy} className={`tp-focus-ring rounded font-medium hover:underline ${tab === 'forward' ? 'text-foreground' : 'text-primary'}`}>Forward</button>}
+              {canForward && canEscalate && ' · '}
+              {canEscalate && <button type="button" onClick={() => pick('escalate')} disabled={busy} className="tp-focus-ring rounded font-medium text-amber-700 hover:underline dark:text-amber-300">Escalate</button>}
+            </p>
           )}
 
           {(footer || expires || approval?.approverEmail) && (
