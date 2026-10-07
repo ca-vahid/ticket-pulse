@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.12-preview';
+export const APP_VERSION = '4.2.13-preview';
 
 export const changelog = [
+  {
+    version: '4.2.13-preview',
+    date: 'October 6, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Background checks no longer crowd FreshService</strong> &mdash; every three minutes Ticket Pulse compared its own tickets with their FreshService copies by reading about 50 conversations in a few seconds. When that met the 15-minute deleted-ticket check, FreshService paused all requests for up to 24 seconds and an open ticket page could time out. The comparison now reads one ticket a second on the same shared pace, stops whenever a person is waiting, and continues where it stopped on the next pass.' },
+    ],
+  },
   {
     version: '4.2.12-preview',
     date: 'October 5, 2026',

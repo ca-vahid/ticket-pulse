@@ -15,6 +15,7 @@ import { boundFsStatusForName } from '../utils/fsStatusBindings.js';
 import { latestFsFieldChanges } from '../utils/fsActivityChanges.js';
 import { getStatusString } from '../integrations/freshserviceTransformer.js';
 import { sseManager } from '../routes/sse.routes.js';
+import { reconcileShouldYield, reconcileSlot } from '../utils/fsBackgroundPace.js';
 
 // TP status labels → FreshService status codes (canonical labels only —
 // custom labels resolve through their BASE via _fsStatusCode below).
@@ -1095,24 +1096,50 @@ class MirrorService {
       tickets.push(...recent.filter((r) => !tickets.some((t) => t.id === r.id)));
     }
 
+    // 6 Oct 2026: this loop used to fire one FreshService read per ticket
+    // back to back (~50 in a few seconds, every 3 minutes). Together with the
+    // 15-minute deleted-ticket check that drew 429s with a Retry-After longer
+    // than a person's request waits. It now takes the shared background pace
+    // (one call a second across both jobs) and stops whenever people are
+    // waiting; the next pass resumes where this one stopped, so the tail of
+    // the list is never starved.
+    if (!this._reconcileResume) this._reconcileResume = new Map();
+    const startAt = tickets.length ? (this._reconcileResume.get(workspaceId) || 0) % tickets.length : 0;
+    const ordered = [...tickets.slice(startAt), ...tickets.slice(0, startAt)];
     let imported = 0;
     let conflicts = 0;
-    for (const ticket of tickets) {
+    let checked = 0;
+    let yielded = false;
+    for (const ticket of ordered) {
+      if (checked > 0 && reconcileShouldYield(this._limiterStats(client))) { yielded = true; break; }
       try {
+        await reconcileSlot();
         const result = await this._reconcileTicketAgainstFs(ticket, client);
         imported += result.imported;
         conflicts += result.conflicts;
       } catch (err) {
         logger.warn(`Reconciliation failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
       }
+      checked += 1;
     }
+    this._reconcileResume.set(workspaceId, yielded ? startAt + checked : 0);
 
     if (tickets.length > 0) {
-      logger.info(`Mirror reconciliation for workspace ${workspaceId}: ${tickets.length} tickets checked, ${imported} entries imported, ${conflicts} conflicts`);
+      logger.info(`Mirror reconciliation for workspace ${workspaceId}: ${checked} tickets checked${yielded ? ` of ${tickets.length} (yielded to people; the rest next pass)` : ''}, ${imported} entries imported, ${conflicts} conflicts`);
     }
     if (!this._lastReconcileAt) this._lastReconcileAt = new Map();
     this._lastReconcileAt.set(workspaceId, Date.now());
-    return { checked: tickets.length, imported, conflicts };
+    return { checked, imported, conflicts, ...(yielded ? { yielded: true, remaining: tickets.length - checked } : {}) };
+  }
+
+  /** The shared limiter's stats as seen through this client; null when it cannot say. */
+  _limiterStats(client) {
+    try {
+      if (typeof client?.getLimiterStats === 'function') return client.getLimiterStats() || null;
+      return client?.limiter?.getStats?.() || null;
+    } catch {
+      return null;
+    }
   }
 
   /** Shared-limiter queue depth as seen through this client; 0 when the client cannot say. */
