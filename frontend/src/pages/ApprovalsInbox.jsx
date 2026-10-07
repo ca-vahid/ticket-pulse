@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer from '../components/tickets/ApprovalComposer';
+import ApprovalTicketBrief from '../components/approvals/ApprovalTicketBrief';
+import { splitImageRefs } from '../utils/approvalBrief';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
@@ -65,21 +67,6 @@ function StatusGlyph({ status, size = 'h-9 w-9', icon = 'h-[18px] w-[18px]' }) {
 const prettyName = (email) => (email ? String(email).split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
 const lower = (v) => String(v || '').trim().toLowerCase();
 
-/** One person in a row: tiny label over avatar + name. Never a bare address. */
-function SidePerson({ label, name, email, size = 'h-7 w-7' }) {
-  const photo = useRequesterPhoto(email);
-  const shown = name || prettyName(email);
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <PersonAvatar name={shown} photoUrl={photo} size={size} textSize="text-[9px]" />
-      <div className="min-w-0 leading-tight">
-        <p className="text-[10px] leading-3 text-muted-foreground/75">{label}</p>
-        <p className="truncate text-[13px] font-medium leading-4 text-foreground" title={email || undefined}>{shown}</p>
-      </div>
-    </div>
-  );
-}
-
 /** Inline mention: small avatar + name, for "Neville asks …" in a sentence. */
 function InlinePerson({ name, email }) {
   const photo = useRequesterPhoto(email);
@@ -90,24 +77,6 @@ function InlinePerson({ name, email }) {
       <span className="font-medium text-foreground/85">{shown}</span>
     </span>
   );
-}
-
-/**
- * The people on an approval, de-duplicated: when the person who asked is also
- * the one it is for (Soheil asking for himself) one entry does, labelled so.
- */
-function peopleOf(a, { withApprover = true } = {}) {
-  const out = [];
-  const byEmail = lower(a.requestedBy);
-  const forEmail = lower(a.requesterEmail);
-  const selfRequest = byEmail && forEmail && byEmail === forEmail;
-  if (selfRequest) out.push({ label: 'Requested for self', name: a.requestedByName || a.requesterName, email: a.requestedBy });
-  else {
-    out.push({ label: 'Requested by', name: a.requestedByName, email: a.requestedBy });
-    if (a.requesterName || a.requesterEmail) out.push({ label: 'For', name: a.requesterName, email: a.requesterEmail });
-  }
-  if (withApprover) out.push({ label: 'Approver', name: a.approverName, email: a.approverEmail });
-  return out;
 }
 
 function PersonOption({ person, active, onPick }) {
@@ -313,6 +282,89 @@ const TicketIcon = ({ a, state }) => (
   </Link>
 );
 const Dot = () => <span className="text-muted-foreground/40" aria-hidden="true">·</span>;
+
+/*
+ * Option A rows (Vahid, 7 Oct 2026): the request reads at full size, the
+ * people collapse into one quiet sentence, and opening a row shows the ticket
+ * beside the decision — no more clicking through to the ticket for context.
+ */
+
+/** The ticket number as a quiet link after the subject. */
+const TicketRef = ({ a, state }) => (
+  <Link
+    to={`/tickets/${a.ticketId}?tab=approvals`}
+    state={state}
+    title={`Open ${a.displayRef}`}
+    aria-label={`Open ticket ${a.displayRef}`}
+    className="tp-focus-ring flex-shrink-0 rounded font-mono text-[12px] text-primary hover:underline"
+  >
+    {a.displayRef}
+  </Link>
+);
+
+/** "Marcus Blackstock asks for Seifeddine Reguige · approver Vahid Haeri" */
+function PeopleLine({ a, withApprover = false, className = '' }) {
+  const byEmail = lower(a.requestedBy);
+  const forEmail = lower(a.requesterEmail);
+  const self = byEmail && forEmail && byEmail === forEmail;
+  return (
+    <div className={`flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-muted-foreground ${className}`} data-testid="approval-people">
+      <InlinePerson name={a.requestedByName} email={a.requestedBy} />
+      {self || !(a.requesterName || a.requesterEmail)
+        ? <span>asks</span>
+        : <><span>asks for</span><InlinePerson name={a.requesterName} email={a.requesterEmail} /></>}
+      {withApprover && (a.approverName || a.approverEmail) && (
+        <><Dot /><span>approver</span><InlinePerson name={a.approverName} email={a.approverEmail} /></>
+      )}
+    </div>
+  );
+}
+
+/** The request at reading size, two lines, pictures counted rather than named. */
+function RequestLine({ note, muted = false }) {
+  const { text, names } = splitImageRefs(cleanNoteText(note || ''));
+  if (!text && !names.length) return null;
+  return (
+    <p className={`mt-1 line-clamp-2 text-[14px] leading-snug [overflow-wrap:anywhere] ${muted ? 'text-foreground/70' : 'text-foreground/90'}`} data-testid="approval-request">
+      {text && <>&ldquo;{text}&rdquo;</>}
+      {names.length > 0 && <span className="text-muted-foreground">{text ? ' · ' : ''}{names.length === 1 ? '1 picture' : `${names.length} pictures`}</span>}
+    </p>
+  );
+}
+
+/** What happened to a decided approval, for the opened All-approvals row. */
+function DecisionRecord({ a }) {
+  const m = STATUS_ICON[a.status] || STATUS_ICON.cancelled;
+  const label = STATUS_META[a.status]?.label || a.status;
+  const note = cleanNoteText(a.decisionNote || '');
+  const condition = cleanNoteText(a.conditionNote || '');
+  return (
+    <div className="min-w-0 space-y-2" data-testid="approval-decision-record">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Decision</div>
+      <p className={`text-[14px] font-semibold ${m.text}`}>{label}</p>
+      <p className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
+        {a.status === 'pending' || a.status === 'info_requested' ? 'Waiting on' : 'Decided by'}
+        <InlinePerson name={a.approverName} email={a.approverEmail} />
+      </p>
+      <p className="text-[12px] text-muted-foreground">
+        {a.decidedAt ? `${formatDayTime(a.decidedAt)} · ${timeAgo(a.decidedAt)}` : `Asked ${formatDayTime(a.createdAt)} · waiting`}
+        {a.decidedVia ? ` · by ${a.decidedVia === 'email' ? 'e-mail' : a.decidedVia}` : ''}
+      </p>
+      {condition && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+          <span className="font-semibold">Condition: </span>{condition}
+        </div>
+      )}
+      {note && <p className="whitespace-pre-line text-[13px] leading-relaxed text-foreground/85 [overflow-wrap:anywhere]">&ldquo;{note}&rdquo;</p>}
+      {(a.amount != null || a.tierCount > 1) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
+          {a.tierCount > 1 && <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} className="!text-[11px]" />}
+        </div>
+      )}
+    </div>
+  );
+}
 /**
  * The note on a row: one truncated line at rest, the whole text on click
  * (Vahid, 21 Sep 2026: an approver had no way to read the full request in
@@ -672,37 +724,45 @@ export default function ApprovalsInbox() {
                 {overview.items.map((a) => {
                   const meta_ = STATUS_META[a.status] || {};
                   const isOpen = expanded.has(a.id);
-                  const note = a.decisionNote || a.conditionNote || a.requestNote || '';
+                  const decided = cleanNoteText(a.decisionNote || a.conditionNote || '');
                   return (
-                    <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5 transition-shadow hover:shadow-subtle" data-testid="approval-row">
-                      {/* xl, not md (QA 09-21 #13): the people panel beside the subject needs more than an iPad's 1024–1180 px. */}
-                      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-5">
-                        {/* Left: what was asked, and what happened to it */}
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <StatusGlyph status={a.status} />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 text-[12px]">
-                              <span className={`whitespace-nowrap font-semibold ${(STATUS_ICON[a.status] || STATUS_ICON.cancelled).text}`}>{meta_.label || a.status}</span>
-                              <Dot />
-                              <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
-                              <TicketIcon a={a} state={backState} />
-                              {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
-                              <When at={a.decidedAt || a.createdAt} className="ml-auto" />
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              {note ? <RowNote note={note} open={isOpen} onToggle={() => toggleExpanded(a.id)} /> : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
-                              <span className="ml-auto flex flex-shrink-0 items-center gap-2">
-                                <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
-                                {a.tierCount > 1 && <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} className="!text-[11px]" />}
-                              </span>
-                            </div>
+                    <li key={a.id} className="tp-card rounded-xl px-4 py-3 transition-shadow hover:shadow-subtle" data-testid="approval-row">
+                      <div className="flex gap-3">
+                        <StatusGlyph status={a.status} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
+                            <span className={`whitespace-nowrap font-semibold ${(STATUS_ICON[a.status] || STATUS_ICON.cancelled).text}`}>{meta_.label || a.status}</span>
+                            <Dot />
+                            <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
+                            <TicketRef a={a} state={backState} />
+                            {a.categoryName && <span className="text-muted-foreground">· {a.categoryName}</span>}
+                            <When at={a.decidedAt || a.createdAt} className="ml-auto" />
+                          </div>
+                          <PeopleLine a={a} withApprover className="mt-0.5" />
+                          {!isOpen && <RequestLine note={a.requestNote} muted={!['pending', 'info_requested'].includes(a.status)} />}
+                          {!isOpen && decided && (
+                            <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
+                              <span className="font-medium text-foreground/75">{(a.approverName || prettyName(a.approverEmail)).split(' ')[0]}:</span> &ldquo;{decided}&rdquo;
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(a.id)}
+                          aria-expanded={isOpen}
+                          className="tp-focus-ring inline-flex h-8 flex-shrink-0 items-center gap-1 self-start rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          {isOpen ? <>Close <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /></> : <>Details <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></>}
+                        </button>
+                      </div>
+                      {isOpen && (
+                        <div className="mt-3 grid gap-5 border-t border-border/70 pt-3 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                          <ApprovalTicketBrief approval={a} backState={backState} />
+                          <div className="min-w-0 lg:border-l lg:border-border/70 lg:pl-5">
+                            <DecisionRecord a={a} />
                           </div>
                         </div>
-                        {/* Right: the people — who asked, who it is for, who decides */}
-                        <div className="grid flex-shrink-0 grid-cols-3 gap-3 border-t border-border/70 pt-2 xl:w-[27rem] xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-                          {peopleOf(a).map((p) => <SidePerson key={p.label} label={p.label} name={p.name} email={p.email} />)}
-                        </div>
-                      </div>
+                      )}
                     </li>
                   );
                 })}
@@ -720,64 +780,66 @@ export default function ApprovalsInbox() {
                 </div>
               ) : (
                 <ul className="space-y-1.5">
-                  {pending.map((a) => (
-                    <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5" data-testid="inbox-row">
-                      <div className={`flex flex-col gap-2 xl:flex-row xl:gap-4 ${expanded.has(a.id) ? 'xl:items-start' : 'xl:items-center'}`}>
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                  {pending.map((a) => {
+                    const isOpen = openId === a.id;
+                    return (
+                      <li key={a.id} className="tp-card overflow-hidden rounded-xl" data-testid="inbox-row">
+                        <div className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center">
                           <StatusGlyph status="pending" />
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 text-[12px]">
-                              <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
-                              <TicketIcon a={a} state={backState} />
-                              {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
+                              <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
+                              <TicketRef a={a} state={backState} />
+                              {a.categoryName && <span className="text-muted-foreground">· {a.categoryName}</span>}
+                              {isOpen && <span className="text-muted-foreground">· {a.isFinal ? 'final approval' : a.tierCount > 1 ? `${a.tierName}, not the final approval` : 'not the final approval'}</span>}
+                              <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
                             </div>
-                            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              {a.requestNote ? <RowNote note={a.requestNote} open={expanded.has(a.id)} onToggle={() => toggleExpanded(a.id)} /> : <span className="min-w-0 truncate text-muted-foreground/60">{a.categoryName || 'No note'}</span>}
-                              <span className="ml-auto flex flex-shrink-0 items-center gap-2">
-                                <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
-                                <TierChip tier={a.tier} tierName={a.tierName} tierCount={a.tierCount} className="!text-[11px]" />
-                                {a.isFinal && <span className="text-[11px] text-muted-foreground/75">final approver</span>}
-                              </span>
-                            </div>
+                            <PeopleLine a={a} className="mt-0.5" />
+                            {!isOpen && <RequestLine note={a.requestNote} />}
+                          </div>
+                          <div className="flex flex-shrink-0 items-center justify-between gap-3 lg:flex-col lg:items-end lg:gap-1.5">
+                            <When at={a.createdAt} />
+                            {isOpen ? (
+                              <button type="button" onClick={() => setOpenId(null)} className="tp-focus-ring inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+                                Close <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                              </button>
+                            ) : (
+                              <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Decide <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                              </button>
+                            )}
                           </div>
                         </div>
-                        {/* Who: requested by / for, stacked */}
-                        <div className="flex flex-shrink-0 flex-row gap-4 border-t border-border/70 pt-2 xl:w-44 xl:flex-col xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
-                          {peopleOf(a, { withApprover: false }).map((p) => <SidePerson key={p.label} label={p.label} name={p.name} email={p.email} size="h-6 w-6" />)}
-                        </div>
-                        {/* When · act */}
-                        {openId !== a.id && (
-                          <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 xl:flex-col xl:items-end xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
-                            <When at={a.createdAt} />
-                            <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                              {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Decide
-                            </button>
+                        {isOpen && (
+                          <div className="grid border-t border-border/70 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                            <div className="min-w-0 px-4 py-4 lg:border-r lg:border-border/70">
+                              <ApprovalTicketBrief approval={a} backState={backState} />
+                            </div>
+                            <div className="min-w-0 px-4 py-4">
+                              <ApprovalComposer
+                                layout="choices"
+                                compact
+                                showShortcuts={false}
+                                minHeight={110}
+                                approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
+                                participants={null}
+                                selfEmail={a.approverEmail}
+                                forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
+                                onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
+                                onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
+                                onHandoff={({ mode, note, toEmail }) => act(async () => {
+                                  if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
+                                  else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
+                                }, a.id)}
+                                disabled={busyId === a.id}
+                                footer={<>You confirm before anything is sent.</>}
+                              />
+                            </div>
                           </div>
                         )}
-                      </div>
-                      {openId === a.id && (
-                        <div className="mt-2.5 border-t border-border/60 pt-2.5 animate-popIn">
-                          <ApprovalComposer
-                            compact
-                            showShortcuts={false}
-                            minHeight={180}
-                            approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
-                            participants={null}
-                            selfEmail={a.approverEmail}
-                            forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
-                            onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
-                            onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
-                            onHandoff={({ mode, note, toEmail }) => act(async () => {
-                              if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
-                              else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
-                            }, a.id)}
-                            disabled={busyId === a.id}
-                            footer={<>Decisions ask you to confirm first · <button type="button" onClick={() => setOpenId(null)} className="tp-focus-ring rounded font-medium text-muted-foreground underline hover:text-foreground">close</button></>}
-                          />
-                        </div>
-                      )}
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>
