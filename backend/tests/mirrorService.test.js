@@ -205,6 +205,22 @@ describe('mirrorService job processing', () => {
     expect(sent.due_by).toBeUndefined();
   });
 
+  test('update_fields: a copy FreshService now wants a department for gets one and the sync is re-sent (7 Oct 2026, job 3434)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Open', assignedTech: null,
+    });
+    const rejection = Object.assign(new Error('Validation failed (department_id: The value provided is of type Null.It should be of type Positive Integer)'), {
+      freshserviceDetail: { description: 'Validation failed', errors: [{ field: 'department_id', message: 'The value provided is of type Null' }] },
+    });
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValueOnce({ id: 90001 });
+    const spy = jest.spyOn(mirrorService, 'resolveDepartmentId').mockResolvedValue(42);
+    expect(await mirrorService._processJob({ id: 31, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.updateTicket.mock.calls[0][1].department_id).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1]).toEqual(expect.objectContaining({ department_id: 42 }));
+    spy.mockRestore();
+  });
+
   test('update_fields keeps due_by while Open, and retries without it if FS still objects', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({
       ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Open', dueBy: new Date('2026-09-14T20:05:45Z'), assignedTech: null,

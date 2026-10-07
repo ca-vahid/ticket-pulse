@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.17-preview';
+export const APP_VERSION = '4.2.18-preview';
 
 export const changelog = [
+  {
+    version: '4.2.18-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>FreshService copies without a department sync again</strong> &mdash; FreshService now requires a department, so updating a copy that had none was refused on every try. The background sync now fills it in from the ticket or the requester&rsquo;s office (as saving from the ticket page already did) and sends the update again.' },
+    ],
+  },
   {
     version: '4.2.17-preview',
     date: 'October 7, 2026',

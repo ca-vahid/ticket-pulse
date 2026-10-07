@@ -114,6 +114,16 @@ function isDueByRejection(err) {
   return /due_by/i.test(String(err?.message || ''));
 }
 
+// FreshService made Department required: an update to a copy that has none
+// is refused with "department_id: The value provided is of type Null" (7 Oct
+// 2026, job 3434 on #243704 failing every few minutes).
+function isDepartmentRejection(err) {
+  const detail = err?.freshserviceDetail;
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
+  if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'department_id')) return true;
+  return /department_id/i.test(String(err?.message || ''));
+}
+
 function isCcEmailsRejection(err) {
   const detail = err?.freshserviceDetail;
   const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
@@ -873,6 +883,15 @@ class MirrorService {
       } else if (payload.cc_emails !== undefined && isCcEmailsRejection(err)) {
         logger.warn(`Mirror: FreshService rejected cc_emails on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, cc_emails: undefined });
+      } else if (isDepartmentRejection(err)) {
+        // Same ladder as the ticket page's write-back: the resolver used for
+        // mirror creates (TP department → requester's office → workspace
+        // fallback). Only on refusal, so a department FS already has is never
+        // overwritten.
+        const departmentId = await this.resolveDepartmentId(client, ticket);
+        if (!departmentId) throw err;
+        logger.warn(`Mirror: FreshService requires a department on #${ticket.freshserviceTicketId} — re-sending the field sync with department ${departmentId}`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, department_id: Number(departmentId) });
       } else if (payload.responder_id && isGroupMembershipRejection(err)) {
         if (groupRefusalAsked.size >= 1000) groupRefusalAsked.clear(); // bounded (Jul 9 leak lesson)
         groupRefusalAsked.set(`${ticket.id}:${ticket.assignedTech?.id ?? ''}`, Date.now());
