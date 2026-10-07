@@ -32,6 +32,11 @@ describe('definition lint', () => {
     expect(lintWorkflowDefinition(def({ rule: true, conditionGroup: { logic: 'all', conditions: [] } }))).toEqual([]);
     expect(lintWorkflowDefinition(null)).toEqual([]);
   });
+
+  test('QA 10-06 #2: a step whose Skip noise tickets switch is set (on or off) made the choice on purpose', () => {
+    expect(lintWorkflowDefinition(def({ skipNoise: true, rule: NOISE_RULE, conditionGroup: { logic: 'all', conditions: [URGENT] } }))).toEqual([]);
+    expect(lintWorkflowDefinition(def({ skipNoise: false, rule: NOISE_RULE, conditionGroup: { logic: 'all', conditions: [URGENT] } }))).toEqual([]);
+  });
 });
 
 describe('went quiet', () => {

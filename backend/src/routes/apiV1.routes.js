@@ -330,6 +330,46 @@ async function resolveAssigneeEmail(req, body) {
   body.assignedTechId = tech.id;
 }
 
+// Body keys PATCH /tickets/:id consumes (QA 10-06 #5/#6) — anything else is
+// reported back in meta.ignoredFields instead of vanishing.
+const PATCH_BODY_KEYS = new Set([
+  'status', 'resolutionReason', 'resolutionNote', 'assignedTechId', 'assignedTechEmail',
+  'subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId',
+  'ccEmails', 'dueBy', 'category', 'subcategory', 'externalRef', 'customFields', 'addNote', 'note',
+]);
+
+/**
+ * QA 10-06 #5/#6: Power Automate sent `bst_number`, `cc_recipients` … as
+ * top-level keys next to `status`, and every one of them was dropped without a
+ * word. A top-level key that is one of this workspace's custom-field keys is
+ * now stored as that custom field (an explicit `customFields` value wins), and
+ * `assigneeEmail` is read as `assignedTechEmail`. Returns the keys still not
+ * understood, for meta.ignoredFields.
+ */
+async function liftTopLevelCustomFields(req, body, consumedKeys) {
+  if (body.assigneeEmail !== undefined && body.assignedTechEmail === undefined) {
+    body.assignedTechEmail = body.assigneeEmail;
+  }
+  delete body.assigneeEmail;
+  const extra = Object.keys(body).filter((k) => !consumedKeys.has(k));
+  if (extra.length === 0) return [];
+  const { default: customFieldService, normalizeFieldKey } = await import('../services/customFieldService.js');
+  const defs = await Promise.resolve()
+    .then(() => customFieldService.listDefinitions(req.workspaceId))
+    .catch(() => []);
+  const known = new Set((defs || []).map((d) => d.key));
+  const ignored = [];
+  for (const key of extra) {
+    const fieldKey = normalizeFieldKey(key);
+    if (!known.has(fieldKey)) { ignored.push(key); continue; }
+    if (body.customFields === undefined || body.customFields === null || typeof body.customFields !== 'object') body.customFields = {};
+    const explicit = Object.keys(body.customFields).some((k) => normalizeFieldKey(k) === fieldKey);
+    if (!explicit) body.customFields[fieldKey] = body[key];
+    delete body[key];
+  }
+  return ignored;
+}
+
 /**
  * A due date from the outside is an SLA override, so it is reserved for
  * trusted-intake credentials — the systems that already agreed the date with
@@ -400,9 +440,9 @@ function assertCustomFieldsWriteScope(req) {
 
 router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const body = req.body || {};
+  const ignoredFields = await liftTopLevelCustomFields(req, body, CREATE_BODY_KEYS);
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   await resolveAssigneeEmail(req, body);
-  const ignoredFields = Object.keys(body).filter((k) => !CREATE_BODY_KEYS.has(k));
   // A RESUBMISSION never touches status, assignee or due date (those belong to
   // the people working the ticket), so on that path they are reported as
   // ignored even though a fresh create accepts them.
@@ -566,21 +606,41 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   const id = (await tid(req));
   const body = req.body || {};
   const actor = apiActor(req);
+  const ignoredFields = await liftTopLevelCustomFields(req, body, PATCH_BODY_KEYS);
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   await resolveAssigneeEmail(req, body);
-  if (body.status !== undefined) {
-    // Simorgh C4/D3: a reason (+ note) may ride with a resolving status change.
-    const resolution = { resolutionReason: body.resolutionReason ?? null, resolutionNote: body.resolutionNote ?? null };
-    const { default: fsBornStatusService } = await import('../services/fsBornStatusService.js');
-    if (await fsBornStatusService.isFreshServiceBorn(id, req.workspaceId)) {
-      // FreshService-born (23 Sep 2026): written to FreshService first, per-client opt-in.
-      if (req.apiKey.fsStatusWrite !== true) {
-        throw problems.forbidden('This ticket belongs to FreshService. Changing its status through the API needs the "may change status on FreshService tickets" permission on this client — ask the Ticket Pulse team.', 'fs_status_write_not_enabled');
-      }
-      await fsBornStatusService.changeFsBornStatus(id, req.workspaceId, body.status, actor, resolution);
-    } else {
-      await ticketService.changeStatus(id, req.workspaceId, body.status, actor, resolution);
+  // QA 10-06 #6: custom fields, fields and the assignee are written BEFORE the
+  // status. A close fires the "resolved or closed" workflows at once, and the
+  // BST e-mail used to run before bst_number had landed in the same call.
+  if (body.customFields !== undefined) {
+    // NO auto-provisioning on PATCH — creation is the intake path that
+    // provisions definitions. Unknown keys are a 422 naming every offender
+    // (setValues alone would stop at the first one).
+    const { default: customFieldService, normalizeFieldKey } = await import('../services/customFieldService.js');
+    // Keys are normalised the way create normalises them (camelCase →
+    // snake_case): the sandbox acceptance sent `simorghVerdict` on PATCH the
+    // way it had on POST and every key came back "unknown".
+    const values = Object.fromEntries(Object.entries(body.customFields || {}).map(([k, v]) => [normalizeFieldKey(k), v]));
+    const known = new Set((await customFieldService.listDefinitions(req.workspaceId)).map((d) => d.key));
+    let unknown = Object.keys(values).filter((k) => !known.has(k));
+    if (unknown.length && req.apiKey.trustedIntake === true) {
+      // A trusted-intake credential IS an intake path (Simorgh: the tier-2
+      // fields exist only once the hunt report lands, minutes after create).
+      // Provision the way create does; whatever create would reject stays a 422.
+      const provisioned = await customFieldService.setValuesAtCreate(req.workspaceId, values, { autoProvision: true, actor });
+      unknown = (provisioned.rejected || []).map((r) => r.key);
+      if (!unknown.length) res.set('X-Provisioned-Custom-Fields', (provisioned.provisioned || []).join(','));
     }
+    if (unknown.length) {
+      throw new ApiProblem({
+        status: 422,
+        code: 'unknown_custom_fields',
+        title: 'Unknown custom fields',
+        detail: `Unknown custom field key(s): ${unknown.join(', ')}. Definitions are created in Settings or auto-provisioned at ticket creation — see GET /api/v1/custom-fields for this workspace's fields.`,
+        errors: unknown.map((k) => ({ field: `customFields.${k}`, code: 'unknown_field' })),
+      });
+    }
+    await customFieldService.setValues(id, req.workspaceId, values, actor);
   }
   if (body.assignedTechId !== undefined) {
     await ticketService.assignTicket(id, req.workspaceId, body.assignedTechId ? Number(body.assignedTechId) : null, actor);
@@ -629,35 +689,19 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
       await ticketService._audit(id, 'fields_updated', actor, { changes: { externalRef: { from: null, to: next } } });
     }
   }
-  if (body.customFields !== undefined) {
-    // NO auto-provisioning on PATCH — creation is the intake path that
-    // provisions definitions. Unknown keys are a 422 naming every offender
-    // (setValues alone would stop at the first one).
-    const { default: customFieldService, normalizeFieldKey } = await import('../services/customFieldService.js');
-    // Keys are normalised the way create normalises them (camelCase →
-    // snake_case): the sandbox acceptance sent `simorghVerdict` on PATCH the
-    // way it had on POST and every key came back "unknown".
-    const values = Object.fromEntries(Object.entries(body.customFields || {}).map(([k, v]) => [normalizeFieldKey(k), v]));
-    const known = new Set((await customFieldService.listDefinitions(req.workspaceId)).map((d) => d.key));
-    let unknown = Object.keys(values).filter((k) => !known.has(k));
-    if (unknown.length && req.apiKey.trustedIntake === true) {
-      // A trusted-intake credential IS an intake path (Simorgh: the tier-2
-      // fields exist only once the hunt report lands, minutes after create).
-      // Provision the way create does; whatever create would reject stays a 422.
-      const provisioned = await customFieldService.setValuesAtCreate(req.workspaceId, values, { autoProvision: true, actor });
-      unknown = (provisioned.rejected || []).map((r) => r.key);
-      if (!unknown.length) res.set('X-Provisioned-Custom-Fields', (provisioned.provisioned || []).join(','));
+  if (body.status !== undefined) {
+    // Simorgh C4/D3: a reason (+ note) may ride with a resolving status change.
+    const resolution = { resolutionReason: body.resolutionReason ?? null, resolutionNote: body.resolutionNote ?? null };
+    const { default: fsBornStatusService } = await import('../services/fsBornStatusService.js');
+    if (await fsBornStatusService.isFreshServiceBorn(id, req.workspaceId)) {
+      // FreshService-born (23 Sep 2026): written to FreshService first, per-client opt-in.
+      if (req.apiKey.fsStatusWrite !== true) {
+        throw problems.forbidden('This ticket belongs to FreshService. Changing its status through the API needs the "may change status on FreshService tickets" permission on this client — ask the Ticket Pulse team.', 'fs_status_write_not_enabled');
+      }
+      await fsBornStatusService.changeFsBornStatus(id, req.workspaceId, body.status, actor, resolution);
+    } else {
+      await ticketService.changeStatus(id, req.workspaceId, body.status, actor, resolution);
     }
-    if (unknown.length) {
-      throw new ApiProblem({
-        status: 422,
-        code: 'unknown_custom_fields',
-        title: 'Unknown custom fields',
-        detail: `Unknown custom field key(s): ${unknown.join(', ')}. Definitions are created in Settings or auto-provisioned at ticket creation — see GET /api/v1/custom-fields for this workspace's fields.`,
-        errors: unknown.map((k) => ({ field: `customFields.${k}`, code: 'unknown_field' })),
-      });
-    }
-    await customFieldService.setValues(id, req.workspaceId, values, actor);
   }
   // addNote (QA 09-16 #2): written LAST so it describes the state the call
   // produced. Same request, same idempotency key — no second call to fail.
@@ -668,7 +712,12 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     note = { entryId: written?.entry?.id ?? written?.id ?? null };
   }
   const ticket = await ticketService.getTicket(id, req.workspaceId, API_READ);
-  res.json({ success: true, data: ticketShape(ticket), ...(note ? { note } : {}) });
+  res.json({
+    success: true,
+    data: ticketShape(ticket),
+    ...(note ? { note } : {}),
+    ...(ignoredFields.length ? { meta: { ignoredFields } } : {}),
+  });
 }));
 
 // Parked (plans/PARKED_BUILD_PLAN.md): park = a marker, the ticket stays

@@ -62,6 +62,8 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
+import SkipNoiseSwitch from './SkipNoiseSwitch';
+import { conditionGroupPatch, visibleConditionGroup } from '../../utils/conditionNoise';
 import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
@@ -7509,6 +7511,34 @@ function MockAuditPanel({
   );
 }
 
+// QA 10-06 #2: any step can be renamed — the inspector title is the name.
+// Saves on Enter or when focus leaves; Escape puts the old name back.
+function StepNameField({ value, placeholder, onCommit }) {
+  const [text, setText] = useState(value);
+  useEffect(() => { setText(value); }, [value]);
+  const commit = () => {
+    const next = text.trim();
+    if (next && next !== value) onCommit(next.slice(0, 80));
+    else setText(value);
+  };
+  return (
+    <input
+      value={text}
+      placeholder={placeholder}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+        if (e.key === 'Escape') { e.stopPropagation(); setText(value); e.currentTarget.blur(); }
+      }}
+      aria-label="Step name"
+      title="Rename this step"
+      data-testid="step-name"
+      className="tp-focus-ring -mx-1 w-full min-w-0 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold text-foreground hover:border-border focus:border-input"
+    />
+  );
+}
+
 function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflow, onRename }) {
   const { resolvedTheme } = useTheme();
   const [addOpen, setAddOpen] = useState(false);
@@ -10229,15 +10259,16 @@ export default function NotificationWorkflowsPanel({
       ))?.target || '';
       return (
         <div className="space-y-4">
+          {/* QA 10-06 #2: noise is the step's own switch, checked first. */}
+          <SkipNoiseSwitch data={selectedNode.data || {}} onPatch={updateNodeData} />
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-200">Conditions</div>
             {/* Structured AND/OR builder — compiled to json-logic by the engine
                 at run time; takes precedence over the raw rule below. */}
             <ConditionGroupBuilder
-              value={selectedNode.data?.conditionGroup}
-              onChange={(group) => updateNodeData({ conditionGroup: group })}
+              value={visibleConditionGroup(selectedNode.data || {})}
+              onChange={(group) => updateNodeData(conditionGroupPatch(selectedNode.data || {}, group))}
               onClear={() => updateNodeData({ conditionGroup: null })}
-              rawRule={selectedNode.data?.rule}
             />
           </div>
 
@@ -12194,7 +12225,12 @@ export default function NotificationWorkflowsPanel({
                               </button>
                               <div className="min-w-0">
                                 <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{NODE_LABELS[selectedNode.type] || selectedNode.type}</div>
-                                <h3 className="truncate text-sm font-semibold text-foreground">{selectedNode.data?.label || selectedNode.id}</h3>
+                                <StepNameField
+                                  key={selectedNode.id}
+                                  value={selectedNode.data?.label || ''}
+                                  placeholder={selectedNode.id}
+                                  onCommit={(label) => updateNodeData({ label })}
+                                />
                               </div>
                             </div>
                             {selectedNode?.type === 'llm_generate' && (

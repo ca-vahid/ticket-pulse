@@ -462,6 +462,14 @@ export const dashboardAPI = {
 /**
  * Settings API
  */
+// QA 10-06 #7: after a custom field is created, changed or removed, open
+// workflow condition builders fetch their field list again
+// (ConditionGroupBuilder listens for this event).
+const customFieldsChanged = (res) => {
+  try { window.dispatchEvent(new CustomEvent('tp:condition-fields-changed')); } catch { /* no window */ }
+  return res;
+};
+
 export const settingsAPI = {
   getAll: async () => {
     return await api.get('/settings');
@@ -595,9 +603,10 @@ export const settingsAPI = {
   getTicketForm: () => api.get('/settings/ticket-form'),
   updateTicketForm: (data) => api.put('/settings/ticket-form', data),
   getCustomFields: () => api.get('/settings/custom-fields'),
-  createCustomField: (data) => api.post('/settings/custom-fields', data),
-  updateCustomField: (id, data) => api.patch(`/settings/custom-fields/${id}`, data),
-  deleteCustomField: (id) => api.delete(`/settings/custom-fields/${id}`),
+  // QA 10-06 #7: a saved field reaches open workflow condition builders.
+  createCustomField: (data) => api.post('/settings/custom-fields', data).then(customFieldsChanged),
+  updateCustomField: (id, data) => api.patch(`/settings/custom-fields/${id}`, data).then(customFieldsChanged),
+  deleteCustomField: (id) => api.delete(`/settings/custom-fields/${id}`).then(customFieldsChanged),
   getPublicTicketStatusSettings: (config = {}) => api.get('/settings/public-ticket-status', config),
   updatePublicTicketStatusSettings: (data, config = {}) => api.put('/settings/public-ticket-status', data, config),
   getFeedbackSettings: (config = {}) => api.get('/settings/feedback-settings', config),
