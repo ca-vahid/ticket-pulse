@@ -6,7 +6,7 @@ import {
   Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
-import ApprovalComposer from '../components/tickets/ApprovalComposer';
+import ApprovalComposer, { ConfirmSheet } from '../components/tickets/ApprovalComposer';
 import ApprovalTicketBrief from '../components/approvals/ApprovalTicketBrief';
 import { splitImageRefs } from '../utils/approvalBrief';
 import AppHeader from '../components/AppHeader';
@@ -40,7 +40,7 @@ const STATUS_META = {
   info_requested: { label: 'Needs info', art: 'approval-question', dot: 'bg-violet-500' },
   approved: { label: 'Approved', art: 'approval-stamp', dot: 'bg-emerald-500' },
   rejected: { label: 'Not approved', art: 'approval-rejected', dot: 'bg-red-500' },
-  cancelled: { label: 'Cancelled', art: null, dot: 'bg-muted-foreground/50' },
+  cancelled: { label: 'Cancelled', art: 'approval-cancelled', dot: 'bg-muted-foreground/50' },
   escalated: { label: 'Escalated', art: 'approval-escalate', dot: 'bg-amber-500' },
   forwarded: { label: 'Forwarded', art: 'approval-forward', dot: 'bg-blue-500' },
 };
@@ -320,12 +320,45 @@ function PeopleLine({ a, withApprover = false, className = '' }) {
   );
 }
 
+/**
+ * The status as its own column beside the row (Vahid, 7 Oct 2026): the plain
+ * icon with the word under it, in the status colour — not squeezed into the
+ * title line.
+ */
+function StatusBlock({ status }) {
+  const meta = STATUS_META[status] || {};
+  const ic = STATUS_ICON[status] || STATUS_ICON.cancelled;
+  return (
+    <div className="flex w-[4.5rem] flex-shrink-0 flex-col items-center gap-1 pt-0.5 text-center" data-testid="approval-status">
+      <StatusGlyph status={status} size="h-8 w-8" />
+      <span className={`text-[11.5px] font-semibold leading-tight ${ic.text}`}>{meta.label || status}</span>
+    </div>
+  );
+}
+
+/** Whole-card click / Enter / Space opens a row — but not from its own links and buttons. */
+const rowToggleProps = (isOpen, toggle, label) => ({
+  role: 'button',
+  tabIndex: 0,
+  'aria-expanded': isOpen,
+  'aria-label': label,
+  onClick: (e) => {
+    if (e.target.closest('a, button, input, textarea, select, [contenteditable="true"]')) return;
+    if (window.getSelection?.()?.toString()) return; // selecting text is not a click
+    toggle();
+  },
+  onKeyDown: (e) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  },
+});
+
 /** The request at reading size, two lines, pictures counted rather than named. */
-function RequestLine({ note, muted = false }) {
+function RequestLine({ note, muted = false, className = 'mt-2.5' }) {
   const { text, names } = splitImageRefs(cleanNoteText(note || ''));
   if (!text && !names.length) return null;
   return (
-    <p className={`mt-1 line-clamp-2 text-[14px] leading-snug [overflow-wrap:anywhere] ${muted ? 'text-foreground/70' : 'text-foreground/90'}`} data-testid="approval-request">
+    <p className={`${className} line-clamp-2 text-[14px] leading-relaxed [overflow-wrap:anywhere] ${muted ? 'text-foreground/70' : 'text-foreground/90'}`} data-testid="approval-request">
       {text && <>&ldquo;{text}&rdquo;</>}
       {names.length > 0 && <span className="text-muted-foreground">{text ? ' · ' : ''}{names.length === 1 ? '1 picture' : `${names.length} pictures`}</span>}
     </p>
@@ -430,6 +463,8 @@ export default function ApprovalsInbox() {
   const [meta, setMeta] = useState(null);
   // Approvals v3: which row has the composer open; people load lazily for the forward picker.
   const [openId, setOpenId] = useState(null);
+  // Quick approve (7 Oct 2026): the row's button approves without a note, after the usual confirm.
+  const [quickId, setQuickId] = useState(null);
   const [people, setPeople] = useState(null);
   // Everyone seen on any approval so far (names + addresses) — feeds the
   // approver / requester pickers even when the current filter hides them.
@@ -722,41 +757,33 @@ export default function ApprovalsInbox() {
             ) : (
               <ul className="space-y-1.5">
                 {overview.items.map((a) => {
-                  const meta_ = STATUS_META[a.status] || {};
                   const isOpen = expanded.has(a.id);
                   const decided = cleanNoteText(a.decisionNote || a.conditionNote || '');
                   return (
-                    <li key={a.id} className="tp-card rounded-xl px-4 py-3 transition-shadow hover:shadow-subtle" data-testid="approval-row">
-                      <div className="flex gap-3">
-                        <StatusGlyph status={a.status} />
+                    <li key={a.id} className="tp-card overflow-hidden rounded-xl transition-shadow hover:shadow-subtle" data-testid="approval-row">
+                      <div {...rowToggleProps(isOpen, () => toggleExpanded(a.id), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-4 px-4 py-4 hover:bg-muted/25">
+                        <StatusBlock status={a.status} />
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
-                            <span className={`whitespace-nowrap font-semibold ${(STATUS_ICON[a.status] || STATUS_ICON.cancelled).text}`}>{meta_.label || a.status}</span>
-                            <Dot />
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
                             <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
                             <TicketRef a={a} state={backState} />
                             {a.categoryName && <span className="text-muted-foreground">· {a.categoryName}</span>}
-                            <When at={a.decidedAt || a.createdAt} className="ml-auto" />
                           </div>
-                          <PeopleLine a={a} withApprover className="mt-0.5" />
+                          <PeopleLine a={a} withApprover className="mt-2" />
                           {!isOpen && <RequestLine note={a.requestNote} muted={!['pending', 'info_requested'].includes(a.status)} />}
                           {!isOpen && decided && (
-                            <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
+                            <p className="mt-1.5 truncate text-[12.5px] text-muted-foreground">
                               <span className="font-medium text-foreground/75">{(a.approverName || prettyName(a.approverEmail)).split(' ')[0]}:</span> &ldquo;{decided}&rdquo;
                             </p>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => toggleExpanded(a.id)}
-                          aria-expanded={isOpen}
-                          className="tp-focus-ring inline-flex h-8 flex-shrink-0 items-center gap-1 self-start rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                        >
-                          {isOpen ? <>Close <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /></> : <>Details <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></>}
-                        </button>
+                        <div className="flex flex-shrink-0 flex-col items-end gap-2">
+                          <When at={a.decidedAt || a.createdAt} />
+                          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                        </div>
                       </div>
                       {isOpen && (
-                        <div className="mt-3 grid gap-5 border-t border-border/70 pt-3 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                        <div className="grid gap-5 border-t border-border/70 px-4 py-4 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
                           <ApprovalTicketBrief approval={a} backState={backState} />
                           <div className="min-w-0 lg:border-l lg:border-border/70 lg:pl-5">
                             <DecisionRecord a={a} />
@@ -784,32 +811,44 @@ export default function ApprovalsInbox() {
                     const isOpen = openId === a.id;
                     return (
                       <li key={a.id} className="tp-card overflow-hidden rounded-xl" data-testid="inbox-row">
-                        <div className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center">
-                          <StatusGlyph status="pending" />
+                        <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-4 px-4 py-4 hover:bg-muted/25">
+                          <StatusBlock status="pending" />
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
                               <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
                               <TicketRef a={a} state={backState} />
                               {a.categoryName && <span className="text-muted-foreground">· {a.categoryName}</span>}
                               {isOpen && <span className="text-muted-foreground">· {a.isFinal ? 'final approval' : a.tierCount > 1 ? `${a.tierName}, not the final approval` : 'not the final approval'}</span>}
                               <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
                             </div>
-                            <PeopleLine a={a} className="mt-0.5" />
+                            <PeopleLine a={a} className="mt-2" />
                             {!isOpen && <RequestLine note={a.requestNote} />}
                           </div>
-                          <div className="flex flex-shrink-0 items-center justify-between gap-3 lg:flex-col lg:items-end lg:gap-1.5">
+                          <div className="flex flex-shrink-0 flex-col items-end gap-2">
                             <When at={a.createdAt} />
-                            {isOpen ? (
-                              <button type="button" onClick={() => setOpenId(null)} className="tp-focus-ring inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
-                                Close <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-                              </button>
-                            ) : (
-                              <button onClick={() => openComposer(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Decide <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                            {!isOpen && (
+                              <button
+                                type="button"
+                                onClick={() => setQuickId(a.id)}
+                                disabled={busyId === a.id}
+                                title="Approve without a note — you confirm first"
+                                className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+                              >
+                                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Quick approve
                               </button>
                             )}
+                            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                           </div>
                         </div>
+                        {quickId === a.id && (
+                          <ConfirmSheet
+                            pending={{ decision: 'approved', note: null, conditionNote: null, amountLabel: a.amountLabel || null, notifyRequester: false }}
+                            approval={{ ...a, ticketRef: a.displayRef }}
+                            busy={busyId === a.id}
+                            onConfirm={() => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, 'approved', null, { noteHtml: null, conditionNote: null, notifyRequester: false }), a.id).finally(() => setQuickId(null))}
+                            onCancel={() => setQuickId(null)}
+                          />
+                        )}
                         {isOpen && (
                           <div className="grid border-t border-border/70 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
                             <div className="min-w-0 px-4 py-4 lg:border-r lg:border-border/70">
@@ -853,7 +892,7 @@ export default function ApprovalsInbox() {
                     <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5">
                       <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-4">
                         <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <StatusGlyph status="info_requested" />
+                          <StatusBlock status="info_requested" />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 text-[12px]">
                               <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>

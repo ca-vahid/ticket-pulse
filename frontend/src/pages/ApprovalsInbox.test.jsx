@@ -123,10 +123,14 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     await waitFor(() => expect(apiOverrides.approvalsOverview).toHaveBeenLastCalledWith({}));
   });
 
-  test('For you: one Decide button, no Ask / Escalate / Forward until it opens; the ticket number is a link after the title (option A, 7 Oct 2026)', async () => {
+  test('For you: the whole card opens the row, Quick approve asks first, no Ask / Escalate / Forward until it opens; the ticket number is a link (7 Oct 2026)', async () => {
     renderPage();
     await screen.findByText('New laptop for Rita');
-    expect(screen.getByRole('button', { name: /Decide/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Decide/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Quick approve/ }));
+    expect(await screen.findByText('Approve this request?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+    expect(screen.getByTestId('approval-status')).toHaveTextContent('Pending');
     expect(screen.queryByRole('button', { name: /Escalate|Forward|^Ask/ })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open ticket TP-77' })).toHaveAttribute('href', '/tickets/501?tab=approvals');
     expect(screen.getByRole('link', { name: 'Open ticket TP-77' })).toHaveTextContent('TP-77');
@@ -142,11 +146,11 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     expect(line).toHaveTextContent('1 picture');
     expect(line).not.toHaveTextContent('[Image:');
     expect(screen.queryByRole('button', { name: /More$/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Decide/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Open New laptop for Rita/ }));
     const brief = await screen.findByTestId('approval-brief');
     expect(brief).toHaveTextContent('one set of controls.');
     expect(screen.getByTestId('approval-choices')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Close/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Close New laptop for Rita/ })).toHaveAttribute('aria-expanded', 'true');
     apiOverrides.approvalInbox = vi.fn(() => Promise.resolve([pendingRow]));
   });
 

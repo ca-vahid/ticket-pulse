@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.16-preview';
+export const APP_VERSION = '4.2.17-preview';
 
 export const changelog = [
+  {
+    version: '4.2.17-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'improvement', html: '<strong>Approvals: clearer rows</strong> &mdash; the status now has its own column beside each request (a plain icon with the word under it) instead of sitting in the title line, with new, simpler status icons across Approvals and the ticket page. Title, people and request each have room to breathe.' },
+      { type: 'improvement', html: '<strong>Click anywhere on an approval to open it</strong> &mdash; the whole card opens the request, the ticket summary and your decision. <strong>Quick approve</strong> on the row approves without a note, after the usual confirmation.' },
+      { type: 'improvement', html: '<strong>Assetron devices in the approval</strong> &mdash; when a laptop is on hold in Assetron for the request, the opened approval shows it (model, serial, specs, who it is for and its Assetron state), as the ticket page does.' },
+    ],
+  },
   {
     version: '4.2.16-preview',
     date: 'October 7, 2026',
