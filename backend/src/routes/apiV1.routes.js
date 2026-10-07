@@ -347,18 +347,27 @@ const PATCH_BODY_KEYS = new Set([
  * understood, for meta.ignoredFields.
  */
 async function liftTopLevelCustomFields(req, body, consumedKeys) {
+  // The alias is a convenience, so it never fails the call: an address that
+  // is not an active agent here is reported back instead of a 400.
+  const aliasIgnored = [];
   if (body.assigneeEmail !== undefined && body.assignedTechEmail === undefined) {
-    body.assignedTechEmail = body.assigneeEmail;
+    const email = String(body.assigneeEmail || '').trim();
+    const tech = email
+      ? await Promise.resolve()
+        .then(() => prisma.technician.findFirst({ where: { workspaceId: req.workspaceId, isActive: true, email: { equals: email, mode: 'insensitive' } }, select: { id: true } }))
+        .catch(() => null)
+      : null;
+    if (tech) body.assignedTechEmail = email; else aliasIgnored.push('assigneeEmail');
   }
   delete body.assigneeEmail;
   const extra = Object.keys(body).filter((k) => !consumedKeys.has(k));
-  if (extra.length === 0) return [];
+  if (extra.length === 0) return aliasIgnored;
   const { default: customFieldService, normalizeFieldKey } = await import('../services/customFieldService.js');
   const defs = await Promise.resolve()
     .then(() => customFieldService.listDefinitions(req.workspaceId))
     .catch(() => []);
   const known = new Set((defs || []).map((d) => d.key));
-  const ignored = [];
+  const ignored = [...aliasIgnored];
   for (const key of extra) {
     const fieldKey = normalizeFieldKey(key);
     if (!known.has(fieldKey)) { ignored.push(key); continue; }
