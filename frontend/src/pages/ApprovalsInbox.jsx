@@ -3,12 +3,12 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import {
   Ban, CheckCircle2, Clock, XCircle,
   Loader2, Check, X, MessageCircleQuestion, Inbox, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
-  Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp,
+  Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp, Tag,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer, { ConfirmSheet } from '../components/tickets/ApprovalComposer';
 import ApprovalTicketBrief from '../components/approvals/ApprovalTicketBrief';
-import { splitImageRefs } from '../utils/approvalBrief';
+import { groupApprovals, splitImageRefs } from '../utils/approvalBrief';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
@@ -21,6 +21,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { BrandArt, PersonAvatar, formatDayTime, timeAgo } from '../components/tickets/ticketUi';
+import { motionReduced } from '../utils/motionPreference';
 import { cleanNoteText } from '../utils/noteText';
 
 /**
@@ -303,7 +304,8 @@ const TicketRef = ({ a, state }) => (
 );
 
 /** "Marcus Blackstock asks for Seifeddine Reguige · approver Vahid Haeri" */
-function PeopleLine({ a, withApprover = false, className = '' }) {
+function PeopleLine({ a, withApprover = false, approvers = null, approverLabel = null, className = '' }) {
+  const shownApprovers = approvers || (a.approverName || a.approverEmail ? [{ name: a.approverName, email: a.approverEmail }] : []);
   const byEmail = lower(a.requestedBy);
   const forEmail = lower(a.requesterEmail);
   const self = byEmail && forEmail && byEmail === forEmail;
@@ -313,11 +315,73 @@ function PeopleLine({ a, withApprover = false, className = '' }) {
       {self || !(a.requesterName || a.requesterEmail)
         ? <span>asks</span>
         : <><span>asks for</span><InlinePerson name={a.requesterName} email={a.requesterEmail} /></>}
-      {withApprover && (a.approverName || a.approverEmail) && (
-        <><Dot /><span>approver</span><InlinePerson name={a.approverName} email={a.approverEmail} /></>
+      {withApprover && shownApprovers.length > 0 && (
+        <>
+          <Dot />
+          <span>{approverLabel || (shownApprovers.length > 1 ? 'approvers' : 'approver')}</span>
+          {shownApprovers.map((p, i) => (
+            <span key={p.email || i} className="inline-flex items-center gap-1.5">
+              {i > 0 && <span className="text-muted-foreground/60">or</span>}
+              <InlinePerson name={p.name} email={p.email} />
+            </span>
+          ))}
+        </>
       )}
     </div>
   );
+}
+
+/**
+ * The approval category is what the approver is deciding about (Vahid, 7 Oct
+ * 2026: "one of the most important things") — its own line above the title,
+ * in the accent colour, not a grey suffix.
+ */
+function CategoryLine({ name, className = '' }) {
+  if (!name) return null;
+  return (
+    <div className={`mb-1 flex items-center gap-1.5 text-[13px] font-semibold text-primary ${className}`} data-testid="approval-category">
+      <Tag className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+      <span className="[overflow-wrap:anywhere]">{name}</span>
+    </div>
+  );
+}
+
+/**
+ * Opening and closing a row glides (grid-rows 0fr ↔ 1fr) instead of snapping;
+ * the content stays mounted until it has closed. Off under the motion setting.
+ */
+function Collapse({ open, children }) {
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      let r2 = 0;
+      const r1 = requestAnimationFrame(() => { r2 = requestAnimationFrame(() => setShown(true)); });
+      return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
+    }
+    setShown(false);
+    if (motionReduced()) { setMounted(false); return undefined; }
+    const t = setTimeout(() => setMounted(false), 320);
+    return () => clearTimeout(t);
+  }, [open]);
+  if (!mounted) return null;
+  return (
+    <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-off:transition-none ${shown ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+/** Who the people line names as approver(s) for a grouped row. */
+function groupApprovers(g) {
+  const a = g.primary;
+  if (a.status === 'approved') return { label: 'approved by', list: [{ name: a.approverName, email: a.approverEmail }] };
+  if (a.status === 'rejected') return { label: 'not approved by', list: [{ name: a.approverName, email: a.approverEmail }] };
+  const open = g.members.filter((m) => ['pending', 'info_requested'].includes(m.status));
+  const list = (open.length ? open : g.members).map((m) => ({ name: m.approverName, email: m.approverEmail }));
+  const seen = new Set();
+  return { label: null, list: list.filter((p) => { const k = lower(p.email); if (seen.has(k)) return false; seen.add(k); return true; }) };
 }
 
 /**
@@ -366,7 +430,8 @@ function RequestLine({ note, muted = false, className = 'mt-2.5' }) {
 }
 
 /** What happened to a decided approval, for the opened All-approvals row. */
-function DecisionRecord({ a }) {
+function DecisionRecord({ a, members = null }) {
+  const others = (members || []).filter((m) => m.id !== a.id);
   const m = STATUS_ICON[a.status] || STATUS_ICON.cancelled;
   const label = STATUS_META[a.status]?.label || a.status;
   const note = cleanNoteText(a.decisionNote || '');
@@ -378,6 +443,9 @@ function DecisionRecord({ a }) {
       <p className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
         {a.status === 'pending' || a.status === 'info_requested' ? 'Waiting on' : 'Decided by'}
         <InlinePerson name={a.approverName} email={a.approverEmail} />
+        {(a.status === 'pending' || a.status === 'info_requested') && others.filter((m) => m.status === a.status).map((m) => (
+          <span key={m.id} className="inline-flex items-center gap-1.5"><span className="text-muted-foreground/60">or</span><InlinePerson name={m.approverName} email={m.approverEmail} /></span>
+        ))}
       </p>
       <p className="text-[12px] text-muted-foreground">
         {a.decidedAt ? `${formatDayTime(a.decidedAt)} · ${timeAgo(a.decidedAt)}` : `Asked ${formatDayTime(a.createdAt)} · waiting`}
@@ -740,7 +808,7 @@ export default function ApprovalsInbox() {
               </div>
               {activeFilterCount > 0 && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{overview?.items?.length ?? 0} approval{(overview?.items?.length ?? 0) === 1 ? '' : 's'} match</span>
+                  <span>{groupApprovals(overview?.items || []).length} request{groupApprovals(overview?.items || []).length === 1 ? '' : 's'} match</span>
                   <button onClick={() => setFilters(EMPTY_FILTERS)} className="tp-focus-ring inline-flex items-center gap-1 rounded text-blue-700 hover:underline dark:text-blue-200">
                     <X className="h-3 w-3" aria-hidden="true" /> Clear filters
                   </button>
@@ -756,20 +824,22 @@ export default function ApprovalsInbox() {
               </div>
             ) : (
               <ul className="space-y-1.5">
-                {overview.items.map((a) => {
+                {groupApprovals(overview.items).map((g) => {
+                  const a = g.primary;
+                  const who = groupApprovers(g);
                   const isOpen = expanded.has(a.id);
                   const decided = cleanNoteText(a.decisionNote || a.conditionNote || '');
                   return (
-                    <li key={a.id} className="tp-card overflow-hidden rounded-xl transition-shadow hover:shadow-subtle" data-testid="approval-row">
+                    <li key={g.key} className="tp-card overflow-hidden rounded-xl transition-shadow hover:shadow-subtle" data-testid="approval-row">
                       <div {...rowToggleProps(isOpen, () => toggleExpanded(a.id), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-4 px-4 py-4 hover:bg-muted/25">
                         <StatusBlock status={a.status} />
                         <div className="min-w-0 flex-1">
+                          <CategoryLine name={a.categoryName} />
                           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
                             <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
                             <TicketRef a={a} state={backState} />
-                            {a.categoryName && <span className="text-muted-foreground">· {a.categoryName}</span>}
                           </div>
-                          <PeopleLine a={a} withApprover className="mt-2" />
+                          <PeopleLine a={a} withApprover approvers={who.list} approverLabel={who.label} className="mt-2" />
                           {!isOpen && <RequestLine note={a.requestNote} muted={!['pending', 'info_requested'].includes(a.status)} />}
                           {!isOpen && decided && (
                             <p className="mt-1.5 truncate text-[12.5px] text-muted-foreground">
@@ -782,14 +852,14 @@ export default function ApprovalsInbox() {
                           <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                         </div>
                       </div>
-                      {isOpen && (
-                        <div className="grid gap-5 border-t border-border/70 px-4 py-4 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                      <Collapse open={isOpen}>
+                        <div className="grid gap-5 border-t border-border/70 px-4 py-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
                           <ApprovalTicketBrief approval={a} backState={backState} />
                           <div className="min-w-0 lg:border-l lg:border-border/70 lg:pl-5">
-                            <DecisionRecord a={a} />
+                            <DecisionRecord a={a} members={g.members} />
                           </div>
                         </div>
-                      )}
+                      </Collapse>
                     </li>
                   );
                 })}
@@ -814,10 +884,10 @@ export default function ApprovalsInbox() {
                         <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-4 px-4 py-4 hover:bg-muted/25">
                           <StatusBlock status="pending" />
                           <div className="min-w-0 flex-1">
+                            <CategoryLine name={a.categoryName} />
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
                               <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
                               <TicketRef a={a} state={backState} />
-                              {a.categoryName && <span className="text-muted-foreground">· {a.categoryName}</span>}
                               {isOpen && <span className="text-muted-foreground">· {a.isFinal ? 'final approval' : a.tierCount > 1 ? `${a.tierName}, not the final approval` : 'not the final approval'}</span>}
                               <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
                             </div>
@@ -849,8 +919,8 @@ export default function ApprovalsInbox() {
                             onCancel={() => setQuickId(null)}
                           />
                         )}
-                        {isOpen && (
-                          <div className="grid border-t border-border/70 animate-popIn lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                        <Collapse open={isOpen}>
+                          <div className="grid border-t border-border/70 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
                             <div className="min-w-0 px-4 py-4 lg:border-r lg:border-border/70">
                               <ApprovalTicketBrief approval={a} backState={backState} />
                             </div>
@@ -875,7 +945,7 @@ export default function ApprovalsInbox() {
                               />
                             </div>
                           </div>
-                        )}
+                        </Collapse>
                       </li>
                     );
                   })}
@@ -894,6 +964,7 @@ export default function ApprovalsInbox() {
                         <div className="flex min-w-0 flex-1 items-center gap-3">
                           <StatusBlock status="info_requested" />
                           <div className="min-w-0 flex-1">
+                            <CategoryLine name={a.categoryName} />
                             <div className="flex items-center gap-2 text-[12px]">
                               <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
                               <TicketIcon a={a} state={backState} />

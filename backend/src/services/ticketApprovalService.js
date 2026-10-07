@@ -1228,6 +1228,8 @@ class TicketApprovalService {
       amountLabel: formatAmount(amountValue, currency),
       amountCurrency: amountValue !== null ? currency : null,
       ticketId: a.ticketId,
+      // The rows of one request to several approvers (Approvals page groups them).
+      requestGroupId: a.requestGroupId || null,
       displayRef: ticketDisplayRef(a.ticket),
       subject: a.ticket?.subject || null,
       requesterName: a.ticket?.requester?.name || null,
