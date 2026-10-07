@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Paperclip } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import AttachmentPreviewModal from '../tickets/AttachmentPreviewModal';
+import ApprovalLaptop from '../tickets/ApprovalLaptop';
 import { cleanNoteText } from '../../utils/noteText';
 import { briefDescription, splitImageRefs } from '../../utils/approvalBrief';
 
@@ -34,6 +35,30 @@ function useApprovalTicket(ticketId, enabled = true) {
     return () => { alive = false; };
   }, [ticketId, enabled]);
   return state;
+}
+
+/**
+ * Assetron devices held for this request (7 Oct 2026): the laptop the agent
+ * reserved, shown the way the ticket page shows it, so the approver sees what
+ * they are approving. Keyed by the approval's request group, read from the
+ * ticket's own approvals list.
+ */
+function useAssetronHolds(ticket, approvalId) {
+  const groupId = (ticket?.approvals || []).find((x) => x.id === approvalId)?.requestGroupId || null;
+  const [list, setList] = useState([]);
+  useEffect(() => {
+    if (!ticket?.id || !groupId || typeof ticketsAPI.assetronHolds !== 'function') { setList([]); return undefined; }
+    let alive = true;
+    Promise.resolve()
+      .then(() => ticketsAPI.assetronHolds(ticket.id))
+      .then((res) => {
+        const raw = (res?.data || {})[groupId];
+        if (alive) setList(Array.isArray(raw) ? raw : (raw ? [raw] : []));
+      })
+      .catch(() => { if (alive) setList([]); });
+    return () => { alive = false; };
+  }, [ticket?.id, groupId]);
+  return list;
 }
 
 function Thumb({ ticketId, attachment, onOpen, size = 'h-14 w-20' }) {
@@ -84,6 +109,7 @@ export default function ApprovalTicketBrief({ approval: a, note: noteOverride = 
   const otherImages = useMemo(() => attachments.filter((x) => isImage(x) && !noteImages.includes(x)), [attachments, noteImages]);
   const otherFiles = useMemo(() => attachments.filter((x) => !isImage(x)), [attachments]);
   const description = useMemo(() => briefDescription(ticket), [ticket]);
+  const holds = useAssetronHolds(ticket, a.id);
   const longDesc = description.length > 360 || description.split('\n').length > 5;
 
   const asker = firstName(a.requestedByName) || 'The agent';
@@ -106,6 +132,17 @@ export default function ApprovalTicketBrief({ approval: a, note: noteOverride = 
           {noteImages.length === 0 && request.names.length > 0 && (
             <p className="mt-1.5 text-[12px] text-muted-foreground">{request.names.length === 1 ? '1 picture' : `${request.names.length} pictures`} attached on the ticket</p>
           )}
+        </div>
+      )}
+
+      {holds.length > 0 && (
+        <div data-testid="approval-brief-devices">
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{holds.length === 1 ? 'Device' : 'Devices'} in Assetron</div>
+          <div className="overflow-hidden rounded-lg border border-border/70 [&>div:last-child]:border-b-0 [&>div]:px-3">
+            {holds.map((h, i) => (
+              <ApprovalLaptop key={`${h.reservationId || i}-${h.itemIndex ?? i}`} hold={h} decided={false} label={holds.length > 1 ? `Device ${i + 1}` : null} />
+            ))}
+          </div>
         </div>
       )}
 
