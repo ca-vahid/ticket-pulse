@@ -1061,7 +1061,10 @@ describe('notification workflow engine persistence', () => {
       expect(email.html).toMatch(/<a href="tel:[^"]+" style="color:#c0392f;text-decoration:none;">/);
     }
     expect(email.html).not.toContain('line-height:0;font-size:0;"><img');
-    expect(email.html).toContain('height:40px;line-height:40px;font-size:1px;');
+    // QA 10-06 #1: the icon sits in its own 40x40 cell with a normal line box —
+    // the 1 px font / fixed line-height trick cut it in new Outlook.
+    expect(email.html).not.toContain('height:40px;line-height:40px;font-size:1px;');
+    expect(email.html).toContain('width:40px;height:40px;font-size:12px;line-height:1;mso-line-height-rule:exactly;');
   });
 
   test('audit HTML sanitization redacts embedded image data without dropping the email body', () => {

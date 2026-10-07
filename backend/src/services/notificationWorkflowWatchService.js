@@ -41,7 +41,9 @@ export function lintWorkflowDefinition(definition) {
   for (const node of nodes) {
     if (node.type !== 'condition') continue;
     const label = node.data?.label || node.id;
-    if (node.data?.conditionGroup && ruleReadsNoise(node.data?.rule) && !groupReadsNoise(node.data.conditionGroup)) {
+    // QA 10-06 #2: a step with the Skip noise tickets switch set (either way)
+    // made the choice on purpose — only the old hidden-rule shape is linted.
+    if (typeof node.data?.skipNoise !== 'boolean' && node.data?.conditionGroup && ruleReadsNoise(node.data?.rule) && !groupReadsNoise(node.data.conditionGroup)) {
       out.push({
         code: 'noise_check_replaced',
         nodeId: node.id,

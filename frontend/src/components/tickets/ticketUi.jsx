@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
+import { linkifyHtml } from '../../utils/linkify';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, RotateCcw, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
@@ -412,7 +413,8 @@ export function SafeHtml({ html, className = '', isDark: isDarkOverride = null, 
       paperTriggers = 0;
     }
     return {
-      clean: sanitized,
+      // QA 10-06 #8: bare web addresses become links (new tab, short label).
+      clean: linkifyHtml(sanitized),
       variantClass: triggers > 0 ? 'tp-rich-body--paper' : 'tp-rich-body--themed',
     };
   }, [html, isDark, preferThemed]);

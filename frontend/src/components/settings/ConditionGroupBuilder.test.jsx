@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 // The builder reads the workspace ticket-type registry for the ticket.ticketType
 // enum options — stub it (no WorkspaceProvider in this unit test).
@@ -25,6 +25,7 @@ vi.mock('../../contexts/WorkspaceContext', () => ({
 }));
 
 import ConditionGroupBuilder, { CG_FIELDS, emptyGroup, invalidateConditionFieldsCache } from './ConditionGroupBuilder';
+import { ticketsAPI } from '../../services/api';
 
 conditionFieldsMock.mockResolvedValue({
   data: [
@@ -225,35 +226,22 @@ describe('fields_updated condition fields (TU-7)', () => {
   });
 });
 
-// QA 10-05 #5: adding conditions to the default "skip noise" step replaced its
-// noise rule without saying so.
-describe('ConditionGroupBuilder — the step\'s noise check', () => {
-  const NOISE_RULE = { '!=': [{ var: 'ticket.isNoise' }, true] };
 
-  test('first conditions on a noise step keep the noise check', () => {
-    const onChange = vi.fn();
-    render(<ConditionGroupBuilder value={null} onChange={onChange} onClear={() => {}} rawRule={NOISE_RULE} />);
-    fireEvent.click(screen.getByRole('button', { name: /Build conditions visually/ }));
-    const group = onChange.mock.calls[0][0];
-    expect(group.conditions[0]).toEqual({ field: 'ticket.isNoise', operator: 'is_false', value: null });
-    expect(group.conditions).toHaveLength(2);
-  });
+// QA 10-06 #7: a custom field added in Ticket Ops never reached an open
+// workflow editor — the list was fetched once per browser session.
+describe('ConditionGroupBuilder — custom fields stay current', () => {
+  test('a saved custom field appears without a reload', async () => {
+    invalidateConditionFieldsCache();
+    ticketsAPI.customFieldDefinitions.mockResolvedValue({ data: [{ key: 'client_name', label: 'Client Name', type: 'text' }] });
+    render(<ConditionGroupBuilder value={emptyGroup()} onChange={() => {}} onClear={() => {}} />);
+    await waitFor(() => expect(screen.getAllByRole('option', { name: 'Custom: Client Name' }).length).toBeGreaterThan(0));
+    expect(screen.queryByRole('option', { name: 'Custom: BST Number' })).not.toBeInTheDocument();
 
-  test('conditions without a noise row warn, and one click adds it back', () => {
-    const onChange = vi.fn();
-    const group = { logic: 'all', conditions: [{ field: 'ticket.priorityLabel', operator: 'is', value: 'Urgent' }] };
-    render(<ConditionGroupBuilder value={group} onChange={onChange} onClear={() => {}} rawRule={NOISE_RULE} />);
-    expect(screen.getByTestId('noise-check-dropped')).toHaveTextContent('This step no longer skips noise tickets');
-    fireEvent.click(screen.getByRole('button', { name: 'Also skip noise tickets' }));
-    expect(onChange.mock.calls[0][0].conditions.map((c) => c.field)).toEqual(['ticket.isNoise', 'ticket.priorityLabel']);
-  });
-
-  test('no warning when the conditions already check noise, or the step never did', () => {
-    const withNoise = { logic: 'all', conditions: [{ field: 'ticket.isNoise', operator: 'is_false', value: null }] };
-    const { unmount } = render(<ConditionGroupBuilder value={withNoise} onChange={() => {}} onClear={() => {}} rawRule={NOISE_RULE} />);
-    expect(screen.queryByTestId('noise-check-dropped')).not.toBeInTheDocument();
-    unmount();
-    render(<ConditionGroupBuilder value={{ logic: 'all', conditions: [{ field: 'ticket.subject', operator: 'contains', value: 'x' }] }} onChange={() => {}} onClear={() => {}} rawRule={true} />);
-    expect(screen.queryByTestId('noise-check-dropped')).not.toBeInTheDocument();
+    ticketsAPI.customFieldDefinitions.mockResolvedValue({ data: [
+      { key: 'client_name', label: 'Client Name', type: 'text' },
+      { key: 'bst_number', label: 'BST Number', type: 'text' },
+    ] });
+    act(() => { window.dispatchEvent(new CustomEvent('tp:condition-fields-changed')); });
+    await waitFor(() => expect(screen.getAllByRole('option', { name: 'Custom: BST Number' }).length).toBeGreaterThan(0));
   });
 });

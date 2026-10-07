@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.2.13-preview';
+export const APP_VERSION = '4.2.14-preview';
 
 export const changelog = [
+  {
+    version: '4.2.14-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>After-hours e-mail: phone icon no longer cut off in new Outlook</strong> &mdash; the round icons in e-mail action rows now sit in their own cell with a normal line height, the way Outlook expects, instead of a 1&nbsp;px text trick that Outlook clipped.' },
+      { type: 'improvement', html: '<strong>Mail Workflows: &ldquo;Skip noise tickets&rdquo; is its own switch</strong> &mdash; every condition step now has a clear on/off switch for noise and spam (checked before the conditions), so adding conditions can never drop the noise check without you seeing it. New steps are called &ldquo;Conditions&rdquo;, and you can rename any step by clicking its name at the top of the side panel.' },
+      { type: 'improvement', html: '<strong>Clearer Assignment icon</strong> &mdash; the left rail uses the new, taller ticket-to-person drawing, so it reads at laptop size.' },
+      { type: 'feature', html: '<strong>Copy buttons beside the requester&rsquo;s e-mail and phone numbers</strong> &mdash; one click copies the address or number; a check mark confirms it.' },
+      { type: 'fix', html: '<strong>API updates no longer drop fields silently</strong> &mdash; a ticket update that sends custom fields such as <code>bst_number</code> or <code>cc_recipients</code> next to <code>status</code> (instead of inside <code>customFields</code>) now stores them, <code>assigneeEmail</code> is accepted as the assignee, and anything still not understood is listed back in <code>meta.ignoredFields</code>. Custom fields and the assignee are written before the status, so a &ldquo;resolved or closed&rdquo; workflow sees them.' },
+      { type: 'fix', html: '<strong>New custom fields appear in workflow conditions straight away</strong> &mdash; the condition field list refreshes when a custom field is saved in Ticket Ops, when the page is opened, and when you come back to the tab. It is also kept per workspace now.' },
+      { type: 'feature', html: '<strong>Links in descriptions and messages are clickable</strong> &mdash; a pasted web address becomes a link that opens in a new tab; long ones show a short version, with the full address on hover.' },
+    ],
+  },
   {
     version: '4.2.13-preview',
     date: 'October 6, 2026',

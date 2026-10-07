@@ -1075,12 +1075,27 @@ function appendFeedbackScore(url, score) {
 
 // One minimalist action row: a circular badge icon, a title + one-line description, and a trailing
 // arrow. The whole row is a link. Used for both the business-hours and after-hours cards.
+// QA 10-06 #1: the round icon in an action row. Outlook sizes an inline
+// image by the line box it sits in, not by its height attribute, so the old
+// cell (1 px font, fixed line-height and height) cut the icon in new Outlook.
+// Now the icon sits in its own 40x40 cell with a normal line box and nothing
+// on the outer cell that could clip it.
+function emailIconCell(src, padding) {
+  return [
+    `<td width="54" valign="middle" style="padding:${padding};">`,
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
+    '<td width="40" height="40" valign="middle" style="width:40px;height:40px;font-size:12px;line-height:1;mso-line-height-rule:exactly;">',
+    `<img src="${src}" width="40" height="40" alt="" style="display:block;border:0;outline:none;width:40px;height:40px;line-height:1;">`,
+    '</td></tr></table></td>',
+  ].join('');
+}
+
 function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null, mb = false }) {
   const borderStyle = border ? `border:1px solid ${border};` : '';
   return [
     `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;${mb ? 'margin-bottom:10px;' : ''}">`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${tint};${borderStyle}border-radius:12px;"><tr>`,
-    `<td width="58" height="56" valign="middle" style="padding:8px 0 8px 14px;height:40px;line-height:40px;font-size:1px;"><img src="${badge}" width="40" height="40" alt="" style="display:block;border:0;width:40px;height:40px;"></td>`,
+    emailIconCell(badge, '8px 0 8px 14px'),
     `<td valign="middle" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:15px;line-height:20px;font-weight:700;color:${color};">${escapeHtml(title)}</div><div style="font-size:12.5px;line-height:17px;color:#64748b;margin-top:1px;">${escapeHtml(subtitle)}</div></td>`,
     `<td width="42" align="right" valign="middle" style="padding-right:16px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:${color};">&rarr;</span></td>`,
     '</tr></table></a>',
@@ -1295,10 +1310,10 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
       // QA 10-05 #6: this row used to sit inside one block <a href="tel:">.
       // Outlook's reading pane rewrites phone links (click-to-call) and, with
       // the icon cell at line-height 0, cut the icon in half when the pane was
-      // narrow. The icon is now outside any link in a cell with a real height;
-      // only the number itself is the tel: link.
+      // narrow. The icon is now outside any link; only the number itself is
+      // the tel: link. QA 10-06 #1: and in its own cell (emailIconCell).
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>',
-      `<td width="58" height="60" valign="middle" style="padding:10px 0 10px 14px;height:40px;line-height:40px;font-size:1px;"><img src="${EMAIL_BADGE_PHONE}" width="40" height="40" alt="" style="display:block;border:0;width:40px;height:40px;"></td>`,
+      emailIconCell(EMAIL_BADGE_PHONE, '10px 0 10px 14px'),
       `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
       '</tr></table>',
     ].join('');
@@ -2420,10 +2435,15 @@ async function executeNode({
         rule = false;
       }
     }
-    const passed = compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
+    // QA 10-06 #2: "Skip noise tickets" is the step's own switch now, not a
+    // condition row that could be dropped without anyone seeing it.
+    const noiseSkipped = node.data?.skipNoise === true && evalScope?.ticket?.isNoise === true;
+    const passed = noiseSkipped || compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
     // QA 10-05 #5: say what was checked and what the ticket had, so a stop is
     // never explained by the Stop step's fixed note alone.
-    const explain = explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
+    const explain = noiseSkipped
+      ? { source: 'skip_noise', noiseSkipped: true, summary: 'Skip noise tickets is on and this ticket is marked as noise' }
+      : explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
     if (state && typeof state === 'object') {
       state.lastCondition = { nodeId: node.id, label: node.data?.label || node.id, passed, summary: explain.summary };
     }

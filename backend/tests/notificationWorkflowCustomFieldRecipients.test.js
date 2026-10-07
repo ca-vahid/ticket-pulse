@@ -135,6 +135,12 @@ describe('recipients from custom fields (QA 10-01 #7)', () => {
     expect(emailsFromCustomField(ctx, 'list')).toEqual(['f@x.com']);
     expect(emailsFromCustomField(ctx, 'missing')).toEqual([]);
     expect(emailsFromCustomField({}, 'to_recipients')).toEqual([]);
+    // QA 10-06 #5: the exact cc list Power Automate sends — spaces, a blank
+    // entry between two semicolons and a trailing semicolon.
+    const qa = { ticket: { customFields: { cc_recipients: 'EMatos@bgcengineering.ca; ECarey@bgcengineering.ca; SDickinson@bgcengineering.ca; ;VNuanmanee@bgcengineering.ca;' } } };
+    expect(emailsFromCustomField(qa, 'cc_recipients').map((e) => e.toLowerCase())).toEqual([
+      'ematos@bgcengineering.ca', 'ecarey@bgcengineering.ca', 'sdickinson@bgcengineering.ca', 'vnuanmanee@bgcengineering.ca',
+    ]);
   });
 
   test('To / Cc / Bcc each read their own field; duplicates across lists are dropped', async () => {

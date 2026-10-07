@@ -1659,9 +1659,12 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
         id: 'skip-noise',
         type: 'condition',
         position: { x: 260, y: 0 },
+        // QA 10-06 #2: the step is "Conditions"; noise is its own switch
+        // (skipNoise, applied by the engine) instead of a hidden rule.
         data: {
-          label: 'Skip noise tickets',
-          rule: { '!=': [{ var: 'ticket.isNoise' }, true] },
+          label: 'Conditions',
+          skipNoise: true,
+          rule: true,
         },
       },
       {

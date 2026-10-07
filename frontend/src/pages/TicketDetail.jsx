@@ -144,6 +144,29 @@ const cleanRefName = (s) => String(s || '').replace(new RegExp('&nbsp;|&#160;|&#
  * clickable chips (click → onImageRef(name) opens a preview). Uses SafeHtml so
  * rich formatting is preserved; delegates the click via the wrapping div.
  */
+// QA 10-06 #4: a visible one-click copy beside the requester's e-mail and
+// phone numbers (the e-mail was click-to-copy with nothing saying so).
+function CopyValueButton({ value, label, onCopy }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      onClick={() => { onCopy(value); setCopied(true); }}
+      aria-label={`Copy ${label}`}
+      title={copied ? 'Copied' : `Copy ${label}`}
+      data-testid={`copy-${label.replace(/\s+/g, '-')}`}
+      className={`tp-focus-ring flex-shrink-0 rounded p-0.5 transition-colors ${copied ? 'text-emerald-600 dark:text-emerald-300' : 'text-muted-foreground/60 hover:bg-muted hover:text-foreground'}`}
+    >
+      {copied ? <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+    </button>
+  );
+}
+
 function RichBody({ html, text, onImageRef, className = '', shownImages = null }) {
   // A picture that is shown as a thumbnail under the message keeps a short
   // "🖼 picture" marker in the text instead of its file name again (2 Oct 2026).
@@ -2710,6 +2733,7 @@ export default function TicketDetail() {
                             >
                               {ticket.requester.email}
                             </button>
+                            <CopyValueButton value={ticket.requester.email} label="e-mail" onCopy={copyText} />
                           </li>
                         )}
                         {(ticket.requester.entraOfficeLocation || ticket.requester.entraCity) && (
@@ -2725,6 +2749,7 @@ export default function TicketDetail() {
                             <Phone className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
                             <a href={`tel:${ticket.requester.phone}`} className="tp-focus-ring rounded tabular-nums text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200">{formatPhone(ticket.requester.phone)}</a>
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50">work</span>
+                            <CopyValueButton value={formatPhone(ticket.requester.phone)} label="work phone" onCopy={copyText} />
                           </li>
                         )}
                         {ticket.requester.mobile && ticket.requester.mobile !== ticket.requester.phone && (
@@ -2732,6 +2757,7 @@ export default function TicketDetail() {
                             <Smartphone className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
                             <a href={`tel:${ticket.requester.mobile}`} className="tp-focus-ring rounded tabular-nums text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200">{formatPhone(ticket.requester.mobile)}</a>
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50">mobile</span>
+                            <CopyValueButton value={formatPhone(ticket.requester.mobile)} label="mobile" onCopy={copyText} />
                           </li>
                         )}
                         {forwardedIntake && (
