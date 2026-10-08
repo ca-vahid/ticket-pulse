@@ -17,6 +17,7 @@ export const REQUESTER_PROFILE_SELECT = Object.freeze({
   language: true,
   entraOfficeLocation: true,
   entraCity: true,
+  unattended: true,
   entraState: true,
   entraCountry: true,
   entraCountryCode: true,
@@ -259,6 +260,9 @@ export async function refreshRequesterEntraProfile(requester) {
   if (!requester?.id || !requester?.email || hasFreshEntraProfile(requester)) {
     return requester;
   }
+  // Unattended integration identities (continuit@, continuit+bri@, sentinel@…)
+  // are not people: their office/city are set at provisioning, never by Entra.
+  if (requester.unattended === true) return requester;
 
   try {
     const profile = await fetchEntraProfile(requester.email);

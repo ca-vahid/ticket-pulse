@@ -336,6 +336,8 @@ const PATCH_BODY_KEYS = new Set([
   'status', 'resolutionReason', 'resolutionNote', 'assignedTechId', 'assignedTechEmail',
   'subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId',
   'ccEmails', 'dueBy', 'category', 'subcategory', 'externalRef', 'customFields', 'addNote', 'note',
+  // ContinuIT (8 Oct 2026): re-point a ticket at another requester.
+  'requesterEmail', 'requesterId', 'requesterName',
 ]);
 
 /**
@@ -661,7 +663,7 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   // the whole list (normalized, deduped, ≤10); [] clears it.
   assertDueByAllowed(req, body);
   // dueBy (ContinuIT B1): updateTicketFields stamps dueBySetBy='manual'.
-  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'ccEmails', 'dueBy'];
+  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'ccEmails', 'dueBy', 'requesterEmail', 'requesterId', 'requesterName'];
   const fields = Object.fromEntries(fieldKeys.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
   // Category/subcategory BY NAME (FR 08-05 #1) — explicit IDs win when both
   // spellings are sent; `category: null` clears the pair.

@@ -95,6 +95,15 @@ describe('B1 — dueBy', () => {
   });
 });
 
+describe('Office requesters (8 Oct 2026) — PATCH re-points the requester', () => {
+  test('requesterEmail (+ name) reaches updateTicketFields; requesterId too', async () => {
+    await request(app()).patch('/api/v1/tickets/901').send({ requesterEmail: 'continuit+bri@bgcengineering.ca', requesterName: 'Brisbane Office' }).expect(200);
+    expect(ticketServiceMock.updateTicketFields).toHaveBeenLastCalledWith(901, 8, { requesterEmail: 'continuit+bri@bgcengineering.ca', requesterName: 'Brisbane Office' }, expect.any(Object));
+    await request(app()).patch('/api/v1/tickets/901').send({ requesterId: 4001 }).expect(200);
+    expect(ticketServiceMock.updateTicketFields).toHaveBeenLastCalledWith(901, 8, { requesterId: 4001 }, expect.any(Object));
+  });
+});
+
 describe('C1 — GET /agents', () => {
   test('a membership lookup failure degrades to groups: [] instead of failing the call', async () => {
     technicianRepositoryMock.getAll.mockResolvedValue([{ id: 56, name: 'S', email: 's@bgc.ca', isActive: true, freshserviceId: null, location: null, photoUrl: null }]);

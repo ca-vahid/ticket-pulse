@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.23-preview';
+export const APP_VERSION = '4.2.24-preview';
 
 export const changelog = [
+  {
+    version: '4.2.24-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Offices as requesters</strong> — ContinuIT office check-in tickets can now have the office itself as requester (“Brisbane Office”, with a building avatar and the office under the name) instead of the office manager.' },
+      { type: 'improved', html: '<strong>Replies on automation tickets</strong> — when the requester is an automation mailbox that is never e-mailed, replies now go to the people Cc’d on the ticket (the office contact) instead of to nobody.' },
+    ],
+  },
   {
     version: '4.2.23-preview',
     date: 'October 7, 2026',

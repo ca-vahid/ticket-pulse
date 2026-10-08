@@ -33,17 +33,19 @@ describe('A4 — an unattended requester never gets requester-facing mail', () =
   const lifecycle = src('../src/services/ticketLifecycleNotificationService.js');
   const api = src('../src/routes/apiV1.routes.js');
 
-  test('the workflow recipient resolver returns nobody for role "requester"', () => {
-    expect(engine).toMatch(/if \(value === 'requester'\) return context\.requester\?\.unattended \? \[\] : \[context\.requester\?\.email\];/);
+  test('the workflow recipient resolver: role "requester" of an unattended requester = the ticket Cc list (none for Simorgh)', () => {
+    expect(engine).toMatch(/if \(!context\.requester\?\.unattended\) return \[context\.requester\?\.email\];/);
+    expect(engine).toMatch(/return Array\.isArray\(context\.ticket\?\.ccEmails\) \? context\.ticket\.ccEmails : \[\];/);
   });
 
   test('the event context carries the flag so the resolver can see it', () => {
     expect(lifecycle).toMatch(/unattended: ticket\.requester\.unattended === true,/);
   });
 
-  test('a reply to an unattended requester is stored but not emailed', () => {
+  test('a reply to an unattended requester with nobody Cc\'d is stored but not emailed; with a Cc it goes to the Cc list', () => {
     const fn = svc.slice(svc.indexOf('async _emailRequesterReply('));
-    expect(fn.slice(0, 900)).toMatch(/ticket\.requester\?\.unattended === true[\s\S]{0,200}return \{ sent: false, skipped: 'unattended_requester' \}/);
+    expect(fn.slice(0, 1600)).toMatch(/const unattended = ticket\.requester\?\.unattended === true;[\s\S]{0,300}if \(unattended && ccPeople\.length === 0\)[\s\S]{0,200}return \{ sent: false, skipped: 'unattended_requester' \}/);
+    expect(fn.slice(0, 2400)).toMatch(/const toAddress = unattended \? ccPeople\[0\] :/);
     // ...and the ticket include actually selects the column, or the guard is dead.
     expect(svc).toMatch(/entraCity: true, entraOfficeLocation: true, entraState: true,\s*(\/\/[^\n]*\n\s*)?unattended: true,/);
   });

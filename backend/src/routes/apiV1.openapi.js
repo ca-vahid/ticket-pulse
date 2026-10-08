@@ -158,6 +158,9 @@ const T = {
     properties: {
       status: { type: 'string', example: 'Pending', description: 'Any label from GET /meta statuses. On a FreshService-born ticket the change is written to FreshService first and needs the client permission "may change status on FreshService tickets" (403 fs_status_write_not_enabled otherwise; 409 freshservice_rejected when FreshService refuses). Roll-up and resolution-reason rules apply to both kinds.' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       subject: { type: 'string' }, assignedTechId: { type: 'integer', nullable: true },
+      requesterEmail: { type: 'string', format: 'email', description: 'Re-point the ticket at another requester by e-mail (or requesterId). Recorded as a requester change in the ticket history; sends no e-mail. A plus-address of an unattended integration requester (continuit+bri@…) is created unattended on first use. On a FreshService-born ticket the new requester must exist in FreshService.' },
+      requesterId: { type: 'integer', description: 'Ticket Pulse requester id — alternative to requesterEmail.' },
+      requesterName: { type: 'string', description: 'Name used only when requesterEmail creates a new requester.' },
       assignedTechEmail: { type: 'string', format: 'email', description: 'Reassign by e-mail (resolved to assignedTechId; 400 unknown_agent_email when no active agent has it). "" unassigns.' },
       internalCategoryId: { type: 'integer' }, internalSubcategoryId: { type: 'integer' },
       groupId: { type: 'integer', nullable: true, description: 'Move to a FreshService group: the `freshserviceId` of an origin:\'freshservice\' group (GET /groups). null clears it.' },
