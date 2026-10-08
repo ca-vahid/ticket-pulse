@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
 import { hrLifecycleAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
 import { PersonAvatar } from '../tickets/ticketUi';
 import { SectionTitle, StatusDot } from './onboardingUi';
-import { MODE_INFO, changeFieldLabel, changeValueLabel, fmtWhen } from './onboardingFormat';
+import { MAX_PEOPLE, MODE_INFO, changeFieldLabel, changeValueLabel, fmtWhen, peopleOf } from './onboardingFormat';
 
 /**
  * Settings → mode, parent assignee, the three child lists, leave / transfer
@@ -23,7 +23,66 @@ const pick = (s) => ({
 
 const assigneeValue = (item) => (item.assigneeTechId ? `t:${item.assigneeTechId}` : item.groupId ? `g:${item.groupId}` : '');
 
-function ChildList({ name, label, hint, items, onChange, assigneeOptions }) {
+/** What is sent: half-chosen slots dropped, the first person kept as the single assignee. */
+const cleanTemplates = (templates = {}) => Object.fromEntries(Object.entries(templates).map(([name, list]) => [name, (list || []).map((item) => {
+  const ids = [...new Set(peopleOf(item).filter((id) => id > 0))];
+  return { ...item, assigneeTechId: ids[0] ?? null, assigneeTechIds: ids };
+})]));
+
+/** One child's default assignee: a person, a group, AI routing — or several people who take turns. */
+function AssigneeCell({ item, what, onChange, assigneeOptions, techOptions }) {
+  const ids = peopleOf(item);
+  const setFirst = (v) => {
+    if (v.startsWith('t:')) {
+      const n = Number(v.slice(2));
+      onChange({ assigneeTechId: n, assigneeTechIds: [n, ...ids.slice(1).filter((x) => x !== n)], groupId: null });
+    } else {
+      onChange({ assigneeTechId: null, assigneeTechIds: [], groupId: v.startsWith('g:') ? Number(v.slice(2)) : null });
+    }
+  };
+  const setAt = (k, id) => onChange({ assigneeTechIds: ids.map((x, j) => (j === k ? id : x)) });
+  const chosen = ids.filter((id) => id > 0);
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <FancySelect value={assigneeValue(item)} onChange={setFirst} options={assigneeOptions} aria-label={`${what} default assignee`} />
+      {ids.slice(1).map((id, k) => (
+        <div key={k} className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <FancySelect
+              value={id ? `t:${id}` : ''}
+              onChange={(v) => setAt(k + 1, v ? Number(v.slice(2)) : 0)}
+              options={[{ value: '', label: 'Choose a person' }, ...techOptions.filter((o) => o.value === `t:${id}` || !ids.includes(Number(o.value.slice(2))))]}
+              aria-label={`${what} person ${k + 2}`}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange({ assigneeTechIds: ids.filter((_, j) => j !== k + 1) })}
+            aria-label={`${what}: remove person ${k + 2}`}
+            className="tp-focus-ring rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      {ids[0] > 0 && !ids.includes(0) && ids.length < MAX_PEOPLE && (
+        <button
+          type="button"
+          onClick={() => onChange({ assigneeTechIds: [...ids, 0] })}
+          aria-label={`${what}: add another person`}
+          className="tp-focus-ring inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs text-primary hover:bg-muted"
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add another person
+        </button>
+      )}
+      {chosen.length > 1 && (
+        <p className="text-xs text-muted-foreground">One ticket, to one of them: they take turns, and anyone off that day is skipped.</p>
+      )}
+    </div>
+  );
+}
+
+function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOptions }) {
   const update = (i, patch) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const move = (i, d) => {
     const next = [...items];
@@ -39,7 +98,7 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions }) {
       </div>
       <ul className="space-y-2">
         {items.map((item, i) => (
-          <li key={`${name}-${item.key || i}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)_5.5rem] sm:items-center">
+          <li key={`${name}-${item.key || i}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)_5.5rem] sm:items-start">
             <input
               type="text"
               value={item.title}
@@ -56,14 +115,12 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions }) {
               aria-label={`${label}: ${item.title || `child ${i + 1}`} due offset (days)`}
               className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
             />
-            <FancySelect
-              value={assigneeValue(item)}
-              onChange={(v) => update(i, {
-                assigneeTechId: v.startsWith('t:') ? Number(v.slice(2)) : null,
-                groupId: v.startsWith('g:') ? Number(v.slice(2)) : null,
-              })}
-              options={assigneeOptions}
-              aria-label={`${label}: ${item.title || `child ${i + 1}`} default assignee`}
+            <AssigneeCell
+              item={item}
+              what={`${label}: ${item.title || `child ${i + 1}`}`}
+              onChange={(patch) => update(i, patch)}
+              assigneeOptions={assigneeOptions}
+              techOptions={techOptions}
             />
             <span className="flex items-center gap-0.5">
               <button type="button" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${item.title} up`} className="tp-focus-ring rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"><ArrowUp className="h-4 w-4" aria-hidden="true" /></button>
@@ -75,7 +132,7 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions }) {
       </ul>
       <button
         type="button"
-        onClick={() => onChange([...items, { key: '', title: 'New child', dueOffsetDays: 0, assigneeTechId: null, groupId: null }])}
+        onClick={() => onChange([...items, { key: '', title: 'New child', dueOffsetDays: 0, assigneeTechId: null, assigneeTechIds: [], groupId: null }])}
         className="tp-focus-ring mt-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-primary hover:bg-muted"
       >
         <Plus className="h-4 w-4" aria-hidden="true" /> Add a child
@@ -114,13 +171,13 @@ export default function SettingsPanel({ data, onSaved }) {
   }, []);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const dirty = JSON.stringify({ ...draft, templates: cleanTemplates(draft.templates) }) !== JSON.stringify({ ...saved, templates: cleanTemplates(saved.templates) });
 
   const save = async () => {
     setSaving(true);
     setStatus(null);
     try {
-      const res = await hrLifecycleAPI.updateSettings(draft);
+      const res = await hrLifecycleAPI.updateSettings({ ...draft, templates: cleanTemplates(draft.templates) });
       const next = res?.data?.settings ? pick(res.data.settings) : draft;
       setSaved(next);
       setDraft(next);
@@ -143,7 +200,7 @@ export default function SettingsPanel({ data, onSaved }) {
       <section className="rounded-xl border border-border bg-card p-4 shadow-subtle">
         <fieldset>
           <legend className="text-sm font-semibold text-foreground">Mode</legend>
-          <p className="mb-3 text-xs text-muted-foreground">Per workspace. Ships off — FreshService stays the live organiser until this is Live.</p>
+          <p className="mb-3 text-xs text-muted-foreground">Per workspace. Live: Ticket Pulse organises every departure and new hire. Shadow only records what it would do.</p>
           <div className="grid gap-2 sm:grid-cols-3">
             {(data.modes || ['off', 'observe', 'live']).map((m) => (
               <label key={m} className={`flex cursor-pointer gap-2.5 rounded-lg border p-3 ${draft.mode === m ? 'border-primary bg-primary/[0.05] dark:bg-primary/10' : 'border-border hover:bg-muted/50'}`}>
@@ -181,6 +238,7 @@ export default function SettingsPanel({ data, onSaved }) {
           items={draft.templates?.[name] || []}
           onChange={(items) => setDraft((d) => ({ ...d, templates: { ...d.templates, [name]: items } }))}
           assigneeOptions={assigneeOptions}
+          techOptions={techOptions}
         />
       ))}
 
@@ -235,7 +293,7 @@ export default function SettingsPanel({ data, onSaved }) {
           </table>
         </div>
         <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-          {['afterTheFact', 'matching', 'recency', 'passwords'].filter((k) => detection[k]).map((k) => <li key={k}>{detection[k]}</li>)}
+          {['afterTheFact', 'matching', 'recency', 'passwords', 'sharing'].filter((k) => detection[k]).map((k) => <li key={k}>{detection[k]}</li>)}
         </ul>
       </section>
 

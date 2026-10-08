@@ -75,6 +75,18 @@ router.get('/events', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await hrLifecycleService.listEvents(req.workspaceId, { limit: req.query.limit, familyId: req.query.familyId || null }) });
 }));
 
+/** Open notices with no family yet, each with what Organise would take in and create. */
+router.get('/candidates', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await hrLifecycleService.candidates(req.workspaceId) });
+}));
+
+/** Start the family of one notice now (Live only): existing tickets are taken in, missing ones created. */
+router.post('/organise', asyncHandler(async (req, res) => {
+  const id = Number(req.body?.ticketId);
+  if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Give the notice ticket id');
+  res.json({ success: true, data: await hrLifecycleService.organise(id, req.workspaceId, sessionUser(req)) });
+}));
+
 /** Classify a ticket (id or TP-#### / #FS ref) and show what would happen. Writes nothing. */
 router.post('/preview', asyncHandler(async (req, res) => {
   const raw = req.body?.ticketId ?? req.body?.ref;

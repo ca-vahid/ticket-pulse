@@ -2088,6 +2088,8 @@ export const hrLifecycleAPI = {
   switchToAfterTheFact: (id) => api.post(`/hr-lifecycle/families/${id}/after-the-fact`),
   events: (params = {}) => api.get('/hr-lifecycle/events', { params }),
   preview: (ref) => api.post('/hr-lifecycle/preview', { ref }),
+  candidates: () => api.get('/hr-lifecycle/candidates'),
+  organise: (ticketId) => api.post('/hr-lifecycle/organise', { ticketId }),
 };
 
 /**
