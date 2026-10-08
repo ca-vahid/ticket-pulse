@@ -137,6 +137,10 @@ export default function LeaveTypesSection({ config, reload, toast }) {
                   <Field label="Days per year"><input type="number" step="0.5" className={INPUT} value={draft.balancePolicy.annualDays} onChange={(e) => setPolicy({ annualDays: e.target.value })} aria-label="Annual days" /></Field>
                   <Field label="Eligible after (days employed)"><input type="number" className={INPUT} value={draft.balancePolicy.eligibleAfterDays} onChange={(e) => setPolicy({ eligibleAfterDays: e.target.value })} aria-label="Eligible after days" /></Field>
                 </div>
+                {/* 7 Oct 2026: per-person allowances exist (People) but nothing here said so. */}
+                <p className="text-xs text-muted-foreground" data-testid="per-person-hint">
+                  This is the default for everyone. For people with a different allowance (15, 20, 25 days&hellip;), type their number under <strong className="font-semibold text-foreground/85">People</strong>, in the &ldquo;{draft.name || 'this type'} days/yr&rdquo; column. It replaces the default and the tenure steps for that person.
+                </p>
                 <Toggle checked={draft.balancePolicy.prorate} onChange={(v) => setPolicy({ prorate: v })} label="Prorate in the first year" />
                 <div>
                   <p className="mb-1 text-xs font-medium text-muted-foreground">Tenure steps</p>

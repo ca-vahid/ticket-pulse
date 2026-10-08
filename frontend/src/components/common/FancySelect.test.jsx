@@ -88,3 +88,24 @@ describe('FancySelect (16 Sep 2026)', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: prevW });
   });
 });
+
+// 7 Oct 2026: in the Availability settings drawer (layer 80) the list opened
+// at layer 60, behind the drawer — "nothing drops down". The list must sit
+// above every drawer and dialog in the app.
+describe('FancySelect inside a drawer', () => {
+  test('its list is layered above the drawer it is opened from', async () => {
+    const { Drawer } = await import('../availability/admin/adminUi');
+    render(
+      <Drawer open title="Edit Vacation" onClose={() => {}} onSave={() => {}}>
+        <FancySelect value="day" onChange={() => {}} options={[{ value: 'day', label: 'Days' }, { value: 'hour', label: 'Hours' }]} aria-label="Booked in" />
+      </Drawer>,
+    );
+    fireEvent.click(screen.getByRole('combobox', { name: 'Booked in' }));
+    const layer = (el) => Number((el.className.match(/z-\[(\d+)\]/) || [])[1] || 0);
+    const list = screen.getByRole('listbox', { name: 'Booked in' });
+    const drawer = screen.getByRole('dialog').parentElement;
+    expect(layer(drawer)).toBeGreaterThan(0);
+    expect(layer(list)).toBeGreaterThan(layer(drawer));
+    expect(screen.getByRole('option', { name: 'Hours' })).toBeInTheDocument();
+  });
+});
