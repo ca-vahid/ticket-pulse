@@ -4065,7 +4065,9 @@ class TicketService {
       if (input.assignedTechId === null) {
         fsPayload.responder_id = null;
         localPatch.assignedTechId = null;
-        if (ticket.assignedTechId) fsHandBack = normalizeHandBack(input.handBack);
+        // QA 10-07 #2: every unassign leaves a row, reason or not - the
+        // hand-back sweep routes from it when the sync never reports it.
+        if (ticket.assignedTechId) fsHandBack = normalizeHandBack(input.handBack) || { code: 'skipped', note: null };
       } else {
         assignee = await this._validateTechnician(workspaceId, Number(input.assignedTechId), { allowAssignableOnly });
         if (!assignee.freshserviceId || assignee.origin === 'local') {

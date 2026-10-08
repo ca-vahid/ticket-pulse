@@ -8,6 +8,8 @@ import { motionReduced } from '../../utils/motionPreference';
  *  C  soft edge fades + round arrows that glide in, follow the visible middle
  *     of the list and page one screen of columns with an eased slide (hold to
  *     keep going). With the subject pinned, the left ones start at column B.
+ *     QA 10-07 #1: the arrows covered row content, so they are opt-in
+ *     (`arrows`, a personal setting in the Columns menu); the fades stay.
  *  E  drag the list sideways with the mouse, ← / → (Shift = a page) anywhere on
  *     the page outside a field. Shift + wheel is the browser's own.
  *  D  an opt-in column map (jump links + mini-map) — a personal setting in
@@ -22,7 +24,7 @@ import { motionReduced } from '../../utils/motionPreference';
 // a press that never moves is still a normal click.
 const DRAG_IGNORE = 'input,select,textarea,[role="separator"],[role="slider"],[contenteditable="true"],[data-no-drag]';
 
-export default function QueueSideScroll({ targetRef, pinned = false, showMap = false, deps = [], children }) {
+export default function QueueSideScroll({ targetRef, pinned = false, showMap = false, arrows = false, deps = [], children }) {
   const frameRef = useRef(null);
   const animRef = useRef(0);
   const [edges, setEdges] = useState({ left: false, right: false, pinW: 0, top: 0, ready: false });
@@ -255,36 +257,38 @@ export default function QueueSideScroll({ targetRef, pinned = false, showMap = f
               style={{ left: edges.pinW }}
             />
             <span aria-hidden="true" className={`tp-side-fade tp-side-fade-r ${edges.right ? 'is-on' : ''}`} />
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label="Scroll columns left"
-              title="Scroll columns left (←) · hold to keep going"
-              onClick={() => pageBy(-1)}
-              onPointerDown={() => startHold(-1)}
-              onPointerUp={stopHold}
-              onPointerLeave={stopHold}
-              onPointerCancel={stopHold}
-              className={`tp-side-arrow tp-side-arrow-l ${edges.left ? 'is-on' : ''}`}
-              style={{ top: edges.top, left: edges.pinW + 10 }}
-            >
-              <ChevronLeft className="w-5 h-5" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label="Scroll columns right"
-              title="Scroll columns right (→) · hold to keep going"
-              onClick={() => pageBy(1)}
-              onPointerDown={() => startHold(1)}
-              onPointerUp={stopHold}
-              onPointerLeave={stopHold}
-              onPointerCancel={stopHold}
-              className={`tp-side-arrow tp-side-arrow-r ${edges.right ? 'is-on' : ''}`}
-              style={{ top: edges.top }}
-            >
-              <ChevronRight className="w-5 h-5" aria-hidden="true" />
-            </button>
+            {arrows && (<>
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label="Scroll columns left"
+                title="Scroll columns left (←) · hold to keep going"
+                onClick={() => pageBy(-1)}
+                onPointerDown={() => startHold(-1)}
+                onPointerUp={stopHold}
+                onPointerLeave={stopHold}
+                onPointerCancel={stopHold}
+                className={`tp-side-arrow tp-side-arrow-l ${edges.left ? 'is-on' : ''}`}
+                style={{ top: edges.top, left: edges.pinW + 10 }}
+              >
+                <ChevronLeft className="w-5 h-5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label="Scroll columns right"
+                title="Scroll columns right (→) · hold to keep going"
+                onClick={() => pageBy(1)}
+                onPointerDown={() => startHold(1)}
+                onPointerUp={stopHold}
+                onPointerLeave={stopHold}
+                onPointerCancel={stopHold}
+                className={`tp-side-arrow tp-side-arrow-r ${edges.right ? 'is-on' : ''}`}
+                style={{ top: edges.top }}
+              >
+                <ChevronRight className="w-5 h-5" aria-hidden="true" />
+              </button>
+            </>)}
           </>
         )}
       </div>

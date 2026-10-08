@@ -236,10 +236,10 @@ describe('Width storage (QR1)', () => {
     // The md band renders from the hardcoded literal — no width leaks below xl.
     const rowGrid = screen.getAllByTitle('Rita Requester · Vancouver HQ')[0].closest('div');
     expect(rowGrid.className).toContain(MD_COMPACT_LITERAL);
-    expect(rowGrid.className).toContain('xl:[grid-template-columns:var(--tp-q-grid)]');
+    expect(rowGrid.className).toContain('qx:[grid-template-columns:var(--tp-q-grid)]');
     // And the handle itself only exists at xl.
     const handle = await findHandle('Requester');
-    expect(handle).toHaveClass('hidden', 'xl:block');
+    expect(handle).toHaveClass('hidden', 'qx:block');
     // Server value won → mirror refreshed for the next first paint.
     expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 300 }, roomy: {} });
   });

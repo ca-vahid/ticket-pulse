@@ -58,7 +58,6 @@ import {
   EMAIL_BADGE_STATUS,
   EMAIL_BADGE_URGENCY,
   EMAIL_BADGE_REQUEST,
-  EMAIL_BADGE_PHONE,
   EMAIL_BADGE_FEEDBACK,
   EMAIL_FEEDBACK_ROCKS_BY_THEME,
 } from './notificationEmailIcons.js';
@@ -284,6 +283,10 @@ export async function refreshLiveTicketFields(eventContext, definition) {
         assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } },
         internalCategory: { select: { id: true, name: true } },
         internalSubcategory: { select: { id: true, name: true } },
+        // QA 10-07 #4: a Wait step lets fields that arrive after the trigger
+        // (Power Automate sends bst_number seconds after an agent closes the
+        // ticket by hand) reach the conditions and the e-mail.
+        customFields: true,
       },
     });
     if (row) {
@@ -311,6 +314,9 @@ export async function refreshLiveTicketFields(eventContext, definition) {
           closedAt: resumeIso(row.closedAt),
           dueBy: resumeIso(row.dueBy),
           frDueBy: resumeIso(row.frDueBy),
+          customFields: row.customFields && typeof row.customFields === 'object' && !Array.isArray(row.customFields)
+            ? row.customFields
+            : (next.ticket?.customFields ?? null),
           internalCategory: row.internalCategory ? { id: row.internalCategory.id, name: row.internalCategory.name } : null,
           internalSubcategory: row.internalSubcategory ? { id: row.internalSubcategory.id, name: row.internalSubcategory.name } : null,
         },
@@ -1090,6 +1096,20 @@ function emailIconCell(src, padding) {
   ].join('');
 }
 
+// QA 10-07 #3: new Outlook still cut the phone badge after three different
+// image cells (the lightning badge one row up, in the same cell, was whole).
+// The phone row therefore carries no image at all: a text glyph in a tinted
+// cell. Text has a line box the client cannot crop, and bgcolor paints the
+// tint where border-radius is ignored (classic Outlook shows a square).
+function emailGlyphCell(glyph, padding, { color = '#c0392f', tint = '#fbdedb' } = {}) {
+  return [
+    `<td width="54" valign="middle" style="padding:${padding};">`,
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr>',
+    `<td width="40" height="40" align="center" valign="middle" bgcolor="${tint}" style="width:40px;height:40px;background-color:${tint};border-radius:20px;color:${color};font-family:'Segoe UI Symbol','Apple Symbols','Arial Unicode MS',Arial,sans-serif;font-size:21px;line-height:24px;font-weight:400;text-align:center;">${glyph}</td>`,
+    '</tr></table></td>',
+  ].join('');
+}
+
 function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null, mb = false }) {
   const borderStyle = border ? `border:1px solid ${border};` : '';
   return [
@@ -1313,7 +1333,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
       // narrow. The icon is now outside any link; only the number itself is
       // the tel: link. QA 10-06 #1: and in its own cell (emailIconCell).
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>',
-      emailIconCell(EMAIL_BADGE_PHONE, '10px 0 10px 14px'),
+      emailGlyphCell('&#9742;&#xFE0E;', '10px 0 10px 14px'),
       `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
       '</tr></table>',
     ].join('');

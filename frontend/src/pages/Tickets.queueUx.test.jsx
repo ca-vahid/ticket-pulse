@@ -69,7 +69,7 @@ import { DEFAULT_COLUMN_KEYS } from '../components/tickets/queueColumns';
 
 // The ONE computed template (QC3): --tp-q-grid on the list card, consumed by
 // header + rows through the same xl arbitrary-property class.
-const GRID_VAR_CLASS = 'xl:[grid-template-columns:var(--tp-q-grid)]';
+const GRID_VAR_CLASS = 'qx:[grid-template-columns:var(--tp-q-grid)]';
 // Defaults must reproduce the pre-QC hardcoded xl templates exactly.
 const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 176px minmax(150px,1fr) 210px 116px 88px 74px';
 const DEFAULT_ROOMY_TEMPLATE = '6px 60px 176px minmax(150px,1fr) 210px 116px 88px 74px';
@@ -168,7 +168,7 @@ describe('Computed column templates (Phase QC — QC3)', () => {
     // non-essential column below xl — QA 08-07 #6 projection preserved).
     const reqHeaderBtn = screen.getByRole('button', { name: /^Requester$/ });
     const reqHeaderCell = reqHeaderBtn.closest('span');
-    expect(reqHeaderCell).toHaveClass('hidden', 'xl:flex');
+    expect(reqHeaderCell).toHaveClass('hidden', 'qx:flex');
 
     // Header and row ride the SAME computed grid (the old :115 pairing rule,
     // now enforced by construction through --tp-q-grid).
@@ -176,7 +176,7 @@ describe('Computed column templates (Phase QC — QC3)', () => {
     expect(headerGrid.className).toContain(GRID_VAR_CLASS);
     const cells = screen.getAllByTitle('Rita Requester · Vancouver HQ');
     expect(cells.length).toBe(2); // one requester cell per row
-    expect(cells[0]).toHaveClass('hidden', 'xl:flex');
+    expect(cells[0]).toHaveClass('hidden', 'qx:flex');
     const rowGrid = cells[0].closest('div');
     expect(rowGrid.className).toContain(GRID_VAR_CLASS);
     // Track parity: header and row place the same number of grid children.
@@ -186,7 +186,7 @@ describe('Computed column templates (Phase QC — QC3)', () => {
 
     // Below xl the meta line keeps the requester — the duplicate is the
     // xl-hidden copy, so exactly one shows at any breakpoint.
-    const metaCopies = screen.getAllByText(/Rita Requester/).filter((el) => el.closest('.xl\\:hidden'));
+    const metaCopies = screen.getAllByText(/Rita Requester/).filter((el) => el.closest('.qx\\:hidden'));
     expect(metaCopies.length).toBeGreaterThan(0);
 
     // The header sorts by requester.
@@ -219,14 +219,14 @@ describe('Computed column templates (Phase QC — QC3)', () => {
 
     expect(currentTemplate()).toBe(DEFAULT_ROOMY_TEMPLATE);
     const cells = screen.getAllByTitle('Rita Requester · Vancouver HQ');
-    expect(cells[0]).toHaveClass('hidden', 'xl:flex');
+    expect(cells[0]).toHaveClass('hidden', 'qx:flex');
     expect(cells[0].closest('div').className).toContain(GRID_VAR_CLASS);
 
     // md keeps the old type+category span; at xl the columns are user-ordered
     // so every column labels itself and "Ticket" collapses onto the type slot.
     const ticketHeaderBtn = screen.getByRole('button', { name: /^Ticket$/ });
     const span = ticketHeaderBtn.closest('span');
-    expect(span).toHaveClass('[grid-column:2/4]', 'xl:[grid-column:2/3]');
+    expect(span).toHaveClass('[grid-column:2/4]', 'qx:[grid-column:2/3]');
     expect(span.closest('div').className).toContain(GRID_VAR_CLASS);
   });
 });
@@ -608,7 +608,7 @@ describe('Priority + State columns (Mega 08-30 Phase QX)', () => {
     // The subject-line dot is suppressed at xl only (column carries it there;
     // the tablet band keeps the dot because the column is not an md essential).
     const subjectDot = screen.getByTestId('subject-priority-dot');
-    expect(subjectDot).toHaveClass('xl:hidden');
+    expect(subjectDot).toHaveClass('qx:hidden');
 
     // Header sort: desc-first (Urgent first) — priority is NOT in ASC_FIRST_SORTS.
     fireEvent.click(screen.getByTitle('Sort by priority (Urgent first)'));

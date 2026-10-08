@@ -288,6 +288,14 @@ class ScheduledSyncService {
             maxPipelineRuns: cfg?.pollMaxPerCycle || 5,
           });
 
+          // QA 10-07 #2: unassigns done in Ticket Pulse that the sync never
+          // reported get their re-routing run from our own hand-back record.
+          if (cfg?.isEnabled) {
+            await import('./ticketHandBackService.js')
+              .then(({ default: ticketHandBackService }) => ticketHandBackService.sweepUnroutedFsHandBacks(wsId))
+              .catch((sweepError) => logger.warn(`[${wsName}] Hand-back sweep failed: ${sweepError.message}`));
+          }
+
           if (result.polling?.triggered || result.ticketsSynced > 0) {
             logger.info(`[${wsName}] Assignment fast sync completed`, {
               ticketsFetched: result.ticketsFetched,

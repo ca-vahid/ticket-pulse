@@ -106,8 +106,10 @@ const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department', 'par
 // by construction. Below xl the hardcoded 6-track "essentials" templates
 // stay exactly as they were — custom columns are an xl+ feature (the tablet
 // band has no width budget, 08-04 sweep) and mobile cards are untouched.
-const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:[grid-template-columns:var(--tp-q-grid)] items-center';
-const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:[grid-template-columns:var(--tp-q-grid)] items-stretch';
+const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] qx:[grid-template-columns:var(--tp-q-grid)] items-center';
+// The list card is wide enough for the column layout below 1280px (QA 10-07 #1).
+const QUEUE_WIDE_CARD_PX = 720;
+const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] qx:[grid-template-columns:var(--tp-q-grid)] items-stretch';
 
 function pageWindow(current, total) {
   const pages = new Set([1, total]);
@@ -450,6 +452,28 @@ export default function Tickets() {
   const [columnMap, setColumnMap] = useState(() => {
     try { return localStorage.getItem('tp_queue_column_map') === '1'; } catch { return false; }
   });
+  // Scroll arrows (QA 10-07 #1): the round arrows over a list that scrolls
+  // sideways covered row content. Opt-in per person, same choreography.
+  const [sideArrows, setSideArrows] = useState(() => {
+    try { return localStorage.getItem('tp_queue_side_arrows') === '1'; } catch { return false; }
+  });
+  const updateSideArrows = useCallback((on) => {
+    setSideArrows(on);
+    try { localStorage.setItem('tp_queue_side_arrows', on ? '1' : '0'); } catch { /* no-op */ }
+    ticketsAPI.setQueuePreference('queue.sideArrows', Boolean(on)).catch(() => { /* local mirror still applies */ });
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference('queue.sideArrows')
+      .then((res) => {
+        const value = res?.data?.value;
+        if (cancelled || typeof value !== 'boolean') return;
+        setSideArrows(value);
+        try { localStorage.setItem('tp_queue_side_arrows', value ? '1' : '0'); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
   const updateColumnMap = useCallback((on) => {
     setColumnMap(on);
     try { localStorage.setItem('tp_queue_column_map', on ? '1' : '0'); } catch { /* no-op */ }
@@ -1464,32 +1488,32 @@ export default function Tickets() {
     const start = roomy
       ? new Map(ordered.filter((k) => k !== 'subject').map((k, i) => [k, i + 3]))
       : new Map(ordered.map((k, i) => [k, i + 2]));
-    const rowStart = roomy ? 'xl:row-start-2' : 'xl:row-start-1';
+    const rowStart = roomy ? 'qx:row-start-2' : 'qx:row-start-1';
     const out = {};
     for (const col of QUEUE_COLUMNS) {
       if (col.key === 'subject') {
         const placed = !roomy && start.has('subject');
         out.subject = {
           render: true,
-          cls: placed ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : 'xl:col-start-2 xl:row-start-1',
+          cls: placed ? 'qx:[grid-column:var(--tp-q-col)] qx:row-start-1' : 'qx:col-start-2 qx:row-start-1',
           headerRender: true,
-          headerCls: placed ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : 'xl:col-start-2 xl:row-start-1',
+          headerCls: placed ? 'qx:[grid-column:var(--tp-q-col)] qx:row-start-1' : 'qx:col-start-2 qx:row-start-1',
           style: placed ? { '--tp-q-col': start.get('subject') } : undefined,
         };
         continue;
       }
       const visible = start.has(col.key);
-      const pos = visible ? `xl:[grid-column:var(--tp-q-col)] ${rowStart}` : '';
-      const headerPos = visible ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : '';
+      const pos = visible ? `qx:[grid-column:var(--tp-q-col)] ${rowStart}` : '';
+      const headerPos = visible ? 'qx:[grid-column:var(--tp-q-col)] qx:row-start-1' : '';
       const mdVisible = Boolean(col.mdEssential);
       // In roomy the md "Ticket" header span covers the category track, so the
       // category header only exists at xl (matches the pre-QC layout).
       const mdHeaderVisible = mdVisible && !(roomy && col.key === 'category');
       out[col.key] = {
         render: visible || mdVisible,
-        cls: mdVisible ? (visible ? pos : 'xl:hidden') : `hidden xl:flex ${pos}`,
+        cls: mdVisible ? (visible ? pos : 'qx:hidden') : `hidden qx:flex ${pos}`,
         headerRender: visible || mdHeaderVisible,
-        headerCls: mdHeaderVisible ? (visible ? headerPos : 'xl:hidden') : `hidden xl:flex ${headerPos}`,
+        headerCls: mdHeaderVisible ? (visible ? headerPos : 'qx:hidden') : `hidden qx:flex ${headerPos}`,
         style: visible ? { '--tp-q-col': start.get(col.key) } : undefined,
       };
     }
@@ -1522,6 +1546,16 @@ export default function Tickets() {
   const listOverflows = listCardWidth > 0 && floorMinWidth + 36 > listCardWidth;
   const widthsPinned = Object.keys(colWidths).length > 0 || dense || listOverflows;
   const listMinWidth = Math.max(gridMinWidth, listOverflows ? floorMinWidth : 0);
+  // QA 10-07 #1: on a laptop (under 1280px, filter rail open) a dense list
+  // took the wide list's minimum width while still drawing the tablet layout:
+  // four columns, the subject stretched across the extra width, and nothing
+  // to scroll to. The column layout (`qx:` classes) now follows the CARD:
+  // wide enough (720px) and it is on at any window size; narrower than that
+  // below 1280px, the list keeps the tablet layout and does not scroll.
+  const wideByCard = listCardWidth >= QUEUE_WIDE_CARD_PX;
+  const narrowCard = listCardWidth > 0 && !wideByCard
+    && typeof window !== 'undefined' && window.innerWidth < 1280;
+  const scrolls = widthsPinned && !narrowCard;
   const scrollWrapRef = useRef(null);
   // F (2 Oct 2026): the checkbox + subject stay put while the columns slide —
   // compact/dense lists whose leftmost column is the subject (roomy's title
@@ -1787,7 +1821,7 @@ export default function Tickets() {
                       custom columns apply at xl+ and mobile keeps its cards. */}
                   {!boardMode && (
                     <div className="hidden md:block order-2">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} />
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} />
                     </div>
                   )}
                   {/* View — two list densities plus the drag-drop board
@@ -1957,7 +1991,7 @@ export default function Tickets() {
                        classes, so the two can never drift. */
                     <div
                       ref={listCardRef}
-                      className="tp-card rounded-xl overflow-hidden"
+                      className={`tp-card rounded-xl overflow-hidden ${wideByCard ? 'tp-q-wide' : ''}`}
                       style={{ '--tp-q-grid': gridTemplate, '--tp-q-minw': `${listMinWidth + 36}px` }}
                     >
                       {/* Overflow wrapper (QR3): only once widths are pinned —
@@ -1974,9 +2008,9 @@ export default function Tickets() {
                           appeared at the foot, 16 Sep 2026). */}
                       {/* md, not xl (QA 09-21 #12): an iPad is 1024–1180 px wide and had no
                           way to reach the columns past the edge. */}
-                      <QueueSideScroll targetRef={scrollWrapRef} pinned={pinSubject && widthsPinned} showMap={columnMap && widthsPinned} deps={[tickets.length, gridTemplate, widthsPinned, layout]}>
-                        <div ref={scrollWrapRef} className={widthsPinned ? `md:overflow-x-auto tp-scrollbar-none ${pinSubject ? 'tp-q-pin' : ''}` : ''}>
-                          <div className={widthsPinned ? 'md:min-w-[var(--tp-q-minw)]' : ''}>
+                      <QueueSideScroll targetRef={scrollWrapRef} pinned={pinSubject && scrolls} showMap={columnMap && scrolls} arrows={sideArrows} deps={[tickets.length, gridTemplate, scrolls, layout, wideByCard]}>
+                        <div ref={scrollWrapRef} className={scrolls ? `md:overflow-x-auto overscroll-x-contain tp-scrollbar-none ${pinSubject ? 'tp-q-pin' : ''}` : ''}>
+                          <div className={scrolls ? 'md:min-w-[var(--tp-q-minw)]' : ''}>
                             {/* Header */}
                             <div className="tp-q-head hidden md:flex items-stretch border-b border-border bg-muted/40">
                               <span className="tp-pin tp-pin-0 flex items-center justify-center w-9 flex-shrink-0">
@@ -1999,7 +2033,7 @@ export default function Tickets() {
                                  user-ordered now, so no fixed span can cover them). */
                                 <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
                                   <span aria-hidden="true" />
-                                  <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/3] xl:row-start-1 xl:!px-1.5`}>
+                                  <span className={`${CELL} py-2 [grid-column:2/4] qx:[grid-column:2/3] qx:row-start-1 qx:!px-1.5`}>
                                     <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded whitespace-nowrap">
                                     Ticket{sortIndicator('subject')}
                                     </button>
@@ -2072,7 +2106,7 @@ export default function Tickets() {
                                   ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
                                   : <PriorityDot priority={ticket.priority} title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — synced from FreshService, read-only here`} />;
                                 const priorityEl = priorityColumnOn
-                                  ? <span className="xl:hidden inline-flex" data-testid="subject-priority-dot">{priorityDot}</span>
+                                  ? <span className="qx:hidden inline-flex" data-testid="subject-priority-dot">{priorityDot}</span>
                                   : priorityDot;
                                 // Real anchor (QA 08-07 #7): right-click → "Open in
                                 // new tab" and modified clicks work natively; a plain
@@ -2144,7 +2178,7 @@ export default function Tickets() {
                                     {/* At xl the requester has a real column (QA 08-07
                                       #6); below xl the meta line keeps name+office
                                       so the tablet band loses nothing. */}
-                                    <span className="xl:hidden">
+                                    <span className="qx:hidden">
                                       {' · '}
                                       {ticket.requester?.name || 'Unknown requester'}
                                       {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
@@ -2156,7 +2190,7 @@ export default function Tickets() {
                                     {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 dark:text-sky-300 font-medium">· TP-born</span>}
                                     {/* Below xl the Updated column is dropped (tablet band) —
                                       its relative time folds into this meta line instead. */}
-                                    <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
+                                    <span className="qx:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
                                   </span>
                                 );
                                 // Everything the registry cell renderers need
@@ -2240,12 +2274,12 @@ export default function Tickets() {
                                               Tightened (QA 07-30 #1): the old py-2 + py-1.5 stack read as
                                               dead space — title now hugs its detail line. */}
                                             <span className="px-3 pt-1.5 pb-0.5 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
-                                              {/* Wrap below xl: chips fall to a second line in normal
+                                              {/* Wrap below qx: chips fall to a second line in normal
                                                 flow instead of overlaying the neighbour column when
                                                 the tablet-band subject track runs out (QA 08-04 #6).
                                                 The dot+subject stay one non-wrapping unit so the
                                                 priority dot never strands on a line of its own. */}
-                                              <span className="flex flex-wrap xl:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
+                                              <span className="flex flex-wrap qx:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
                                                 <span className="flex items-center gap-1.5 min-w-0">
                                                   {priorityEl}
                                                   {subjectBtn}
@@ -2257,7 +2291,7 @@ export default function Tickets() {
                                             {/* Row 2: the slim type slot, then the chosen
                                               columns (canonical DOM order; xl placement
                                               via --tp-q-col — see colMeta). */}
-                                            <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-2`}>{typePill}</span>
+                                            <span className={`${CELL} ${cellPad} qx:col-start-2 qx:row-start-2`}>{typePill}</span>
                                             {columnCells}
                                           </div>
                                         ) : (
@@ -2273,7 +2307,7 @@ export default function Tickets() {
                                                 Dense (16 Sep 2026): ONE line — the ref follows the
                                                 subject the FreshService way, nothing wraps, the list
                                                 scrolls sideways instead. */}
-                                              <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap xl:flex-nowrap'}`}>
+                                              <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap qx:flex-nowrap'}`}>
                                                 <span className="flex items-center gap-1.5 min-w-0">
                                                   {priorityEl}
                                                   <span className="shrink-0">{typePill}</span>
@@ -2417,7 +2451,7 @@ export default function Tickets() {
                           </div>
                         </div>
                       </QueueSideScroll>
-                      <StickyScrollbar targetRef={scrollWrapRef} deps={[tickets.length, gridTemplate, widthsPinned]} />
+                      <StickyScrollbar targetRef={scrollWrapRef} deps={[tickets.length, gridTemplate, scrolls, wideByCard]} />
 
                       {/* Full pagination */}
                       <div className="px-4 py-3 border-t border-border/60 bg-muted/25">

@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.22-preview';
+export const APP_VERSION = '4.2.23-preview';
 
 export const changelog = [
+  {
+    version: '4.2.23-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Tickets list on a laptop shows its columns</strong> &mdash; on a window narrower than 1280 pixels, a Dense list (or one with many columns) scrolled sideways over the four-column tablet layout: the subject stretched across empty space and there was nothing to scroll to. The list now uses the full column layout whenever its card is wide enough, with the checkbox and subject pinned while the other columns slide. On a narrow card it keeps the short layout and does not scroll.' },
+      { type: 'improvement', html: '<strong>Scroll arrows are a personal switch</strong> &mdash; the round arrows over a list that scrolls sideways covered row content. They are off by default; turn them on under Columns &rarr; Scroll arrows. Dragging the list, Shift + wheel, the arrow keys and the scrollbar work as before.' },
+      { type: 'fix', html: '<strong>A category FreshService does not know no longer blocks the assignment</strong> &mdash; when the AI picked a Ticket Pulse subcategory with no matching FreshService lookup record, the whole write-back failed and the ticket stayed unassigned. The category is now written without the subcategory, the run says so, and the assignment goes ahead.' },
+      { type: 'fix', html: '<strong>A ticket unassigned in Ticket Pulse is always re-routed</strong> &mdash; re-routing a FreshService ticket after an agent handed it back waited for the sync to notice the change in FreshService; when the sync missed it, the ticket stayed with nobody. Ticket Pulse now re-routes from its own record ten minutes after the hand-back if nothing else has.' },
+      { type: 'fix', html: '<strong>After-hours e-mail: the phone row has no image</strong> &mdash; new Outlook kept cutting the phone badge. The row now shows a telephone symbol as text in a tinted circle, which a mail client cannot crop.' },
+      { type: 'improvement', html: '<strong>Workflows: custom fields are read again after a Wait step</strong> &mdash; a workflow that waits now continues with the ticket&rsquo;s current custom fields, so a field another system fills in a few seconds after the trigger reaches the conditions and the e-mail.' },
+    ],
+  },
   {
     version: '4.2.22-preview',
     date: 'October 7, 2026',

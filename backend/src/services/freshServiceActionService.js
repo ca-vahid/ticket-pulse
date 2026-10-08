@@ -218,6 +218,10 @@ async function findTicketForNotificationMirror(ticketId, context) {
   }
 }
 
+// A Ticket Pulse category with no FreshService lookup record (see
+// _resolveTicketPulseLookupFields): optional for every decision.
+const TP_LOOKUP_MISSING = 'TP_LOOKUP_MISSING';
+
 class FreshServiceActionService {
   /**
    * Build the FreshService actions for a pipeline run decision.
@@ -1365,7 +1369,7 @@ class FreshServiceActionService {
             });
             logger.info('FreshService: Ticket Pulse skill fields updated', { ticketId: action.ticketId, runId });
           } catch (customFieldError) {
-            if (run.decision !== 'noise_dismissed') {
+            if (run.decision !== 'noise_dismissed' && customFieldError.code !== TP_LOOKUP_MISSING) {
               throw customFieldError;
             }
 
@@ -1378,7 +1382,7 @@ class FreshServiceActionService {
             optionalActionFailures.push(optionalFailure);
             action.optionalFailure = optionalFailure;
             payloadData = buildSyncPayload(actions, preview, dryRun, { optionalActionFailures });
-            logger.warn('FreshService sync: optional noise category write failed; continuing to close ticket', {
+            logger.warn('FreshService sync: optional category write failed; continuing with the remaining actions', {
               ticketId: action.ticketId,
               runId,
               error: customFieldError.message,
@@ -1443,6 +1447,7 @@ class FreshServiceActionService {
       if (optionalActionFailures.length > 0) {
         syncNotes.push('Optional Ticket Pulse category write failed; continued with remaining FreshService actions');
       }
+      for (const gap of new Set(actions.map((a) => a.lookupGap).filter(Boolean))) syncNotes.push(gap);
       const syncNote = syncNotes.length > 0 ? syncNotes.join(' ') : null;
 
       await prisma.assignmentPipelineRun.update({
@@ -1759,10 +1764,21 @@ class FreshServiceActionService {
     const subcategoryDisplayId = subcategoryRecord ? recordDisplayId(subcategoryRecord) : null;
 
     if (!categoryDisplayId) {
-      throw new Error(`FreshService lookup record not found for Ticket Pulse category "${categoryName}"`);
+      const missing = new Error(`FreshService lookup record not found for Ticket Pulse category "${categoryName}"`);
+      // QA 10-07 #2: a gap in the FreshService lookup table is a taxonomy
+      // problem, never a reason to leave the ticket without an agent.
+      missing.code = TP_LOOKUP_MISSING;
+      throw missing;
     }
     if (subcategoryName && !subcategoryDisplayId) {
-      throw new Error(`FreshService lookup record not found for Ticket Pulse subcategory "${subcategoryName}"`);
+      // #245756 (6 Oct 2026): "Security Alert Triage" has no FreshService
+      // record. That used to fail the whole write-back, assignment included,
+      // and the ticket sat unassigned for 29 hours. The category still goes;
+      // the subcategory is left empty and the run says so.
+      action.lookupGap = `FreshService has no lookup record for the Ticket Pulse subcategory "${subcategoryName}" - the category was written without it`;
+      logger.warn('FreshService sync: Ticket Pulse subcategory has no lookup record; writing the category alone', {
+        ticketId: action.ticketId, categoryName, subcategoryName,
+      });
     }
 
     return {

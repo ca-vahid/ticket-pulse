@@ -135,6 +135,16 @@ describe('refreshLiveTicketFields', () => {
     expect(stored.ticket.status).toBe('Open'); // the stored copy is not mutated
   });
 
+  // QA 10-07 #4: Power Automate sends bst_number seconds after an agent closes
+  // the ticket by hand. A Wait step now lets it reach the e-mail.
+  test('custom fields are read live, so a field that arrived during the wait is there', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue(dbTicket({ customFields: { site: 'VAN', bst_number: 'P26667', project_accountant: 'Gisalie Galanos' } }));
+    const next = await refreshLiveTicketFields(stored, nudge);
+    expect(next.ticket.customFields).toEqual({ site: 'VAN', bst_number: 'P26667', project_accountant: 'Gisalie Galanos' });
+    expect(prismaMock.ticket.findUnique.mock.calls[0][0].select.customFields).toBe(true);
+    expect(stored.ticket.customFields).toEqual({ site: 'VAN' });
+  });
+
   test('an unreadable ticket keeps the stored copy', async () => {
     prismaMock.ticket.findUnique.mockRejectedValue(new Error('db blip'));
     const next = await refreshLiveTicketFields(stored, nudge);
