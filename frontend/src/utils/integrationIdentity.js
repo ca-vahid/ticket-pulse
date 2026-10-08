@@ -21,6 +21,9 @@ const AVATARS = {
   sentinel: '/brand/integrations/sentinel.png',
   // ContinuIT office requesters (8 Oct 2026): one building mark for every office.
   office: '/brand/integrations/office.png',
+  // ContinuIT itself (8 Oct 2026, Vahid): a calendar page with a follow-up
+  // loop around a check — meetings whose IT actions keep moving.
+  continuit: '/brand/integrations/continuit.png',
 };
 
 // Each BGC office's own city photo (8 Oct 2026, Vahid via ContinuIT): the
@@ -37,11 +40,14 @@ const INTEGRATION_REQUESTERS = {
   'simorgh@bgcengineering.ca': 'simorgh',
   // Exact address only: "Sentinel Storage" is a real vendor and keeps its initials.
   'sentinel@bgcengineering.ca': 'sentinel',
+  // Plain continuit@ only; continuit+<office>@ is an office (isOfficeRequester).
+  'continuit@bgcengineering.ca': 'continuit',
 };
 
 const REQUESTER_IDENTITIES = {
   simorgh: { key: 'simorgh', name: 'Simorgh', subtitle: 'Security agent', avatarUrl: AVATARS.simorgh, avatarDarkUrl: AVATARS.simorghDark, tone: 'simorgh' },
   sentinel: { key: 'sentinel', name: 'Microsoft Sentinel', subtitle: 'Monitoring alerts', avatarUrl: AVATARS.sentinel, tone: 'sentinel' },
+  continuit: { key: 'continuit', name: 'ContinuIT', subtitle: 'Meeting follow-ups', avatarUrl: AVATARS.continuit, tone: 'continuit' },
 };
 
 /**
@@ -94,6 +100,8 @@ export function integrationIdentity(entry) {
       tone: 'rostam',
     };
   }
+  // Notes ContinuIT writes through the API carry its credential name.
+  if (/^ContinuIT\b/i.test(actor)) return REQUESTER_IDENTITIES.continuit;
   if (/^Simorgh\b/i.test(actor)) {
     return {
       key: 'simorgh',
