@@ -11,6 +11,7 @@ import logger from './utils/logger.js';
 import { setupBigIntSerialization } from './utils/bigIntSerializer.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { slowRequestLog } from './middleware/slowRequestLog.js';
+import { usageActionCapture, start as startUsageStats } from './services/usageStatsService.js';
 import routes from './routes/index.js';
 import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
@@ -92,6 +93,11 @@ app.use(
 // Slow-request warn line (> 1.5 s, route path only, streams skipped) — the
 // http-level access log below is dropped in production (QA 09-25).
 app.use(slowRequestLog());
+
+// Site stats: one buffered event per finished request that changed something
+// (route pattern only). Never waits for the database; off with
+// USAGE_STATS_ENABLED=false.
+app.use(usageActionCapture());
 
 // Request logging middleware (exclude polling endpoints to reduce log spam)
 app.use((req, res, next) => {
@@ -533,6 +539,13 @@ async function initialize() {
       apiMaintenanceService.start();
     } catch (e) {
       logger.warn('Public-API workers failed to start (non-fatal):', e.message);
+    }
+
+    // Site stats: buffered writes every 15 s, daily rollup every 10 min, prune.
+    try {
+      startUsageStats();
+    } catch (e) {
+      logger.warn('Site stats worker failed to start (non-fatal):', e.message);
     }
 
     logger.info('Server initialization complete');

@@ -628,6 +628,13 @@ export const settingsAPI = {
 /**
  * Sync API
  */
+// Site stats (Settings -> Site stats): super admins only, spans workspaces.
+export const siteStatsAPI = {
+  overview: async (params = {}) => (await api.get('/site-stats/overview', { params })).data,
+  people: async (params = {}) => (await api.get('/site-stats/people', { params })).data,
+  items: async (params = {}) => (await api.get('/site-stats/items', { params })).data,
+};
+
 export const aiUsageAPI = {
   report: async (params = {}) => {
     const response = await api.get('/ai-usage', { params });

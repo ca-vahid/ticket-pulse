@@ -6,6 +6,7 @@ import { DashboardProvider } from './contexts/DashboardContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { LayoutProvider } from './contexts/LayoutContext';
+import UsageTracker from './components/UsageTracker';
 import Login from './pages/Login';
 import WorkspacePicker from './pages/WorkspacePicker';
 import Dashboard from './pages/Dashboard';
@@ -502,6 +503,7 @@ function App() {
                   <AccessBounceToast />
                   <V4Splash />
                   <CommandPalette />
+                  <UsageTracker />
                 </SettingsProvider>
               </DashboardProvider>
             </WorkspaceProvider>
