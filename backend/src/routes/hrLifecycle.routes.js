@@ -71,6 +71,11 @@ router.post('/families/:id/after-the-fact', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await hrLifecycleService.switchToAfterTheFact(Number(req.params.id), req.workspaceId, sessionUser(req)) });
 }));
 
+/** Apply the office lists to one open onboarding family (children held outside the list move to one person on it). */
+router.post('/families/:id/reroute', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await hrLifecycleService.rerouteFamily(Number(req.params.id), req.workspaceId, sessionUser(req)) });
+}));
+
 router.get('/events', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await hrLifecycleService.listEvents(req.workspaceId, { limit: req.query.limit, familyId: req.query.familyId || null }) });
 }));

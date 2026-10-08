@@ -690,3 +690,97 @@ describe('organise now: existing tickets are taken in, only the missing ones cre
     expect(ticketSvc.addPrivateNote).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------- new hires by office
+
+describe('new hires by office', () => {
+  const hire = (name, office, empId, start = day(20)) => fsNotice({
+    subject: `New Hire: ${name}`,
+    sender: BAMBOO,
+    text: `New Team Member Start Date: ${start} Employee #: ${empId} Position: Geologist Employee Status: FTR Location: ${office} Reports To: Maria Cruz View Employee Record`,
+  });
+  const ROUTING = {
+    offices: [
+      { label: 'Vancouver and vicinity', match: ['Vancouver', 'Kamloops'], assigneeTechIds: [3, 4] },
+      { label: 'Calgary', match: 'Calgary, Edmonton', assigneeTechIds: [2] },
+    ],
+    fallbackTechIds: [1],
+  };
+  const owners = (parent) => ticketSvc.createTicket.mock.calls.map((c) => c[1]).filter((i) => i.subject.endsWith(parent.subject)).map((i) => [i.assignedTechId, i.runAiTriage]);
+
+  test('seeded from the team by name; saved lists are validated and audited', async () => {
+    const seeded = (await hr.getSettings(1)).officeRouting;
+    expect(seeded.offices.map((o) => o.key)).toEqual(['vancouver', 'toronto', 'calgary', 'ottawa']);
+    expect(seeded.offices[0]).toMatchObject({ label: 'Vancouver and vicinity', assigneeTechIds: [4] }); // only Adrian Lo exists in this team
+    expect(seeded.fallbackTechIds).toEqual([4]);
+
+    const { settings, changes } = await hr.updateSettings(1, { officeRouting: ROUTING }, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+    expect(settings.officeRouting.offices.map((o) => [o.key, o.match, o.assigneeTechIds])).toEqual([
+      ['vancouver_and_vicinity', ['Vancouver', 'Kamloops'], [3, 4]], ['calgary', ['Calgary', 'Edmonton'], [2]],
+    ]);
+    expect(changes.map((c) => c.field)).toEqual(expect.arrayContaining(['officeRouting[vancouver]', 'officeRouting[calgary].match', 'officeRouting[calgary].assigneeTechIds', 'officeRouting.fallbackTechIds']));
+    // The lists survive a save of something else.
+    await hr.updateSettings(1, { mode: 'observe' });
+    expect((await hr.getSettings(1)).officeRouting.fallbackTechIds).toEqual([1]);
+
+    await expect(hr.updateSettings(1, { officeRouting: { offices: [{ label: 'X', match: [], assigneeTechIds: [] }] } })).rejects.toThrow(/at least one office name/);
+    await expect(hr.updateSettings(1, { officeRouting: { offices: [{ label: 'X', match: ['x'], assigneeTechIds: [999] }] } })).rejects.toThrow(/active technician/);
+    await expect(hr.updateSettings(1, { officeRouting: { offices: 'nope' } })).rejects.toThrow(/must be a list/);
+  });
+
+  test('both children of a hire go to ONE person of the office, in turn; other offices are fair grab; no AI run', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: ROUTING });
+    const a = hire('Ann One', 'Vancouver', 3001);
+    const b = hire('Bob Two', 'Vancouver - Software', 3002);
+    const c = hire('Cy Three', 'Kamloops', 3003);
+    const d = hire('Di Four', 'Edmonton', 3004);
+    const e = hire('Ed Five', 'Brisbane', 3005);
+    for (const t of [a, b, c, d, e]) await hr.onTicketCreated(t.id, 1);
+    expect(owners(a)).toEqual([[3, false], [3, false]]);
+    expect(owners(b)).toEqual([[4, false], [4, false]]);
+    expect(owners(c)).toEqual([[3, false], [3, false]]);
+    expect(owners(d)).toEqual([[2, false], [2, false]]);
+    expect(owners(e)).toEqual([[1, false], [1, false]]);
+  });
+
+  test('a child with its own default assignee keeps it; an office with nobody listed falls back to AI routing', async () => {
+    const list = (await hr.getSettings(1)).templates.onboarding;
+    await hr.updateSettings(1, {
+      mode: 'live',
+      officeRouting: { offices: [{ label: 'Vancouver', match: ['Vancouver'], assigneeTechIds: [3] }, { label: 'Toronto', match: ['Toronto'], assigneeTechIds: [] }], fallbackTechIds: [] },
+      templates: { onboarding: list.map((i) => (i.key === 'workstation' ? { ...i, assigneeTechId: 2, assigneeTechIds: [2] } : i)) },
+    });
+    const a = hire('Ann One', 'Vancouver', 3001);
+    const t = hire('Tor Onto', 'Toronto', 3002);
+    await hr.onTicketCreated(a.id, 1);
+    await hr.onTicketCreated(t.id, 1);
+    expect(owners(a)).toEqual([[3, false], [2, false]]);
+    expect(owners(t)).toEqual([[undefined, true], [2, false]]);
+  });
+
+  test('reassign by office: children held outside the list move to one list person; a list member who already holds one is kept', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: { offices: [], fallbackTechIds: [] } });
+    const a = hire('Ann One', 'Vancouver', 3001);
+    await hr.onTicketCreated(a.id, 1); // no lists yet: AI routing
+    const fam = db.families.at(-1);
+    const kids = db.members.filter((m) => m.familyId === fam.id).map((m) => ticketById(m.ticketId));
+    kids[0].assignedTechId = 2; // somebody outside the office
+    kids[1].assignedTechId = 4; // already an office person
+    await hr.updateSettings(1, { officeRouting: ROUTING });
+    jest.clearAllMocks();
+
+    const r = await hr.rerouteFamily(fam.id, 1, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+    expect(r).toMatchObject({ assignee: { id: 4, name: 'Adrian Lo' }, office: 'Vancouver and vicinity', warnings: [] });
+    expect(r.moved.map((m) => m.ticketId)).toEqual([kids[0].id]);
+    expect(kids.map((k) => k.assignedTechId)).toEqual([4, 4]);
+    expect(ticketSvc.assignTicket).toHaveBeenCalledTimes(1);
+    expect(ticketSvc.addPrivateNote.mock.calls[0][2].bodyHtml).toMatch(/assigned to Adrian Lo by office \(Vancouver and vicinity\), by Vahid Haeri/);
+    expect(db.events.at(-1)).toMatchObject({ mode: 'manual', decision: 'reroute_office', outcome: 'done', actor: 'vahid@x.ca' });
+
+    // Nothing left to move; a departure is refused.
+    expect((await hr.rerouteFamily(fam.id, 1)).moved).toEqual([]);
+    const dep = departureOf('Matt Lin', day(8), 4444);
+    await hr.onTicketCreated(dep.id, 1);
+    await expect(hr.rerouteFamily(db.families.at(-1).id, 1)).rejects.toThrow(/Only a new hire/);
+  });
+});

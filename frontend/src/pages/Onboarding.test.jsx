@@ -57,6 +57,7 @@ Object.assign(api, {
   switchToAfterTheFact: vi.fn(async () => ({ success: true, data: { closed: [] } })),
   candidates: vi.fn(async () => ({ success: true, data: [] })),
   organise: vi.fn(async () => ({ success: true, data: { familyId: 8, outcome: 'done', warnings: [] } })),
+  rerouteFamily: vi.fn(async () => ({ success: true, data: { familyId: 4, assignee: { id: 2, name: 'Muhammad Shahidullah' }, office: 'Vancouver and vicinity', moved: [{ ticketId: 90 }], warnings: [] } })),
   events: vi.fn(async () => ({ success: true, data: [{
     id: 1, mode: 'observe', outcome: 'recorded', decision: 'create_family', person: 'Jamie Gill', ticketId: 77, createdAt: '2026-10-01T17:00:00Z',
     summary: 'Would: Jamie Gill: offboarding family with 2 children (Laptop, Decommissioning Account), due Fri, Oct 9, 2026',
@@ -221,5 +222,38 @@ describe('several people on one child', () => {
     expect(screen.getByLabelText('Offboarding: Decommissioning Account person 2')).toBeInTheDocument();
     // A slot nobody was chosen for is not a change.
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+});
+
+describe('new hires by office', () => {
+  const ROUTED = { ...SETTINGS, settings: { ...SETTINGS.settings, officeRouting: { offices: [{ key: 'vancouver', label: 'Vancouver and vicinity', match: ['Vancouver', 'Kamloops'], assigneeTechIds: [1] }], fallbackTechIds: [] } } };
+  afterEach(() => api.getSettings.mockResolvedValue({ success: true, data: SETTINGS }));
+
+  test('Settings shows the office teams; adding a person and an office name is saved as clean lists', async () => {
+    api.getSettings.mockResolvedValue({ success: true, data: ROUTED });
+    renderAt('/onboarding/settings');
+    const section = await screen.findByRole('region', { name: 'New hires by office' });
+    expect(within(section).getByLabelText('Office team 1 name')).toHaveValue('Vancouver and vicinity');
+    const covers = within(section).getByLabelText('Vancouver and vicinity: offices it covers');
+    expect(covers).toHaveValue('Vancouver, Kamloops');
+    // An empty slot is not a change; a new office name is.
+    fireEvent.click(within(section).getByRole('button', { name: 'Vancouver and vicinity: add a person' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.change(covers, { target: { value: 'Vancouver, Kamloops, Victoria, ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalled());
+    expect(api.updateSettings.mock.calls[0][0].officeRouting).toEqual({
+      offices: [{ key: 'vancouver', label: 'Vancouver and vicinity', match: ['Vancouver', 'Kamloops', 'Victoria'], assigneeTechIds: [1] }], fallbackTechIds: [],
+    });
+  });
+
+  test('an open onboarding family offers "Reassign by office" and says what moved', async () => {
+    api.families.mockResolvedValueOnce({ success: true, data: [{ id: 4, kind: 'onboarding', personName: 'Ann One', office: 'Vancouver', effectiveDate: '2026-11-02', afterTheFact: false, status: 'open', progress: { done: 0, total: 2 }, linked: 0, parent: { id: 77, ref: '#240100' } }] });
+    api.family.mockResolvedValueOnce({ success: true, data: { id: 4, kind: 'onboarding', status: 'open', afterTheFact: false, officeList: 'Vancouver and vicinity', parent: { id: 77, ref: '#240100' }, details: {}, members: [] } });
+    renderAt('/onboarding/people');
+    fireEvent.click(await screen.findByRole('button', { name: /Show Ann One's tickets/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reassign by office' }));
+    await waitFor(() => expect(api.rerouteFamily).toHaveBeenCalledWith(4));
+    expect(await screen.findByText('1 ticket assigned to Muhammad Shahidullah (Vancouver and vicinity).')).toBeInTheDocument();
   });
 });

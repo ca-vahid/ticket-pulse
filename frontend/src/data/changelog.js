@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.29-preview';
+export const APP_VERSION = '4.2.30-preview';
 
 export const changelog = [
+  {
+    version: '4.2.30-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Comings &amp; Goings: new hires go to the IT people of their office</strong> &mdash; Settings has a new list, &ldquo;New hires by office&rdquo;: which people look after the new hires of which office (Vancouver and vicinity, Toronto, Calgary, Ottawa and Montreal), and who takes turns for every other office. A new hire&rsquo;s Laptop and Workstation both go to one person from that list, in turn; anyone off that day is skipped.' },
+      { type: 'added', html: '<strong>Reassign by office</strong> &mdash; an open new-hire family under People has a &ldquo;Reassign by office&rdquo; button: tickets held by somebody outside the office&rsquo;s list move to one person on it, with a note on each.' },
+    ],
+  },
   {
     version: '4.2.29-preview',
     date: 'October 8, 2026',

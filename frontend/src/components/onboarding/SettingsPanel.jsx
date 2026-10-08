@@ -19,6 +19,7 @@ const pick = (s) => ({
   templates: s.templates,
   leave: s.leave,
   officeChange: s.officeChange,
+  officeRouting: s.officeRouting || { offices: [], fallbackTechIds: [] },
 });
 
 const assigneeValue = (item) => (item.assigneeTechId ? `t:${item.assigneeTechId}` : item.groupId ? `g:${item.groupId}` : '');
@@ -28,6 +29,113 @@ const cleanTemplates = (templates = {}) => Object.fromEntries(Object.entries(tem
   const ids = [...new Set(peopleOf(item).filter((id) => id > 0))];
   return { ...item, assigneeTechId: ids[0] ?? null, assigneeTechIds: ids };
 })]));
+
+/** What is sent for the office lists: half-chosen slots and empty office names dropped. */
+const cleanRouting = (r = {}) => ({
+  offices: (r.offices || []).map((o) => ({
+    ...o,
+    match: (Array.isArray(o.match) ? o.match : []).map((m) => String(m).trim()).filter(Boolean),
+    assigneeTechIds: [...new Set((o.assigneeTechIds || []).filter((id) => id > 0))],
+  })),
+  fallbackTechIds: [...new Set((r.fallbackTechIds || []).filter((id) => id > 0))],
+});
+
+/** A list of people: one picker each, add and remove. 0 = a slot still being chosen. */
+function PeopleList({ ids, onChange, techOptions, what, max = MAX_PEOPLE, addLabel = 'Add a person' }) {
+  return (
+    <div className="min-w-0 space-y-1.5">
+      {ids.map((id, k) => (
+        // The slot's position is its identity: people can repeat while being chosen.
+        <div key={`${what}-${k}`} className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <FancySelect
+              value={id ? `t:${id}` : ''}
+              onChange={(v) => onChange(ids.map((x, j) => (j === k ? (v ? Number(v.slice(2)) : 0) : x)))}
+              options={[{ value: '', label: 'Choose a person' }, ...techOptions.filter((o) => o.value === `t:${id}` || !ids.includes(Number(o.value.slice(2))))]}
+              aria-label={`${what} person ${k + 1}`}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange(ids.filter((_, j) => j !== k))}
+            aria-label={`${what}: remove person ${k + 1}`}
+            className="tp-focus-ring rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      {!ids.includes(0) && ids.length < max && (
+        <button
+          type="button"
+          onClick={() => onChange([...ids, 0])}
+          aria-label={`${what}: add a person`}
+          className="tp-focus-ring inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs text-primary hover:bg-muted"
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> {addLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** New hires by office: which people look after the new hires of which office. */
+function OfficeRouting({ routing, onChange, techOptions }) {
+  const offices = routing.offices || [];
+  const setOffice = (i, patch) => onChange({ ...routing, offices: offices.map((o, j) => (j === i ? { ...o, ...patch } : o)) });
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 shadow-subtle" aria-label="New hires by office">
+      <SectionTitle hint="A new hire's Laptop and Workstation go to one person from the list of the hire's office, in turn; anyone off that day is skipped. A child with its own default assignee above keeps it.">
+        New hires by office
+      </SectionTitle>
+      <div className="hidden grid-cols-[minmax(0,12rem)_minmax(0,1fr)_minmax(0,1fr)_2rem] gap-2 px-1 pb-1 text-xs text-muted-foreground sm:grid">
+        <span>Team</span><span>Offices it covers (comma separated)</span><span>People</span><span><span className="sr-only">Remove</span></span>
+      </div>
+      <ul className="space-y-3">
+        {offices.map((o, i) => (
+          <li key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_minmax(0,1fr)_2rem] sm:items-start">
+            <input
+              type="text"
+              value={o.label}
+              onChange={(e) => setOffice(i, { label: e.target.value })}
+              aria-label={`Office team ${i + 1} name`}
+              className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
+            />
+            <input
+              type="text"
+              value={(o.match || []).join(', ')}
+              onChange={(e) => setOffice(i, { match: e.target.value.split(',').map((m) => m.replace(/^\s+/, '')) })}
+              aria-label={`${o.label || `Office team ${i + 1}`}: offices it covers`}
+              placeholder="Vancouver, Kamloops"
+              className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
+            />
+            <PeopleList ids={o.assigneeTechIds || []} onChange={(ids) => setOffice(i, { assigneeTechIds: ids })} techOptions={techOptions} what={o.label || `Office team ${i + 1}`} />
+            <button
+              type="button"
+              onClick={() => onChange({ ...routing, offices: offices.filter((_, j) => j !== i) })}
+              aria-label={`Remove ${o.label || `office team ${i + 1}`}`}
+              className="tp-focus-ring justify-self-start rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-red-600 dark:hover:text-red-300"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() => onChange({ ...routing, offices: [...offices, { key: '', label: 'New team', match: [], assigneeTechIds: [] }] })}
+        className="tp-focus-ring mt-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-primary hover:bg-muted"
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" /> Add an office team
+      </button>
+      <div className="mt-4 grid gap-1.5 border-t border-border pt-3 sm:max-w-md">
+        <span className="text-sm font-medium text-foreground">Any other office</span>
+        <span className="text-xs text-muted-foreground">Offices no team covers: these people take turns. Nobody listed means AI routing.</span>
+        <PeopleList ids={routing.fallbackTechIds || []} onChange={(ids) => onChange({ ...routing, fallbackTechIds: ids })} techOptions={techOptions} what="Any other office" max={20} />
+      </div>
+    </section>
+  );
+}
 
 /** One child's default assignee: a person, a group, AI routing — or several people who take turns. */
 function AssigneeCell({ item, what, onChange, assigneeOptions, techOptions }) {
@@ -171,13 +279,14 @@ export default function SettingsPanel({ data, onSaved }) {
   }, []);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const dirty = JSON.stringify({ ...draft, templates: cleanTemplates(draft.templates) }) !== JSON.stringify({ ...saved, templates: cleanTemplates(saved.templates) });
+  const cleaned = (d) => ({ ...d, templates: cleanTemplates(d.templates), officeRouting: cleanRouting(d.officeRouting) });
+  const dirty = JSON.stringify(cleaned(draft)) !== JSON.stringify(cleaned(saved));
 
   const save = async () => {
     setSaving(true);
     setStatus(null);
     try {
-      const res = await hrLifecycleAPI.updateSettings({ ...draft, templates: cleanTemplates(draft.templates) });
+      const res = await hrLifecycleAPI.updateSettings(cleaned(draft));
       const next = res?.data?.settings ? pick(res.data.settings) : draft;
       setSaved(next);
       setDraft(next);
@@ -242,6 +351,8 @@ export default function SettingsPanel({ data, onSaved }) {
         />
       ))}
 
+      <OfficeRouting routing={draft.officeRouting} onChange={(officeRouting) => setDraft((d) => ({ ...d, officeRouting }))} techOptions={techOptions} />
+
       <section className="rounded-xl border border-border bg-card p-4 shadow-subtle">
         <SectionTitle hint="No new ticket: the notice itself is assigned, given a due date and parked until its lead time.">Leave and transfer notices</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -293,7 +404,7 @@ export default function SettingsPanel({ data, onSaved }) {
           </table>
         </div>
         <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-          {['afterTheFact', 'matching', 'recency', 'passwords', 'sharing'].filter((k) => detection[k]).map((k) => <li key={k}>{detection[k]}</li>)}
+          {['afterTheFact', 'matching', 'recency', 'passwords', 'sharing', 'offices'].filter((k) => detection[k]).map((k) => <li key={k}>{detection[k]}</li>)}
         </ul>
       </section>
 
@@ -308,7 +419,7 @@ export default function SettingsPanel({ data, onSaved }) {
                 <span className="text-xs text-muted-foreground">{fmtWhen(c.createdAt)}</span>
                 <span className="truncate text-xs text-foreground/85">{c.changedByName || c.changedBy || 'Unknown'}</span>
                 <span className="min-w-0">
-                  <span className="text-foreground">{changeFieldLabel(c.field, { templateLabels: labels, templates: draft.templates, item: c.before || c.after })}</span>
+                  <span className="text-foreground">{changeFieldLabel(c.field, { templateLabels: labels, templates: draft.templates, item: /^officeRouting\[/.test(c.field) ? ((draft.officeRouting?.offices || []).find((o) => c.field.startsWith(`officeRouting[${o.key}]`)) || c.after || c.before) : (c.before || c.after) })}</span>
                   <span className="text-muted-foreground">: {changeValueLabel(c.field, c.before, { techById, groupById })} → </span>
                   <span className="text-foreground">{changeValueLabel(c.field, c.after, { techById, groupById })}</span>
                 </span>
