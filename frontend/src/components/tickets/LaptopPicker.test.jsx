@@ -120,4 +120,18 @@ describe('Assetron device finder', () => {
     expect(warrantyLabel(null)).toBe('—');
     expect(warrantyLabel('soon')).toBe('soon');
   });
+  // 8 Oct 2026: the same device on two pages of Assetron's list left rows from the previous filter behind.
+  test('a device listed twice shows once, and a make filter leaves only that make', async () => {
+    const lenovo = Array.from({ length: 6 }, (_, i) => dev(100 + i, { make: 'Lenovo', model: 'ThinkPad X9' }));
+    const dell = Array.from({ length: 4 }, (_, i) => dev(200 + i));
+    load([...lenovo, ...dell, lenovo[1], lenovo[2], dell[0]]);
+    renderPicker();
+    const filters = await screen.findByRole('group', { name: 'Filters' });
+    expect(screen.getByTestId('device-count')).toHaveTextContent('10 of 10 new devices');
+    const tick = (name) => fireEvent.click(within(filters).getByRole('checkbox', { name }));
+    tick(/Dell/); tick(/Dell/); tick(/Lenovo/); tick(/Lenovo/); tick(/Dell/);
+    const rows = [...document.querySelectorAll('tbody tr')];
+    expect(rows).toHaveLength(4);
+    rows.forEach((r) => expect(r).toHaveTextContent('Dell'));
+  });
 });

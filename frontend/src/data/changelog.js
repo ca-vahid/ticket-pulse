@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.25-preview';
+export const APP_VERSION = '4.2.26-preview';
 
 export const changelog = [
+  {
+    version: '4.2.26-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Assetron device finder</strong> — a filter (for example Make: Dell) could still show devices from the previous filter when Assetron listed the same device twice. Each device now shows once and the table always matches the filters.' },
+    ],
+  },
   {
     version: '4.2.25-preview',
     date: 'October 8, 2026',

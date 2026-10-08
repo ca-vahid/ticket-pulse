@@ -49,6 +49,21 @@ function sizeValue(v) {
   return Number(m[0]) * (/TB/i.test(String(v)) ? 1024 : 1);
 }
 const idOf = (a) => a?.id ?? null;
+/**
+ * One row per device (8 Oct 2026). Assetron's list is read page by page, and a
+ * device can come back on two pages; two rows with the same id left rows from
+ * the previous filter in the table (a Dell filter still showing Lenovo rows).
+ */
+export function uniqueDevices(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : []).filter((d) => {
+    if (!d) return false;
+    if (d.id === null || d.id === undefined || d.id === '') return true;
+    if (seen.has(d.id)) return false;
+    seen.add(d.id);
+    return true;
+  });
+}
 
 export function RecipientField({ recipient, onRecipient }) {
   const [editing, setEditing] = useState(false);
@@ -159,7 +174,7 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
         if (!s?.data?.configured) { setStatus({ loading: false, configured: false, error: null }); return; }
         const r = await ticketsAPI.assetronDevices();
         if (!alive) return;
-        const items = Array.isArray(r?.data?.items) ? r.data.items : [];
+        const items = uniqueDevices(r?.data?.items);
         setDevices(items);
         setTruncated(Boolean(r?.data?.truncated));
         setStatus({ loading: false, configured: true, error: null });
@@ -359,10 +374,10 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((a) => {
+                        {rows.map((a, i) => {
                           const chosen = idOf(value) === a.id;
                           return (
-                            <tr key={a.id} onClick={() => onChange(a)} aria-selected={chosen}
+                            <tr key={a.id ?? `row-${i}`} onClick={() => onChange(a)} aria-selected={chosen}
                               className={`cursor-pointer border-t border-border/60 ${chosen ? 'bg-primary/10' : 'hover:bg-muted/50'}`}>
                               <td className="px-2 py-1.5">
                                 <button type="button" onClick={(e) => { e.stopPropagation(); onChange(a); }} aria-label={`Choose ${assetTitle(a)} ${a.serialNumber || ''}`}
