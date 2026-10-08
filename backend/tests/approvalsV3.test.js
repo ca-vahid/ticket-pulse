@@ -162,6 +162,21 @@ describe('postMessage — ask the approvers / agent only', () => {
     expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyText).toContain('(approvers + agent only)');
   });
 
+  test('a rich question reaches the ticket note as rich text, quoted under its header line (7 Oct 2026)', async () => {
+    const html = '<p>Hi Andrii,</p><p><strong>BGC4333 looks healthy.</strong></p><table><tr><th>Component</th><th>Specs</th></tr><tr><td>Memory</td><td><strong>32 GB</strong></td></tr></table>';
+    await conversation.postMessage(row(), { mode: 'internal', to: ['vahid@x.io'], bodyHtml: html, author: { email: 'neville@x.io', name: 'Neville' } });
+    const data = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(data.bodyText).toContain('Question (approvers + agent only) from Neville');
+    expect(data.bodyHtml).toMatch(/^<p>Question \(approvers \+ agent only\) from Neville → [^<]+:<\/p><blockquote>/);
+    expect(data.bodyHtml).toContain('<table>');
+    expect(data.bodyHtml).toContain('<strong>32 GB</strong>');
+  });
+
+  test('a plain-text question keeps a plain note (no HTML invented)', async () => {
+    await conversation.postMessage(row(), { mode: 'internal', to: ['vahid@x.io'], bodyText: 'q', author: { email: 'neville@x.io' } });
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyHtml).toBeUndefined();
+  });
+
   test('defaults to the agent + the rest of the chain', async () => {
     const res = await conversation.postMessage(row(), { mode: 'internal', bodyText: 'q', author: { email: 'neville@x.io' } });
     expect(res.to.sort()).toEqual(['req@x.io', 'vahid@x.io']);

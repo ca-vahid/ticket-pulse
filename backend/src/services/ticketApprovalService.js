@@ -324,7 +324,8 @@ class TicketApprovalService {
           ticketId, workspaceId, source: 'ticketpulse_user', eventType: 'note',
           actorName: requesterLabel, actorEmail: actor?.email || null, authorType: 'system',
           incoming: false, isPrivate: true, visibility: 'private', bodyText: body, content: body, occurredAt: new Date(), mirrorState: null,
-          rawPayload: { kind: 'approval_event', v: 1, event: 'requested', requestGroupId, category: category.name, approvers: managers, note: cleanNote || null },
+          // noteHtml (7 Oct 2026): the request's own formatting, so the card is not flattened.
+          rawPayload: { kind: 'approval_event', v: 1, event: 'requested', requestGroupId, category: category.name, approvers: managers, note: cleanNote || null, noteHtml: cleanNote && noteHtml ? sanitizeNoteHtml(noteHtml) : null },
         },
       }).catch((err) => logger.warn(`Approval request note write failed (non-fatal): ${err.message}`));
     }
@@ -1654,6 +1655,11 @@ class TicketApprovalService {
                 ? ((await this._resolvePersonName(approval.requestedBy).catch(() => null)) || prettifyLocalPart(approval.requestedBy))
                 : null,
               requestNote: askedFor ? (askedFor.length > 400 ? `${askedFor.slice(0, 400).trimEnd()}…` : askedFor) : null,
+              // The same notes with their formatting (7 Oct 2026) — the card
+              // renders these when present; the plain fields stay for search.
+              noteHtml: note && noteHtml ? sanitizeNoteHtml(noteHtml) : null,
+              conditionHtml: cleanConditionHtml || null,
+              requestNoteHtml: askedFor && approval.requestNoteHtml ? approval.requestNoteHtml : null,
               // QA 09-18 #1: whether the end user was on the verdict e-mail.
               requesterNotified: notifyRequester,
             },

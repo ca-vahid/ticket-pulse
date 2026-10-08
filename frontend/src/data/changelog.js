@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.19-preview';
+export const APP_VERSION = '4.2.20-preview';
 
 export const changelog = [
+  {
+    version: '4.2.20-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Approval notes keep their formatting on the ticket</strong> &mdash; a question, comment or answer written with tables, bold text or lists arrived formatted in the e-mail but showed as one flat paragraph on the ticket. The ticket now shows it as written, quoted under who asked whom. The approval request and decision cards keep the formatting of the request, the decision note and the condition too. Earlier approvals were updated.' },
+    ],
+  },
   {
     version: '4.2.19-preview',
     date: 'October 7, 2026',

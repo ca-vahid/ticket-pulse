@@ -1,5 +1,5 @@
 import { CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
-import { PersonAvatar, timeAgo } from './ticketUi';
+import { PersonAvatar, SafeHtml, timeAgo } from './ticketUi';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 import { cleanNoteText } from '../../utils/noteText';
 
@@ -70,6 +70,8 @@ export function parseApprovalRequest(entry) {
       requesterName: entry?.actorName || (m ? m[3].trim() : null),
       amount: m && m[4] ? m[4] : null,
       note: cleanNoteText(raw.note || (m && m[5] ? unquote(m[5]) : '')) || null,
+      // 7 Oct 2026: the request's own formatting (tables, bold, lists) when it had any.
+      noteHtml: raw.noteHtml || null,
     };
   }
   if (!m) return null;
@@ -149,7 +151,9 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
               </p>
               {request.note && (
                 <Block label="Request">
-                  <span className="whitespace-pre-line">{request.note}</span>
+                  {request.noteHtml
+                    ? <SafeHtml html={request.noteHtml} className="!text-[15px] text-foreground/85" />
+                    : <span className="whitespace-pre-line">{request.note}</span>}
                 </Block>
               )}
             </div>
@@ -203,9 +207,15 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
             <p className="text-xs text-muted-foreground/75 mt-0.5">Approval decision</p>
 
             {structured.condition && (
-              <Block label="Condition" labelClass="text-amber-700 dark:text-amber-300">{structured.condition}</Block>
+              <Block label="Condition" labelClass="text-amber-700 dark:text-amber-300">
+                {structured.conditionHtml ? <SafeHtml html={structured.conditionHtml} className="!text-[15px] text-foreground/85" /> : structured.condition}
+              </Block>
             )}
-            {structured.note && <Block label="Decision note">{structured.note}</Block>}
+            {structured.note && (
+              <Block label="Decision note">
+                {structured.noteHtml ? <SafeHtml html={structured.noteHtml} className="!text-[15px] text-foreground/85" /> : structured.note}
+              </Block>
+            )}
             {typeof structured.requesterNotified === 'boolean' && (
               <p className="mt-2.5 text-[12px] text-muted-foreground" data-testid="requester-notified">
                 {structured.requesterNotified ? 'E-mailed to the agents and the requester.' : 'E-mailed to the agents only — the requester was not copied.'}
@@ -213,7 +223,9 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
             )}
             {structured.requestNote && (
               <Block label={`Asked by ${askedBy}`}>
-                <span className="text-muted-foreground">“{structured.requestNote}”</span>
+                {structured.requestNoteHtml
+                  ? <SafeHtml html={structured.requestNoteHtml} className="!text-[14px] !text-muted-foreground" />
+                  : <span className="text-muted-foreground">“{structured.requestNote}”</span>}
               </Block>
             )}
           </div>
