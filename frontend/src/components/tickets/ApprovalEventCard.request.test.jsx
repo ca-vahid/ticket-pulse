@@ -51,3 +51,27 @@ describe('approval request card', () => {
     expect(document.body.textContent).not.toMatch(/&nbsp;|vhaeri@/);
   });
 });
+
+// 7 Oct 2026: a formatted request (table, bold) read as one flat paragraph on
+// the ticket. The payload now carries the HTML and the card renders it.
+describe('approval cards keep the note formatting', () => {
+  test('a request with a table renders the table', () => {
+    const entry = {
+      bodyText: 'Approval requested · New Computer Upgrade → a@x by Andrii — "Specs below"', actorName: 'Andrii', occurredAt: new Date().toISOString(),
+      rawPayload: { kind: 'approval_event', v: 1, event: 'requested', category: 'New Computer Upgrade', approvers: ['a@x'], note: 'Specs below', noteHtml: '<p><strong>Specs</strong> below</p><table><tr><td>Memory</td><td>32 GB</td></tr></table>' },
+    };
+    const { container } = render(<ul><ApprovalEventCard entry={entry} meta={{ label: 'Requested' }} body={entry.bodyText} /></ul>);
+    expect(container.querySelector('table')).not.toBeNull();
+    expect(container.querySelector('strong')).toHaveTextContent('Specs');
+  });
+
+  test('a decision with a formatted condition renders it; plain notes stay plain', () => {
+    const entry = {
+      bodyText: 'Approval APPROVED WITH CONDITION ✔ by Reza', actorEmail: 'r@x', occurredAt: new Date().toISOString(),
+      rawPayload: { kind: 'approval_event', v: 2, event: 'approved', parts: { verdict: 'approved', actorName: 'Reza', note: 'ok', condition: 'Only the 14 inch', conditionHtml: '<ul><li>Only the <strong>14 inch</strong></li></ul>' } },
+    };
+    const { container } = render(<ul><ApprovalEventCard entry={entry} meta={{ label: 'Approved' }} body={entry.bodyText} /></ul>);
+    expect(container.querySelector('li strong')).toHaveTextContent('14 inch');
+    expect(screen.getByText('ok')).toBeInTheDocument();
+  });
+});

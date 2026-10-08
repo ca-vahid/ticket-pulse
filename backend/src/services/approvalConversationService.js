@@ -10,6 +10,20 @@ import { pickIngestMailbox } from './mailboxPicker.js';
 import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+
+const escapeNoteHtml = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * The ticket note for an approval question / comment / answer as rich text
+ * (Vahid, 7 Oct 2026: a question with a table and bold text arrived in the
+ * e-mail formatted but read as one flat paragraph on the ticket). The header
+ * line stays plain; the message's own sanitized HTML is quoted under it, the
+ * way the e-mail shows it. Null when the message had no HTML.
+ */
+export function approvalNoteHtml(header, messageHtml) {
+  if (!messageHtml) return null;
+  return `<p>${escapeNoteHtml(header)}</p><blockquote>${messageHtml}</blockquote>`;
+}
 /**
  * Approvals v3 — the conversation on a request (16 Sep 2026, Vahid).
  *
@@ -203,9 +217,11 @@ class ApprovalConversationService {
       }).catch((err) => logger.warn(`Approval question: status update failed (non-fatal): ${err.message}`));
     }
 
+    const questionHeader = `${kind === 'question' ? 'Question' : 'Comment'} ${audience === 'internal' ? '(approvers + agent only) ' : ''}from ${authorName} → ${[...toList, ...ccList].map((p) => p.name || p.email).join(', ')}:`;
     await this._ticketNote(approval, {
       actorName: authorName, actorEmail: authorEmail,
-      body: `${kind === 'question' ? 'Question' : 'Comment'} ${audience === 'internal' ? '(approvers + agent only) ' : ''}from ${authorName} → ${[...toList, ...ccList].map((p) => p.name || p.email).join(', ')}: "${cleanText}"`,
+      body: `${questionHeader} "${cleanText}"`,
+      html: approvalNoteHtml(questionHeader, cleanHtml),
       event: kind, messageId: message.id,
     });
 
@@ -287,9 +303,11 @@ class ApprovalConversationService {
       }
     }
 
+    const answerHeader = `Answer ${audience === 'internal' ? '(approvers + agent only) ' : ''}from ${name}${via === 'email' ? ' by e-mail' : ''}:`;
     await this._ticketNote(approval, {
       actorName: name, actorEmail: email,
-      body: `Answer ${audience === 'internal' ? '(approvers + agent only) ' : ''}from ${name}${via === 'email' ? ' by e-mail' : ''}: "${cleanText}"`,
+      body: `${answerHeader} "${cleanText}"`,
+      html: approvalNoteHtml(answerHeader, cleanHtml),
       event: 'answer', messageId: message.id,
     });
 
@@ -352,13 +370,13 @@ class ApprovalConversationService {
   }
 
   // ------------------------------------------------------------ internals
-  async _ticketNote(approval, { actorName, actorEmail, body, event, messageId }) {
+  async _ticketNote(approval, { actorName, actorEmail, body, html = null, event, messageId }) {
     try {
       const entry = await prisma.ticketThreadEntry.create({
         data: {
           ticketId: approval.ticketId, workspaceId: approval.workspaceId, source: 'ticketpulse_user', eventType: 'note',
           actorName, actorEmail, authorType: 'system', incoming: false, isPrivate: true, visibility: 'private',
-          bodyText: body, content: body, occurredAt: new Date(), mirrorState: null,
+          bodyText: body, content: body, ...(html ? { bodyHtml: html } : {}), occurredAt: new Date(), mirrorState: null,
           rawPayload: { kind: 'approval_event', v: 1, event, messageId },
         },
       });
