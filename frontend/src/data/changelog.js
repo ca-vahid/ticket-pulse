@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.21-preview';
+export const APP_VERSION = '4.2.22-preview';
 
 export const changelog = [
+  {
+    version: '4.2.22-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Dropdowns in the Availability settings panels open again</strong> &mdash; in the edit panels (leave types, offices, groups, rules) the lists for Colour, Booked in, Shows as and Colleagues see opened behind the panel, so nothing seemed to happen. Dropdown lists now always open on top of any panel or dialog.' },
+      { type: 'improvement', html: '<strong>Different vacation days per person</strong> &mdash; the leave type&rsquo;s &ldquo;Days per year&rdquo; is the default; the edit panel now says where to give someone their own number (15, 20, 25&hellip;): <em>Availability &rarr; Settings &rarr; People</em>, in that type&rsquo;s &ldquo;days/yr&rdquo; column.' },
+    ],
+  },
   {
     version: '4.2.21-preview',
     date: 'October 7, 2026',

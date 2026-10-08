@@ -171,7 +171,7 @@ export default function FancySelect({
           aria-label={ariaLabel}
           aria-activedescendant={active >= 0 ? `${id}-opt-${active}` : undefined}
           style={{ position: 'fixed', left: pos.left, minWidth: pos.minWidth, width: 'max-content', maxWidth: pos.maxWidth, scrollbarGutter: 'stable', top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight, transformOrigin: pos.bottom != null ? 'bottom center' : 'top center' }}
-          className="z-[60] overflow-y-auto settings-scrollbar tp-card rounded-xl shadow-soft p-1.5 animate-popIn"
+          className="z-[1000] overflow-y-auto settings-scrollbar tp-card rounded-xl shadow-soft p-1.5 animate-popIn"
         >
           {rows.map((r) => (r.heading ? (
             <li key={r.key} role="presentation" className="px-2.5 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 select-none">
