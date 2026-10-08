@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.20-preview';
+export const APP_VERSION = '4.2.21-preview';
 
 export const changelog = [
+  {
+    version: '4.2.21-preview',
+    date: 'October 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Teams daily digest counts only open tickets</strong> &mdash; the digest counted every ticket without a resolved or closed date as open, which included closed and deleted tickets that never got one, and it stopped counting at 200. It now counts tickets in an open or pending status, the same as the Tickets page, with no cap; the list shows the ten most urgent and &ldquo;and N more&rdquo; follows the real total.' },
+    ],
+  },
   {
     version: '4.2.20-preview',
     date: 'October 7, 2026',
