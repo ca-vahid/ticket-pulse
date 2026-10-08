@@ -21,6 +21,7 @@ const svc = {
   preview: jest.fn(async (id) => ({ ticketId: id })),
   candidates: jest.fn(async () => [{ ticketId: 9 }]),
   organise: jest.fn(async (id) => ({ familyId: 3, outcome: 'done', ticketId: id })),
+  rerouteFamily: jest.fn(async (id) => ({ familyId: id, moved: [] })),
 };
 const wsRepo = { getAccessRole: jest.fn(async () => 'viewer') };
 
@@ -75,12 +76,14 @@ test.each([
   ['post', '/preview'],
   ['get', '/candidates'],
   ['post', '/organise'],
+  ['post', '/families/3/reroute'],
 ])('%s %s is admin-only', async (method, path) => {
   const r = await request(app(MEMBER))[method](`/api/hr-lifecycle${path}`).send({ mode: 'live', ticketId: 1 });
   expect(r.status).toBe(403);
   expect(svc.updateSettings).not.toHaveBeenCalled();
   expect(svc.switchToAfterTheFact).not.toHaveBeenCalled();
   expect(svc.organise).not.toHaveBeenCalled();
+  expect(svc.rerouteFamily).not.toHaveBeenCalled();
 });
 
 test('a workspace admin (not a global admin) passes', async () => {
@@ -119,4 +122,9 @@ test('candidates and organise: the notice id is required and the session user is
   expect(svc.organise).toHaveBeenCalledWith(61870, 1, ADMIN);
   expect((await request(app(ADMIN)).post('/api/hr-lifecycle/organise').send({})).status).toBe(400);
   expect((await request(app(ADMIN)).post('/api/hr-lifecycle/organise').send({ ticketId: 'x' })).status).toBe(400);
+});
+
+test('reassign by office passes the family and the session user', async () => {
+  expect((await request(app(ADMIN)).post('/api/hr-lifecycle/families/7/reroute')).body.data).toEqual({ familyId: 7, moved: [] });
+  expect(svc.rerouteFamily).toHaveBeenCalledWith(7, 1, ADMIN);
 });

@@ -139,6 +139,24 @@ function FamilyDetail({ familyId, onChanged }) {
   const [error, setError] = useState(null);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+
+  const reroute = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await hrLifecycleAPI.rerouteFamily(familyId);
+      const d = res?.data || {};
+      const n = d.moved?.length || 0;
+      setNote(n ? `${n} ${n === 1 ? 'ticket' : 'tickets'} assigned to ${d.assignee?.name} (${d.office}).` : `Nothing to move: the open tickets are already with the ${d.office} people.`);
+      load();
+      onChanged?.();
+    } catch (err) {
+      setNote(err?.message || 'Could not reassign');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = useCallback(() => {
     hrLifecycleAPI.family(familyId)
@@ -173,6 +191,17 @@ function FamilyDetail({ familyId, onChanged }) {
         {family.employeeId && <span>BambooHR #{family.employeeId}</span>}
         {family.details?.title && <span>{family.details.title}</span>}
         {family.details?.manager && <span>Reports to {family.details.manager}</span>}
+        {family.kind === 'onboarding' && family.status === 'open' && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={reroute}
+            title={`Open tickets held outside the ${family.officeList || 'office'} list move to one person on it`}
+            className="tp-focus-ring ml-auto rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40"
+          >
+            {busy ? 'Reassigning…' : 'Reassign by office'}
+          </button>
+        )}
         {canSwitch && (
           <button
             type="button"
@@ -183,6 +212,7 @@ function FamilyDetail({ familyId, onChanged }) {
           </button>
         )}
       </div>
+      {note && <p role="status" className="mb-2 text-xs text-foreground/85">{note}</p>}
       <ul className="divide-y divide-border rounded-lg border border-border bg-card">
         {family.members.map((m) => (
           <li key={`${m.role}-${m.ticket?.id}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2 sm:grid-cols-[5.5rem_minmax(0,1.4fr)_minmax(0,1fr)_6rem_7rem]">

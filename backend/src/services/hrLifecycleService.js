@@ -77,6 +77,20 @@ const DEFAULT_TEMPLATES = Object.freeze({
 });
 const DEFAULT_PARENT_HINT = 'Vahid Haeri';
 
+// New hires by office (Vahid, 8 Oct 2026): the Laptop and Workstation of a new
+// hire go to ONE person from the list of the hire's office, in turn. An office
+// matches when the notice's office contains one of its terms. Offices with no
+// list are "fair grab": everybody on the fallback list takes turns.
+const DEFAULT_OFFICE_ROUTING = Object.freeze([
+  { key: 'vancouver', label: 'Vancouver and vicinity', match: ['Vancouver', 'Kamloops', 'Victoria'], hints: ['Adrian Lo', 'Soheil Nasiri', 'Reza Zaim', 'Marcus Blackstock'] },
+  { key: 'toronto', label: 'Toronto', match: ['Toronto'], hints: ['Andrew Fong'] },
+  { key: 'calgary', label: 'Calgary', match: ['Calgary'], hints: ['Andrii Grynik', 'Alexey Lavrenyuk'] },
+  { key: 'ottawa', label: 'Ottawa and Montreal', match: ['Ottawa', 'Montreal'], hints: ['Anton Kuzmychev', 'Seifeddine Reguige'] },
+]);
+const ROUTING_KEY = '__officeRouting'; // lives inside the templates JSON (no migration)
+const MAX_OFFICES = 20;
+const MAX_FALLBACK = 20;
+
 // The intro line of each child (FreshService wording the team already knows).
 const CHILD_INTRO = {
   laptop: { offboarding: 'Please take the necessary steps to retrieve the laptop from the following user.', onboarding: 'Please set up a laptop for the following new hire.' },
@@ -106,6 +120,22 @@ export function assigneeIds(item) {
     ? item.assigneeTechIds
     : (item?.assigneeTechId ? [item.assigneeTechId] : []);
   return [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+}
+
+const idList = (list) => [...new Set((Array.isArray(list) ? list : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+
+/** Stored office routing → clean shape, or null when nothing usable is stored. */
+function normalizeRouting(v) {
+  if (!v || typeof v !== 'object' || !Array.isArray(v.offices)) return null;
+  return {
+    offices: v.offices.map((o) => ({
+      key: String(o.key || ''),
+      label: String(o.label || ''),
+      match: (Array.isArray(o.match) ? o.match : []).map((m) => String(m).trim()).filter(Boolean),
+      assigneeTechIds: idList(o.assigneeTechIds),
+    })).filter((o) => o.key && o.label),
+    fallbackTechIds: idList(v.fallbackTechIds),
+  };
 }
 
 const soft = (fn, fallback = null) => Promise.resolve().then(fn).catch((err) => {
@@ -203,9 +233,11 @@ class HrLifecycleService {
         return { ...item, assigneeTechId: id, assigneeTechIds: id ? [id] : [], groupId: null };
       });
     }
+    const offices = DEFAULT_OFFICE_ROUTING.map(({ hints, ...o }) => ({ ...o, match: [...o.match], assigneeTechIds: hints.map(resolve).filter(Boolean) }));
     return {
       mode: 'off',
       parentAssigneeTechId: resolve(DEFAULT_PARENT_HINT),
+      officeRouting: { offices, fallbackTechIds: [...new Set(offices.flatMap((o) => o.assigneeTechIds))] },
       templates,
       leave: { assigneeTechId: null, park: true },
       officeChange: { assigneeTechId: null, park: true },
@@ -231,6 +263,7 @@ class HrLifecycleService {
     return {
       mode: HR_LIFECYCLE_MODES.includes(row?.mode) ? row.mode : defaults.mode,
       parentAssigneeTechId: row ? (row.parentAssigneeTechId ?? null) : defaults.parentAssigneeTechId,
+      officeRouting: normalizeRouting(stored[ROUTING_KEY]) || defaults.officeRouting,
       templates,
       leave: side(row?.leave, defaults.leave),
       officeChange: side(row?.officeChange, defaults.officeChange),
@@ -240,8 +273,10 @@ class HrLifecycleService {
   /** Effective settings (stored row, else the seeded defaults with mode off). */
   async getSettings(workspaceId, { withTechs = true } = {}) {
     const row = await soft(() => prisma.hrLifecycleSettings.findUnique({ where: { workspaceId: Number(workspaceId) } }));
-    // Seeding the defaults needs the team; a stored row does not.
-    const techs = row || !withTechs ? [] : await this._technicians(workspaceId);
+    // Seeding the defaults needs the team; a stored row does not — until it
+    // carries the office lists too (rows saved before 8 Oct 2026 do not).
+    const seeded = row && row.templates && typeof row.templates === 'object' && row.templates[ROUTING_KEY];
+    const techs = seeded || !withTechs ? [] : await this._technicians(workspaceId);
     const settings = this._normalize(row, this._defaults(techs));
     return {
       workspaceId: Number(workspaceId),
@@ -278,7 +313,31 @@ class HrLifecycleService {
 
     const next = JSON.parse(JSON.stringify({
       mode: current.mode, parentAssigneeTechId: current.parentAssigneeTechId, templates: current.templates, leave: current.leave, officeChange: current.officeChange,
+      officeRouting: current.officeRouting,
     }));
+    if (input.officeRouting !== undefined) {
+      const r = input.officeRouting || {};
+      if (!Array.isArray(r.offices)) throw new ValidationError('New hires by office: the office list must be a list');
+      if (r.offices.length > MAX_OFFICES) throw new ValidationError(`New hires by office: at most ${MAX_OFFICES} offices`);
+      const seenKeys = new Set();
+      const people = (list, where, max) => {
+        const ids = [...new Set((Array.isArray(list) ? list : []).map((v) => techOrNull(v, where)).filter(Boolean))];
+        if (ids.length > max) throw new ValidationError(`${where}: at most ${max} people`);
+        return ids;
+      };
+      const offices = r.offices.map((o, i) => {
+        const label = String(o?.label || '').replace(/\s+/g, ' ').trim();
+        if (!label || label.length > 60) throw new ValidationError(`New hires by office #${i + 1}: a name of 1–60 characters is required`);
+        const match = [...new Set((Array.isArray(o?.match) ? o.match : String(o?.match || '').split(',')).map((m) => String(m).replace(/\s+/g, ' ').trim()).filter(Boolean))];
+        if (!match.length) throw new ValidationError(`${label}: give at least one office name to match`);
+        if (match.length > 12 || match.some((m) => m.length > 40)) throw new ValidationError(`${label}: at most 12 office names of up to 40 characters`);
+        let key = /^[a-z0-9_]{1,40}$/.test(String(o?.key || '')) ? String(o.key) : slugKey(label);
+        while (seenKeys.has(key)) key = `${key}_2`.slice(0, 40);
+        seenKeys.add(key);
+        return { key, label, match, assigneeTechIds: people(o?.assigneeTechIds, label, MAX_ASSIGNEES) };
+      });
+      next.officeRouting = { offices, fallbackTechIds: people(r.fallbackTechIds, 'Any other office', MAX_FALLBACK) };
+    }
     if (input.mode !== undefined) {
       if (!HR_LIFECYCLE_MODES.includes(input.mode)) throw new ValidationError(`Mode must be one of: ${HR_LIFECYCLE_MODES.join(', ')}`);
       next.mode = input.mode;
@@ -342,6 +401,17 @@ class HrLifecycleService {
       push(`${side}.assigneeTechId`, before[side]?.assigneeTechId, after[side]?.assigneeTechId);
       push(`${side}.park`, before[side]?.park, after[side]?.park);
     }
+    const ra = before.officeRouting || { offices: [], fallbackTechIds: [] };
+    const rb = after.officeRouting || { offices: [], fallbackTechIds: [] };
+    const raBy = new Map(ra.offices.map((o) => [o.key, o]));
+    const rbBy = new Map(rb.offices.map((o) => [o.key, o]));
+    for (const o of ra.offices) if (!rbBy.has(o.key)) changes.push({ field: `officeRouting[${o.key}]`, before: o, after: null });
+    for (const o of rb.offices) {
+      const prev = raBy.get(o.key);
+      if (!prev) { changes.push({ field: `officeRouting[${o.key}]`, before: null, after: o }); continue; }
+      for (const f of ['label', 'match', 'assigneeTechIds']) push(`officeRouting[${o.key}].${f}`, prev[f], o[f]);
+    }
+    push('officeRouting.fallbackTechIds', ra.fallbackTechIds, rb.fallbackTechIds);
     for (const name of TEMPLATE_NAMES) {
       const a = before.templates?.[name] || [];
       const b = after.templates?.[name] || [];
@@ -375,7 +445,7 @@ class HrLifecycleService {
     const data = {
       mode: next.mode,
       parentAssigneeTechId: next.parentAssigneeTechId,
-      templates: next.templates,
+      templates: { ...next.templates, [ROUTING_KEY]: next.officeRouting },
       leave: next.leave,
       officeChange: next.officeChange,
       updatedBy: who,
@@ -409,6 +479,7 @@ class HrLifecycleService {
       recency: `Only tickets created in the last ${RECENT_DAYS} days are handled (history backfills never start a family).`,
       passwords: 'Lines that carry a password are removed from anything written into child descriptions or notes.',
       sharing: 'A child with several people goes to one of them: they take turns, and anyone off that day is skipped.',
+      offices: 'A new hire\'s children with no default assignee go to one person from the list of the hire\'s office (both to the same person, in turn); an office with no list uses "Any other office"; no list at all means AI routing.',
     };
   }
 
@@ -499,7 +570,33 @@ class HrLifecycleService {
    * is off today while somebody else is in. Reads only.
    */
   async _pickAssignee(workspaceId, item, tz) {
-    const ids = assigneeIds(item);
+    return this._takeTurn(workspaceId, assigneeIds(item), tz, { keys: [item.key] });
+  }
+
+  /** The office list a notice's office falls under (first match in list order), or null. */
+  _officeRule(settings, office) {
+    const o = String(office || '').toLowerCase();
+    if (!o) return null;
+    return (settings.officeRouting?.offices || []).find((r) => r.match.some((m) => o.includes(String(m).toLowerCase()))) || null;
+  }
+
+  /**
+   * Who looks after a new hire of this office: somebody on the office's list
+   * (or on "Any other office"), in turn. `prefer` keeps a person who already
+   * holds one of the hire's tickets. Returns { techId, label, ids }.
+   */
+  async _pickForOffice(workspaceId, settings, office, tz, { prefer = [] } = {}) {
+    const rule = this._officeRule(settings, office);
+    const ids = rule ? rule.assigneeTechIds : (settings.officeRouting?.fallbackTechIds || []);
+    const label = rule ? rule.label : 'Any other office';
+    if (!ids.length) return { techId: null, label, ids };
+    const kept = prefer.map(Number).find((id) => ids.includes(id));
+    if (kept) return { techId: kept, label, ids };
+    const keys = (settings.templates?.onboarding || []).map((i) => i.key);
+    return { techId: await this._takeTurn(workspaceId, ids, tz, { keys, kind: 'onboarding' }), label, ids };
+  }
+
+  async _takeTurn(workspaceId, ids, tz, { keys = [], kind = null } = {}) {
     if (ids.length <= 1) return ids[0] ?? null;
     const ws = Number(workspaceId);
     const today = new Date(`${localDate(new Date(), tz || 'America/Los_Angeles')}T00:00:00Z`);
@@ -512,7 +609,7 @@ class HrLifecycleService {
     const pool = ids.filter((id) => !away.has(id));
     const candidates = pool.length ? pool : ids;
     const recent = await soft(() => prisma.hrLifecycleFamilyMember.findMany({
-      where: { workspaceId: ws, role: 'child', templateKey: item.key }, orderBy: { id: 'desc' }, take: 20, select: { id: true, ticketId: true },
+      where: { workspaceId: ws, role: 'child', templateKey: { in: keys }, ...(kind ? { family: { kind } } : {}) }, orderBy: { id: 'desc' }, take: 40, select: { id: true, ticketId: true },
     }), []) || [];
     const newestFirst = [...recent].sort((a, b) => b.id - a.id);
     const tickets = newestFirst.length ? await soft(() => prisma.ticket.findMany({
@@ -786,14 +883,19 @@ class HrLifecycleService {
       // After the fact the last day is already past: the work is due from today.
       const baseDate = c.date ? (c.noticeDate && c.date < c.noticeDate ? c.noticeDate : c.date) : (afterTheFact ? c.noticeDate : null);
       const children = [];
+      let byOffice = null;
       for (const item of settings.templates[template] || []) {
         const ids = assigneeIds(item);
+        // A new hire's children with no assignee of their own go by office: one person for the hire.
+        const office = fx.family === 'onboarding' && !ids.length && !item.groupId;
+        if (office && !byOffice) byOffice = await this._pickForOffice(ws, settings, c.office, tz);
         children.push({
           key: item.key,
           title: item.title,
           dueOffsetDays: item.dueOffsetDays,
           dueDate: baseDate ? addDays(baseDate, item.dueOffsetDays) : null,
-          assigneeTechId: await this._pickAssignee(ws, item, tz),
+          assigneeTechId: office ? byOffice.techId : await this._pickAssignee(ws, item, tz),
+          ...(office && byOffice.techId ? { byOffice: byOffice.label } : {}),
           ...(ids.length > 1 ? { assigneeTechIds: ids } : {}),
           groupId: item.groupId || null,
           subject: `Child Ticket - ${item.title} - ${ticket.subject}`.slice(0, 500),
@@ -1176,6 +1278,53 @@ class HrLifecycleService {
     await this._note(ticket, `<p><strong>Onboarding / Offboarding:</strong> ${esc(plan.summary)}${parked ? ` — parked until ${esc(fmtDay(parked))}` : ''}.</p>`, out);
   }
 
+  // ------------------------------------------------------------ reassign by office
+
+  /**
+   * Apply the office lists to an open onboarding family: its open children
+   * held by somebody outside the office's list move to one person on it (a
+   * list member who already holds one of them, else the next in turn).
+   */
+  async rerouteFamily(familyId, workspaceId, actor = null) {
+    const ws = Number(workspaceId);
+    const family = await soft(() => prisma.hrLifecycleFamily.findFirst({ where: { id: Number(familyId), workspaceId: ws } }));
+    if (!family) throw new NotFoundError('Family not found');
+    if (family.kind !== 'onboarding') throw new ValidationError('Only a new hire is assigned by office');
+    if (family.status !== 'open') throw new ConflictError('This family is no longer open');
+    const settings = await this.getSettings(ws);
+    const tz = await this._timeZone(ws);
+    const fam = await this._familyTickets(family);
+    const open = fam.members.filter((m) => m.member.role === 'child' && !m.terminal);
+    const pick = await this._pickForOffice(ws, settings, family.office, tz, { prefer: open.map((m) => m.ticket.assignedTechId).filter(Boolean) });
+    if (!pick.techId) throw new ConflictError(`No people are listed for ${pick.label}`);
+    const techs = await this._technicians(ws);
+    const name = techs.find((t) => t.id === pick.techId)?.name || `technician ${pick.techId}`;
+    const who = actor?.name || actor?.email || 'an admin';
+    const out = { warnings: [], created: [] };
+    const moved = [];
+    for (const m of open) {
+      const owner = Number(m.ticket.assignedTechId) || null;
+      if (owner && pick.ids.includes(owner)) continue; // already with the office's people
+      const before = out.warnings.length;
+      await this._assign(m.ticket, pick.techId, out);
+      if (out.warnings.length > before) continue;
+      moved.push({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), title: m.member.title, from: m.ticket.assignedTech?.name || null });
+      await this._note(m.ticket, `<p><strong>Onboarding:</strong> assigned to ${esc(name)} by office (${esc(pick.label)}), by ${esc(who)}.</p>`, out);
+    }
+    await this._record(ws, {
+      ticket: fam.parent,
+      c: null,
+      plan: { decision: 'reroute_office', familyId: family.id, noticeType: 'manual' },
+      mode: 'manual',
+      outcome: moved.length || !out.warnings.length ? 'done' : 'failed',
+      familyId: family.id,
+      summary: `${family.personName}: ${moved.length} ${moved.length === 1 ? 'ticket' : 'tickets'} assigned to ${name} by office (${pick.label})`,
+      details: { moved, warnings: out.warnings, person: family.personName },
+      actor: actor?.email || who,
+    });
+    return { familyId: family.id, assignee: { id: pick.techId, name }, office: pick.label, moved, warnings: out.warnings };
+  }
+
   // ------------------------------------------------------------ organise now
 
   /**
@@ -1466,6 +1615,7 @@ class HrLifecycleService {
       template: f.template,
       details: f.details || null,
       createdAt: f.createdAt,
+      officeList: f.kind === 'onboarding' ? (this._officeRule(await this.getSettings(ws), f.office)?.label || 'Any other office') : null,
       parent: this._ticketCard(fam.parent),
       members: fam.members.map((m) => ({
         role: m.member.role, key: m.member.templateKey, title: m.member.title, dueOffsetDays: m.member.dueOffsetDays, closed: m.terminal, ticket: this._ticketCard(m.ticket),

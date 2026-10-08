@@ -39,6 +39,7 @@ export const DECISION_LABEL = {
   no_family: 'No open family',
   no_date: 'No clear date',
   switch_after_the_fact: 'Switched to after the fact',
+  reroute_office: 'Assigned by office',
   ignored: 'Ignored',
 };
 
@@ -79,6 +80,13 @@ export function changeFieldLabel(field, { templateLabels = {}, templates = {}, i
   if (field === 'parentAssigneeTechId') return 'Parent assignee';
   let m = field.match(/^(leave|officeChange)\.(assigneeTechId|park)$/);
   if (m) return `${SIDE_LABEL[m[1]]} — ${m[2] === 'park' ? 'park until the date' : 'assignee'}`;
+  if (field === 'officeRouting.fallbackTechIds') return 'New hires — any other office: people';
+  m = field.match(/^officeRouting\[([\w-]+)\](?:\.(\w+))?$/);
+  if (m) {
+    const name = item?.label || m[1].replace(/_/g, ' ');
+    const f = { label: 'name', match: 'office names', assigneeTechIds: 'people' }[m[2]];
+    return f ? `New hires — ${name}: ${f}` : `New hires — ${name}`;
+  }
   m = field.match(/^templates\.(\w+)\.order$/);
   if (m) return `${templateLabels[m[1]] || m[1]} — order`;
   m = field.match(/^templates\.(\w+)\[([\w-]+)\](?:\.(\w+))?$/);
@@ -92,10 +100,11 @@ export function changeFieldLabel(field, { templateLabels = {}, templates = {}, i
 }
 
 export function changeValueLabel(field, value, { techById = new Map(), groupById = new Map() } = {}) {
-  if (/assigneeTechIds$/.test(field)) {
+  if (/(assigneeTechIds|fallbackTechIds)$/.test(field)) {
     const ids = Array.isArray(value) ? value : [];
-    return ids.length ? ids.map((id) => techById.get(Number(id))?.name || `Technician ${id}`).join(', ') : 'AI routing';
+    return ids.length ? ids.map((id) => techById.get(Number(id))?.name || `Technician ${id}`).join(', ') : (/^officeRouting/.test(field) ? 'nobody' : 'AI routing');
   }
+  if (/^officeRouting\[[\w-]+\]$/.test(field)) return value ? `${value.label} (${(value.match || []).join(', ')})` : 'not in the list';
   if (value === null || value === undefined) {
     if (/assigneeTechId$/.test(field)) return 'AI routing';
     if (/groupId$/.test(field)) return 'No group';
