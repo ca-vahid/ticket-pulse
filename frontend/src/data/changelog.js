@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.24-preview';
+export const APP_VERSION = '4.2.25-preview';
 
 export const changelog = [
+  {
+    version: '4.2.25-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Office photos</strong> — ContinuIT office requesters now show their own office photo as the avatar (Brisbane, Calgary, Vancouver and the rest); an office without a photo keeps the building mark.' },
+    ],
+  },
   {
     version: '4.2.24-preview',
     date: 'October 8, 2026',
