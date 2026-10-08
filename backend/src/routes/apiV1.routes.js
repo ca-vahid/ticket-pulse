@@ -1184,13 +1184,68 @@ async function resolveTagRef(req, ref) {
   return tag;
 }
 
+// Tag palette colours (same set as Settings → Tags).
+const API_TAG_COLORS = new Set(['slate', 'red', 'orange', 'amber', 'emerald', 'sky', 'blue', 'violet', 'pink']);
+
+// createIfMissing (ContinuIT meeting series, 8 Oct 2026): a name that is not
+// in the palette yet is created — only for a client holding `tags:create`.
+// Name = trimmed, inner whitespace collapsed, ≤ 60 characters. A concurrent
+// create of the same name (unique per workspace) re-reads the winner. An
+// admin-retired tag of that name is never revived by an integration.
+async function createTagIfMissing(req, rawName, color) {
+  if (!scopeSatisfies(req.apiKey?.scopes, 'tags:create')) {
+    throw problems.forbidden('createIfMissing needs the tags:create scope on this client — ask the Ticket Pulse team.', 'insufficient_scope');
+  }
+  const name = String(rawName ?? '').trim().replace(/\s+/g, ' ');
+  if (!name) throw problems.badRequest('Name the tag by `name` to create it');
+  if (name.length > 60) throw problems.badRequest('Tag names are at most 60 characters', [{ field: 'name', code: 'too_long' }]);
+  if (color !== undefined && !API_TAG_COLORS.has(color)) {
+    throw problems.badRequest(`color must be one of ${[...API_TAG_COLORS].join(', ')}`, [{ field: 'color', code: 'invalid' }]);
+  }
+  const existing = await prisma.ticketTag.findFirst({
+    where: { workspaceId: req.workspaceId, name: { equals: name, mode: 'insensitive' } },
+    select: { id: true, name: true, color: true, isActive: true },
+  });
+  if (existing && !existing.isActive) {
+    throw new ApiProblem({ status: 409, code: 'tag_retired', title: 'Tag retired', detail: `The tag "${existing.name}" was retired by an administrator and cannot be re-created through the API.` });
+  }
+  if (existing) return { tag: existing, created: false };
+  try {
+    const tag = await prisma.ticketTag.create({
+      data: { workspaceId: req.workspaceId, name, color: color || 'slate', createdBy: apiActor(req)?.email || req.apiKey?.name || null },
+      select: { id: true, name: true, color: true },
+    });
+    logger.info(`API tag created: "${tag.name}" (#${tag.id}) in workspace ${req.workspaceId} by ${req.apiKey?.name || 'api'}`);
+    return { tag, created: true };
+  } catch (err) {
+    if (err?.code !== 'P2002') throw err;
+    const winner = await prisma.ticketTag.findFirst({
+      where: { workspaceId: req.workspaceId, name: { equals: name, mode: 'insensitive' }, isActive: true },
+      select: { id: true, name: true, color: true },
+    });
+    if (!winner) throw err;
+    return { tag: winner, created: false };
+  }
+}
+
 router.post('/tickets/:id/tags', S('tags:write'), asyncHandler(async (req, res) => {
   const id = await tid(req);
-  const tag = await resolveTagRef(req, req.body?.tagId ?? req.body?.name);
+  const body = req.body || {};
+  let tag;
+  let created = false;
+  const byName = body.tagId === undefined && body.name !== undefined && !/^\d+$/.test(String(body.name).trim());
+  if (body.createIfMissing === true && byName) {
+    // Validate the ticket first so a bad id never leaves a stray palette tag.
+    const exists = await prisma.ticket.findFirst({ where: { id, workspaceId: req.workspaceId }, select: { id: true } });
+    if (!exists) throw problems.notFound('Ticket not found');
+    ({ tag, created } = await createTagIfMissing(req, body.name, body.color));
+  } else {
+    tag = await resolveTagRef(req, body.tagId ?? body.name);
+  }
   const current = await prisma.ticketTagLink.findMany({ where: { ticketId: id }, select: { tagId: true } });
   const ids = [...new Set([...current.map((l) => l.tagId), tag.id])];
   const result = await ticketService.setTags(id, req.workspaceId, ids, apiActor(req));
-  res.json({ success: true, data: result });
+  res.json({ success: true, data: result, tag: { id: tag.id, name: tag.name, color: tag.color ?? null, created } });
 }));
 
 router.delete('/tickets/:id/tags/:tag', S('tags:write'), asyncHandler(async (req, res) => {

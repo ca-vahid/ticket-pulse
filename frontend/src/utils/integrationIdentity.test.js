@@ -38,6 +38,12 @@ describe('Microsoft Sentinel requester (29 Sep 2026)', () => {
     expect(requesterIntegrationIdentity({ name: 'Microsoft Sentinel', email: 'Sentinel@bgcengineering.ca' }))
       .toMatchObject({ key: 'sentinel', name: 'Microsoft Sentinel', avatarUrl: '/brand/integrations/sentinel.png' });
     expect(integrationRequesterAvatar('sentinel@bgcengineering.ca')).toBe('/brand/integrations/sentinel.png');
+    // ContinuIT itself (8 Oct 2026): its own mark; its office plus-addresses stay offices.
+    expect(requesterIntegrationIdentity({ name: 'ContinuIT', email: 'ContinuIT@bgcengineering.ca' }))
+      .toMatchObject({ key: 'continuit', name: 'ContinuIT', subtitle: 'Meeting follow-ups', avatarUrl: '/brand/integrations/continuit.png' });
+    expect(integrationRequesterAvatar('continuit@bgcengineering.ca')).toBe('/brand/integrations/continuit.png');
+    expect(integrationRequesterAvatar('continuit+van@bgcengineering.ca')).toBe('/brand/offices/van.jpg');
+    expect(integrationIdentity({ actorName: 'ContinuIT', rawPayload: {} })).toMatchObject({ key: 'continuit' });
   });
 
   test('a real vendor called "Sentinel Storage" keeps its initials; Simorgh is unchanged', () => {

@@ -15,6 +15,10 @@ export const API_KEY_SCOPES = [
   'contacts:read',
   'agents:read', 'groups:read',
   'tags:read', 'tags:write',
+  // tags:create (ContinuIT meeting-series tags, 8 Oct 2026): POST
+  // /tickets/{id}/tags { name, createIfMissing: true } may add a NEW tag to
+  // the workspace palette. Opt-in per client; tags:write alone never creates.
+  'tags:create',
   'categories:read', 'types:read',
   // Custom fields (FR 08-05 #1): read = GET /custom-fields definitions;
   // write = gate on create/PATCH payloads that carry `customFields` (checked

@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.26-preview';
+export const APP_VERSION = '4.2.27-preview';
 
 export const changelog = [
+  {
+    version: '4.2.27-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>ContinuIT avatar</strong> — tickets and notes from ContinuIT now show its own mark (a calendar with a follow-up loop) instead of plain initials.' },
+      { type: 'added', html: '<strong>Integrations can create tags</strong> — an integration granted “Create new tags” can add a tag that doesn’t exist yet while tagging a ticket. ContinuIT uses it to tag tickets with the meeting series they came from.' },
+    ],
+  },
   {
     version: '4.2.26-preview',
     date: 'October 8, 2026',

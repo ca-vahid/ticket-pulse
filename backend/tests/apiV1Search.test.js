@@ -21,7 +21,7 @@ const prismaMock = { requester: { findMany: jest.fn() }, technician: { findFirst
 let apiKey;
 
 prismaMock.$queryRawUnsafe = jest.fn();
-prismaMock.ticketTag = { findFirst: jest.fn() };
+prismaMock.ticketTag = { findFirst: jest.fn(), create: jest.fn() };
 prismaMock.ticketTagLink = { findMany: jest.fn() };
 prismaMock.ticket = { findFirst: jest.fn(), findUnique: jest.fn() };
 const similarMock = { search: jest.fn() };
@@ -157,6 +157,68 @@ describe('one-tag add / remove (linking)', () => {
     prismaMock.ticketTag.findFirst.mockResolvedValue(null);
     await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'nope' }).expect(404);
     expect(ticketServiceMock.setTags).not.toHaveBeenCalled();
+  });
+});
+
+describe('createIfMissing — meeting-series tags (ContinuIT, 8 Oct 2026)', () => {
+  beforeEach(() => {
+    apiKey = { ...KEY, scopes: ['tags:write', 'tags:create'] };
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 901 });
+    prismaMock.ticketTagLink.findMany.mockResolvedValue([{ tagId: 3 }]);
+    ticketServiceMock.setTags.mockResolvedValue({ changed: true, tags: [] });
+  });
+
+  test('a new name is created (collapsed whitespace, chosen colour), linked, and the id returned', async () => {
+    prismaMock.ticketTag.findFirst.mockResolvedValue(null);
+    prismaMock.ticketTag.create.mockResolvedValue({ id: 301, name: 'IT Online Meeting', color: 'violet' });
+    const res = await request(app()).post('/api/v1/tickets/901/tags').send({ name: '  IT   Online Meeting ', createIfMissing: true, color: 'violet' }).expect(200);
+    expect(prismaMock.ticketTag.create.mock.calls[0][0].data).toMatchObject({ workspaceId: 8, name: 'IT Online Meeting', color: 'violet' });
+    expect(ticketServiceMock.setTags).toHaveBeenCalledWith(901, 8, [3, 301], expect.any(Object));
+    expect(res.body.tag).toEqual({ id: 301, name: 'IT Online Meeting', color: 'violet', created: true });
+  });
+
+  test('an existing name (any case) is reused, not created', async () => {
+    prismaMock.ticketTag.findFirst.mockResolvedValue({ id: 302, name: 'CoreOps Weekly Catchup', color: 'violet', isActive: true });
+    const res = await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'coreops weekly catchup', createIfMissing: true }).expect(200);
+    expect(prismaMock.ticketTag.create).not.toHaveBeenCalled();
+    expect(res.body.tag).toMatchObject({ id: 302, created: false });
+  });
+
+  test('without tags:create the call is refused and nothing is created', async () => {
+    apiKey = { ...KEY, scopes: ['tags:write'] };
+    prismaMock.ticketTag.findFirst.mockResolvedValue(null);
+    await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'Brand new', createIfMissing: true }).expect(403);
+    expect(prismaMock.ticketTag.create).not.toHaveBeenCalled();
+    expect(ticketServiceMock.setTags).not.toHaveBeenCalled();
+  });
+
+  test('a tag an administrator retired is not revived', async () => {
+    prismaMock.ticketTag.findFirst.mockResolvedValue({ id: 303, name: 'Old series', color: 'slate', isActive: false });
+    await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'Old series', createIfMissing: true }).expect(409);
+    expect(prismaMock.ticketTag.create).not.toHaveBeenCalled();
+  });
+
+  test('over 60 characters, or an unknown colour, is a 400', async () => {
+    prismaMock.ticketTag.findFirst.mockResolvedValue(null);
+    await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'x'.repeat(61), createIfMissing: true }).expect(400);
+    await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'Fine', createIfMissing: true, color: 'teal' }).expect(400);
+    expect(prismaMock.ticketTag.create).not.toHaveBeenCalled();
+  });
+
+  test('a ticket that does not exist creates no palette tag', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(null);
+    prismaMock.ticket.findUnique.mockResolvedValue(null);
+    prismaMock.ticketTag.findFirst.mockResolvedValue(null);
+    const res = await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'Fine', createIfMissing: true });
+    expect(res.status).toBe(404);
+    expect(prismaMock.ticketTag.create).not.toHaveBeenCalled();
+  });
+
+  test('a concurrent create of the same name re-reads the winner', async () => {
+    prismaMock.ticketTag.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 304, name: 'Race', color: 'violet' });
+    prismaMock.ticketTag.create.mockRejectedValue(Object.assign(new Error('unique'), { code: 'P2002' }));
+    const res = await request(app()).post('/api/v1/tickets/901/tags').send({ name: 'Race', createIfMissing: true }).expect(200);
+    expect(res.body.tag).toMatchObject({ id: 304, created: false });
   });
 });
 

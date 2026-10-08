@@ -10,7 +10,7 @@ const SCOPE_GROUPS = [
   ['Conversations', [['conversations:read', 'Read the full thread'], ['conversations:write', 'Public replies & internal notes']]],
   ['Tasks', [['tasks:read', 'Read tasks'], ['tasks:write', 'Create / update / delete tasks']]],
   ['Directory', [['contacts:read', 'Read requesters'], ['agents:read', 'Read agents'], ['groups:read', 'Read groups']]],
-  ['Taxonomy', [['tags:read', 'Read tag palette'], ['tags:write', 'Set ticket tags'], ['categories:read', 'Read categories'], ['types:read', 'Read ticket types']]],
+  ['Taxonomy', [['tags:read', 'Read tag palette'], ['tags:write', 'Set ticket tags'], ['tags:create', 'Create new tags'], ['categories:read', 'Read categories'], ['types:read', 'Read ticket types']]],
   ['Custom fields', [['customfields:read', 'Read custom field definitions'], ['customfields:write', 'Send custom field values on tickets']]],
   ['Attachments', [['attachments:read', 'List & download attachments']]],
   ['Approvals', [['approvals:read', 'Read approvals'], ['approvals:write', 'Request approvals']]],
