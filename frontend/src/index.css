@@ -1040,7 +1040,8 @@ html[data-motion="reduce"] .tp-ai-live::before {
    (Tickets.jsx stamps .tp-q-pin on the scroller when the subject is the
    leftmost column of a compact/dense list). A pinned cell paints the card
    under the row's own tint so the sliding columns never show through it.
-   xl only: below it the list keeps its essentials template. */
+   From 1280px, and below it while the list card carries .tp-q-wide (the twin
+   block under this one); a narrower card keeps its essentials template. */
 @media (min-width: 1280px) {
   .tp-q-pin .tp-pin {
     position: sticky;
@@ -1066,6 +1067,34 @@ html[data-motion="reduce"] .tp-ai-live::before {
   .tp-q-pin .tp-pin-subject { transition: box-shadow 0.25s ease; }
   .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
   .dark .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 12px -8px rgb(0 0 0 / 0.7); }
+}
+/* QA 10-07 #1: the same pinning below 1280px when the card is wide enough for
+   the column layout (Tickets.jsx stamps .tp-q-wide on the list card). */
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .tp-q-wide .tp-q-pin .tp-pin {
+    position: sticky;
+    z-index: 2;
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(var(--tp-row-tint, transparent), var(--tp-row-tint, transparent));
+  }
+  .tp-q-wide .tp-q-pin .tp-pin-0 { left: 0; }
+  .tp-q-wide .tp-q-pin .tp-pin-accent { position: sticky; z-index: 2; left: 36px; }
+  .tp-q-wide .tp-q-pin .tp-pin-subject { left: 42px; }
+  /* overflow:hidden would make the flashing row its own scroll box and
+     un-stick its cells for the 3 s of the flash — clip paints the same. */
+  .tp-q-wide .tp-q-pin .tp-fx1 { overflow: clip; }
+  .tp-q-wide .tp-q-pin .tp-q-head { --tp-row-tint: hsl(var(--muted) / 0.4); }
+  .tp-q-wide .tp-q-pin [data-row="idle"]:hover { --tp-row-tint: hsl(var(--muted) / 0.7); }
+  .tp-q-wide .tp-q-pin [data-row="preview"] { --tp-row-tint: rgb(239 246 255 / 0.5); }
+  .tp-q-wide .tp-q-pin [data-row="selected"] { --tp-row-tint: rgb(239 246 255 / 0.4); }
+  .tp-q-wide .tp-q-pin [data-row="ai"] { --tp-row-tint: rgb(124 58 237 / 0.12); }
+  .dark .tp-q-wide .tp-q-pin [data-row="preview"],
+  .dark .tp-q-wide .tp-q-pin [data-row="selected"] { --tp-row-tint: rgb(59 130 246 / 0.1); }
+  .dark .tp-q-wide .tp-q-pin [data-row="ai"] { --tp-row-tint: rgb(124 58 237 / 0.18); }
+  /* Once columns slide under it, the pinned block casts a soft edge. */
+  .tp-q-wide .tp-q-pin .tp-pin-subject { transition: box-shadow 0.25s ease; }
+  .tp-q-wide .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
+  .dark .tp-q-wide .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 12px -8px rgb(0 0 0 / 0.7); }
 }
 /* E: dragging the list sideways. */
 [data-dragging] { cursor: grabbing; user-select: none; }

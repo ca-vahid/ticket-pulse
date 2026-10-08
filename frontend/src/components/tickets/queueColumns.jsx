@@ -42,7 +42,7 @@ import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 // No vertical grid lines (modern list feel) — horizontal row dividers only.
 // px-2 below xl: the tablet band's narrower tracks need the padding back as
 // content width (px-3 alone truncated "Open" → "Op…" in the status column).
-export const CELL = 'px-2 xl:px-3 self-stretch flex items-center min-w-0';
+export const CELL = 'px-2 qx:px-3 self-stretch flex items-center min-w-0';
 
 // Row anchors (QA 08-07 #7): plain left-click keeps the in-app peek/navigate
 // behavior, but any modified click (Ctrl/Cmd new tab, Shift new window, Alt
@@ -1064,7 +1064,7 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => { e.stopPropagation(); onReset(colKey); }}
       onKeyDown={onKeyDown}
-      className="tp-focus-ring hidden xl:block absolute right-0 inset-y-0 w-[6px] z-10 cursor-col-resize touch-none select-none rounded-full transition-colors hover:bg-blue-300/70 active:bg-blue-400/80 focus-visible:bg-blue-300/70"
+      className="tp-focus-ring hidden qx:block absolute right-0 inset-y-0 w-[6px] z-10 cursor-col-resize touch-none select-none rounded-full transition-colors hover:bg-blue-300/70 active:bg-blue-400/80 focus-visible:bg-blue-300/70"
     />
   );
 }
@@ -1077,7 +1077,7 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
  * "Always shown", Reset-to-default footer. Same shell as FilterFlyout.
  * Hidden in board mode (the board has status columns, not these).
  */
-export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null }) {
+export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null, sideArrows = false, onSideArrowsChange = null }) {
   const [open, setOpen] = useState(false);
   // QA 09-21 #12: on a touch screen (iPad) a `draggable` row swallows the tap
   // as a drag start and the checkbox never toggles. Coarse pointers get
@@ -1258,6 +1258,24 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               <span className="min-w-0">
                 <span className="block text-sm text-foreground/85">Column map</span>
                 <span className="block text-[11px] leading-snug text-muted-foreground/75">Jump links and a mini-map above the list when it scrolls sideways. Just for you.</span>
+              </span>
+            </label>
+          )}
+          {/* Scroll arrows (QA 10-07 #1): the round arrows sat on top of the
+              rows. They are now a personal choice, off until someone wants
+              them; dragging, Shift + wheel and the arrow keys always work. */}
+          {onSideArrowsChange && (
+            <label className="flex items-start gap-2 px-1.5 py-1.5 rounded-md cursor-pointer hover:bg-muted/60">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={sideArrows}
+                onChange={(e) => onSideArrowsChange(e.target.checked)}
+                className="tp-focus-ring mt-0.5 rounded border-input text-blue-600 dark:text-blue-300"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm text-foreground/85">Scroll arrows</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground/75">Round arrows over the list that page it sideways. Without them: drag the list, Shift + wheel, or the arrow keys. Just for you.</span>
               </span>
             </label>
           )}

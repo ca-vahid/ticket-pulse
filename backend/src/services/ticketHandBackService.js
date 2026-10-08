@@ -35,6 +35,13 @@ const NOTE_MAX = 500;
 // FS-born: how far apart our unassign and FreshService's activity timestamp may
 // be and still be the same event.
 export const FS_ATTACH_WINDOW_MS = 15 * 60 * 1000;
+// QA 10-07 #2: how long the sync gets to report an unassign done in Ticket
+// Pulse before the sweep routes it from our own record, and how far back the
+// sweep looks.
+export const FS_REBOUND_GRACE_MS = 10 * 60 * 1000;
+export const FS_REBOUND_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SWEEP_MAX_TRIES = 3;
+const sweepTries = new Map();
 
 export function handBackLabel(code) {
   return HAND_BACK_REASONS[code] || null;
@@ -160,6 +167,106 @@ const ticketHandBackService = {
         orderBy: { createdAt: 'desc' },
       }))
       .catch(() => null);
+  },
+
+  /**
+   * QA 10-07 #2 (#245867, #245870 on 6 Oct 2026): an agent unassigned a
+   * FreshService ticket inside Ticket Pulse, and the ticket then waited 22
+   * and 17 hours with nobody on it. Re-routing was left to the next sync
+   * pass noticing FreshService's "agent set to none" activity; when that
+   * pass misses it there is no second look, because the ticket does not
+   * change again. We wrote the hand-back row ourselves, so we do not need
+   * FreshService to tell us: a row older than the grace period with no
+   * routing run, on a ticket that is still open and unassigned, gets its
+   * rebound run from here. Runs from the per-workspace fast-sync tick.
+   */
+  async sweepUnroutedFsHandBacks(workspaceId, { now = new Date() } = {}) {
+    const at = now.getTime();
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticketHandBack.findMany({
+        where: {
+          workspaceId: Number(workspaceId),
+          origin: 'freshservice',
+          pipelineRunId: null,
+          createdAt: { gte: new Date(at - FS_REBOUND_MAX_AGE_MS), lte: new Date(at - FS_REBOUND_GRACE_MS) },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }))
+      .catch(() => []);
+    const out = { checked: rows.length, queued: 0 };
+    if (!rows.length) return out;
+
+    let liveNames = ['Open', 'Pending'];
+    try {
+      const { default: statusService } = await import('./statusService.js');
+      const found = await statusService.statusNamesForBase(Number(workspaceId), ['Open', 'Pending']);
+      if (Array.isArray(found) && found.length) liveNames = found;
+    } catch { /* keep the fallback */ }
+
+    const seenTickets = new Set();
+    for (const row of rows) {
+      // Newest first: only a ticket's latest hand-back can still be waiting.
+      if (seenTickets.has(row.ticketId)) continue;
+      seenTickets.add(row.ticketId);
+      if ((sweepTries.get(row.id) || 0) >= SWEEP_MAX_TRIES) continue;
+      try {
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: row.ticketId },
+          select: { id: true, workspaceId: true, status: true, isNoise: true, assignedTechId: true, freshserviceTicketId: true },
+        });
+        if (!ticket || ticket.assignedTechId || ticket.isNoise === true || !liveNames.includes(ticket.status)) continue;
+        // Any routing run since the hand-back means it was looked at again.
+        const laterRun = await prisma.assignmentPipelineRun.findFirst({
+          where: { ticketId: ticket.id, createdAt: { gte: row.createdAt } },
+          select: { id: true },
+        });
+        if (laterRun) continue;
+
+        sweepTries.set(row.id, (sweepTries.get(row.id) || 0) + 1);
+        const prevTech = row.technicianId
+          ? await prisma.technician.findUnique({ where: { id: row.technicianId }, select: { name: true } }).catch(() => null)
+          : null;
+        const prevTechName = prevTech?.name || 'The previous assignee';
+        const rejectionCount = Math.max(1, await Promise.resolve()
+          .then(() => prisma.ticketAssignmentEpisode.count({ where: { ticketId: ticket.id, endMethod: 'rejected' } }))
+          .catch(() => 1));
+        const reason = reasonForRebound(row);
+        const unassignedAt = new Date(row.createdAt).toISOString();
+        const reboundFrom = {
+          previousTechId: row.technicianId || null,
+          previousTechName: prevTechName,
+          unassignedAt,
+          unassignedByName: row.actorName || null,
+          reboundCount: rejectionCount,
+          source: 'ticketpulse',
+          ...(reason ? { reason } : {}),
+        };
+        const { queueReboundRun } = await import('./reboundRunService.js');
+        const result = await queueReboundRun({
+          ticketId: ticket.id,
+          workspaceId: ticket.workspaceId,
+          reboundFrom,
+          returnedPhrase: `${prevTechName} was assigned this ticket and handed it back in Ticket Pulse on ${unassignedAt.slice(0, 10)}`,
+          freshserviceTicketId: ticket.freshserviceTicketId,
+          onRun: (run) => this.attach(row.id, { pipelineRunId: run.id }),
+        });
+        if (result?.runId) await this.attach(row.id, { pipelineRunId: result.runId });
+        if (['queued', 'exhausted'].includes(result?.outcome)) {
+          out.queued += 1;
+          logger.warn('Hand-back sweep: the sync never reported this unassign - routing it from our own record', {
+            ticketId: ticket.id,
+            freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || null,
+            handBackId: row.id,
+            waitedMinutes: Math.round((at - new Date(row.createdAt).getTime()) / 60000),
+            outcome: result.outcome,
+          });
+        }
+      } catch (err) {
+        logger.warn(`Hand-back sweep skipped row ${row.id}: ${err.message}`);
+      }
+    }
+    return out;
   },
 
   async forTicket(ticketId, workspaceId) {

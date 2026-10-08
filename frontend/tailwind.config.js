@@ -74,6 +74,14 @@ export default {
       // core variant plugins register last), so the app uses its own names.
       addVariant('motion-off', 'html[data-motion="reduce"] &');
       addVariant('motion-on', 'html:not([data-motion="reduce"]) &');
+      // QA 10-07 #1: `qx:` is the Tickets list's column layout. It is on from
+      // 1280px, and below that whenever the list card itself is wide enough
+      // (Tickets.jsx stamps .tp-q-wide on the card). It replaces the plain
+      // `xl:` the list used: on a laptop with the filter rail open the list
+      // scrolled sideways over the tablet layout, which has four columns and
+      // nothing to scroll to. Both forms carry two classes of specificity so
+      // they win over the list's md: classes whatever the stylesheet order.
+      addVariant('qx', ['@media (min-width: 1280px) { :root & }', '.tp-q-wide &']);
     },
   ],
 };

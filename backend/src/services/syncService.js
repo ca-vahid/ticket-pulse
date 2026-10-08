@@ -555,6 +555,14 @@ class SyncService {
         ticketId: upsertedTicket.id, technicianId: prevTechId, unassignedAt: rejectionKey,
       });
       const handBackReason = reasonForRebound(pendingHandBack);
+      // QA 10-07 #2: the hand-back sweep already routed this unassign from
+      // our own record (the sync was late) - one run per hand-back.
+      if (pendingHandBack?.pipelineRunId) {
+        logger.debug('Bounce detection: hand-back already routed by the sweep, skipping', {
+          ticketId: upsertedTicket.id, handBackId: pendingHandBack.id, runId: pendingHandBack.pipelineRunId,
+        });
+        return;
+      }
 
       const reboundFrom = {
         previousTechId: prevTechId,

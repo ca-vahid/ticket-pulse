@@ -882,3 +882,41 @@ describe('Ticket Pulse lookup tables are cached per FreshService workspace (15 S
     expect(c.listCustomObjects).toHaveBeenCalledTimes(2);
   });
 });
+
+// QA 10-07 #2 (#245756, 6 Oct 2026): "Security Alert Triage" has no record in
+// the FreshService lookup table. The write-back threw on it and the run ended
+// 'failed' with the assignment never attempted.
+describe('a Ticket Pulse subcategory with no FreshService lookup record', () => {
+  const client = () => ({
+    domain: 'example.freshservice.com',
+    listCustomObjects: jest.fn().mockResolvedValue([{ id: 548, title: 'Ticket Pulse Skills' }, { id: 549, title: 'Ticket Pulse Subskills' }]),
+    listCustomObjectRecords: jest.fn((objectId) => Promise.resolve(objectId === 548
+      ? [{ data: { name: 'Security', bo_display_id: 'CAT-9' } }]
+      : [{ data: { name: 'Phishing', bo_display_id: 'SUB-9', parent: 'CAT-9' } }])),
+  });
+  const fsConfig = { workspaceId: '31', tpSkillCustomField: 'lf_ticket_pulse_category', tpSubskillCustomField: 'lf_ticket_pulse_subcategory' };
+  const action = (localFields) => ({
+    type: 'update_custom_fields', ticketId: 245756, localFields,
+    customFields: { lf_ticket_pulse_category: localFields.tpSkill, lf_ticket_pulse_subcategory: localFields.tpSubskill },
+  });
+
+  test('the category is still written, the subcategory is left empty, and the action says why', async () => {
+    const a = action({ tpSkill: 'Security', tpSubskill: 'Security Alert Triage' });
+    const fields = await freshServiceActionService._resolveTicketPulseLookupFields(client(), a, fsConfig);
+    expect(fields).toMatchObject({ lf_ticket_pulse_category: 'CAT-9', lf_ticket_pulse_subcategory: null });
+    expect(a.lookupGap).toContain('Security Alert Triage');
+  });
+
+  test('a known subcategory is unchanged', async () => {
+    const a = action({ tpSkill: 'Security', tpSubskill: 'Phishing' });
+    const fields = await freshServiceActionService._resolveTicketPulseLookupFields(client(), a, fsConfig);
+    expect(fields).toMatchObject({ lf_ticket_pulse_category: 'CAT-9', lf_ticket_pulse_subcategory: 'SUB-9' });
+    expect(a.lookupGap).toBeUndefined();
+  });
+
+  test('a missing category still throws, marked as a lookup gap so the caller can carry on to the assignment', async () => {
+    const a = action({ tpSkill: 'Brand New Category', tpSubskill: null });
+    await expect(freshServiceActionService._resolveTicketPulseLookupFields(client(), a, fsConfig))
+      .rejects.toMatchObject({ code: 'TP_LOOKUP_MISSING' });
+  });
+});
