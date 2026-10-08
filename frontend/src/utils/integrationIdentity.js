@@ -23,6 +23,15 @@ const AVATARS = {
   office: '/brand/integrations/office.png',
 };
 
+// Each BGC office's own city photo (8 Oct 2026, Vahid via ContinuIT): the
+// cover photos from bgcengineering.ca, centre-cropped to 192 px squares in
+// public/brand/offices/<code>.jpg. A code without a photo gets the building mark.
+const OFFICE_PHOTOS = new Set(['bri', 'cal', 'edm', 'fred', 'col', 'hfx', 'kam', 'kel', 'mtl', 'ott', 'chi', 'dr', 'sud', 'sur', 'tor', 'van', 'vic', 'wht']);
+function officeAvatar(email) {
+  const code = String(email || '').trim().toLowerCase().split('@')[0].split('+')[1] || '';
+  return OFFICE_PHOTOS.has(code) ? { url: `/brand/offices/${code}.jpg`, photo: true } : { url: AVATARS.office, photo: false };
+}
+
 /** Requester records that belong to an integration, keyed on the address. */
 const INTEGRATION_REQUESTERS = {
   'simorgh@bgcengineering.ca': 'simorgh',
@@ -42,7 +51,7 @@ const REQUESTER_IDENTITIES = {
  */
 export function integrationRequesterAvatar(email) {
   const addr = String(email || '').trim().toLowerCase();
-  if (isOfficeRequester(addr)) return AVATARS.office;
+  if (isOfficeRequester(addr)) return officeAvatar(addr).url;
   const key = INTEGRATION_REQUESTERS[addr];
   return key ? REQUESTER_IDENTITIES[key]?.avatarUrl || null : null;
 }
@@ -60,7 +69,8 @@ export function requesterIntegrationIdentity(requester) {
   if (!requester) return null;
   const email = String(requester.email || '').trim().toLowerCase();
   if (isOfficeRequester(email)) {
-    return { key: 'office', name: requester.name || 'Office', subtitle: 'BGC office', avatarUrl: AVATARS.office, tone: 'office' };
+    const av = officeAvatar(email);
+    return { key: 'office', name: requester.name || 'Office', subtitle: 'BGC office', avatarUrl: av.url, photo: av.photo, tone: 'office' };
   }
   const key = INTEGRATION_REQUESTERS[email] || (/^Simorgh\b/i.test(String(requester.name || '')) ? 'simorgh' : null);
   return key ? REQUESTER_IDENTITIES[key] || null : null;

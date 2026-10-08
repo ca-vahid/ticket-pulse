@@ -56,8 +56,10 @@ describe('ContinuIT office requesters (8 Oct 2026)', () => {
   test('continuit+<code>@ is an office: building mark, the record name, "BGC office"', () => {
     expect(isOfficeRequester('Continuit+BRI@bgcengineering.ca')).toBe(true);
     expect(requesterIntegrationIdentity({ name: 'Brisbane Office', email: 'continuit+bri@bgcengineering.ca' }))
-      .toMatchObject({ key: 'office', name: 'Brisbane Office', subtitle: 'BGC office', avatarUrl: '/brand/integrations/office.png' });
-    expect(integrationRequesterAvatar('continuit+cal@bgcengineering.ca')).toBe('/brand/integrations/office.png');
+      .toMatchObject({ key: 'office', name: 'Brisbane Office', subtitle: 'BGC office', avatarUrl: '/brand/offices/bri.jpg', photo: true });
+    expect(integrationRequesterAvatar('continuit+cal@bgcengineering.ca')).toBe('/brand/offices/cal.jpg');
+    // A new office without a photo yet falls back to the building mark.
+    expect(integrationRequesterAvatar('continuit+yyz@bgcengineering.ca')).toBe('/brand/integrations/office.png');
   });
   test('plain continuit@ and other plus-addresses are not offices', () => {
     expect(isOfficeRequester('continuit@bgcengineering.ca')).toBe(false);

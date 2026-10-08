@@ -7,7 +7,8 @@
  */
 export function IntegrationAvatar({ identity, size = 'h-10 w-10', className = '' }) {
   if (!identity) return null;
-  const rostam = identity.key === 'rostam';
+  // Rostam and the office photos are pictures, not marks: fill the circle.
+  const rostam = identity.key === 'rostam' || identity.photo === true;
   const ring = rostam
     ? 'bg-slate-900 ring-teal-400/60'
     : 'bg-sky-50 dark:bg-slate-900 ring-sky-200/80 dark:ring-sky-500/40';
