@@ -55,6 +55,8 @@ Object.assign(api, {
     members: [{ role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', subject: 'Child Ticket - Laptop', status: 'Open', dueBy: '2026-10-10T00:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } }],
   } })),
   switchToAfterTheFact: vi.fn(async () => ({ success: true, data: { closed: [] } })),
+  candidates: vi.fn(async () => ({ success: true, data: [] })),
+  organise: vi.fn(async () => ({ success: true, data: { familyId: 8, outcome: 'done', warnings: [] } })),
   events: vi.fn(async () => ({ success: true, data: [{
     id: 1, mode: 'observe', outcome: 'recorded', decision: 'create_family', person: 'Jamie Gill', ticketId: 77, createdAt: '2026-10-01T17:00:00Z',
     summary: 'Would: Jamie Gill: offboarding family with 2 children (Laptop, Decommissioning Account), due Fri, Oct 9, 2026',
@@ -165,5 +167,59 @@ describe('People in Shadow', () => {
     expect(within(detail).getByText('Workstation')).toBeInTheDocument();
     expect(within(detail).getAllByText('AI routing')).toHaveLength(2);
     expect(api.family).not.toHaveBeenCalled();
+  });
+});
+
+// 8 Oct 2026 (go-live): notices that predate Live are organised from People.
+describe('People once Live', () => {
+  const live = () => {
+    api.status.mockResolvedValue({ success: true, data: { available: true, mode: 'live' } });
+    api.getSettings.mockResolvedValue({ success: true, data: { ...SETTINGS, settings: { ...SETTINGS.settings, mode: 'live' } } });
+  };
+  afterEach(() => {
+    api.status.mockResolvedValue({ success: true, data: { available: true, mode: 'observe' } });
+    api.getSettings.mockResolvedValue({ success: true, data: SETTINGS });
+  });
+
+  test('"Not organised yet" lists what exists and what would be created; Organise asks first, then calls the server', async () => {
+    live();
+    api.candidates.mockResolvedValueOnce({ success: true, data: [{
+      ticketId: 61870, kind: 'offboarding', personName: 'Matt Lin', effectiveDate: '2026-10-16', afterTheFact: false,
+      parent: { id: 61870, ref: '#245882', assignee: { id: 1, name: 'Vahid Haeri' } },
+      existing: [{ title: 'Laptop', ref: '#245883', status: 'Pending', closed: false }],
+      toCreate: [{ title: 'Phone', dueDate: '2026-10-16', assignee: null }],
+    }] });
+    renderAt('/onboarding/people');
+    const section = await screen.findByRole('region', { name: 'Not organised yet' });
+    expect(within(section).getByText('Matt Lin')).toBeInTheDocument();
+    expect(within(section).getByText(/has Laptop #245883/)).toBeInTheDocument();
+    expect(within(section).getByText('Will create Phone')).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole('button', { name: 'Organise Matt Lin' }));
+    expect(api.organise).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('1 existing ticket joins the family as they are.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Organise' }));
+    await waitFor(() => expect(api.organise).toHaveBeenCalledWith(61870));
+    expect(await screen.findByText('Matt Lin: organised.')).toBeInTheDocument();
+  });
+
+  test('in Shadow the section is not asked for', async () => {
+    renderAt('/onboarding/people');
+    await screen.findByText('Jamie Gill');
+    expect(api.candidates).not.toHaveBeenCalled();
+  });
+});
+
+describe('several people on one child', () => {
+  test('"Add another person" sends the list and keeps the first as the single assignee', async () => {
+    renderAt('/onboarding/settings');
+    await screen.findByTestId('hr-change-history');
+    const add = screen.getByRole('button', { name: 'Offboarding: Decommissioning Account: add another person' });
+    // A child on AI routing has nobody to share with yet.
+    expect(screen.queryByRole('button', { name: 'Offboarding: Laptop: add another person' })).not.toBeInTheDocument();
+    fireEvent.click(add);
+    expect(screen.getByLabelText('Offboarding: Decommissioning Account person 2')).toBeInTheDocument();
+    // A slot nobody was chosen for is not a change.
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 });

@@ -12,7 +12,7 @@ import { jest } from '@jest/globals';
 const db = {};
 let seq = 1000;
 const reset = () => {
-  for (const k of ['settings', 'changes', 'families', 'members', 'events', 'tickets']) db[k] = [];
+  for (const k of ['settings', 'changes', 'families', 'members', 'events', 'tickets', 'leaves']) db[k] = [];
   db.technicians = [
     { id: 1, name: 'Vahid Haeri', email: 'vahid@x.ca', photoUrl: null, workspaceId: 1, isActive: true },
     { id: 2, name: 'Muhammad Shahidullah', email: 'ms@x.ca', photoUrl: null, workspaceId: 1, isActive: true },
@@ -23,7 +23,9 @@ const reset = () => {
   seq = 1000;
 };
 const matches = (row, where = {}) => Object.entries(where).every(([k, v]) => {
+  if (k === 'OR' || k === 'requester') return true;
   if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
+    if ('contains' in v && !String(row[k] || '').includes(v.contains)) return false;
     if ('in' in v) return v.in.includes(row[k]);
     if ('not' in v) return row[k] !== v.not;
     if ('startsWith' in v) return String(row[k] || '').startsWith(v.startsWith);
@@ -80,6 +82,7 @@ const prismaMock = {
     findMany: jest.fn(async ({ where }) => db.tickets.filter((r) => matches(r, where)).map((t) => ({ ...t, assignedTech: db.technicians.find((x) => x.id === t.assignedTechId) || null }))),
   },
   technician: { findMany: jest.fn(async () => db.technicians) },
+  technicianLeave: { findMany: jest.fn(async ({ where }) => db.leaves.filter((l) => where.technicianId.in.includes(l.technicianId))) },
   group: {
     findMany: jest.fn(async () => db.groups),
     findFirst: jest.fn(async ({ where }) => db.groups.find((g) => g.id === where.id) || null),
@@ -523,3 +526,167 @@ test('families list shows progress n/m and the parent card', async () => {
 function dbDate(d) {
   return d instanceof Date ? d.toISOString().slice(0, 10) : d;
 }
+
+// ---------------------------------------------------------------- several people per child
+
+const departureOf = (name, last, empId) => fsNotice({
+  subject: `Departure Notification: ${name} from the Calgary office will be departing`,
+  text: `Hello, Name: ${name} Office: Calgary Departure Date: ${last} Bamboo Profile : https://bgcengineering.bamboohr.com/employees/employee.php?id=${empId}&page=2096`,
+});
+
+describe('several people on one child', () => {
+  const sharePhone = async () => {
+    const list = (await hr.getSettings(1)).templates.offboarding_standard;
+    return hr.updateSettings(1, {
+      mode: 'live',
+      templates: { offboarding_standard: list.map((i) => (i.key === 'phone' ? { ...i, assigneeTechId: 3, assigneeTechIds: [3, 4] } : i)) },
+    }, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+  };
+  const phoneOwner = (parent) => ticketSvc.createTicket.mock.calls.map((c) => c[1]).find((i) => i.subject === `Child Ticket - Phone - ${parent.subject}`).assignedTechId;
+
+  test('the list is saved, audited as one change, and bounded', async () => {
+    const { settings, changes } = await sharePhone();
+    expect(settings.templates.offboarding_standard.find((i) => i.key === 'phone')).toMatchObject({ assigneeTechId: 3, assigneeTechIds: [3, 4] });
+    expect(changes).toEqual(expect.arrayContaining([{ field: 'templates.offboarding_standard[phone].assigneeTechIds', before: [3], after: [3, 4] }]));
+    expect(changes.some((c) => c.field.endsWith('[phone].assigneeTechId'))).toBe(false);
+    const list = settings.templates.offboarding_standard;
+    await expect(hr.updateSettings(1, { templates: { offboarding_standard: list.map((i) => (i.key === 'phone' ? { ...i, assigneeTechIds: [3, 999] } : i)) } })).rejects.toThrow(/active technician/);
+    await expect(hr.updateSettings(1, { templates: { offboarding_standard: list.map((i) => (i.key === 'phone' ? { ...i, assigneeTechIds: [3, 4, 1, 2, 3, 4, 1, 2] } : i)) } })).resolves.toBeTruthy(); // repeats collapse
+  });
+
+  test('a page that only knows the single field still changes the person', async () => {
+    const list = (await hr.getSettings(1)).templates.offboarding_standard; // phone: [3]
+    const { settings } = await hr.updateSettings(1, { templates: { offboarding_standard: list.map((i) => (i.key === 'phone' ? { ...i, assigneeTechId: 4 } : i)) } });
+    expect(settings.templates.offboarding_standard.find((i) => i.key === 'phone')).toMatchObject({ assigneeTechId: 4, assigneeTechIds: [4] });
+  });
+
+  test('they take turns, one ticket each time', async () => {
+    await sharePhone();
+    const owners = [];
+    for (const [i, name] of ['Ann One', 'Bob Two', 'Cy Three'].entries()) {
+      const parent = departureOf(name, day(10), 3000 + i);
+      await hr.onTicketCreated(parent.id, 1);
+      owners.push(phoneOwner(parent));
+    }
+    expect(owners).toEqual([3, 4, 3]);
+    expect(ticketSvc.createTicket.mock.calls.filter((c) => /Child Ticket - Phone/.test(c[1].subject))).toHaveLength(3);
+  });
+
+  test('someone off today is skipped; if everyone is off the turn stands', async () => {
+    await sharePhone();
+    db.leaves.push({ technicianId: 3, isFullDay: true });
+    const a = departureOf('Ann One', day(10), 3001);
+    await hr.onTicketCreated(a.id, 1);
+    expect(phoneOwner(a)).toBe(4);
+    db.leaves.push({ technicianId: 4, isFullDay: true });
+    const b = departureOf('Bob Two', day(10), 3002);
+    await hr.onTicketCreated(b.id, 1);
+    expect(phoneOwner(b)).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------- organise now
+
+describe('organise now: existing tickets are taken in, only the missing ones created', () => {
+  const fsChild = (parent, title, status = 'Open', sep = ' - ') => {
+    const t = fsNotice({ subject: `Child Ticket - ${title}${sep}${parent.subject}`, text: 'Please take the necessary steps' });
+    t.status = status;
+    return t;
+  };
+
+  test('a departure FreshService already organised: its children join, the gaps are filled, the owner stays', async () => {
+    await setMode('live');
+    const parent = departure('Matt Lin', day(8));
+    parent.assignedTechId = 4;
+    const laptop = fsChild(parent, 'Laptop');
+    const phone = fsChild(parent, 'Phone', 'Pending', '- '); // FreshService's own spacing
+    const disable = fsChild(parent, 'Disable Account', 'Closed');
+    fsChild(departureOf('Somebody Else', day(8), 4321), 'Laptop');
+    jest.clearAllMocks();
+
+    const r = await hr.organise(parent.id, 1, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+    expect(r).toMatchObject({ outcome: 'done', warnings: [] });
+    expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].subject)).toEqual([
+      `Child Ticket - iPad - ${parent.subject}`, `Child Ticket - Decommissioning Account - ${parent.subject}`,
+    ]);
+    const fam = db.families.find((f) => f.parentTicketId === parent.id);
+    const members = db.members.filter((m) => m.familyId === fam.id);
+    expect(members.map((m) => [m.templateKey, m.role]).sort()).toEqual([
+      ['decommission_account', 'child'], ['disable_account', 'child'], ['ipad', 'child'], ['laptop', 'child'], ['phone', 'child'],
+    ]);
+    expect(members.filter((m) => [laptop.id, phone.id, disable.id].includes(m.ticketId))).toHaveLength(3);
+    // The notice already had an owner: not reassigned. Its due date was blank: set.
+    expect(ticketSvc.updateFsTicket.mock.calls.some((c) => c[0] === parent.id && c[2].assignedTechId !== undefined)).toBe(false);
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(day(8)) }, expect.anything());
+    const note = ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === parent.id)[2].bodyHtml;
+    expect(note).toMatch(/Laptop \(already existed\)/);
+    expect(note).toMatch(/Disable Account \(already existed, closed\)/);
+    const ev = db.events.at(-1);
+    expect(ev).toMatchObject({ mode: 'live', decision: 'create_family', outcome: 'done', actor: 'vahid@x.ca' });
+    expect(ev.details.adopted).toHaveLength(3);
+    expect(ev.summary).toMatch(/3 existing tickets taken in/);
+
+    await expect(hr.organise(parent.id, 1)).rejects.toThrow(/already has a family/);
+    // A later date change moves the taken-in children too.
+    jest.clearAllMocks();
+    const change = fsNotice({ subject: 'Departure Notification: Matt Lin departure date has changed', text: `The departure date has changed from ${day(8)} to ${day(12)} for Matt Lin in the Calgary office. ${PROFILE}` });
+    const moved = await hr.onTicketCreated(change.id, 1);
+    expect(moved.decision).toBe('move_dates');
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(laptop.id, 1, { dueBy: dueInstant(day(12)) }, expect.anything());
+    expect(ticketSvc.updateFsTicket.mock.calls.some((c) => c[0] === disable.id)).toBe(false); // closed stays closed
+  });
+
+  test('a new hire whose NH Laptop ticket exists: it is the Laptop child, only Workstation is created, no password travels', async () => {
+    await setMode('live');
+    const parent = fsNotice({ subject: 'New Hire: Jane Doe', sender: BAMBOO, text: `Start Date: ${day(14)} Employee #: 2249 Position: Engineer Employee Status: FTR Location: Brisbane Reports To: Kim Lee` });
+    const nh = fsNotice({ subject: `NH Laptop - Brisbane - AU - jdoe - ${day(14)}`, sender: 'jdoe@bgcengineering.ca', text: `Start Date: ${day(14)} Username: jdoe Full Name: Jane D. ID: 2249 Email: jdoe@x.ca Password: Hunter2!` });
+    fsNotice({ subject: `NH Laptop - Brisbane - AU - other - ${day(14)}`, sender: 'o@bgcengineering.ca', text: 'Full Name: Other Person ID: 7777 Email: o@x.ca' });
+    jest.clearAllMocks();
+    const r = await hr.organise(parent.id, 1, { email: 'vahid@x.ca' });
+    expect(r.outcome).toBe('done');
+    expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].subject)).toEqual(['Child Ticket - Workstation - New Hire: Jane Doe']);
+    expect(db.members.find((m) => m.ticketId === nh.id)).toMatchObject({ role: 'child', templateKey: 'laptop' });
+    expect(linkSvc.link).toHaveBeenCalledWith(parent.id, 1, { relatedTicketId: nh.id, kind: 'related_to' }, expect.anything());
+    expect(ticketSvc.addPrivateNote.mock.calls.some((c) => c[0] === nh.id)).toBe(false);
+    expect(JSON.stringify([ticketSvc.addPrivateNote.mock.calls, ticketSvc.createTicket.mock.calls, db.events])).not.toMatch(/Hunter2/);
+  });
+
+  test('refused in Shadow, and for anything that is not a departure or new-hire notice', async () => {
+    await setMode('observe');
+    const parent = departure('Matt Lin', day(8));
+    await expect(hr.organise(parent.id, 1)).rejects.toThrow(/Live first/);
+    await setMode('live');
+    const leave = fsNotice({ subject: 'On Leave Notification: Pat Kim', text: `Expected Leave Date: ${day(5)} Expected Return Date: ${day(40)}` });
+    await expect(hr.organise(leave.id, 1)).rejects.toThrow(/Only a departure or new-hire notice/);
+    await expect(hr.organise(999999, 1)).rejects.toThrow(/not found/i);
+    expect(ticketSvc.createTicket).not.toHaveBeenCalled();
+  });
+
+  test('candidates: open notices with no family, with what would be taken in and created; People stops listing Shadow once Live', async () => {
+    await setMode('observe');
+    const shadowed = departure('Matt Lin', day(8));
+    await hr.onTicketCreated(shadowed.id, 1);
+    expect((await hr.listFamilies(1)).some((f) => f.shadow)).toBe(true);
+    await setMode('live');
+    expect(await hr.listFamilies(1)).toEqual([]);
+
+    fsChild(shadowed, 'Laptop');
+    const hire = fsNotice({ subject: 'New Hire: Jane Doe', sender: BAMBOO, text: `Start Date: ${day(14)} Employee #: 2249 Position: Engineer Employee Status: FTR Location: Brisbane Reports To: Kim Lee` });
+    const closed = departureOf('Gone Already', day(-30), 3101);
+    closed.status = 'Closed';
+    const organised = departureOf('Has Family', day(9), 3102);
+    await hr.onTicketCreated(organised.id, 1);
+    jest.clearAllMocks();
+
+    const list = await hr.candidates(1);
+    expect(list.map((c) => c.personName).sort()).toEqual(['Jane Doe', 'Matt Lin']);
+    const matt = list.find((c) => c.personName === 'Matt Lin');
+    expect(matt).toMatchObject({ ticketId: shadowed.id, kind: 'offboarding', effectiveDate: day(8) });
+    expect(matt.existing.map((x) => x.title)).toEqual(['Laptop']);
+    expect(matt.toCreate.map((x) => x.title)).toEqual(['Phone', 'iPad', 'Disable Account', 'Decommissioning Account']);
+    expect(list.find((c) => c.ticketId === hire.id).toCreate.map((x) => x.title)).toEqual(['Laptop', 'Workstation']);
+    // Reads only.
+    expect(ticketSvc.createTicket).not.toHaveBeenCalled();
+    expect(ticketSvc.addPrivateNote).not.toHaveBeenCalled();
+  });
+});

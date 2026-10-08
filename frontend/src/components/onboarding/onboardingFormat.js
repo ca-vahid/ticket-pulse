@@ -85,13 +85,17 @@ export function changeFieldLabel(field, { templateLabels = {}, templates = {}, i
   if (m) {
     const list = templateLabels[m[1]] || m[1];
     const title = (templates[m[1]] || []).find((i) => i.key === m[2])?.title || item?.title || m[2];
-    const f = { title: 'title', dueOffsetDays: 'due offset', assigneeTechId: 'assignee', groupId: 'group' }[m[3]];
+    const f = { title: 'title', dueOffsetDays: 'due offset', assigneeTechId: 'assignee', assigneeTechIds: 'people', groupId: 'group' }[m[3]];
     return f ? `${list} — ${title}: ${f}` : `${list} — ${title}`;
   }
   return field;
 }
 
 export function changeValueLabel(field, value, { techById = new Map(), groupById = new Map() } = {}) {
+  if (/assigneeTechIds$/.test(field)) {
+    const ids = Array.isArray(value) ? value : [];
+    return ids.length ? ids.map((id) => techById.get(Number(id))?.name || `Technician ${id}`).join(', ') : 'AI routing';
+  }
   if (value === null || value === undefined) {
     if (/assigneeTechId$/.test(field)) return 'AI routing';
     if (/groupId$/.test(field)) return 'No group';
@@ -107,3 +111,11 @@ export function changeValueLabel(field, value, { techById = new Map(), groupById
   if (typeof value === 'object') return value.title ? `${value.title} (${value.dueOffsetDays >= 0 ? '+' : ''}${value.dueOffsetDays ?? 0} days)` : JSON.stringify(value);
   return String(value);
 }
+
+/** The people of one child: the list, else the single assignee. 0 = a slot still being chosen. */
+export function peopleOf(item) {
+  if (Array.isArray(item?.assigneeTechIds) && item.assigneeTechIds.length) return item.assigneeTechIds.map(Number);
+  return item?.assigneeTechId ? [Number(item.assigneeTechId)] : [];
+}
+
+export const MAX_PEOPLE = 6;

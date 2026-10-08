@@ -19,6 +19,8 @@ const svc = {
   switchToAfterTheFact: jest.fn(async (id) => ({ familyId: id, closed: [] })),
   listEvents: jest.fn(async () => []),
   preview: jest.fn(async (id) => ({ ticketId: id })),
+  candidates: jest.fn(async () => [{ ticketId: 9 }]),
+  organise: jest.fn(async (id) => ({ familyId: 3, outcome: 'done', ticketId: id })),
 };
 const wsRepo = { getAccessRole: jest.fn(async () => 'viewer') };
 
@@ -71,11 +73,14 @@ test.each([
   ['post', '/families/3/after-the-fact'],
   ['get', '/events'],
   ['post', '/preview'],
+  ['get', '/candidates'],
+  ['post', '/organise'],
 ])('%s %s is admin-only', async (method, path) => {
   const r = await request(app(MEMBER))[method](`/api/hr-lifecycle${path}`).send({ mode: 'live', ticketId: 1 });
   expect(r.status).toBe(403);
   expect(svc.updateSettings).not.toHaveBeenCalled();
   expect(svc.switchToAfterTheFact).not.toHaveBeenCalled();
+  expect(svc.organise).not.toHaveBeenCalled();
 });
 
 test('a workspace admin (not a global admin) passes', async () => {
@@ -105,4 +110,13 @@ test('after-the-fact and preview', async () => {
   expect(svc.switchToAfterTheFact).toHaveBeenCalledWith(7, 1, ADMIN);
   expect((await request(app(ADMIN)).post('/api/hr-lifecycle/preview').send({ ref: 'TP-12' })).body.data).toEqual({ ticketId: 42 });
   expect((await request(app(ADMIN)).post('/api/hr-lifecycle/preview').send({})).status).toBe(400);
+});
+
+test('candidates and organise: the notice id is required and the session user is passed on', async () => {
+  expect((await request(app(ADMIN)).get('/api/hr-lifecycle/candidates')).body.data).toEqual([{ ticketId: 9 }]);
+  const r = await request(app(ADMIN)).post('/api/hr-lifecycle/organise').send({ ticketId: 61870 });
+  expect(r.body.data).toEqual({ familyId: 3, outcome: 'done', ticketId: 61870 });
+  expect(svc.organise).toHaveBeenCalledWith(61870, 1, ADMIN);
+  expect((await request(app(ADMIN)).post('/api/hr-lifecycle/organise').send({})).status).toBe(400);
+  expect((await request(app(ADMIN)).post('/api/hr-lifecycle/organise').send({ ticketId: 'x' })).status).toBe(400);
 });

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, UserRoundMinus, UserRoundPlus } from 'lucide-react';
 import { hrLifecycleAPI } from '../../services/api';
 import { ConfirmDialog, EmptyState, Loading } from '../knowledge/knowledgeUi';
-import { Person, StatusDot, TicketRef } from './onboardingUi';
+import { Person, SectionTitle, StatusDot, TicketRef } from './onboardingUi';
 import { FAMILY_STATUS, KIND_LABEL, fmtDate, ticketTone } from './onboardingFormat';
 
 const FILTERS = [
@@ -11,6 +11,102 @@ const FILTERS = [
   { id: 'cancelled', label: 'Cancelled' },
   { id: 'all', label: 'All' },
 ];
+
+/**
+ * Live: open departure / new-hire notices that have no family yet (they
+ * arrived before Live). Organise takes in the tickets that already exist and
+ * creates only the missing ones.
+ */
+function NotOrganised({ onDone }) {
+  const [rows, setRows] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const load = useCallback(() => {
+    hrLifecycleAPI.candidates()
+      .then((res) => setRows(Array.isArray(res?.data) ? res.data : []))
+      .catch(() => setRows([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const organise = async () => {
+    const c = confirm;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await hrLifecycleAPI.organise(c.ticketId);
+      const n = res?.data?.warnings?.length || 0;
+      setMessage(n
+        ? { ok: false, text: `${c.personName}: organised with ${n} ${n === 1 ? 'warning' : 'warnings'} — see Activity.` }
+        : { ok: true, text: `${c.personName}: organised.` });
+      load();
+      onDone?.();
+    } catch (err) {
+      setMessage({ ok: false, text: err?.message || 'Could not organise' });
+    } finally {
+      setBusy(false);
+      setConfirm(null);
+    }
+  };
+
+  if (!rows?.length && !message) return null;
+  return (
+    <section className="mb-6" aria-label="Not organised yet">
+      {rows?.length > 0 && (
+        <SectionTitle hint="These notices arrived before Live. Organise takes in the tickets that already exist and creates only the missing ones.">
+          Not organised yet
+        </SectionTitle>
+      )}
+      {message && (
+        <p role={message.ok ? 'status' : 'alert'} className={`mb-2 text-sm ${message.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{message.text}</p>
+      )}
+      {rows?.length > 0 && (
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
+          {rows.map((c) => (
+            <li key={c.ticketId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-3 py-2.5 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
+              <Person name={c.personName} sub={`${KIND_LABEL[c.kind] || c.kind} · ${fmtDate(c.effectiveDate, { withYear: true })}${c.afterTheFact ? ' · after the fact' : ''}`} />
+              <span className="order-last col-span-2 min-w-0 text-xs text-muted-foreground md:order-none md:col-span-1">
+                <span className="block truncate">
+                  Notice <TicketRef ticket={c.parent} />
+                  {c.parent?.assignee?.name ? ` · ${c.parent.assignee.name}` : ''}
+                  {c.existing.length > 0 && ` · has ${c.existing.map((x) => `${x.title} ${x.ref}`).join(', ')}`}
+                </span>
+                <span className="block truncate text-foreground/85">
+                  {c.toCreate.length ? `Will create ${c.toCreate.map((x) => x.title).join(', ')}` : 'Nothing to create'}
+                </span>
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirm(c)}
+                aria-label={`Organise ${c.personName}`}
+                className="tp-focus-ring rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40"
+              >
+                Organise
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ConfirmDialog
+        open={Boolean(confirm)}
+        title={`Organise ${confirm?.personName || 'this person'}?`}
+        confirmLabel={busy ? 'Organising…' : 'Organise'}
+        onCancel={() => setConfirm(null)}
+        onConfirm={organise}
+      >
+        {confirm?.existing?.length
+          ? `${confirm.existing.length} existing ${confirm.existing.length === 1 ? 'ticket joins' : 'tickets join'} the family as they are. `
+          : ''}
+        {confirm?.toCreate?.length
+          ? `Ticket Pulse creates ${confirm.toCreate.map((x) => x.title).join(', ')}.`
+          : 'No new ticket is created.'}
+        {' '}The notice keeps its owner if it has one.
+      </ConfirmDialog>
+    </section>
+  );
+}
 
 /** A family Shadow recorded: the children Live would create (2 Oct 2026). */
 function ShadowFamilyDetail({ family }) {
@@ -116,7 +212,7 @@ function FamilyDetail({ familyId, onChanged }) {
   );
 }
 
-export default function PeoplePanel() {
+export default function PeoplePanel({ mode = null }) {
   const [filter, setFilter] = useState('open');
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
@@ -146,10 +242,11 @@ export default function PeoplePanel() {
         ))}
       </div>
       {error && <p className="mb-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
+      {mode === 'live' && (filter === 'open' || filter === 'all') && <NotOrganised onDone={load} />}
       {rows === null ? <Loading label="Loading people…" /> : !rows.length ? (
         <EmptyState icon={UserRoundPlus} title="No families here">
           A family appears when an HR departure or new-hire notice arrives. In Shadow it is listed
-          here with the child tickets Live would create; nothing is created.
+          here with the child tickets Live would create; nothing is created until Live.
         </EmptyState>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card shadow-subtle">

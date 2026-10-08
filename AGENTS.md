@@ -164,6 +164,13 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - **Notifications.** Approvers get an e-mail when a request needs them; requesters get one on approve / deny / cancel-by-someone-else. The e-mails are Outlook-safe (no gradients). Teams cards and a daily "who's out" digest are v2.
 - **Privacy (BC PIPA).** `away` types (sick, bereavement, appointment) show as "Away" to colleagues; the type is visible only to the person, their approvers and admins. `private` types are hidden from colleagues entirely.
 
+### Onboarding / Offboarding — "Comings & Goings" (v4.1.32; live in IT since v4.2.29, 8 Oct 2026)
+
+`hrLifecycleService.js` + `utils/hrNoticeClassifier.js`, routes `/api/hr-lifecycle`, page `/onboarding`. Per workspace `mode` off | observe ("Shadow") | live; available only in `HR_LIFECYCLE_WORKSPACE_IDS` (default `1`). The HR notice ticket is the parent of a family; children are TP-born and come from three editable lists (offboarding 5, after the fact 3, onboarding Laptop + Workstation). Change notices move every open member, cancellations close the family. FreshService's departure workflow and the account script's NH tickets were switched off on 8 Oct 2026 — Ticket Pulse is the only organiser.
+
+- **Several people per child (v4.2.29):** a template item carries `assigneeTechIds` (first one mirrored in `assigneeTechId`). `_pickAssignee` gives each new child to ONE of them: whoever had this kind of child longest ago, skipping anyone with a full-day OFF leave today. Blank list = AI routing.
+- **Organise now (v4.2.29):** `candidates()` lists open departure / new-hire notices with no family; `organise(ticketId)` (Live only, `POST /organise`) builds the family with `plan(..., { adopt: true })`: existing tickets are taken in as `role: 'child'` members (FreshService "Child Ticket - <title> - <notice subject>", NH Laptop / NH Workstation matched by BambooHR id then name), only the missing children are created, and a notice that already has an owner or due date keeps them. Never quote an NH body (initial passwords).
+
 ### Site stats (v4.2.28, 2026-10)
 
 Settings -> Site stats, **super admins only** (`requireGlobalAdmin`, nav `minRole: 'global'`). Measures use of the tool: who was last seen, active days, visits, which pages and actions, at which hours. Plan: `plans/SITE_STATS_PLAN.md` (continuous-dev worktree).

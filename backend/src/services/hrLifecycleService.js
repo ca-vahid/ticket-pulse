@@ -48,6 +48,10 @@ const RECENT_DAYS = 3;
 const MAX_CHILDREN = 12;
 const MAX_BODY_CHARS = 6000;
 const DUE_LOCAL_TIME = '17:00:00';
+const MAX_ASSIGNEES = 6;
+// Organise now: how far back existing child / NH tickets are looked for.
+const ADOPT_LOOKBACK_DAYS = 180;
+const CANDIDATE_LIMIT = 40;
 
 // Seeded from today's routing (research §3 "Assignees"): accounts go to the
 // identity/M365 owner, the phone to the phone owner, devices to the office
@@ -94,6 +98,14 @@ export function availableWorkspaceIds() {
 
 export function isAvailable(workspaceId) {
   return availableWorkspaceIds().has(Number(workspaceId));
+}
+
+/** A child's people: the stored list, else the single legacy assignee. */
+export function assigneeIds(item) {
+  const raw = Array.isArray(item?.assigneeTechIds) && item.assigneeTechIds.length
+    ? item.assigneeTechIds
+    : (item?.assigneeTechId ? [item.assigneeTechId] : []);
+  return [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
 }
 
 const soft = (fn, fallback = null) => Promise.resolve().then(fn).catch((err) => {
@@ -186,9 +198,10 @@ class HrLifecycleService {
     const resolve = (hint) => (hint ? byName.get(normalizePersonName(hint)) ?? null : null);
     const templates = {};
     for (const name of TEMPLATE_NAMES) {
-      templates[name] = DEFAULT_TEMPLATES[name].map(({ assigneeHint, ...item }) => ({
-        ...item, assigneeTechId: resolve(assigneeHint), groupId: null,
-      }));
+      templates[name] = DEFAULT_TEMPLATES[name].map(({ assigneeHint, ...item }) => {
+        const id = resolve(assigneeHint);
+        return { ...item, assigneeTechId: id, assigneeTechIds: id ? [id] : [], groupId: null };
+      });
     }
     return {
       mode: 'off',
@@ -203,10 +216,13 @@ class HrLifecycleService {
     const templates = {};
     const stored = row?.templates && typeof row.templates === 'object' ? row.templates : {};
     for (const name of TEMPLATE_NAMES) {
-      templates[name] = Array.isArray(stored[name]) ? stored[name].map((i) => ({
-        key: String(i.key), title: String(i.title), dueOffsetDays: Number(i.dueOffsetDays) || 0,
-        assigneeTechId: i.assigneeTechId ? Number(i.assigneeTechId) : null, groupId: i.groupId ? Number(i.groupId) : null,
-      })) : defaults.templates[name];
+      templates[name] = Array.isArray(stored[name]) ? stored[name].map((i) => {
+        const ids = assigneeIds(i);
+        return {
+          key: String(i.key), title: String(i.title), dueOffsetDays: Number(i.dueOffsetDays) || 0,
+          assigneeTechId: ids[0] ?? null, assigneeTechIds: ids, groupId: i.groupId ? Number(i.groupId) : null,
+        };
+      }) : defaults.templates[name];
     }
     const side = (v, d) => ({
       assigneeTechId: v?.assigneeTechId ? Number(v.assigneeTechId) : (v ? null : d.assigneeTechId),
@@ -285,11 +301,19 @@ class HrLifecycleService {
           seen.add(key);
           const offset = Number(item?.dueOffsetDays ?? 0);
           if (!Number.isInteger(offset) || offset < -30 || offset > 90) throw new ValidationError(`${TEMPLATE_LABELS[name]} — ${title}: due offset must be a whole number of days between -30 and 90`);
+          // Several people may share a child: they take turns (see _pickAssignee).
+          // A page that only knows the single field (an older tab) sends a stale list: the single field wins then.
+          const listed = Array.isArray(item?.assigneeTechIds) ? item.assigneeTechIds : null;
+          const agrees = listed && (item.assigneeTechId === undefined || Number(listed[0] || 0) === Number(item.assigneeTechId || 0));
+          const rawIds = agrees ? listed : [item?.assigneeTechId];
+          const ids = [...new Set(rawIds.map((v) => techOrNull(v, `${TEMPLATE_LABELS[name]} — ${title}`)).filter(Boolean))];
+          if (ids.length > MAX_ASSIGNEES) throw new ValidationError(`${TEMPLATE_LABELS[name]} — ${title}: at most ${MAX_ASSIGNEES} people`);
           return {
             key,
             title,
             dueOffsetDays: offset,
-            assigneeTechId: techOrNull(item?.assigneeTechId, `${TEMPLATE_LABELS[name]} — ${title}`),
+            assigneeTechId: ids[0] ?? null,
+            assigneeTechIds: ids,
             groupId: groupOrNull(item?.groupId, `${TEMPLATE_LABELS[name]} — ${title}`),
           };
         });
@@ -327,7 +351,12 @@ class HrLifecycleService {
       for (const item of b) {
         const prev = aBy.get(item.key);
         if (!prev) { changes.push({ field: `templates.${name}[${item.key}]`, before: null, after: item }); continue; }
-        for (const f of ['title', 'dueOffsetDays', 'assigneeTechId', 'groupId']) push(`templates.${name}[${item.key}].${f}`, prev[f], item[f]);
+        for (const f of ['title', 'dueOffsetDays']) push(`templates.${name}[${item.key}].${f}`, prev[f], item[f]);
+        const was = assigneeIds(prev);
+        const now = assigneeIds(item);
+        if (was.length > 1 || now.length > 1) push(`templates.${name}[${item.key}].assigneeTechIds`, was, now);
+        else push(`templates.${name}[${item.key}].assigneeTechId`, was[0], now[0]);
+        push(`templates.${name}[${item.key}].groupId`, prev.groupId, item.groupId);
       }
       const order = (list) => list.map((i) => i.key).filter((k) => aBy.has(k) && bBy.has(k));
       if (JSON.stringify(order(a)) !== JSON.stringify(order(b))) push(`templates.${name}.order`, order(a), order(b));
@@ -379,6 +408,7 @@ class HrLifecycleService {
       matching: 'A person is matched by their BambooHR employee id first, then by their normalised name.',
       recency: `Only tickets created in the last ${RECENT_DAYS} days are handled (history backfills never start a family).`,
       passwords: 'Lines that carry a password are removed from anything written into child descriptions or notes.',
+      sharing: 'A child with several people goes to one of them: they take turns, and anyone off that day is skipped.',
     };
   }
 
@@ -462,6 +492,109 @@ class HrLifecycleService {
   }
 
   // ------------------------------------------------------------ families
+
+  /**
+   * Who gets this child. One person: that person. Several: they take turns
+   * (whoever was given this kind of child longest ago), skipping anyone who
+   * is off today while somebody else is in. Reads only.
+   */
+  async _pickAssignee(workspaceId, item, tz) {
+    const ids = assigneeIds(item);
+    if (ids.length <= 1) return ids[0] ?? null;
+    const ws = Number(workspaceId);
+    const today = new Date(`${localDate(new Date(), tz || 'America/Los_Angeles')}T00:00:00Z`);
+    const off = await soft(() => prisma.technicianLeave.findMany({
+      where: { technicianId: { in: ids }, leaveDate: today, status: 'APPROVED', category: 'OFF' },
+      select: { technicianId: true, isFullDay: true },
+      take: 50,
+    }), []);
+    const away = new Set((off || []).filter((l) => l.isFullDay !== false).map((l) => l.technicianId));
+    const pool = ids.filter((id) => !away.has(id));
+    const candidates = pool.length ? pool : ids;
+    const recent = await soft(() => prisma.hrLifecycleFamilyMember.findMany({
+      where: { workspaceId: ws, role: 'child', templateKey: item.key }, orderBy: { id: 'desc' }, take: 20, select: { id: true, ticketId: true },
+    }), []) || [];
+    const newestFirst = [...recent].sort((a, b) => b.id - a.id);
+    const tickets = newestFirst.length ? await soft(() => prisma.ticket.findMany({
+      where: { id: { in: newestFirst.map((r) => r.ticketId) }, workspaceId: ws }, select: { id: true, assignedTechId: true },
+    }), []) || [] : [];
+    const owner = new Map(tickets.map((t) => [t.id, t.assignedTechId]));
+    const lastTurn = (id) => {
+      const i = newestFirst.findIndex((r) => Number(owner.get(r.ticketId)) === id);
+      return i === -1 ? 1e9 : i;
+    };
+    return [...candidates].sort((a, b) => lastTurn(b) - lastTurn(a) || ids.indexOf(a) - ids.indexOf(b))[0];
+  }
+
+  /** NH automation tickets of the last months (one read, shared by a candidates run). */
+  async _nhTickets(workspaceId) {
+    return await soft(() => prisma.ticket.findMany({
+      where: { workspaceId: Number(workspaceId), subject: { startsWith: 'NH ' }, createdAt: { gte: new Date(Date.now() - ADOPT_LOOKBACK_DAYS * 86400e3) } },
+      select: {
+        id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, description: true,
+        descriptionText: true, status: true, createdAt: true, assignedTechId: true, requester: { select: { email: true } },
+      },
+      take: 300,
+      orderBy: { id: 'desc' },
+    }), []) || [];
+  }
+
+  /**
+   * Tickets that already cover a family's work (Organise now): FreshService's
+   * "Child Ticket - <title> - <notice subject>" tickets for a departure, the
+   * automation's NH Laptop / NH Workstation tickets for a new hire. Closed
+   * ones count (the work is done); deleted and spam do not. Reads only.
+   */
+  async _existingWork(ticket, c, kind, settings, tz, { nhTickets = null } = {}) {
+    const ws = ticket.workspaceId;
+    const found = [];
+    if (kind === 'offboarding') {
+      const known = new Map();
+      for (const name of ['offboarding_standard', 'offboarding_after_fact']) {
+        for (const item of settings.templates?.[name] || []) if (!known.has(item.title.toLowerCase())) known.set(item.title.toLowerCase(), item);
+      }
+      const subject = String(ticket.subject || '');
+      const rows = subject ? await soft(() => prisma.ticket.findMany({
+        where: {
+          workspaceId: ws,
+          id: { not: ticket.id },
+          subject: { startsWith: 'Child Ticket', contains: subject.slice(0, 150) },
+          createdAt: { gte: new Date(new Date(ticket.createdAt || Date.now()).getTime() - 86400e3) },
+        },
+        select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, status: true, assignedTechId: true },
+        take: 30,
+        orderBy: { id: 'asc' },
+      }), []) || [] : [];
+      for (const t of rows) {
+        if (['Deleted', 'Spam'].includes(t.status)) continue;
+        const at = t.subject.indexOf(subject.slice(0, 150));
+        if (!t.subject.startsWith('Child Ticket') || at < 0) continue;
+        const title = t.subject.slice('Child Ticket'.length, at).replace(/^[\s\-–:]+|[\s\-–:]+$/g, '').replace(/\s+/g, ' ');
+        if (!title) continue;
+        const item = known.get(title.toLowerCase());
+        found.push({ key: item?.key || slugKey(title), title: item?.title || title, dueOffsetDays: item?.dueOffsetDays ?? 0, ticket: t });
+      }
+    } else if (kind === 'onboarding') {
+      const titles = new Map((settings.templates?.onboarding || []).map((i) => [i.key, i]));
+      const name = normalizePersonName(c.person || '');
+      for (const t of nhTickets || await this._nhTickets(ws)) {
+        if (t.id === ticket.id || ['Deleted', 'Spam'].includes(t.status)) continue;
+        const nc = this.classify(t, tz);
+        if (!nc || nc.type !== 'nh_automation') continue;
+        const sameId = c.employeeId && nc.employeeId && String(c.employeeId) === String(nc.employeeId);
+        const sameName = !(c.employeeId && nc.employeeId) && name && nc.person && normalizePersonName(nc.person) === name;
+        if (!sameId && !sameName) continue;
+        const key = nc.nhKind === 'workstation' ? 'workstation' : 'laptop';
+        if (found.some((f) => f.key === key)) continue;
+        const item = titles.get(key);
+        // Never carry the NH body along: it can hold the initial password.
+        const card = { id: t.id, workspaceId: t.workspaceId, origin: t.origin, nativeNumber: t.nativeNumber, freshserviceTicketId: t.freshserviceTicketId, subject: t.subject, status: t.status, assignedTechId: t.assignedTechId };
+        found.push({ key, title: item?.title || (key === 'workstation' ? 'Workstation' : 'Laptop'), dueOffsetDays: item?.dueOffsetDays ?? 0, ticket: card });
+      }
+    }
+    for (const f of found) f.terminal = await this._isTerminal(ws, f.ticket.status);
+    return found;
+  }
 
   async findOpenFamily(workspaceId, kind, c) {
     const ws = Number(workspaceId);
@@ -590,7 +723,7 @@ class HrLifecycleService {
   }
 
   /** What a notice would do. Reads only. */
-  async plan(ticket, c, settings, _tz, { shadow = false } = {}) {
+  async plan(ticket, c, settings, tz, { shadow = false, adopt = false, nhTickets = null } = {}) {
     const ws = ticket.workspaceId;
     const fx = NOTICE_EFFECT[c.type];
     const person = c.person || c.username || 'this person';
@@ -652,15 +785,38 @@ class HrLifecycleService {
       const template = fx.family === 'onboarding' ? 'onboarding' : (afterTheFact ? 'offboarding_after_fact' : 'offboarding_standard');
       // After the fact the last day is already past: the work is due from today.
       const baseDate = c.date ? (c.noticeDate && c.date < c.noticeDate ? c.noticeDate : c.date) : (afterTheFact ? c.noticeDate : null);
-      const children = (settings.templates[template] || []).map((item) => ({
-        key: item.key,
-        title: item.title,
-        dueOffsetDays: item.dueOffsetDays,
-        dueDate: baseDate ? addDays(baseDate, item.dueOffsetDays) : null,
-        assigneeTechId: item.assigneeTechId || null,
-        groupId: item.groupId || null,
-        subject: `Child Ticket - ${item.title} - ${ticket.subject}`.slice(0, 500),
-      }));
+      const children = [];
+      for (const item of settings.templates[template] || []) {
+        const ids = assigneeIds(item);
+        children.push({
+          key: item.key,
+          title: item.title,
+          dueOffsetDays: item.dueOffsetDays,
+          dueDate: baseDate ? addDays(baseDate, item.dueOffsetDays) : null,
+          assigneeTechId: await this._pickAssignee(ws, item, tz),
+          ...(ids.length > 1 ? { assigneeTechIds: ids } : {}),
+          groupId: item.groupId || null,
+          subject: `Child Ticket - ${item.title} - ${ticket.subject}`.slice(0, 500),
+        });
+      }
+      // Organise now: tickets that already exist are taken in, never duplicated.
+      if (adopt) {
+        const existing = await this._existingWork(ticket, c, fx.family, settings, tz, { nhTickets });
+        const card = (e) => ({ adoptTicketId: e.ticket.id, adoptRef: ticketDisplayRef(e.ticket), adoptStatus: e.ticket.status, adoptClosed: e.terminal, adoptOrigin: e.ticket.origin || null });
+        const used = new Set();
+        for (const child of children) {
+          const hit = existing.find((e) => e.key === child.key && !used.has(e.ticket.id));
+          if (!hit) continue;
+          used.add(hit.ticket.id);
+          Object.assign(child, card(hit));
+        }
+        for (const e of existing) {
+          if (used.has(e.ticket.id)) continue;
+          children.push({ key: e.key, title: e.title, dueOffsetDays: e.dueOffsetDays, dueDate: baseDate ? addDays(baseDate, e.dueOffsetDays) : null, assigneeTechId: null, groupId: null, subject: e.ticket.subject, ...card(e) });
+        }
+      }
+      const taken = children.filter((x) => x.adoptTicketId);
+      const fresh = children.filter((x) => !x.adoptTicketId);
       const why = afterTheFact ? (c.effectiveImmediately ? ' (after the fact: "effective immediately")' : ' (after the fact: the notice arrived on/after the last day)') : '';
       return {
         decision: afterTheFact ? 'create_family_after_the_fact' : 'create_family',
@@ -670,7 +826,10 @@ class HrLifecycleService {
         effectiveDate: c.date || null,
         parent: { ticketId: ticket.id, assigneeTechId: settings.parentAssigneeTechId || null, dueDate: baseDate },
         children,
-        summary: `${person}: ${FAMILY_KIND_LABEL[fx.family]} family with ${children.length} ${children.length === 1 ? 'child' : 'children'} (${children.map((x) => x.title).join(', ')})${baseDate ? `, due ${fmtDay(baseDate)}` : ', no date in the notice'}${why}`,
+        ...(adopt ? { adopt: true } : {}),
+        summary: adopt
+          ? `${person}: ${FAMILY_KIND_LABEL[fx.family]} family — ${taken.length} existing ${taken.length === 1 ? 'ticket' : 'tickets'} taken in${taken.length ? ` (${taken.map((x) => x.title).join(', ')})` : ''}, ${fresh.length} created${fresh.length ? ` (${fresh.map((x) => x.title).join(', ')})` : ''}${baseDate ? `, due ${fmtDay(baseDate)}` : ', no date in the notice'}${why}`
+          : `${person}: ${FAMILY_KIND_LABEL[fx.family]} family with ${children.length} ${children.length === 1 ? 'child' : 'children'} (${children.map((x) => x.title).join(', ')})${baseDate ? `, due ${fmtDay(baseDate)}` : ', no date in the notice'}${why}`,
       };
     }
 
@@ -750,9 +909,9 @@ class HrLifecycleService {
 
   // ------------------------------------------------------------ live execution
 
-  async execute(ticket, c, plan, settings, tz) {
+  async execute(ticket, c, plan, settings, tz, { actor = null } = {}) {
     const ws = ticket.workspaceId;
-    const out = { warnings: [], created: [] };
+    const out = { warnings: [], created: [], adopted: [] };
     let familyId = plan.familyId || null;
     let outcome = 'done';
     try {
@@ -793,7 +952,8 @@ class HrLifecycleService {
     return this._record(ws, {
       ticket, c, plan, mode: 'live', outcome, familyId,
       summary: plan.summary + (out.warnings.length ? ` — ${out.warnings.length} warning(s)` : ''),
-      details: { warnings: out.warnings, created: out.created },
+      details: { warnings: out.warnings, created: out.created, ...(out.adopted.length || plan.adopt ? { adopted: out.adopted, organisedBy: actor?.email || actor?.name || null } : {}) },
+      actor: actor?.email || actor?.name || null,
     });
   }
 
@@ -813,18 +973,33 @@ class HrLifecycleService {
         status: 'open',
         template: plan.template,
         sourceTicketIds: [ticket.id],
-        details: { title: c.title || null, manager: c.manager || null, noticeType: c.type, effectiveImmediately: c.effectiveImmediately === true },
+        details: { title: c.title || null, manager: c.manager || null, noticeType: c.type, effectiveImmediately: c.effectiveImmediately === true, ...(plan.adopt ? { organisedLater: true } : {}) },
       },
     });
 
-    await this._assign(ticket, plan.parent.assigneeTechId, out);
-    await this._setDue(ticket, plan.parent.dueDate, tz, out);
+    // Organise now: a notice somebody already owns (or dated) is left as it is.
+    if (!(plan.adopt && ticket.assignedTechId)) await this._assign(ticket, plan.parent.assigneeTechId, out);
+    if (!(plan.adopt && ticket.dueBy)) await this._setDue(ticket, plan.parent.dueDate, tz, out);
 
     const svc = await this._ticketService();
     const links = await this._linkService();
     const body = plainBody(ticket);
     const lines = [];
     for (const child of plan.children) {
+      if (child.adoptTicketId) {
+        try {
+          await prisma.hrLifecycleFamilyMember.create({
+            data: { familyId: family.id, workspaceId: ws, ticketId: child.adoptTicketId, role: 'child', templateKey: child.key, title: child.title, dueOffsetDays: child.dueOffsetDays },
+          });
+          // FreshService's own children are already parent/child there; an NH ticket is not.
+          if (plan.familyKind === 'onboarding') await this._link(ticket, { id: child.adoptTicketId, origin: child.adoptOrigin, freshserviceTicketId: null, nativeNumber: null }, out);
+          out.adopted.push({ ticketId: child.adoptTicketId, ref: child.adoptRef, key: child.key, title: child.title });
+          lines.push(`<li>${esc(child.adoptRef)} — ${esc(child.title)} (already existed${child.adoptClosed ? ', closed' : ''})</li>`);
+        } catch (err) {
+          out.warnings.push(`${child.title} (${child.adoptRef}) not taken in: ${err.message}`);
+        }
+        continue;
+      }
       const intro = CHILD_INTRO[child.key]?.[plan.familyKind] || `${child.title} for the following ${plan.familyKind === 'onboarding' ? 'new hire' : 'user'}.`;
       const html = [
         `<p>${esc(intro)}</p>`,
@@ -872,7 +1047,8 @@ class HrLifecycleService {
     ].join(''), out);
 
     // Onboarding: NH automation tickets that arrived before the notice join now.
-    if (plan.familyKind === 'onboarding') await this._adoptEarlyNh(family, ticket, c, out);
+    // (Organise now has already taken them in as the children themselves.)
+    if (plan.familyKind === 'onboarding' && !plan.adopt) await this._adoptEarlyNh(family, ticket, c, out);
     return family.id;
   }
 
@@ -1000,6 +1176,102 @@ class HrLifecycleService {
     await this._note(ticket, `<p><strong>Onboarding / Offboarding:</strong> ${esc(plan.summary)}${parked ? ` — parked until ${esc(fmtDay(parked))}` : ''}.</p>`, out);
   }
 
+  // ------------------------------------------------------------ organise now
+
+  /**
+   * Start a family for a notice that arrived before Live (or that the hook
+   * missed): tickets that already cover the work are taken in, only the
+   * missing children are created. Live only; one family per notice.
+   */
+  async organise(ticketId, workspaceId, actor = null) {
+    const ws = Number(workspaceId);
+    if ((await this.getMode(ws)) !== 'live') throw new ConflictError('Switch On/Offboarding to Live first');
+    const ticket = await this._loadTicket(ticketId, ws);
+    if (!ticket) throw new NotFoundError('Ticket not found in this workspace');
+    const tz = await this._timeZone(ws);
+    const c = this.classify(ticket, tz);
+    if (!c || NOTICE_EFFECT[c.type]?.effect !== 'create') throw new ValidationError('Only a departure or new-hire notice can start a family');
+    const key = `${ws}:${ticket.id}`;
+    if (this._inFlight.has(key)) throw new ConflictError('This notice is being organised right now');
+    this._inFlight.add(key);
+    try {
+      const already = await soft(() => prisma.hrLifecycleFamily.findFirst({ where: { workspaceId: ws, parentTicketId: ticket.id }, select: { id: true } }));
+      if (already) throw new ConflictError('This notice already has a family');
+      const settings = await this.getSettings(ws);
+      const plan = await this.plan(ticket, c, settings, tz, { adopt: true });
+      if (!['create_family', 'create_family_after_the_fact'].includes(plan.decision)) throw new ConflictError(`${plan.summary || 'Nothing to organise'}`);
+      const event = await this.execute(ticket, c, plan, settings, tz, { actor });
+      return { familyId: event?.familyId ?? null, outcome: event?.outcome || null, summary: event?.summary || plan.summary, warnings: event?.details?.warnings || [] };
+    } finally {
+      this._inFlight.delete(key);
+    }
+  }
+
+  /**
+   * Open departure / new-hire notices that have no family yet, each with what
+   * Organise would do: the tickets it would take in and the ones it would
+   * create. Reads only.
+   */
+  async candidates(workspaceId) {
+    const ws = Number(workspaceId);
+    const tz = await this._timeZone(ws);
+    const rows = await soft(() => prisma.ticket.findMany({
+      where: {
+        workspaceId: ws,
+        createdAt: { gte: new Date(Date.now() - ADOPT_LOOKBACK_DAYS * 86400e3) },
+        requester: { email: { in: [...HR_SENDERS] } },
+        OR: [{ subject: { startsWith: 'Departure Notification' } }, { subject: { startsWith: 'New Hire' } }],
+      },
+      select: {
+        id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, description: true,
+        descriptionText: true, status: true, priority: true, dueBy: true, createdAt: true, assignedTechId: true, requesterId: true, parkedUntil: true,
+        requester: { select: { email: true, name: true } }, assignedTech: { select: { id: true, name: true } },
+      },
+      take: 400,
+      orderBy: { id: 'desc' },
+    }), []) || [];
+    if (!rows.length) return [];
+    const families = await soft(() => prisma.hrLifecycleFamily.findMany({
+      where: { workspaceId: ws }, select: { parentTicketId: true, kind: true, status: true, personKey: true, employeeId: true }, take: 2000, orderBy: { id: 'desc' },
+    }), []) || [];
+    const parents = new Set(families.map((f) => f.parentTicketId).filter(Boolean));
+    const open = families.filter((f) => f.status === 'open');
+    const settings = await this.getSettings(ws);
+    const techName = new Map((await this._technicians(ws)).map((t) => [t.id, t.name]));
+    let nhTickets = null;
+    const seen = new Set();
+    const out = [];
+    for (const t of rows) {
+      if (out.length >= CANDIDATE_LIMIT) break;
+      if (parents.has(t.id) || await this._isTerminal(ws, t.status)) continue;
+      const c = this.classify(t, tz);
+      const fx = c ? NOTICE_EFFECT[c.type] : null;
+      if (!fx || fx.effect !== 'create') continue;
+      const personKey = normalizePersonName(c.person || '');
+      // Newest notice per person and kind (a re-sent notice is the same family).
+      const dedupe = `${fx.family}:${c.employeeId || personKey || `t${t.id}`}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      if (open.some((f) => f.kind === fx.family && ((c.employeeId && f.employeeId === String(c.employeeId)) || (personKey && f.personKey === personKey)))) continue;
+      if (fx.family === 'onboarding' && !nhTickets) nhTickets = await this._nhTickets(ws);
+      const plan = await this.plan(t, c, settings, tz, { adopt: true, nhTickets });
+      if (!['create_family', 'create_family_after_the_fact'].includes(plan.decision)) continue;
+      out.push({
+        ticketId: t.id,
+        kind: fx.family,
+        personName: c.person || null,
+        office: c.office || null,
+        effectiveDate: plan.effectiveDate || null,
+        afterTheFact: Boolean(plan.afterTheFact),
+        noticeDate: c.noticeDate || null,
+        parent: { ...this._ticketCard(t), assignee: t.assignedTech ? { id: t.assignedTech.id, name: t.assignedTech.name, photoUrl: null } : null },
+        existing: plan.children.filter((x) => x.adoptTicketId).map((x) => ({ title: x.title, ref: x.adoptRef, status: x.adoptStatus, closed: Boolean(x.adoptClosed) })),
+        toCreate: plan.children.filter((x) => !x.adoptTicketId).map((x) => ({ title: x.title, dueDate: x.dueDate || null, assignee: x.assigneeTechId ? techName.get(x.assigneeTechId) || null : null })),
+      });
+    }
+    return out.sort((a, b) => String(a.effectiveDate || '9999').localeCompare(String(b.effectiveDate || '9999')));
+  }
+
   // ------------------------------------------------------------ manual action
 
   /** One click on the parent: drop the children the after-the-fact list does not have. */
@@ -1064,7 +1336,8 @@ class HrLifecycleService {
     // 2 Oct 2026 (Vahid: "I don't see anyone under People"): Shadow builds no
     // real families, so People also lists the families Shadow recorded —
     // marked shadow, with the children it would create.
-    const shadow = await this._shadowFamilies(ws, { status, kind });
+    // Once Live, those people are offered under "Not organised yet" instead.
+    const shadow = (await this.getMode(ws)) === 'live' ? [] : await this._shadowFamilies(ws, { status, kind });
     return [...real, ...shadow];
   }
 
@@ -1111,7 +1384,9 @@ class HrLifecycleService {
       const children = (plan.children || []).map((c) => ({
         title: c.title,
         dueDate: c.dueDate && shiftDays ? addDays(c.dueDate, shiftDays) : (c.dueDate || null),
-        assignee: c.assigneeTechId ? techName.get(c.assigneeTechId) || null : null,
+        assignee: Array.isArray(c.assigneeTechIds) && c.assigneeTechIds.length > 1
+          ? c.assigneeTechIds.map((id) => techName.get(id)).filter(Boolean).join(' or ') || null
+          : (c.assigneeTechId ? techName.get(c.assigneeTechId) || null : null),
       }));
       out.push({
         id: `shadow-${e.id}`,

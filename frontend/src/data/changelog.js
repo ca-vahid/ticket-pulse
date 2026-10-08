@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.28-preview';
+export const APP_VERSION = '4.2.29-preview';
 
 export const changelog = [
+  {
+    version: '4.2.29-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Comings &amp; Goings: several people on one child ticket</strong> &mdash; a child such as Phone can now list more than one person under Settings. Each new ticket still goes to one of them: they take turns, and anyone who is off that day is skipped.' },
+      { type: 'added', html: '<strong>Comings &amp; Goings: organise people who were announced before Live</strong> &mdash; once the section is Live, People shows &ldquo;Not organised yet&rdquo;: departures and new hires whose notice arrived earlier. Organise takes in the tickets that already exist (FreshService child tickets, NH Laptop and NH Workstation) and creates only the missing ones, so later date changes and cancellations reach every ticket.' },
+    ],
+  },
   {
     version: '4.2.28-preview',
     date: 'October 8, 2026',
