@@ -336,7 +336,10 @@ export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
       ],
     });
   }
-  if (rows.length > 10) body.push(text(`…and ${rows.length - 10} more`, { size: 'Small', isSubtle: true, spacing: 'Small' }));
+  // "more" counts against the real number of open tickets, not the rows passed in.
+  const shown = Math.min(rows.length, 10);
+  const more = Math.max(0, (Number.isFinite(Number(counts?.open)) ? Number(counts.open) : rows.length) - shown);
+  if (more > 0) body.push(text(`…and ${more} more`, { size: 'Small', isSubtle: true, spacing: 'Small' }));
   if (held.length) {
     const lines = held.slice(0, 8).map((h) => `- ${EVENT_META[h.eventKey]?.icon || '•'} ${EVENT_META[h.eventKey]?.heading || 'Update'} — ${clip(h.summary, 110)}`).join('\n');
     body.push({ type: 'Container', style: 'emphasis', showBorder: true, roundedCorners: true, spacing: 'Medium', items: [label('HELD FOR THIS DIGEST'), text(lines, { spacing: 'Small' })] });

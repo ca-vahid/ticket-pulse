@@ -14,7 +14,7 @@ const prismaMock = {
   technician: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
   technicianLeave: { findFirst: jest.fn().mockResolvedValue(null) },
   technicianNotificationPreference: { findUnique: jest.fn().mockResolvedValue(null) },
-  ticket: { findFirst: jest.fn(), findMany: jest.fn() },
+  ticket: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
   ticketThreadEntry: { findUnique: jest.fn() },
   ticketApproval: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   approvalCategory: { findUnique: jest.fn() },
@@ -44,6 +44,8 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jes
 jest.unstable_mockModule('../src/integrations/teamsBotClient.js', () => ({ default: botMock }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { assignTicket, addPrivateNote, addReply: jest.fn() } }));
 jest.unstable_mockModule('../src/services/ticketApprovalService.js', () => ({ default: { decideInApp } }));
+const statusNamesForBase = jest.fn();
+jest.unstable_mockModule('../src/services/statusService.js', () => ({ default: { statusNamesForBase, resolveBaseStatus: jest.fn() } }));
 
 const { default: svc, effectivePrefs, cleanPrefs, eventActor, EVENTS, approvalClosedStage } = await import('../src/services/teamsNotificationService.js');
 const { ticketCard, approvalCard } = await import('../src/services/teamsCards.js');
@@ -322,5 +324,55 @@ describe('approval cards follow the approval', () => {
     expect(approvalClosedStage({ ...AP, status: 'forwarded', escalationLog: [{ kind: 'forwarded', toEmails: ['cfo@x.io'], byName: 'Sam' }] }, 'sam@x.io'))
       .toMatchObject({ word: 'Handed on', detail: 'Forwarded to cfo@x.io by Sam. Nothing is needed from you.' });
     expect(approvalClosedStage({ ...AP, conditionNote: 'Under 2k' }, 'sam@x.io').detail).toContain('Condition: Under 2k');
+  });
+});
+
+// 7 Oct 2026: Vahid's digest read "200 open, 200 overdue". The numbers were
+// counted from a list capped at 200, and "open" matched Closed and Deleted
+// tickets that had no resolved/closed date.
+describe('daily digest counts', () => {
+  const past = new Date(Date.now() - 3 * 86400_000);
+  const ROWS = Array.from({ length: 10 }, (_, i) => ({ id: 900 + i, subject: `Ticket ${i}`, dueBy: past, priority: 2, freshserviceTicketId: BigInt(245000 + i), nativeNumber: null, origin: 'freshservice' }));
+
+  beforeEach(() => {
+    prismaMock.technician.findMany.mockResolvedValue([
+      { id: 59, name: 'Vahid Haeri', workspaceId: 1, timezone: 'America/Vancouver' },
+      { id: 901914, name: 'Vahid Haeri', workspaceId: 2, timezone: 'America/Vancouver' },
+    ]);
+    statusNamesForBase.mockImplementation(async (ws) => (ws === 1 ? ['Open', 'Pending', 'Pending Response'] : ['Open', 'Pending']));
+    prismaMock.ticket.findMany.mockImplementation(async (args) => (args.select?.subject ? ROWS : [{ dueBy: new Date() }]));
+    prismaMock.ticket.count.mockImplementation(async ({ where }) => (where.dueBy ? 4 : 14));
+    prismaMock.teamsDelivery.findMany.mockResolvedValue([]);
+    prismaMock.ticket.count.mockClear();
+    prismaMock.ticket.findMany.mockClear();
+  });
+
+  test('open means an open or pending status in each workspace, never "no closed date"', async () => {
+    await svc._digestCardFor('vhaeri@x.io');
+    const where = prismaMock.ticket.count.mock.calls[0][0].where;
+    expect(where).toEqual({
+      OR: [
+        { workspaceId: 1, assignedTechId: { in: [59] }, status: { in: ['Open', 'Pending', 'Pending Response'] } },
+        { workspaceId: 2, assignedTechId: { in: [901914] }, status: { in: ['Open', 'Pending'] } },
+      ],
+      isNoise: false,
+    });
+    expect(JSON.stringify(where)).not.toContain('resolvedAt');
+  });
+
+  test('the three numbers are real counts, the list shows ten, and "more" follows the open count', async () => {
+    const card = await svc._digestCardFor('vhaeri@x.io');
+    const text = JSON.stringify(card);
+    expect(text).toContain('"text":"14"');
+    expect(text).toContain('"text":"4"');
+    expect(text).toContain('"text":"1"');
+    expect(text).toContain('and 4 more');
+    expect(prismaMock.ticket.findMany.mock.calls[0][0].take).toBe(10);
+  });
+
+  test('a status registry that cannot be read falls back to Open and Pending', async () => {
+    statusNamesForBase.mockRejectedValue(new Error('registry down'));
+    await svc._digestCardFor('vhaeri@x.io');
+    expect(prismaMock.ticket.count.mock.calls[0][0].where.OR[0].status).toEqual({ in: ['Open', 'Pending'] });
   });
 });

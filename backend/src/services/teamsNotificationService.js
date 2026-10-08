@@ -77,6 +77,9 @@ const fmtDue = (d, tz) => {
 function localHHMM(tz, at = new Date()) {
   try { return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz || 'America/Los_Angeles' }).format(at); } catch { return '12:00'; }
 }
+// Rows the digest card lists; the counts above them are not limited by it.
+const DIGEST_ROWS = 10;
+
 function localDay(tz, at = new Date()) {
   try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Los_Angeles' }).format(at); } catch { return at.toISOString().slice(0, 10); }
 }
@@ -793,16 +796,29 @@ class TeamsNotificationService {
   async _digestCardFor(email, { workspaceId = null, since = null } = {}) {
     const techs = await prisma.technician.findMany({ where: { email: { equals: lc(email), mode: 'insensitive' }, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true, name: true, workspaceId: true, timezone: true } });
     if (!techs.length) return null;
-    const ids = techs.map((t) => t.id);
-    const open = await prisma.ticket.findMany({
-      where: { assignedTechId: { in: ids }, resolvedAt: null, closedAt: null, isNoise: false },
-      select: { id: true, subject: true, dueBy: true, priority: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
-      orderBy: [{ dueBy: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
-      take: 200,
-    });
+    // 7 Oct 2026 (Vahid's digest read "200 open, 200 overdue"): "open" was
+    // "no resolved or closed date", which also matched 178 Closed and 70
+    // Deleted tickets that never got those dates, and the three numbers were
+    // counted from a list capped at 200 rows. Open now means an Open- or
+    // Pending-base status in the ticket's own workspace (the same rule as the
+    // Tickets page), and the numbers are real counts.
+    const where = { OR: await this._openTicketScopes(techs), isNoise: false };
     const now = new Date();
     const tz = techs[0].timezone || 'America/Los_Angeles';
     const today = localDay(tz, now);
+    const [open, openCount, overdueCount, nearDue] = await Promise.all([
+      prisma.ticket.findMany({
+        where,
+        select: { id: true, subject: true, dueBy: true, priority: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
+        orderBy: [{ dueBy: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
+        take: DIGEST_ROWS,
+      }),
+      prisma.ticket.count({ where }),
+      prisma.ticket.count({ where: { ...where, dueBy: { lt: now } } }),
+      // "Due today" is a local calendar day: read the due times around now and test each in the agent's time zone.
+      prisma.ticket.findMany({ where: { ...where, dueBy: { gte: new Date(now.getTime() - 36 * 3600 * 1000), lte: new Date(now.getTime() + 36 * 3600 * 1000) } }, select: { dueBy: true }, take: 1000 }),
+    ]);
+    const dueTodayCount = nearDue.filter((t) => t.dueBy && localDay(tz, t.dueBy) === today).length;
     const rows = open.map((t) => ({
       ref: ticketDisplayRef(t), subject: t.subject, url: this._ticketUrl(t.id), priority: t.priority,
       overdue: Boolean(t.dueBy && t.dueBy < now), dueLabel: t.dueBy ? fmtDue(t.dueBy, tz) : '',
@@ -814,11 +830,36 @@ class TeamsNotificationService {
     });
     return digestCard({
       name: techs[0].name,
-      counts: { open: rows.length, overdue: rows.filter((r) => r.overdue).length, dueToday: rows.filter((r) => r.dueToday).length, waiting: 0 },
+      counts: { open: openCount, overdue: overdueCount, dueToday: dueTodayCount, waiting: 0 },
       rows,
       held,
       queueUrl: `${baseUrl()}/tickets?view=mine`,
     });
+  }
+
+  /**
+   * One { workspace, my technician ids there, open-like status names } scope
+   * per workspace the person is an agent in. Status names come from the
+   * workspace's registry (custom open/pending statuses count); a registry
+   * that cannot be read falls back to Open / Pending.
+   */
+  async _openTicketScopes(techs) {
+    const byWs = new Map();
+    for (const t of techs) {
+      if (!byWs.has(t.workspaceId)) byWs.set(t.workspaceId, []);
+      byWs.get(t.workspaceId).push(t.id);
+    }
+    const scopes = [];
+    for (const [workspaceId, ids] of byWs) {
+      let names = ['Open', 'Pending'];
+      try {
+        const { default: statusService } = await import('./statusService.js');
+        const found = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
+        if (Array.isArray(found) && found.length) names = found;
+      } catch { /* keep the fallback */ }
+      scopes.push({ workspaceId, assignedTechId: { in: ids }, status: { in: names } });
+    }
+    return scopes;
   }
 
   // ------------------------------------------------------------ agent API
