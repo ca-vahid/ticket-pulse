@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.27-preview';
+export const APP_VERSION = '4.2.28-preview';
 
 export const changelog = [
+  {
+    version: '4.2.28-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Site stats</strong> &mdash; super admins have a new page under Settings &rarr; Site stats: how many people use Ticket Pulse each day, who was last seen when, which pages and actions are used most and where the time goes, and at which hours. Counts always say how many people they are out of.' },
+      { type: 'added', html: '<strong>What is recorded</strong> &mdash; page names, time with a page open and actions such as reply or assign. Ticket content, search text and network addresses are not recorded. Detailed records are kept for 90 days and daily summaries for one year. Your Profile page says the same.' },
+    ],
+  },
   {
     version: '4.2.27-preview',
     date: 'October 8, 2026',

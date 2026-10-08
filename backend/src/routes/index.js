@@ -38,6 +38,8 @@ import handBacksRoutes from './handBacks.routes.js';
 import teamRoutingSettingsRoutes from './teamRoutingSettings.routes.js';
 import hrLifecycleRoutes from './hrLifecycle.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
+import usageRoutes from './usage.routes.js';
+import siteStatsRoutes from './siteStats.routes.js';
 import { requireAdmin, requireAdminOrObserver, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -114,6 +116,10 @@ router.use('/settings', settingsRoutes);
 // Cross-workspace AI usage/cost report: super-admin gated inside the router,
 // deliberately NOT behind workspace enforcement (it spans all workspaces).
 router.use('/ai-usage', aiUsageRoutes);
+// Site stats: the browser's page-view intake (any signed-in person) and the
+// super-admin report. Both span workspaces, so they sit before enforcement.
+router.use('/usage', usageRoutes);
+router.use('/site-stats', siteStatsRoutes);
 // SSE live events: agent-allowed READ tier (Mega 08-15 Phase A1). Global
 // 'agent' users (no workspace_access rows) work the ticket queue, so their
 // live updates must not 401/403 — active-technician membership grants access,

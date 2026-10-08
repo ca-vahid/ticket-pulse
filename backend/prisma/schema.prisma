@@ -4669,3 +4669,107 @@ model AvBalanceAdjustment {
   @@index([email, year])
   @@map("av_balance_adjustments")
 }
+
+// ---------------------------------------------------------------------------
+// Site stats (Settings -> Site stats, super admins only; 8 Oct 2026).
+// Who uses the site, which pages, how long. People are keyed by lowercase
+// e-mail like the rest of the app (there is no User table). Page names and
+// route patterns only: never a raw URL, never ticket content, never an IP.
+// Raw events are kept 90 days, everything else one year (usageStatsService).
+// No relations on purpose: nothing here may slow or block a workspace delete.
+// ---------------------------------------------------------------------------
+model UsageEvent {
+  id             Int      @id @default(autoincrement())
+  eventUuid      String   @unique @map("event_uuid") @db.VarChar(40)
+  occurredAt     DateTime @map("occurred_at")
+  receivedAt     DateTime @default(now()) @map("received_at")
+  email          String   @db.VarChar(255)
+  workspaceId    Int      @default(0) @map("workspace_id") // 0 = no workspace selected
+  visitId        String?  @map("visit_id") @db.VarChar(40)
+  kind           String   @db.VarChar(10) // page | action | ui
+  key            String   @db.VarChar(160)
+  section        String   @default("") @db.VarChar(80)
+  engagedSeconds Int      @default(0) @map("engaged_seconds")
+  openSeconds    Int      @default(0) @map("open_seconds")
+  appVersion     String?  @map("app_version") @db.VarChar(30)
+
+  @@index([occurredAt])
+  @@index([email, occurredAt])
+  @@map("usage_events")
+}
+
+model UsageSignIn {
+  id      Int      @id @default(autoincrement())
+  email   String   @db.VarChar(255)
+  at      DateTime @default(now())
+  method  String   @db.VarChar(20) // sso | dev
+  outcome String   @db.VarChar(20) // success | no_access
+  browser String?  @db.VarChar(20)
+  device  String?  @db.VarChar(20)
+
+  @@index([at])
+  @@index([email, at])
+  @@map("usage_sign_ins")
+}
+
+// One row per person per Pacific day. Distinct people are counted from these
+// rows (COUNT DISTINCT over a range), never by adding daily totals.
+model UsageDailyUser {
+  id             Int      @id @default(autoincrement())
+  day            DateTime @db.Date
+  email          String   @db.VarChar(255)
+  visits         Int      @default(0)
+  engagedSeconds Int      @default(0) @map("engaged_seconds")
+  openSeconds    Int      @default(0) @map("open_seconds")
+  pageViews      Int      @default(0) @map("page_views")
+  actions        Int      @default(0)
+  firstAt        DateTime @map("first_at")
+  lastAt         DateTime @map("last_at")
+  hoursMask      Int      @default(0) @map("hours_mask") // bit h = active in Pacific hour h
+
+  @@unique([day, email])
+  @@index([email, day])
+  @@map("usage_daily_users")
+}
+
+model UsageDailyUserItem {
+  id             Int      @id @default(autoincrement())
+  day            DateTime @db.Date
+  email          String   @db.VarChar(255)
+  workspaceId    Int      @default(0) @map("workspace_id")
+  kind           String   @db.VarChar(10)
+  key            String   @db.VarChar(160)
+  section        String   @default("") @db.VarChar(80)
+  count          Int      @default(0)
+  engagedSeconds Int      @default(0) @map("engaged_seconds")
+  openSeconds    Int      @default(0) @map("open_seconds")
+
+  @@unique([day, email, workspaceId, kind, key, section], map: "usage_daily_user_items_uq")
+  @@index([day, kind])
+  @@map("usage_daily_user_items")
+}
+
+model UsagePerson {
+  email        String    @id @db.VarChar(255)
+  name         String?   @db.VarChar(255)
+  firstSeenAt  DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt   DateTime  @default(now()) @map("last_seen_at")
+  lastSignInAt DateTime? @map("last_sign_in_at")
+  signInCount  Int       @default(0) @map("sign_in_count")
+  browser      String?   @db.VarChar(20)
+  device       String?   @db.VarChar(20)
+  viewport     String?   @db.VarChar(20)
+
+  @@map("usage_people")
+}
+
+// Who opened which stats view (need-to-know access is auditable).
+model UsageStatsView {
+  id          Int      @id @default(autoincrement())
+  viewerEmail String   @map("viewer_email") @db.VarChar(255)
+  at          DateTime @default(now())
+  view        String   @db.VarChar(40)
+
+  @@index([at])
+  @@map("usage_stats_views")
+}

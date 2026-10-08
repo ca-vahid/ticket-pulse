@@ -164,6 +164,16 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - **Notifications.** Approvers get an e-mail when a request needs them; requesters get one on approve / deny / cancel-by-someone-else. The e-mails are Outlook-safe (no gradients). Teams cards and a daily "who's out" digest are v2.
 - **Privacy (BC PIPA).** `away` types (sick, bereavement, appointment) show as "Away" to colleagues; the type is visible only to the person, their approvers and admins. `private` types are hidden from colleagues entirely.
 
+### Site stats (v4.2.28, 2026-10)
+
+Settings -> Site stats, **super admins only** (`requireGlobalAdmin`, nav `minRole: 'global'`). Measures use of the tool: who was last seen, active days, visits, which pages and actions, at which hours. Plan: `plans/SITE_STATS_PLAN.md` (continuous-dev worktree).
+
+- **Sources**: (1) sign-ins from `POST /api/auth/sso` - only a call that arrives without a live session counts, the same endpoint serves silent renewals; (2) actions from `usageActionCapture()` in `app.js`, one event per finished 2xx write request keyed by method + matched route pattern (`usageCatalog.js` excludes housekeeping and names the common ones); (3) page views and time from the browser (`frontend/src/utils/usageTracker.js`, `components/UsageTracker.jsx`) to `POST /api/usage/batch`.
+- **Rules**: a visit ends after 30 min without input or at 24 h and spans the tabs of one browser; "open" time = tab visible, "with input" = visible and input in the last 60 s. Page NAMES only (`tickets.detail`), never a URL; no ticket content, search text or IP. Public token pages are not tracked.
+- **Write path**: in-memory buffer, one transaction every 15 s (`usageStatsService.flush`), capped at 5,000 events, never awaited by a request. Kill switch `USAGE_STATS_ENABLED=false`. Off under Jest.
+- **Tables**: `usage_events` (raw, 90 days), `usage_daily_users` + `usage_daily_user_items` (per person per Pacific day, one year; rebuilt every 10 min for days with new events), `usage_people`, `usage_sign_ins`, `usage_stats_views` (who opened the stats). Distinct people are always counted over the range from the per-person rows, never by adding daily totals.
+- **Product rule**: no ranking of people by time or clicks; counts are shown as "n of N with access". A new signed-in route needs an entry in `TRACKED_ROUTES` (a test fails otherwise).
+
 ## Planned Architecture
 
 ### Directory Structure

@@ -10,6 +10,7 @@ import agentCompetencyService from '../services/agentCompetencyService.js';
 import rateLimiter from '../services/apiRateLimitService.js';
 import { clientIp } from '../middleware/apiKeyAuth.js';
 import logger from '../utils/logger.js';
+import { recordSignIn } from '../services/usageStatsService.js';
 
 const router = express.Router();
 
@@ -278,6 +279,17 @@ router.post(
     } catch (err) {
       logger.warn('Failed to fetch workspaces during login:', err.message);
     }
+
+    // Site stats: this endpoint also serves silent token renewals. Only a call
+    // that arrives without a live session for this person is a sign-in.
+    recordSignIn({
+      email,
+      name,
+      method: 'sso',
+      hadSession: req.session?.user?.email === email,
+      hasAccess: role === 'admin' || availableWorkspaces.length > 0,
+      userAgent: req.get('user-agent'),
+    });
 
     // Preserve existing workspace selection if session already has one
     const existingWsId = req.session?.user?.selectedWorkspaceId;

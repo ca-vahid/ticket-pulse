@@ -24,6 +24,7 @@ import TicketOpsPanel from '../components/settings/TicketOpsPanel';
 import ApiKeysPanel from '../components/settings/ApiKeysPanel';
 import BackupRestorePanel from '../components/settings/BackupRestorePanel';
 import AiUsagePanel from '../components/settings/AiUsagePanel';
+import SiteStatsPanel from '../components/settings/SiteStatsPanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
@@ -1362,6 +1363,13 @@ export default function Settings() {
                 {activeSectionId === 'ai-usage' && (
                   <div className="p-6">
                     <AiUsagePanel />
+                  </div>
+                )}
+
+                {/* Site stats — super admins only, spans all workspaces */}
+                {activeSectionId === 'site-stats' && (
+                  <div className="p-6">
+                    <SiteStatsPanel />
                   </div>
                 )}
 

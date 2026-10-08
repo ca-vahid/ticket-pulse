@@ -10,6 +10,7 @@ import {
   DatabaseBackup,
   Download,
   ExternalLink,
+  LineChart,
   EyeOff,
   Globe,
   Inbox,
@@ -82,6 +83,7 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // Workspace
   { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global', group: 'Workspace' },
   { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global', group: 'Workspace' },
+  { id: 'site-stats', label: 'Site stats', Icon: LineChart, minRole: 'global', group: 'Workspace' },
   // Was viewer-tier: a dead form for non-admins (PUT /settings is admin-only).
   { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'admin', group: 'Workspace' },
   // 'workspace-access' retired (Sep 2026): merged into Members — app-only

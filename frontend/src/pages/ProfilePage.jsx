@@ -186,6 +186,13 @@ export default function ProfilePage() {
             </span>
           </Link>
         </nav>
+
+        <p className="mt-4 text-xs text-muted-foreground">
+          Ticket Pulse records which of its pages you open, how long they stay open and which actions you take
+          (reply, assign and so on), to see which pages matter and improve them. It does not record ticket
+          content, what you type or search for, or your network address. The figures are kept for one year
+          and only super admins can see them.
+        </p>
       </main>
 
       {dialogOpen && (
