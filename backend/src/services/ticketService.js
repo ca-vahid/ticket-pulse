@@ -1206,6 +1206,24 @@ class TicketService {
     const byEmail = await requesterRepository.findByEmail(email);
     if (byEmail) return byEmail;
 
+    // ContinuIT office requesters (8 Oct 2026): a plus-address whose BASE is an
+    // unattended integration requester (continuit+bri@ → continuit@) is that
+    // integration's sub-identity, e.g. "Brisbane Office". It is not a mailbox,
+    // so the Entra check below would refuse it — create it unattended instead,
+    // named from requesterName, its office taken from the name.
+    const plus = email.match(/^([^@+]+)[+]([^@]{1,40})@(.+)$/);
+    if (plus) {
+      const base = await requesterRepository.findByEmail(`${plus[1]}@${plus[3]}`);
+      if (base?.unattended === true) {
+        const name = requesterName?.trim() || `${base.name} ${plus[2].toUpperCase()}`;
+        const office = name.replace(/[ ]+Office$/i, '').trim() || null;
+        logger.info(`Requester ${email}: created unattended as a sub-identity of ${base.email} ("${name}")`);
+        return prisma.requester.create({
+          data: { email, name, isActive: true, unattended: true, entraOfficeLocation: office, entraCity: office },
+        });
+      }
+    }
+
     // QA 09-09: creating a requester for an INTERNAL address nobody owns is
     // how a typo becomes permanent. A QA run of the Power Apps integration
     // posted susan.xu@bgcengineering.ca (a guess; her login is sxu@) through
@@ -5940,13 +5958,18 @@ class TicketService {
   async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null, subject: subjectOverride = null } = {}) {
     const ref = ticketDisplayRef(ticket);
     // Simorgh A4: the requester is an unattended automation mailbox — the
-    // reply stays on the ticket (where the system reads it) and no mail goes
-    // out. Cc'd people are people, but a reply to nobody is not sent to them
-    // either; they see it in the thread via the mirror / the app.
-    if (ticket.requester?.unattended === true) {
-      logger.info(`Reply to ${ref} not emailed: requester ${ticket.requester.email} is unattended`);
+    // reply stays on the ticket (where the system reads it). ContinuIT office
+    // requesters (8 Oct 2026): when the ticket has Cc'd people, they ARE the
+    // audience — the first becomes the To, the rest stay on Cc. With no Cc,
+    // nothing is sent (Simorgh, Sentinel).
+    const unattended = ticket.requester?.unattended === true;
+    const ccPeople = (Array.isArray(cc) ? cc : []).map((a) => String(a || '').trim()).filter(Boolean);
+    if (unattended && ccPeople.length === 0) {
+      logger.info(`Reply to ${ref} not emailed: requester ${ticket.requester.email} is unattended and nobody is Cc'd`);
       return { sent: false, skipped: 'unattended_requester' };
     }
+    const toAddress = unattended ? ccPeople[0] : String(ticket.requester.email || '').trim();
+    if (unattended) logger.info(`Reply to ${ref}: requester ${ticket.requester.email} is unattended — sent to the Cc list (${ccPeople.length})`);
     // Agent-edited subject (Phase SN4) or the default — either way the
     // `[TP-n]` token stays on: it is the inbound threading signal.
     const subject = effectiveReplySubject(ticket, subjectOverride);
@@ -5981,10 +6004,7 @@ class TicketService {
     // Cc for the wire (Phase CC, QA 08-26 #1): the requester is already the
     // To — SendGrid rejects an address that appears in both to and cc, and
     // Graph would deliver twice. Case-insensitive, order preserved.
-    const requesterEmail = String(ticket.requester.email || '').trim();
-    const ccForSend = (Array.isArray(cc) ? cc : [])
-      .map((address) => String(address || '').trim())
-      .filter((address) => address && address.toLowerCase() !== requesterEmail.toLowerCase());
+    const ccForSend = ccPeople.filter((address) => address.toLowerCase() !== toAddress.toLowerCase());
     // Graph simple attach tops out at ~3 MB per file; bigger ones stay
     // download-only in Ticket Pulse (the thread still lists them). The same
     // per-file cap applies on the SendGrid/SMTP path (30 MB message total).
@@ -6015,7 +6035,7 @@ class TicketService {
           // SendGrid sender is not a mailbox we read.
           replyTo = plusAddressReplyTo(connection.address, ticket);
           const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
-            to: [ticket.requester.email],
+            to: [toAddress],
             cc: ccForSend,
             subject,
             html,
@@ -6034,8 +6054,8 @@ class TicketService {
               status: 'sent',
               eventType: 'ticket.reply_posted',
               notificationType: 'native_reply_to_requester',
-              recipient: ticket.requester.email,
-              toRecipients: [ticket.requester.email],
+              recipient: toAddress,
+              toRecipients: [toAddress],
               ccRecipients: ccForSend,
               subject,
               htmlBody: html.slice(0, 20000),
@@ -6048,7 +6068,7 @@ class TicketService {
               sentAt: new Date(),
             },
           }).catch((err) => logger.warn(`Reply delivery audit write failed (non-fatal): ${err.message}`));
-          return { sent: true, to: ticket.requester.email, via: 'msgraph', from: connection.address };
+          return { sent: true, to: toAddress, via: 'msgraph', from: connection.address };
         }
       }
     } catch (err) {
@@ -6067,7 +6087,7 @@ class TicketService {
       const ingestMailbox = await pickIngestMailbox(ticket.workspaceId).catch(() => null);
       const sendgridReplyTo = ingestMailbox ? plusAddressReplyTo(ingestMailbox.address, ticket) : null;
       const result = await sendgridNotificationService.sendEmail({
-        to: [ticket.requester.email],
+        to: [toAddress],
         cc: ccForSend,
         // FR 09-11 #5: leave from the workspace's own mailbox address, not the
         // global sender — replies are read there, so the From should say so.
@@ -6093,8 +6113,8 @@ class TicketService {
           status: 'sent',
           eventType: 'ticket.reply_posted',
           notificationType: 'native_reply_to_requester',
-          recipient: ticket.requester.email,
-          toRecipients: [ticket.requester.email],
+          recipient: toAddress,
+          toRecipients: [toAddress],
           ccRecipients: ccForSend,
           subject,
           htmlBody: html.slice(0, 20000),
@@ -6106,7 +6126,7 @@ class TicketService {
           sentAt: new Date(),
         },
       }).catch((err) => logger.warn(`Reply delivery audit write failed (non-fatal): ${err.message}`));
-      return { sent: true, to: ticket.requester.email };
+      return { sent: true, to: toAddress };
     } catch (err) {
       logger.warn(`Requester reply email failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
       await prisma.notificationDelivery.create({
@@ -6117,8 +6137,8 @@ class TicketService {
           status: 'failed_permanent',
           eventType: 'ticket.reply_posted',
           notificationType: 'native_reply_to_requester',
-          recipient: ticket.requester.email,
-          toRecipients: [ticket.requester.email],
+          recipient: toAddress,
+          toRecipients: [toAddress],
           ccRecipients: ccForSend,
           subject,
           error: String(err.message || err).slice(0, 2000),

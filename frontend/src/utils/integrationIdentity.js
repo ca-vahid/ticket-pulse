@@ -19,6 +19,8 @@ const AVATARS = {
   // Microsoft Sentinel (29 Sep 2026): an original shield-and-eye mark in the
   // app's pictogram style — not Microsoft's logo.
   sentinel: '/brand/integrations/sentinel.png',
+  // ContinuIT office requesters (8 Oct 2026): one building mark for every office.
+  office: '/brand/integrations/office.png',
 };
 
 /** Requester records that belong to an integration, keyed on the address. */
@@ -39,8 +41,15 @@ const REQUESTER_IDENTITIES = {
  * queue, search, approvals, requester pages — shows it with no network call.
  */
 export function integrationRequesterAvatar(email) {
-  const key = INTEGRATION_REQUESTERS[String(email || '').trim().toLowerCase()];
+  const addr = String(email || '').trim().toLowerCase();
+  if (isOfficeRequester(addr)) return AVATARS.office;
+  const key = INTEGRATION_REQUESTERS[addr];
   return key ? REQUESTER_IDENTITIES[key]?.avatarUrl || null : null;
+}
+
+/** continuit+<office code>@bgcengineering.ca — a BGC office as the requester (ContinuIT). */
+export function isOfficeRequester(email) {
+  return /^continuit[+][a-z0-9-]{1,40}@bgcengineering[.]ca$/.test(String(email || '').trim().toLowerCase());
 }
 
 /**
@@ -50,6 +59,9 @@ export function integrationRequesterAvatar(email) {
 export function requesterIntegrationIdentity(requester) {
   if (!requester) return null;
   const email = String(requester.email || '').trim().toLowerCase();
+  if (isOfficeRequester(email)) {
+    return { key: 'office', name: requester.name || 'Office', subtitle: 'BGC office', avatarUrl: AVATARS.office, tone: 'office' };
+  }
   const key = INTEGRATION_REQUESTERS[email] || (/^Simorgh\b/i.test(String(requester.name || '')) ? 'simorgh' : null);
   return key ? REQUESTER_IDENTITIES[key] || null : null;
 }

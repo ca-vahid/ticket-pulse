@@ -2054,7 +2054,13 @@ function recipientFromToken(token, context, customEmails) {
   if (customField) return emailsFromCustomField(context, customField[1]);
   // Simorgh A4: an unattended requester (an automation's mailbox) never
   // receives requester-facing mail — acks, status changes, CSAT, the lot.
-  if (value === 'requester') return context.requester?.unattended ? [] : [context.requester?.email];
+  // ContinuIT office requesters (8 Oct 2026): for an unattended requester the
+  // ticket's Cc list stands in — empty for Simorgh/Sentinel, the office
+  // contact for an office ticket.
+  if (value === 'requester') {
+    if (!context.requester?.unattended) return [context.requester?.email];
+    return Array.isArray(context.ticket?.ccEmails) ? context.ticket.ccEmails : [];
+  }
   if (value === 'assigned_agent') return [context.assignedAgent?.email];
   if (value === 'previous_agent') return [context.previousAgent?.email];
   // Approval events (approval.requested/decided) carry the requesting agent's

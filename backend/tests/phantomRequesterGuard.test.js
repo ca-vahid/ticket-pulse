@@ -22,7 +22,7 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   workspace: { findUnique: jest.fn() },
-  requester: { findMany: jest.fn() },
+  requester: { findMany: jest.fn(), create: jest.fn(async ({ data }) => ({ id: 777, ...data })) },
 };
 const repoMock = { findByEmail: jest.fn(), createNative: jest.fn() };
 const adMock = { resolveAddress: jest.fn(), getUserProfile: jest.fn(), searchUsers: jest.fn() };
@@ -42,6 +42,30 @@ beforeEach(() => {
   repoMock.findByEmail.mockResolvedValue(null);
   repoMock.createNative.mockImplementation(async (d) => ({ id: 999, ...d }));
   adMock.searchUsers.mockResolvedValue([]);
+});
+
+describe('resolveRequester — integration sub-identities (ContinuIT offices, 8 Oct 2026)', () => {
+  test('a plus-address of an UNATTENDED requester is created unattended, named, with its office — no directory call', async () => {
+    repoMock.findByEmail.mockImplementation(async (e) => (e === 'continuit@bgcengineering.ca' ? { id: 3847, name: 'ContinuIT', email: e, unattended: true } : null));
+    const r = await ticketService.resolveRequester(1, { requesterEmail: 'Continuit+BRI@bgcengineering.ca', requesterName: 'Brisbane Office' });
+    expect(r).toMatchObject({ email: 'continuit+bri@bgcengineering.ca', name: 'Brisbane Office', unattended: true, entraOfficeLocation: 'Brisbane', entraCity: 'Brisbane' });
+    expect(adMock.resolveAddress).not.toHaveBeenCalled();
+    expect(repoMock.createNative).not.toHaveBeenCalled();
+  });
+
+  test('a plus-address of a PERSON is not special — it still has to be a real mailbox', async () => {
+    repoMock.findByEmail.mockImplementation(async (e) => (e === 'vhaeri@bgcengineering.ca' ? { id: 1, name: 'Vahid Haeri', email: e, unattended: false } : null));
+    adMock.resolveAddress.mockResolvedValue({ status: 'absent' });
+    await expect(ticketService.resolveRequester(1, { requesterEmail: 'vhaeri+test@bgcengineering.ca' })).rejects.toThrow(/not a mailbox/);
+    expect(prismaMock.requester.create).not.toHaveBeenCalled();
+  });
+
+  test('an office that already exists is simply reused', async () => {
+    repoMock.findByEmail.mockResolvedValue({ id: 4001, email: 'continuit+cal@bgcengineering.ca', unattended: true });
+    const r = await ticketService.resolveRequester(1, { requesterEmail: 'continuit+cal@bgcengineering.ca' });
+    expect(r.id).toBe(4001);
+    expect(prismaMock.requester.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('resolveRequester — internal addresses must exist', () => {

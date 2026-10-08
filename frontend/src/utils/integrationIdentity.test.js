@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { vi } from 'vitest';
-import { integrationIdentity, integrationRequesterAvatar, requesterIntegrationIdentity } from './integrationIdentity';
+import { integrationIdentity, integrationRequesterAvatar, isOfficeRequester, requesterIntegrationIdentity } from './integrationIdentity';
 
 vi.mock('../services/api', () => ({ ticketsAPI: { requesterPhoto: () => { throw new Error('no network for integrations'); } } }));
 
@@ -49,5 +49,19 @@ describe('Microsoft Sentinel requester (29 Sep 2026)', () => {
   test('the shared photo lookup answers integrations without a network call', async () => {
     const { fetchRequesterPhoto } = await import('../hooks/useRequesterPhoto');
     await expect(fetchRequesterPhoto('sentinel@bgcengineering.ca')).resolves.toBe('/brand/integrations/sentinel.png');
+  });
+});
+
+describe('ContinuIT office requesters (8 Oct 2026)', () => {
+  test('continuit+<code>@ is an office: building mark, the record name, "BGC office"', () => {
+    expect(isOfficeRequester('Continuit+BRI@bgcengineering.ca')).toBe(true);
+    expect(requesterIntegrationIdentity({ name: 'Brisbane Office', email: 'continuit+bri@bgcengineering.ca' }))
+      .toMatchObject({ key: 'office', name: 'Brisbane Office', subtitle: 'BGC office', avatarUrl: '/brand/integrations/office.png' });
+    expect(integrationRequesterAvatar('continuit+cal@bgcengineering.ca')).toBe('/brand/integrations/office.png');
+  });
+  test('plain continuit@ and other plus-addresses are not offices', () => {
+    expect(isOfficeRequester('continuit@bgcengineering.ca')).toBe(false);
+    expect(isOfficeRequester('vhaeri+test@bgcengineering.ca')).toBe(false);
+    expect(isOfficeRequester('continuit+bri@example.com')).toBe(false);
   });
 });

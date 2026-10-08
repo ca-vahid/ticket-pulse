@@ -8,6 +8,7 @@
  *   node scripts/continuit-provision.mjs --it                            # IT workspace: tags + requester only (no taxonomy change)
  *   node scripts/continuit-provision.mjs --client --workspace <id> [--allowlist <file>] [--default-source <n>]
  *   node scripts/continuit-provision.mjs --webhook --workspace <id> [--url <https://…>] [--ref-prefix continuit:] [--match-tag continuit]
+ *   node scripts/continuit-provision.mjs --offices                       # the unattended "<Office> Office" requesters (8 Oct 2026)
  *   add --apply to any of the above to write. Secrets print ONCE.
  *
  * Decisions encoded here (Vahid's forwarding note, 19 Sep 2026):
@@ -153,6 +154,37 @@ async function subscribeWebhook(workspaceId, url) {
   console.log(`  subscription #${sub.id}\n  signing secret: ${secret}\n  (shown once — hand it over out of band)`);
 }
 
+// ContinuIT office requesters (their list, 8 Oct 2026). requesterEmail =
+// continuit+<code lower-case>@; the office goes in entraOfficeLocation/City so
+// the queue shows it under the name and search returns it as `office`. New
+// offices also self-provision on first use (ticketService.resolveRequester).
+const OFFICES = [
+  ['Brisbane', 'BRI', 'Brisbane'], ['Calgary', 'CAL', 'Calgary'], ['Edmonton', 'EDM', 'Edmonton'],
+  ['Fredericton', 'FRED', 'Fredericton'], ['Golden', 'COL', 'Golden'], ['Halifax', 'HFX', 'Halifax'],
+  ['Kamloops', 'KAM', 'Kamloops'], ['Kelowna', 'KEL', 'Kelowna'], ['Montreal', 'MTL', 'Montreal'],
+  ['Ottawa', 'OTT', 'Ottawa'], ['Santiago', 'CHI', 'Santiago'], ['Santo Domingo', 'DR', 'Santo Domingo'],
+  ['Sudbury', 'SUD', 'Sudbury'], ['Surrey', 'SUR', 'Surrey'], ['Toronto', 'TOR', 'Toronto'],
+  ['Vancouver', 'VAN', 'Vancouver'], ['Victoria', 'VIC', 'Victoria'], ['Whitehorse', 'WHT', 'Whitehorse'],
+];
+
+async function ensureOffices() {
+  for (const [office, code, city] of OFFICES) {
+    const email = `continuit+${code.toLowerCase()}@bgcengineering.ca`;
+    const want = { name: `${office} Office`, unattended: true, isActive: true, entraOfficeLocation: office, entraCity: city };
+    const found = await prisma.requester.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
+    if (!found) {
+      plan(`create unattended requester "${want.name}" <${email}>`);
+      if (APPLY) await prisma.requester.create({ data: { email, ...want } });
+      continue;
+    }
+    const patch = Object.fromEntries(Object.entries(want).filter(([k, v]) => found[k] !== v));
+    if (Object.keys(patch).length) {
+      plan(`update requester #${found.id} <${email}>: ${JSON.stringify(patch)}`);
+      if (APPLY) await prisma.requester.update({ where: { id: found.id }, data: patch });
+    } else log(`requester #${found.id} "${found.name}" <${email}> (exists)`);
+  }
+}
+
 async function main() {
   console.log(APPLY ? 'APPLY mode — writing.' : 'DRY RUN — pass --apply to write.');
   if (has('--sandbox')) {
@@ -178,7 +210,12 @@ async function main() {
     console.log(`\n[webhook ws ${ws}]`);
     await subscribeWebhook(ws, url);
   }
-  if (!has('--sandbox') && !has('--it') && !has('--client') && !has('--webhook')) console.log('nothing selected — see the header for flags');
+  if (has('--offices')) {
+    console.log('\n[office requesters]');
+    await ensureRequester();
+    await ensureOffices();
+  }
+  if (!has('--sandbox') && !has('--it') && !has('--client') && !has('--webhook') && !has('--offices')) console.log('nothing selected — see the header for flags');
 }
 
 main().catch((e) => { console.error(e.message); process.exitCode = 1; }).finally(() => prisma.$disconnect());
