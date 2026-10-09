@@ -40,6 +40,7 @@ export const DECISION_LABEL = {
   no_date: 'No clear date',
   switch_after_the_fact: 'Switched to after the fact',
   reroute_office: 'Assigned by office',
+  park_family: 'Parked until needed',
   ignored: 'Ignored',
 };
 

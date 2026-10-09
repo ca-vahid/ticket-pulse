@@ -2091,6 +2091,7 @@ export const hrLifecycleAPI = {
   candidates: () => api.get('/hr-lifecycle/candidates'),
   organise: (ticketId) => api.post('/hr-lifecycle/organise', { ticketId }),
   rerouteFamily: (id) => api.post(`/hr-lifecycle/families/${id}/reroute`),
+  parkFamily: (id) => api.post(`/hr-lifecycle/families/${id}/park`),
 };
 
 /**

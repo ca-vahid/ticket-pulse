@@ -119,7 +119,15 @@ const ticketSvc = {
 const linkSvc = { setParent: jest.fn(async () => ({})), link: jest.fn(async () => ({})) };
 const parkSvc = {
   hrSuggestion: jest.fn(async () => ({ usable: true, until: '2026-10-19T15:00:00.000Z', wakeDate: '2026-10-19', reason: 'Leave starts Oct 21 (from the HR notice)' })),
-  park: jest.fn(async () => ({})),
+  park: jest.fn(async (id, _ws, input) => { ticketById(id).parkedUntil = new Date(input.until); return {}; }),
+  unpark: jest.fn(async (id) => { ticketById(id).parkedUntil = null; return { unparked: true }; }),
+  // The real lead-time rule on a Monday–Friday calendar.
+  hrWakeFor: jest.fn(async (_ws, kind, iso) => {
+    const wakeDate = hrWakeDate(kind, iso);
+    const until = new Date(`${wakeDate}T15:00:00.000Z`);
+    const started = until.getTime() <= Date.now() + 3600e3;
+    return { wakeDate, until: until.toISOString(), started, usable: !started && until.getTime() <= Date.now() + 184 * 86400e3 };
+  }),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -132,6 +140,7 @@ jest.unstable_mockModule('../src/services/statusService.js', () => ({
 }));
 
 const { default: hr, dueInstant } = await import('../src/services/hrLifecycleService.js');
+const { hrWakeDate } = await import('../src/utils/hrNoticeDates.js');
 
 // ---------------------------------------------------------------- fixtures
 const HR = 'humanresources@bgcengineering.ca';
@@ -832,5 +841,94 @@ describe('new hires by office: the edges', () => {
     expect(row).toMatchObject({ personName: 'Ann One', personEmail: 'aone@bgcengineering.ca', assignees: [{ id: 4, name: 'Adrian Lo' }] });
     expect(JSON.stringify(row)).not.toMatch(/photoUrl":"/);
     db.requesters = [];
+  });
+});
+
+// ---------------------------------------------------------------- parks follow the date
+
+describe('parking: asleep until the lead time, and the parks follow a date change', () => {
+  const hire = (name, empId, start) => fsNotice({
+    subject: `New Hire: ${name}`,
+    sender: BAMBOO,
+    text: `New Team Member Start Date: ${start} Employee #: ${empId} Position: Geologist Employee Status: FTR Location: Calgary Reports To: Maria Cruz View Employee Record`,
+  });
+  const wakeAt = (kind, iso) => new Date(`${hrWakeDate(kind, iso)}T15:00:00.000Z`).getTime();
+  const kidsOf = (parent) => db.members.filter((m) => m.familyId === db.families.find((f) => f.parentTicketId === parent.id).id && m.role === 'child').map((m) => ticketById(m.ticketId));
+
+  test('a new hire: the children and the notice are parked until 14 days before the start', async () => {
+    await setMode('live');
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const kids = kidsOf(a);
+    expect(kids).toHaveLength(2);
+    for (const t of [...kids, a]) expect(new Date(t.parkedUntil).getTime()).toBe(wakeAt('new_hire', day(60)));
+    expect(parkSvc.park).toHaveBeenCalledWith(kids[0].id, 1, expect.objectContaining({ kind: 'until_date', reason: expect.stringMatching(/^Starts .+ — onboarding/) }), expect.objectContaining({ name: 'Ticket Pulse (HR notice)' }), { source: 'suggested_hr' });
+  });
+
+  test('a start inside the lead time, and an after-the-fact departure, are not parked', async () => {
+    await setMode('live');
+    const soon = hire('Bob Two', 3002, day(5));
+    await hr.onTicketCreated(soon.id, 1);
+    const gone = departureOf('Cy Three', day(-2), 3003);
+    await hr.onTicketCreated(gone.id, 1);
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(kidsOf(soon).every((t) => !t.parkedUntil)).toBe(true);
+  });
+
+  test('HR moves the start later: due dates and parks move together, the note says so', async () => {
+    await setMode('live');
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const kids = kidsOf(a);
+    kids[1].parkedUntil = null; // somebody woke the Workstation ticket to start early
+    jest.clearAllMocks();
+    const change = fsNotice({ subject: 'New Hire Notification: Ann One start date has changed', text: `The start date has changed from ${day(60)} to ${day(120)} for Ann One in the Calgary office.` });
+    const ev = await hr.onTicketCreated(change.id, 1);
+    expect(ev).toMatchObject({ decision: 'move_dates', outcome: 'done' });
+    // Parked tickets follow; the awake one sleeps again because the new wake is months away.
+    for (const t of [...kids, a]) expect(new Date(t.parkedUntil).getTime()).toBe(wakeAt('new_hire', day(120)));
+    const note = ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === kids[0].id)[2].bodyHtml;
+    expect(note).toMatch(/Due date now .+\. Parked until /);
+  });
+
+  test('HR moves the start to next week: parked tickets wake, an awake one is left alone', async () => {
+    await setMode('live');
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const kids = kidsOf(a);
+    kids[1].parkedUntil = null;
+    jest.clearAllMocks();
+    const change = fsNotice({ subject: 'New Hire Notification: Ann One start date has changed', text: `The start date has changed from ${day(60)} to ${day(6)} for Ann One in the Calgary office.` });
+    await hr.onTicketCreated(change.id, 1);
+    expect(parkSvc.unpark).toHaveBeenCalledWith(kids[0].id, 1, expect.objectContaining({ reopen: true }), expect.anything());
+    expect(parkSvc.unpark.mock.calls.some((c) => c[0] === kids[1].id)).toBe(false);
+    expect(kids.every((t) => !t.parkedUntil)).toBe(true);
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === kids[0].id)[2].bodyHtml).toMatch(/Woken: the work is due to start/);
+  });
+
+  test('a departure: children sleep until the Monday of the last week; a later last day moves them', async () => {
+    await setMode('live');
+    const d = departureOf('Dee Four', day(40), 3004);
+    await hr.onTicketCreated(d.id, 1);
+    const kids = kidsOf(d);
+    expect(new Date(kids[0].parkedUntil).getTime()).toBe(wakeAt('departure', day(40)));
+    const change = fsNotice({ subject: 'Departure Notification: Dee Four departure date has changed', text: `The departure date has changed from ${day(40)} to ${day(75)} for Dee Four in the Calgary office. Bamboo Profile : https://bgcengineering.bamboohr.com/employees/employee.php?id=3004&page=2096` });
+    await hr.onTicketCreated(change.id, 1);
+    expect(new Date(kids[0].parkedUntil).getTime()).toBe(wakeAt('departure', day(75)));
+  });
+
+  test('park a family by hand: only its open, awake children', async () => {
+    await setMode('live');
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const kids = kidsOf(a);
+    kids[0].parkedUntil = null;
+    kids[1].status = 'Closed';
+    jest.clearAllMocks();
+    const r = await hr.parkFamily(db.families.at(-1).id, 1, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+    expect(r.parked.map((x) => x.ticketId)).toEqual([kids[0].id]);
+    expect(parkSvc.park).toHaveBeenCalledTimes(1);
+    expect(db.events.at(-1)).toMatchObject({ mode: 'manual', decision: 'park_family', actor: 'vahid@x.ca' });
   });
 });

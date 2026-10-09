@@ -57,6 +57,7 @@ Object.assign(api, {
   switchToAfterTheFact: vi.fn(async () => ({ success: true, data: { closed: [] } })),
   candidates: vi.fn(async () => ({ success: true, data: [] })),
   organise: vi.fn(async () => ({ success: true, data: { familyId: 8, outcome: 'done', warnings: [] } })),
+  parkFamily: vi.fn(async () => ({ success: true, data: { familyId: 4, parked: [{ ticketId: 90 }], until: '2026-10-19', warnings: [] } })),
   rerouteFamily: vi.fn(async () => ({ success: true, data: { familyId: 4, assignee: { id: 2, name: 'Muhammad Shahidullah' }, office: 'Vancouver and vicinity', moved: [{ ticketId: 90 }], warnings: [] } })),
   events: vi.fn(async () => ({ success: true, data: [{
     id: 1, mode: 'observe', outcome: 'recorded', decision: 'create_family', person: 'Jamie Gill', ticketId: 77, createdAt: '2026-10-01T17:00:00Z',
@@ -273,5 +274,21 @@ describe('People: faces and the onboarding / offboarding switch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Offboarding' }));
     await waitFor(() => expect(api.families).toHaveBeenLastCalledWith({ status: 'open', kind: 'offboarding' }));
     expect(screen.getByRole('button', { name: 'Offboarding' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('parking a family', () => {
+  test('"Park until needed" shows while a child is open and awake, and says what was parked', async () => {
+    api.families.mockResolvedValueOnce({ success: true, data: [{ id: 4, kind: 'onboarding', personName: 'Ann One', office: 'Vancouver', effectiveDate: '2026-11-02', afterTheFact: false, status: 'open', progress: { done: 0, total: 2 }, linked: 0, parent: { id: 77, ref: '#240100' } }] });
+    api.family.mockResolvedValue({ success: true, data: { id: 4, kind: 'onboarding', status: 'open', effectiveDate: '2026-11-02', afterTheFact: false, officeList: 'Vancouver', parent: { id: 77, ref: '#240100' }, details: {}, members: [
+      { role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', status: 'Open', dueBy: '2026-11-03T00:00:00Z', parkedUntil: null, assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+      { role: 'child', key: 'workstation', title: 'Workstation', closed: false, ticket: { id: 91, ref: 'TP-5001', status: 'Pending', dueBy: '2026-11-03T00:00:00Z', parkedUntil: '2026-10-19T15:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+    ] } });
+    renderAt('/onboarding/people');
+    fireEvent.click(await screen.findByRole('button', { name: /Show Ann One's tickets/ }));
+    expect(await screen.findByText('Parked to Oct 19')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Park until needed' }));
+    await waitFor(() => expect(api.parkFamily).toHaveBeenCalledWith(4));
+    expect(await screen.findByText('1 ticket parked until Oct 19, 2026.')).toBeInTheDocument();
   });
 });

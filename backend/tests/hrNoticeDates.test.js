@@ -96,3 +96,18 @@ describe('hrWakeDate — lead time for HR parks (Vahid, 25 Sep 2026)', () => {
     expect(hrWakeDate('unknown', '2026-10-07')).toBe('2026-10-07');
   });
 });
+
+// 8 Oct 2026 (production audit): the park reader keeps its six-month window; the
+// one-line transfer notice now has a date.
+describe('audit gaps', () => {
+  test('a new-hire start more than six months ahead stays unparked by the reader (parks hold six months)', () => {
+    expect(readHrNoticeDate({ subject: 'New Hire: John Paul Mortin', text: 'Start Date: Mon January 18 Employee #: 2324', createdAt: '2026-05-12T17:00:00Z' })).toBeNull();
+  });
+  test('one-line transfer notice', () => {
+    expect(readHrNoticeDate({
+      subject: 'Transfer Notification: Devin Frioud will be transferring from Vancouver office to Victoria office',
+      text: 'Hello, Devin Frioud will be transferring from Vancouver office to Victoria office on 2026-07-06. Please make any necessary changes required.',
+      createdAt: '2025-11-14T17:00:00Z',
+    })).toMatchObject({ kind: 'transfer', date: '2026-07-06' });
+  });
+});

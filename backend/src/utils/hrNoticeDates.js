@@ -35,7 +35,7 @@ export function fromIso(text) {
 }
 
 /** "Tue October 13" with no year: the year whose date falls on that weekday, nearest after `ref` (within a year). */
-export function fromWeekdayMonthDay(weekday, monthName, day, ref) {
+export function fromWeekdayMonthDay(weekday, monthName, day, ref, { maxAheadDays = 184 } = {}) {
   const month = MONTHS.indexOf(String(monthName).toLowerCase()) + 1;
   const wd = WEEKDAYS.indexOf(String(weekday).slice(0, 3).toLowerCase());
   if (month < 1 || wd < 0) return null;
@@ -47,11 +47,14 @@ export function fromWeekdayMonthDay(weekday, monthName, day, ref) {
   // A start notice arrives shortly before the start: from a week before the
   // notice to six months after. Exactly one weekday-consistent date in that
   // window = clear. (A wider window turned stale January notices into next
-  // January — the weekday matched, the year was a guess.)
+  // January — the weekday matched, the year was a guess.) Onboarding reads
+  // up to a year ahead (interns are announced 7–9 months early; 15 of 194
+  // new-hire notices in the year to Oct 2026): the weekday still has to match,
+  // and a date before the notice is never accepted.
   const refMs = new Date(ref).getTime();
   const near = candidates.filter((iso) => {
     const t = new Date(`${iso}T12:00:00Z`).getTime();
-    return t >= refMs - 7 * 86400e3 && t <= refMs + 184 * 86400e3;
+    return t >= refMs - 7 * 86400e3 && t <= refMs + maxAheadDays * 86400e3;
   });
   return near.length === 1 ? near[0] : null;
 }
@@ -72,7 +75,10 @@ export function readHrNoticeDate({ subject = '', text = '', createdAt = new Date
 
   if (/^transfer notification\b/i.test(subj)) {
     const section = (body.split(/new transfer records/i)[1] || '').split(/removed transfer records/i)[0];
-    const iso = /transfer date/i.test(section) ? fromIso(section) : null;
+    // Older one-line format (12 of 34 in the year to Oct 2026):
+    // "<Name> will be transferring from X office to Y office on 2026-10-05."
+    const line = body.match(/will be transferring from\s+.+?\s+office to\s+.+?\s+office on\s+(20\d{2}-\d{2}-\d{2})/i);
+    const iso = /transfer date/i.test(section) ? fromIso(section) : (line ? fromIso(line[1]) : null);
     return iso ? { kind: 'transfer', date: iso, reason: `Transfer effective ${label(iso)} (from the HR notice)`, source: 'hr_notice' } : null;
   }
   if (/^departure notification\b/i.test(subj) || /departure notification:/i.test(subj)) {
@@ -126,7 +132,7 @@ export function readHrNoticeDate({ subject = '', text = '', createdAt = new Date
       const iso = fromIso(isoM[1]);
       return iso ? { kind: 'new_hire', date: iso, reason: `Starts ${label(iso)} (from the HR notice)`, source: 'hr_notice' } : null;
     }
-    const wm = body.match(/start date\s*:\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+([a-z]+)\s+(\d{1,2})\b/i);
+    const wm = body.match(/start date\s*:\s*(mon|tue|wed|thu|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?,?\s*(january|february|march|april|may|june|july|august|september|october|november|december)\s*(\d{1,2})(?!\d)/i);
     const iso = wm ? fromWeekdayMonthDay(wm[1], wm[2], wm[3], createdAt) : null;
     return iso ? { kind: 'new_hire', date: iso, reason: `Starts ${label(iso)} (from the HR notice)`, source: 'hr_notice' } : null;
   }

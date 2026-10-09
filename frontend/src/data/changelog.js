@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.31-preview';
+export const APP_VERSION = '4.2.32-preview';
 
 export const changelog = [
+  {
+    version: '4.2.32-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Comings &amp; Goings: tickets sleep until they are needed</strong> &mdash; the child tickets of a new hire or a departure are parked as soon as they are created and wake at the lead time before the date (new hire: 14 days before the start; departure: the Monday of the last week). A family under People has a &ldquo;Park until needed&rdquo; button for tickets created before this release.' },
+      { type: 'improved', html: '<strong>Date changes from HR move everything</strong> &mdash; when HR changes a start date, a last day or a contract end, the due dates <em>and</em> the parks of the notice and every open child move together, with a note on each. If the new date is close, parked tickets wake at once.' },
+      { type: 'fixed', html: '<strong>HR notices read correctly</strong> &mdash; checked against 14 months of notices: a start date more than six months ahead (interns) is now read, as are notices whose text arrives without spaces, &ldquo;New Hire (Feb 01 - FDR): &hellip;&rdquo; subjects, a name followed by a bracketed note, and the one-line transfer notice.' },
+    ],
+  },
   {
     version: '4.2.31-preview',
     date: 'October 8, 2026',
