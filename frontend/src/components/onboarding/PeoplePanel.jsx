@@ -228,7 +228,7 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
             Park until needed
           </button>
         )}
-        {family.kind === 'onboarding' && family.status === 'open' && (
+        {family.kind === 'onboarding' && family.status === 'open' && family.members.some((m) => m.role === 'child' && !m.closed && !m.ticket?.parkedUntil) && (
           <button
             type="button"
             disabled={busy}

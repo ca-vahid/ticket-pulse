@@ -93,6 +93,8 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - **Vacation/Availability**: technician_leaves feeds leave/capacity context; it is written by the native **Availability** module (v4.2, see below), the Vacation Tracker sync (being retired), and the Accounting Graph group-calendar reader.
 
 ### Custom Mail Notification Workflows
+
+- **`send_teams_message` (v4.2.34, QA 10-08 #3):** the Ticket Pulse bot messages people 1:1. `node.data = { people[], groups[] (internal group ids), roles[] ('ticket_group' | 'assigned_agent'), titleTemplate, bodyTemplate, includeTicketLink, onError }`. Executor `executeSendTeamsMessageNode` → `teamsNotificationService.sendWorkflowMessage`: bot configured + workspace `teamsEnabled`, ACTIVE technicians of the workspace only (a workflow never installs the app for anyone else), one message per person per step (`teams_deliveries.reason = wf:<runId>:<nodeId>`), max 25 people, counts only in the step output (the audit redacts addresses). Shadow/preview returns `wouldSend`. Template `unassigned_teams_alert`. The action list exists twice: `ACTION_NODE_TYPES` (server) and `CLIENT_ACTION_NODE_TYPES` (panel).
 - **Settings Surface**: Workspace admins manage mail workflows from Settings > Mail Workflows.
 - **API**: `/api/notification-workflows/*`
 - **Provider**: SendGrid is the v1 outbound provider. Microsoft Graph sending, FreshService public replies, and FreshService private notes are deferred.
@@ -163,6 +165,16 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
   - `POST /admin/balances/import` takes VT's Leave Balance Report as CSV and writes `import` adjustments so remaining matches VT.
 - **Notifications.** Approvers get an e-mail when a request needs them; requesters get one on approve / deny / cancel-by-someone-else. The e-mails are Outlook-safe (no gradients). Teams cards and a daily "who's out" digest are v2.
 - **Privacy (BC PIPA).** `away` types (sick, bereavement, appointment) show as "Away" to colleagues; the type is visible only to the person, their approvers and admins. `private` types are hidden from colleagues entirely.
+
+### Access model, Super admins and View as (v4.2.34, QA 10-08)
+
+- **Three layers.** (1) Super admin = `user.role === 'admin'`, from `app_settings.admin_emails` (else env `ADMIN_EMAILS`; production still uses the env list) — every gate short-circuits on it BEFORE the workspace role is read, so a super admin's row under Members is stored but never applied. (2) Workspace role = `workspace_access.role` (`readonly | viewer | reviewer | admin`), read live by `workspaceRepository.getAccessRole`. (3) Agent = an active technician with no access row. Settings → "Super admins" (was "Admins") edits (1); Members edits (2) and marks super admins (`isSuperAdmin` on `GET /workspaces/:id/members`).
+- **Live list.** `/auth/session` re-reads the super-admin list for `authMethod: 'sso'` sessions (promote and demote on the next page load). Dev-login roles and a role view are left alone. Bearer-only clients still refresh at their next `/sso`.
+- **View as** (`services/viewAsContext.js`, `POST|DELETE /api/auth/view-as`, super admins only, never nested). The marker `viewAs = { mode, by, byName, label, role?, workspaceId? }` lives on the session user AND in the JWT. `requireAuth` runs the request inside an AsyncLocalStorage context:
+  - `mode: 'role'` — same e-mail (writes stay the admin's), global role `viewer`/`agent`, ONE workspace; `getAccessRole` answers from the context (`roleOverrideForRequest`), and `blockReadonlyWrites` (which runs before requireAuth) reads the marker directly. `resolveUserAccess(email, role, viewAs)` returns that single workspace.
+  - `mode: 'person'` — the session user IS the target (their access); `requireAuth` refuses every non-GET (`view_as_read_only`), except quiet beacons (204) and reads sent as POST (`/preview`, `/search`, `/query`, `/validate`).
+  - `/workspaces/select` re-signs the token WITH the marker. A fresh `/sso` ends a view. New code that signs a token or resolves access must carry `viewAs` through.
+- Frontend: `components/ViewAsControl.jsx` (dialog from the profile menu + the bottom bar); it reloads the app on the new token. It imports `services/api` lazily because header test suites mock that module partially.
 
 ### Onboarding / Offboarding — "Comings & Goings" (v4.1.32; live in IT since v4.2.29, 8 Oct 2026)
 

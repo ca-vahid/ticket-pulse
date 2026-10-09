@@ -77,9 +77,11 @@ export default function AdminManagementPanel() {
           <Shield className="w-5 h-5 text-amber-600 dark:text-amber-300" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-foreground">Admin Management</h3>
+          <h3 className="text-lg font-semibold text-foreground">Super admins</h3>
           <p className="text-sm text-muted-foreground">
-            Manage who has admin access to Ticket Pulse. Admins can see all workspaces, manage settings, and access all features.
+            The people on this list see every workspace and every setting, whatever role they hold under Members.
+            Everyone else gets their access per workspace under Members. To check what a role or a person sees,
+            use <span className="font-medium text-foreground">View as</span> in your profile menu.
           </p>
         </div>
       </div>

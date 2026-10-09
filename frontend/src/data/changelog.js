@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.33-preview';
+export const APP_VERSION = '4.2.34-preview';
 
 export const changelog = [
+  {
+    version: '4.2.34-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>View as</strong> &mdash; super admins have a new entry in the profile menu: &ldquo;View as&hellip;&rdquo;. Try on a role in the current workspace (Read-only, Standard, Reviewer, Workspace admin, Agent) or look at Ticket Pulse as a named person. The server applies the view, so what you see is exactly what they get. As a role you stay yourself and can act; as a person the view is read-only, so nothing is ever done in their name. A bar at the bottom of every page takes you back.' },
+      { type: 'improved', html: '<strong>Admins are now called Super admins</strong> &mdash; the Settings section is renamed and says plainly what it is: the people who see every workspace and every setting whatever their role under Members. Members now marks those people (&ldquo;Super admin &middot; role not applied&rdquo;) and says so when you change their role.' },
+      { type: 'fixed', html: '<strong>Removing a super admin takes effect at once</strong> &mdash; someone taken off the list used to stay an admin in their open session for up to seven days. Their next page load now uses their workspace role.' },
+      { type: 'added', html: '<strong>Mail Workflows: Send Teams message</strong> &mdash; a new step that has the Ticket Pulse bot message people in Teams: named people, members of an internal group, the members of the ticket&rsquo;s group or the assignee. A ready-made workflow, &ldquo;Nobody picked this up: tell the team in Teams&rdquo;, uses it with the &ldquo;unassigned for N hours&rdquo; trigger. Only active team members of the workspace are messaged, and Teams must be switched on for the workspace.' },
+      { type: 'improved', html: '<strong>Spell-check in every editor</strong> &mdash; the reply, note, description, signature, Knowledge and workflow e-mail editors now ask the browser for spell-check explicitly, in Canadian English. Text you type is underlined as in any other web page; if nothing is ever underlined, spell-check is switched off in the browser itself.' },
+      { type: 'improved', html: '<strong>Comings &amp; Goings</strong> &mdash; &ldquo;Reassign by office&rdquo; is no longer offered on a family whose tickets are all asleep with no owner (they are assigned when they wake).' },
+    ],
+  },
   {
     version: '4.2.33-preview',
     date: 'October 8, 2026',

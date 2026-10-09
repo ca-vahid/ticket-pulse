@@ -38,6 +38,7 @@ import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import PublicApprovalReply from './pages/PublicApprovalReply';
 import RequesterDetail from './pages/RequesterDetail';
 import DemoModeBanner from './components/DemoModeBanner';
+import ViewAsBanner from './components/ViewAsControl';
 import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
 import SyncHealthBanner from './components/SyncHealthBanner';
@@ -494,6 +495,7 @@ function App() {
                     </Routes>
                   </ErrorBoundary>
                   <DemoModeBanner />
+                  <ViewAsBanner />
                   {/* Admin health banners share one bottom-left stack so email +
                   stale-sync warnings never overlap each other. */}
                   <div className="fixed bottom-3 left-3 z-[9998] flex flex-col gap-2">

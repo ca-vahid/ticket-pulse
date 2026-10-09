@@ -419,6 +419,13 @@ const RichTextEditor = forwardRef(function RichTextEditor({
         <div
           ref={editorRef}
           contentEditable
+          // Spell-check (QA 10-08 #4): asked for explicitly rather than left to
+          // the browser default, with Canadian English as the proofing
+          // language (Edge's editor picks its dictionary from `lang`).
+          spellCheck
+          lang="en-CA"
+          autoCorrect="on"
+          autoCapitalize="sentences"
           role="textbox"
           aria-multiline="true"
           aria-label={ariaLabel}

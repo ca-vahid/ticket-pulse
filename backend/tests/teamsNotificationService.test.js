@@ -376,3 +376,61 @@ describe('daily digest counts', () => {
     expect(prismaMock.ticket.count.mock.calls[0][0].where.OR[0].status).toEqual({ in: ['Open', 'Pending'] });
   });
 });
+
+// QA 10-08 #3: the message a Mail Workflow asks for (send_teams_message).
+describe('workflow messages', () => {
+  const send = (extra = {}) => svc.sendWorkflowMessage({
+    workspaceId: 1, emails: ['adrian@x.io', 'outsider@x.io'], title: 'Nobody has picked up TP-77', body: 'Unassigned for 4 hours.\n\nRequester: Kim.', ticketId: 77, ticketRef: 'TP-77', refKey: 'wf:500:teams', ...extra,
+  });
+  beforeEach(() => {
+    botMock.isTeamsConfigured.mockReturnValue(true);
+    prismaMock.technician.findMany.mockResolvedValue([{ id: 7, email: 'adrian@x.io' }]);
+    prismaMock.teamsDelivery.findFirst.mockResolvedValue(null);
+    botMock.sendToConversation.mockResolvedValue('act-9');
+    botMock.installForUser.mockClear();
+  });
+
+  test('only active team members of the workspace are messaged; anyone else is recorded as skipped and never gets the app', async () => {
+    const out = await send();
+    expect(out).toMatchObject({ sent: 1, skipped: 1, failed: 0, off: null });
+    expect(botMock.sendToConversation).toHaveBeenCalledTimes(1);
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+    const rows = prismaMock.teamsDelivery.create.mock.calls.map((c) => c[0].data);
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ email: 'adrian@x.io', eventKey: 'workflow', status: 'sent', reason: 'wf:500:teams', ticketId: 77 }),
+      expect.objectContaining({ email: 'outsider@x.io', eventKey: 'workflow', status: 'skipped', reason: 'not_a_team_member' }),
+    ]));
+    // The card carries the title, the text and a link to the ticket.
+    const card = JSON.stringify(botMock.cardActivity.mock.calls.at(-1)[0]);
+    expect(card).toMatch(/Nobody has picked up TP-77/);
+    expect(card).toMatch(/Unassigned for 4 hours/);
+    expect(card).toMatch(/Open TP-77/);
+    expect(card).toMatch(/\/tickets\/77/);
+  });
+
+  test('the workspace switch and the bot configuration are respected', async () => {
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ workspaceId: 1, teamsEnabled: false });
+    expect(await send()).toMatchObject({ sent: 0, off: expect.stringMatching(/switched off for this workspace/) });
+    botMock.isTeamsConfigured.mockReturnValue(false);
+    expect((await send()).off).toMatch(/not configured/);
+    expect(botMock.sendToConversation).not.toHaveBeenCalled();
+  });
+
+  test('one person gets one message per workflow step, even if the step runs again', async () => {
+    prismaMock.teamsDelivery.findFirst.mockResolvedValue({ id: 1 });
+    expect(await send({ emails: ['adrian@x.io'] })).toMatchObject({ sent: 0, skipped: 1, failed: 0 });
+    expect(botMock.sendToConversation).not.toHaveBeenCalled();
+  });
+
+  test('a person who cannot be reached is counted and recorded; the reason never carries an address', async () => {
+    botMock.sendToConversation.mockRejectedValue(new Error('Bot blocked by policy for adrian@x.io'));
+    const out = await send({ emails: ['adrian@x.io'] });
+    expect(out).toMatchObject({ sent: 0, failed: 1, firstError: 'Bot blocked by policy for a person' });
+    expect(prismaMock.teamsDelivery.create.mock.calls.at(-1)[0].data).toMatchObject({ status: 'failed', eventKey: 'workflow' });
+  });
+
+  test('somebody an admin disconnected is skipped, not re-installed', async () => {
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'adrian@x.io', disconnectedAt: new Date() });
+    expect(await send({ emails: ['adrian@x.io'] })).toMatchObject({ sent: 0, skipped: 1, failed: 0 });
+  });
+});

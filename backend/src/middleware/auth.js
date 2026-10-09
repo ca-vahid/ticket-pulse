@@ -2,6 +2,27 @@ import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
 import { AuthenticationError, AuthorizationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { runWithViewAs, viewAsRoleOverride } from '../services/viewAsContext.js';
+
+// "View as a person": nothing is ever changed in somebody else's name. A few
+// calls are reads sent as POST, and a few are background beacons that should
+// fail silently instead of raising an error on every page.
+const VIEW_AS_QUIET = /\/(usage\/batch|presence|sse\/telemetry)(\/|$|\?)/;
+const VIEW_AS_READS_BY_POST = /\/(preview|search|query|validate|dry-run)(\/|$|\?)/;
+
+/** Continue the request inside its "view as" context (or plainly when there is none). */
+function continueAs(user, req, res, next) {
+  const view = user?.viewAs;
+  if (!view) return next();
+  if (view.mode === 'person' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const url = req.originalUrl || req.url || '';
+    if (VIEW_AS_QUIET.test(url)) return res.status(204).end();
+    if (!VIEW_AS_READS_BY_POST.test(url)) {
+      return next(new AuthorizationError(`You are viewing Ticket Pulse as ${view.label || 'someone else'}. Nothing can be changed in this view — exit it first.`, 'view_as_read_only'));
+    }
+  }
+  return runWithViewAs(view, user.email, () => next());
+}
 
 // Lazy import to avoid circular dependency (workspaceRepository → prisma → ...)
 let _wsRepo = null;
@@ -48,24 +69,28 @@ export function sessionUser(req) {
  */
 export function requireAuth(req, res, next) {
   if (req.session && req.session.user) {
-    return next();
+    return continueAs(req.session.user, req, res, next);
   }
 
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
+    let decoded = null;
     try {
       const token = authHeader.substring(7);
-      const decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
+      decoded = jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
+    } catch {
+      // Invalid or expired token — fall through to auth error
+    }
+    if (decoded) {
       req.user = {
         email: decoded.email,
         name: decoded.name,
         username: decoded.username || decoded.name,
         role: decoded.role,
         selectedWorkspaceId: decoded.selectedWorkspaceId,
+        ...(decoded.viewAs ? { viewAs: decoded.viewAs } : {}),
       };
-      return next();
-    } catch {
-      // Invalid or expired token — fall through to auth error
+      return continueAs(req.user, req, res, next);
     }
   }
 
@@ -217,14 +242,36 @@ const READONLY_WRITE_ALLOWLIST = [
   /\/approvals\/\d+\/(decide|clarify)$/,
 ];
 
+function bearerIdentity(req) {
+  const header = req.headers?.authorization;
+  if (!header?.startsWith('Bearer ')) return null;
+  try {
+    const decoded = jwt.verify(header.substring(7), config.session.secret, { algorithms: ['HS256'] });
+    return decoded?.email ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 export function blockReadonlyWrites(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-  const user = sessionUser(req);
+  // This gate runs before requireAuth, so a cookie-blocked browser has no
+  // req.user yet: read its token here, or its read-only role would never be
+  // enforced (found in the QA 10-08 second look). API keys are not JWTs signed
+  // with the session secret and stay untouched.
+  const user = sessionUser(req) || bearerIdentity(req);
   if (!user?.email || user.role === 'admin') return next();
   const rawWs = req.headers['x-workspace-id'] ?? user.selectedWorkspaceId ?? req.query.workspaceId;
   const wsId = Number(rawWs);
   if (!Number.isFinite(wsId) || wsId <= 0) return next();
   if (READONLY_WRITE_ALLOWLIST.some((re) => re.test(req.path))) return next();
+  // This gate runs before requireAuth, outside the "view as" context: a
+  // read-only role being tried on is answered here directly.
+  const tried = viewAsRoleOverride(user.viewAs, user.email, user.email, wsId);
+  if (tried !== undefined) {
+    if (tried === 'readonly') return next(new AuthorizationError('Your access is read-only — this action needs a Standard role or higher', 'read_only_role'));
+    return next();
+  }
   getWsRepo()
     .then((wsRepo) => wsRepo.getAccessRole(user.email, wsId))
     .then((wsRole) => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Eye,
   Award,
   Bell,
   Boxes,
@@ -34,6 +35,7 @@ import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
 import HeaderSearch from './nav/HeaderSearch';
 import ChangelogModal from './ChangelogModal';
 import { openV4Splash } from './v4/V4Splash';
+import { ViewAsDialog } from './ViewAsControl';
 
 // Slim top bar for desktop. Primary navigation lives in the fixed left
 // SideRail (rendered here so every AppHeader page gets it); the bar itself
@@ -156,6 +158,7 @@ export default function AppHeader({
     }
   };
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [viewAsOpen, setViewAsOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   // Background-sync row honesty: off-dashboard routes have no sync polling, so
@@ -720,6 +723,22 @@ export default function AppHeader({
               </span>
             </button>
 
+            {/* View as (QA 10-08 #2): super admins only, and never from inside a view. */}
+            {user?.role === 'admin' && !user?.viewAs && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setUserMenuOpen(false); setViewAsOpen(true); }}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+              >
+                <Eye className="h-4 w-4 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">View as&hellip;</span>
+                  <span className="block truncate text-xs text-muted-foreground">See what a role or a person sees</span>
+                </span>
+              </button>
+            )}
+
             <div className="my-1 border-t border-border" />
 
             {/* Theme (Phase DM-A): applies immediately and keeps the menu open
@@ -821,6 +840,8 @@ export default function AppHeader({
           </div>
         </div>
       )}
+
+      <ViewAsDialog open={viewAsOpen} onClose={() => setViewAsOpen(false)} />
 
       <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
     </>

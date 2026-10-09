@@ -237,6 +237,81 @@ export async function executeRequestApprovalNode(node, eventContext, { renderedN
   }
 }
 
+// ------------------------------------------------------------- Teams message
+
+const TEAMS_MAX_RECIPIENTS = 25;
+
+/** Active technicians of the ticket's group (internal group first, else its FreshService group). */
+async function ticketGroupEmails(ticket, workspaceId) {
+  try {
+    let source = ticket;
+    // The event context does not always carry the group columns.
+    if (ticket?.id && ticket.internalGroupId === undefined && ticket.groupId === undefined) {
+      source = await prisma.ticket.findUnique({ where: { id: Number(ticket.id) }, select: { internalGroupId: true, groupId: true } }) || ticket;
+    }
+    let groupId = Number(source?.internalGroupId) || null;
+    if (!groupId && source?.groupId && /^\d+$/.test(String(source.groupId))) {
+      const group = await prisma.group.findFirst({ where: { workspaceId, freshserviceId: BigInt(source.groupId) }, select: { id: true } });
+      groupId = group?.id || null;
+    }
+    if (!groupId) return [];
+    const members = await prisma.groupMember.findMany({
+      where: { groupId },
+      select: { technician: { select: { email: true, isActive: true } } },
+    });
+    return members.filter((m) => m.technician?.isActive && m.technician?.email).map((m) => m.technician.email);
+  } catch (error) {
+    logger.warn(`Teams message: ticket group lookup failed (non-fatal): ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * send_teams_message (QA 10-08 #3): the Ticket Pulse bot messages IT team
+ * members 1:1. Recipients = listed people + members of the chosen internal
+ * groups + roles read from the ticket (its assignee, its group). Only active
+ * technicians of the workspace are messaged (the service enforces it), the
+ * workspace Teams switch is respected, and a run never messages the same
+ * person twice. Output carries counts only — never an address (the run log is
+ * redacted and teams_deliveries is the per-person record).
+ */
+export async function executeSendTeamsMessageNode(node, eventContext, { renderedTitle, renderedBody, workspaceId, runId = null, dryRun = false } = {}) {
+  const ws = Number(workspaceId || eventContext?.workspace?.id || eventContext?.ticket?.workspaceId);
+  const body = String(renderedBody || '').trim();
+  if (!body) return { skipped: true, reason: 'No message configured' };
+  const roles = Array.isArray(node.data?.roles) ? node.data.roles : [];
+  const emails = new Set();
+  for (const e of Array.isArray(node.data?.people) ? node.data.people : []) {
+    const v = String(e || '').trim().toLowerCase();
+    if (v.includes('@')) emails.add(v);
+  }
+  const groupTokens = (Array.isArray(node.data?.groups) ? node.data.groups : []).filter((g) => Number(g) > 0).map((g) => `internal_group:${Number(g)}`);
+  for (const e of await resolveInternalGroupEmails(groupTokens)) emails.add(String(e).toLowerCase());
+  if (roles.includes('assigned_agent') && eventContext?.assignedAgent?.email) emails.add(String(eventContext.assignedAgent.email).toLowerCase());
+  if (roles.includes('ticket_group')) for (const e of await ticketGroupEmails(eventContext?.ticket, ws)) emails.add(String(e).toLowerCase());
+
+  const recipients = [...emails].slice(0, TEAMS_MAX_RECIPIENTS);
+  if (!recipients.length) return { skipped: true, reason: 'Nobody to tell: no person, group member, assignee or ticket-group member was found' };
+  const title = String(renderedTitle || '').trim() || 'Ticket Pulse';
+  if (dryRun) return { dryRun: true, wouldSend: { recipients: recipients.length, title: title.slice(0, 150) } };
+
+  const { default: teams } = await import('./teamsNotificationService.js');
+  const ticketId = Number(eventContext?.ticket?.id) || null;
+  const result = await teams.sendWorkflowMessage({
+    workspaceId: ws,
+    emails: recipients,
+    title,
+    body,
+    ticketId,
+    ticketRef: eventContext?.ticket?.displayRef || null,
+    includeTicketLink: node.data?.includeTicketLink !== false,
+    refKey: `wf:${runId ?? 'x'}:${node.id}`.slice(0, 120),
+  });
+  if (result.off) return { skipped: true, reason: result.off };
+  if (!result.sent && result.failed) throw new Error(result.firstError || 'Teams message could not be sent');
+  return { sent: result.sent, skippedPeople: result.skipped, failedPeople: result.failed, recipients: recipients.length, ...(result.firstError ? { note: result.firstError } : {}) };
+}
+
 // ----------------------------------------------------------- group recipients
 
 /** Resolve `internal_group:<id>` recipient tokens to member emails. */
@@ -501,6 +576,7 @@ export default {
   executeCreateChildTicketNode,
   executeRequestApprovalNode,
   executeAddNoteNode,
+  executeSendTeamsMessageNode,
   sanitizeWorkflowNoteHtml,
   resolveInternalGroupEmails,
   webhookUrlProblem,

@@ -2602,6 +2602,29 @@ async function executeNode({
     }
   }
 
+  if (node.type === 'send_teams_message') {
+    const { executeSendTeamsMessageNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedTitle = await renderLiquid(node.data?.titleTemplate || '', scope);
+    const renderedBody = await renderLiquid(node.data?.bodyTemplate || '', scope);
+    try {
+      const output = await executeSendTeamsMessageNode(node, eventContext, {
+        renderedTitle,
+        renderedBody,
+        workspaceId: workflow?.workspaceId || eventContext?.workspace?.id,
+        runId: run?.id ?? null,
+        dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+      });
+      state.teams = { ...(state.teams || {}), [nodeOutputKey(node)]: output };
+      return output;
+    } catch (error) {
+      // Telling people is rarely worth failing a run over: 'continue' is the default.
+      if (node.data?.onError === 'fail') throw error;
+      const output = { failed: true, error: error.message };
+      state.teams = { ...(state.teams || {}), [nodeOutputKey(node)]: output };
+      return output;
+    }
+  }
+
   if (node.type === 'create_child_ticket') {
     const { executeCreateChildTicketNode } = await import('./notificationWorkflowActionNodes.js');
     const renderedSubject = await renderLiquid(node.data?.subjectTemplate || '', scope);
