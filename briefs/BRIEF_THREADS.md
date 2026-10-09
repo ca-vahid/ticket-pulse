@@ -8,7 +8,7 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 7 Oct 2026 (Wed daily — final firing of cron 38eb7e18, re-armed after; AP holiday backlog CLEARED (3–7d tail 2); SSL-certificate ownership gap; Mehdi concentration; AD thread exited)._
+_Last updated: 9 Oct 2026 PM (weekly Oct 5–9 sent; Hedberg #17 found (missed Thu); routing hand-backs 46 = 5-wk high; weekly cron re-armed)._
 
 ## Probe read rules (do not remove)
 - 'No business hours configured for this day' = the WEEKEND queue reason (in use since Apr) — by design, not a regression (checked Oct 5).
@@ -35,11 +35,13 @@ _Last updated: 7 Oct 2026 (Wed daily — final firing of cron 38eb7e18, re-armed
 
 ## Active threads
 ### (a) Security
+- Oct 8: Cambio (Sapu, Oct 7) — swamped this week, will take BGC-AZU-DBPRD1 next week; the OTHER SQL hosts in #241754 are NOT Cambio's → need an owner on our side (Mo has context; Anton freed by ROPC). Raised at Oct 8 standup.
 - Pentest HIGHs: #241753 ROPC CLOSED Oct 2 (Anton, after 7-day sign-in review). #241754 TLS/SSL (Mo) Pending on Cambio sprint planning since Sep 16 — ask for a date.
 - RTBT-2026 burn-down flat at 11 open + 1 pending since Aug 28 (Mehdi 7, Muhammad 3) — cyber load concentrated on three people; who-takes-what ask stands.
 - CLEARED Sep 14 (mention only on relapse): #242218 CRITICAL defense-evasion (closed same-day, Anton), #241869 Darktrace 100-score (closed, Anton), #242225 suspicious-CAPTCHA report (same-day).
 
-### (b) Hedberg BEC campaign — NOW 16 INSTANCES
+### (b) Hedberg BEC campaign — NOW 17 INSTANCES
+- #17 = #246182 'FWD: CONFIDENTIAL: Retainer Billing – Executive Search Engagement - Steve Hedberg' Oct 8 06:00 PT, ws2, from jade@novus-online.com (NEW domain, outside tcg family; 7 domains total). Open, not noise as of Oct 9. Oct 8 daily wrongly said 'no #17' — corrected in weekly. Ask: spam-close + persona rule.
 - Oct 2: #16 SPAM-CLOSED (day 2).
 - Instance #16 = #244809 "FWD: CONFIDENTIAL: Initial Retainer Billing – Executive Search Engagement 'Steve Hedberg'" (Sep 30 12:05 PT, ws2), from christina@tcgglobal-usa.com ("Christina Graham") — NEW domain, 6th in the tcg-global lookalike family; zero-width characters between letters (same trick as #8). Open + UNASSIGNED over the holiday. Flagged Oct 1: spam-close + block domain; transport-rule argument (persona + external sender) restated. Exit when spam-closed and domain blocked.
 - Instance #15 = #242789 "Outstanding Fee – Invoice 80044710620" (Sep 16, ws2), sender m@emsgdirect.com — one of the four KNOWN fake "Steve Hedberg" requester records from the PDF. Spam-marked SAME-DAY (vs 5 days for #14). Two lessons: vocabulary drifted again ("outstanding fee"), and the actor REUSES old infrastructure — the block list has real teeth.
@@ -107,8 +109,17 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (o-tail) Vancouver hypervisors + DC follow-ups
 - VAN-HV46 hardware fault #245431 (Mehdi, since Oct 3) = 3rd VAN hypervisor alert in 2 weeks (HV40/41). FDR-DC1 'DC service not answering' #245903 Oct 6 16:31–17:01 PT, auto-resolved — likely planned DC work (stale-DC removal item 2 on #244687, still open); ask Mo one line. AD storm itself EXITED (fixed Oct 2, written up Oct 5).
 ### (p) AP review backlog — RECOVERED Oct 7 (exited)
+- Oct 9: 194 unassigned going into the Thanksgiving 4-day weekend; projection ~350 Tue AM → Tuesday review push recommended. Check the 3–7d tail on Oct 13.
 - 281 (Oct 2 AM) → 269 (Oct 5, 127 aged 3–7d) → 198 → 156 (Oct 7, only 2 aged 3–7d). Lesson for Thanksgiving Oct 12: review step absorbs ~2 days before aging; four-day weekend needs a Tuesday push or auto-assign of high-acceptance categories. Re-open only if 3–7d tail >30 again.
+### (s) Re-routing ignores hand-back notes — PRODUCT DEFECT (Oct 8)
+- Oct 9: SYSTEMIC. Oct 8 also: #246299 modeling computer (Andrii→Alexey "This is not to Calgary team"→Mo→Reza fixed: access to BGC-VAN-MODEL2); #246305 N: drive (Soheil→Adrian→Mo→Mehdi +1 TB); #246312 N: drive dup (Mo→Andrii→Andrew→Mehdi, open — likely fixed by the 1 TB); #246331 Pembina Azure restart (Mo→Vahid→Anton rebooted). BGC1392 rebooted by Reza Oct 8. Recommended: (1) hand-back note outranks requester office on re-route, (2) 2nd hand-back → coordinator not a 3rd guess. STILL awaiting Vahid's go to send to TP Continuous Dev thread. No fix in v4.2.24–34.
+- #246097 BGC1392 restart (P4, requester Bogart Mendez, Calgary; PC in Vancouver): auto-assigned Andrii (Calgary) → note "needs someone in Vancouver" + reject → re-assigned Alexey (Calgary, "you are based there") → Alexey reject Oct 8 07:02 PT: "Not sure if anyone (or even AI) is reading the notes at all" → Soheil. 17 h for a power button. Re-route pass must weight the rejecting agent's note above requester office. Offered to send to TP Continuous Dev thread (awaiting Vahid). Trust signal: answer at standup.
+### (u) Comings & Goings live (v4.2.29–4.2.33, Oct 8–9)
+- On/offboarding child tickets park with their family, wake 21/14 days before date, route to the office's IT people. ws1 parked 30 → 44 = the flow, not hiding. Departure notices now carry "Offboarding organised by Ticket Pulse" + child list (Vahid's overdue departure notices are bookkeeping).
+### (t) ContinuIT meeting → tasks (Oct 8)
+- 13 tasks 08:52 PT from ops meeting + 3 Brisbane via Reza 09:04 (source 105), owned + dated (mostly Nov 7; Brisbane Feb 18). Excluded from per-agent lists while fresh; expect bars +1–2 each (planned work). Review at next ops meeting.
 ### (r) SSL certificate ownership + Mehdi concentration (Oct 7)
+- Oct 8: #245983 DigiCert now assigned to VAHID. #240981 wildcard still no note. #245867 W: drive CLOSED (Andrii); #245961 BST CLOSED (Mehdi, service restart). TP-1766 day 6 no note.
 - #245983 DigiCert 'CTE API SSL certificate' notice (Oct 7) → Anton noted "not to me or to Calgary" (bounce risk). #240981 GoDaddy wildcard *.bgcengineering.ca reissue (Mehdi) ready since Sep 7, overdue since Sep 26, NO note. Ask: name one cert owner (Mehdi natural), route #245983, confirm wildcard installed, recurring expiry check. Exit when owned + noted.
 - Mehdi concentration: #245867 W: drive access (UNASSIGNED after first agent lacked security-tab rights), #245961 BST prebill/invoicing/bank recs (Accounting month-end, 2 reboots failed), TP-1766 (day 5 no note), HV46. Coaching/structural: second person with file-share security-group rights.
 - #245974 Teams search bounced 2x (Soheil now) — wanderer watch.
@@ -136,6 +147,8 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - Per-workspace fast-sync cadence exists (Settings → Workspaces); all five workspaces still on 1 minute.
 
 ## Weekly-only carry-overs
+- Oct 5–9 memo: IT 312 new / 288 resolved, 0 unassigned all week. AP 585 new / 722 resolved; aged tail 127 → ~0; Fri ~200 → Thanksgiving projection ~350 Tue. IT hand-backs by week 28/18/38/19/46 (34 tickets) — 5-wk high, mostly re-route-ignores-note; Andrii 13 hand-backs (Calgary-office routing, not his work). Mo AD close = model; Mehdi specialist queue (cert #240981, TP-1766 day 7/135 alerts, HV46) no notes → 1:1 priorities suggested. Sam pending 12 flat 2 weeks (oldest 441 d) → Fredericton visit moment. 48 releases v4.1.39–4.2.34 (Availability, Comings & Goings, ContinuIT office requesters, FS delete). 2nd /ticket-followups round now a week late.
+- PROBE READ RULE (Oct 9): Hedberg check must be persona/subject-based ("Hedberg", "Retainer Billing", "Executive Search"), not tcg-domain only — #17 came from novus-online.com and was missed in the Oct 8 brief.
 - Sep 28–Oct 2 memo: short week (Sep 30 holiday). IT 219 new / 220 resolved, 0 unassigned. ROPC #241753 CLOSED Oct 2 (Anton); TLS/SSL #241754 (Mo) last pentest item, pending Cambio sprint date since Sep 16. Mo's #244687 got a real write-up Oct 2: time sync fixed on 15 DCs; stale-DC removal (FDR-DC2/EDM-DC2/KAM-DC1) approved by Vahid → expected root of AD integrity errors; watch the 5 integrity tickets close mid-week, else real fault. AP review pile 281 (Fri AM) → 186 (PM); Thanksgiving Oct 12 = next long-weekend test. Two corrections owned (laptop false alarm, Deleted tickets in probe). Per-agent: Mo heaviest open load (9 overdue = machine-dated AD alerts); pending piles Gaby 19 / Marcus 13 / Vahid 21 (old departure notices). 39 releases v4.1.00–4.1.38. Next: /ticket-followups ~Wed Oct 7.
 - Oct 6: TP-1766 still no note (alert day 131).
 - TP-1766 = FS #245376, auto-assigned Mehdi; no note by Oct 5 (alerts continued Sat/Sun, 130 days). Expect first note by Wed Oct 7.
@@ -143,5 +156,6 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - Sep 21–25 memo: IT 385 resolved / 291 new; team overdue fell from dozens to 6 (none >2 — Vahid 2; Mo 10→0, Sam 5→1, Gaby 3→0) after the Sep 23 follow-ups; closure review (FS-checked) 68/89 real notes; notes-gap discovery + fix; Parked idea→daily use in 3 days; Sentinel/[Infra] intake found CAL-DC1/KAM-DC2/VAN-HV41. Per-agent weight now: open work Mehdi 17 / Mo 16 / Anton 13; pending piles Gaby 19 / Marcus 17; Andrii mostly parked. Recommended a 2nd /ticket-followups run ~Oct 7 (fortnightly), not sooner. Standing risk now includes the HV40+HV41 cluster (two unhealthy hosts).
 - Sep 14–18 memo highlights (context for next week): 70 releases (v3.8.81→3.9.43); AP board week 551 in/551 out; two failed runs all week (both auto-recovered); "excellent at fires, stuck on projects" pattern named re pentest HIGHs + RTBT; no housekeeping ticket opened (all alert streams owned — bar is unowned+unswept); v3.9.42 = readonly observers actually see Dashboard/Analytics (Bryan Baker role now delivers).
 - Standing default action: promised ticket lists — confirm prod state; if unswept AND unowned, open consolidated owned housekeeping tickets via `ticketService` (TP-1120/TP-1294 pattern; `backend/scripts/weekly-0911-housekeeping.mjs`: DATABASE_URL=prod before the service import, requester ticketpulse@, `suppressRequesterAck: true`). Document the reasoning if not opened.
+- Standing risk line (Oct 9): TP-1766 Azure Backup (135 days, no note after a week); wildcard cert #240981 unconfirmed since Sep 7; pentest TLS/SSL hosts mostly ours (Cambio = DBPRD1 only).
 - Standing risk line (Oct 2): Azure Backup sharepointfilesync01 (TP-1766) until alerts stop or a written retire decision. TP-1294/LCD1 EXITED (fixed Sep 23 by Mehdi, quiet since). New: RAID fault KAM-HV02 #245153 (Anton, open); VAN-HV33 #245317 closed same day (Mehdi).
 - Accepted-risk ledger exits after the Sep 11 sweep: bank #238335 (closed, Dominic), choppy-video #240835, cambioearth #239761, Vancouver voicemail #239030.
