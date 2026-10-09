@@ -41,6 +41,7 @@ export const DECISION_LABEL = {
   switch_after_the_fact: 'Switched to after the fact',
   reroute_office: 'Assigned by office',
   park_family: 'Parked until needed',
+  assign_due: 'Assigned on waking',
   ignored: 'Ignored',
 };
 

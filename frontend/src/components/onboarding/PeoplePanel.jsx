@@ -172,7 +172,7 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
       const res = await hrLifecycleAPI.parkFamily(familyId);
       const d = res?.data || {};
       const n = d.parked?.length || 0;
-      setNote(n ? `${n} ${n === 1 ? 'ticket' : 'tickets'} parked until ${fmtDate(d.until, { withYear: true })}.` : 'Nothing to park: the tickets are already parked or closed, or the work is due to start.');
+      setNote(n ? `${n} ${n === 1 ? 'ticket sleeps' : 'tickets sleep'} until ${fmtDate(d.until, { withYear: true })} with no owner; the owner is chosen that day.` : 'Nothing to park: the work is due to start, or the tickets are already asleep with no owner.');
       load();
       onChanged?.();
     } catch (err) {
@@ -206,7 +206,8 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
   if (error) return <p className="px-4 py-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>;
   if (!family) return <Loading label="Loading family…" className="py-6" />;
   const canSwitch = family.kind === 'offboarding' && family.status === 'open' && !family.afterTheFact;
-  const canPark = family.status === 'open' && family.effectiveDate && family.members.some((m) => m.role === 'child' && !m.closed && !m.ticket?.parkedUntil);
+  // Offered while a child is awake or still has an owner; inside the lead time the server leaves everything as it is.
+  const canPark = family.status === 'open' && family.effectiveDate && family.members.some((m) => m.role === 'child' && !m.closed && (!m.ticket?.parkedUntil || m.ticket?.assignee));
   const role = { child: 'Child', linked: 'Linked', notice: 'Notice' };
 
   return (
@@ -221,7 +222,7 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
             type="button"
             disabled={busy}
             onClick={park}
-            title="Open tickets sleep until the lead time before the date (new hire: 14 days; departure: the Monday of that week)"
+            title="Open tickets sleep with no owner until the lead time before the date (new hire: 21 days; departure: 14 days); the owner is chosen when they wake"
             className="tp-focus-ring ml-auto rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40"
           >
             Park until needed
@@ -257,7 +258,11 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
               <TicketRef ticket={m.ticket} className="mr-2" />
               {m.title || m.ticket?.subject}
             </span>
-            <span className="hidden sm:block"><Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl || techById.get(m.ticket?.assignee?.id)?.photoUrl || null} size="h-5 w-5" /></span>
+            <span className="hidden sm:block">
+              {!m.ticket?.assignee && m.ticket?.parkedUntil && !m.closed
+                ? <span className="text-xs text-muted-foreground">Assigned when it wakes</span>
+                : <Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl || techById.get(m.ticket?.assignee?.id)?.photoUrl || null} size="h-5 w-5" />}
+            </span>
             <span className="hidden text-xs text-muted-foreground sm:block">
               {m.ticket?.dueBy ? `Due ${fmtDate(m.ticket.dueBy)}` : 'No due date'}
               {m.ticket?.parkedUntil && !m.closed && <span className="block">Parked to {fmtDate(m.ticket.parkedUntil)}</span>}
@@ -388,7 +393,7 @@ export default function PeoplePanel({ mode = null, techById = new Map() }) {
                       </td>
                       <td className="hidden px-2 py-2 lg:table-cell">
                         {f.shadow ? <span className="text-xs text-muted-foreground">—</span> : (
-                          <AvatarStack people={(f.assignees || []).map((a) => ({ ...a, photoUrl: techById.get(a.id)?.photoUrl || null }))} />
+                          <AvatarStack people={(f.assignees || []).map((a) => ({ ...a, photoUrl: techById.get(a.id)?.photoUrl || null }))} empty={f.asleep ? 'Asleep, no owner yet' : 'Nobody yet'} />
                         )}
                       </td>
                       <td className="px-2 py-2"><StatusDot tone={status.tone} label={status.label} /></td>

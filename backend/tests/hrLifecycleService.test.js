@@ -106,6 +106,7 @@ const ticketSvc = {
     return { ...t, displayRef: `TP-${t.nativeNumber}` };
   }),
   assignTicket: jest.fn(async (id, ws, techId) => { ticketById(id).assignedTechId = techId; }),
+  _startAiTriage: jest.fn(async () => ({ queued: true })),
   updateFsTicket: jest.fn(async (id, ws, input) => {
     const t = ticketById(id);
     if (input.assignedTechId !== undefined) t.assignedTechId = input.assignedTechId;
@@ -126,7 +127,8 @@ const parkSvc = {
     const wakeDate = hrWakeDate(kind, iso);
     const until = new Date(`${wakeDate}T15:00:00.000Z`);
     const started = until.getTime() <= Date.now() + 3600e3;
-    return { wakeDate, until: until.toISOString(), started, usable: !started && until.getTime() <= Date.now() + 184 * 86400e3 };
+    const usable = !started && until.getTime() <= Date.now() + 184 * 86400e3;
+    return { wakeDate, until: until.toISOString(), started, usable, holdUntil: started ? null : (usable ? until.toISOString() : new Date(Date.now() + 180 * 86400e3).toISOString()) };
   }),
 };
 
@@ -844,91 +846,172 @@ describe('new hires by office: the edges', () => {
   });
 });
 
-// ---------------------------------------------------------------- parks follow the date
+// ---------------------------------------------------------------- asleep with no owner, assigned on waking
 
-describe('parking: asleep until the lead time, and the parks follow a date change', () => {
-  const hire = (name, empId, start) => fsNotice({
+describe('asleep with no owner until the lead time; the owner is chosen on waking', () => {
+  const hire = (name, empId, start, office = 'Vancouver') => fsNotice({
     subject: `New Hire: ${name}`,
     sender: BAMBOO,
-    text: `New Team Member Start Date: ${start} Employee #: ${empId} Position: Geologist Employee Status: FTR Location: Calgary Reports To: Maria Cruz View Employee Record`,
+    text: `New Team Member Start Date: ${start} Employee #: ${empId} Position: Geologist Employee Status: FTR Location: ${office} Reports To: Maria Cruz View Employee Record`,
   });
   const wakeAt = (kind, iso) => new Date(`${hrWakeDate(kind, iso)}T15:00:00.000Z`).getTime();
-  const kidsOf = (parent) => db.members.filter((m) => m.familyId === db.families.find((f) => f.parentTicketId === parent.id).id && m.role === 'child').map((m) => ticketById(m.ticketId));
+  const famOf = (parent) => db.families.find((f) => f.parentTicketId === parent.id);
+  const kidsOf = (parent) => db.members.filter((m) => m.familyId === famOf(parent).id && m.role === 'child').map((m) => ticketById(m.ticketId));
+  const ROUTING = { offices: [{ label: 'Vancouver', match: ['Vancouver'], assigneeTechIds: [3, 4] }], fallbackTechIds: [1] };
+  const live = () => hr.updateSettings(1, { mode: 'live', officeRouting: ROUTING }, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+  // What ticketParkService does when a park ends: marker off, then the family step.
+  const wake = async (t, reason = 'woke') => { t.parkedUntil = null; t.status = 'Open'; return hr.onTicketAwake(t.id, 1, { reason }); };
 
-  test('a new hire: the children and the notice are parked until 14 days before the start', async () => {
-    await setMode('live');
+  test('a new hire two months out: children are created with NO owner and no AI run, parked until 21 days before the start', async () => {
+    await live();
     const a = hire('Ann One', 3001, day(60));
     await hr.onTicketCreated(a.id, 1);
+    const inputs = ticketSvc.createTicket.mock.calls.map((c) => c[1]);
+    expect(inputs.map((i) => [i.assignedTechId, i.runAiTriage])).toEqual([[undefined, false], [undefined, false]]);
     const kids = kidsOf(a);
-    expect(kids).toHaveLength(2);
     for (const t of [...kids, a]) expect(new Date(t.parkedUntil).getTime()).toBe(wakeAt('new_hire', day(60)));
+    expect(kids.every((t) => t.assignedTechId === null)).toBe(true);
     expect(parkSvc.park).toHaveBeenCalledWith(kids[0].id, 1, expect.objectContaining({ kind: 'until_date', reason: expect.stringMatching(/^Starts .+ — onboarding/) }), expect.objectContaining({ name: 'Ticket Pulse (HR notice)' }), { source: 'suggested_hr' });
+    const note = ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === a.id)[2].bodyHtml;
+    expect(note).toMatch(/asleep until .+ \(assigned then\)/);
   });
 
-  test('a start inside the lead time, and an after-the-fact departure, are not parked', async () => {
-    await setMode('live');
-    const soon = hire('Bob Two', 3002, day(5));
+  test('work inside the lead time (start in two weeks, last day in ten days, after the fact) is assigned at once, as before', async () => {
+    await live();
+    const soon = hire('Bob Two', 3002, day(14));
     await hr.onTicketCreated(soon.id, 1);
-    const gone = departureOf('Cy Three', day(-2), 3003);
-    await hr.onTicketCreated(gone.id, 1);
+    const leaving = departureOf('Cy Three', day(10), 3003);
+    await hr.onTicketCreated(leaving.id, 1);
     expect(parkSvc.park).not.toHaveBeenCalled();
-    expect(kidsOf(soon).every((t) => !t.parkedUntil)).toBe(true);
+    expect(kidsOf(soon).map((t) => t.assignedTechId)).toEqual([3, 3]);
+    expect(kidsOf(leaving).find((t) => /Phone/.test(t.subject)).assignedTechId).toBe(3); // Gaby
   });
 
-  test('HR moves the start later: due dates and parks move together, the note says so', async () => {
-    await setMode('live');
+  test('on waking: both children of a hire go to ONE office person chosen that day, the due date is back on the start, a note says why', async () => {
+    await live();
     const a = hire('Ann One', 3001, day(60));
     await hr.onTicketCreated(a.id, 1);
     const kids = kidsOf(a);
-    kids[1].parkedUntil = null; // somebody woke the Workstation ticket to start early
+    db.leaves.push({ technicianId: 3, isFullDay: true }); // Gaby is off on the day it wakes
+    db.families.at(-1).effectiveDate = new Date(`${day(15)}T00:00:00Z`); // …three weeks before the start
+    kids[0].dueBy = new Date(Date.now() + 200 * 86400e3); // the wake pushed the due date by the time parked
+    jest.clearAllMocks();
+    expect(await wake(kids[0])).toMatchObject({ action: 'assigned', techId: 4 });
+    expect(await wake(kids[1])).toMatchObject({ action: 'assigned', techId: 4 }); // same person as the sibling
+    expect(ticketSvc.updateTicketFields).toHaveBeenCalledWith(kids[0].id, 1, { dueBy: dueInstant(day(15)) }, expect.anything());
+    expect(ticketSvc.addPrivateNote.mock.calls[0][2].bodyHtml).toMatch(/the work is due to start — assigned to Adrian Lo \(office: Vancouver\)/);
+    expect(db.events.filter((e) => e.decision === 'assign_due')).toHaveLength(2);
+    expect(ticketSvc._startAiTriage).not.toHaveBeenCalled();
+  });
+
+  test('on waking: a child with its own people takes turns; one with no rule goes to AI routing', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: { offices: [], fallbackTechIds: [] } });
+    const list = (await hr.getSettings(1)).templates.offboarding_standard;
+    await hr.updateSettings(1, { templates: { offboarding_standard: list.map((i) => (i.key === 'phone' ? { ...i, assigneeTechIds: [3, 4] } : i)) } });
+    const owners = [];
+    for (const [i, name] of ['Ann One', 'Bob Two'].entries()) {
+      const d = departureOf(name, day(50), 3001 + i);
+      await hr.onTicketCreated(d.id, 1);
+      const phone = kidsOf(d).find((t) => /Phone/.test(t.subject));
+      db.families.at(-1).effectiveDate = new Date(`${day(10)}T00:00:00Z`);
+      await wake(phone);
+      owners.push(phone.assignedTechId);
+      if (i === 0) {
+        const laptop = kidsOf(d).find((t) => /Laptop/.test(t.subject));
+        expect(await wake(laptop)).toMatchObject({ action: 'ai' });
+        expect(ticketSvc._startAiTriage).toHaveBeenCalledWith(laptop.id, 1);
+      }
+    }
+    expect(owners).toEqual([3, 4]);
+  });
+
+  test('HR moves the start later: due dates and parks move, an awake assigned child goes back to sleep with no owner, nobody is told', async () => {
+    await live();
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const kids = kidsOf(a);
+    kids[1].parkedUntil = null; // somebody woke the Workstation ticket and took it
+    kids[1].assignedTechId = 4;
     jest.clearAllMocks();
     const change = fsNotice({ subject: 'New Hire Notification: Ann One start date has changed', text: `The start date has changed from ${day(60)} to ${day(120)} for Ann One in the Calgary office.` });
     const ev = await hr.onTicketCreated(change.id, 1);
     expect(ev).toMatchObject({ decision: 'move_dates', outcome: 'done' });
-    // Parked tickets follow; the awake one sleeps again because the new wake is months away.
     for (const t of [...kids, a]) expect(new Date(t.parkedUntil).getTime()).toBe(wakeAt('new_hire', day(120)));
-    const note = ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === kids[0].id)[2].bodyHtml;
-    expect(note).toMatch(/Due date now .+\. Parked until /);
+    expect(kids.map((t) => t.assignedTechId)).toEqual([null, null]);
+    expect(a.assignedTechId).toBe(1); // the notice keeps its owner
+    expect(ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === kids[0].id)[2].bodyHtml).toMatch(/Due date now .+\. Parked until .+; it is assigned when it wakes\./);
   });
 
-  test('HR moves the start to next week: parked tickets wake, an awake one is left alone', async () => {
-    await setMode('live');
+  test('HR moves the start to next week: parked tickets are woken (the park service then calls the family step, which assigns them)', async () => {
+    await live();
     const a = hire('Ann One', 3001, day(60));
     await hr.onTicketCreated(a.id, 1);
     const kids = kidsOf(a);
-    kids[1].parkedUntil = null;
     jest.clearAllMocks();
-    const change = fsNotice({ subject: 'New Hire Notification: Ann One start date has changed', text: `The start date has changed from ${day(60)} to ${day(6)} for Ann One in the Calgary office.` });
+    const change = fsNotice({ subject: 'New Hire Notification: Ann One start date has changed', text: `The start date has changed from ${day(60)} to ${day(6)} for Ann One in the Vancouver office.` });
     await hr.onTicketCreated(change.id, 1);
     expect(parkSvc.unpark).toHaveBeenCalledWith(kids[0].id, 1, expect.objectContaining({ reopen: true }), expect.anything());
-    expect(parkSvc.unpark.mock.calls.some((c) => c[0] === kids[1].id)).toBe(false);
-    expect(kids.every((t) => !t.parkedUntil)).toBe(true);
     expect(parkSvc.park).not.toHaveBeenCalled();
-    expect(ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === kids[0].id)[2].bodyHtml).toMatch(/Woken: the work is due to start/);
+    expect(await hr.onTicketAwake(kids[0].id, 1, { reason: 'unparked' })).toMatchObject({ action: 'assigned', techId: 3 });
   });
 
-  test('a departure: children sleep until the Monday of the last week; a later last day moves them', async () => {
-    await setMode('live');
-    const d = departureOf('Dee Four', day(40), 3004);
-    await hr.onTicketCreated(d.id, 1);
-    const kids = kidsOf(d);
-    expect(new Date(kids[0].parkedUntil).getTime()).toBe(wakeAt('departure', day(40)));
-    const change = fsNotice({ subject: 'Departure Notification: Dee Four departure date has changed', text: `The departure date has changed from ${day(40)} to ${day(75)} for Dee Four in the Calgary office. Bamboo Profile : https://bgcengineering.bamboohr.com/employees/employee.php?id=3004&page=2096` });
-    await hr.onTicketCreated(change.id, 1);
-    expect(new Date(kids[0].parkedUntil).getTime()).toBe(wakeAt('departure', day(75)));
+  test('a start further away than a park can hold: held as long as allowed, and parked again when that park ends', async () => {
+    await live();
+    const a = hire('Ann One', 3001, day(300));
+    await hr.onTicketCreated(a.id, 1);
+    const [kid] = kidsOf(a);
+    const held = new Date(kid.parkedUntil).getTime();
+    expect(held).toBeGreaterThan(Date.now() + 170 * 86400e3);
+    expect(held).toBeLessThan(Date.now() + 184 * 86400e3);
+    jest.clearAllMocks();
+    expect(await wake(kid)).toMatchObject({ action: 'parked_again' });
+    expect(kid.assignedTechId).toBeNull();
+    expect(kid.parkedUntil).not.toBeNull();
   });
 
-  test('park a family by hand: only its open, awake children', async () => {
-    await setMode('live');
+  test('somebody unparks a child by hand long before the date: it gets an owner (it is awake), it is not parked again', async () => {
+    await live();
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const [kid] = kidsOf(a);
+    jest.clearAllMocks();
+    expect(await wake(kid, 'unparked')).toMatchObject({ action: 'assigned' });
+    expect(parkSvc.park).not.toHaveBeenCalled();
+  });
+
+  test('safety net: an awake child with no owner is settled by the sweep pass, once; a parked one and a fresh one are left', async () => {
+    await live();
     const a = hire('Ann One', 3001, day(60));
     await hr.onTicketCreated(a.id, 1);
     const kids = kidsOf(a);
-    kids[0].parkedUntil = null;
-    kids[1].status = 'Closed';
+    kids[0].parkedUntil = null; // woke, but the family step never ran
+    kids[0].createdAt = new Date(Date.now() - 10 * 60e3);
     jest.clearAllMocks();
-    const r = await hr.parkFamily(db.families.at(-1).id, 1, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
-    expect(r.parked.map((x) => x.ticketId)).toEqual([kids[0].id]);
-    expect(parkSvc.park).toHaveBeenCalledTimes(1);
+    expect(await hr.assignDue()).toBe(1);
+    expect(kids[0].assignedTechId).toBe(3);
+    expect(kids[1].assignedTechId).toBeNull(); // still asleep
+    expect(await hr.assignDue()).toBe(0);
+  });
+
+  test('"Park until needed" on a family made before this rule: awake children are parked, owners are released, parked ones follow the new lead time', async () => {
+    await live();
+    const a = hire('Ann One', 3001, day(60));
+    await hr.onTicketCreated(a.id, 1);
+    const kids = kidsOf(a);
+    kids[0].parkedUntil = null; kids[0].assignedTechId = 4;                  // awake and assigned (today's state)
+    kids[1].parkedUntil = new Date(Date.now() + 46 * 86400e3); kids[1].assignedTechId = 4; // parked by the old rule, assigned
+    jest.clearAllMocks();
+    const r = await hr.parkFamily(famOf(a).id, 1, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+    expect(r.parked.map((x) => x.ticketId).sort()).toEqual(kids.map((k) => k.id).sort());
+    for (const t of kids) {
+      expect(new Date(t.parkedUntil).getTime()).toBe(wakeAt('new_hire', day(60)));
+      expect(t.assignedTechId).toBeNull();
+    }
     expect(db.events.at(-1)).toMatchObject({ mode: 'manual', decision: 'park_family', actor: 'vahid@x.ca' });
+    // Inside the lead time nothing is touched.
+    const soon = hire('Bob Two', 3002, day(14));
+    await hr.onTicketCreated(soon.id, 1);
+    expect((await hr.parkFamily(famOf(soon).id, 1)).parked).toEqual([]);
+    expect(kidsOf(soon).map((t) => t.assignedTechId)).toEqual([3, 3]);
   });
 });
