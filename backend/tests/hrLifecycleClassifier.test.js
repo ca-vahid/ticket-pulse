@@ -138,3 +138,46 @@ describe('stripSecrets — never copy an initial password', () => {
 test('normalizePersonName folds case, accents and spacing', () => {
   expect(normalizePersonName('  Michèle   OSTIGUY ')).toBe('michele ostiguy');
 });
+
+// 8 Oct 2026: 14 months of production notices put through the rules.
+describe('gaps found in the production audit', () => {
+  const BAMBOO_SENDER = 'notifications@app.bamboohr.com';
+  const HR_SENDER = 'humanresources@bgcengineering.ca';
+  const body = (start) => `New Team Member Start Date: ${start} Employee #: 2324 Position: Junior Intern Employee Status: FTR Location: Vancouver Reports To: Maren Ingle View Employee Record`;
+
+  test('a start eight months ahead with no year (interns): the weekday still fixes the year', () => {
+    const c = classifyHrNotice({ subject: 'New Hire: John Paul Mortin', text: body('Mon January 18'), requesterEmail: BAMBOO_SENDER, createdAt: '2026-05-12T17:00:00Z' });
+    expect(c).toMatchObject({ type: 'new_hire', date: '2027-01-18', office: 'Vancouver' });
+  });
+
+  test('never a date before the notice, never a weekday that does not match, never more than a year out', () => {
+    const at = '2026-05-12T17:00:00Z';
+    // 13 April 2026 was a Monday, a month BEFORE the notice: not next April (a Tuesday).
+    expect(classifyHrNotice({ subject: 'New Hire: A B', text: body('Mon April 13'), requesterEmail: BAMBOO_SENDER, createdAt: at }).date).toBeNull();
+    // 18 January 2027 is a Monday, not a Tuesday.
+    expect(classifyHrNotice({ subject: 'New Hire: A B', text: body('Tue January 18'), requesterEmail: BAMBOO_SENDER, createdAt: at }).date).toBeNull();
+  });
+
+  test('"New Hire (Feb 01 - FDR): <Name>" is a new hire', () => {
+    const c = classifyHrNotice({ subject: 'New Hire (Feb 01 - FDR): Penuel Wandile Mthiyane', text: body('Mon February 01'), requesterEmail: BAMBOO_SENDER, createdAt: '2026-07-09T17:00:00Z' });
+    expect(c).toMatchObject({ type: 'new_hire', person: 'Penuel Wandile Mthiyane', date: '2027-02-01' });
+  });
+
+  test('the one-line transfer notice carries its date', () => {
+    const c = classifyHrNotice({
+      subject: 'Transfer Notification: Alyssa Sandeman will be transferring from Calgary office to Edmonton office',
+      text: 'Hello, Alyssa Sandeman will be transferring from Calgary office to Edmonton office on 2026-10-05. Please make any necessary changes required.',
+      requesterEmail: HR_SENDER, createdAt: '2025-09-02T17:00:00Z',
+    });
+    expect(c).toMatchObject({ type: 'transfer', date: '2026-10-05', office: 'Edmonton', fromOffice: 'Calgary' });
+  });
+});
+
+test('a notice whose text lost its spaces still gives the date, the office and a clean name', () => {
+  const c = classifyHrNotice({
+    subject: 'New Hire: Emma Benjamin (May 04)',
+    text: 'New Team Member Start Date:MonMay 04Emma BenjaminView Employee RecordEmployee #:1948Position:Junior InternEmployee Status:FTR - Full-time RegularDepartment:Engineering/GeoscienceDivision:Junior ILocation:FrederictonReports To:Kyle StubbsView Employee Record',
+    requesterEmail: 'notifications@app.bamboohr.com', createdAt: '2026-01-05T17:00:00Z',
+  });
+  expect(c).toMatchObject({ type: 'new_hire', person: 'Emma Benjamin', date: '2026-05-04', employeeId: '1948', office: 'Fredericton', title: 'Junior Intern', manager: 'Kyle Stubbs' });
+});

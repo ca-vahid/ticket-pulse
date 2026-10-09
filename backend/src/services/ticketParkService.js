@@ -502,6 +502,26 @@ class TicketParkService {
 
   // ---------- HR notices (§2.6) ----------
 
+  /**
+   * When a ticket about this date should wake (hrWakeDate on the workspace
+   * calendar). usable = in the future and within what a park can hold;
+   * started = the lead time has already begun.
+   */
+  async hrWakeFor(workspaceId, kind, dateIso) {
+    if (!dateIso) return null;
+    let isBusinessDay = null;
+    try {
+      const { default: businessCalendarService } = await import('./businessCalendarService.js');
+      const cal = await businessCalendarService.loadCalendar(Number(workspaceId));
+      if (cal) isBusinessDay = (iso) => cal.byDay.has(new Date(`${iso}T00:00:00Z`).getUTCDay()) && !cal.isHolidayDate(iso);
+    } catch { /* Monday–Friday */ }
+    const wakeDate = hrWakeDate(kind, dateIso, { isBusinessDay });
+    const until = new Date(`${wakeDate}T15:00:00.000Z`);
+    const now = Date.now();
+    const started = until.getTime() <= now + 3600e3;
+    return { wakeDate, until: until.toISOString(), started, usable: !started && until.getTime() <= now + MAX_PARK_DAYS * 86400e3 };
+  }
+
   /** The clear date an HR notice states, or null. Never guesses. */
   async hrSuggestion(ticketId, workspaceId) {
     const t = await prisma.ticket.findFirst({

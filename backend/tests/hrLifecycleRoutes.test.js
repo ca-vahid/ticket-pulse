@@ -22,6 +22,7 @@ const svc = {
   candidates: jest.fn(async () => [{ ticketId: 9 }]),
   organise: jest.fn(async (id) => ({ familyId: 3, outcome: 'done', ticketId: id })),
   rerouteFamily: jest.fn(async (id) => ({ familyId: id, moved: [] })),
+  parkFamily: jest.fn(async (id) => ({ familyId: id, parked: [] })),
 };
 const wsRepo = { getAccessRole: jest.fn(async () => 'viewer') };
 
@@ -77,6 +78,7 @@ test.each([
   ['get', '/candidates'],
   ['post', '/organise'],
   ['post', '/families/3/reroute'],
+  ['post', '/families/3/park'],
 ])('%s %s is admin-only', async (method, path) => {
   const r = await request(app(MEMBER))[method](`/api/hr-lifecycle${path}`).send({ mode: 'live', ticketId: 1 });
   expect(r.status).toBe(403);
@@ -127,4 +129,9 @@ test('candidates and organise: the notice id is required and the session user is
 test('reassign by office passes the family and the session user', async () => {
   expect((await request(app(ADMIN)).post('/api/hr-lifecycle/families/7/reroute')).body.data).toEqual({ familyId: 7, moved: [] });
   expect(svc.rerouteFamily).toHaveBeenCalledWith(7, 1, ADMIN);
+});
+
+test('park a family passes the family and the session user', async () => {
+  expect((await request(app(ADMIN)).post('/api/hr-lifecycle/families/7/park')).body.data).toEqual({ familyId: 7, parked: [] });
+  expect(svc.parkFamily).toHaveBeenCalledWith(7, 1, ADMIN);
 });

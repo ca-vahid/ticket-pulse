@@ -41,6 +41,7 @@ export const TEMPLATE_LABELS = Object.freeze({
   offboarding_after_fact: 'Offboarding — after the fact',
   onboarding: 'Onboarding',
 });
+const PARK_ACTOR = Object.freeze({ name: 'Ticket Pulse (HR notice)', role: 'automation' });
 export const HR_LIFECYCLE_ACTOR = Object.freeze({ name: 'Ticket Pulse (Onboarding)', role: 'automation' });
 
 /** Only tickets created in the last few days start anything (history backfills must not). */
@@ -480,6 +481,7 @@ class HrLifecycleService {
       recency: `Only tickets created in the last ${RECENT_DAYS} days are handled (history backfills never start a family).`,
       passwords: 'Lines that carry a password are removed from anything written into child descriptions or notes.',
       sharing: 'A child with several people goes to one of them: they take turns, and anyone off that day is skipped.',
+      parking: 'Children sleep until the lead time before the date (new hire: 14 days; departure: the Monday of that week) and wake then. A date change from HR moves the due dates and the parks together; a cancellation closes the family.',
       offices: 'A new hire\'s children with no default assignee go to one person from the list of the hire\'s office (both to the same person, in turn); an office with no list uses "Any other office"; no list at all means AI routing.',
     };
   }
@@ -560,6 +562,44 @@ class HrLifecycleService {
       await links.link(parent.id, parent.workspaceId, { relatedTicketId: related.id, kind: 'related_to' }, HR_LIFECYCLE_ACTOR);
     } catch (err) {
       out.warnings.push(`Linking ${ticketDisplayRef(related)} to ${ticketDisplayRef(parent)} failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * Keep one family ticket asleep until the work is due to start: the lead
+   * time before the family date (new hire 14 days, departure the Monday of
+   * that week — hrWakeDate). A parked ticket follows the date; one that is
+   * awake is parked when `whenAwake` allows it ('always', or 'far' = only
+   * when the wake is two weeks or more away). When the lead time has already
+   * begun a parked ticket is woken. Returns 'parked' | 'moved' | 'woken' | null.
+   */
+  async _parkUntilNeeded(t, familyKind, dateIso, out, { whenAwake = 'always' } = {}) {
+    if (!dateIso || !t) return null;
+    try {
+      const parks = await this._parkService();
+      const s = await parks.hrWakeFor(t.workspaceId, familyKind === 'onboarding' ? 'new_hire' : 'departure', dateIso);
+      if (!s) return null;
+      const parked = Boolean(t.parkedUntil);
+      if (!s.usable) {
+        if (parked && s.started) {
+          await parks.unpark(t.id, t.workspaceId, { reason: 'unparked', reopen: true, note: `The date moved to ${fmtDay(dateIso)}: the work is due to start` }, PARK_ACTOR);
+          t.parkedUntil = null;
+          return 'woken';
+        }
+        return null;
+      }
+      if (parked && Math.abs(new Date(t.parkedUntil).getTime() - new Date(s.until).getTime()) < 60e3) return null;
+      if (!parked && (whenAwake === 'never' || (whenAwake === 'far' && new Date(s.until).getTime() < Date.now() + 14 * 86400e3))) return null;
+      const reason = familyKind === 'onboarding'
+        ? `Starts ${fmtDay(dateIso)} — onboarding (from the HR notice)`
+        : `Last day ${fmtDay(dateIso)} — offboarding (from the HR notice)`;
+      await parks.park(t.id, t.workspaceId, { kind: 'until_date', until: s.until, reason }, PARK_ACTOR, { source: 'suggested_hr' });
+      t.parkedUntil = new Date(s.until);
+      t.wakeDate = s.wakeDate;
+      return parked ? 'moved' : 'parked';
+    } catch (err) {
+      out?.warnings?.push(`Park of ${ticketDisplayRef(t)} skipped: ${err.message}`);
+      return null;
     }
   }
 
@@ -1178,6 +1218,10 @@ class HrLifecycleService {
           out.warnings.push(`Linking ${child.title} to the parent failed: ${err.message}`);
         }
         const ref = created.displayRef || ticketDisplayRef(created);
+        // Nobody has to look at it until the lead time before the date.
+        if (!plan.afterTheFact && plan.effectiveDate) {
+          await this._parkUntilNeeded({ id: created.id, workspaceId: ws, origin: 'ticketpulse', nativeNumber: created.nativeNumber, parkedUntil: null }, plan.familyKind, plan.effectiveDate, out);
+        }
         out.created.push({ ticketId: created.id, ref, key: child.key, title: child.title });
         lines.push(`<li>${esc(ref)} — ${esc(child.title)}${child.dueDate ? `, due ${esc(fmtDay(child.dueDate))}` : ''}</li>`);
       } catch (err) {
@@ -1189,6 +1233,11 @@ class HrLifecycleService {
       lines.length ? `<ul>${lines.join('')}</ul>` : '<p>No children were created — see Onboarding → Activity.</p>',
       '<p>This ticket closes once every child is closed.</p>',
     ].join(''), out);
+
+    // A fresh notice sleeps with its children (an older one keeps whatever its owner did).
+    if (!plan.adopt && !plan.afterTheFact && plan.effectiveDate && !ticket.parkedUntil) {
+      await this._parkUntilNeeded(ticket, plan.familyKind, plan.effectiveDate, out);
+    }
 
     // Onboarding: NH automation tickets that arrived before the notice join now.
     // (Organise now has already taken them in as the children themselves.)
@@ -1250,7 +1299,10 @@ class HrLifecycleService {
     for (const t of touched) {
       const mv = moveBy.get(t.id);
       if (mv) await this._setDue(t, mv.dueDate, tz, out);
-      await this._note(t, note(mv ? ` Due date now ${fmtDay(mv.dueDate)}.` : ''), out);
+      // The park follows the date: asleep until the new lead time, or awake now when it has begun.
+      const park = mv && plan.toDate ? await this._parkUntilNeeded(t, plan.familyKind, plan.toDate, out, { whenAwake: 'far' }) : null;
+      const sleep = park === 'woken' ? ' Woken: the work is due to start.' : (park ? ` Parked until ${fmtDay(t.wakeDate)}.` : '');
+      await this._note(t, note(mv ? ` Due date now ${fmtDay(mv.dueDate)}.${sleep}` : ''), out);
     }
     await soft(() => prisma.hrLifecycleFamily.update({
       where: { id: family.id },
@@ -1365,6 +1417,41 @@ class HrLifecycleService {
       actor: actor?.email || who,
     });
     return { familyId: family.id, assignee: { id: pick.techId, name }, office: pick.label, moved, warnings: out.warnings };
+  }
+
+  // ------------------------------------------------------------ park until needed
+
+  /** Park the open, awake tickets of a family until the lead time before its date. */
+  async parkFamily(familyId, workspaceId, actor = null) {
+    const ws = Number(workspaceId);
+    const family = await soft(() => prisma.hrLifecycleFamily.findFirst({ where: { id: Number(familyId), workspaceId: ws } }));
+    if (!family) throw new NotFoundError('Family not found');
+    if (family.status !== 'open') throw new ConflictError('This family is no longer open');
+    const date = dateOnly(family.effectiveDate);
+    if (!date) throw new ValidationError('This family has no date to park until');
+    const fam = await this._familyTickets(family);
+    const out = { warnings: [], created: [] };
+    const parked = [];
+    for (const m of fam.members) {
+      if (m.member.role !== 'child' || m.terminal || m.ticket.parkedUntil) continue;
+      if (await this._parkUntilNeeded(m.ticket, family.kind, date, out)) parked.push({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), title: m.member.title, until: m.ticket.wakeDate });
+    }
+    const who = actor?.name || actor?.email || 'an admin';
+    const until = parked[0]?.until || null;
+    await this._record(ws, {
+      ticket: fam.parent,
+      c: null,
+      plan: { decision: 'park_family', familyId: family.id, noticeType: 'manual' },
+      mode: 'manual',
+      outcome: 'done',
+      familyId: family.id,
+      summary: parked.length
+        ? `${family.personName}: ${parked.length} ${parked.length === 1 ? 'ticket' : 'tickets'} parked until ${fmtDay(until)} by ${who}`
+        : `${family.personName}: nothing to park (already parked, closed, or the lead time has begun)`,
+      details: { parked, warnings: out.warnings, person: family.personName },
+      actor: actor?.email || who,
+    });
+    return { familyId: family.id, parked, until, warnings: out.warnings };
   }
 
   // ------------------------------------------------------------ organise now

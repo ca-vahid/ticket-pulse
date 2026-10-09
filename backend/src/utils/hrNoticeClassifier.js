@@ -43,7 +43,7 @@ export const DETECTION_RULES = Object.freeze([
   { type: 'new_hire_cancelled', label: 'New hire cancelled', sender: 'humanresources@', subject: `${NHN}(.+?)\\s+will no longer be starting`, example: 'New Hire Notification: <Name> will no longer be starting', action: 'Close the parent and every open child with a note; the family is cancelled' },
   { type: 'start_date_change', label: 'Start date changed', sender: 'humanresources@', subject: `${NHN}(.+?)\\s+start date has changed`, example: 'New Hire Notification: <Name> start date has changed', action: 'Move the due date of the parent and every open child; note on each' },
   { type: 'new_hire_office_change', label: 'New-hire office changed', sender: 'humanresources@', subject: `${NHN}(.+?)\\s+office location has changed`, example: 'New Hire Notification: <Name> office location has changed', action: 'Note on every open ticket in the family (and move dates when the start date moved)' },
-  { type: 'new_hire', label: 'New hire (BambooHR)', sender: 'notifications@app.bamboohr.com', subject: '^new hire(?:\\s+[a-z]+\\.?\\s+\\d{1,2})?:\\s*(.+)$', example: 'New Hire: <Name>', action: 'Onboarding family: the notice is the parent + the onboarding children' },
+  { type: 'new_hire', label: 'New hire (BambooHR)', sender: 'notifications@app.bamboohr.com', subject: '^new hire(?:\\s*\\([^)]{1,40}\\)|\\s+[a-z]+\\.?\\s+\\d{1,2})?:\\s*(.+)$', example: 'New Hire: <Name>', action: 'Onboarding family: the notice is the parent + the onboarding children' },
   { type: 'nh_automation', label: 'NH Laptop / NH Workstation (automation)', sender: 'any', subject: '^NH\\s+(laptop|workstation)\\s*-\\s*(.+?)\\s*-\\s*([a-z]{2})\\s*-\\s*(\\S+)\\s*-\\s*(20\\d{2}-\\d{2}-\\d{2})', example: 'NH Laptop - <Office> - <CC> - <username> - <start>', action: 'Linked to the open onboarding family as related + a note (never a new child)' },
   { type: 'transfer', label: 'Transfer', sender: 'humanresources@', subject: '^transfer notification:\\s*(.+?)(?:\\s+will be transferring from\\s+(.+?)\\s+office to\\s+(.+?)\\s+office|\\s+transfer date has changed.*)?$', example: 'Transfer Notification: <Name>', action: 'The notice is the ticket: assign per settings, due + park on the move date' },
   { type: 'leave_change', label: 'Leave dates changed', sender: 'humanresources@', subject: '^on leave notification:\\s*(.+?)\\s+expected (return|leave) date has changed to\\s+(20\\d{2}-\\d{2}-\\d{2})(?:\\s+in\\s+(.+))?$', example: 'On Leave Notification: <Name> expected return date has changed to <date> in <Office>', action: 'The notice is the ticket: assign per settings, due + park on the new date' },
@@ -135,8 +135,9 @@ function newHireStart(body, createdAt) {
     const month = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'].indexOf(withYear[1].toLowerCase()) + 1;
     if (month > 0) return fromIso(`${withYear[3]}-${String(month).padStart(2, '0')}-${String(withYear[2]).padStart(2, '0')}`);
   }
-  const wm = body.match(/start date\s*:\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+([a-z]+)\s+(\d{1,2})\b/i);
-  return wm ? fromWeekdayMonthDay(wm[1], wm[2], wm[3], createdAt) : null;
+  const wm = body.match(/start date\s*:\s*(mon|tue|wed|thu|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?,?\s*(january|february|march|april|may|june|july|august|september|october|november|december)\s*(\d{1,2})(?!\d)/i);
+  // Up to a year ahead: interns are announced long before they start.
+  return wm ? fromWeekdayMonthDay(wm[1], wm[2], wm[3], createdAt, { maxAheadDays: 366 }) : null;
 }
 
 function firstIsoIn(section) {
@@ -193,12 +194,12 @@ export function classifyHrNotice({ subject = '', text = '', requesterEmail = nul
   case 'new_hire':
     return {
       ...base,
-      person: clean(m[1]),
+      person: clean(String(m[1]).replace(/\s*\([^)]{1,40}\)\s*$/, '')),
       date: newHireStart(body, createdAt),
       employeeId: after(body, /Employee #:\s*(\d+)/i),
-      title: after(body, /Position:\s*(.+?)\s+Employee Status:/i),
-      office: after(body, /Location:\s*(.+?)\s+Reports To:/i),
-      manager: after(body, /Reports To:\s*(.+?)(?:\s+View Employee Record|$)/i),
+      title: after(body, /Position:\s*(.+?)\s*Employee Status:/i),
+      office: after(body, /Location:\s*(.+?)\s*Reports To:/i),
+      manager: after(body, /Reports To:\s*(.+?)(?:\s*View Employee Record|$)/i),
     };
   case 'start_date_change': {
     const d = changedDates(body, 'start date');
@@ -226,7 +227,8 @@ export function classifyHrNotice({ subject = '', text = '', requesterEmail = nul
     const section = (body.split(/new transfer records/i)[1] || '').split(/removed transfer records/i)[0];
     const date = (section ? firstIsoIn(section) : null)
         || changedDates(body, 'transfer date').to
-        || fromIso(after(body, /Transfer Date:\s*(20\d{2}-\d{2}-\d{2})/i));
+        || fromIso(after(body, /Transfer Date:\s*(20\d{2}-\d{2}-\d{2})/i))
+        || fromIso(after(body, /will be transferring from\s+.+?\s+office to\s+.+?\s+office on\s+(20\d{2}-\d{2}-\d{2})/i));
     return {
       ...base,
       person: clean(m[1]),

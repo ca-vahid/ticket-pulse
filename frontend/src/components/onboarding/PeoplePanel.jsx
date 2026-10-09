@@ -165,6 +165,23 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
     }
   };
 
+  const park = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await hrLifecycleAPI.parkFamily(familyId);
+      const d = res?.data || {};
+      const n = d.parked?.length || 0;
+      setNote(n ? `${n} ${n === 1 ? 'ticket' : 'tickets'} parked until ${fmtDate(d.until, { withYear: true })}.` : 'Nothing to park: the tickets are already parked or closed, or the work is due to start.');
+      load();
+      onChanged?.();
+    } catch (err) {
+      setNote(err?.message || 'Could not park');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const load = useCallback(() => {
     hrLifecycleAPI.family(familyId)
       .then((res) => setFamily(res?.data || null))
@@ -189,6 +206,7 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
   if (error) return <p className="px-4 py-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>;
   if (!family) return <Loading label="Loading family…" className="py-6" />;
   const canSwitch = family.kind === 'offboarding' && family.status === 'open' && !family.afterTheFact;
+  const canPark = family.status === 'open' && family.effectiveDate && family.members.some((m) => m.role === 'child' && !m.closed && !m.ticket?.parkedUntil);
   const role = { child: 'Child', linked: 'Linked', notice: 'Notice' };
 
   return (
@@ -198,15 +216,26 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
         {family.employeeId && <span>BambooHR #{family.employeeId}</span>}
         {family.details?.title && <span>{family.details.title}</span>}
         {family.details?.manager && <span>Reports to {family.details.manager}</span>}
+        {canPark && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={park}
+            title="Open tickets sleep until the lead time before the date (new hire: 14 days; departure: the Monday of that week)"
+            className="tp-focus-ring ml-auto rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40"
+          >
+            Park until needed
+          </button>
+        )}
         {family.kind === 'onboarding' && family.status === 'open' && (
           <button
             type="button"
             disabled={busy}
             onClick={reroute}
             title={`Open tickets held outside the ${family.officeList || 'office'} list move to one person on it`}
-            className="tp-focus-ring ml-auto rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40"
+            className={`tp-focus-ring ${canPark ? '' : 'ml-auto '}rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40`}
           >
-            {busy ? 'Reassigning…' : 'Reassign by office'}
+            {busy ? 'Working…' : 'Reassign by office'}
           </button>
         )}
         {canSwitch && (
@@ -229,7 +258,10 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
               {m.title || m.ticket?.subject}
             </span>
             <span className="hidden sm:block"><Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl || techById.get(m.ticket?.assignee?.id)?.photoUrl || null} size="h-5 w-5" /></span>
-            <span className="hidden text-xs text-muted-foreground sm:block">{m.ticket?.dueBy ? `Due ${fmtDate(m.ticket.dueBy)}` : 'No due date'}</span>
+            <span className="hidden text-xs text-muted-foreground sm:block">
+              {m.ticket?.dueBy ? `Due ${fmtDate(m.ticket.dueBy)}` : 'No due date'}
+              {m.ticket?.parkedUntil && !m.closed && <span className="block">Parked to {fmtDate(m.ticket.parkedUntil)}</span>}
+            </span>
             <StatusDot tone={ticketTone(m.ticket?.status)} label={m.ticket?.status || '—'} />
           </li>
         ))}
