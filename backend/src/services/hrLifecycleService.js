@@ -83,9 +83,10 @@ const DEFAULT_PARENT_HINT = 'Vahid Haeri';
 // list are "fair grab": everybody on the fallback list takes turns.
 const DEFAULT_OFFICE_ROUTING = Object.freeze([
   { key: 'vancouver', label: 'Vancouver and vicinity', match: ['Vancouver', 'Kamloops', 'Victoria'], hints: ['Adrian Lo', 'Soheil Nasiri', 'Reza Zaim', 'Marcus Blackstock'] },
-  { key: 'toronto', label: 'Toronto', match: ['Toronto'], hints: ['Andrew Fong'] },
-  { key: 'calgary', label: 'Calgary', match: ['Calgary'], hints: ['Andrii Grynik', 'Alexey Lavrenyuk'] },
+  { key: 'toronto', label: 'Toronto and Kingston', match: ['Toronto', 'Kingston'], hints: ['Andrew Fong'] },
+  { key: 'calgary', label: 'Calgary and Edmonton', match: ['Calgary', 'Edmonton'], hints: ['Andrii Grynik', 'Alexey Lavrenyuk'] },
   { key: 'ottawa', label: 'Ottawa and Montreal', match: ['Ottawa', 'Montreal'], hints: ['Anton Kuzmychev', 'Seifeddine Reguige'] },
+  { key: 'halifax', label: 'Halifax', match: ['Halifax'], hints: ['Sam Khadem'] },
 ]);
 const ROUTING_KEY = '__officeRouting'; // lives inside the templates JSON (no migration)
 const MAX_OFFICES = 20;
@@ -585,27 +586,68 @@ class HrLifecycleService {
    * (or on "Any other office"), in turn. `prefer` keeps a person who already
    * holds one of the hire's tickets. Returns { techId, label, ids }.
    */
-  async _pickForOffice(workspaceId, settings, office, tz, { prefer = [] } = {}) {
+  async _pickForOffice(workspaceId, settings, office, tz, { prefer = [], balance = false } = {}) {
     const rule = this._officeRule(settings, office);
-    const ids = rule ? rule.assigneeTechIds : (settings.officeRouting?.fallbackTechIds || []);
-    const label = rule ? rule.label : 'Any other office';
+    const others = settings.officeRouting?.fallbackTechIds || [];
+    let ids = rule ? rule.assigneeTechIds : others;
+    let label = rule ? rule.label : 'Any other office';
     if (!ids.length) return { techId: null, label, ids };
     const kept = prefer.map(Number).find((id) => ids.includes(id));
     if (kept) return { techId: kept, label, ids };
+    // The office team first; when every one of them is off today, anyone else.
+    if (rule && others.length) {
+      const away = await this._awayToday(ids, tz);
+      if (ids.every((id) => away.has(id))) {
+        const rest = others.filter((id) => !ids.includes(id));
+        if (rest.length) { ids = rest; label = `${rule.label} — everyone off, anyone else`; }
+      }
+    }
+    if (balance) return { techId: await this._leastLoaded(workspaceId, ids, tz), label, ids };
     const keys = (settings.templates?.onboarding || []).map((i) => i.key);
     return { techId: await this._takeTurn(workspaceId, ids, tz, { keys, kind: 'onboarding' }), label, ids };
   }
 
-  async _takeTurn(workspaceId, ids, tz, { keys = [], kind = null } = {}) {
-    if (ids.length <= 1) return ids[0] ?? null;
-    const ws = Number(workspaceId);
+  /** Who of these people has a full-day OFF leave today. */
+  async _awayToday(ids, tz) {
+    if (!ids.length) return new Set();
     const today = new Date(`${localDate(new Date(), tz || 'America/Los_Angeles')}T00:00:00Z`);
     const off = await soft(() => prisma.technicianLeave.findMany({
       where: { technicianId: { in: ids }, leaveDate: today, status: 'APPROVED', category: 'OFF' },
       select: { technicianId: true, isFullDay: true },
       take: 50,
     }), []);
-    const away = new Set((off || []).filter((l) => l.isFullDay !== false).map((l) => l.technicianId));
+    return new Set((off || []).filter((l) => l.isFullDay !== false).map((l) => l.technicianId));
+  }
+
+  /**
+   * The person holding the fewest open new-hire children right now (list
+   * order breaks a tie), skipping anyone off today. Used when tickets are
+   * handed out again: "whose turn" by creation order would pile them up.
+   */
+  async _leastLoaded(workspaceId, ids, tz) {
+    if (ids.length <= 1) return ids[0] ?? null;
+    const ws = Number(workspaceId);
+    const away = await this._awayToday(ids, tz);
+    const pool = ids.filter((id) => !away.has(id));
+    const candidates = pool.length ? pool : ids;
+    const members = await soft(() => prisma.hrLifecycleFamilyMember.findMany({
+      where: { workspaceId: ws, role: 'child', family: { kind: 'onboarding', status: 'open' } }, select: { ticketId: true }, take: 400, orderBy: { id: 'desc' },
+    }), []) || [];
+    const tickets = members.length ? await soft(() => prisma.ticket.findMany({
+      where: { id: { in: members.map((m) => m.ticketId) }, workspaceId: ws, assignedTechId: { in: candidates } }, select: { id: true, assignedTechId: true, status: true },
+    }), []) || [] : [];
+    const load = new Map(candidates.map((id) => [id, 0]));
+    for (const t of tickets) {
+      if (!load.has(Number(t.assignedTechId)) || await this._isTerminal(ws, t.status)) continue;
+      load.set(Number(t.assignedTechId), load.get(Number(t.assignedTechId)) + 1);
+    }
+    return [...candidates].sort((a, b) => load.get(a) - load.get(b) || ids.indexOf(a) - ids.indexOf(b))[0];
+  }
+
+  async _takeTurn(workspaceId, ids, tz, { keys = [], kind = null } = {}) {
+    if (ids.length <= 1) return ids[0] ?? null;
+    const ws = Number(workspaceId);
+    const away = await this._awayToday(ids, tz);
     const pool = ids.filter((id) => !away.has(id));
     const candidates = pool.length ? pool : ids;
     const recent = await soft(() => prisma.hrLifecycleFamilyMember.findMany({
@@ -738,7 +780,7 @@ class HrLifecycleService {
       where: { id: { in: ids }, workspaceId: family.workspaceId },
       select: {
         id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, status: true,
-        dueBy: true, assignedTechId: true, parkedUntil: true, assignedTech: { select: { id: true, name: true, photoUrl: true } },
+        dueBy: true, assignedTechId: true, parkedUntil: true, assignedTech: { select: { id: true, name: true } },
       },
     }), []) : [];
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -1295,7 +1337,7 @@ class HrLifecycleService {
     const tz = await this._timeZone(ws);
     const fam = await this._familyTickets(family);
     const open = fam.members.filter((m) => m.member.role === 'child' && !m.terminal);
-    const pick = await this._pickForOffice(ws, settings, family.office, tz, { prefer: open.map((m) => m.ticket.assignedTechId).filter(Boolean) });
+    const pick = await this._pickForOffice(ws, settings, family.office, tz, { prefer: open.map((m) => m.ticket.assignedTechId).filter(Boolean), balance: true });
     if (!pick.techId) throw new ConflictError(`No people are listed for ${pick.label}`);
     const techs = await this._technicians(ws);
     const name = techs.find((t) => t.id === pick.techId)?.name || `technician ${pick.techId}`;
@@ -1418,6 +1460,8 @@ class HrLifecycleService {
         toCreate: plan.children.filter((x) => !x.adoptTicketId).map((x) => ({ title: x.title, dueDate: x.dueDate || null, assignee: x.assigneeTechId ? techName.get(x.assigneeTechId) || null : null })),
       });
     }
+    const emails = await this._personEmails(out.map((c) => c.personName));
+    for (const c of out) c.personEmail = emails.get(normalizePersonName(c.personName || '')) || null;
     return out.sort((a, b) => String(a.effectiveDate || '9999').localeCompare(String(b.effectiveDate || '9999')));
   }
 
@@ -1466,6 +1510,24 @@ class HrLifecycleService {
 
   // ------------------------------------------------------------ reads for the page
 
+  /** Directory e-mail per person name (for their photo), from the requesters we know. One read. */
+  async _personEmails(names) {
+    const list = [...new Set(names.map((n) => String(n || '').trim()).filter(Boolean))].slice(0, 80);
+    if (!list.length) return new Map();
+    const rows = await soft(() => prisma.requester.findMany({
+      where: { email: { not: null }, OR: list.map((n) => ({ name: { equals: n, mode: 'insensitive' } })) },
+      select: { name: true, email: true },
+      take: 200,
+    }), []) || [];
+    const own = (e) => /@bgcengineering\.ca$/i.test(e || '');
+    const out = new Map();
+    for (const r of rows) {
+      const key = normalizePersonName(r.name);
+      if (!out.has(key) || (own(r.email) && !own(out.get(key)))) out.set(key, r.email);
+    }
+    return out;
+  }
+
   _ticketCard(t) {
     if (!t) return null;
     return {
@@ -1487,7 +1549,10 @@ class HrLifecycleService {
     // marked shadow, with the children it would create.
     // Once Live, those people are offered under "Not organised yet" instead.
     const shadow = (await this.getMode(ws)) === 'live' ? [] : await this._shadowFamilies(ws, { status, kind });
-    return [...real, ...shadow];
+    const all = [...real, ...shadow];
+    const emails = await this._personEmails(all.map((f) => f.personName));
+    for (const f of all) f.personEmail = f.personEmail || emails.get(normalizePersonName(f.personName || '')) || null;
+    return all;
   }
 
   /**
@@ -1592,6 +1657,10 @@ class HrLifecycleService {
         parent: this._ticketCard(fam.parent),
         progress: { done, total: children.length },
         linked: fam.members.filter((m) => m.member.role === 'linked').length,
+        personEmail: f.personEmail || null,
+        // Who holds the children (open ones first), each person once.
+        assignees: [...new Map([...children.filter((m) => !m.terminal), ...children.filter((m) => m.terminal)]
+          .filter((m) => m.ticket.assignedTech).map((m) => [m.ticket.assignedTech.id, { id: m.ticket.assignedTech.id, name: m.ticket.assignedTech.name }])).values()],
       });
     }
     return out;

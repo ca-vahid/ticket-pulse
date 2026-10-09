@@ -66,6 +66,7 @@ Object.assign(api, {
 });
 
 vi.mock('../services/api', () => ({ get hrLifecycleAPI() { return api; } }));
+vi.mock('../hooks/useRequesterPhoto', () => ({ useRequesterPhoto: (email) => (email ? `photo:${email}` : null) }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../components/nav/MobileTabBar', () => ({ default: () => null }));
 vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT' } }) }));
@@ -255,5 +256,22 @@ describe('new hires by office', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Reassign by office' }));
     await waitFor(() => expect(api.rerouteFamily).toHaveBeenCalledWith(4));
     expect(await screen.findByText('1 ticket assigned to Muhammad Shahidullah (Vancouver and vicinity).')).toBeInTheDocument();
+  });
+});
+
+describe('People: faces and the onboarding / offboarding switch', () => {
+  test('a person with a known e-mail shows their photo, the row shows who holds the children, and the switch asks for one kind', async () => {
+    api.families.mockResolvedValue({ success: true, data: [{
+      id: 4, kind: 'onboarding', personName: 'Ann One', personEmail: 'aone@bgcengineering.ca', office: 'Vancouver', effectiveDate: '2026-11-02', afterTheFact: false, status: 'open',
+      progress: { done: 0, total: 2 }, linked: 0, parent: { id: 77, ref: '#240100' }, assignees: [{ id: 2, name: 'Muhammad Shahidullah' }],
+    }] });
+    const { container } = renderAt('/onboarding/people');
+    expect(await screen.findByText('Ann One')).toBeInTheDocument();
+    expect(container.querySelector('img[src="photo:aone@bgcengineering.ca"]')).not.toBeNull();
+    expect(screen.getByText('Muhammad Shahidullah')).toBeInTheDocument();
+    expect(api.families).toHaveBeenLastCalledWith({ status: 'open' });
+    fireEvent.click(screen.getByRole('button', { name: 'Offboarding' }));
+    await waitFor(() => expect(api.families).toHaveBeenLastCalledWith({ status: 'open', kind: 'offboarding' }));
+    expect(screen.getByRole('button', { name: 'Offboarding' })).toHaveAttribute('aria-pressed', 'true');
   });
 });

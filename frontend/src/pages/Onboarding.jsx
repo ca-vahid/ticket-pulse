@@ -71,7 +71,7 @@ export default function Onboarding() {
   else if (settingsData) {
     body = (
       <section role="tabpanel" id={`onboarding-panel-${tab}`} aria-labelledby={`onboarding-tab-${tab}`} tabIndex={-1} className="animate-fadeIn focus:outline-none">
-        {tab === 'people' && <PeoplePanel mode={mode} />}
+        {tab === 'people' && <PeoplePanel mode={mode} techById={techById} />}
         {tab === 'activity' && <ActivityPanel techById={techById} />}
         {tab === 'settings' && (
           <SettingsPanel

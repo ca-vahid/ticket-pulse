@@ -82,6 +82,7 @@ const prismaMock = {
     findMany: jest.fn(async ({ where }) => db.tickets.filter((r) => matches(r, where)).map((t) => ({ ...t, assignedTech: db.technicians.find((x) => x.id === t.assignedTechId) || null }))),
   },
   technician: { findMany: jest.fn(async () => db.technicians) },
+  requester: { findMany: jest.fn(async () => db.requesters || []) },
   technicianLeave: { findMany: jest.fn(async ({ where }) => db.leaves.filter((l) => where.technicianId.in.includes(l.technicianId))) },
   group: {
     findMany: jest.fn(async () => db.groups),
@@ -710,7 +711,9 @@ describe('new hires by office', () => {
 
   test('seeded from the team by name; saved lists are validated and audited', async () => {
     const seeded = (await hr.getSettings(1)).officeRouting;
-    expect(seeded.offices.map((o) => o.key)).toEqual(['vancouver', 'toronto', 'calgary', 'ottawa']);
+    expect(seeded.offices.map((o) => o.key)).toEqual(['vancouver', 'toronto', 'calgary', 'ottawa', 'halifax']);
+    expect(seeded.offices.find((o) => o.key === 'calgary').match).toEqual(['Calgary', 'Edmonton']);
+    expect(seeded.offices.find((o) => o.key === 'toronto').match).toEqual(['Toronto', 'Kingston']);
     expect(seeded.offices[0]).toMatchObject({ label: 'Vancouver and vicinity', assigneeTechIds: [4] }); // only Adrian Lo exists in this team
     expect(seeded.fallbackTechIds).toEqual([4]);
 
@@ -718,7 +721,7 @@ describe('new hires by office', () => {
     expect(settings.officeRouting.offices.map((o) => [o.key, o.match, o.assigneeTechIds])).toEqual([
       ['vancouver_and_vicinity', ['Vancouver', 'Kamloops'], [3, 4]], ['calgary', ['Calgary', 'Edmonton'], [2]],
     ]);
-    expect(changes.map((c) => c.field)).toEqual(expect.arrayContaining(['officeRouting[vancouver]', 'officeRouting[calgary].match', 'officeRouting[calgary].assigneeTechIds', 'officeRouting.fallbackTechIds']));
+    expect(changes.map((c) => c.field)).toEqual(expect.arrayContaining(['officeRouting[vancouver]', 'officeRouting[calgary].label', 'officeRouting[calgary].assigneeTechIds', 'officeRouting.fallbackTechIds']));
     // The lists survive a save of something else.
     await hr.updateSettings(1, { mode: 'observe' });
     expect((await hr.getSettings(1)).officeRouting.fallbackTechIds).toEqual([1]);
@@ -782,5 +785,52 @@ describe('new hires by office', () => {
     const dep = departureOf('Matt Lin', day(8), 4444);
     await hr.onTicketCreated(dep.id, 1);
     await expect(hr.rerouteFamily(db.families.at(-1).id, 1)).rejects.toThrow(/Only a new hire/);
+  });
+});
+
+describe('new hires by office: the edges', () => {
+  const hire = (name, office, empId) => fsNotice({
+    subject: `New Hire: ${name}`,
+    sender: BAMBOO,
+    text: `New Team Member Start Date: ${day(20)} Employee #: ${empId} Position: Geologist Employee Status: FTR Location: ${office} Reports To: Maria Cruz View Employee Record`,
+  });
+  const owners = (parent) => ticketSvc.createTicket.mock.calls.map((c) => c[1]).filter((i) => i.subject.endsWith(parent.subject)).map((i) => i.assignedTechId);
+
+  test('the office team first; when every one of them is off today, anyone else', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: { offices: [{ label: 'Calgary and Edmonton', match: ['Calgary', 'Edmonton'], assigneeTechIds: [2] }], fallbackTechIds: [2, 3, 4] } });
+    const a = hire('Ann One', 'Edmonton', 3001);
+    await hr.onTicketCreated(a.id, 1);
+    expect(owners(a)).toEqual([2, 2]);
+    db.leaves.push({ technicianId: 2, isFullDay: true });
+    const b = hire('Bob Two', 'Edmonton', 3002);
+    await hr.onTicketCreated(b.id, 1);
+    expect(owners(b)).toEqual([3, 3]); // not 2 (off), the next of the others
+  });
+
+  test('reassign by office hands a hire to whoever holds the fewest open new-hire tickets', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: { offices: [], fallbackTechIds: [] } });
+    const fams = [];
+    for (const [i, name] of ['Ann One', 'Bob Two', 'Cy Three', 'Di Four'].entries()) {
+      const t = hire(name, 'Vancouver', 3001 + i);
+      await hr.onTicketCreated(t.id, 1);
+      const fam = db.families.at(-1);
+      fams.push(fam);
+      for (const m of db.members.filter((x) => x.familyId === fam.id)) ticketById(m.ticketId).assignedTechId = 1; // all with somebody outside
+    }
+    await hr.updateSettings(1, { officeRouting: { offices: [{ label: 'Vancouver', match: ['Vancouver'], assigneeTechIds: [3, 4] }], fallbackTechIds: [] } });
+    const got = [];
+    for (const f of fams) got.push((await hr.rerouteFamily(f.id, 1)).assignee.id);
+    expect(got).toEqual([3, 4, 3, 4]);
+  });
+
+  test('the People list says who holds the children and carries the e-mail of the person for their photo', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: { offices: [{ label: 'Vancouver', match: ['Vancouver'], assigneeTechIds: [4] }], fallbackTechIds: [] } });
+    db.requesters = [{ name: 'ann one', email: 'aone@bgcengineering.ca' }, { name: 'Ann One', email: 'ann@gmail.com' }];
+    const a = hire('Ann One', 'Vancouver', 3001);
+    await hr.onTicketCreated(a.id, 1);
+    const [row] = await hr.listFamilies(1, { status: 'open' });
+    expect(row).toMatchObject({ personName: 'Ann One', personEmail: 'aone@bgcengineering.ca', assignees: [{ id: 4, name: 'Adrian Lo' }] });
+    expect(JSON.stringify(row)).not.toMatch(/photoUrl":"/);
+    db.requesters = [];
   });
 });
