@@ -294,6 +294,7 @@ class TicketParkService {
       details: { reason, kind: park.kind, until: park.until, ...(note ? { note } : {}) },
     }).catch(() => {});
     this._broadcast({ ...ticket, parkedUntil: null, parkKind: null }, 'unparked');
+    if (reopen) await this._familyAwake(ticket, reason);
     return { unparked: true, reason };
   }
 
@@ -345,6 +346,21 @@ class TicketParkService {
     this._broadcast({ ...ticket, parkedUntil: null, parkKind: null }, 'woke');
     await this._notifyAssignee(ticket, park).catch((err) => logger.warn(`Park wake notice for ${ticketDisplayRef(ticket)} not sent: ${err.message}`));
     logger.info(`Ticket ${ticketDisplayRef(ticket)} woke (${park.kind}, parked by ${park.parkedBy})`);
+    await this._familyAwake(ticket, 'woke');
+  }
+
+  /**
+   * An onboarding / offboarding child that is awake again gets its owner now
+   * (the people rules as they stand today), its due date back, or — when its
+   * date is still further away than a park could hold — another park.
+   */
+  async _familyAwake(ticket, reason) {
+    try {
+      const { default: hrLifecycleService } = await import('./hrLifecycleService.js');
+      await hrLifecycleService.onTicketAwake(ticket.id, ticket.workspaceId, { reason });
+    } catch (err) {
+      logger.warn(`Park wake: family step for ${ticketDisplayRef(ticket)} failed: ${err.message}`);
+    }
   }
 
   async _notifyAssignee(ticket, park) {
@@ -492,6 +508,14 @@ class TicketParkService {
           const parked = (await this.autoParkHrNotices({ workspaceId: ws.id, sinceDays: 2 })).filter((r) => r.parked);
           out.hrParked = (out.hrParked || 0) + parked.length;
         }
+        // Safety net: an awake family child with no owner gets one.
+        try {
+          const { default: hrLifecycleService } = await import('./hrLifecycleService.js');
+          const settled = await hrLifecycleService.assignDue();
+          if (settled) out.familyAssigned = settled;
+        } catch (err) {
+          logger.warn(`Park sweep: family assignment pass failed: ${err.message}`);
+        }
       }
       if (out.woke || out.ended || out.hrParked) logger.info(`Park sweep: ${out.woke} woke, ${out.ended} ended (status moved), ${out.dueSoon} due soon, ${out.hrParked || 0} HR notice(s) parked`);
       return out;
@@ -519,7 +543,11 @@ class TicketParkService {
     const until = new Date(`${wakeDate}T15:00:00.000Z`);
     const now = Date.now();
     const started = until.getTime() <= now + 3600e3;
-    return { wakeDate, until: until.toISOString(), started, usable: !started && until.getTime() <= now + MAX_PARK_DAYS * 86400e3 };
+    const usable = !started && until.getTime() <= now + MAX_PARK_DAYS * 86400e3;
+    // A wake further away than a park can hold: hold as long as allowed; the
+    // family re-parks it when that park ends (hrLifecycleService.onTicketAwake).
+    const holdUntil = started ? null : (usable ? until.toISOString() : new Date(now + (MAX_PARK_DAYS - 4) * 86400e3).toISOString());
+    return { wakeDate, until: until.toISOString(), started, usable, holdUntil };
   }
 
   /** The clear date an HR notice states, or null. Never guesses. */

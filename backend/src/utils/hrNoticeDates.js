@@ -142,8 +142,9 @@ export function readHrNoticeDate({ subject = '', text = '', createdAt = new Date
 /**
  * Lead time for HR parks (Vahid, 25 Sep 2026): a notice wakes ahead of its date
  * so the work is ready on the day, not started on it.
- *   new hire / start change  14 days before the start
- *   departure / leave        the Monday of the week of the date
+ *   new hire / start change  21 days before the start   (8 Oct 2026; was 14)
+ *   departure                14 days before the last day (8 Oct 2026; was the Monday of that week)
+ *   leave                    the Monday of the week of the date
  *   transfer                 2 business days before the effective date
  * A wake that lands on a non-business day moves back to the business day
  * before it. `isBusinessDay(iso)` defaults to Monday–Friday.
@@ -160,8 +161,10 @@ export function hrWakeDate(kind, dateIso, { isBusinessDay = null } = {}) {
   };
   let wake = dateIso;
   if (kind === 'new_hire' || kind === 'start_change') {
+    wake = shift(dateIso, -21);
+  } else if (kind === 'departure') {
     wake = shift(dateIso, -14);
-  } else if (kind === 'departure' || kind === 'leave') {
+  } else if (kind === 'leave') {
     const dow = new Date(`${dateIso}T00:00:00Z`).getUTCDay(); // 0 = Sunday
     wake = shift(dateIso, -((dow + 6) % 7));
   } else if (kind === 'transfer') {

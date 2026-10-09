@@ -481,7 +481,7 @@ class HrLifecycleService {
       recency: `Only tickets created in the last ${RECENT_DAYS} days are handled (history backfills never start a family).`,
       passwords: 'Lines that carry a password are removed from anything written into child descriptions or notes.',
       sharing: 'A child with several people goes to one of them: they take turns, and anyone off that day is skipped.',
-      parking: 'Children sleep until the lead time before the date (new hire: 14 days; departure: the Monday of that week) and wake then. A date change from HR moves the due dates and the parks together; a cancellation closes the family.',
+      parking: 'Children sleep with no owner until the lead time before the date (new hire: 21 days; departure: 14 days). When they wake, the owner is chosen from who is here that day: the people of the ticket, the office team, or AI routing. A date change from HR moves the due dates and the parks together; a cancellation closes the family.',
       offices: 'A new hire\'s children with no default assignee go to one person from the list of the hire\'s office (both to the same person, in turn); an office with no list uses "Any other office"; no list at all means AI routing.',
     };
   }
@@ -573,30 +573,42 @@ class HrLifecycleService {
    * when the wake is two weeks or more away). When the lead time has already
    * begun a parked ticket is woken. Returns 'parked' | 'moved' | 'woken' | null.
    */
-  async _parkUntilNeeded(t, familyKind, dateIso, out, { whenAwake = 'always' } = {}) {
+  async _parkUntilNeeded(t, familyKind, dateIso, out, { whenAwake = 'always', release = false } = {}) {
     if (!dateIso || !t) return null;
     try {
       const parks = await this._parkService();
       const s = await parks.hrWakeFor(t.workspaceId, familyKind === 'onboarding' ? 'new_hire' : 'departure', dateIso);
       if (!s) return null;
       const parked = Boolean(t.parkedUntil);
-      if (!s.usable) {
-        if (parked && s.started) {
+      if (s.started || !s.holdUntil) {
+        if (parked) {
           await parks.unpark(t.id, t.workspaceId, { reason: 'unparked', reopen: true, note: `The date moved to ${fmtDay(dateIso)}: the work is due to start` }, PARK_ACTOR);
           t.parkedUntil = null;
           return 'woken';
         }
         return null;
       }
-      if (parked && Math.abs(new Date(t.parkedUntil).getTime() - new Date(s.until).getTime()) < 60e3) return null;
-      if (!parked && (whenAwake === 'never' || (whenAwake === 'far' && new Date(s.until).getTime() < Date.now() + 14 * 86400e3))) return null;
-      const reason = familyKind === 'onboarding'
-        ? `Starts ${fmtDay(dateIso)} — onboarding (from the HR notice)`
-        : `Last day ${fmtDay(dateIso)} — offboarding (from the HR notice)`;
-      await parks.park(t.id, t.workspaceId, { kind: 'until_date', until: s.until, reason }, PARK_ACTOR, { source: 'suggested_hr' });
-      t.parkedUntil = new Date(s.until);
+      const same = parked && Math.abs(new Date(t.parkedUntil).getTime() - new Date(s.holdUntil).getTime()) < 5 * 86400e3 && (s.usable ? Math.abs(new Date(t.parkedUntil).getTime() - new Date(s.until).getTime()) < 60e3 : true);
+      const skipAwake = !parked && (whenAwake === 'never' || (whenAwake === 'far' && new Date(s.holdUntil).getTime() < Date.now() + 14 * 86400e3));
+      if (skipAwake) return null;
+      let result = null;
+      if (!same) {
+        const reason = familyKind === 'onboarding'
+          ? `Starts ${fmtDay(dateIso)} — onboarding (from the HR notice)`
+          : `Last day ${fmtDay(dateIso)} — offboarding (from the HR notice)`;
+        await parks.park(t.id, t.workspaceId, { kind: 'until_date', until: s.holdUntil, reason }, PARK_ACTOR, { source: 'suggested_hr' });
+        t.parkedUntil = new Date(s.holdUntil);
+        result = parked ? 'moved' : 'parked';
+      }
       t.wakeDate = s.wakeDate;
-      return parked ? 'moved' : 'parked';
+      // Asleep = nobody's yet: the owner is chosen when it wakes (who is here THEN).
+      if (release && t.assignedTechId && this._isNative(t)) {
+        const svc = await this._ticketService();
+        await svc.assignTicket(t.id, t.workspaceId, null, HR_LIFECYCLE_ACTOR);
+        t.assignedTechId = null;
+        result = result || 'released';
+      }
+      return result;
     } catch (err) {
       out?.warnings?.push(`Park of ${ticketDisplayRef(t)} skipped: ${err.message}`);
       return null;
@@ -664,14 +676,14 @@ class HrLifecycleService {
    * order breaks a tie), skipping anyone off today. Used when tickets are
    * handed out again: "whose turn" by creation order would pile them up.
    */
-  async _leastLoaded(workspaceId, ids, tz) {
+  async _leastLoaded(workspaceId, ids, tz, { kind = 'onboarding', keys = null } = {}) {
     if (ids.length <= 1) return ids[0] ?? null;
     const ws = Number(workspaceId);
     const away = await this._awayToday(ids, tz);
     const pool = ids.filter((id) => !away.has(id));
     const candidates = pool.length ? pool : ids;
     const members = await soft(() => prisma.hrLifecycleFamilyMember.findMany({
-      where: { workspaceId: ws, role: 'child', family: { kind: 'onboarding', status: 'open' } }, select: { ticketId: true }, take: 400, orderBy: { id: 'desc' },
+      where: { workspaceId: ws, role: 'child', ...(keys ? { templateKey: { in: keys } } : {}), family: { kind, status: 'open' } }, select: { ticketId: true }, take: 400, orderBy: { id: 'desc' },
     }), []) || [];
     const tickets = members.length ? await soft(() => prisma.ticket.findMany({
       where: { id: { in: members.map((m) => m.ticketId) }, workspaceId: ws, assignedTechId: { in: candidates } }, select: { id: true, assignedTechId: true, status: true },
@@ -681,7 +693,13 @@ class HrLifecycleService {
       if (!load.has(Number(t.assignedTechId)) || await this._isTerminal(ws, t.status)) continue;
       load.set(Number(t.assignedTechId), load.get(Number(t.assignedTechId)) + 1);
     }
-    return [...candidates].sort((a, b) => load.get(a) - load.get(b) || ids.indexOf(a) - ids.indexOf(b))[0];
+    // Equal load: whoever was given a family ticket longest ago (never = first).
+    const recent = await soft(() => prisma.hrLifecycleEvent.findMany({
+      where: { workspaceId: ws, decision: { in: ['assign_due', 'reroute_office'] } }, orderBy: { id: 'desc' }, take: 60, select: { id: true, details: true },
+    }), []) || [];
+    const newest = [...recent].sort((x, y) => y.id - x.id);
+    const lastTurn = (id) => { const i = newest.findIndex((e) => Number(e.details?.techId) === id); return i === -1 ? 1e9 : i; };
+    return [...candidates].sort((a, b) => load.get(a) - load.get(b) || lastTurn(b) - lastTurn(a) || ids.indexOf(a) - ids.indexOf(b))[0];
   }
 
   async _takeTurn(workspaceId, ids, tz, { keys = [], kind = null } = {}) {
@@ -1169,6 +1187,13 @@ class HrLifecycleService {
     const links = await this._linkService();
     const body = plainBody(ticket);
     const lines = [];
+    // Work that is not due to start yet sleeps with NO owner: who gets it is
+    // decided when it wakes, from who is here then (Vahid, 8 Oct 2026).
+    let defer = null;
+    if (!plan.afterTheFact && plan.effectiveDate) {
+      const wake = await Promise.resolve().then(async () => (await this._parkService()).hrWakeFor(ws, plan.familyKind === 'onboarding' ? 'new_hire' : 'departure', plan.effectiveDate)).catch(() => null);
+      if (wake && !wake.started && wake.holdUntil) defer = wake;
+    }
     for (const child of plan.children) {
       if (child.adoptTicketId) {
         try {
@@ -1202,11 +1227,11 @@ class HrLifecycleService {
           description: html,
           priority: [1, 2, 3, 4].includes(Number(ticket.priority)) ? Number(ticket.priority) : 2,
           ...(ticket.requesterId ? { requesterId: ticket.requesterId } : { requesterEmail: ticket.requester?.email || HR_SENDERS[0] }),
-          ...(child.assigneeTechId ? { assignedTechId: child.assigneeTechId } : {}),
+          ...(child.assigneeTechId && !defer ? { assignedTechId: child.assigneeTechId } : {}),
           ...groupFields,
           ...(child.dueDate ? { dueBy: dueInstant(child.dueDate, tz) } : {}),
           // Blank default = the normal AI routing. HR never gets an ack per child.
-          runAiTriage: !child.assigneeTechId,
+          runAiTriage: !defer && !child.assigneeTechId,
           notifyRequester: false,
         }, HR_LIFECYCLE_ACTOR);
         await prisma.hrLifecycleFamilyMember.create({
@@ -1223,7 +1248,7 @@ class HrLifecycleService {
           await this._parkUntilNeeded({ id: created.id, workspaceId: ws, origin: 'ticketpulse', nativeNumber: created.nativeNumber, parkedUntil: null }, plan.familyKind, plan.effectiveDate, out);
         }
         out.created.push({ ticketId: created.id, ref, key: child.key, title: child.title });
-        lines.push(`<li>${esc(ref)} — ${esc(child.title)}${child.dueDate ? `, due ${esc(fmtDay(child.dueDate))}` : ''}</li>`);
+        lines.push(`<li>${esc(ref)} — ${esc(child.title)}${child.dueDate ? `, due ${esc(fmtDay(child.dueDate))}` : ''}${defer ? `, asleep until ${esc(fmtDay(defer.wakeDate))} (assigned then)` : ''}</li>`);
       } catch (err) {
         out.warnings.push(`${child.title} child not created: ${err.message}`);
       }
@@ -1300,8 +1325,9 @@ class HrLifecycleService {
       const mv = moveBy.get(t.id);
       if (mv) await this._setDue(t, mv.dueDate, tz, out);
       // The park follows the date: asleep until the new lead time, or awake now when it has begun.
-      const park = mv && plan.toDate ? await this._parkUntilNeeded(t, plan.familyKind, plan.toDate, out, { whenAwake: 'far' }) : null;
-      const sleep = park === 'woken' ? ' Woken: the work is due to start.' : (park ? ` Parked until ${fmtDay(t.wakeDate)}.` : '');
+      const isChild = mv?.role === 'child';
+      const park = mv && plan.toDate ? await this._parkUntilNeeded(t, plan.familyKind, plan.toDate, out, { whenAwake: 'far', release: isChild }) : null;
+      const sleep = park === 'woken' ? ' Woken: the work is due to start.' : (park ? ` Parked until ${fmtDay(t.wakeDate)}${isChild ? '; it is assigned when it wakes' : ''}.` : '');
       await this._note(t, note(mv ? ` Due date now ${fmtDay(mv.dueDate)}.${sleep}` : ''), out);
     }
     await soft(() => prisma.hrLifecycleFamily.update({
@@ -1413,10 +1439,123 @@ class HrLifecycleService {
       outcome: moved.length || !out.warnings.length ? 'done' : 'failed',
       familyId: family.id,
       summary: `${family.personName}: ${moved.length} ${moved.length === 1 ? 'ticket' : 'tickets'} assigned to ${name} by office (${pick.label})`,
-      details: { moved, warnings: out.warnings, person: family.personName },
+      details: { moved, techId: pick.techId, warnings: out.warnings, person: family.personName },
       actor: actor?.email || who,
     });
     return { familyId: family.id, assignee: { id: pick.techId, name }, office: pick.label, moved, warnings: out.warnings };
+  }
+
+  // ------------------------------------------------------------ awake = somebody's
+
+  /** ticketParkService calls this when a ticket wakes or is unparked. Never throws. */
+  async onTicketAwake(ticketId, workspaceId, { reason = 'woke' } = {}) {
+    try {
+      if (!isAvailable(workspaceId)) return null;
+      const member = await soft(() => prisma.hrLifecycleFamilyMember.findFirst({ where: { ticketId: Number(ticketId), workspaceId: Number(workspaceId), role: 'child' }, orderBy: { id: 'desc' } }));
+      if (!member) return null;
+      const family = await soft(() => prisma.hrLifecycleFamily.findFirst({ where: { id: member.familyId, workspaceId: Number(workspaceId) } }));
+      if (!family || family.status !== 'open') return null;
+      return await this._settleChild(family, member, { bySystem: reason === 'woke' });
+    } catch (err) {
+      logger.warn(`HR lifecycle: awake step for ticket ${ticketId} failed: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * One awake child of an open family: its due date back on the family date
+   * (a wake pushes a TP-born due date by the time parked), another park when
+   * its own park ran out before the lead time, otherwise an owner by the
+   * rules as they stand now: the child's own people, the office team (one
+   * person per new hire), or the normal AI routing.
+   */
+  async _settleChild(family, member, { bySystem = false, settings = null } = {}) {
+    const ws = family.workspaceId;
+    const t = await this._loadTicket(member.ticketId, ws);
+    if (!t || t.parkedUntil || await this._isTerminal(ws, t.status)) return null;
+    const tz = await this._timeZone(ws);
+    const out = { warnings: [], created: [] };
+    const date = dateOnly(family.effectiveDate);
+    if (date && this._isNative(t)) await this._setDue(t, addDays(date, member.dueOffsetDays || 0), tz, out);
+    if (date && bySystem && !family.afterTheFact) {
+      const again = await this._parkUntilNeeded(t, family.kind, date, out, { release: true });
+      if (again && again !== 'woken') return { ticketId: t.id, action: 'parked_again' };
+    }
+    if (t.assignedTechId) return { ticketId: t.id, action: 'kept' };
+
+    const cfg = settings || await this.getSettings(ws);
+    const item = (cfg.templates?.[family.template] || []).find((i) => i.key === member.templateKey) || null;
+    const own = item ? assigneeIds(item) : [];
+    let techId = null;
+    let why = null;
+    if (own.length) {
+      techId = await this._leastLoaded(ws, own, tz, { kind: family.kind, keys: [member.templateKey] });
+      why = own.length > 1 ? 'their turn' : 'the default for this ticket';
+    } else if (item?.groupId) {
+      return { ticketId: t.id, action: 'group' };
+    } else if (family.kind === 'onboarding') {
+      const fam = await this._familyTickets(family);
+      const prefer = fam.members.filter((m) => m.member.role === 'child' && !m.terminal && m.ticket.id !== t.id).map((m) => m.ticket.assignedTechId).filter(Boolean);
+      const pick = await this._pickForOffice(ws, cfg, family.office, tz, { prefer, balance: true });
+      techId = pick.techId;
+      why = `office: ${pick.label}`;
+    }
+    if (!techId) {
+      // No people rule for this ticket: the normal AI routing decides now.
+      if (this._isNative(t)) {
+        const svc = await this._ticketService();
+        await Promise.resolve().then(() => svc._startAiTriage(t.id, ws)).catch((err) => out.warnings.push(`AI routing not started: ${err.message}`));
+      }
+      await this._record(ws, { ticket: t, c: null, plan: { decision: 'assign_due', familyId: family.id, noticeType: 'manual' }, mode: 'live', outcome: 'done', familyId: family.id, summary: `${family.personName}: ${member.title || 'ticket'} is due to start — sent to AI routing`, details: { techId: null, key: member.templateKey, warnings: out.warnings, person: family.personName } });
+      return { ticketId: t.id, action: 'ai' };
+    }
+    await this._assign(t, techId, out);
+    const name = (await this._technicians(ws)).find((x) => x.id === techId)?.name || `technician ${techId}`;
+    if (Number(t.assignedTechId) === Number(techId)) {
+      await this._note(t, `<p><strong>${family.kind === 'onboarding' ? 'Onboarding' : 'Offboarding'}:</strong> the work is due to start — assigned to ${esc(name)} (${esc(why)}).</p>`, out);
+    }
+    await this._record(ws, {
+      ticket: t, c: null, plan: { decision: 'assign_due', familyId: family.id, noticeType: 'manual' }, mode: 'live',
+      outcome: Number(t.assignedTechId) === Number(techId) ? 'done' : 'failed', familyId: family.id,
+      summary: `${family.personName}: ${member.title || 'ticket'} is due to start — assigned to ${name} (${why})`,
+      details: { techId, key: member.templateKey, warnings: out.warnings, person: family.personName },
+    });
+    return { ticketId: t.id, action: 'assigned', techId };
+  }
+
+  /**
+   * Safety net (park sweep, every few minutes): any awake child of an open
+   * family that has no owner gets one. Covers a missed wake, a manual unpark
+   * and a failed first attempt. Returns how many tickets it settled.
+   */
+  async assignDue() {
+    let n = 0;
+    for (const ws of availableWorkspaceIds()) {
+      if ((await this.getMode(ws)) !== 'live') continue;
+      const families = await soft(() => prisma.hrLifecycleFamily.findMany({ where: { workspaceId: ws, status: 'open' }, orderBy: { id: 'asc' }, take: 200 }), []) || [];
+      if (!families.length) continue;
+      const members = await soft(() => prisma.hrLifecycleFamilyMember.findMany({ where: { workspaceId: ws, role: 'child', familyId: { in: families.map((f) => f.id) } }, orderBy: { id: 'asc' }, take: 1500 }), []) || [];
+      if (!members.length) continue;
+      const idle = await soft(() => prisma.ticket.findMany({
+        where: { id: { in: members.map((m) => m.ticketId) }, workspaceId: ws, assignedTechId: null, parkedUntil: null, createdAt: { lt: new Date(Date.now() - 3 * 60e3) } },
+        select: { id: true, status: true },
+        take: 200,
+      }), []) || [];
+      if (!idle.length) continue;
+      const settings = await this.getSettings(ws);
+      const famById = new Map(families.map((f) => [f.id, f]));
+      for (const t of idle) {
+        if (await this._isTerminal(ws, t.status)) continue;
+        const member = members.find((m) => m.ticketId === t.id);
+        const family = famById.get(member.familyId);
+        // A ticket already sent to AI routing is not sent again within the hour.
+        const asked = await soft(() => prisma.hrLifecycleEvent.findFirst({ where: { workspaceId: ws, ticketId: t.id, decision: 'assign_due', createdAt: { gte: new Date(Date.now() - 3600e3) } }, select: { id: true } }));
+        if (asked) continue;
+        const r = await this._settleChild(family, member, { settings }).catch((err) => { logger.warn(`HR lifecycle: assigning ticket ${t.id} failed: ${err.message}`); return null; });
+        if (r && ['assigned', 'ai', 'parked_again'].includes(r.action)) n += 1;
+      }
+    }
+    return n;
   }
 
   // ------------------------------------------------------------ park until needed
@@ -1433,9 +1572,12 @@ class HrLifecycleService {
     const out = { warnings: [], created: [] };
     const parked = [];
     for (const m of fam.members) {
-      if (m.member.role !== 'child' || m.terminal || m.ticket.parkedUntil) continue;
-      if (await this._parkUntilNeeded(m.ticket, family.kind, date, out)) parked.push({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), title: m.member.title, until: m.ticket.wakeDate });
+      if (m.member.role !== 'child' || m.terminal) continue;
+      const did = await this._parkUntilNeeded(m.ticket, family.kind, date, out, { release: true });
+      if (did && did !== 'woken') parked.push({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), title: m.member.title, until: m.ticket.wakeDate, did });
     }
+    // The notice follows when it is asleep already (an awake one is somebody's on purpose).
+    if (fam.parent && !fam.parentTerminal && fam.parent.parkedUntil) await this._parkUntilNeeded(fam.parent, family.kind, date, out, { whenAwake: 'never' });
     const who = actor?.name || actor?.email || 'an admin';
     const until = parked[0]?.until || null;
     await this._record(ws, {
@@ -1745,6 +1887,7 @@ class HrLifecycleService {
         progress: { done, total: children.length },
         linked: fam.members.filter((m) => m.member.role === 'linked').length,
         personEmail: f.personEmail || null,
+        asleep: children.some((m) => !m.terminal && m.ticket.parkedUntil),
         // Who holds the children (open ones first), each person once.
         assignees: [...new Map([...children.filter((m) => !m.terminal), ...children.filter((m) => m.terminal)]
           .filter((m) => m.ticket.assignedTech).map((m) => [m.ticket.assignedTech.id, { id: m.ticket.assignedTech.id, name: m.ticket.assignedTech.name }])).values()],

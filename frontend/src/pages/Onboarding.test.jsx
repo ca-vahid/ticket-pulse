@@ -282,13 +282,14 @@ describe('parking a family', () => {
     api.families.mockResolvedValueOnce({ success: true, data: [{ id: 4, kind: 'onboarding', personName: 'Ann One', office: 'Vancouver', effectiveDate: '2026-11-02', afterTheFact: false, status: 'open', progress: { done: 0, total: 2 }, linked: 0, parent: { id: 77, ref: '#240100' } }] });
     api.family.mockResolvedValue({ success: true, data: { id: 4, kind: 'onboarding', status: 'open', effectiveDate: '2026-11-02', afterTheFact: false, officeList: 'Vancouver', parent: { id: 77, ref: '#240100' }, details: {}, members: [
       { role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', status: 'Open', dueBy: '2026-11-03T00:00:00Z', parkedUntil: null, assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
-      { role: 'child', key: 'workstation', title: 'Workstation', closed: false, ticket: { id: 91, ref: 'TP-5001', status: 'Pending', dueBy: '2026-11-03T00:00:00Z', parkedUntil: '2026-10-19T15:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+      { role: 'child', key: 'workstation', title: 'Workstation', closed: false, ticket: { id: 91, ref: 'TP-5001', status: 'Pending', dueBy: '2026-11-03T00:00:00Z', parkedUntil: '2026-10-19T15:00:00Z', assignee: null } },
     ] } });
     renderAt('/onboarding/people');
     fireEvent.click(await screen.findByRole('button', { name: /Show Ann One's tickets/ }));
     expect(await screen.findByText('Parked to Oct 19')).toBeInTheDocument();
+    expect(screen.getByText('Assigned when it wakes')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Park until needed' }));
     await waitFor(() => expect(api.parkFamily).toHaveBeenCalledWith(4));
-    expect(await screen.findByText('1 ticket parked until Oct 19, 2026.')).toBeInTheDocument();
+    expect(await screen.findByText('1 ticket sleeps until Oct 19, 2026 with no owner; the owner is chosen that day.')).toBeInTheDocument();
   });
 });

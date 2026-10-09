@@ -59,23 +59,26 @@ describe('readHrNoticeDate', () => {
   });
 });
 
-describe('hrWakeDate — lead time for HR parks (Vahid, 25 Sep 2026)', () => {
-  test('new hire / start change: 14 days before the start (Marcus moved #38822 Oct 19 → Oct 5)', () => {
-    expect(hrWakeDate('new_hire', '2026-10-19')).toBe('2026-10-05');
-    expect(hrWakeDate('start_change', '2027-03-01')).toBe('2027-02-15');
+describe('hrWakeDate — lead time for HR parks (Vahid, 25 Sep 2026; new hire 21 days and departure 14 days since 8 Oct 2026)', () => {
+  test('new hire / start change: 21 days before the start', () => {
+    expect(hrWakeDate('new_hire', '2026-10-19')).toBe('2026-09-28');
+    expect(hrWakeDate('start_change', '2027-03-01')).toBe('2027-02-08');
+    expect(hrWakeDate('new_hire', '2027-01-04')).toBe('2026-12-14'); // Mon → Mon
   });
 
-  test('14 days before a start that lands on a weekend moves back to the Friday', () => {
-    expect(hrWakeDate('new_hire', '2027-01-04')).toBe('2026-12-21'); // Mon → Mon
-    expect(hrWakeDate('new_hire', '2026-11-01')).toBe('2026-10-16'); // Sun − 14 = Sun → Fri
+  test('a wake that lands on a weekend moves back to the Friday', () => {
+    expect(hrWakeDate('new_hire', '2026-11-01')).toBe('2026-10-09'); // Sun − 21 = Sun → Fri
+    expect(hrWakeDate('departure', '2026-10-11')).toBe('2026-09-25'); // Sun − 14 = Sun → Fri
   });
 
-  test('departure and leave: the Monday of the week of the date', () => {
-    expect(hrWakeDate('departure', '2026-10-09')).toBe('2026-10-05'); // Fri → Mon
-    expect(hrWakeDate('departure', '2026-10-05')).toBe('2026-10-05'); // already Monday
+  test('departure: 14 days before the last day', () => {
+    expect(hrWakeDate('departure', '2026-10-09')).toBe('2026-09-25'); // Fri → Fri
+    expect(hrWakeDate('departure', '2026-10-16')).toBe('2026-10-02');
+  });
+
+  test('leave: still the Monday of the week of the date', () => {
     expect(hrWakeDate('leave', '2026-11-16')).toBe('2026-11-16'); // Monday return
     expect(hrWakeDate('leave', '2026-11-18')).toBe('2026-11-16'); // Wed → Mon
-    expect(hrWakeDate('departure', '2026-10-11')).toBe('2026-10-05'); // Sun belongs to the week starting Mon 5th
   });
 
   test('transfer: 2 business days before the effective date', () => {
@@ -84,12 +87,10 @@ describe('hrWakeDate — lead time for HR parks (Vahid, 25 Sep 2026)', () => {
   });
 
   test('the business calendar decides: a holiday is skipped (Thanksgiving Mon 12 Oct 2026)', () => {
-    const isBusinessDay = (iso) => {
-      const d = new Date(`${iso}T00:00:00Z`).getUTCDay();
-      return d >= 1 && d <= 5 && iso !== '2026-10-12';
-    };
+    const holidays = new Set(['2026-10-12']);
+    const isBusinessDay = (iso) => { const d = new Date(`${iso}T00:00:00Z`).getUTCDay(); return d >= 1 && d <= 5 && !holidays.has(iso); };
     expect(hrWakeDate('transfer', '2026-10-14', { isBusinessDay })).toBe('2026-10-09'); // Wed → Tue 13, (Mon 12 holiday) Fri 9
-    expect(hrWakeDate('departure', '2026-10-16', { isBusinessDay })).toBe('2026-10-09'); // Monday 12 is a holiday → Friday before
+    expect(hrWakeDate('departure', '2026-10-26', { isBusinessDay })).toBe('2026-10-09'); // Mon − 14 = holiday Mon 12 → Friday before
   });
 
   test('other kinds keep their date', () => {

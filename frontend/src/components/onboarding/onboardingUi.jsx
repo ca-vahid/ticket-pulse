@@ -43,8 +43,8 @@ export function NoticePerson({ name, email = null, sub = null, size = 'h-8 w-8' 
 }
 
 /** The people holding a set of tickets: overlapping faces, then "+n". */
-export function AvatarStack({ people = [], max = 4 }) {
-  if (!people.length) return <span className="text-xs text-muted-foreground">Nobody yet</span>;
+export function AvatarStack({ people = [], max = 4, empty = 'Nobody yet' }) {
+  if (!people.length) return <span className="text-xs text-muted-foreground">{empty}</span>;
   const shown = people.slice(0, max);
   return (
     <span className="inline-flex items-center" title={people.map((p) => p.name).join(', ')}>

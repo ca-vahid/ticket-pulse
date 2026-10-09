@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.32-preview';
+export const APP_VERSION = '4.2.33-preview';
 
 export const changelog = [
+  {
+    version: '4.2.33-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Comings &amp; Goings: nobody is assigned until the work is due</strong> &mdash; child tickets for a start or a last day that is still weeks away now sleep with <em>no owner</em>. On the day they wake, Ticket Pulse picks the owner from who is here then: the people listed for that ticket (in turn), the office team for a new hire (one person for the hire), or the normal AI routing. A start-date change in the meantime moves everything quietly; nobody has to be told.' },
+      { type: 'improved', html: '<strong>Earlier wake-up</strong> &mdash; new-hire tickets wake 21 days before the start (was 14); departure tickets wake 14 days before the last day (was the Monday of that week). Work that is already inside that window is created awake and assigned at once, as before.' },
+      { type: 'improved', html: '<strong>No gaps</strong> &mdash; a ticket that wakes gets its due date back on the start or last day, a start more than six months away is parked again when its park runs out, and a ticket that is awake with no owner is picked up within minutes. &ldquo;Park until needed&rdquo; on a family puts existing tickets on the same footing.' },
+    ],
+  },
   {
     version: '4.2.32-preview',
     date: 'October 8, 2026',
