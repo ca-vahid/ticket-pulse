@@ -2,8 +2,14 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, UserRoundMinus, UserRoundPlus } from 'lucide-react';
 import { hrLifecycleAPI } from '../../services/api';
 import { ConfirmDialog, EmptyState, Loading } from '../knowledge/knowledgeUi';
-import { Person, SectionTitle, StatusDot, TicketRef } from './onboardingUi';
+import { AvatarStack, NoticePerson, Person, SectionTitle, StatusDot, TicketRef } from './onboardingUi';
 import { FAMILY_STATUS, KIND_LABEL, fmtDate, ticketTone } from './onboardingFormat';
+
+const KINDS = [
+  { id: 'all', label: 'Everyone' },
+  { id: 'onboarding', label: 'Onboarding' },
+  { id: 'offboarding', label: 'Offboarding' },
+];
 
 const FILTERS = [
   { id: 'open', label: 'Open' },
@@ -17,7 +23,7 @@ const FILTERS = [
  * arrived before Live). Organise takes in the tickets that already exist and
  * creates only the missing ones.
  */
-function NotOrganised({ onDone }) {
+function NotOrganised({ onDone, kind = 'all' }) {
   const [rows, setRows] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -50,10 +56,11 @@ function NotOrganised({ onDone }) {
     }
   };
 
-  if (!rows?.length && !message) return null;
+  const shown = (rows || []).filter((c) => kind === 'all' || c.kind === kind);
+  if (!shown.length && !message) return null;
   return (
     <section className="mb-6" aria-label="Not organised yet">
-      {rows?.length > 0 && (
+      {shown.length > 0 && (
         <SectionTitle hint="These notices arrived before Live. Organise takes in the tickets that already exist and creates only the missing ones.">
           Not organised yet
         </SectionTitle>
@@ -61,11 +68,11 @@ function NotOrganised({ onDone }) {
       {message && (
         <p role={message.ok ? 'status' : 'alert'} className={`mb-2 text-sm ${message.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{message.text}</p>
       )}
-      {rows?.length > 0 && (
+      {shown.length > 0 && (
         <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
-          {rows.map((c) => (
+          {shown.map((c) => (
             <li key={c.ticketId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-3 py-2.5 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
-              <Person name={c.personName} sub={`${KIND_LABEL[c.kind] || c.kind} · ${fmtDate(c.effectiveDate, { withYear: true })}${c.afterTheFact ? ' · after the fact' : ''}`} />
+              <NoticePerson name={c.personName} email={c.personEmail} sub={`${KIND_LABEL[c.kind] || c.kind} · ${fmtDate(c.effectiveDate, { withYear: true })}${c.afterTheFact ? ' · after the fact' : ''}`} />
               <span className="order-last col-span-2 min-w-0 text-xs text-muted-foreground md:order-none md:col-span-1">
                 <span className="block truncate">
                   Notice <TicketRef ticket={c.parent} />
@@ -134,7 +141,7 @@ function ShadowFamilyDetail({ family }) {
 }
 
 /** One family's members: the children, the linked NH tickets and the re-sent / change notices. */
-function FamilyDetail({ familyId, onChanged }) {
+function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
   const [family, setFamily] = useState(null);
   const [error, setError] = useState(null);
   const [confirm, setConfirm] = useState(false);
@@ -221,7 +228,7 @@ function FamilyDetail({ familyId, onChanged }) {
               <TicketRef ticket={m.ticket} className="mr-2" />
               {m.title || m.ticket?.subject}
             </span>
-            <span className="hidden sm:block"><Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl} size="h-5 w-5" /></span>
+            <span className="hidden sm:block"><Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl || techById.get(m.ticket?.assignee?.id)?.photoUrl || null} size="h-5 w-5" /></span>
             <span className="hidden text-xs text-muted-foreground sm:block">{m.ticket?.dueBy ? `Due ${fmtDate(m.ticket.dueBy)}` : 'No due date'}</span>
             <StatusDot tone={ticketTone(m.ticket?.status)} label={m.ticket?.status || '—'} />
           </li>
@@ -242,37 +249,53 @@ function FamilyDetail({ familyId, onChanged }) {
   );
 }
 
-export default function PeoplePanel({ mode = null }) {
+export default function PeoplePanel({ mode = null, techById = new Map() }) {
   const [filter, setFilter] = useState('open');
+  const [kind, setKind] = useState('all');
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
 
   const load = useCallback(() => {
     setError(null);
-    hrLifecycleAPI.families(filter === 'all' ? {} : { status: filter })
+    hrLifecycleAPI.families({ ...(filter === 'all' ? {} : { status: filter }), ...(kind === 'all' ? {} : { kind }) })
       .then((res) => setRows(Array.isArray(res?.data) ? res.data : []))
       .catch((err) => { setRows([]); setError(err?.message || 'Could not load people'); });
-  }, [filter]);
+  }, [filter, kind]);
   useEffect(() => { setRows(null); load(); }, [load]);
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-1" role="group" aria-label="Show families">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            aria-pressed={filter === f.id}
-            onClick={() => setFilter(f.id)}
-            className={`tp-focus-ring rounded-md px-2.5 py-1 text-sm ${filter === f.id ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex items-center gap-1" role="group" aria-label="Onboarding or offboarding">
+          {KINDS.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              aria-pressed={kind === k.id}
+              onClick={() => setKind(k.id)}
+              className={`tp-focus-ring rounded-md px-2.5 py-1 text-sm ${kind === k.id ? 'bg-primary/10 font-medium text-primary dark:bg-primary/20' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Show families">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              aria-pressed={filter === f.id}
+              onClick={() => setFilter(f.id)}
+              className={`tp-focus-ring rounded-md px-2.5 py-1 text-sm ${filter === f.id ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
       {error && <p className="mb-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
-      {mode === 'live' && (filter === 'open' || filter === 'all') && <NotOrganised onDone={load} />}
+      {mode === 'live' && (filter === 'open' || filter === 'all') && <NotOrganised onDone={load} kind={kind} />}
       {rows === null ? <Loading label="Loading people…" /> : !rows.length ? (
         <EmptyState icon={UserRoundPlus} title="No families here">
           A family appears when an HR departure or new-hire notice arrives. In Shadow it is listed
@@ -288,6 +311,7 @@ export default function PeoplePanel({ mode = null }) {
                 <th scope="col" className="hidden px-2 py-2 font-medium sm:table-cell">Type</th>
                 <th scope="col" className="px-2 py-2 font-medium">Date</th>
                 <th scope="col" className="hidden px-2 py-2 font-medium md:table-cell">Children</th>
+                <th scope="col" className="hidden px-2 py-2 font-medium lg:table-cell">With</th>
                 <th scope="col" className="px-2 py-2 font-medium">Status</th>
               </tr>
             </thead>
@@ -313,7 +337,7 @@ export default function PeoplePanel({ mode = null }) {
                           {open ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
                         </button>
                       </td>
-                      <td className="px-2 py-2"><Person name={f.personName} sub={f.office} /></td>
+                      <td className="px-2 py-2"><NoticePerson name={f.personName} email={f.personEmail} sub={f.office} /></td>
                       <td className="hidden px-2 py-2 sm:table-cell">
                         <span className="inline-flex items-center gap-1.5 text-foreground/85">
                           <KindIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
@@ -330,11 +354,16 @@ export default function PeoplePanel({ mode = null }) {
                           <span className="text-xs text-muted-foreground">{f.shadow ? `${f.progress.total} would be created` : `${f.progress.done}/${f.progress.total} closed`}{f.linked ? ` · ${f.linked} linked` : ''}</span>
                         </div>
                       </td>
+                      <td className="hidden px-2 py-2 lg:table-cell">
+                        {f.shadow ? <span className="text-xs text-muted-foreground">—</span> : (
+                          <AvatarStack people={(f.assignees || []).map((a) => ({ ...a, photoUrl: techById.get(a.id)?.photoUrl || null }))} />
+                        )}
+                      </td>
                       <td className="px-2 py-2"><StatusDot tone={status.tone} label={status.label} /></td>
                     </tr>
                     {open && (
                       <tr className="bg-muted/30">
-                        <td colSpan={6}>{f.shadow ? <ShadowFamilyDetail family={f} /> : <FamilyDetail familyId={f.id} onChanged={load} />}</td>
+                        <td colSpan={7}>{f.shadow ? <ShadowFamilyDetail family={f} /> : <FamilyDetail familyId={f.id} onChanged={load} techById={techById} />}</td>
                       </tr>
                     )}
                   </Fragment>

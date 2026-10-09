@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.30-preview';
+export const APP_VERSION = '4.2.31-preview';
 
 export const changelog = [
+  {
+    version: '4.2.31-preview',
+    date: 'October 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Comings &amp; Goings: faces and a switch</strong> &mdash; People now shows each person&rsquo;s photo where the directory has one, and a &ldquo;With&rdquo; column with the faces of whoever holds their tickets. A switch above the list shows everyone, only onboarding or only offboarding.' },
+      { type: 'improved', html: '<strong>New hires by office</strong> &mdash; Edmonton goes to the Calgary team, Kingston to Toronto, and Halifax has its own team. When everyone on an office&rsquo;s team is off that day, anyone else takes the new hire.' },
+      { type: 'fixed', html: '<strong>Reassign by office</strong> now hands a new hire to whoever holds the fewest open new-hire tickets, so one person no longer collects several in a row.' },
+    ],
+  },
   {
     version: '4.2.30-preview',
     date: 'October 8, 2026',
