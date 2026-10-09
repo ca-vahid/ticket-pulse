@@ -251,7 +251,7 @@ describe('new hires by office', () => {
 
   test('an open onboarding family offers "Reassign by office" and says what moved', async () => {
     api.families.mockResolvedValueOnce({ success: true, data: [{ id: 4, kind: 'onboarding', personName: 'Ann One', office: 'Vancouver', effectiveDate: '2026-11-02', afterTheFact: false, status: 'open', progress: { done: 0, total: 2 }, linked: 0, parent: { id: 77, ref: '#240100' } }] });
-    api.family.mockResolvedValueOnce({ success: true, data: { id: 4, kind: 'onboarding', status: 'open', afterTheFact: false, officeList: 'Vancouver and vicinity', parent: { id: 77, ref: '#240100' }, details: {}, members: [] } });
+    api.family.mockResolvedValueOnce({ success: true, data: { id: 4, kind: 'onboarding', status: 'open', afterTheFact: false, officeList: 'Vancouver and vicinity', parent: { id: 77, ref: '#240100' }, details: {}, members: [{ role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', status: 'Open', dueBy: null, parkedUntil: null, assignee: { id: 2, name: 'Muhammad Shahidullah' } } }] } });
     renderAt('/onboarding/people');
     fireEvent.click(await screen.findByRole('button', { name: /Show Ann One's tickets/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Reassign by office' }));
@@ -292,4 +292,14 @@ describe('parking a family', () => {
     await waitFor(() => expect(api.parkFamily).toHaveBeenCalledWith(4));
     expect(await screen.findByText('1 ticket sleeps until Oct 19, 2026 with no owner; the owner is chosen that day.')).toBeInTheDocument();
   });
+});
+
+test('a family whose open tickets are all asleep with no owner does not offer Reassign by office', async () => {
+  api.families.mockResolvedValueOnce({ success: true, data: [{ id: 4, kind: 'onboarding', personName: 'Ann One', office: 'Vancouver', effectiveDate: '2027-01-04', afterTheFact: false, status: 'open', progress: { done: 0, total: 1 }, linked: 0, parent: { id: 77, ref: '#240100' } }] });
+  api.family.mockResolvedValueOnce({ success: true, data: { id: 4, kind: 'onboarding', status: 'open', effectiveDate: '2027-01-04', afterTheFact: false, officeList: 'Vancouver', parent: { id: 77, ref: '#240100' }, details: {}, members: [{ role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', status: 'Pending', dueBy: null, parkedUntil: '2026-12-14T15:00:00Z', assignee: null } }] } });
+  renderAt('/onboarding/people');
+  fireEvent.click(await screen.findByRole('button', { name: /Show Ann One's tickets/ }));
+  expect(await screen.findByText('Assigned when it wakes')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Reassign by office' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Park until needed' })).not.toBeInTheDocument();
 });

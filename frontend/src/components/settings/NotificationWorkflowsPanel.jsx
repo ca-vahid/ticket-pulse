@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit';
 import MonacoEditor from '@monaco-editor/react';
 
 import {
+  MessagesSquare,
   ArrowUpDown,
   Activity,
   AlertCircle,
@@ -314,6 +315,16 @@ const WORKFLOW_NODE_REGISTRY = {
     outputHandles: ['default'],
     addable: true,
   },
+  // QA 10-08 #3: the Ticket Pulse bot messages IT team members in Teams.
+  send_teams_message: {
+    label: 'Send Teams message',
+    icon: MessagesSquare,
+    color: '#0f766e',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
   create_child_ticket: {
     label: 'Create child ticket',
     icon: Inbox,
@@ -441,6 +452,7 @@ const NODE_PALETTE_GROUPS = [
     label: 'Integrations',
     hints: {
       call_webhook: 'POST JSON to an external URL',
+      send_teams_message: 'Have the Ticket Pulse bot message people or a group in Teams',
       run_workflow: 'Run another workflow with this context',
     },
   },
@@ -2060,6 +2072,18 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
   if (type === 'delay') {
     return { label: 'Wait', minutes: 60 };
   }
+  if (type === 'send_teams_message') {
+    return {
+      label: 'Send Teams message',
+      people: [],
+      groups: [],
+      roles: ['ticket_group'],
+      titleTemplate: '{{ ticket.displayRef }}: {{ ticket.subject }}',
+      bodyTemplate: '',
+      includeTicketLink: true,
+      onError: 'continue',
+    };
+  }
   if (type === 'call_webhook') {
     return {
       label: 'Call webhook',
@@ -2364,9 +2388,9 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
   }
   // Mirrors the server rule: any ACTION node qualifies — a propose_reply-only
   // workflow (e.g. the AI first-reply template) is valid without a send node.
-  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'send_teams_message', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!nodes.some((node) => CLIENT_ACTION_NODE_TYPES.includes(node.type))) {
-    errors.push('Workflow must include at least one action node (send email, update ticket, add note, webhook, child ticket, approval, or stage-for-approval)');
+    errors.push('Workflow must include at least one action node (send email, update ticket, add note, webhook, Teams message, child ticket, approval, or stage-for-approval)');
   }
 
   for (const edge of edges) {
@@ -2718,6 +2742,104 @@ export function WebhookNodeEditor({ data = {}, onChange, variables = [] }) {
   );
 }
 
+/**
+ * send_teams_message (QA 10-08 #3): who the bot tells and what it says. People
+ * are e-mail addresses of IT team members; groups are internal groups; the two
+ * roles are read from the ticket when the step runs.
+ */
+export function TeamsMessageNodeEditor({ data = {}, onChange, variables = [], groups = [] }) {
+  const [search, setSearch] = useState('');
+  const bodyRef = useRef(null);
+  const [peopleText, setPeopleText] = useState(() => (data.people || []).join(', '));
+  const internalGroups = (groups || []).filter((g) => g.origin === 'local');
+  const roles = Array.isArray(data.roles) ? data.roles : [];
+  const chosenGroups = (Array.isArray(data.groups) ? data.groups : []).map(Number);
+  const toggle = (list, value) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  const insert = (token) => {
+    const value = String(data.bodyTemplate || '');
+    const el = bodyRef.current;
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? start;
+    onChange({ bodyTemplate: `${value.slice(0, start)}${token}${value.slice(end)}` });
+  };
+  const field = 'mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground';
+  return (
+    <div className="space-y-3" data-testid="teams-message-editor">
+      <fieldset>
+        <legend className="text-xs font-medium uppercase text-muted-foreground">Who to tell</legend>
+        <label className="mt-1.5 flex items-center gap-2 text-sm text-foreground">
+          <input type="checkbox" checked={roles.includes('ticket_group')} onChange={() => onChange({ roles: toggle(roles, 'ticket_group') })} />
+          Members of the ticket&rsquo;s group
+        </label>
+        <label className="mt-1 flex items-center gap-2 text-sm text-foreground">
+          <input type="checkbox" checked={roles.includes('assigned_agent')} onChange={() => onChange({ roles: toggle(roles, 'assigned_agent') })} />
+          The assigned agent
+        </label>
+        {internalGroups.length > 0 && (
+          <div className="mt-2">
+            <p className="text-xs text-muted-foreground">Members of these groups</p>
+            {internalGroups.map((g) => (
+              <label key={g.id} className="mt-1 flex items-center gap-2 text-sm text-foreground">
+                <input type="checkbox" checked={chosenGroups.includes(Number(g.id))} onChange={() => onChange({ groups: toggle(chosenGroups, Number(g.id)) })} />
+                {g.name}
+              </label>
+            ))}
+          </div>
+        )}
+        <label className="mt-2 block text-xs text-muted-foreground">
+          These people (e-mail addresses, separated by commas)
+          <input
+            value={peopleText}
+            onChange={(event) => {
+              setPeopleText(event.target.value);
+              onChange({ people: event.target.value.split(/[,;\s]+/).map((v) => v.trim().toLowerCase()).filter((v) => v.includes('@')) });
+            }}
+            placeholder="first.last@bgcengineering.ca, …"
+            aria-label="People to tell"
+            className={field}
+          />
+        </label>
+      </fieldset>
+      <label className="block text-xs font-medium uppercase text-muted-foreground">
+        Title
+        <input value={data.titleTemplate || ''} onChange={(event) => onChange({ titleTemplate: event.target.value })} aria-label="Teams message title" className={field} />
+      </label>
+      <label className="block text-xs font-medium uppercase text-muted-foreground">
+        Message
+        <textarea
+          ref={bodyRef}
+          value={data.bodyTemplate || ''}
+          onChange={(event) => onChange({ bodyTemplate: event.target.value })}
+          aria-label="Teams message"
+          spellCheck
+          lang="en-CA"
+          placeholder="Unassigned for {{ event.extra.thresholdHours }} hours. Requester: {{ requester.name }}."
+          className="mt-1 h-28 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
+        />
+      </label>
+      <div>
+        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Variables</p>
+        <VariablePicker variables={variables} search={search} onSearch={setSearch} onInsert={insert} activeTarget="teams-body" />
+      </div>
+      <label className="flex items-center gap-2 text-sm text-foreground">
+        <input type="checkbox" checked={data.includeTicketLink !== false} onChange={(event) => onChange({ includeTicketLink: event.target.checked })} />
+        Add a button that opens the ticket
+      </label>
+      <label className="block text-xs font-medium uppercase text-muted-foreground">
+        If nobody can be reached
+        <select value={data.onError || 'continue'} onChange={(event) => onChange({ onError: event.target.value })} className={field}>
+          <option value="continue">Continue the workflow</option>
+          <option value="fail">Fail the workflow</option>
+        </select>
+      </label>
+      <p className="text-[11px] text-muted-foreground/75">
+        Sent 1:1 by the Ticket Pulse bot. Only active team members of this workspace are messaged, Teams must be switched on for the
+        workspace (Settings → Teams), and one person gets one message per run. In Shadow nothing is sent; the run log says how many people it would tell.
+      </p>
+    </div>
+  );
+}
+
 export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workflowName = 'This workflow', onChange }) {
   const [variableSearch, setVariableSearch] = useState('');
   const [activeField, setActiveField] = useState(null); // 'title' | 'intro' | 'body'
@@ -2965,6 +3087,12 @@ function summarizePreviewStep(step) {
   if (step?.nodeType === 'template_render') return output.email?.subject || 'Template rendered';
   if (step?.nodeType === 'add_note') return output.summary || output.reason || 'Note added to the ticket';
   if (step?.nodeType === 'send_email') return output.reason || 'Email delivery simulated';
+  if (step?.nodeType === 'send_teams_message') {
+    if (output.failed) return output.error || 'Teams message could not be sent';
+    if (output.skipped) return output.reason || 'Teams message skipped';
+    if (output.dryRun) return `Would tell ${output.wouldSend?.recipients ?? 0} ${output.wouldSend?.recipients === 1 ? 'person' : 'people'} in Teams`;
+    return `Told ${output.sent ?? 0} of ${output.recipients ?? 0} in Teams${output.failedPeople ? ` (${output.failedPeople} could not be reached)` : ''}`;
+  }
   if (step?.nodeType === 'stop') return output.reason || 'Workflow stopped';
   return step?.status || 'Step completed';
 }
@@ -7995,6 +8123,8 @@ export default function NotificationWorkflowsPanel({
     editorProps: {
       attributes: {
         class: 'min-h-[260px] max-h-[420px] overflow-y-auto rounded-md border border-border bg-card px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-blue-500',
+        spellcheck: 'true',
+        lang: 'en-CA',
       },
     },
     onUpdate: ({ editor: activeEditor }) => {
@@ -8050,7 +8180,7 @@ export default function NotificationWorkflowsPanel({
     if (!selectedNode || ticketMeta) return;
     // recipient_resolver needs the internal-group list for the
     // "Internal group members" recipient (Phase RL, RL-6).
-    if (!['update_ticket', 'request_approval', 'recipient_resolver'].includes(selectedNode.type)) return;
+    if (!['update_ticket', 'request_approval', 'recipient_resolver', 'send_teams_message'].includes(selectedNode.type)) return;
     ticketsAPI.meta()
       .then((res) => setTicketMeta(res?.data || {}))
       .catch(() => setTicketMeta({ technicians: [], categoryTree: [], groups: [], approvalCategories: [] }));
@@ -10645,6 +10775,10 @@ export default function NotificationWorkflowsPanel({
 
     if (selectedNode.type === 'call_webhook') {
       return <WebhookNodeEditor data={selectedNode.data || {}} onChange={updateNodeData} variables={availableVariables} />;
+    }
+
+    if (selectedNode.type === 'send_teams_message') {
+      return <TeamsMessageNodeEditor key={selectedNode.id} data={selectedNode.data || {}} onChange={updateNodeData} variables={availableVariables} groups={ticketMeta?.groups || []} />;
     }
 
     if (selectedNode.type === 'park_ticket') {

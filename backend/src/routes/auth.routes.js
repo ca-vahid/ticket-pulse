@@ -11,6 +11,7 @@ import rateLimiter from '../services/apiRateLimitService.js';
 import { clientIp } from '../middleware/apiKeyAuth.js';
 import logger from '../utils/logger.js';
 import { recordSignIn } from '../services/usageStatsService.js';
+import { VIEW_AS_ROLES, VIEW_AS_ROLE_LABELS, cleanViewAs, currentViewAs } from '../services/viewAsContext.js';
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ const ENV_ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .map(e => e.trim().toLowerCase())
   .filter(Boolean);
 
-async function getAdminEmails() {
+export async function getAdminEmails() {
   try {
     const dbVal = await settingsRepository.get('admin_emails');
     if (dbVal && dbVal.trim()) {
@@ -106,7 +107,7 @@ function sanitizeAgentProfiles(profiles = []) {
   return profiles.map(sanitizeAgentProfile).filter(Boolean);
 }
 
-function buildTokenUser({ email, name, role, selectedWorkspaceId }) {
+function buildTokenUser({ email, name, role, selectedWorkspaceId, viewAs = null }) {
   const payload = {
     email,
     name,
@@ -116,22 +117,24 @@ function buildTokenUser({ email, name, role, selectedWorkspaceId }) {
   if (selectedWorkspaceId) {
     payload.selectedWorkspaceId = selectedWorkspaceId;
   }
+  const view = cleanViewAs(viewAs);
+  if (view) payload.viewAs = view;
   return payload;
 }
 
-function buildResponseUser({ email, name, role, selectedWorkspaceId, agentProfiles = [] }) {
+function buildResponseUser({ email, name, role, selectedWorkspaceId, agentProfiles = [], viewAs = null }) {
   const sanitizedAgentProfiles = sanitizeAgentProfiles(agentProfiles);
   return {
-    ...buildTokenUser({ email, name, role, selectedWorkspaceId }),
+    ...buildTokenUser({ email, name, role, selectedWorkspaceId, viewAs }),
     hasAgentProfile: sanitizedAgentProfiles.length > 0,
     agentProfile: sanitizedAgentProfiles[0] || null,
     agentProfiles: sanitizedAgentProfiles,
   };
 }
 
-function issueAuthToken({ email, name, role, selectedWorkspaceId }) {
+function issueAuthToken({ email, name, role, selectedWorkspaceId, viewAs = null }) {
   return jwt.sign(
-    buildTokenUser({ email, name, role, selectedWorkspaceId }),
+    buildTokenUser({ email, name, role, selectedWorkspaceId, viewAs }),
     config.session.secret,
     {
       algorithm: 'HS256',
@@ -175,7 +178,21 @@ function isLocalDevRequest(req) {
  *   workspaces (pure technicians keep the agent-portal UX — decision recorded
  *   in plans/MEGA_2026-08-15_PLAN.md Phase A1).
  */
-export async function resolveUserAccess(email, role) {
+export async function resolveUserAccess(email, role, viewAs = currentViewAs()) {
+  // "View as a role": exactly one workspace, with the role being tried on.
+  if (viewAs?.mode === 'role') {
+    const agentProfiles = await agentCompetencyService.getAgentProfiles(email);
+    if (viewAs.role === 'agent') {
+      const technician = (await workspaceRepository.getTechnicianWorkspaces(email)).filter((ws) => Number(ws.id) === Number(viewAs.workspaceId));
+      return { role: 'agent', availableWorkspaces: technician, agentProfiles };
+    }
+    const ws = (await workspaceRepository.getAll()).find((w) => Number(w.id) === Number(viewAs.workspaceId));
+    return {
+      role: 'viewer',
+      availableWorkspaces: ws ? [{ id: ws.id, name: ws.name, slug: ws.slug, role: viewAs.role, nativeTicketingEnabled: ws.nativeTicketingEnabled === true }] : [],
+      agentProfiles,
+    };
+  }
   if (role === 'admin') {
     const availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
       id: ws.id,
@@ -493,10 +510,20 @@ router.get(
       // role verbatim — the "stale-role trap". A DB hiccup keeps the session
       // values (refresh is best-effort, never a lockout).
       try {
-        const resolved = await resolveUserAccess(
-          String(req.session.user.email || '').toLowerCase(),
-          req.session.user.role,
-        );
+        const sessionEmail = String(req.session.user.email || '').toLowerCase();
+        const view = cleanViewAs(req.session.user.viewAs);
+        // The super-admin list is read live for real sign-ins (QA 10-08 #1):
+        // removing somebody from it used to leave their open session an admin
+        // for up to seven days. Dev-login roles and a role being tried on are
+        // left alone.
+        let baseRole = req.session.user.role;
+        if (req.session.user.authMethod === 'sso' && view?.mode !== 'role') {
+          const admins = await getAdminEmails();
+          if (admins.includes(sessionEmail)) baseRole = 'admin';
+          // An empty list means it could not be read: never demote on that.
+          else if (baseRole === 'admin' && admins.length) baseRole = 'viewer';
+        }
+        const resolved = await resolveUserAccess(sessionEmail, baseRole, view);
         const refreshedProfiles = sanitizeAgentProfiles(resolved.agentProfiles);
         req.session.user.role = resolved.role;
         req.session.user.availableWorkspaces = resolved.availableWorkspaces;
@@ -511,11 +538,13 @@ router.get(
       // lives in tab-scoped sessionStorage, so a brand-new tab arrives here
       // with the httpOnly cookie but NO token — without this, that tab could
       // never authenticate SSE/Bearer paths. Mirrors the /sso response shape.
+      const sessionView = cleanViewAs(req.session.user.viewAs);
       const authToken = issueAuthToken({
         email: req.session.user.email,
         name: req.session.user.name,
         role: req.session.user.role,
         selectedWorkspaceId: req.session.user.selectedWorkspaceId || null,
+        viewAs: sessionView,
       });
       return res.json({
         success: true,
@@ -525,6 +554,7 @@ router.get(
           name: req.session.user.name,
           username: req.session.user.username || req.session.user.name,
           role: req.session.user.role,
+          ...(sessionView ? { viewAs: sessionView } : {}),
           hasAgentProfile: sessionAgentProfiles.length > 0,
           agentProfile: sessionAgentProfiles[0] || null,
           agentProfiles: sessionAgentProfiles,
@@ -555,7 +585,7 @@ router.get(
           let role = decoded.role;
           if (email) {
             // Same merged-picker resolution as /sso and /dev-login (Phase A1).
-            const resolved = await resolveUserAccess(email, role);
+            const resolved = await resolveUserAccess(email, role, cleanViewAs(decoded.viewAs));
             role = resolved.role;
             decoded.role = role;
             availableWorkspaces = resolved.availableWorkspaces;
@@ -584,6 +614,7 @@ router.get(
               availableWorkspaces,
               selectedWorkspaceName,
               selectedWorkspaceSlug,
+              ...(cleanViewAs(decoded.viewAs) ? { viewAs: cleanViewAs(decoded.viewAs) } : {}),
             };
           }
         } catch (wsErr) {
@@ -595,6 +626,7 @@ router.get(
           role: decoded.role,
           selectedWorkspaceId: req.session?.user?.selectedWorkspaceId || selectedWorkspaceId,
           agentProfiles: req.session?.user?.agentProfiles || agentProfiles,
+          viewAs: decoded.viewAs,
         });
 
         return res.json({
@@ -617,5 +649,108 @@ router.get(
     });
   }),
 );
+
+// ---------------------------------------------------------------------------
+// View as (QA 10-08 #2) — see services/viewAsContext.js
+// ---------------------------------------------------------------------------
+
+/** Who is calling, by cookie session or by token (these routes sit before requireAuth). */
+function callerIdentity(req) {
+  if (req.session?.user?.email) return req.session.user;
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    try {
+      return jwt.verify(header.substring(7), config.session.secret, { algorithms: ['HS256'] });
+    } catch { /* not signed in */ }
+  }
+  return null;
+}
+
+function replyWithIdentity(req, res, next, { email, name, resolved, selectedWorkspaceId, viewAs, authMethod }) {
+  const ws = resolved.availableWorkspaces.find((w) => Number(w.id) === Number(selectedWorkspaceId)) || (resolved.availableWorkspaces.length === 1 ? resolved.availableWorkspaces[0] : null);
+  const profiles = sanitizeAgentProfiles(resolved.agentProfiles);
+  const user = {
+    email,
+    name,
+    username: name,
+    role: resolved.role,
+    loginTime: new Date().toISOString(),
+    authMethod,
+    availableWorkspaces: resolved.availableWorkspaces,
+    agentProfiles: profiles,
+    agentProfile: profiles[0] || null,
+    selectedWorkspaceId: ws?.id || null,
+    selectedWorkspaceName: ws?.name || null,
+    selectedWorkspaceSlug: ws?.slug || null,
+    ...(viewAs ? { viewAs } : {}),
+  };
+  const send = () => res.json({
+    success: true,
+    user: buildResponseUser({ email, name, role: resolved.role, selectedWorkspaceId: user.selectedWorkspaceId, agentProfiles: resolved.agentProfiles, viewAs }),
+    authToken: issueAuthToken({ email, name, role: resolved.role, selectedWorkspaceId: user.selectedWorkspaceId, viewAs }),
+    availableWorkspaces: resolved.availableWorkspaces,
+    selectedWorkspaceId: user.selectedWorkspaceId,
+    viewAs: viewAs || null,
+  });
+  if (!req.session) return send();
+  req.session.user = user;
+  // The page reloads right after this call: the session must be stored first.
+  return req.session.save((err) => (err ? next(err) : send()));
+}
+
+/**
+ * POST /api/auth/view-as  { mode: 'role', role, workspaceId } | { mode: 'person', email }
+ * Super admins only. The response carries a new token; the page reloads on it.
+ */
+router.post('/view-as', asyncHandler(async (req, res, next) => {
+  const me = callerIdentity(req);
+  if (!me?.email) throw new AuthenticationError('Authentication required');
+  const myEmail = String(me.email).toLowerCase();
+  const admins = await getAdminEmails();
+  const reallyAdmin = me.role === 'admin' && !me.viewAs && (admins.includes(myEmail) || me.authMethod === 'dev-bypass' || process.env.NODE_ENV !== 'production');
+  if (me.viewAs) return res.status(409).json({ success: false, code: 'view_as_active', message: 'Exit the current view first' });
+  if (!reallyAdmin) return res.status(403).json({ success: false, code: 'super_admin_required', message: 'Only a super admin can view Ticket Pulse as someone else' });
+
+  const mode = req.body?.mode;
+  const base = { by: myEmail, byName: me.name || me.username || myEmail, since: new Date().toISOString() };
+  if (mode === 'role') {
+    const role = String(req.body?.role || '');
+    const workspaceId = Number(req.body?.workspaceId);
+    if (!VIEW_AS_ROLES.includes(role)) throw new ValidationError(`role must be one of: ${VIEW_AS_ROLES.join(', ')}`);
+    const ws = Number.isInteger(workspaceId) ? (await workspaceRepository.getAll()).find((w) => Number(w.id) === workspaceId) : null;
+    if (!ws) throw new ValidationError('Pick a workspace to view');
+    const viewAs = cleanViewAs({ ...base, mode: 'role', role, workspaceId, label: `${VIEW_AS_ROLE_LABELS[role]} in ${ws.name}` });
+    const resolved = await resolveUserAccess(myEmail, 'viewer', viewAs);
+    if (!resolved.availableWorkspaces.length) {
+      throw new ValidationError(role === 'agent' ? `You have no technician profile in ${ws.name}, so there is no agent view of it for you — view as one of its agents instead` : 'That workspace is not available');
+    }
+    logger.info(`View as started: ${myEmail} → ${viewAs.label}`);
+    return replyWithIdentity(req, res, next, { email: myEmail, name: me.name || myEmail, resolved, selectedWorkspaceId: workspaceId, viewAs, authMethod: me.authMethod || 'sso' });
+  }
+  if (mode === 'person') {
+    const target = String(req.body?.email || '').trim().toLowerCase();
+    if (!target || !target.includes('@')) throw new ValidationError('Give the e-mail of the person to view as');
+    if (target === myEmail) throw new ValidationError('That is you — pick a role to try on instead');
+    const resolved = await resolveUserAccess(target, admins.includes(target) ? 'admin' : 'viewer', null);
+    if (!resolved.availableWorkspaces.length) throw new ValidationError(`${target} has no access to Ticket Pulse, so there is nothing to see as them`);
+    const name = resolved.agentProfiles?.[0]?.name || String(req.body?.name || '').trim().slice(0, 120) || target;
+    const viewAs = cleanViewAs({ ...base, mode: 'person', label: name });
+    logger.info(`View as started: ${myEmail} → ${target} (read-only)`);
+    return replyWithIdentity(req, res, next, { email: target, name, resolved, selectedWorkspaceId: me.selectedWorkspaceId, viewAs, authMethod: 'view-as' });
+  }
+  throw new ValidationError('mode must be "role" or "person"');
+}));
+
+/** DELETE /api/auth/view-as — back to yourself. */
+router.delete('/view-as', asyncHandler(async (req, res, next) => {
+  const me = callerIdentity(req);
+  const view = cleanViewAs(me?.viewAs);
+  if (!me?.email || !view) return res.status(409).json({ success: false, code: 'view_as_inactive', message: 'You are not viewing as anyone' });
+  const admins = await getAdminEmails();
+  const still = admins.includes(view.by) || process.env.NODE_ENV !== 'production';
+  const resolved = await resolveUserAccess(view.by, still ? 'admin' : 'viewer', null);
+  logger.info(`View as ended: ${view.by} ← ${view.label}`);
+  return replyWithIdentity(req, res, next, { email: view.by, name: view.byName || view.by, resolved, selectedWorkspaceId: me.selectedWorkspaceId, viewAs: null, authMethod: 'sso' });
+}));
 
 export default router;

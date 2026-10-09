@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
+import { roleOverrideForRequest } from './viewAsContext.js';
 
 /**
  * Merge access-row workspaces with technician workspaces, deduped by id.
@@ -223,6 +224,9 @@ class WorkspaceRepository {
    * ('viewer'|'admin') or null if no access.
    */
   async getAccessRole(email, workspaceId) {
+    // "View as a role": the role being tried on, for the viewer in this request only.
+    const tried = roleOverrideForRequest(email, workspaceId);
+    if (tried !== undefined) return tried;
     try {
       const record = await prisma.workspaceAccess.findUnique({
         where: { email_workspaceId: { email: email.toLowerCase(), workspaceId } },

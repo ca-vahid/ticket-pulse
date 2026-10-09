@@ -313,6 +313,10 @@ export const authAPI = {
   checkSession: async () => {
     return await api.get('/auth/session');
   },
+
+  // View as (super admins): { mode: 'role', role, workspaceId } | { mode: 'person', email }.
+  viewAs: async (body) => api.post('/auth/view-as', body),
+  exitViewAs: async () => api.delete('/auth/view-as'),
 };
 
 /**

@@ -316,6 +316,7 @@ router.post(
         username: user.username || user.name,
         role: effectiveRole,
         selectedWorkspaceId: ws.id,
+        ...(user.viewAs ? { viewAs: user.viewAs } : {}),
       },
       config.session.secret,
       { algorithm: 'HS256', expiresIn: config.session.jwtExpiresIn },
@@ -403,7 +404,17 @@ router.get(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const members = await workspaceRepository.getWorkspaceMembers(req.workspaceId);
-    res.json({ success: true, data: members });
+    // A super admin sees everything whatever this list says: mark them so the
+    // page can say so instead of offering a role that changes nothing.
+    let superAdmins = new Set();
+    try {
+      const auth = await import('./auth.routes.js');
+      superAdmins = new Set(await auth.getAdminEmails());
+    } catch { /* the list is a hint for the page, never a reason to fail it */ }
+    const flagged = Array.isArray(members)
+      ? members.map((m) => ({ ...m, isSuperAdmin: superAdmins.has(String(m?.email || '').toLowerCase()) }))
+      : members;
+    res.json({ success: true, data: flagged });
   }),
 );
 

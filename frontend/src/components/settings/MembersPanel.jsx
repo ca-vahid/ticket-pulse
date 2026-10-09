@@ -231,6 +231,8 @@ export default function MembersPanel() {
   // App-access map (QA 08-19 #1): lowercased email → 'viewer'|'reviewer'|'admin'.
   // null = not loaded / not permitted → the column stays hidden.
   const [accessByEmail, setAccessByEmail] = useState(null);
+  // Super admins see everything whatever their role here says (QA 10-08 #1).
+  const [superAdmins, setSuperAdmins] = useState(() => new Set());
   const [accessBusyEmail, setAccessBusyEmail] = useState(null);
   const [appOnly, setAppOnly] = useState([]);
   // Unified roster (v3.8.94): the single "Add a person" box adds a local
@@ -263,7 +265,9 @@ export default function MembersPanel() {
       const res = await workspaceAPI.getMembers(wsId);
       const map = {};
       const appOnlyRows = [];
+      const supers = new Set();
       for (const m of res?.data || []) {
+        if (m.email && m.isSuperAdmin) supers.add(String(m.email).toLowerCase());
         if (m.email && m.accessRole) map[String(m.email).toLowerCase()] = m.accessRole;
         // App-only people (Sep 2026 merge): grants with no technician row —
         // observers, execs, service accounts. This replaces the separate
@@ -271,6 +275,7 @@ export default function MembersPanel() {
         if (m.email && m.accessRole && !m.technicianId) appOnlyRows.push(m);
       }
       setAccessByEmail(map);
+      setSuperAdmins(supers);
       setAppOnly(appOnlyRows.sort((a, b) => String(a.email).localeCompare(String(b.email))));
     } catch {
       setAccessByEmail(null);
@@ -397,7 +402,10 @@ export default function MembersPanel() {
     try {
       if (newRole) {
         await workspaceAPI.grantAccess(wsId, email, newRole);
-        flash(`${t.name} can now sign in as ${ACCESS_OPTIONS.find((o) => o.value === newRole)?.label || newRole} — it applies on their next page load.`);
+        const label = ACCESS_OPTIONS.find((o) => o.value === newRole)?.label || newRole;
+        flash(superAdmins.has(email)
+          ? `${t.name} is a super admin, so ${label} changes nothing for them: a super admin sees everything. Remove them under Settings → Super admins for this role to apply — or use View as in the profile menu to see what ${label} sees.`
+          : `${t.name} can now sign in as ${label} — it applies on their next page load.`);
       } else {
         await workspaceAPI.revokeAccess(wsId, email);
         flash(`App access removed for ${t.name}.`);
@@ -415,7 +423,7 @@ export default function MembersPanel() {
     } finally {
       setAccessBusyEmail(null);
     }
-  }, [wsId, accessByEmail, loadAccess]);
+  }, [wsId, accessByEmail, loadAccess, superAdmins]);
 
   // AI routing guidance (QA 07-14): a standing instruction the assignment AI
   // reads whenever this person is a candidate — e.g. reduced capacity.
@@ -543,11 +551,19 @@ export default function MembersPanel() {
               ))}
             </select>
             {busy && <Loader className="w-3.5 h-3.5 text-blue-500 animate-spin" aria-hidden="true" />}
+            {superAdmins.has(email) && (
+              <span
+                className="whitespace-nowrap text-xs font-medium text-amber-700 dark:text-amber-300"
+                title="A super admin sees every workspace and every setting. The role on the left is stored but not applied while they are a super admin (Settings → Super admins)."
+              >
+                Super admin · role not applied
+              </span>
+            )}
           </div>
         );
       },
     })] : []),
-  ], [accessByEmail, accessBusyEmail, isGlobalAdmin, changeAccess]);
+  ], [accessByEmail, accessBusyEmail, isGlobalAdmin, changeAccess, superAdmins]);
 
   const table = useReactTable({
     data: rows,

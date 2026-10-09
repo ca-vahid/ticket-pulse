@@ -173,6 +173,8 @@ export default function AutoHelpSuggestion({ proposal, onSend, onDismiss }) {
               aria-multiline="true"
               aria-label="Edit the answer"
               contentEditable
+              spellCheck
+              lang="en-CA"
               suppressContentEditableWarning
               className="tp-focus-ring min-h-[6rem] rounded-md px-1 py-0.5 outline-none ring-1 ring-primary/30 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5"
               data-testid="auto-help-editor"

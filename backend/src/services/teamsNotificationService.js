@@ -270,6 +270,59 @@ class TeamsNotificationService {
     return activityId;
   }
 
+  /**
+   * A message a Mail Workflow asked for (send_teams_message, QA 10-08 #3).
+   * Rules: the bot must be configured, Teams must be ON for the workspace,
+   * only ACTIVE technicians of that workspace are messaged (nobody else ever
+   * gets the app installed by a workflow), and one person gets one message per
+   * workflow step (refKey). Personal mutes and quiet hours are for ticket
+   * notifications a person tunes; an alert an admin configured is delivered.
+   * @returns {{ sent, skipped, failed, firstError?, off? }}
+   */
+  async sendWorkflowMessage({ workspaceId, emails = [], title, body, ticketId = null, ticketRef = null, includeTicketLink = true, refKey = null } = {}) {
+    const out = { sent: 0, skipped: 0, failed: 0, firstError: null, off: null };
+    if (!bot.isTeamsConfigured()) { out.off = 'The Teams bot is not configured on this server'; return out; }
+    const settings = await this.workspaceSettings(workspaceId);
+    if (!settings.teamsEnabled) { out.off = 'Teams is switched off for this workspace (Settings → Teams)'; return out; }
+    const wanted = [...new Set(emails.map((e) => lc(e)).filter(Boolean))];
+    const techs = wanted.length ? await prisma.technician.findMany({
+      where: { workspaceId: Number(workspaceId), isActive: true, OR: wanted.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) },
+      select: { id: true, email: true },
+      take: 100,
+    }).catch(() => []) : [];
+    const techByEmail = new Map(techs.map((t) => [lc(t.email), t]));
+    const heading = String(title || 'Ticket Pulse').slice(0, 150);
+    const lines = textToCardMarkdown(String(body || '')).split(/\n{2,}/).map((l) => l.trim()).filter(Boolean).slice(0, 12);
+    const actions = includeTicketLink && ticketId ? [{ type: 'Action.OpenUrl', title: ticketRef ? `Open ${ticketRef}` : 'Open the ticket', url: this._ticketUrl(ticketId) }] : [];
+    const card = textCard(heading, lines.length ? lines : [String(body || '').slice(0, 1000)], actions, { icon: '🔔', word: 'Workflow' });
+    const preview = String(body || '').replace(/[*_#[\]()]/g, '').replace(/\s+/g, ' ').slice(0, 150);
+    for (const email of wanted) {
+      const tech = techByEmail.get(email);
+      const base = { workspaceId: Number(workspaceId), email, technicianId: tech?.id || null, ticketId, eventKey: 'workflow', summary: heading };
+      if (!tech) { out.skipped += 1; await this._record({ ...base, status: 'skipped', reason: 'not_a_team_member' }); continue; }
+      if (refKey) {
+        const already = await prisma.teamsDelivery.findFirst({ where: { email, eventKey: 'workflow', status: 'sent', reason: String(refKey).slice(0, 120) }, select: { id: true } }).catch(() => null);
+        if (already) { out.skipped += 1; continue; }
+      }
+      try {
+        const activityId = await this._send(tech.email, card, {
+          summary: heading, workspaceId: Number(workspaceId), technicianId: tech.id, ticketId, eventKey: 'workflow', refKey,
+          bell: { title: heading, preview, ...(ticketId ? { webUrl: this._ticketUrl(ticketId) } : {}) },
+        });
+        if (activityId === null) out.skipped += 1; // disconnected by an admin — _send recorded it
+        else out.sent += 1;
+      } catch (err) {
+        out.failed += 1;
+        // Never an address in what goes back to the run log.
+        const why = String(err.message || 'send failed').replace(/[\w.+-]+@[\w.-]+/g, 'a person').slice(0, 200);
+        if (!out.firstError) out.firstError = why;
+        logger.warn(`Teams workflow message to ${email} failed: ${err.message}`);
+        await this._record({ ...base, status: 'failed', reason: why.slice(0, 120) });
+      }
+    }
+    return out;
+  }
+
   async _record(data) {
     await prisma.teamsDelivery.create({ data: { ...data, email: lc(data.email), summary: data.summary ? String(data.summary).slice(0, 500) : null } }).catch(() => {});
   }

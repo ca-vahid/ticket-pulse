@@ -321,6 +321,36 @@ export const WORKFLOW_TEMPLATES = [
   // an email can be sent to the same email thread as the Ticket Received
   // email chain". The reply keeps the ticket's subject, so it threads into
   // that chain in the requester's mailbox.
+  // QA 10-08 #3: the same trigger, but the team is told in Teams instead of the
+  // requester by e-mail. Installs with nobody to tell: pick people or a group
+  // on the Teams step before it can be published.
+  {
+    key: 'unassigned_teams_alert',
+    name: 'Nobody picked this up: tell the team in Teams',
+    description: 'When a ticket has sat with nobody assigned for a few hours, the Ticket Pulse bot messages the people or the group you choose in Microsoft Teams, with a link to the ticket. Set the hours on the trigger and who to tell on the Teams step. Teams must be switched on for the workspace.',
+    triggerType: 'ticket.unassigned_for',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.unassigned_for', unassignedHours: 4 } },
+      {
+        id: 'teams',
+        type: 'send_teams_message',
+        data: {
+          label: 'Tell the team in Teams',
+          people: [],
+          groups: [],
+          roles: ['ticket_group'],
+          titleTemplate: 'Nobody has picked up {{ ticket.displayRef }}',
+          bodyTemplate: '**{{ ticket.subject }}**\n\nUnassigned for {{ event.extra.thresholdHours }} hours. Requester: {{ requester.name }}.',
+          includeTicketLink: true,
+          onError: 'continue',
+        },
+      },
+      { id: 'stop', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'teams' },
+      { id: 'e2', source: 'teams', target: 'stop' },
+    ]),
+  },
   {
     key: 'unassigned_chase',
     name: 'Nobody picked this up (unassigned for N hours)',
@@ -875,6 +905,13 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
     inputHandles: ['default'],
     outputHandles: ['default'],
   },
+  // QA 10-08 #3: a message from the Ticket Pulse Teams bot to IT team members.
+  send_teams_message: {
+    label: 'Send Teams message',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
   create_child_ticket: {
     label: 'Create child ticket',
     terminal: false,
@@ -969,6 +1006,11 @@ const TEMPLATE_CONTENT_SOURCES = new Set([
   'llm_only',
   'advanced_liquid',
 ]);
+
+// send_teams_message node vocabulary (QA 10-08 #3). Roles are resolved from the
+// ticket at run time; people are e-mail addresses; groups are internal groups.
+export const TEAMS_MESSAGE_ROLES = Object.freeze(['assigned_agent', 'ticket_group']);
+export const TEAMS_MESSAGE_MAX_PEOPLE = 25;
 
 // add_note node vocabulary (Custom Fields Activation Phase 1). Accents map to
 // the frontend FieldCardNote's tp palette tokens; caps are enforced again at
@@ -1122,7 +1164,7 @@ function validateGraph(definition, triggerType) {
 
   // Keep in sync with the client mirror in NotificationWorkflowsPanel.jsx
   // (the builder repeats this "at least one action" check for save-time UX).
-  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'send_teams_message', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
     errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
@@ -1221,6 +1263,23 @@ function validateGraph(definition, triggerType) {
       // time (and errors into the step output when the ticket has none).
     }
 
+    if (node.type === 'send_teams_message' && reachable.has(node.id)) {
+      if (typeof node.data?.bodyTemplate !== 'string' || !node.data.bodyTemplate.trim()) {
+        errors.push(`Teams message node ${node.id} needs a message`);
+      }
+      const people = (Array.isArray(node.data?.people) ? node.data.people : []).filter((e) => String(e || '').includes('@'));
+      const groups = (Array.isArray(node.data?.groups) ? node.data.groups : []).filter((g) => Number(g) > 0);
+      const roles = (Array.isArray(node.data?.roles) ? node.data.roles : []).filter((r) => TEAMS_MESSAGE_ROLES.includes(r));
+      if (people.length + groups.length + roles.length === 0) {
+        errors.push(`Teams message node ${node.id} needs somebody to tell: people, a group, the assignee or the ticket's group`);
+      }
+      if (people.length > TEAMS_MESSAGE_MAX_PEOPLE) {
+        errors.push(`Teams message node ${node.id} lists too many people (max ${TEAMS_MESSAGE_MAX_PEOPLE})`);
+      }
+      if (node.data?.onError !== undefined && node.data?.onError !== null && !['continue', 'fail'].includes(node.data.onError)) {
+        errors.push(`Teams message node ${node.id} onError must be continue or fail`);
+      }
+    }
     if (node.type === 'add_note' && reachable.has(node.id)) {
       const mode = node.data?.mode;
       if (!ADD_NOTE_MODES.includes(mode)) {

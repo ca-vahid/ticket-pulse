@@ -81,7 +81,7 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin', group: 'Sync & Data' },
   { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin', group: 'Sync & Data' },
   // Workspace
-  { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global', group: 'Workspace' },
+  { id: 'admins', label: 'Super admins', Icon: Shield, minRole: 'global', group: 'Workspace' },
   { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global', group: 'Workspace' },
   { id: 'site-stats', label: 'Site stats', Icon: LineChart, minRole: 'global', group: 'Workspace' },
   // Was viewer-tier: a dead form for non-admins (PUT /settings is admin-only).
