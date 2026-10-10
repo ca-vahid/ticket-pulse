@@ -148,6 +148,11 @@ export function isGroupMembershipRejection(err) {
 // once after a restart), so adding the person to the FS group heals the copy
 // by itself without a refused round trip on every sync in between.
 const GROUP_REFUSAL_RETRY_MS = 6 * 60 * 60 * 1000;
+// "Other teams" people (assignable-only: Coreshack) own TP-born tickets too.
+// The copy is moved to their own FreshService group so the assignee can be
+// copied; remembered per ticket+assignee so later syncs do not move it back
+// and get refused again (9 Oct 2026, TP-1739).
+const homeGroupFor = new Map(); // `${ticketId}:${techId}` -> FS group id
 const groupRefusalAsked = new Map();
 
 /** The note _mirrorFields leaves on a ticket when FS refuses its assignee for the copy's group. */
@@ -517,7 +522,7 @@ class MirrorService {
       include: {
         workspace: true,
         requester: true,
-        assignedTech: { select: { id: true, name: true, freshserviceId: true } },
+        assignedTech: { select: { id: true, name: true, freshserviceId: true, assignableOnly: true } },
         internalCategory: { select: { name: true } },
         internalSubcategory: { select: { name: true } },
       },
@@ -868,6 +873,7 @@ class MirrorService {
     // (26 Sep: 19 refused round trips an hour on four Sentinel tickets). A new
     // assignee, or the note cleared by a later successful sync, asks again.
     const refusalKey = `${ticket.id}:${ticket.assignedTech?.id ?? ''}`;
+    if (payload.responder_id && homeGroupFor.has(refusalKey)) payload.group_id = homeGroupFor.get(refusalKey);
     const lastAsked = groupRefusalAsked.get(refusalKey) || 0;
     if (payload.responder_id && ticket.assignedTech && ticket.mirrorError === groupRefusalNote(ticket.assignedTech.name)
       && Date.now() - lastAsked < GROUP_REFUSAL_RETRY_MS) {
@@ -892,6 +898,8 @@ class MirrorService {
         if (!departmentId) throw err;
         logger.warn(`Mirror: FreshService requires a department on #${ticket.freshserviceTicketId} — re-sending the field sync with department ${departmentId}`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, department_id: Number(departmentId) });
+      } else if (payload.responder_id && isGroupMembershipRejection(err) && await this._moveCopyToHomeGroup(client, ticket, payload, refusalKey)) {
+        // moved to the assignee's own group and synced, assignee included
       } else if (payload.responder_id && isGroupMembershipRejection(err)) {
         if (groupRefusalAsked.size >= 1000) groupRefusalAsked.clear(); // bounded (Jul 9 leak lesson)
         groupRefusalAsked.set(`${ticket.id}:${ticket.assignedTech?.id ?? ''}`, Date.now());
@@ -911,6 +919,36 @@ class MirrorService {
       data: { mirrorState: 'mirrored', mirroredAt: new Date(), mirrorError: assigneeNote },
     });
     this._broadcast(ticket, 'mirror');
+  }
+
+  /**
+   * FreshService refused the assignee for the copy's group. For an "other
+   * teams" person, re-send the field sync with their own group (the same
+   * rule the FS-born write-back follows). The Ticket Pulse ticket keeps its
+   * group; only the copy moves. False when there is nothing to move to or
+   * FreshService still refuses.
+   */
+  async _moveCopyToHomeGroup(client, ticket, payload, key) {
+    const tech = ticket.assignedTech;
+    if (!tech?.assignableOnly || !tech.freshserviceId) return false;
+    try {
+      const { getFsGroups } = await import('./fsHomeGroupService.js');
+      const groups = await getFsGroups(ticket.workspaceId, client);
+      const agent = String(tech.freshserviceId);
+      const mine = (Array.isArray(groups) ? groups : []).filter((g) => g.members.has(agent) && g.active);
+      if (mine.length === 0) return false;
+      mine.sort((a, b) => a.members.size - b.members.size || a.name.localeCompare(b.name));
+      const home = mine[0];
+      if (payload.group_id && String(payload.group_id) === home.fsId) return false;
+      await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, group_id: Number(home.fsId) });
+      if (homeGroupFor.size >= 1000) homeGroupFor.clear();
+      homeGroupFor.set(key, Number(home.fsId));
+      logger.info(`Mirror: moved the FreshService copy #${ticket.freshserviceTicketId} to group "${home.name}" so ${tech.name} could be copied as the assignee`);
+      return true;
+    } catch (err) {
+      logger.warn(`Mirror: could not move #${ticket.freshserviceTicketId} to the assignee's own group (${err.message})`);
+      return false;
+    }
   }
 
   /** Mirror-prefixed FS body for a thread entry (create AND edit reuse this). */

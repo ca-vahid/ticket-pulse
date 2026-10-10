@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.34-preview';
+export const APP_VERSION = '4.2.35-preview';
 
 export const changelog = [
+  {
+    version: '4.2.35-preview',
+    date: 'October 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Comings &amp; Goings: no second ticket for the same new-hire work</strong> &mdash; the account script still files its own &ldquo;NH Laptop&rdquo; and &ldquo;NH Workstation&rdquo; tickets when it creates a new user. When the onboarding family already has that Laptop or Workstation ticket, the script ticket is now closed as a duplicate the moment it arrives, before it is routed to a second person, with a note on each ticket pointing at the other. The account details stay on the script ticket. A script ticket that somebody already holds is linked and left alone. This is a stop-gap until the script stops filing tickets.' },
+      { type: 'fixed', html: '<strong>Other-teams assignees now reach the FreshService copy of a Ticket Pulse ticket</strong> &mdash; assigning a ticket created in Ticket Pulse to someone outside the IT groups (the Coreshack people) left the FreshService copy with its previous assignee, because FreshService refuses an assignee who is not in the ticket&rsquo;s group. The copy is now moved to that person&rsquo;s own FreshService group, as already happened for tickets that started in FreshService. The ticket&rsquo;s group in Ticket Pulse is unchanged, and IT assignments never change a group.' },
+    ],
+  },
   {
     version: '4.2.34-preview',
     date: 'October 8, 2026',
