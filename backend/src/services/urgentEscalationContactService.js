@@ -102,6 +102,36 @@ function fallbackFromLegacy(policy, showPhone) {
   };
 }
 
+/**
+ * The on-call person of the Urgent response rotation (Settings → Urgent
+ * Response → On-call), which follows the handover time and the covers. Null
+ * when no order is saved there, or on any failure — the caller then keeps the
+ * legacy weekly rotation. Imported lazily: the on-call service is newer than
+ * this file and must never be able to break the requester's e-mail.
+ */
+async function onCallRotationRow(workspaceId, at, byTechnicianId) {
+  try {
+    const { default: onCallService } = await import('./urgentResponse/onCallService.js');
+    const current = await onCallService.current(workspaceId, at);
+    if (!current?.configured || !current.technician?.id) return null;
+    const id = current.technician.id;
+    let row = byTechnicianId.get(id) || null;
+    if (!row) {
+      // On call but not on the escalation roster: read the person (never the photo).
+      const technician = await prisma.technician.findFirst({
+        where: { id, workspaceId, isActive: true },
+        select: { id: true, name: true, email: true, notificationPreference: true },
+      });
+      row = technician ? { technicianId: id, technician } : null;
+    }
+    if (!row) return null;
+    const label = current.cover && current.scheduled?.name ? `On call (covering for ${current.scheduled.name})` : 'On call this week';
+    return { row, label };
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveAfterHoursActiveContact(workspaceId, options = {}) {
   const numericWorkspaceId = Number(workspaceId);
   if (!numericWorkspaceId) {
@@ -161,7 +191,13 @@ export async function resolveAfterHoursActiveContact(workspaceId, options = {}) 
   const mode = normalizeAfterHoursContactMode(policy.afterHoursContactMode);
   let selected = null;
 
-  if (mode === 'weekly_rotation') {
+  const onCall = mode === 'weekly_rotation'
+    ? await onCallRotationRow(numericWorkspaceId, Number.isNaN(at.getTime()) ? new Date() : at, byTechnicianId)
+    : null;
+
+  if (onCall) {
+    selected = contactFromRow(onCall.row, 'weekly_rotation', onCall.label, showPhone);
+  } else if (mode === 'weekly_rotation') {
     const rotationOrder = normalizeRotationOrder(policy.afterHoursRotationOrder).filter((id) => byTechnicianId.has(id));
     const effectiveOrder = rotationOrder.length ? rotationOrder : rows.map((row) => row.technicianId);
     if (effectiveOrder.length) {

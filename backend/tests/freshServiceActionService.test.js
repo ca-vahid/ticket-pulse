@@ -134,6 +134,28 @@ describe('freshServiceActionService workspace-scoped category writeback', () => 
     expect(prismaMock.workspace.findUnique).not.toHaveBeenCalled();
   });
 
+  // Urgent response, layer 1: the guard replaced the AI's pick. The assign
+  // action and the note follow the run row, not the ranked recommendation.
+  test('names the person actually assigned when the urgent rule redirected the run', async () => {
+    prismaMock.technician.findUnique.mockResolvedValue({ freshserviceId: 9022, name: 'Maria Lee', email: 'mlee@example.com' });
+    const sentence = 'Assigned to Maria Lee instead of Zoe Dio by the Urgent rule: Zoe starts at 09:00.';
+    const result = await freshServiceActionService.buildAction(run({
+      decision: 'auto_assigned',
+      assignedTechId: 22,
+      decisionNote: sentence,
+    }));
+
+    expect(prismaMock.technician.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 22 } }));
+    expect(result.actions.find((action) => action.type === 'assign')).toMatchObject({ techId: 22, techName: 'Maria Lee', agentId: 9022 });
+    const note = result.actions.find((action) => action.type === 'note');
+    expect(note.body).toContain('<b>Assigned to:</b> Maria Lee<br>');
+    expect(note.body).toContain(`<b>Urgent rule:</b> ${sentence}<br>`);
+
+    // An ordinary auto-assignment has no such line.
+    const plain = await freshServiceActionService.buildAction(run({ decision: 'auto_assigned' }));
+    expect(plain.actions.find((action) => action.type === 'note').body).not.toContain('Urgent rule');
+  });
+
   test('keeps canonical category writeback for the IT skill hierarchy workspace', async () => {
     const result = await freshServiceActionService.buildAction(run({
       workspaceId: 1,

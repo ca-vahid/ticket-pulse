@@ -1,6 +1,20 @@
-export const APP_VERSION = '4.2.36-preview';
+export const APP_VERSION = '4.2.37-preview';
 
 export const changelog = [
+  {
+    version: '4.2.37-preview',
+    date: 'October 10, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Urgent response</strong> &mdash; a new set of fixed rules so an urgent ticket always has an owner who is at work, and somebody touches it within a set time. Three steps, each with its own switch: when assigning, the AI never gives an Urgent or High ticket to someone who is not at work; when a ticket becomes Urgent and its owner is away, it moves to someone at work straight away; and if nobody touches an Urgent ticket, the people at work are told after 15 minutes and it moves after 30. No AI is involved in these decisions. Off in every workspace; IT starts in Shadow, where everything is worked out and recorded but no ticket moves and nobody is told.' },
+      { type: 'added', html: '<strong>Settings &rarr; Urgent Response</strong> &mdash; one page per workspace, for admins. <em>Rules</em> shows the three steps left to right with their priorities and minutes, who is told (Teams, e-mail or both), what happens when nobody is at work, and a line estimating what the last 30 days would have looked like with the settings on screen. <em>Log</em> lists every action with the reason in one sentence, 30-day counts, and an Undo on each move. Every settings change is recorded with who made it. The old Urgent Escalation settings are the fourth tab, <em>Requester escalation</em>.' },
+      { type: 'added', html: '<strong>How the next owner is picked</strong> &mdash; always in the same order: at work now and not on leave, has the skill for the ticket&rsquo;s category, fewest open tickets, least recently given a ticket. The same sentence that explains a move appears on the ticket&rsquo;s Activity, in the Log and in the notices.' },
+      { type: 'added', html: '<strong>On-call rotation with cover</strong> &mdash; Settings &rarr; Urgent Response &rarr; On-call holds the weekly order, the handover day and time (Monday 5:00 p.m. by default) and the next eight weeks. When the on-call person is on leave the week says &ldquo;Needs cover&rdquo; and is never skipped automatically: an admin sets a cover for the week or part of it, or asks the others in the rotation, and the first to accept takes it. The long-term order does not change.' },
+      { type: 'added', html: '<strong>On-call page</strong> &mdash; everyone, agents included, has a new On-call page with who is on call now, the next eight weeks, their own weeks and any cover request sent to them, with <em>Take it</em> and <em>Not this time</em>. A cover request also shows as a small prompt in the corner of the app and arrives by Teams and e-mail.' },
+      { type: 'added', html: '<strong>Urgent clock on the ticket</strong> &mdash; while the clock is running in a Live workspace, the ticket shows one line under its title, such as &ldquo;Urgent: untouched for about 12 min. The team is told at 15 min; it moves at 30 min.&rdquo; Any reply, note or change by an agent stops it; nothing the requester does counts.' },
+      { type: 'added', html: '<strong>Weekly summary and analytics</strong> &mdash; workspace admins get a short Monday e-mail with what Urgent response did the week before (or would have done, in Shadow), and Analytics &rarr; Automation Ops has an Urgent response panel with the counts per step. No per-person numbers.' },
+      { type: 'improved', html: '<strong>Requester&rsquo;s after-hours contact follows the on-call rotation</strong> &mdash; when the weekly rotation is set up on the new On-call tab, the after-hours contact shown to requesters uses it, including the handover time and any cover.' },
+    ],
+  },
   {
     version: '4.2.36-preview',
     date: 'October 9, 2026',

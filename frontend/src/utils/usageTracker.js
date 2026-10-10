@@ -35,6 +35,7 @@ export const TRACKED_ROUTES = [
   { path: '/onboarding', key: 'onboarding', label: 'Onboarding' },
   { path: '/availability/:tab', key: 'availability', label: 'Availability' },
   { path: '/availability', key: 'availability', label: 'Availability' },
+  { path: '/on-call', key: 'oncall', label: 'On-call' },
   { path: '/dashboard', key: 'dashboard', label: 'Dashboard' },
   { path: '/technician/:id', key: 'technician.detail', label: 'Technician' },
   { path: '/settings', key: 'settings', label: 'Settings' },

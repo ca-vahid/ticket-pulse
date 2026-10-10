@@ -57,7 +57,9 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   { id: 'alert-correlation', label: 'Alert correlation', Icon: Radar, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'tone-of-voice', label: 'Tone of Voice', Icon: MessageSquareQuote, minRole: 'admin', group: 'Tickets & AI' },
-  { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
+  // Urgent Response (Oct 2026) took over the old Urgent Escalation section:
+  // requester escalation is its fourth tab; #urgent-escalation aliases below.
+  { id: 'urgent-response', label: 'Urgent Response', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
   // Notifications & Public
   { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin', group: 'Notifications & Public' },
   // Workspace admins can reach this to see Email delivery health (QA 07-23 #3);
@@ -107,6 +109,23 @@ export function filterSettingsNavItems({ isAgent = false, isGlobalAdmin = false,
     if (item.minRole === 'reviewer') return isWsReviewer;
     return true; // viewer
   });
+}
+
+/**
+ * Retired section ids that still arrive as deep-link hashes. `tab` opens a
+ * tab inside the section that took the old one over.
+ */
+export const RETIRED_SETTINGS_SECTIONS = {
+  // Sep 2026: Workspace Access merged into Members (nav id 'agents').
+  'workspace-access': { id: 'agents' },
+  // Oct 2026: Urgent Escalation is the "Requester escalation" tab of Urgent Response.
+  'urgent-escalation': { id: 'urgent-response', tab: 'escalation' },
+};
+
+/** The live section (and tab, when there is one) behind a requested hash. */
+export function resolveSettingsAlias(requestedId) {
+  const retired = RETIRED_SETTINGS_SECTIONS[requestedId];
+  return retired ? { id: retired.id, tab: retired.tab || null } : { id: requestedId ?? null, tab: null };
 }
 
 /**

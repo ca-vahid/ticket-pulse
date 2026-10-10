@@ -4,9 +4,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   AnalyticsNavIcon, ApprovalsNavIcon, AssignmentNavIcon, AvailabilityNavIcon, DashboardNavIcon, KnowledgeNavIcon, MapNavIcon,
-  OnboardingNavIcon, TicketsNavIcon, TimelineNavIcon, WorkflowNavIcon,
+  OnCallNavIcon, OnboardingNavIcon, TicketsNavIcon, TimelineNavIcon, WorkflowNavIcon,
 } from './NavIcons';
 import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
+import { useUrgentResponseStatus } from '../../hooks/useUrgentResponseStatus';
 
 // Single source of truth for the primary navigation destinations, shared by the
 // desktop header rail (AppHeader) and the mobile bottom tab bar (MobileTabBar).
@@ -24,6 +25,9 @@ import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
 //   gate: 'signedIn' -> every signed-in person, agents included, even before
 //                      the workspace role resolves (Availability: your own time
 //                      away is not workspace-scoped)
+//   gate: 'onCall'  -> every signed-in person, agents included, but only where
+//                      the workspace uses it (GET /urgent-response/status:
+//                      the mode is not off, or an on-call order is set)
 //   gate: null      -> visible to everyone (Tickets, Approvals)
 //
 // ROLE MODEL (QA 08-24 #3, v3.7.02): viewers and reviewers get the ticket
@@ -159,6 +163,20 @@ export const NAV_DESTINATIONS = [
     bar: 'bg-cyan-600',
     gate: 'signedIn',
   },
+  {
+    // On-call (plans/URGENT_RESPONSE_PLAN.md): who covers after-hours urgent
+    // tickets, the next eight weeks, and cover requests. Last in the list on
+    // purpose: a look-up page, not a daily one.
+    id: 'oncall',
+    label: 'On-call',
+    hint: 'Who covers after-hours urgent tickets',
+    path: '/on-call',
+    Icon: OnCallNavIcon,
+    tile: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/30 dark:bg-rose-500/15 dark:text-rose-200',
+    hover: 'hover:border-rose-300 hover:bg-rose-100',
+    bar: 'bg-rose-600',
+    gate: 'onCall',
+  },
 ];
 
 // Session-scoped marker written by AdminRoute when it bounces a non-admin off
@@ -253,12 +271,15 @@ export function useNavDestinations() {
   const canView = canManage || wsRole === 'readonly';
   // Only admins ask the server whether Onboarding exists here.
   const hrLifecycle = useHrLifecycleStatus({ enabled: canManage && user?.role !== 'agent' });
+  // Everybody asks whether this workspace has an on-call rotation to show.
+  const urgentResponse = useUrgentResponseStatus({ enabled: Boolean(user) });
 
   // Agent-role users only work tickets + approvals — everything else in the app
   // is coordinator/manager territory and would just bounce them. Agents can be
   // approval managers and request approvals, so the Approvals inbox is theirs too.
   if (user?.role === 'agent') {
-    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' || dest.id === 'approvals' || dest.id === 'availability');
+    return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' || dest.id === 'approvals' || dest.id === 'availability'
+      || (dest.id === 'oncall' && urgentResponse.visible));
   }
 
   return NAV_DESTINATIONS.filter((dest) => {
@@ -267,6 +288,7 @@ export function useNavDestinations() {
     if (dest.gate === 'view') return canView;
     if (dest.gate === 'hrLifecycle') return canManage && hrLifecycle.available;
     if (dest.gate === 'signedIn') return Boolean(user);
+    if (dest.gate === 'onCall') return Boolean(user) && urgentResponse.visible;
     return true;
   });
 }

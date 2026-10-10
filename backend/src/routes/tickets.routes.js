@@ -1521,6 +1521,18 @@ router.get('/:id', asyncHandler(async (req, res) => {
     const ticket = await ticketService.getTicket(ticketId, req.workspaceId, { reconcile });
     // Parked (plans/PARKED_BUILD_PLAN.md): the active park rides on the ticket.
     if (ticket?.parkedUntil) ticket.park = parkView(await ticketParkService.activePark(ticketId));
+    // Urgent response (plans/URGENT_RESPONSE_PLAN.md): the running clock rides
+    // on the ticket. Only High / Urgent tickets with an owner can have one, so
+    // every other ticket costs no read; a failure never fails the page.
+    if (ticket && Number(ticket.priority) >= 3 && ticket.assignedTechId && !ticket.parkedUntil) {
+      try {
+        const { default: urgentResponseService } = await import('../services/urgentResponse/urgentResponseService.js');
+        const clock = await urgentResponseService.clockView(ticketId);
+        if (clock) ticket.urgentClock = clock;
+      } catch (error) {
+        logger.debug?.(`Urgent clock not attached to ticket ${ticketId}: ${error.message}`);
+      }
+    }
     res.json({ success: true, data: ticket });
   } catch (err) {
     if (!(err instanceof NotFoundError)) throw err;

@@ -28,6 +28,7 @@ import {
   FileText,
 } from 'lucide-react';
 import AnalyticsReports from '../components/analytics/AnalyticsReports';
+import UrgentResponseOps from '../components/analytics/UrgentResponseOps';
 import MetricHint from '../components/analytics/MetricHint';
 import { metricHintText } from '../utils/metricsGlossary';
 import { Link, useLocation } from 'react-router-dom';
@@ -4051,6 +4052,12 @@ export default function Analytics({ view = 'standard' }) {
           {opsFunnelRows.length ? <HighchartsBlock options={opsFunnelOptions} height={isMobile ? '18rem' : '22rem'} /> : <EmptyState />}
         </Panel>
       </div>
+
+      {ops?.urgentResponse && (
+        <Panel title="Urgent response" subtitle="What the Urgent rule did in the selected range, by layer. Counts only.">
+          <UrgentResponseOps data={ops.urgentResponse} />
+        </Panel>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel

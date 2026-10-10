@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { BadgeCheck, BookOpen,
   ArrowRight, Bot, Building2, CalendarClock, Check, CheckSquare, ChevronDown, ChevronRight, Forward,
-  Hand, History, Inbox, Lock, Mail, MessageSquare, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Tag, UserRound, VolumeX, Zap,
+  Hand, History, Inbox, Lock, Mail, MessageSquare, Pencil, Plus, RefreshCw, RotateCcw, Siren, Sparkles, Tag, UserRound, VolumeX, Zap,
 } from 'lucide-react';
 import { ActorKindChip } from './activityKind.jsx';
 import { PersonAvatar, StatusPill, formatDayTime, timeAgo } from './ticketUi.jsx';
@@ -47,6 +47,7 @@ const EVENT_STYLE = {
   noise: { icon: VolumeX, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200' },
   ai: { icon: Sparkles, tone: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200' },
   autohelp: { icon: BookOpen, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' },
+  urgent: { icon: Siren, tone: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200' },
   intake: { icon: Inbox, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200' },
   workflow: { icon: Bot, tone: 'bg-muted text-muted-foreground border border-dashed border-input' },
   system: { icon: Bot, tone: 'bg-muted text-muted-foreground border border-dashed border-input' },

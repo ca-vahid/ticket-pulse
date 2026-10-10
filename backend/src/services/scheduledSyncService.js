@@ -65,6 +65,7 @@ class ScheduledSyncService {
       this.startGraphSubscriptionMaintenance();
       this.startMailboxHoldDigest();
       this.startNoiseCloseDigest();
+      this.startUrgentResponseDigest();
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
@@ -540,6 +541,36 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Urgent response weekly e-mail (plans/URGENT_RESPONSE_PLAN.md): Mondays at
+   * 08:10 Pacific, what the Urgent rule did in the last seven days (in Shadow:
+   * what it would have done), to the admins of each workspace where it is in
+   * Shadow or Live. Quiet when nothing happened. Kill switch:
+   * URGENT_RESPONSE_DIGEST=false. Plain cron values only: node-cron 3.0.3
+   * mishandles stepped ranges.
+   */
+  startUrgentResponseDigest() {
+    this.stopUrgentResponseDigest();
+    if (process.env.URGENT_RESPONSE_DIGEST === 'false') return;
+    this.urgentResponseDigestJob = cron.schedule('10 8 * * 1', async () => {
+      try {
+        const { default: urgentResponseDigestService } = await import('./urgentResponse/urgentResponseDigestService.js');
+        const result = await urgentResponseDigestService.sendDigests();
+        const sent = result.filter((r) => r.sent);
+        if (sent.length) logger.info(`Urgent response digest: ${sent.length} workspace digest(s) sent`);
+      } catch (error) {
+        logger.warn(`Urgent response digest tick failed (non-fatal): ${error.message}`);
+      }
+    }, { scheduled: true, timezone: 'America/Los_Angeles' });
+  }
+
+  stopUrgentResponseDigest() {
+    if (this.urgentResponseDigestJob) {
+      this.urgentResponseDigestJob.stop();
+      this.urgentResponseDigestJob = null;
+    }
+  }
+
   stopMailboxHoldDigest() {
     if (this.mailboxHoldDigestJob) {
       this.mailboxHoldDigestJob.stop();
@@ -552,6 +583,7 @@ class ScheduledSyncService {
     this.stopGraphSubscriptionMaintenance();
     this.stopMailboxHoldDigest();
     this.stopNoiseCloseDigest();
+    this.stopUrgentResponseDigest();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {

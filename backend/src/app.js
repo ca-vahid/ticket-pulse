@@ -465,6 +465,19 @@ async function initialize() {
       logger.warn('Park sweep failed to start (non-fatal):', e.message);
     }
 
+    // Urgent response: the minute sweep behind layers 2 and 3 - an Urgent
+    // ticket has an owner who is at work and is touched in time
+    // (plans/URGENT_RESPONSE_PLAN.md). Only on the instance that runs the
+    // scheduled sync; kill switch URGENT_RESPONSE_SWEEP_ENABLED=false.
+    if (config.sync.enableScheduledSync && process.env.URGENT_RESPONSE_SWEEP_ENABLED !== 'false') {
+      try {
+        const { default: urgentResponseService } = await import('./services/urgentResponse/urgentResponseService.js');
+        urgentResponseService.start();
+      } catch (e) {
+        logger.warn('Urgent response sweep failed to start (non-fatal):', e.message);
+      }
+    }
+
     // Auto-help settle jobs: their own tick and running guard, never inside
     // the park sweep (a drain runs model calls — audit S1, 26 Sep 2026).
     try {

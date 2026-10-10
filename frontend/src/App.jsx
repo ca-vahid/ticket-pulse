@@ -34,10 +34,12 @@ import ApprovalsInbox from './pages/ApprovalsInbox';
 import Knowledge from './pages/Knowledge';
 import Onboarding from './pages/Onboarding';
 import Availability from './pages/Availability';
+import OnCall from './pages/OnCall';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import PublicApprovalReply from './pages/PublicApprovalReply';
 import RequesterDetail from './pages/RequesterDetail';
 import DemoModeBanner from './components/DemoModeBanner';
+import CoverRequestBanner from './components/onCall/CoverRequestBanner';
 import ViewAsBanner from './components/ViewAsControl';
 import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
@@ -325,6 +327,17 @@ function App() {
                         }
                       />
 
+                      {/* On-call (urgent response): the rotation and cover requests. Every
+                          signed-in member of the workspace, agents included; read-only. */}
+                      <Route
+                        path="/on-call"
+                        element={
+                          <TicketsRoute>
+                            <OnCall />
+                          </TicketsRoute>
+                        }
+                      />
+
                       {/* Admin-only routes (v3.7.02 role lockdown) */}
                       <Route
                         path="/dashboard"
@@ -495,6 +508,7 @@ function App() {
                     </Routes>
                   </ErrorBoundary>
                   <DemoModeBanner />
+                  <CoverRequestBanner />
                   <ViewAsBanner />
                   {/* Admin health banners share one bottom-left stack so email +
                   stale-sync warnings never overlap each other. */}

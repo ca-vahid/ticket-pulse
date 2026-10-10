@@ -20,7 +20,7 @@ import { countsForAgentMetrics, withAgentMetricTickets } from '../utils/autoHelp
 // custom statuses still count toward a technician's load; the legacy variants
 // stay appended.
 const LEGACY_OPEN_STATUS_VARIANTS = ['open', 'pending', '2', '3'];
-async function openWorkloadStatuses(workspaceId) {
+export async function openWorkloadStatuses(workspaceId) {
   const names = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
   return [...new Set([...names, ...LEGACY_OPEN_STATUS_VARIANTS])];
 }

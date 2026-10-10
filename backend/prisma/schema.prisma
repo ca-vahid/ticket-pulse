@@ -4467,6 +4467,155 @@ model HrLifecycleEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Urgent response (plans/URGENT_RESPONSE_PLAN.md, QA 10-09 #5): an Urgent
+// ticket always has an owner who is at work, and somebody touches it within
+// N minutes. Mode off | observe (Shadow) | live per workspace, default off.
+// No relations on purpose (ids only) so the feature degrades cleanly while
+// the hand-applied migration is missing.
+
+/// One row per workspace: the switch, the three layers, who is told, on-call.
+model UrgentResponseSettings {
+  workspaceId               Int       @id @map("workspace_id")
+  mode                      String    @default("off") @db.VarChar(10) // off | observe | live
+  assignEnabled             Boolean   @default(true) @map("assign_enabled")
+  assignPriorities          Int[]     @default([4, 3]) @map("assign_priorities")
+  assignGraceMinutes        Int       @default(30) @map("assign_grace_minutes")
+  raiseEnabled              Boolean   @default(true) @map("raise_enabled")
+  raisePriorities           Int[]     @default([4]) @map("raise_priorities")
+  raiseManualAction         String    @default("notify") @map("raise_manual_action") @db.VarChar(10) // notify | move
+  clockEnabled              Boolean   @default(true) @map("clock_enabled")
+  clockPriorities           Int[]     @default([4]) @map("clock_priorities")
+  clockNotifyMinutes        Int       @default(15) @map("clock_notify_minutes")
+  clockMoveMinutes          Int       @default(30) @map("clock_move_minutes")
+  notifyAudience            String    @default("on_shift") @map("notify_audience") @db.VarChar(12) // on_shift | group | named
+  notifyTechnicianIds       Int[]     @default([]) @map("notify_technician_ids")
+  notifyChannels            String[]  @default(["teams", "email"]) @map("notify_channels")
+  nobodyMode                String    @default("hold") @map("nobody_mode") @db.VarChar(10) // hold | on_call
+  nobodyContactTechnicianId Int?      @map("nobody_contact_technician_id")
+  coordinatorTechnicianId   Int?      @map("coordinator_technician_id")
+  maxMoves                  Int       @default(2) @map("max_moves")
+  onCallOrder               Int[]     @default([]) @map("on_call_order")
+  onCallHandoverDay         Int       @default(1) @map("on_call_handover_day") // 0 = Sunday
+  onCallHandoverTime        String    @default("17:00") @map("on_call_handover_time") @db.VarChar(5)
+  /// The date of the first handover of onCallOrder[0].
+  onCallAnchorDate          DateTime? @map("on_call_anchor_date") @db.Date
+  /// Null = the next sweep baselines the tickets already in scope (no flood on switch-on).
+  baselinedAt               DateTime? @map("baselined_at") @db.Timestamptz(6)
+  updatedBy                 String?   @map("updated_by") @db.VarChar(255)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("urgent_response_settings")
+}
+
+/// Append-only settings audit: who, when, field, before and after.
+model UrgentResponseSettingsChange {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  changedBy     String?  @map("changed_by") @db.VarChar(255)
+  changedByName String?  @map("changed_by_name") @db.VarChar(255)
+  field         String   @db.VarChar(200)
+  before        Json?
+  after         Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_urgent_response_settings_changes_ws")
+  @@map("urgent_response_settings_changes")
+}
+
+/// The log: one row per thing the rule did (or, in Shadow, would have done).
+model UrgentResponseAction {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @map("workspace_id")
+  ticketId         Int?      @map("ticket_id")
+  layer            String    @db.VarChar(12) // assign | raise | clock | on_call | undo
+  /// redirected | held | moved | told_owner_away | team_told | coordinator | on_call_assigned |
+  /// undone | cover_needed | cover_requested | cover_set | failed
+  action           String    @db.VarChar(24)
+  shadow           Boolean   @default(false)
+  priority         Int?
+  fromTechnicianId Int?      @map("from_technician_id")
+  toTechnicianId   Int?      @map("to_technician_id")
+  fromName         String?   @map("from_name") @db.VarChar(255)
+  toName           String?   @map("to_name") @db.VarChar(255)
+  sentence         String?   @db.Text
+  details          Json?
+  dedupeKey        String?   @unique(map: "uq_urgent_response_actions_dedupe") @map("dedupe_key") @db.VarChar(200)
+  undoneAt         DateTime? @map("undone_at") @db.Timestamptz(6)
+  undoneBy         String?   @map("undone_by") @db.VarChar(255)
+  undoOfId         Int?      @map("undo_of_id")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt], map: "idx_urgent_response_actions_ws")
+  @@index([ticketId, createdAt], map: "idx_urgent_response_actions_ticket")
+  @@map("urgent_response_actions")
+}
+
+/// One clock per ticket: the current "somebody must touch this" cycle.
+model UrgentResponseClock {
+  ticketId           Int       @id @map("ticket_id")
+  workspaceId        Int       @map("workspace_id")
+  ownerTechnicianId  Int?      @map("owner_technician_id")
+  state              String    @db.VarChar(12) // running | waiting | stopped
+  startedAt          DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  notifyAt           DateTime? @map("notify_at") @db.Timestamptz(6)
+  moveAt             DateTime? @map("move_at") @db.Timestamptz(6)
+  notifiedAt         DateTime? @map("notified_at") @db.Timestamptz(6)
+  moveCount          Int       @default(0) @map("move_count")
+  /// The people the ticket has already left in this chain.
+  chainTechnicianIds Int[]     @default([]) @map("chain_technician_ids")
+  stoppedAt          DateTime? @map("stopped_at") @db.Timestamptz(6)
+  /// touched | priority_lowered | closed | parked | unassigned | owner_changed | moved |
+  /// coordinator | undone | baseline | shadow_done | mode_off
+  stopReason         String?   @map("stop_reason") @db.VarChar(24)
+  shadow             Boolean   @default(false)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, state], map: "idx_urgent_response_clocks_ws_state")
+  @@map("urgent_response_clocks")
+}
+
+/// Somebody else holds the on-call phone for a window; the long-term order does not change.
+model UrgentResponseOnCallCover {
+  id                   Int       @id @default(autoincrement())
+  workspaceId          Int       @map("workspace_id")
+  originalTechnicianId Int       @map("original_technician_id")
+  coverTechnicianId    Int       @map("cover_technician_id")
+  startsAt             DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt               DateTime  @map("ends_at") @db.Timestamptz(6)
+  note                 String?   @db.Text
+  source               String    @default("admin") @db.VarChar(10) // admin | request
+  requestId            Int?      @map("request_id")
+  createdBy            String?   @map("created_by") @db.VarChar(255)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  cancelledAt          DateTime? @map("cancelled_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, startsAt], map: "idx_urgent_response_on_call_covers_ws")
+  @@map("urgent_response_on_call_covers")
+}
+
+/// A request for on-call cover sent to the rotation; the first person to accept takes it.
+model UrgentResponseCoverRequest {
+  id                   Int       @id @default(autoincrement())
+  workspaceId          Int       @map("workspace_id")
+  originalTechnicianId Int       @map("original_technician_id")
+  startsAt             DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt               DateTime  @map("ends_at") @db.Timestamptz(6)
+  message              String?   @db.Text
+  status               String    @default("open") @db.VarChar(10) // open | filled | cancelled | expired
+  askedTechnicianIds   Int[]     @default([]) @map("asked_technician_ids")
+  responses            Json      @default("[]") // [{ technicianId, answer, at }]
+  filledByTechnicianId Int?      @map("filled_by_technician_id")
+  filledAt             DateTime? @map("filled_at") @db.Timestamptz(6)
+  createdBy            String?   @map("created_by") @db.VarChar(255)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, status], map: "idx_urgent_response_cover_requests_ws_status")
+  @@map("urgent_response_cover_requests")
+}
+
+// ---------------------------------------------------------------------------
 // Availability (plans/AVAILABILITY_TRACKER_PLAN.md, Oct 2026): the native
 // Vacation Tracker replacement. Company-level (not per workspace), keyed by a
 // person's e-mail. Approved requests project into technician_leaves (vt_leave_id

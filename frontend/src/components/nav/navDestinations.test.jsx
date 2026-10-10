@@ -14,6 +14,9 @@ vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => wsState 
 const hrStatus = { available: false, mode: 'off', loading: false };
 const hrHook = vi.fn(() => hrStatus);
 vi.mock('../../hooks/useHrLifecycleStatus', () => ({ useHrLifecycleStatus: (opts) => hrHook(opts) }));
+// On-call (urgent response): shown only where the workspace uses it.
+const urgentStatus = { mode: 'off', onCall: false, visible: false, loading: false };
+vi.mock('../../hooks/useUrgentResponseStatus', () => ({ useUrgentResponseStatus: () => urgentStatus }));
 
 const {
   NAV_DESTINATIONS, canAccessSettings, homePathFor, isWorkspaceAdmin, resolveWorkspaceRole,
@@ -111,11 +114,13 @@ describe('hooks', () => {
 
   test('useNavDestinations: workspace admin → everything (Onboarding where the server enables it)', () => {
     wsState.availableWorkspaces = [{ id: 1, role: 'admin' }];
-    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(NAV_DESTINATIONS.map((d) => d.id).filter((id) => id !== 'onboarding'));
+    expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(NAV_DESTINATIONS.map((d) => d.id).filter((id) => id !== 'onboarding' && id !== 'oncall'));
     expect(hrHook).toHaveBeenLastCalledWith({ enabled: true });
     hrStatus.available = true;
+    urgentStatus.visible = true;
     expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(NAV_DESTINATIONS.map((d) => d.id));
     hrStatus.available = false;
+    urgentStatus.visible = false;
     expect(renderHook(() => useCanAccessSettings()).result.current).toBe(true);
   });
 

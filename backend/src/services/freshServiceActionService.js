@@ -321,6 +321,9 @@ class FreshServiceActionService {
       noteBody += `<b>Assigned to:</b> ${tech.name}<br>`;
       if (messageHtml) noteBody += `${messageHtml}<br>`;
       if (run.overrideReason) noteBody += `<b>Override reason:</b> ${run.overrideReason}<br>`;
+      // The urgent response guard replaced the AI's pick: the briefing above
+      // may still name the first choice, so the note says who has it and why.
+      if (decision === 'auto_assigned' && run.decisionNote) noteBody += `<b>Urgent rule:</b> ${run.decisionNote}<br>`;
       noteBody += `<b>Run ID:</b> ${run.id}`;
 
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });

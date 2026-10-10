@@ -150,6 +150,12 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'status', verb: 'ended the park', detail: why || d.note || null });
     } else if (t === 'ticket_woke') {
       item = baseItem({ event: 'status', verb: 'woke — the park date came', detail: d.reason || null, machine: true });
+    } else if (t === 'urgent_response') {
+      // Urgent response (plans/URGENT_RESPONSE_PLAN.md): the server writes the
+      // one plain sentence; it is shown word for word as Ticket Pulse's own
+      // line, and stays visible with machine activity hidden (a move is part
+      // of the ticket's story).
+      item = baseItem({ event: 'urgent', verb: d.sentence || d.note || 'Urgent response', importance: 2, machine: false });
     } else if (String(t || '').startsWith('auto_help_')) {
       // Auto-help P1: every step of the answer → check-in → close loop.
       const verbs = {
@@ -208,7 +214,8 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     } else {
       item = baseItem({ event: 'system', verb: humanize(t), detail: d.note || null });
     }
-    items.push({ ...item, key: `a-${a.id}`, at, kind, machine: item.machine ?? machine, actor, source, sig: `a|${t}|${actor}|${item.from || ''}|${item.to || ''}|${item.detail || ''}` });
+    const shownActor = t === 'urgent_response' ? 'Ticket Pulse' : actor;
+    items.push({ ...item, key: `a-${a.id}`, at, kind, machine: item.machine ?? machine, actor: shownActor, source, sig: `a|${t}|${shownActor}|${item.from || ''}|${item.to || ''}|${item.detail || (t === 'urgent_response' ? item.verb : '')}` });
   }
 
   for (const ep of assignmentEpisodes) {
