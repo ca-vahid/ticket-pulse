@@ -9,7 +9,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, Wrench, AlertTriangle,
   Search, Clock, Save, Upload, FileText, X, MapPin, History,
   Sparkles, ArrowUpDown, ArrowUpRight, ArrowDownRight, SlidersHorizontal, CalendarDays,
-  Folder, GitMerge, CheckSquare, Square, Lock, Unlock,
+  Folder, GitMerge, CheckSquare, Square, Lock, Unlock, GraduationCap,
 } from 'lucide-react';
 import {
   CopyBadge, ToolCallCard, StreamContent,
@@ -18,6 +18,7 @@ import {
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import CategoriesManagementTab, { ParentCategoryPicker } from './CategoriesManagementTab';
+import LearnedSkillsTab from './LearnedSkillsTab';
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200' },
@@ -742,8 +743,9 @@ function MatrixTab({ onAnalyze }) {
   }, [deepTechId, technicians]);
 
   const mappingMap = {};
-  // Competencies minted by the assignment-feedback learner (notes stamped
-  // "Auto-created…") get a visible marker: admins should know which matrix
+  // Competencies added by the skills learner — from closed tickets since QA
+  // 10-09 item 12, from assignment decisions before that (notes stamped
+  // "Auto-created…") — get a visible marker: admins should know which matrix
   // entries no human ever chose. A manual edit re-saves without the note,
   // which correctly clears the marker — the human has confirmed it.
   const autoLearnedMap = {};
@@ -1181,7 +1183,7 @@ function MatrixTab({ onAnalyze }) {
                                     ? 'bg-card/75 text-muted-foreground/50 ring-1 ring-purple-200 dark:ring-purple-500/30'
                                     : `${matrixEditMode ? 'text-muted-foreground/40 hover:bg-muted' : 'text-muted-foreground/40'}`
                               }`}
-                              title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'}${autoLearned ? ' — AUTO-LEARNED from assignment feedback, no human set this' : ''} (${matrixEditMode ? 'click to cycle and auto-save' : 'enable edits to change'})`}
+                              title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'}${autoLearned ? ' — added by the system from closed tickets, no person set this (review it under Learned skills)' : ''} (${matrixEditMode ? 'click to cycle and auto-save' : 'enable edits to change'})`}
                             >
                               {levelInfo ? levelInfo.num : '·'}
                               {autoLearned && (
@@ -2039,6 +2041,7 @@ function CompetencyPromptTab() {
 
 const COMPETENCY_TABS = [
   { id: 'matrix', label: 'Skill Matrix', icon: Search },
+  { id: 'learned', label: 'Learned skills', icon: GraduationCap },
   { id: 'categories', label: 'Categories', icon: Folder },
   { id: 'suggestions', label: 'AI Suggestions', icon: Sparkles },
   { id: 'history', label: 'Run History', icon: Clock },
@@ -2127,6 +2130,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
       </div>
 
       {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
+      {effectiveTab === 'learned' && <LearnedSkillsTab workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={useHierarchyEditor} showReclassifyControls={useReclassifyTools} />}
       {effectiveTab === 'suggestions' && <CategorySuggestionsTab onCountChange={setSuggestionCount} />}
       {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}

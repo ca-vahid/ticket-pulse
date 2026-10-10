@@ -1781,6 +1781,11 @@ export const assignmentAPI = {
 
   getFreshServiceDomain: () => api.get('/assignment/freshservice-domain'),
   getCompetencyTechnicians: () => api.get('/assignment/competencies/technicians'),
+  // Learned skills review (QA 10-09 item 12): skills the system added from closed tickets.
+  getLearnedSkills: () => api.get('/assignment/competencies/learned'),
+  keepLearnedSkills: (ids) => api.post('/assignment/competencies/learned/keep', { ids }),
+  removeLearnedSkills: (ids) => api.post('/assignment/competencies/learned/remove', { ids }),
+  setLearnedSkillLevel: (id, level) => api.put(`/assignment/competencies/learned/${id}/level`, { level }),
   analyzeCompetency: (techId) => api.post(`/assignment/competencies/analyze/${techId}`),
   getCompetencyRuns: (params) => api.get('/assignment/competencies/runs', { params }),
   getCompetencyRun: (id) => api.get(`/assignment/competencies/runs/${id}`),

@@ -12,6 +12,7 @@ import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
 import FancySelect from '../components/common/FancySelect';
 import { fillGreetingPlaceholders, wrapWithGreeting } from '../utils/replyGreeting';
+import { canDeleteNoteEntry } from '../utils/noteDeleteRules';
 import FieldCardNote from '../components/tickets/FieldCardNote';
 import PinnedIntakeCard from '../components/tickets/PinnedIntakeCard';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
@@ -47,7 +48,7 @@ import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
 import {
   BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
-  PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry,
+  PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
   ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
@@ -578,7 +579,7 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
                 <button
                   onClick={() => setConfirmDelete(true)}
                   aria-label="Delete note"
-                  title="Delete note (admin)"
+                  title="Delete note"
                   className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-600 dark:hover:text-red-300 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                 >
                   <Trash2 className="w-3 h-3" aria-hidden="true" />
@@ -1600,6 +1601,12 @@ export default function TicketDetail() {
     const em = String(e?.actorEmail || '').toLowerCase();
     return Boolean(em && em === actorEmail);
   }, [isAdmin, actorEmail]);
+  // Note deletion (QA 10-09 item 6): the author or an admin, Ticket Pulse
+  // tickets only — the same rule the server applies (utils/noteDeleteRules).
+  const actorReadOnly = meta?.actor?.workspaceRole === 'readonly' || meta?.actor?.role === 'readonly';
+  const canDeleteEntry = useCallback((e) => canDeleteNoteEntry(e, {
+    origin: ticket?.origin, isAdmin, actorEmail, readOnly: actorReadOnly,
+  }), [ticket?.origin, isAdmin, actorEmail, actorReadOnly]);
   const editNote = useCallback(async (entryId, { bodyHtml, bodyText }) => {
     try {
       await ticketsAPI.updateNote(ticketId, entryId, { bodyHtml, bodyText });
@@ -2262,6 +2269,11 @@ export default function TicketDetail() {
                             liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
                           }`}
                         >
+                          {/* QA 10-09 #8: the number leads the title, one step
+                              smaller than the subject (it was a small grey tag below). */}
+                          {ticket.displayRef && (
+                            <span className="mr-2 text-base sm:text-lg font-semibold tabular-nums text-muted-foreground" data-testid="ticket-ref">{ticket.displayRef}</span>
+                          )}
                           {ticket.subject || '(no subject)'}
                           {canConverse && ticket.status !== 'Deleted' && (
                             <button
@@ -2329,10 +2341,10 @@ export default function TicketDetail() {
 
 
                   {/* Row 2: what kind of ticket, then its identity — type first and
-                      large, the rest as quiet chips (the mirror is one chip now). */}
+                      large, the rest as quiet chips (the mirror is one chip now).
+                      The number sits in the title line since QA 10-09 #8. */}
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     <TypeBadge type={ticket.ticketType} />
-                    <span className="font-mono text-xs font-bold text-muted-foreground">{ticket.displayRef}</span>
                     <OriginChip origin={ticket.origin} />
                     {ticket.isExternal && <ExternalChip />}
                     <MirrorBadge
@@ -2400,22 +2412,10 @@ export default function TicketDetail() {
                   </div>
 
                   {/* Quick actions (16 Sep 2026, v2): the everyday ones stay in the
-                      row — Edit, Close, Delete, Mark as noise, Macros — and the
-                      utilities (Print, Copy link, Clone, Merge, Split) live behind
-                      More. Pick up sits under the status badges, not here. */}
+                      row — Edit, Delete, Mark as noise, Macros, Close ticket — and
+                      the utilities (Print, Copy link, Clone, Merge, Split) live
+                      behind More. Pick up sits under the status badges, not here. */}
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 print-hide" data-testid="ticket-actions">
-                    {canCloseFromHeader && (
-                      <button
-                        onClick={closeFromHeader}
-                        disabled={savingField === 'resolve' || Boolean(fsConfirm)}
-                        data-testid="header-close"
-                        title={isNative ? 'Close this ticket' : 'Close this ticket — written to FreshService first'}
-                        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3.5 text-xs font-semibold text-white shadow-subtle hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ActionIcon name="resolve" className="h-[18px] w-[18px] brightness-0 invert" />}
-                        Close
-                      </button>
-                    )}
                     {canConverse && ticket.status !== 'Deleted' && (
                       <button
                         onClick={() => setEditOpen(true)}
@@ -2488,7 +2488,6 @@ export default function TicketDetail() {
                     {parkDialog && (
                       <ParkDialog
                         ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
-                        requesterEmail={ticket.requester?.email || null}
                         initial={parkDialog.initial}
                         busy={parkBusy}
                         error={parkError}
@@ -2519,6 +2518,20 @@ export default function TicketDetail() {
                         }}
                       />
                     )}
+                    {/* QA 10-09 #8: last in the row, and an action like its
+                        neighbours — the filled green read as a status. */}
+                    {canCloseFromHeader && (
+                      <button
+                        onClick={closeFromHeader}
+                        disabled={savingField === 'resolve' || Boolean(fsConfirm)}
+                        data-testid="header-close"
+                        title={isNative ? 'Close this ticket' : 'Close this ticket — written to FreshService first'}
+                        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-muted-foreground hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-60 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200"
+                      >
+                        {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />}
+                        Close ticket
+                      </button>
+                    )}
                     <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
                     <span ref={noiseMenuRef} className="relative">
                       <button
@@ -2541,11 +2554,6 @@ export default function TicketDetail() {
                           <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
                             <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
                           </button>
-                          {requestableApprovalCategories.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
-                            <button onClick={() => { setRequestApprovalOpen(true); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                              <Stamp className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Request approval…
-                            </button>
-                          )}
                           {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
                             <button
                               onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
@@ -2747,17 +2755,18 @@ export default function TicketDetail() {
                         {ticket.requester.phone && (
                           <li className="flex items-center gap-2 min-w-0">
                             <Phone className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
-                            <a href={`tel:${ticket.requester.phone}`} className="tp-focus-ring rounded tabular-nums text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200">{formatPhone(ticket.requester.phone)}</a>
+                            {/* QA 10-09 #7: plain text, not a tel: link; copy gives the bare digits. */}
+                            <span className="tabular-nums text-foreground/80">{formatPhone(ticket.requester.phone)}</span>
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50">work</span>
-                            <CopyValueButton value={formatPhone(ticket.requester.phone)} label="work phone" onCopy={copyText} />
+                            <CopyValueButton value={phoneCopyValue(ticket.requester.phone)} label="work phone" onCopy={copyText} />
                           </li>
                         )}
                         {ticket.requester.mobile && ticket.requester.mobile !== ticket.requester.phone && (
                           <li className="flex items-center gap-2 min-w-0">
                             <Smartphone className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
-                            <a href={`tel:${ticket.requester.mobile}`} className="tp-focus-ring rounded tabular-nums text-foreground/80 hover:text-blue-700 hover:underline dark:hover:text-blue-200">{formatPhone(ticket.requester.mobile)}</a>
+                            <span className="tabular-nums text-foreground/80">{formatPhone(ticket.requester.mobile)}</span>
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground/50">mobile</span>
-                            <CopyValueButton value={formatPhone(ticket.requester.mobile)} label="mobile" onCopy={copyText} />
+                            <CopyValueButton value={phoneCopyValue(ticket.requester.mobile)} label="mobile" onCopy={copyText} />
                           </li>
                         )}
                         {forwardedIntake && (
@@ -3062,7 +3071,7 @@ export default function TicketDetail() {
                                     photoFor={photoFor}
                                     nameForEmail={nameForEmail}
                                     onCopy={copyText}
-                                    canDelete={isAdmin && ticket?.origin === 'ticketpulse'}
+                                    canDelete={canDeleteEntry(item.e)}
                                     onDelete={deleteNote}
                                     deleting={deletingNoteId === item.e.id}
                                     canEdit={canEditEntry(item.e)}
@@ -3395,13 +3404,14 @@ export default function TicketDetail() {
                             addComposerFiles([new File([file], name, { type: file.type || 'image/png' })]);
                             return name;
                           }}
+                          // Phase D: read-only signature — the server appends it
+                          // to the outbound email; never seeded into the editable
+                          // HTML (draft/double-append safety). QA 10-09 #4: shown
+                          // inside the editor frame, right under the message.
+                          footer={composerMode === 'reply' && Boolean(meta?.actor?.technicianId)
+                            ? <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
+                            : null}
                         />
-                        {/* Phase D: read-only signature strip — the server
-                            appends it to the outbound email; never seeded
-                            into the editor (draft/double-append safety). */}
-                        {composerMode === 'reply' && Boolean(meta?.actor?.technicianId) && (
-                          <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
-                        )}
                         {composerFiles.length > 0 && (
                           <ul className="mt-2 flex flex-wrap gap-2 items-start" aria-label="Files to attach">
                             {composerFiles.map((file) => (

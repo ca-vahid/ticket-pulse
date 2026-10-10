@@ -8,7 +8,7 @@ import MobileTabBar from '../components/nav/MobileTabBar';
 import { ticketsAPI } from '../services/api';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
-import { PersonAvatar, StatusPill, PriorityDot, SolutionMark, formatDayTime, timeAgo, ticketCategoryLabels } from '../components/tickets/ticketUi';
+import { PersonAvatar, StatusPill, PriorityDot, SolutionMark, formatDayTime, formatPhone, timeAgo, ticketCategoryLabels } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
 
@@ -275,8 +275,9 @@ export default function RequesterDetail() {
                         {r.email}
                       </button>
                     )}
-                    {r.phone && <a href={`tel:${r.phone}`} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-muted-foreground hover:text-foreground"><Phone className="h-3.5 w-3.5" aria-hidden="true" />{r.phone}</a>}
-                    {r.mobile && r.mobile !== r.phone && <a href={`tel:${r.mobile}`} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-muted-foreground hover:text-foreground"><Smartphone className="h-3.5 w-3.5" aria-hidden="true" />{r.mobile}</a>}
+                    {/* QA 10-09 #7: phone numbers are text, not tel: links. */}
+                    {r.phone && <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 tabular-nums text-muted-foreground"><Phone className="h-3.5 w-3.5" aria-hidden="true" />{formatPhone(r.phone)}</span>}
+                    {r.mobile && r.mobile !== r.phone && <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 tabular-nums text-muted-foreground"><Smartphone className="h-3.5 w-3.5" aria-hidden="true" />{formatPhone(r.mobile)}</span>}
                     {place && <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-muted-foreground"><MapPin className="h-3.5 w-3.5" aria-hidden="true" />{place}</span>}
                     {r.timeZone && <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-muted-foreground"><Globe className="h-3.5 w-3.5" aria-hidden="true" />{r.timeZone}</span>}
                   </div>

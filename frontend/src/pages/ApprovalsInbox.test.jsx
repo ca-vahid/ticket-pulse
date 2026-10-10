@@ -70,6 +70,21 @@ describe('ApprovalsInbox (Phase B + E)', () => {
     expect(screen.getByRole('region', { name: 'Approval categories' })).toBeInTheDocument();
   });
 
+  test('the selected tab clips its accent bar to its own rounded top (QA 10-09 #2: the bar stuck out past the corners)', async () => {
+    roleState.role = 'reviewer';
+    renderPage();
+    await screen.findByText('New laptop for Rita');
+    const bars = screen.getAllByTestId('approvals-tab-accent');
+    expect(bars).toHaveLength(1);
+    const tab = screen.getByRole('tab', { name: /For you/ });
+    expect(tab).toContainElement(bars[0]);
+    // The bar spans the tab (inset-x-0) and the tab clips it along its rounded corners.
+    expect(tab).toHaveClass('relative', 'overflow-hidden', 'rounded-t-lg');
+    expect(bars[0]).toHaveClass('absolute', 'inset-x-0', 'top-0');
+    fireEvent.click(screen.getByRole('tab', { name: /All approvals/ }));
+    expect(screen.getByRole('tab', { name: /All approvals/ })).toContainElement(screen.getByTestId('approvals-tab-accent'));
+  });
+
   test('admins get the Categories tab too, and ?tab=categories deep-links straight to it', async () => {
     roleState.role = 'admin';
     renderPage('/approvals?tab=categories');

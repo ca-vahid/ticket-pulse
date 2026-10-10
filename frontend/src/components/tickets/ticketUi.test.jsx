@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import DOMPurify from 'dompurify';
 import { ThemeProvider, useTheme } from '../../contexts/ThemeContext';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SafeHtml, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, formatPhone, initials, isNonAuthorialColor, parseColor, slaTargetState, timeAgo, timeAgoShort,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SafeHtml, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, formatPhone, initials, phoneCopyValue, isNonAuthorialColor, parseColor, slaTargetState, timeAgo, timeAgoShort,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -87,9 +87,20 @@ describe('ticketUi helpers', () => {
 describe('formatPhone (16 Sep 2026)', () => {
   test('North-American numbers get the (xxx) xxx-xxxx shape, with or without the country code', () => {
     expect(formatPhone('6047064989')).toBe('(604) 706-4989');
-    expect(formatPhone('1-604-706-4989')).toBe('+1 (604) 706-4989');
-    expect(formatPhone('+1 604 706 4989')).toBe('+1 (604) 706-4989');
+    // QA 10-09 #7: one shape — the country code is dropped.
+    expect(formatPhone('1-604-706-4989')).toBe('(604) 706-4989');
+    expect(formatPhone('+1 604 706 4989')).toBe('(604) 706-4989');
+    expect(formatPhone('+1 (778) 644-0541')).toBe('(778) 644-0541');
     expect(formatPhone('604.706.4989 ext 12')).toBe('(604) 706-4989 ext. 12');
+    expect(formatPhone('+1 604 706 4989 x12')).toBe('(604) 706-4989 ext. 12');
+  });
+  test('the copy value is the bare ten digits for North America, the stored value otherwise (QA 10-09 #7)', () => {
+    expect(phoneCopyValue('+1 (778) 644-0541')).toBe('7786440541');
+    expect(phoneCopyValue('(778) 220-1419')).toBe('7782201419');
+    expect(phoneCopyValue('1-604-706-4989')).toBe('6047064989');
+    expect(phoneCopyValue('604.706.4989 ext 12')).toBe('604.706.4989 ext 12');
+    expect(phoneCopyValue('+44 20 7946 0958')).toBe('+44 20 7946 0958');
+    expect(phoneCopyValue(null)).toBe('');
   });
   test('anything else is returned untouched', () => {
     expect(formatPhone('+44 20 7946 0958')).toBe('+44 20 7946 0958');

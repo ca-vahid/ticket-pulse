@@ -1145,19 +1145,35 @@ export function TicketRefLink({
 
 /**
  * Human phone formatting (16 Sep 2026): North-American numbers become
- * "(604) 706-4989" / "+1 (604) 706-4989", an extension survives as "ext. 12",
- * anything else is returned untouched (international, short codes).
+ * "(604) 706-4989", an extension survives as "ext. 12", anything else is
+ * returned untouched (international, short codes).
+ * QA 10-09 #7: one shape for North America — the leading +1 is dropped, so
+ * "+1 778 644 0541" and "7786440541" read the same.
  */
-export function formatPhone(raw) {
+function splitPhone(raw) {
   const s = String(raw || '').trim();
-  if (!s) return '';
   const extMatch = s.match(/(?:ext\.?|x|#)\s*(\d{1,6})\s*$/i);
   const ext = extMatch ? extMatch[1] : null;
   const digits = (ext ? s.slice(0, extMatch.index) : s).replace(/\D/g, '');
-  const tail = ext ? ` ext. ${ext}` : '';
-  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}${tail}`;
-  if (digits.length === 11 && digits[0] === '1') return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}${tail}`;
+  const national = digits.length === 10 ? digits : (digits.length === 11 && digits[0] === '1' ? digits.slice(1) : null);
+  return { s, ext, national };
+}
+
+export function formatPhone(raw) {
+  const { s, ext, national } = splitPhone(raw);
+  if (!s) return '';
+  if (national) return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}${ext ? ` ext. ${ext}` : ''}`;
   return s;
+}
+
+/**
+ * What the copy button puts on the clipboard (QA 10-09 #7): the bare ten
+ * digits of a North-American number ("7786440541"), ready to paste into a
+ * dialler; anything else — an extension, an international number — as stored.
+ */
+export function phoneCopyValue(raw) {
+  const { s, ext, national } = splitPhone(raw);
+  return national && !ext ? national : s;
 }
 
 // ── Generated artwork + the big header badges (16 Sep 2026) ─────────────────

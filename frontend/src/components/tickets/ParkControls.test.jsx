@@ -31,17 +31,18 @@ describe('ParkDialog', () => {
     expect(screen.getByRole('button', { name: /^Park$/ })).toBeDisabled();
   });
 
-  test('waiting on the requester points to Pending Response instead', () => {
+  test('waiting on a person points to Pending Response instead', () => {
     const onUse = vi.fn();
-    render(<ParkDialog ticketRef="TP-1700" requesterEmail="rita@x.com" onSubmit={() => {}} onClose={() => {}} onUsePendingResponse={onUse} />);
-    fireEvent.click(screen.getByLabelText(/Waiting on someone/));
-    fireEvent.change(screen.getByLabelText(/Waiting on \(name or e-mail\)/), { target: { value: 'Rita@x.com' } });
-    fireEvent.change(screen.getByLabelText(/Chase on/), { target: { value: inDays(5) } });
-    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Needs her answer' } });
-    expect(screen.getByText(/isn’t a park/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Park$/ })).toBeDisabled();
+    render(<ParkDialog ticketRef="TP-1700" onSubmit={() => {}} onClose={() => {}} onUsePendingResponse={onUse} />);
+    expect(screen.getByTestId('park-pending-pointer')).toHaveTextContent(/Waiting on the requester or on another person\? That isn’t a park/);
     fireEvent.click(screen.getByRole('button', { name: 'Use Pending Response' }));
     expect(onUse).toHaveBeenCalled();
+  });
+
+  test('the pointer stays as plain text where Pending Response cannot be set from here (FS-born, bulk)', () => {
+    render(<ParkDialog bulkCount={2} onSubmit={() => {}} onClose={() => {}} />);
+    expect(screen.getByTestId('park-pending-pointer')).toHaveTextContent(/Pending Response/);
+    expect(screen.queryByRole('button', { name: 'Use Pending Response' })).toBeNull();
   });
 
   test('bulk title counts the selection', () => {
@@ -76,18 +77,35 @@ describe('ParkLine / ParkSuggestion / ParkedMark', () => {
 
 // QA 10-01 #6: "Waiting until a date" and "In progress, with an ETA" merged.
 describe('ParkDialog — one choice for a date or an ETA', () => {
-  test('two reasons only, and the merged one is the default', () => {
-    render(<ParkDialog ticketRef="TP-1741" onSubmit={() => {}} onClose={() => {}} />);
-    const radios = screen.getAllByRole('radio');
-    expect(radios).toHaveLength(2);
-    expect(screen.getByLabelText(/Waiting until a date or an ETA/)).toBeChecked();
+  // QA 10-09 #9: "Waiting on someone" left the dialog — one reason needs no
+  // radio group, so the dialog opens straight on the date.
+  test('no reason picker and no "waiting on" fields: the dialog opens on the date', () => {
+    render(<ParkDialog ticketRef="TP-1741" requesterEmail="rita@x.com" onSubmit={() => {}} onClose={() => {}} />);
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.queryByText('Waiting on someone')).toBeNull();
+    expect(screen.queryByLabelText(/Waiting on \(name or e-mail\)/)).toBeNull();
     expect(screen.queryByText('In progress, with an ETA')).toBeNull();
+    expect(screen.getByLabelText(/Until \/ ETA/)).toHaveFocus();
+    expect(screen.getByRole('link', { name: 'Schedule it instead' })).toBeInTheDocument();
+  });
+
+  test('an older "waiting on someone" park keeps who it waits on when its date changes', () => {
+    const onSubmit = vi.fn();
+    const waitingOn = [{ name: 'Alexa' }, { email: 'kirsten@x.com', name: 'kirsten@x.com' }];
+    render(<ParkDialog ticketRef="TP-1741" initial={{ kind: 'waiting_on', until: inDays(20), reason: 'List review', waitingOn }} onSubmit={onSubmit} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/Until/), { target: { value: inDays(25) } });
+    fireEvent.click(screen.getByRole('button', { name: /^Park$/ }));
+    expect(onSubmit).toHaveBeenCalledWith({ kind: 'waiting_on', until: inDays(25), reason: 'List review', waitingOn });
+  });
+
+  test('…and still shows as waiting on someone in the queue mark', () => {
+    render(<ParkedMark until="2026-11-16T15:00:00Z" kind="waiting_on" />);
+    expect(screen.getByTestId('parked-mark')).toHaveAttribute('title', 'Parked — Waiting on someone');
   });
 
   test('changing the date of an older ETA park opens on the merged choice and saves it as until_date', () => {
     const onSubmit = vi.fn();
     render(<ParkDialog ticketRef="TP-1741" initial={{ kind: 'eta', until: inDays(20), reason: 'Rollout' }} onSubmit={onSubmit} onClose={() => {}} />);
-    expect(screen.getByLabelText(/Waiting until a date or an ETA/)).toBeChecked();
     fireEvent.change(screen.getByLabelText(/Until/), { target: { value: inDays(21) } });
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Rollout moved' } });
     fireEvent.click(screen.getByRole('button', { name: /^Park$/ }));

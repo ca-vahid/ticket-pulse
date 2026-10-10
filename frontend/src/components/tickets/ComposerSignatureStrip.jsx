@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, PenLine } from 'lucide-react';
 import { agentAPI } from '../../services/api';
 import { SafeHtml } from './ticketUi';
 
@@ -26,16 +25,20 @@ function fetchSignature(workspaceId) {
 }
 
 /**
- * Collapsed read-only strip under the reply editor (Mega 08-15 Phase D):
- * "your signature will be appended" with an expandable preview. The
+ * The agent's signature, read-only, under the reply (Mega 08-15 Phase D). The
  * signature is NEVER seeded into the editable area — the server appends it
  * to the outbound email at send time, so drafts can't double-append and the
  * stored thread entry stays clean. Rendered by the host only in reply mode.
  *
- * 18 Sep 2026 (Vahid): open by default, so an agent SEES what goes under the
+ * 18 Sep 2026 (Vahid): shown by default, so an agent SEES what goes under the
  * reply before sending, and — because the company signature has no sign-off —
- * a line saying so whenever the signature does not open with one. Collapsing
+ * a line saying so whenever the signature does not open with one. Hiding it
  * is remembered per browser.
+ *
+ * QA 10-09 #4: no box of its own any more. The host passes it as the editor's
+ * `footer`, so it sits inside the editor frame straight under the message, in
+ * the body's padding and type — the composer reads like the e-mail the
+ * requester receives. One quiet caption under it says it is automatic.
  */
 const COLLAPSE_KEY = 'tp.composerSignature.collapsed';
 const SIGN_OFF_RE = /^\s*(kind |best |warm |with )?(regards|thanks|thank you|cheers|sincerely|best|respectfully)\b/i;
@@ -64,37 +67,41 @@ export default function ComposerSignatureStrip({ workspaceId }) {
 
   if (!signature?.enabled || !String(signature.html || signature.text || '').trim()) return null;
 
+  const toggle = () => setExpanded((prev) => {
+    try { window.localStorage.setItem(COLLAPSE_KEY, prev ? '1' : '0'); } catch { /* private window */ }
+    return !prev;
+  });
+  const quietLink = 'tp-focus-ring rounded font-medium text-muted-foreground hover:text-foreground hover:underline';
+
   return (
-    <div className="mt-1.5 rounded-lg border border-border bg-muted/35" data-testid="composer-signature-strip">
-      <button
-        type="button"
-        onClick={() => setExpanded((prev) => {
-          try { window.localStorage.setItem(COLLAPSE_KEY, prev ? '1' : '0'); } catch { /* private window */ }
-          return !prev;
-        })}
-        aria-expanded={expanded}
-        className="tp-focus-ring flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:text-foreground/85"
-      >
-        <PenLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/75" aria-hidden="true" />
-        <span className="min-w-0 truncate">Your signature is added automatically under this reply</span>
-        <span className="ml-auto inline-flex items-center gap-0.5 font-semibold text-blue-600 dark:text-blue-300">
-          {expanded ? 'Hide' : 'Show'}
-          <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
-        </span>
-      </button>
+    <div className="cursor-default px-3 pb-2.5" data-testid="composer-signature-strip">
       {expanded && (
-        <div className="border-t border-border px-3 py-2.5" data-testid="composer-signature-preview">
+        <div
+          role="group"
+          aria-label="Your signature — added automatically when the reply is sent, not editable here"
+          data-testid="composer-signature-preview"
+        >
+          {/* Same sanitising as a thread body (SafeHtml); themed, so it reads on
+              the composer's own ground in dark mode instead of a white well. */}
           {signature.html
-            ? <div className="tp-light rounded-md bg-card px-3 py-2"><SafeHtml html={signature.html} /></div>
-            : <p className="whitespace-pre-wrap text-xs text-muted-foreground">{signature.text}</p>}
-          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground" data-testid="composer-signature-hint">
-            {signatureHasSignOff(signature)
-              ? 'No need to type your name — this goes under your message exactly as shown.'
-              : 'It has no sign-off line, so end your message with your own “Thanks,” or “Kind regards,” — then this goes under it exactly as shown.'}
-            {' '}Change it under your account menu → Notifications → Signature.
-          </p>
+            ? <SafeHtml html={signature.html} preferThemed className="!text-foreground" />
+            : <p className="whitespace-pre-wrap text-sm text-foreground">{signature.text}</p>}
         </div>
       )}
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/75" data-testid="composer-signature-caption">
+        {expanded ? 'Signature, added automatically' : 'Your signature is added automatically under this reply'}
+        {' · '}
+        <a href="/profile" target="_blank" rel="noreferrer" title="Your profile → Email signature (opens in a new tab)" className={quietLink}>Change</a>
+        {' · '}
+        <button type="button" onClick={toggle} aria-expanded={expanded} aria-label={expanded ? 'Hide signature' : 'Show signature'} className={quietLink}>
+          {expanded ? 'Hide' : 'Show'}
+        </button>
+        {expanded && !signatureHasSignOff(signature) && (
+          <span data-testid="composer-signature-hint">
+            {' · '}It has no sign-off line, so end your message with your own “Thanks,” or “Kind regards,”.
+          </span>
+        )}
+      </p>
     </div>
   );
 }

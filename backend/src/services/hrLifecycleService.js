@@ -210,7 +210,8 @@ class HrLifecycleService {
   async _technicians(workspaceId) {
     return soft(() => prisma.technician.findMany({
       where: { workspaceId: Number(workspaceId), isActive: true },
-      select: { id: true, name: true, email: true, photoUrl: true },
+      // origin: the People picker hides local agents on FreshService tickets (QA 10-09 #1).
+      select: { id: true, name: true, email: true, photoUrl: true, origin: true },
       orderBy: { name: 'asc' },
     }), []);
   }
@@ -1713,6 +1714,16 @@ class HrLifecycleService {
 
   // ------------------------------------------------------------ manual action
 
+  /**
+   * The open children a switch to after the fact would close: the ones the
+   * after-the-fact list does not have. Empty = the switch has nothing to do
+   * (the page then hides it, QA 10-09 #1).
+   */
+  _afterTheFactExtras(fam, settings) {
+    const keep = new Set((settings.templates?.offboarding_after_fact || []).map((i) => i.key));
+    return fam.members.filter((m) => m.member.role === 'child' && !m.terminal && !keep.has(m.member.templateKey));
+  }
+
   /** One click on the parent: drop the children the after-the-fact list does not have. */
   async switchToAfterTheFact(familyId, workspaceId, actor) {
     const ws = Number(workspaceId);
@@ -1722,14 +1733,12 @@ class HrLifecycleService {
     if (family.status !== 'open') throw new ConflictError('This family is no longer open');
     if (family.afterTheFact) throw new ConflictError('This family is already after the fact');
     const settings = await this.getSettings(ws);
-    const keep = new Set((settings.templates.offboarding_after_fact || []).map((i) => i.key));
     const fam = await this._familyTickets(family);
     const out = { warnings: [], created: [] };
     const who = actor?.name || actor?.email || 'an admin';
     const closed = [];
     const by = { ...HR_LIFECYCLE_ACTOR, name: `${who} via Onboarding` };
-    for (const m of fam.members) {
-      if (m.member.role !== 'child' || m.terminal || keep.has(m.member.templateKey)) continue;
+    for (const m of this._afterTheFactExtras(fam, settings)) {
       try {
         const svc = await this._ticketService();
         await svc.addPrivateNote(m.ticket.id, ws, { bodyHtml: `<p><strong>Switched to after the fact</strong> by ${esc(who)}: the account was handled before the notice, so ${esc(m.member.title || 'this task')} is not needed. Closed by Ticket Pulse.</p>` }, by);
@@ -1779,6 +1788,8 @@ class HrLifecycleService {
     return {
       id: t.id,
       ref: ticketDisplayRef(t),
+      // 'ticketpulse' | 'freshservice': the page assigns through the matching route.
+      origin: t.origin || null,
       subject: t.subject,
       status: t.status,
       dueBy: t.dueBy || null,
@@ -1919,6 +1930,8 @@ class HrLifecycleService {
     if (!f) throw new NotFoundError('Family not found');
     const fam = await this._familyTickets(f);
     const events = await soft(() => prisma.hrLifecycleEvent.findMany({ where: { workspaceId: ws, familyId: f.id }, orderBy: { createdAt: 'desc' }, take: 50 }), []);
+    const settings = await this.getSettings(ws);
+    const canSwitch = f.kind === 'offboarding' && f.status === 'open' && !f.afterTheFact;
     return {
       id: f.id,
       kind: f.kind,
@@ -1931,7 +1944,11 @@ class HrLifecycleService {
       template: f.template,
       details: f.details || null,
       createdAt: f.createdAt,
-      officeList: f.kind === 'onboarding' ? (this._officeRule(await this.getSettings(ws), f.office)?.label || 'Any other office') : null,
+      officeList: f.kind === 'onboarding' ? (this._officeRule(settings, f.office)?.label || 'Any other office') : null,
+      // What "Switch to after the fact" would close right now ([] = nothing to switch).
+      afterTheFactCloses: canSwitch
+        ? this._afterTheFactExtras(fam, settings).map((m) => ({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), title: m.member.title }))
+        : [],
       parent: this._ticketCard(fam.parent),
       members: fam.members.map((m) => ({
         role: m.member.role, key: m.member.templateKey, title: m.member.title, dueOffsetDays: m.member.dueOffsetDays, closed: m.terminal, ticket: this._ticketCard(m.ticket),

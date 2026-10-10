@@ -484,6 +484,30 @@ describe('live: date changes and cancellations', () => {
     expect(db.events.at(-1)).toMatchObject({ mode: 'manual', decision: 'switch_after_the_fact', actor: 'vahid@x.ca' });
     await expect(hr.switchToAfterTheFact(db.families[0].id, 1, {})).rejects.toThrow(/already after the fact/);
   });
+
+  test('the family says what a switch to after the fact would close, and nothing once those are closed (QA 10-09 #1)', async () => {
+    const { children } = await liveFamily();
+    const id = db.families[0].id;
+    const before = await hr.getFamily(id, 1);
+    expect(before.afterTheFactCloses.map((c) => c.title)).toEqual(['Disable Account', 'Decommissioning Account']);
+    expect(before.afterTheFactCloses[0]).toMatchObject({ ticketId: expect.any(Number), ref: expect.stringMatching(/^TP-[0-9]+$/) });
+    // Each member card carries its origin, so the page can assign through the right route.
+    expect(before.members.every((m) => m.ticket.origin === 'ticketpulse')).toBe(true);
+    expect(before.parent.origin).toBe('freshservice');
+    // The extras are closed (by hand, say): the switch has nothing left to do.
+    for (const c of children) if (before.afterTheFactCloses.some((x) => x.ticketId === c.id)) c.status = 'Closed';
+    expect((await hr.getFamily(id, 1)).afterTheFactCloses).toEqual([]);
+    // Every child closed: still nothing.
+    for (const c of children) c.status = 'Closed';
+    expect((await hr.getFamily(id, 1)).afterTheFactCloses).toEqual([]);
+  });
+
+  test('a family already after the fact offers no switch', async () => {
+    await liveFamily();
+    const id = db.families[0].id;
+    await hr.switchToAfterTheFact(id, 1, { email: 'vahid@x.ca' });
+    expect((await hr.getFamily(id, 1)).afterTheFactCloses).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------- NH automation

@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, UserRoundMinus, UserRoundPlus } from 'lucide-react';
-import { hrLifecycleAPI } from '../../services/api';
+import { hrLifecycleAPI, ticketsAPI } from '../../services/api';
 import { ConfirmDialog, EmptyState, Loading } from '../knowledge/knowledgeUi';
+import AssigneePicker from '../tickets/AssigneePicker';
 import { AvatarStack, NoticePerson, Person, SectionTitle, StatusDot, TicketRef } from './onboardingUi';
 import { FAMILY_STATUS, KIND_LABEL, fmtDate, ticketTone } from './onboardingFormat';
 
@@ -147,19 +148,22 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
+  const [noteBad, setNoteBad] = useState(false);
+  const say = (text, bad = false) => { setNote(text); setNoteBad(bad); };
+  const technicians = useMemo(() => [...techById.values()], [techById]);
 
   const reroute = async () => {
     setBusy(true);
-    setNote(null);
+    say(null);
     try {
       const res = await hrLifecycleAPI.rerouteFamily(familyId);
       const d = res?.data || {};
       const n = d.moved?.length || 0;
-      setNote(n ? `${n} ${n === 1 ? 'ticket' : 'tickets'} assigned to ${d.assignee?.name} (${d.office}).` : `Nothing to move: the open tickets are already with the ${d.office} people.`);
+      say(n ? `${n} ${n === 1 ? 'ticket' : 'tickets'} assigned to ${d.assignee?.name} (${d.office}).` : `Nothing to move: the open tickets are already with the ${d.office} people.`);
       load();
       onChanged?.();
     } catch (err) {
-      setNote(err?.message || 'Could not reassign');
+      say(err?.message || 'Could not reassign', true);
     } finally {
       setBusy(false);
     }
@@ -167,16 +171,16 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
 
   const park = async () => {
     setBusy(true);
-    setNote(null);
+    say(null);
     try {
       const res = await hrLifecycleAPI.parkFamily(familyId);
       const d = res?.data || {};
       const n = d.parked?.length || 0;
-      setNote(n ? `${n} ${n === 1 ? 'ticket sleeps' : 'tickets sleep'} until ${fmtDate(d.until, { withYear: true })} with no owner; the owner is chosen that day.` : 'Nothing to park: the work is due to start, or the tickets are already asleep with no owner.');
+      say(n ? `${n} ${n === 1 ? 'ticket sleeps' : 'tickets sleep'} until ${fmtDate(d.until, { withYear: true })} with no owner; the owner is chosen that day.` : 'Nothing to park: the work is due to start, or the tickets are already asleep with no owner.');
       load();
       onChanged?.();
     } catch (err) {
-      setNote(err?.message || 'Could not park');
+      say(err?.message || 'Could not park', true);
     } finally {
       setBusy(false);
     }
@@ -189,11 +193,38 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
   }, [familyId]);
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * Change who holds one open child, in place (QA 10-09 #1). A Ticket Pulse
+   * ticket is assigned here; a FreshService ticket is written to FreshService
+   * first and only then changes here. The picker shows its own spinner; a
+   * refusal lands in the note line and the row keeps its owner.
+   */
+  const assignChild = (ticket) => async (techId, extra = null) => {
+    const fsBorn = ticket.origin === 'freshservice';
+    setBusy(true);
+    say(fsBorn ? `Writing ${ticket.ref} to FreshService…` : null);
+    try {
+      const res = fsBorn
+        ? await ticketsAPI.fsUpdate(ticket.id, { assignedTechId: techId, ...(extra?.handBack ? { handBack: extra.handBack } : {}) })
+        : await ticketsAPI.assign(ticket.id, techId, extra || {});
+      say(techId == null
+        ? `${ticket.ref} has no owner now.`
+        : `${ticket.ref} assigned to ${techById.get(techId)?.name || 'the chosen person'}${fsBorn ? ' in FreshService' : ''}.`);
+      return res;
+    } catch (err) {
+      say(err?.response?.data?.message || err?.message || 'Could not assign', true);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const switchAfterFact = async () => {
     setBusy(true);
     try {
       await hrLifecycleAPI.switchToAfterTheFact(familyId);
       setConfirm(false);
+      say(null);
       load();
       onChanged?.();
     } catch (err) {
@@ -205,7 +236,9 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
 
   if (error) return <p className="px-4 py-3 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>;
   if (!family) return <Loading label="Loading family…" className="py-6" />;
-  const canSwitch = family.kind === 'offboarding' && family.status === 'open' && !family.afterTheFact;
+  // Offered only while the switch would close something: an open child the after-the-fact list does not have.
+  const switchCloses = family.kind === 'offboarding' && family.status === 'open' && !family.afterTheFact ? (family.afterTheFactCloses || []) : [];
+  const canSwitch = switchCloses.length > 0;
   // Offered while a child is awake or still has an owner; inside the lead time the server leaves everything as it is.
   const canPark = family.status === 'open' && family.effectiveDate && family.members.some((m) => m.role === 'child' && !m.closed && (!m.ticket?.parkedUntil || m.ticket?.assignee));
   const role = { child: 'Child', linked: 'Linked', notice: 'Notice' };
@@ -239,17 +272,8 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
             {busy ? 'Working…' : 'Reassign by office'}
           </button>
         )}
-        {canSwitch && (
-          <button
-            type="button"
-            onClick={() => setConfirm(true)}
-            className="tp-focus-ring ml-auto rounded-md border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
-          >
-            Switch to after the fact
-          </button>
-        )}
       </div>
-      {note && <p role="status" className="mb-2 text-xs text-foreground/85">{note}</p>}
+      {note && <p role={noteBad ? 'alert' : 'status'} className={`mb-2 text-xs ${noteBad ? 'text-red-700 dark:text-red-300' : 'text-foreground/85'}`}>{note}</p>}
       <ul className="divide-y divide-border rounded-lg border border-border bg-card">
         {family.members.map((m) => (
           <li key={`${m.role}-${m.ticket?.id}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2 sm:grid-cols-[5.5rem_minmax(0,1.4fr)_minmax(0,1fr)_6rem_7rem]">
@@ -258,10 +282,26 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
               <TicketRef ticket={m.ticket} className="mr-2" />
               {m.title || m.ticket?.subject}
             </span>
-            <span className="hidden sm:block">
-              {!m.ticket?.assignee && m.ticket?.parkedUntil && !m.closed
-                ? <span className="text-xs text-muted-foreground">Assigned when it wakes</span>
-                : <Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl || techById.get(m.ticket?.assignee?.id)?.photoUrl || null} size="h-5 w-5" />}
+            <span className="hidden min-w-0 sm:block">
+              {m.closed || !m.ticket ? (
+                <Person name={m.ticket?.assignee?.name} photoUrl={m.ticket?.assignee?.photoUrl || techById.get(m.ticket?.assignee?.id)?.photoUrl || null} size="h-5 w-5" />
+              ) : (
+                <>
+                  <AssigneePicker
+                    ticketId={m.ticket.id}
+                    value={m.ticket.assignee?.id ?? null}
+                    technicians={technicians}
+                    currentTech={m.ticket.assignee ? { ...m.ticket.assignee, photoUrl: m.ticket.assignee.photoUrl || techById.get(m.ticket.assignee.id)?.photoUrl || null } : null}
+                    ticketOrigin={m.ticket.origin || null}
+                    assignFn={assignChild(m.ticket)}
+                    onAssigned={() => { load(); onChanged?.(); }}
+                    disabled={busy}
+                    size="sm"
+                    showAi={false}
+                  />
+                  {!m.ticket.assignee && m.ticket.parkedUntil && <span className="block pl-1.5 text-xs text-muted-foreground">Assigned when it wakes</span>}
+                </>
+              )}
             </span>
             <span className="hidden text-xs text-muted-foreground sm:block">
               {m.ticket?.dueBy ? `Due ${fmtDate(m.ticket.dueBy)}` : 'No due date'}
@@ -272,6 +312,19 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
         ))}
         {!family.members.length && <li className="px-3 py-3 text-sm text-muted-foreground">No children yet.</li>}
       </ul>
+      {canSwitch && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Account already handled before the notice?{' '}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirm(true)}
+            className="tp-focus-ring rounded font-medium text-primary hover:underline disabled:opacity-40"
+          >
+            Switch to after the fact
+          </button>
+        </p>
+      )}
       <ConfirmDialog
         open={confirm}
         title="Switch to after the fact?"
@@ -279,8 +332,8 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
         onCancel={() => setConfirm(false)}
         onConfirm={switchAfterFact}
       >
-        The account was handled before the notice. Children that are not in the after-the-fact list (by default
-        Disable Account and Decommissioning Account) are closed with a note. Devices stay open.
+        The account was handled before the notice. This closes{' '}
+        {switchCloses.map((c) => `${c.title || 'a ticket'} (${c.ref})`).join(', ')} with a note. Every other ticket stays as it is.
       </ConfirmDialog>
     </div>
   );

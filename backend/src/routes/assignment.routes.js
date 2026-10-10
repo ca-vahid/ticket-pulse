@@ -1136,13 +1136,9 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
     );
   }
 
-  // Competency feedback (fire-and-forget)
-  if (decision === 'approved' || decision === 'modified') {
-    const finalTechId = assignedTechId || run.recommendation?.recommendations?.[0]?.techId;
-    competencyFeedbackService.processDecisionFeedback(runId, decision, finalTechId, req.workspaceId).catch((err) =>
-      logger.warn('Competency feedback failed after decide', { runId, error: err.message }),
-    );
-  }
+  // No competency feedback here any more (QA 10-09 item 12): a decision is
+  // not evidence of skill. The matrix learns when the ticket is closed, for
+  // whoever holds it then (competencyFeedbackService.processTicketClosed).
 
   res.json({ success: true, data: updated });
 }));
@@ -2057,6 +2053,39 @@ router.put('/competencies/technician/:techId', requireAdmin, asyncHandler(async 
   await competencyRepository.bulkUpdateTechnicianCompetencies(techId, req.workspaceId, competencies);
   const updated = await competencyRepository.getTechnicianCompetencies(techId, req.workspaceId);
   res.json({ success: true, data: updated });
+}));
+
+// ─── Learned skills review (QA 10-09 item 12) ───────────────────────────
+// Skills the system added from closed tickets ("Auto-created…" notes), with
+// the evidence behind each. Admin only, like the rest of the matrix. Keep
+// confirms a row (drops the marker), Remove deletes it; both are scoped to
+// this workspace AND to learner rows, so a hand-set skill cannot be touched
+// through these routes.
+
+router.get('/competencies/learned', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await competencyFeedbackService.listLearnedSkills(req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+router.post('/competencies/learned/keep', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await competencyFeedbackService.keepLearnedSkills(
+    req.workspaceId, req.body?.ids, (req.session?.user ?? req.user)?.email || null,
+  );
+  res.json({ success: true, data });
+}));
+
+router.post('/competencies/learned/remove', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await competencyFeedbackService.removeLearnedSkills(
+    req.workspaceId, req.body?.ids, (req.session?.user ?? req.user)?.email || null,
+  );
+  res.json({ success: true, data });
+}));
+
+router.put('/competencies/learned/:id/level', requireAdmin, asyncHandler(async (req, res) => {
+  const data = await competencyFeedbackService.setLearnedSkillLevel(
+    req.workspaceId, req.params.id, req.body?.level, (req.session?.user ?? req.user)?.email || null,
+  );
+  res.json({ success: true, data });
 }));
 
 // ─── Competency Analysis Pipeline ───────────────────────────────────────
