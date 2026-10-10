@@ -6,7 +6,7 @@ import { categoryTiers } from '../utils/approvalTiers.js';
 import logger from '../utils/logger.js';
 import { textToHtml } from '../utils/forwardedMailParser.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
-import { AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
+import { AuthorizationError, AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
@@ -5357,18 +5357,27 @@ class TicketService {
   }
 
   /**
-   * Admin-only deletion of an internal note. Scoped tightly on purpose:
+   * Deletion of an internal note: its author, or an admin (QA 10-09 item 6 —
+   * it was admin-only, so an agent could not take back their own note).
+   * Scoped tightly on purpose:
    *  - native (TP-owned) tickets only — FS-sourced notes would just re-sync;
    *  - `eventType === 'note'` — replies/forwards/requester messages are the
    *    real conversation and stay put;
    *  - non-system notes — approval/audit events are preserved.
-   * Removes the note's attachments (blobs + rows) then the entry itself. The
-   * FreshService fallback copy (if the note was mirrored) is intentionally left
-   * alone, matching how attachment deletion behaves today.
+   * "Own" is the entry's actor e-mail matching the signed-in person's. An
+   * entry with no actor e-mail (synced from FreshService, written by a
+   * workflow) is nobody's own: only an admin deletes it. The read-only role
+   * never gets here — the write guard refuses its DELETE first — and is
+   * refused again below in case this is called from elsewhere.
+   * Removes the note's attachments (blobs + rows) then the entry itself; a
+   * mirrored copy on the FreshService fallback ticket is deleted through the
+   * mirror queue.
    */
   async deleteNote(ticketId, workspaceId, entryId, actor) {
     const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
-    if (!isAdmin) throw new ValidationError('Only an admin can delete notes');
+    if (!isAdmin && (actor?.role === 'readonly' || actor?.workspaceRole === 'readonly')) {
+      throw new AuthorizationError('Read-only access cannot delete notes', 'read_only');
+    }
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
@@ -5388,6 +5397,11 @@ class TicketService {
     }
     if (entry.authorType === 'system') {
       throw new ValidationError('System and approval notes cannot be deleted');
+    }
+    const isAuthor = Boolean(entry.actorEmail && actor?.email)
+      && String(entry.actorEmail).trim().toLowerCase() === String(actor.email).trim().toLowerCase();
+    if (!isAdmin && !isAuthor) {
+      throw new AuthorizationError('You can delete only your own notes', 'not_note_author');
     }
 
     // If this note was mirrored to the FreshService fallback copy, capture its
@@ -5409,6 +5423,7 @@ class TicketService {
     await this._audit(ticket.id, 'note.deleted', actor, {
       entryId: entry.id,
       preview: (entry.bodyText || entry.content || '').slice(0, 140),
+      byAuthor: isAuthor,
     });
 
     logger.info(`Note ${entry.id} on ticket ${ticket.id} deleted by ${actor?.email || 'unknown'}`);

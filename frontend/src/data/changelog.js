@@ -1,11 +1,29 @@
-export const APP_VERSION = '4.2.35-preview';
+export const APP_VERSION = '4.2.36-preview';
 
 export const changelog = [
+  {
+    version: '4.2.36-preview',
+    date: 'October 9, 2026',
+    entries: [
+      { type: 'added', html: '<strong>On/Offboarding: change who has a ticket, in place</strong> &mdash; on the People page, each open child ticket now has the assignee picker. Pick a person and the ticket is theirs; a ticket that lives in FreshService is written there first. A sleeping ticket with no owner can be given one, and it keeps that owner when it wakes.' },
+      { type: 'improved', html: '<strong>On/Offboarding: &ldquo;Switch to after the fact&rdquo; only when it would do something</strong> &mdash; the action now appears only on a departure that still has an open ticket the switch would close, sits under the list of tickets instead of the top corner, and the confirmation names the tickets it will close.' },
+      { type: 'fixed', html: '<strong>Approvals</strong> &mdash; the coloured bar on the selected tab no longer sticks out past the tab&rsquo;s rounded corners.' },
+      { type: 'improved', html: '<strong>One place to request an approval</strong> &mdash; &ldquo;Request approval&hellip;&rdquo; is gone from the ticket&rsquo;s More menu. Use the + on the Approvals tab.' },
+      { type: 'improved', html: '<strong>Your signature shows inside the reply</strong> &mdash; the signature is no longer in a separate box under the editor. It now sits directly under your text, as the requester will receive it. It is still added automatically, so do not type it; &ldquo;Change&rdquo; and &ldquo;Hide&rdquo; are in the small line under it.' },
+      { type: 'added', html: '<strong>Delete your own notes</strong> &mdash; anyone who can write on a ticket can now delete an internal note they wrote themselves on a Ticket Pulse ticket. Admins can still delete any note. Replies that were sent, and other people&rsquo;s notes, cannot be deleted.' },
+      { type: 'improved', html: '<strong>Phone numbers</strong> &mdash; North American numbers show in one form without the +1, such as (778) 644-0541, and the copy button copies just the ten digits. Numbers are no longer links. Extensions and international numbers are unchanged.' },
+      { type: 'improved', html: '<strong>Ticket header</strong> &mdash; the green Close switch is now a plain &ldquo;Close ticket&rdquo; button at the end of the row, after Macros, so it no longer reads as the ticket&rsquo;s status. The ticket number is larger and leads the title.' },
+      { type: 'changed', html: '<strong>Park is for dates only</strong> &mdash; &ldquo;Waiting on someone&rdquo; is removed from the Park dialog. To wait on the requester or another person, set the ticket to Pending Response. Tickets already parked that way are not affected.' },
+      { type: 'changed', html: '<strong>Skills are learned from closed tickets, not from assignments</strong> &mdash; a skill used to be added the moment a ticket was assigned, even when the AI chose wrongly. Now the person holding a ticket when it is closed earns the skill: basic at the first closed ticket in a category, intermediate at 10, advanced at 25. Expert is only ever set by a person. Noise, duplicates and tickets closed by automation do not count, and a level a person has set is never changed.' },
+      { type: 'changed', html: '<strong>Assignment scoring</strong> &mdash; someone with no skill in a ticket&rsquo;s category now scores 0.1 on the skill factor instead of 0.25, so people who have the skill are preferred more strongly.' },
+      { type: 'added', html: '<strong>Learned skills review</strong> &mdash; Assignment Review &rarr; Competencies has a new tab for admins, &ldquo;Learned skills&rdquo;: every skill the system added, grouped by person, with how many tickets that person has closed in the category. Keep it, change its level or remove it, one at a time or several together.' },
+    ],
+  },
   {
     version: '4.2.35-preview',
     date: 'October 9, 2026',
     entries: [
-      { type: 'fixed', html: '<strong>Comings &amp; Goings: no second ticket for the same new-hire work</strong> &mdash; the account script still files its own &ldquo;NH Laptop&rdquo; and &ldquo;NH Workstation&rdquo; tickets when it creates a new user. When the onboarding family already has that Laptop or Workstation ticket, the script ticket is now closed as a duplicate the moment it arrives, before it is routed to a second person, with a note on each ticket pointing at the other. The account details stay on the script ticket. A script ticket that somebody already holds is linked and left alone. This is a stop-gap until the script stops filing tickets.' },
+      { type: 'fixed', html: '<strong>On/Offboarding: no second ticket for the same new-hire work</strong> &mdash; the account script still files its own &ldquo;NH Laptop&rdquo; and &ldquo;NH Workstation&rdquo; tickets when it creates a new user. When the onboarding family already has that Laptop or Workstation ticket, the script ticket is now closed as a duplicate the moment it arrives, before it is routed to a second person, with a note on each ticket pointing at the other. The account details stay on the script ticket. A script ticket that somebody already holds is linked and left alone. This is a stop-gap until the script stops filing tickets.' },
       { type: 'fixed', html: '<strong>Other-teams assignees now reach the FreshService copy of a Ticket Pulse ticket</strong> &mdash; assigning a ticket created in Ticket Pulse to someone outside the IT groups (the Coreshack people) left the FreshService copy with its previous assignee, because FreshService refuses an assignee who is not in the ticket&rsquo;s group. The copy is now moved to that person&rsquo;s own FreshService group, as already happened for tickets that started in FreshService. The ticket&rsquo;s group in Ticket Pulse is unchanged, and IT assignments never change a group.' },
     ],
   },
@@ -18,14 +36,14 @@ export const changelog = [
       { type: 'fixed', html: '<strong>Removing a super admin takes effect at once</strong> &mdash; someone taken off the list used to stay an admin in their open session for up to seven days. Their next page load now uses their workspace role.' },
       { type: 'added', html: '<strong>Mail Workflows: Send Teams message</strong> &mdash; a new step that has the Ticket Pulse bot message people in Teams: named people, members of an internal group, the members of the ticket&rsquo;s group or the assignee. A ready-made workflow, &ldquo;Nobody picked this up: tell the team in Teams&rdquo;, uses it with the &ldquo;unassigned for N hours&rdquo; trigger. Only active team members of the workspace are messaged, and Teams must be switched on for the workspace.' },
       { type: 'improved', html: '<strong>Spell-check in every editor</strong> &mdash; the reply, note, description, signature, Knowledge and workflow e-mail editors now ask the browser for spell-check explicitly, in Canadian English. Text you type is underlined as in any other web page; if nothing is ever underlined, spell-check is switched off in the browser itself.' },
-      { type: 'improved', html: '<strong>Comings &amp; Goings</strong> &mdash; &ldquo;Reassign by office&rdquo; is no longer offered on a family whose tickets are all asleep with no owner (they are assigned when they wake).' },
+      { type: 'improved', html: '<strong>On/Offboarding</strong> &mdash; &ldquo;Reassign by office&rdquo; is no longer offered on a family whose tickets are all asleep with no owner (they are assigned when they wake).' },
     ],
   },
   {
     version: '4.2.33-preview',
     date: 'October 8, 2026',
     entries: [
-      { type: 'improved', html: '<strong>Comings &amp; Goings: nobody is assigned until the work is due</strong> &mdash; child tickets for a start or a last day that is still weeks away now sleep with <em>no owner</em>. On the day they wake, Ticket Pulse picks the owner from who is here then: the people listed for that ticket (in turn), the office team for a new hire (one person for the hire), or the normal AI routing. A start-date change in the meantime moves everything quietly; nobody has to be told.' },
+      { type: 'improved', html: '<strong>On/Offboarding: nobody is assigned until the work is due</strong> &mdash; child tickets for a start or a last day that is still weeks away now sleep with <em>no owner</em>. On the day they wake, Ticket Pulse picks the owner from who is here then: the people listed for that ticket (in turn), the office team for a new hire (one person for the hire), or the normal AI routing. A start-date change in the meantime moves everything quietly; nobody has to be told.' },
       { type: 'improved', html: '<strong>Earlier wake-up</strong> &mdash; new-hire tickets wake 21 days before the start (was 14); departure tickets wake 14 days before the last day (was the Monday of that week). Work that is already inside that window is created awake and assigned at once, as before.' },
       { type: 'improved', html: '<strong>No gaps</strong> &mdash; a ticket that wakes gets its due date back on the start or last day, a start more than six months away is parked again when its park runs out, and a ticket that is awake with no owner is picked up within minutes. &ldquo;Park until needed&rdquo; on a family puts existing tickets on the same footing.' },
     ],
@@ -34,7 +52,7 @@ export const changelog = [
     version: '4.2.32-preview',
     date: 'October 8, 2026',
     entries: [
-      { type: 'added', html: '<strong>Comings &amp; Goings: tickets sleep until they are needed</strong> &mdash; the child tickets of a new hire or a departure are parked as soon as they are created and wake at the lead time before the date (new hire: 14 days before the start; departure: the Monday of the last week). A family under People has a &ldquo;Park until needed&rdquo; button for tickets created before this release.' },
+      { type: 'added', html: '<strong>On/Offboarding: tickets sleep until they are needed</strong> &mdash; the child tickets of a new hire or a departure are parked as soon as they are created and wake at the lead time before the date (new hire: 14 days before the start; departure: the Monday of the last week). A family under People has a &ldquo;Park until needed&rdquo; button for tickets created before this release.' },
       { type: 'improved', html: '<strong>Date changes from HR move everything</strong> &mdash; when HR changes a start date, a last day or a contract end, the due dates <em>and</em> the parks of the notice and every open child move together, with a note on each. If the new date is close, parked tickets wake at once.' },
       { type: 'fixed', html: '<strong>HR notices read correctly</strong> &mdash; checked against 14 months of notices: a start date more than six months ahead (interns) is now read, as are notices whose text arrives without spaces, &ldquo;New Hire (Feb 01 - FDR): &hellip;&rdquo; subjects, a name followed by a bracketed note, and the one-line transfer notice.' },
     ],
@@ -43,7 +61,7 @@ export const changelog = [
     version: '4.2.31-preview',
     date: 'October 8, 2026',
     entries: [
-      { type: 'improved', html: '<strong>Comings &amp; Goings: faces and a switch</strong> &mdash; People now shows each person&rsquo;s photo where the directory has one, and a &ldquo;With&rdquo; column with the faces of whoever holds their tickets. A switch above the list shows everyone, only onboarding or only offboarding.' },
+      { type: 'improved', html: '<strong>On/Offboarding: faces and a switch</strong> &mdash; People now shows each person&rsquo;s photo where the directory has one, and a &ldquo;With&rdquo; column with the faces of whoever holds their tickets. A switch above the list shows everyone, only onboarding or only offboarding.' },
       { type: 'improved', html: '<strong>New hires by office</strong> &mdash; Edmonton goes to the Calgary team, Kingston to Toronto, and Halifax has its own team. When everyone on an office&rsquo;s team is off that day, anyone else takes the new hire.' },
       { type: 'fixed', html: '<strong>Reassign by office</strong> now hands a new hire to whoever holds the fewest open new-hire tickets, so one person no longer collects several in a row.' },
     ],
@@ -52,7 +70,7 @@ export const changelog = [
     version: '4.2.30-preview',
     date: 'October 8, 2026',
     entries: [
-      { type: 'added', html: '<strong>Comings &amp; Goings: new hires go to the IT people of their office</strong> &mdash; Settings has a new list, &ldquo;New hires by office&rdquo;: which people look after the new hires of which office (Vancouver and vicinity, Toronto, Calgary, Ottawa and Montreal), and who takes turns for every other office. A new hire&rsquo;s Laptop and Workstation both go to one person from that list, in turn; anyone off that day is skipped.' },
+      { type: 'added', html: '<strong>On/Offboarding: new hires go to the IT people of their office</strong> &mdash; Settings has a new list, &ldquo;New hires by office&rdquo;: which people look after the new hires of which office (Vancouver and vicinity, Toronto, Calgary, Ottawa and Montreal), and who takes turns for every other office. A new hire&rsquo;s Laptop and Workstation both go to one person from that list, in turn; anyone off that day is skipped.' },
       { type: 'added', html: '<strong>Reassign by office</strong> &mdash; an open new-hire family under People has a &ldquo;Reassign by office&rdquo; button: tickets held by somebody outside the office&rsquo;s list move to one person on it, with a note on each.' },
     ],
   },
@@ -60,8 +78,8 @@ export const changelog = [
     version: '4.2.29-preview',
     date: 'October 8, 2026',
     entries: [
-      { type: 'added', html: '<strong>Comings &amp; Goings: several people on one child ticket</strong> &mdash; a child such as Phone can now list more than one person under Settings. Each new ticket still goes to one of them: they take turns, and anyone who is off that day is skipped.' },
-      { type: 'added', html: '<strong>Comings &amp; Goings: organise people who were announced before Live</strong> &mdash; once the section is Live, People shows &ldquo;Not organised yet&rdquo;: departures and new hires whose notice arrived earlier. Organise takes in the tickets that already exist (FreshService child tickets, NH Laptop and NH Workstation) and creates only the missing ones, so later date changes and cancellations reach every ticket.' },
+      { type: 'added', html: '<strong>On/Offboarding: several people on one child ticket</strong> &mdash; a child such as Phone can now list more than one person under Settings. Each new ticket still goes to one of them: they take turns, and anyone who is off that day is skipped.' },
+      { type: 'added', html: '<strong>On/Offboarding: organise people who were announced before Live</strong> &mdash; once the section is Live, People shows &ldquo;Not organised yet&rdquo;: departures and new hires whose notice arrived earlier. Organise takes in the tickets that already exist (FreshService child tickets, NH Laptop and NH Workstation) and creates only the missing ones, so later date changes and cancellations reach every ticket.' },
     ],
   },
   {

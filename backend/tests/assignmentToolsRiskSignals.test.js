@@ -51,7 +51,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { executeTool, TOOL_SCHEMAS } = await import('../src/services/assignmentTools.js');
+const { executeTool, TOOL_SCHEMAS, COMPETENCY_MATCH_SCORES, competencyMatchScore } = await import('../src/services/assignmentTools.js');
 
 const techs = [
   { id: 1, name: 'Busy Expert', email: 'busy@example.com', location: 'Vancouver', timezone: 'America/Los_Angeles', workStartTime: '09:00', workEndTime: '17:00', freshserviceId: BigInt(101) },
@@ -212,5 +212,20 @@ describe('assignmentTools risk and routing helpers', () => {
       expect.objectContaining({ techId: 1, memberOfCurrentGroup: false }),
       expect.objectContaining({ techId: 2, memberOfCurrentGroup: true }),
     ]);
+  });
+});
+
+// QA 10-09 item 12: a candidate with no skill in the category scores 0.1 on
+// the competency factor (was 0.25); the matched tiers are unchanged.
+describe('competency factor of the assignment score', () => {
+  test('exact 1.0, parent 0.72, category 0.65, none 0.1', () => {
+    expect(COMPETENCY_MATCH_SCORES).toEqual({ subcategory_exact: 1, parent_fallback: 0.72, category_exact: 0.65, none: 0.1 });
+    expect(competencyMatchScore('subcategory_exact')).toBe(1);
+    expect(competencyMatchScore('parent_fallback')).toBe(0.72);
+    expect(competencyMatchScore('category_exact')).toBe(0.65);
+    expect(competencyMatchScore('none')).toBe(0.1);
+    expect(competencyMatchScore(undefined)).toBe(0.1);
+    expect(competencyMatchScore('something_else')).toBe(0.1);
+    expect(competencyMatchScore('toString')).toBe(0.1);
   });
 });

@@ -719,11 +719,12 @@ export default function ApprovalsInbox() {
                 to={tabPath(k)}
                 aria-selected={view === k}
                 onClick={(e) => { e.preventDefault(); goTab(k); }}
-                className={`tp-focus-ring relative -mb-px inline-flex items-center gap-1.5 rounded-t-lg border px-3.5 py-2 text-sm font-semibold transition-colors ${
+                className={`tp-focus-ring relative -mb-px inline-flex items-center gap-1.5 overflow-hidden rounded-t-lg border px-3.5 py-2 text-sm font-semibold transition-colors ${
                   view === k ? 'border-border border-b-card bg-card text-emerald-700 dark:text-emerald-200' : 'border-transparent bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground/85'
                 }`}
               >
-                {view === k && <span className="absolute inset-x-0 top-0 h-0.5 rounded-t bg-emerald-600" aria-hidden="true" />}
+                {/* overflow-hidden on the tab clips this bar to the rounded top corners (QA 10-09 #2: it stuck out past them). */}
+                {view === k && <span data-testid="approvals-tab-accent" className="absolute inset-x-0 top-0 h-0.5 bg-emerald-600" aria-hidden="true" />}
                 <Icon className="h-4 w-4" aria-hidden="true" /> {label}
               </Link>
             ))}

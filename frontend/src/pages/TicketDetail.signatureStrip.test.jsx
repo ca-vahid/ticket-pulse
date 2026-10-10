@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // Mega 08-15 Phase D — the composer signature strip is REPLY-mode only:
@@ -105,7 +105,13 @@ vi.mock('../components/tickets/StagedFileChip', () => ({ default: () => null }))
 vi.mock('../components/tickets/RichTextEditor', async () => {
   const { forwardRef } = await import('react');
   return {
-    default: forwardRef(({ ariaLabel }, _ref) => <textarea aria-label={ariaLabel || 'editor'} />),
+    // QA 10-09 #4: the signature arrives as the editor's `footer` (inside its frame).
+    default: forwardRef(({ ariaLabel, footer }, _ref) => (
+      <div data-testid="editor-frame">
+        <textarea aria-label={ariaLabel || 'editor'} />
+        {footer}
+      </div>
+    )),
     isRichContent: () => false,
   };
 });
@@ -123,7 +129,7 @@ function renderPage() {
   );
 }
 
-const STRIP_TEXT = /your signature is added automatically/i;
+const STRIP_TEXT = /signature, added automatically/i;
 
 describe('TicketDetail composer signature strip (Phase D)', () => {
   beforeEach(() => {
@@ -150,8 +156,10 @@ describe('TicketDetail composer signature strip (Phase D)', () => {
     // The editable area stays empty — the signature is preview-only.
     expect(screen.getByRole('textbox', { name: 'Reply body' })).toHaveValue('');
 
-    // Open by default (18 Sep 2026): the agent sees what goes under the reply.
+    // Open by default (18 Sep 2026): the agent sees what goes under the reply —
+    // and since QA 10-09 #4 it sits inside the editor frame, under the body.
     expect(screen.getByTestId('composer-signature-preview')).toBeInTheDocument();
+    expect(within(screen.getByTestId('editor-frame')).getByTestId('composer-signature-strip')).toBeInTheDocument();
 
     // Back to note mode: strip goes away.
     fireEvent.click(screen.getByRole('button', { name: /internal note/i }));

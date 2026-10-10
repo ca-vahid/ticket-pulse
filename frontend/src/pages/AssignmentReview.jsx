@@ -4705,8 +4705,8 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           color="text-indigo-600 dark:text-indigo-300"
         />
         <ConfigToggle
-          label="Learn Competencies From Assignments"
-          description="Approved and reassigned tickets strengthen — or auto-create — the assigned technician's competency in the ticket's category (marked with an amber dot in the matrix). Turn off if people outside the team temporarily handle tickets here, so one reassignment can't add them to the skills matrix."
+          label="Learn Competencies From Closed Tickets"
+          description="When someone closes a ticket, the person holding it gains — or strengthens — a competency in the ticket's category: Basic from 1 closed ticket, Comfortable from 10, Advanced from 25. Expert is only ever set by a person. Assignments alone teach nothing. System-added entries carry an amber dot in the matrix and are listed under Competencies → Learned skills for review. Turn off to change the matrix by hand only."
           checked={config.competencyFeedbackEnabled !== false}
           onChange={() => setConfig({ ...config, competencyFeedbackEnabled: config.competencyFeedbackEnabled === false })}
           color="text-amber-600 dark:text-amber-300"

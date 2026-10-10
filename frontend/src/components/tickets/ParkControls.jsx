@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarClock, Loader2, PauseCircle, Plus, Sparkles, X } from 'lucide-react';
+import { CalendarClock, Loader2, PauseCircle, Sparkles, X } from 'lucide-react';
 
 /**
  * Parked tickets (plans/PARKED_BUILD_PLAN.md). A park is a marker, not a
@@ -11,11 +11,15 @@ import { CalendarClock, Loader2, PauseCircle, Plus, Sparkles, X } from 'lucide-r
 // QA 10-01 #6: "Waiting until a date" and "In progress, with an ETA" were too
 // alike — one choice now covers both. 'eta' stays a valid kind for parks made
 // before (and for the API), and still reads as "In progress, with an ETA".
+//
+// QA 10-09 #9: "Waiting on someone" is gone from the dialog too — waiting on a
+// person is what Pending Response is for — so a park is always until a date.
+// 'waiting_on' stays a valid kind for parks made before (and for the API), and
+// still reads as "Waiting on someone — <who>" wherever a park is shown.
 export const PARK_KINDS = [
   { value: 'until_date', label: 'Waiting until a date or an ETA', hint: 'Nothing to do before then, or work that is moving — a transfer, a start date, a return from leave, a rollout. It comes back to you on the date.' },
-  { value: 'waiting_on', label: 'Waiting on someone', hint: 'A colleague, a vendor, HR, another team. It comes back to you to chase them.' },
 ];
-const KIND_LABEL = { ...Object.fromEntries(PARK_KINDS.map((k) => [k.value, k.label])), eta: 'In progress, with an ETA' };
+const KIND_LABEL = { ...Object.fromEntries(PARK_KINDS.map((k) => [k.value, k.label])), eta: 'In progress, with an ETA', waiting_on: 'Waiting on someone' };
 const MAX_DAYS = 184;
 
 function isoDay(d) {
@@ -84,15 +88,14 @@ export function ParkedMark({ until, kind }) {
 
 /**
  * Park dialog. `initial` pre-fills an extension or a suggestion.
- * onSubmit({ kind, until, reason, waitingOn }) — the caller saves and closes.
+ * onSubmit({ kind, until, reason }) — the caller saves and closes. kind is
+ * 'until_date', except when an older waiting-on park gets a new date.
  */
 export default function ParkDialog({
-  ticketRef, requesterEmail = null, initial = null, busy = false, error = null, onSubmit, onClose, onUsePendingResponse, bulkCount = null,
+  ticketRef, initial = null, busy = false, error = null, onSubmit, onClose, onUsePendingResponse, bulkCount = null,
 }) {
-  const [kind, setKind] = useState(initial?.kind === 'waiting_on' ? 'waiting_on' : 'until_date');
   const [until, setUntil] = useState(initial?.until ? isoDay(initial.until) : '');
   const [reason, setReason] = useState(initial?.reason || '');
-  const [people, setPeople] = useState(Array.isArray(initial?.waitingOn) && initial.waitingOn.length ? initial.waitingOn.map((p) => p.name || p.email || '') : ['']);
   const firstRef = useRef(null);
   useEffect(() => { firstRef.current?.focus(); }, []);
   useEffect(() => {
@@ -109,10 +112,9 @@ export default function ParkDialog({
     { label: 'In a month', date: addDays(30) },
     ...(initial?.suggestedUntil ? [{ label: 'From the HR notice', date: new Date(initial.suggestedUntil) }] : []),
   ]), [initial?.suggestedUntil]);
-  const waitingOn = people.map((p) => p.trim()).filter(Boolean)
-    .map((p) => (p.includes('@') ? { email: p.toLowerCase(), name: p } : { name: p }));
-  const namesRequester = requesterEmail && waitingOn.some((p) => p.email === String(requesterEmail).toLowerCase());
-  const valid = until && until >= minDay && until <= maxDay && reason.trim() && (kind !== 'waiting_on' || waitingOn.length) && !namesRequester;
+  const valid = until && until >= minDay && until <= maxDay && reason.trim();
+  // Changing the date of an older "waiting on someone" park keeps who it waits on.
+  const legacyWaitingOn = initial?.kind === 'waiting_on' && Array.isArray(initial.waitingOn) && initial.waitingOn.length ? initial.waitingOn : null;
 
   return (
     <div
@@ -137,54 +139,13 @@ export default function ParkDialog({
           </button>
         </div>
 
-        <fieldset className="space-y-1.5">
-          <legend className="text-xs font-medium text-muted-foreground">Why is it waiting?</legend>
-          {PARK_KINDS.map((k, i) => (
-            <label key={k.value} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${kind === k.value ? 'border-primary/50 bg-primary/5' : 'border-border hover:bg-muted/50'}`}>
-              <input ref={i === 0 ? firstRef : undefined} type="radio" name="park-kind" value={k.value} checked={kind === k.value} onChange={() => setKind(k.value)} className="mt-0.5" />
-              <span>
-                <span className="font-semibold text-foreground">{k.label}</span>
-                <span className="block text-xs text-muted-foreground">{k.hint}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-
-        {kind === 'waiting_on' && (
-          <div className="mt-3">
-            <label className="block text-xs font-medium text-muted-foreground" htmlFor="park-person-0">Waiting on (name or e-mail)</label>
-            {people.map((p, i) => (
-              <input
-                key={i}
-                id={`park-person-${i}`}
-                value={p}
-                onChange={(e) => setPeople(people.map((x, j) => (j === i ? e.target.value : x)))}
-                placeholder="e.g. Alexa Wong or alexa@bgcengineering.ca"
-                className="tp-focus-ring mt-1 w-full rounded-lg border border-input bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60"
-              />
-            ))}
-            {people.length < 5 && (
-              <button type="button" onClick={() => setPeople([...people, ''])} className="tp-focus-ring mt-1 inline-flex items-center gap-1 rounded text-xs font-medium text-primary hover:underline">
-                <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Another person
-              </button>
-            )}
-            {namesRequester && (
-              <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-200">
-                Waiting on the requester isn’t a park — set the ticket to <strong>Pending Response</strong> and FreshService reminds them.
-                {onUsePendingResponse && (
-                  <button type="button" onClick={onUsePendingResponse} className="tp-focus-ring ml-1 rounded font-semibold underline">Use Pending Response</button>
-                )}
-              </p>
-            )}
-          </div>
-        )}
-
-        <div className="mt-3">
+        <div>
           <label className="block text-xs font-medium text-muted-foreground" htmlFor="park-until">
-            {kind === 'waiting_on' ? 'Chase on' : 'Until / ETA'} <span className="font-normal">(up to six months)</span>
+            Until / ETA <span className="font-normal">(up to six months)</span>
           </label>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <input
+              ref={firstRef}
               id="park-until"
               type="date"
               value={until}
@@ -208,12 +169,18 @@ export default function ParkDialog({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             maxLength={500}
-            placeholder={kind === 'waiting_on' ? 'e.g. Needs Alexa and Kirsten to review the list' : 'e.g. Transfer effective Oct 5, or DarkTrace rollout — ETA end of October'}
+            placeholder="e.g. Transfer effective Oct 5, or DarkTrace rollout — ETA end of October"
             className="tp-focus-ring mt-1 w-full rounded-lg border border-input bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60"
           />
         </div>
 
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="park-pending-pointer">
+          Waiting on the requester or on another person? That isn’t a park — set the ticket to <strong className="font-semibold text-foreground/85">Pending Response</strong>.
+          {onUsePendingResponse && (
+            <button type="button" onClick={onUsePendingResponse} className="tp-focus-ring ml-1 rounded font-medium text-primary hover:underline">Use Pending Response</button>
+          )}
+        </p>
+        <p className="mt-1.5 text-xs text-muted-foreground">
           A repeating task? <a href="/tickets?view=scheduled" className="tp-focus-ring rounded font-medium text-primary hover:underline">Schedule it instead</a> — a fresh ticket each time, closed when done.
         </p>
         {error && <p className="mt-2 text-xs text-red-600 dark:text-red-300" role="alert">{error}</p>}
@@ -223,7 +190,7 @@ export default function ParkDialog({
           <button
             type="button"
             disabled={!valid || busy}
-            onClick={() => onSubmit?.({ kind, until, reason: reason.trim(), ...(kind === 'waiting_on' ? { waitingOn } : {}) })}
+            onClick={() => onSubmit?.({ kind: legacyWaitingOn ? 'waiting_on' : 'until_date', until, reason: reason.trim(), ...(legacyWaitingOn ? { waitingOn: legacyWaitingOn } : {}) })}
             className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}

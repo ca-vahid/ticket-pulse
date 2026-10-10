@@ -52,7 +52,11 @@ Object.assign(api, {
   }] })),
   family: vi.fn(async () => ({ success: true, data: {
     id: 4, kind: 'offboarding', status: 'open', afterTheFact: false, parent: { id: 77, ref: '#240100' }, employeeId: '1234', details: {},
-    members: [{ role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', subject: 'Child Ticket - Laptop', status: 'Open', dueBy: '2026-10-10T00:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } }],
+    members: [
+      { role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', origin: 'ticketpulse', subject: 'Child Ticket - Laptop', status: 'Open', dueBy: '2026-10-10T00:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+      { role: 'child', key: 'decommission_account', title: 'Decommissioning Account', closed: false, ticket: { id: 91, ref: '#241814', origin: 'freshservice', subject: 'Child Ticket - Decommissioning Account', status: 'Open', dueBy: '2026-10-16T00:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+    ],
+    afterTheFactCloses: [{ ticketId: 91, ref: '#241814', title: 'Decommissioning Account' }],
   } })),
   switchToAfterTheFact: vi.fn(async () => ({ success: true, data: { closed: [] } })),
   candidates: vi.fn(async () => ({ success: true, data: [] })),
@@ -66,7 +70,18 @@ Object.assign(api, {
   }] })),
 });
 
-vi.mock('../services/api', () => ({ get hrLifecycleAPI() { return api; } }));
+// The child rows reuse the tickets' assignee picker, which writes through ticketsAPI.
+const tickets = vi.hoisted(() => ({}));
+Object.assign(tickets, {
+  assign: vi.fn(async () => ({ success: true, data: { id: 90 } })),
+  fsUpdate: vi.fn(async () => ({ success: true, data: { id: 91 } })),
+});
+
+vi.mock('../services/api', () => ({
+  get hrLifecycleAPI() { return api; },
+  get ticketsAPI() { return tickets; },
+  assignmentAPI: {},
+}));
 vi.mock('../hooks/useRequesterPhoto', () => ({ useRequesterPhoto: (email) => (email ? `photo:${email}` : null) }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../components/nav/MobileTabBar', () => ({ default: () => null }));
@@ -302,4 +317,130 @@ test('a family whose open tickets are all asleep with no owner does not offer Re
   expect(await screen.findByText('Assigned when it wakes')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Reassign by office' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Park until needed' })).not.toBeInTheDocument();
+});
+
+// Earlier tests leave their own families behind (mockResolvedValue outlives clearAllMocks).
+const JAMIE_ROW = {
+  id: 4, kind: 'offboarding', personName: 'Jamie Gill', office: 'Calgary', effectiveDate: '2026-10-09', afterTheFact: false, status: 'open',
+  progress: { done: 0, total: 2 }, linked: 0, parent: { id: 77, ref: '#240100' },
+};
+const JAMIE_FAMILY = {
+  id: 4, kind: 'offboarding', status: 'open', afterTheFact: false, parent: { id: 77, ref: '#240100' }, employeeId: '1234', details: {},
+  members: [
+    { role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', origin: 'ticketpulse', subject: 'Child Ticket - Laptop', status: 'Open', dueBy: '2026-10-10T00:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+    { role: 'child', key: 'decommission_account', title: 'Decommissioning Account', closed: false, ticket: { id: 91, ref: '#241814', origin: 'freshservice', subject: 'Child Ticket - Decommissioning Account', status: 'Open', dueBy: '2026-10-16T00:00:00Z', assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+  ],
+  afterTheFactCloses: [{ ticketId: 91, ref: '#241814', title: 'Decommissioning Account' }],
+};
+const jamie = () => {
+  api.families.mockResolvedValue({ success: true, data: [JAMIE_ROW] });
+  api.family.mockResolvedValue({ success: true, data: JAMIE_FAMILY });
+};
+
+describe('changing who holds a child (QA 10-09 #1)', () => {
+  beforeEach(jamie);
+  const openFamily = async () => {
+    renderAt('/onboarding/people');
+    fireEvent.click(await screen.findByRole('button', { name: /Show Jamie Gill's tickets/ }));
+    await screen.findByText('TP-5000');
+  };
+  const rowOf = (ref) => screen.getByText(ref).closest('li');
+  const pick = async (ref, name) => {
+    fireEvent.click(within(rowOf(ref)).getByRole('button', { name: /Assignee: Muhammad Shahidullah/ }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Choose assignee' })).getByRole('option', { name: new RegExp(name) }));
+  };
+
+  test('a Ticket Pulse child is assigned in place: the family reloads and the line says who has it', async () => {
+    await openFamily();
+    expect(api.family).toHaveBeenCalledTimes(1);
+    await pick('TP-5000', 'Vahid Haeri');
+    await waitFor(() => expect(tickets.assign).toHaveBeenCalledWith(90, 1, {}));
+    expect(tickets.fsUpdate).not.toHaveBeenCalled();
+    expect(await screen.findByText('TP-5000 assigned to Vahid Haeri.')).toBeInTheDocument();
+    await waitFor(() => expect(api.family).toHaveBeenCalledTimes(2));
+    // The People list is refreshed too (the "With" faces).
+    expect(api.families).toHaveBeenCalledTimes(2);
+  });
+
+  test('a FreshService child is written to FreshService instead', async () => {
+    await openFamily();
+    await pick('#241814', 'Vahid Haeri');
+    await waitFor(() => expect(tickets.fsUpdate).toHaveBeenCalledWith(91, { assignedTechId: 1 }));
+    expect(tickets.assign).not.toHaveBeenCalled();
+    expect(await screen.findByText('#241814 assigned to Vahid Haeri in FreshService.')).toBeInTheDocument();
+  });
+
+  test('a refusal shows in the note line as an alert and the row keeps its owner', async () => {
+    tickets.assign.mockRejectedValueOnce(new Error('Vahid Haeri is on leave'));
+    await openFamily();
+    await pick('TP-5000', 'Vahid Haeri');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Vahid Haeri is on leave');
+    expect(api.family).toHaveBeenCalledTimes(1);
+    expect(within(rowOf('TP-5000')).getByRole('button', { name: /Assignee: Muhammad Shahidullah/ })).toBeInTheDocument();
+  });
+
+  test('a closed child is read-only; an asleep child with no owner can be given one', async () => {
+    api.family.mockResolvedValue({ success: true, data: { id: 4, kind: 'offboarding', status: 'open', afterTheFact: false, parent: { id: 77, ref: '#240100' }, details: {}, afterTheFactCloses: [], members: [
+      { role: 'child', key: 'laptop', title: 'Laptop', closed: true, ticket: { id: 90, ref: 'TP-5000', origin: 'ticketpulse', status: 'Closed', dueBy: null, parkedUntil: null, assignee: { id: 2, name: 'Muhammad Shahidullah' } } },
+      { role: 'child', key: 'phone', title: 'Phone', closed: false, ticket: { id: 92, ref: 'TP-5002', origin: 'ticketpulse', status: 'Pending', dueBy: null, parkedUntil: '2026-10-19T15:00:00Z', assignee: null } },
+    ] } });
+    await openFamily();
+    expect(within(rowOf('TP-5000')).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(rowOf('TP-5000')).getByText('Muhammad Shahidullah')).toBeInTheDocument();
+    const asleep = rowOf('TP-5002');
+    expect(within(asleep).getByText('Assigned when it wakes')).toBeInTheDocument();
+    fireEvent.click(within(asleep).getByRole('button', { name: /Unassigned/ }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Choose assignee' })).getByRole('option', { name: /Vahid Haeri/ }));
+    await waitFor(() => expect(tickets.assign).toHaveBeenCalledWith(92, 1, {}));
+  });
+});
+
+describe('"Switch to after the fact" shows only when it would close something (QA 10-09 #1)', () => {
+  beforeEach(jamie);
+  const family = (over) => ({ success: true, data: {
+    id: 4, kind: 'offboarding', status: 'open', afterTheFact: false, parent: { id: 77, ref: '#240100' }, details: {},
+    members: [{ role: 'child', key: 'decommission_account', title: 'Decommissioning Account', closed: true, ticket: { id: 91, ref: 'TP-5001', origin: 'ticketpulse', status: 'Closed', dueBy: null, assignee: { id: 2, name: 'Muhammad Shahidullah' } } }],
+    afterTheFactCloses: [],
+    ...over,
+  } });
+  const open = async () => {
+    renderAt('/onboarding/people');
+    fireEvent.click(await screen.findByRole('button', { name: /Show Jamie Gill's tickets/ }));
+  };
+
+  test('every child closed: no switch', async () => {
+    api.family.mockResolvedValue(family());
+    await open();
+    expect(await screen.findByText('TP-5001')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Switch to after the fact' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Account already handled before the notice/)).not.toBeInTheDocument();
+  });
+
+  test('open children, but none the switch would close (devices only): no switch', async () => {
+    api.family.mockResolvedValue(family({ members: [{ role: 'child', key: 'laptop', title: 'Laptop', closed: false, ticket: { id: 90, ref: 'TP-5000', origin: 'ticketpulse', status: 'Open', dueBy: null, assignee: null } }] }));
+    await open();
+    expect(await screen.findByText('TP-5000')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Switch to after the fact' })).not.toBeInTheDocument();
+  });
+
+  test('already after the fact, or an onboarding family: no switch even if the server lists tickets', async () => {
+    api.family.mockResolvedValue(family({ afterTheFact: true, afterTheFactCloses: [{ ticketId: 91, ref: 'TP-5001', title: 'Decommissioning Account' }] }));
+    await open();
+    expect(await screen.findByText('TP-5001')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Switch to after the fact' })).not.toBeInTheDocument();
+  });
+
+  test('it sits under the children as a quiet question, names what it closes, then calls the server', async () => {
+    await open();
+    const btn = await screen.findByRole('button', { name: 'Switch to after the fact' });
+    // Under the list, not in the meta line at the top.
+    const list = screen.getByText('TP-5000').closest('ul');
+    expect(list.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(btn.closest('p')).toHaveTextContent('Account already handled before the notice? Switch to after the fact');
+    fireEvent.click(btn);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('This closes Decommissioning Account (#241814) with a note.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Switch and close extras' }));
+    await waitFor(() => expect(api.switchToAfterTheFact).toHaveBeenCalledWith(4));
+  });
 });

@@ -1946,8 +1946,9 @@ router.post('/:id/mirror/retry', requireNativeTicketing, asyncHandler(async (req
   res.json({ success: true, data: result });
 }));
 
-// Admin-only: delete an internal note (native tickets; also removes the FS
-// fallback copy via the mirror). Guarded again inside the service.
+// Delete an internal note: its author or an admin (QA 10-09 item 6). Native
+// tickets only; also removes the FS fallback copy via the mirror. The service
+// decides who may (403 for someone else's note).
 router.delete('/:id/notes/:entryId', requireNativeTicketing, asyncHandler(async (req, res) => {
   const result = await ticketService.deleteNote(
     parseTicketId(req), req.workspaceId, Number(req.params.entryId), req.ticketActor,

@@ -272,6 +272,9 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   onImagePaste,
   // Article editor only: Normal / Section heading / Subheading block controls.
   headings = false,
+  // Read-only content shown inside the frame, straight under the editable area
+  // (the reply composer's signature). Never part of the emitted html.
+  footer = null,
 }, ref) {
   const editorRef = useRef(null);
   const lastEmittedRef = useRef(null);
@@ -365,6 +368,20 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     emit();
   };
 
+  // With a footer the frame, not the editable area, is the tall click target:
+  // a click on its empty space puts the caret at the end of the message.
+  const focusEnd = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+
   const toolBtn = 'tp-focus-ring p-1.5 rounded-md text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15';
   const blockOn = 'bg-muted text-foreground';
 
@@ -416,82 +433,92 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             {placeholder}
           </span>
         )}
+        {/* Always present so the editable node keeps its place (and its
+            content) when a footer comes or goes; it only takes over the
+            height and the scrolling while there is one. */}
         <div
-          ref={editorRef}
-          contentEditable
-          // Spell-check (QA 10-08 #4): asked for explicitly rather than left to
-          // the browser default, with Canadian English as the proofing
-          // language (Edge's editor picks its dictionary from `lang`).
-          spellCheck
-          lang="en-CA"
-          autoCorrect="on"
-          autoCapitalize="sentences"
-          role="textbox"
-          aria-multiline="true"
-          aria-label={ariaLabel}
-          onInput={emit}
-          onBlur={emit}
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); }
-          }}
-          onPaste={(e) => {
+          className={footer ? 'flex flex-col cursor-text overflow-y-auto settings-scrollbar rounded-b-lg' : undefined}
+          style={footer ? { minHeight, maxHeight: 460 } : undefined}
+          onMouseDown={footer ? (e) => { if (e.target === e.currentTarget) { e.preventDefault(); focusEnd(); } } : undefined}
+        >
+          <div
+            ref={editorRef}
+            contentEditable
+            // Spell-check (QA 10-08 #4): asked for explicitly rather than left to
+            // the browser default, with Canadian English as the proofing
+            // language (Edge's editor picks its dictionary from `lang`).
+            spellCheck
+            lang="en-CA"
+            autoCorrect="on"
+            autoCapitalize="sentences"
+            role="textbox"
+            aria-multiline="true"
+            aria-label={ariaLabel}
+            onInput={emit}
+            onBlur={emit}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); }
+            }}
+            onPaste={(e) => {
             // Pasted images (e.g. a screenshot) become staged attachments rather
             // than base64-bloated inline HTML — the host handles them.
-            const images = Array.from(e.clipboardData?.items || [])
-              .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
-              .map((it) => it.getAsFile())
-              .filter(Boolean);
-            const htmlData = e.clipboardData.getData('text/html');
-            const textData = e.clipboardData.getData('text/plain');
-            if (images.length && onImagePaste) {
+              const images = Array.from(e.clipboardData?.items || [])
+                .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+                .map((it) => it.getAsFile())
+                .filter(Boolean);
+              const htmlData = e.clipboardData.getData('text/html');
+              const textData = e.clipboardData.getData('text/plain');
+              if (images.length && onImagePaste) {
+                e.preventDefault();
+                // Keep any text the clipboard also carried, first.
+                const insert = htmlData ? sanitize(cleanPastedHtml(htmlData)) : textToHtml(textData);
+                if (insert) document.execCommand('insertHTML', false, insert);
+                // Stage each image and drop a lightweight reference at the caret so
+                // the tech can anchor where the picture belongs in their write-up.
+                // onImagePaste returns the staged filename (or nothing for older hosts).
+                images.forEach((f) => {
+                  const label = onImagePaste(f);
+                  if (label) {
+                    const esc = document.createElement('div');
+                    esc.textContent = label;
+                    document.execCommand('insertHTML', false, `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`);
+                  }
+                });
+                emit();
+                return;
+              }
+              // Otherwise paste as sanitized content, not raw clipboard markup.
               e.preventDefault();
-              // Keep any text the clipboard also carried, first.
-              const insert = htmlData ? sanitize(cleanPastedHtml(htmlData)) : textToHtml(textData);
-              if (insert) document.execCommand('insertHTML', false, insert);
-              // Stage each image and drop a lightweight reference at the caret so
-              // the tech can anchor where the picture belongs in their write-up.
-              // onImagePaste returns the staged filename (or nothing for older hosts).
-              images.forEach((f) => {
-                const label = onImagePaste(f);
-                if (label) {
-                  const esc = document.createElement('div');
-                  esc.textContent = label;
-                  document.execCommand('insertHTML', false, `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`);
-                }
-              });
-              emit();
-              return;
-            }
-            // Otherwise paste as sanitized content, not raw clipboard markup.
-            e.preventDefault();
-            let insert;
-            if (htmlData) {
+              let insert;
+              if (htmlData) {
               // Embedded pictures leave the markup and become attachments.
-              const { html: withoutImages, images: embedded } = extractInlineImages(cleanPastedHtml(htmlData));
-              insert = sanitize(withoutImages);
-              embedded.forEach((image, i) => {
-                let replacement;
-                const label = onImagePaste ? onImagePaste(inlineImageToFile(image, i)) : null;
-                if (label) {
-                  const esc = document.createElement('div');
-                  esc.textContent = label;
-                  replacement = `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`;
-                } else if (!onImagePaste && image.base64.length * 0.75 <= INLINE_IMAGE_KEEP_BYTES) {
-                  replacement = `<img src="${image.dataUri}" alt="">`;
-                } else {
-                  replacement = onImagePaste ? '' : '&nbsp;<i>[Picture removed &mdash; attach it as a file]</i>&nbsp;';
-                }
-                insert = insert.replace(`[[TPIMG:${i}]]`, replacement);
-              });
-            } else {
-              insert = textToHtml(textData);
-            }
-            document.execCommand('insertHTML', false, insert);
-            emit();
-          }}
-          className="tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0"
-          style={{ minHeight, maxHeight: 460 }}
-        />
+                const { html: withoutImages, images: embedded } = extractInlineImages(cleanPastedHtml(htmlData));
+                insert = sanitize(withoutImages);
+                embedded.forEach((image, i) => {
+                  let replacement;
+                  const label = onImagePaste ? onImagePaste(inlineImageToFile(image, i)) : null;
+                  if (label) {
+                    const esc = document.createElement('div');
+                    esc.textContent = label;
+                    replacement = `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`;
+                  } else if (!onImagePaste && image.base64.length * 0.75 <= INLINE_IMAGE_KEEP_BYTES) {
+                    replacement = `<img src="${image.dataUri}" alt="">`;
+                  } else {
+                    replacement = onImagePaste ? '' : '&nbsp;<i>[Picture removed &mdash; attach it as a file]</i>&nbsp;';
+                  }
+                  insert = insert.replace(`[[TPIMG:${i}]]`, replacement);
+                });
+              } else {
+                insert = textToHtml(textData);
+              }
+              document.execCommand('insertHTML', false, insert);
+              emit();
+            }}
+            className={`tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 outline-none ${footer ? 'min-h-[5.5rem] only:flex-1' : 'rounded-b-lg overflow-y-auto settings-scrollbar'} [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0`}
+            style={footer ? undefined : { minHeight, maxHeight: 460 }}
+          />
+          {footer}
+        </div>
       </div>
     </div>
   );

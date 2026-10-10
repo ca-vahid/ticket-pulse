@@ -842,6 +842,37 @@ async function trackReopenState(existingTicket, upsertedTicket) {
   }
 }
 
+/**
+ * Skills learner (QA 10-09 item 12): a skill is learned when a ticket is
+ * CLOSED, for the person holding it — never at assignment. Every status writer
+ * reports here (native edits, FS sync, mirror-back), so this is the one place
+ * a close is seen for both origins. Only an observed move from a non-terminal
+ * to a terminal status counts: a ticket first seen already closed (history
+ * backfill) teaches nothing by itself. Fire-and-forget; the learner reads the
+ * ticket again, decides, and never throws.
+ */
+let learnerChain = Promise.resolve();
+async function creditCloseToSkills(existingTicket, upsertedTicket) {
+  try {
+    const from = String(existingTicket?.status || '').trim();
+    const to = String(upsertedTicket?.status || '').trim();
+    const ticketId = asNumber(upsertedTicket?.id) || asNumber(existingTicket?.id);
+    if (!existingTicket || !from || !to || from === to || !ticketId) return;
+    const workspaceId = asNumber(upsertedTicket?.workspaceId) || asNumber(existingTicket?.workspaceId);
+    const isTerminal = await workspaceTerminalResolver(workspaceId);
+    if (isTerminal(from) || !isTerminal(to)) return;
+    // The import is awaited (cheap, cached); the learner itself is not.
+    const { default: learner } = await import('./competencyFeedbackService.js');
+    // One at a time: a sync that closes fifty tickets must not open fifty
+    // learner reads at once on a nine-connection pool.
+    learnerChain = learnerChain
+      .then(() => learner.processTicketClosed(ticketId, workspaceId))
+      .catch((err) => logger.warn(`Skills learner skipped (non-fatal): ${err.message}`));
+  } catch (err) {
+    logger.warn(`Skills learner skipped (non-fatal): ${err.message}`);
+  }
+}
+
 export async function emitTicketLifecycleNotifications({
   existingTicket,
   upsertedTicket,
@@ -862,6 +893,9 @@ export async function emitTicketLifecycleNotifications({
   // Re-opened bookkeeping (QA 09-25 #1) runs for EVERY observed status move —
   // before the workflow gate, so syncs that don't run workflows still count.
   await trackReopenState(existingTicket, upsertedTicket);
+  // Learn-on-close — before the workflow gate, like the reopen counter, so
+  // syncs that run no workflows still teach the matrix.
+  await creditCloseToSkills(existingTicket, upsertedTicket);
   // Auto-help (P1 audit): a reassignment to someone else while Auto-help
   // waits on the requester means that person owns it now — the loop ends.
   const ahNewTech = asNumber(upsertedTicket?.assignedTechId);

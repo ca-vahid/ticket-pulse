@@ -1719,13 +1719,28 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
   };
 }
 
+/**
+ * Competency factor of the assignment score, by how the candidate's skills
+ * match the ticket. `none` was 0.25 until QA 10-09 item 12: a person with no
+ * skill in the category still scored a quarter of an exact match, which let
+ * workload and location carry tickets to people who had never done the work.
+ */
+export const COMPETENCY_MATCH_SCORES = Object.freeze({
+  subcategory_exact: 1,
+  parent_fallback: 0.72,
+  category_exact: 0.65,
+  none: 0.1,
+});
+
+export function competencyMatchScore(matchType) {
+  return Object.prototype.hasOwnProperty.call(COMPETENCY_MATCH_SCORES, matchType)
+    ? COMPETENCY_MATCH_SCORES[matchType]
+    : COMPETENCY_MATCH_SCORES.none;
+}
+
 function scoreCandidate(candidate, allCandidates, weights) {
   const openMax = Math.max(1, ...allCandidates.map((item) => item.openTickets || 0));
-  const competencyScore = candidate.competencyMatch?.matchType === 'subcategory_exact'
-    ? 1
-    : candidate.competencyMatch?.matchType === 'parent_fallback'
-      ? 0.72
-      : candidate.competencyMatch?.matchType === 'category_exact' ? 0.65 : 0.25;
+  const competencyScore = competencyMatchScore(candidate.competencyMatch?.matchType);
   const workloadScore = clampScore(1 - ((candidate.openTickets || 0) / openMax));
   const locationScore = candidate.locationMatch === null ? 0.55 : candidate.locationMatch ? 1 : 0.2;
   const recencyScore = clampScore(1 - (candidate.assignmentRisk?.riskPenalty || 0));

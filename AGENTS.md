@@ -176,7 +176,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
   - `/workspaces/select` re-signs the token WITH the marker. A fresh `/sso` ends a view. New code that signs a token or resolves access must carry `viewAs` through.
 - Frontend: `components/ViewAsControl.jsx` (dialog from the profile menu + the bottom bar); it reloads the app on the new token. It imports `services/api` lazily because header test suites mock that module partially.
 
-### Onboarding / Offboarding — "Comings & Goings" (v4.1.32; live in IT since v4.2.29, 8 Oct 2026)
+### On/Offboarding (v4.1.32; live in IT since v4.2.29, 8 Oct 2026)
 
 `hrLifecycleService.js` + `utils/hrNoticeClassifier.js`, routes `/api/hr-lifecycle`, page `/onboarding`. Per workspace `mode` off | observe ("Shadow") | live; available only in `HR_LIFECYCLE_WORKSPACE_IDS` (default `1`). The HR notice ticket is the parent of a family; children are TP-born and come from three editable lists (offboarding 5, after the fact 3, onboarding Laptop + Workstation). Change notices move every open member, cancellations close the family. FreshService's departure workflow and the account script's NH tickets were switched off on 8 Oct 2026 — Ticket Pulse is the only organiser.
 

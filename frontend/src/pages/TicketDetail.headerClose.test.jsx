@@ -20,7 +20,7 @@ const BASE = {
   updatedAt: '2026-08-28T10:05:00Z',
   lastActivityAt: '2026-08-28T10:05:00Z',
   requesterId: 40,
-  requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+  requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com', phone: '+1 (778) 644-0541', mobile: '7782201419' },
   assignedTech: null,
   internalCategory: null,
   internalSubcategory: null,
@@ -162,7 +162,20 @@ describe('Header Close (2 Oct 2026)', () => {
   test('sits in the action row, not behind More', async () => {
     await ready();
     const row = screen.getByTestId('ticket-actions');
-    expect(within(row).getByTestId('header-close')).toHaveTextContent('Close');
+    expect(within(row).getByTestId('header-close')).toHaveTextContent('Close ticket');
+  });
+
+  // QA 10-09 #8: last of the everyday actions (only More follows), and an
+  // outlined action like its neighbours rather than a filled green status.
+  test('comes at the end of the row, after Mark as noise and before More, as a plain outlined button', async () => {
+    await ready();
+    const row = screen.getByTestId('ticket-actions');
+    const close = within(row).getByTestId('header-close');
+    const buttons = within(row).getAllByRole('button');
+    expect(buttons.indexOf(close)).toBeGreaterThan(buttons.indexOf(within(row).getByRole('button', { name: 'Mark as noise' })));
+    expect(buttons.indexOf(close)).toBe(buttons.indexOf(within(row).getByTestId('more-actions')) - 1);
+    expect(close.className).toContain('border-border');
+    expect(close.className).not.toMatch(/bg-emerald/);
   });
 
   test('TP-born: confirm in-app, close, back to the filtered list', async () => {
@@ -231,6 +244,41 @@ describe('Header Close (2 Oct 2026)', () => {
       else expect(screen.queryByTestId('header-close')).not.toBeInTheDocument();
       cleanup();
     }
+  });
+
+  // QA 10-09 #8: the ticket number leads the title line.
+  test('the ticket number sits in the title, before the subject, and nowhere else in the header rows', async () => {
+    await ready();
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(title).toHaveTextContent('#243555Laptop will not boot');
+    expect(within(title).getByTestId('ticket-ref')).toHaveTextContent('#243555');
+    expect(screen.getAllByText('#243555')).toHaveLength(1);
+  });
+
+  // QA 10-09 #3: the Approvals tab's + is the one place to request an approval.
+  test('More no longer offers "Request approval…"; the + on the Approvals tab still does', async () => {
+    apiOverrides.meta = vi.fn(() => Promise.resolve({ data: { ...META, approvalCategories: [{ id: 7, name: 'Hardware', managerCount: 2 }] } }));
+    await ready();
+    fireEvent.click(screen.getByTestId('more-actions'));
+    const menu = screen.getByTestId('more-actions-menu');
+    expect(within(menu).getByRole('menuitem', { name: /Print/ })).toBeInTheDocument();
+    expect(within(menu).queryByText(/Request approval/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('new-approval-request')).toBeInTheDocument();
+  });
+
+  // QA 10-09 #7: one North-American shape, plain text, and copy gives the digits.
+  test('requester phones: no +1, not links, and the copy buttons copy the bare ten digits', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await ready();
+    const contact = screen.getByRole('list', { name: 'Requester contact' });
+    expect(within(contact).getByText('(778) 644-0541')).toBeInTheDocument();
+    expect(within(contact).getByText('(778) 220-1419')).toBeInTheDocument();
+    expect(contact.querySelector('a[href^="tel:"]')).toBeNull();
+    fireEvent.click(within(contact).getByTestId('copy-work-phone'));
+    expect(writeText).toHaveBeenLastCalledWith('7786440541');
+    fireEvent.click(within(contact).getByTestId('copy-mobile'));
+    expect(writeText).toHaveBeenLastCalledWith('7782201419');
   });
 
   test('hidden for readonly', async () => {

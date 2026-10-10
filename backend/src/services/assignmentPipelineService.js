@@ -5,7 +5,6 @@ import settingsRepository from './settingsRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { TOOL_SCHEMAS, executeTool, applyWorkspaceTicketTypes } from './assignmentTools.js';
 import freshServiceActionService from './freshServiceActionService.js';
-import competencyFeedbackService from './competencyFeedbackService.js';
 import noiseRuleService from './noiseRuleService.js';
 import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationService.js';
 import { formatDateInTimezone } from '../utils/timezone.js';
@@ -1755,22 +1754,8 @@ class AssignmentPipelineService {
       // the earlier 'completed' broadcast predates these writes.
       if (decision === 'auto_assigned' || decision === 'classified_only') {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
-          .then((syncResult) => {
-            // Competency feedback ONLY for auto-assignments that actually
-            // APPLIED (Bryan/CIO loop, Sep 2026): a decision whose write-back
-            // was skipped, downgraded, aborted or dry-run must not teach the
-            // matrix — that's how a person who can never hold a ticket
-            // accumulated three competencies from assignments that went
-            // nowhere. Human decisions (approved/modified) keep learning at
-            // the decide route — human intent is a real signal on its own.
-            const applied = !!syncResult?.success && !syncResult?.skipped && !syncResult?.dryRun;
-            if (decision === 'auto_assigned' && topRec?.techId && applied) {
-              competencyFeedbackService.processDecisionFeedback(runId, decision, topRec.techId, workspaceId).catch((err) =>
-                logger.warn('Competency feedback failed after auto-assign', { runId, error: err.message }),
-              );
-            }
-            return null;
-          })
+          // No competency feedback from an auto-assignment (QA 10-09 item 12):
+          // the matrix learns when the ticket is closed, for whoever holds it.
           .catch((err) => logger.warn('FreshService pipeline sync failed', { runId, decision, error: err.message }))
           .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
       } else if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise && !noiseVetoApplied) {
