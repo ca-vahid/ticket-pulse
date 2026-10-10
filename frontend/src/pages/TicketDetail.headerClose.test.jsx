@@ -287,3 +287,22 @@ describe('Header Close (2 Oct 2026)', () => {
     expect(screen.queryByTestId('header-close')).not.toBeInTheDocument();
   });
 });
+
+// Urgent response (10 Oct 2026): the untouched clock is one plain line under the title.
+describe('Urgent clock line', () => {
+  test('shown under the title when the ticket carries an urgent clock, absent otherwise', async () => {
+    apiOverrides.get = vi.fn(() => Promise.resolve({
+      data: { ...FS_BORN, urgentClock: { state: 'waiting', startedAt: new Date().toISOString(), notifiedAt: null, notifyMinutes: 15, moveMinutes: 30 } },
+    }));
+    await ready();
+    const line = screen.getByTestId('urgent-clock-line');
+    expect(line).toHaveTextContent('Urgent: nobody is at work. It moves as soon as someone is.');
+    expect(line).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('heading', { level: 1 }).compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: FS_BORN }));
+    await ready();
+    expect(screen.queryByTestId('urgent-clock-line')).not.toBeInTheDocument();
+  });
+});

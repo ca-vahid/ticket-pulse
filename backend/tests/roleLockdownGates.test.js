@@ -106,6 +106,8 @@ for (const mod of [
   'priorityBackfillService', 'workspaceWebhookService', 'availabilityService', 'settingsRepository',
   'prisma', 'technicianRepository', 'groupRepository', 'approvalCategoryService', 'azureAdService',
   'scheduledSyncService', 'emailHealthService', 'afterHoursUrgentEscalationService', 'userSignatureService',
+  // urgentResponse.routes.js (real router): its two services; the engine is imported lazily.
+  'urgentResponse/settingsService', 'urgentResponse/onCallService',
 ]) {
   jest.unstable_mockModule(`../src/services/${mod}.js`, stub);
 }
@@ -216,6 +218,18 @@ describe('A. index.js mounts — viewers keep the ticket surface, lose the admin
     expect(requireAdminMock).not.toHaveBeenCalled();
   });
 
+  // Urgent response sits on the agent-allowed tier (on-call schedule + cover
+  // requests are an agent's own); its rules, log and settings stay admin-only.
+  test('/urgent-response lets an agent through the mount gate, and keeps settings admin-only', async () => {
+    const agent = await as('agent', request(apiApp).get('/api/urgent-response/settings'));
+    expect(agent.status).toBe(403);
+    expect(agent.body.code).toBe('admin_required');
+    expect(requireWorkspaceMemberOrAgentMock).toHaveBeenCalled();
+    expect(requireWorkspaceAccessMock).not.toHaveBeenCalled();
+    const nobody = await as('none', request(apiApp).get('/api/urgent-response/status'));
+    expect(nobody.status).toBe(403);
+    expect(nobody.body.code).toBe('workspace_access_denied');
+  });
   test('a user with no workspace access is still refused everywhere below the gate', async () => {
     const res = await as('none', request(apiApp).get('/api/dashboard'));
     expect(res.status).toBe(403);

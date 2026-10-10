@@ -2104,6 +2104,30 @@ export const hrLifecycleAPI = {
 };
 
 /**
+ * Urgent response (plans/URGENT_RESPONSE_PLAN.md): an Urgent ticket always has
+ * an owner who is at work. /status, the on-call schedule and a person's own
+ * cover requests are open to members; everything else is workspace-admin only.
+ * Responses are { success, data }.
+ */
+export const urgentResponseAPI = {
+  getStatus: () => api.get('/urgent-response/status'),
+  getSettings: () => api.get('/urgent-response/settings'),
+  updateSettings: (patch) => api.put('/urgent-response/settings', patch),
+  getChanges: (limit = 50) => api.get('/urgent-response/settings/changes', { params: { limit } }),
+  preview: (draft) => api.post('/urgent-response/preview', draft),
+  getActions: (params = {}) => api.get('/urgent-response/actions', { params }),
+  getStats: (days = 30) => api.get('/urgent-response/stats', { params: { days } }),
+  undoAction: (id) => api.post(`/urgent-response/actions/${id}/undo`),
+  getOnCall: () => api.get('/urgent-response/on-call'),
+  createCover: (body) => api.post('/urgent-response/on-call/covers', body),
+  cancelCover: (id) => api.delete(`/urgent-response/on-call/covers/${id}`),
+  createCoverRequest: (body) => api.post('/urgent-response/on-call/requests', body),
+  cancelCoverRequest: (id) => api.post(`/urgent-response/on-call/requests/${id}/cancel`),
+  myCoverRequests: () => api.get('/urgent-response/on-call/requests/mine'),
+  respondCoverRequest: (id, answer) => api.post(`/urgent-response/on-call/requests/${id}/respond`, { answer }),
+};
+
+/**
  * Availability (native Vacation Tracker replacement): time away, WFH and site
  * visits. Everyone books and sees the team calendar; approvers decide; the
  * /admin/* routes are Availability-admin only. Responses are { success, data }.

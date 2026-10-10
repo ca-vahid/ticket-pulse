@@ -52,6 +52,7 @@ import {
   ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
+import UrgentClockLine from '../components/tickets/UrgentClockLine';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { readHideMachinePreference, writeHideMachinePreference } from '../components/tickets/activityKind';
 
@@ -2286,6 +2287,7 @@ export default function TicketDetail() {
                           )}
                         </h1>
                       )}
+                      {ticket.urgentClock && <UrgentClockLine clock={ticket.urgentClock} />}
                       {ticket.parkedUntil ? (
                         <ParkLine
                           park={ticket.park}

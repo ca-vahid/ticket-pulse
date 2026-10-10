@@ -243,7 +243,12 @@ function unwrapApiData(response) {
   return response?.data?.data ?? response?.data ?? response ?? {};
 }
 
-export default function UrgentEscalationPanel() {
+/**
+ * `onCallOrderInUse`: Settings → Urgent Response → On-call owns the rotation
+ * order (handover time, covers). The order list here is then replaced by one
+ * sentence pointing there; `onOpenOnCall` opens that tab.
+ */
+export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpenOnCall = null } = {}) {
   const [policy, setPolicy] = useState(null);
   const [draft, setDraft] = useState(null);
   const [candidates, setCandidates] = useState([]);
@@ -823,52 +828,65 @@ export default function UrgentEscalationPanel() {
               </div>
             ) : (
               <div className="rounded-lg border border-border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
+                {onCallOrderInUse ? (
+                  <div data-testid="rotation-order-moved">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Weekly rotation order</div>
-                    <p className="mt-1 text-xs text-muted-foreground">Rotation starts Monday at 00:00 in the workspace timezone.</p>
+                    <p className="mt-1 text-sm text-foreground/85">
+                      The order, the handover time and any cover are set on the{' '}
+                      {onOpenOnCall
+                        ? <button type="button" onClick={onOpenOnCall} className="tp-focus-ring rounded font-medium text-primary hover:underline">On-call tab</button>
+                        : 'On-call tab'}
+                      . The phone number shown to requesters follows it.
+                    </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={setRosterOrder}
-                    className="rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground/85 hover:bg-muted/50"
-                  >
+                ) : (<>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Weekly rotation order</div>
+                      <p className="mt-1 text-xs text-muted-foreground">Rotation starts Monday at 00:00 in the workspace timezone.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={setRosterOrder}
+                      className="rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground/85 hover:bg-muted/50"
+                    >
                     Use roster order
-                  </button>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {rotationOrderUsers.length === 0 && (
-                    <div className="rounded-md border border-dashed border-input px-3 py-4 text-center text-xs text-muted-foreground">
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {rotationOrderUsers.length === 0 && (
+                      <div className="rounded-md border border-dashed border-input px-3 py-4 text-center text-xs text-muted-foreground">
                       Add roster users, then click Use roster order.
-                    </div>
-                  )}
-                  {rotationOrderUsers.map((candidate, index) => (
-                    <div key={candidate.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/50 px-3 py-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-foreground">{index + 1}. {candidate.name}</div>
-                        <div className="truncate text-xs text-muted-foreground">{verifiedPhoneForCandidate(candidate) || 'No verified phone'}</div>
                       </div>
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          onClick={() => moveRotationUser(candidate.id, -1)}
-                          disabled={index === 0}
-                          className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
-                        >
+                    )}
+                    {rotationOrderUsers.map((candidate, index) => (
+                      <div key={candidate.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/50 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-foreground">{index + 1}. {candidate.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{verifiedPhoneForCandidate(candidate) || 'No verified phone'}</div>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveRotationUser(candidate.id, -1)}
+                            disabled={index === 0}
+                            className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
+                          >
                           Up
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveRotationUser(candidate.id, 1)}
-                          disabled={index === rotationOrderUsers.length - 1}
-                          className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
-                        >
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveRotationUser(candidate.id, 1)}
+                            disabled={index === rotationOrderUsers.length - 1}
+                            className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
+                          >
                           Down
-                        </button>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </>)}
                 <label className="mt-3 block">
                   <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rotation anchor date</span>
                   <input

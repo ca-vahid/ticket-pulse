@@ -37,6 +37,7 @@ import toneRoutes from './tone.routes.js';
 import handBacksRoutes from './handBacks.routes.js';
 import teamRoutingSettingsRoutes from './teamRoutingSettings.routes.js';
 import hrLifecycleRoutes from './hrLifecycle.routes.js';
+import urgentResponseRoutes from './urgentResponse.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import usageRoutes from './usage.routes.js';
 import siteStatsRoutes from './siteStats.routes.js';
@@ -126,6 +127,10 @@ router.use('/site-stats', siteStatsRoutes);
 // same model as /tickets and /search above. Mounted before the strict
 // requireWorkspaceAccess gate; everything below it stays members-only.
 router.use('/sse', requireWorkspace, requireWorkspaceMemberOrAgent, sseRoutes);
+// Urgent response (plans/URGENT_RESPONSE_PLAN.md): the same agent-allowed tier
+// as /sse — agents read the on-call schedule and answer the cover requests
+// sent to them. Rules, log, covers and settings are requireAdmin inside the router.
+router.use('/urgent-response', requireWorkspace, requireWorkspaceMemberOrAgent, urgentResponseRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 

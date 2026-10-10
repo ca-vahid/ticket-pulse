@@ -2354,8 +2354,49 @@ export async function getAutomationOps(workspaceId, query = {}) {
       // Parked (plans/PARKED_BUILD_PLAN.md): how parking is used in the range.
       // "Parked 3+ times" is a coaching signal about a ticket, never a ranking.
       parks: await parkStatsForRange(workspaceId, rangeInfo),
+      // Urgent response (plans/URGENT_RESPONSE_PLAN.md): what the rule did in
+      // the range, by layer, live and Shadow apart. Counts of tickets only —
+      // never who they left or who they went to.
+      urgentResponse: await urgentResponseStatsForRange(workspaceId, rangeInfo),
     };
   });
+}
+
+const URGENT_RESPONSE_COUNT_KEYS = ['redirected', 'held', 'moved', 'raiseMoved', 'clockMoved', 'toldOwnerAway', 'teamTold', 'coordinator', 'onCallAssigned', 'undone'];
+const URGENT_RESPONSE_ACTION_KEYS = {
+  held: 'held', told_owner_away: 'toldOwnerAway', team_told: 'teamTold', coordinator: 'coordinator', on_call_assigned: 'onCallAssigned', undone: 'undone',
+};
+
+export async function urgentResponseStatsForRange(workspaceId, rangeInfo) {
+  try {
+    const { default: settingsService } = await import('./urgentResponse/settingsService.js');
+    const mode = await settingsService.getMode(workspaceId);
+    // One bounded read: at most layers x actions x 2 groups, whatever the range.
+    const groups = await prisma.urgentResponseAction.groupBy({
+      by: ['layer', 'action', 'shadow'],
+      where: { workspaceId, createdAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
+      _count: { _all: true },
+    });
+    if (mode === 'off' && !groups.length) return null;
+    const empty = () => Object.fromEntries(URGENT_RESPONSE_COUNT_KEYS.map((k) => [k, 0]));
+    const out = { mode, live: empty(), shadow: empty() };
+    for (const g of groups) {
+      const side = out[g.shadow ? 'shadow' : 'live'];
+      const n = g._count?._all || 0;
+      if (g.action === 'redirected') {
+        if (g.layer === 'assign') side.redirected += n;
+      } else if (g.action === 'moved') {
+        side.moved += n;
+        if (g.layer === 'raise') side.raiseMoved += n;
+        else if (g.layer === 'clock') side.clockMoved += n;
+      } else if (URGENT_RESPONSE_ACTION_KEYS[g.action]) {
+        side[URGENT_RESPONSE_ACTION_KEYS[g.action]] += n;
+      }
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 async function parkStatsForRange(workspaceId, rangeInfo) {

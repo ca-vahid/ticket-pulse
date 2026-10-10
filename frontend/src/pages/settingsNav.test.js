@@ -3,6 +3,7 @@ import {
   ALL_SETTINGS_NAV_ITEMS,
   filterSettingsNavItems,
   resolveActiveSettingsItem,
+  resolveSettingsAlias,
 } from './settingsNav';
 
 /**
@@ -70,5 +71,35 @@ describe('resolveActiveSettingsItem', () => {
 
   test('resolves to null when no sections are visible (agent deep link)', () => {
     expect(resolveActiveSettingsItem([], 'ticket-ops')).toBeNull();
+  });
+});
+
+// Oct 2026: Urgent Escalation became the "Requester escalation" tab of Urgent
+// Response. Old links (Assignment Review still has two) must keep working.
+describe('resolveSettingsAlias', () => {
+  const adminItems = filterSettingsNavItems({ isWsAdmin: true, isWsReviewer: true });
+
+  test('Urgent Response replaced Urgent Escalation in the nav', () => {
+    const item = ALL_SETTINGS_NAV_ITEMS.find((i) => i.id === 'urgent-response');
+    expect(item).toMatchObject({ label: 'Urgent Response', minRole: 'admin', group: 'Tickets & AI' });
+    expect(ids(ALL_SETTINGS_NAV_ITEMS)).not.toContain('urgent-escalation');
+  });
+
+  test('#urgent-escalation lands on Urgent Response, on its Requester escalation tab', () => {
+    const alias = resolveSettingsAlias('urgent-escalation');
+    expect(alias).toEqual({ id: 'urgent-response', tab: 'escalation' });
+    expect(resolveActiveSettingsItem(adminItems, alias.id)?.id).toBe('urgent-response');
+  });
+
+  test('a live section passes through with no tab', () => {
+    expect(resolveSettingsAlias('urgent-response')).toEqual({ id: 'urgent-response', tab: null });
+    expect(resolveSettingsAlias('ticket-ops')).toEqual({ id: 'ticket-ops', tab: null });
+    expect(resolveSettingsAlias(null)).toEqual({ id: null, tab: null });
+  });
+
+  test('#workspace-access lands on Members (its nav id is "agents"), not on the first section', () => {
+    const alias = resolveSettingsAlias('workspace-access');
+    expect(alias).toEqual({ id: 'agents', tab: null });
+    expect(resolveActiveSettingsItem(adminItems, alias.id)).toMatchObject({ id: 'agents', label: 'Members' });
   });
 });

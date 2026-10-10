@@ -38,7 +38,7 @@ import RealtimeHealthCard from '../components/settings/RealtimeHealthCard';
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
 import TeamsSettingsPanel from '../components/settings/TeamsSettingsPanel';
 import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
-import UrgentEscalationPanel from '../components/settings/UrgentEscalationPanel';
+import UrgentResponsePanel from '../components/settings/urgentResponse/UrgentResponsePanel';
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui';
 import { cn } from '../lib/utils';
 // Section-nav icons now live with the nav model in settingsNav.js — only the
@@ -63,7 +63,7 @@ import {
   Search,
 } from 'lucide-react';
 import { AssignmentConfigPanel } from './AssignmentReview';
-import { filterSettingsNavItems, resolveActiveSettingsItem } from './settingsNav';
+import { filterSettingsNavItems, resolveActiveSettingsItem, resolveSettingsAlias } from './settingsNav';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import useSettingsSectionHash from '../hooks/useSettingsSectionHash';
 
@@ -154,8 +154,9 @@ export default function Settings() {
     isWsAdmin,
     isWsReviewer,
   });
-  // Retired-section alias (Sep 2026): Workspace Access merged into Members.
-  const aliasedSection = activeSection === 'workspace-access' ? 'members' : activeSection;
+  // Retired-section aliases: Workspace Access merged into Members (Sep 2026);
+  // Urgent Escalation is a tab of Urgent Response (Oct 2026).
+  const { id: aliasedSection, tab: aliasedTab } = resolveSettingsAlias(activeSection);
   const activeNavigationItem = resolveActiveSettingsItem(navigationItems, aliasedSection);
   // Type-to-filter for the section tree (Sep 2026): "members" jumps straight
   // to Members without scanning six groups. Matches label or group name.
@@ -1536,8 +1537,8 @@ export default function Settings() {
                   <FeedbackPagePanel />
                 )}
 
-                {activeSectionId === 'urgent-escalation' && (
-                  <UrgentEscalationPanel />
+                {activeSectionId === 'urgent-response' && (
+                  <UrgentResponsePanel initialTab={aliasedTab || 'rules'} />
                 )}
 
                 {activeSectionId === 'tone-of-voice' && <div className="p-6"><ToneOfVoicePanel /></div>}

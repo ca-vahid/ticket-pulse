@@ -27,6 +27,7 @@ describe('resolvePage', () => {
     ['/assignments/run/28885', '', '', 'assignments.run', ''],
     ['/knowledge/solutions/412', '', '', 'knowledge', 'solutions'],
     ['/availability', '', '', 'availability', ''],
+    ['/on-call', '', '?request=41', 'oncall', ''],
     ['/analytics/category-map', '', '', 'analytics.category-map', ''],
   ])('%s%s%s is %s / "%s"', (pathname, hash, search, key, section) => {
     expect(resolvePage({ pathname, hash, search })).toEqual({ key, section });

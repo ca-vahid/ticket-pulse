@@ -1543,6 +1543,77 @@ class AssignmentPipelineService {
         }
       }
 
+      // Urgent response, layer 1 (plans/URGENT_RESPONSE_PLAN.md): an Urgent
+      // (or High) ticket is never auto-assigned to someone who is not at work.
+      // The guard is deterministic and never blocks: any error keeps the AI's
+      // pick. Live `redirect` / `on_call` swap the technician this run assigns
+      // (assignTechId - the ranked recommendation itself is left as the AI
+      // wrote it); live `hold` leaves the run for a person, like the guards
+      // above. Shadow mode and a dry-run pipeline only write the log row.
+      let assignTechId = topRec?.techId ?? null;
+      let urgentGuard = null;
+      if (decision === 'auto_assigned' && topRec?.techId) {
+        try {
+          const { default: urgentResponseService } = await import('./urgentResponse/urgentResponseService.js');
+          const assessedLabel = String(recommendation?.assessedPriority || '').trim().toLowerCase();
+          const assessedPriorityId = priorityAssessmentEnabled
+            ? ({ low: 1, medium: 2, high: 3, urgent: 4 }[assessedLabel] ?? (Number(recommendation?.assessedPriorityId) || null))
+            : null;
+          urgentGuard = await urgentResponseService.guardAutoAssignment({
+            workspaceId,
+            // The run has not saved its category yet: the guard matches skills against the AI's.
+            ticket: {
+              id: ticketId,
+              internalCategoryId: Number(recommendation?.internalCategoryId) || null,
+              internalSubcategoryId: Number(recommendation?.internalSubcategoryId) || null,
+            },
+            techId: topRec.techId,
+            assessedPriorityId,
+            runId,
+            now: new Date(),
+            dryRun: assignmentConfig?.dryRunMode ?? true,
+          });
+        } catch (guardError) {
+          urgentGuard = null;
+          logger.warn('Pipeline: urgent response guard failed - assignment unchanged', { runId, ticketId, error: guardError.message });
+        }
+        if (urgentGuard && urgentGuard.shadow !== true && urgentGuard.outcome && urgentGuard.outcome !== 'keep') {
+          const redirected = ['redirect', 'on_call'].includes(urgentGuard.outcome) && Boolean(urgentGuard.techId);
+          const held = urgentGuard.outcome === 'hold';
+          if (redirected) assignTechId = urgentGuard.techId;
+          else if (held) decision = 'pending_review';
+          else urgentGuard = null;
+          if (urgentGuard) {
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({
+              pipelineRunId: runId,
+              stepNumber: stepCounter,
+              stepName: 'urgent_response_guard',
+              status: 'completed',
+              durationMs: 0,
+              output: {
+                kind: 'urgent_response_guard',
+                outcome: urgentGuard.outcome,
+                forcedDecision: held ? 'pending_review' : null,
+                fromTechId: topRec.techId,
+                fromTechName: topRec.techName || null,
+                toTechId: redirected ? urgentGuard.techId : null,
+                toTechName: redirected ? (urgentGuard.techName || null) : null,
+                message: urgentGuard.sentence,
+              },
+            }).catch((stepError) => {
+              logger.warn('Pipeline: failed to record urgent_response_guard step', { runId, error: stepError.message });
+            });
+            emit({ type: 'urgent_response_guard', outcome: urgentGuard.outcome, message: urgentGuard.sentence });
+            logger.info('Pipeline auto-assignment changed by the urgent response guard', {
+              runId, ticketId, workspaceId, outcome: urgentGuard.outcome, fromTechId: topRec.techId, toTechId: redirected ? urgentGuard.techId : null,
+            });
+          }
+        }
+      }
+      const urgentGuardHeld = urgentGuard?.outcome === 'hold' && urgentGuard.shadow !== true;
+      const urgentGuardRedirected = Boolean(urgentGuard && urgentGuard.shadow !== true && assignTechId && assignTechId !== topRec?.techId);
+
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
       if (closeGuard?.hold) {
@@ -1559,6 +1630,8 @@ class AssignmentPipelineService {
         errorMessage = assignmentConfig?.observeCategoryWritebackEnabled
           ? `Group #${observedGroupId} is in observe-only mode — the category was applied; assignment${isNoise ? ' and the noise verdict' : ''} stayed a recorded suggestion.`
           : `Group #${observedGroupId} is in observe-only mode — the recommendation${isNoise ? ' (looks like noise)' : ''} was recorded but nothing was changed on the ticket.`;
+      } else if (urgentGuardHeld) {
+        errorMessage = `Urgent response: ${urgentGuard.sentence}`;
       } else if (groupExcluded) {
         // The "Group <X>" prefix is what the run detail page keys on to render
         // the blue "Manual approval required" strip — keep this format stable.
@@ -1646,7 +1719,12 @@ class AssignmentPipelineService {
         nonActionableReason,
         fullTranscript,
         errorMessage,
-        ...(decision === 'auto_assigned' && topRec?.techId ? { assignedTechId: topRec.techId } : {}),
+        // assignTechId, not topRec.techId: the urgent response guard may have
+        // replaced the AI's pick. Everything downstream (the FreshService
+        // write-back, its private note, the local assignment, notifications)
+        // reads the run's assignedTechId.
+        ...(decision === 'auto_assigned' && assignTechId ? { assignedTechId: assignTechId } : {}),
+        ...(decision === 'auto_assigned' && urgentGuardRedirected ? { decisionNote: urgentGuard.sentence } : {}),
         ...(pipelineDidDecide ? { decidedAt: new Date() } : {}),
         ...(willTriggerSync ? { syncStatus: 'pending' } : {}),
       });

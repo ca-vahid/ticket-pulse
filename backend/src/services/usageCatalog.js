@@ -15,6 +15,8 @@ const EXCLUDED = [
   /^\/api\/(usage|site-stats|auth|sse|workspaces)(\/|$)/,
   /\/(preferences|presence|typing|drafts?|telemetry|heartbeat|viewing|seen|read-state)(\/|$)/,
   /\/pinned-cards\//,
+  // A read-by-POST recalculated while an admin edits the rules: not an action.
+  /^\/api\/urgent-response\/preview$/,
 ];
 
 // Reads worth counting. Everything else that is a GET is a page loading data.
@@ -63,6 +65,13 @@ const LABELS = {
   'POST /api/tickets/saved-views': 'Save a view',
   'POST /api/tickets/scheduled': 'Schedule a ticket',
   'POST /api/tickets/templates': 'Save a reply template',
+  'PUT /api/urgent-response/settings': 'Urgent response: save settings',
+  'POST /api/urgent-response/actions/:id/undo': 'Urgent response: undo a move',
+  'POST /api/urgent-response/on-call/covers': 'On-call: set cover',
+  'DELETE /api/urgent-response/on-call/covers/:id': 'On-call: cancel cover',
+  'POST /api/urgent-response/on-call/requests': 'On-call: ask for cover',
+  'POST /api/urgent-response/on-call/requests/:id/cancel': 'On-call: cancel cover request',
+  'POST /api/urgent-response/on-call/requests/:id/respond': 'On-call: answer cover request',
 };
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);

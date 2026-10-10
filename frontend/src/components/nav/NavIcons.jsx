@@ -43,3 +43,4 @@ export const WorkflowNavIcon = maskIcon('workflows', 'Workflow');
 export const MapNavIcon = maskIcon('map', 'Map');
 export const ApprovalsNavIcon = maskIcon('approvals', 'Approvals');
 export const AvailabilityNavIcon = maskIcon('availability', 'Availability');
+export const OnCallNavIcon = maskIcon('oncall', 'OnCall');
