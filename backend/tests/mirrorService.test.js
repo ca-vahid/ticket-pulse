@@ -528,6 +528,59 @@ describe('mirrorService — "Also for" additional requesters → cc_emails (Phas
     expect(saved.mirrorError).toMatch(/Anton Kuzmychev isn't in the FreshService group/);
   });
 
+  test('update_fields: an other-teams assignee refused by the copy\'s group moves the copy to their own group', async () => {
+    // TP-1739 (9 Oct): David Zapata, assigned in Ticket Pulse, stayed Susan Xu on the copy.
+    const { _resetFsGroupCache } = await import('../src/services/fsHomeGroupService.js');
+    _resetFsGroupCache();
+    const tech = { id: 14, name: 'David Zapata', freshserviceId: BigInt(5550014), assignableOnly: true };
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, id: 914, freshserviceTicketId: BigInt(90914), status: 'Open', ccEmails: [], groupId: BigInt(111), assignedTech: tech, mirrorError: null,
+    });
+    clientMock.listGroups = jest.fn().mockResolvedValue([
+      { id: 111, name: 'Everyone IT', members: [1, 2, 3] },
+      { id: 222, name: 'Coreshack', members: [5550014, 5550015] },
+    ]);
+    const rejection = new Error("Validation failed (agent_group_id: Assigned agent isn't a member of the group.)");
+    rejection.freshserviceDetail = { errors: [{ field: 'agent_group_id', message: "Assigned agent isn't a member of the group." }] };
+    clientMock.updateTicket.mockReset();
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValue({ id: 90914 });
+
+    expect(await mirrorService._processJob({ id: 91, ticketId: 914, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.updateTicket.mock.calls[0][1]).toMatchObject({ group_id: 111, responder_id: 5550014 });
+    expect(clientMock.updateTicket.mock.calls[1][1]).toMatchObject({ group_id: 222, responder_id: 5550014 });
+    const saved = prismaMock.ticket.update.mock.calls.at(-1)[0].data;
+    expect(saved.mirrorError).toBeNull();
+    // the Ticket Pulse ticket keeps its own group
+    expect(saved.groupId).toBeUndefined();
+
+    // Next sync goes straight to the remembered group: one call, no refusal.
+    clientMock.updateTicket.mockClear();
+    expect(await mirrorService._processJob({ id: 92, ticketId: 914, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(1);
+    expect(clientMock.updateTicket.mock.calls[0][1]).toMatchObject({ group_id: 222, responder_id: 5550014 });
+  });
+
+  test('update_fields: an IT assignee refused by the copy\'s group never has the group changed', async () => {
+    const { _resetFsGroupCache } = await import('../src/services/fsHomeGroupService.js');
+    _resetFsGroupCache();
+    const tech = { id: 15, name: 'It Person', freshserviceId: BigInt(5550020), assignableOnly: false };
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, id: 915, freshserviceTicketId: BigInt(90915), status: 'Open', ccEmails: [], assignedTech: tech, mirrorError: null,
+    });
+    clientMock.listGroups = jest.fn().mockResolvedValue([{ id: 333, name: 'Other', members: [5550020] }]);
+    const rejection = new Error("Validation failed (agent_group_id: Assigned agent isn't a member of the group.)");
+    rejection.freshserviceDetail = { errors: [{ field: 'agent_group_id', message: "Assigned agent isn't a member of the group." }] };
+    clientMock.updateTicket.mockReset();
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValue({ id: 90915 });
+
+    expect(await mirrorService._processJob({ id: 93, ticketId: 915, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.listGroups).not.toHaveBeenCalled();
+    expect(clientMock.updateTicket.mock.calls[1][1].responder_id).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1].group_id).toBeUndefined();
+    expect(prismaMock.ticket.update.mock.calls.at(-1)[0].data.mirrorError).toMatch(/It Person isn't in the FreshService group/);
+  });
+
   test('update_fields: a refused assignee is not re-asked on every sync, only after 6 h', async () => {
     // 26 Sep: 19 refused round trips an hour on four Sentinel tickets after the first fix.
     const { groupRefusalNote } = await import('../src/services/mirrorService.js');

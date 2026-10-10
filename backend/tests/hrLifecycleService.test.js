@@ -503,6 +503,49 @@ describe('live: NH automation tickets', () => {
     const all = JSON.stringify([ticketSvc.addPrivateNote.mock.calls, db.events]);
     expect(all).not.toMatch(/Hunter2/);
   });
+
+  test('stop-gap: an NH ticket that repeats a family child is closed as a duplicate, with a note on both', async () => {
+    await setMode('live');
+    const parent = fsNotice({ subject: 'New Hire: Jane Doe', sender: BAMBOO, text: `Start Date: ${day(14)} Employee #: 2249 Position: Engineer Employee Status: FTR Location: Brisbane Reports To: Kim Lee` });
+    await hr.onTicketCreated(parent.id, 1);
+    const laptop = db.members.find((m) => m.role === 'child' && m.templateKey === 'laptop');
+    const workstation = db.members.find((m) => m.role === 'child' && m.templateKey === 'workstation');
+    jest.clearAllMocks();
+    const nh = fsNotice({ subject: `NH Workstation - Brisbane - AU - jdoe - ${day(14)}`, sender: 'jdoe@bgcengineering.ca', text: `Start Date: ${day(14)} Username: jdoe Full Name: Jane D. ID: 2249 Email: jdoe@x.ca Password: Hunter2!x Location: Brisbane - AU` });
+    const ev = await hr.onTicketCreated(nh.id, 1);
+    expect(ev).toMatchObject({ decision: 'link_nh', outcome: 'done' });
+    expect(ev.summary).toMatch(/NH Workstation ticket closed as a duplicate of TP-/);
+    // the script ticket is closed, the family child is untouched
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(nh.id, 1, { status: 'Closed' }, expect.objectContaining({ name: 'Ticket Pulse (Onboarding)' }));
+    expect(ticketSvc.changeStatus).not.toHaveBeenCalled();
+    const noted = ticketSvc.addPrivateNote.mock.calls.map((c) => c[0]);
+    expect(noted).toEqual([nh.id, workstation.ticketId]);
+    expect(noted).not.toContain(laptop.ticketId);
+    const nhNote = ticketSvc.addPrivateNote.mock.calls[0][2].bodyHtml;
+    expect(nhNote).toMatch(/same work as TP-/);
+    expect(nhNote).toMatch(/Closed as a duplicate/);
+    // notes land before the close, so the reason is on the ticket when it shuts
+    expect(Math.max(...ticketSvc.addPrivateNote.mock.invocationCallOrder)).toBeLessThan(ticketSvc.updateFsTicket.mock.invocationCallOrder.at(-1));
+    expect(JSON.stringify([ticketSvc.addPrivateNote.mock.calls, db.events])).not.toMatch(/Hunter2/);
+  });
+
+  test('stop-gap: an NH ticket that is already closed, or that somebody already holds, is linked and left alone', async () => {
+    await setMode('live');
+    const parent = fsNotice({ subject: 'New Hire: Jane Doe', sender: BAMBOO, text: `Start Date: ${day(14)} Employee #: 2249 Position: Engineer Employee Status: FTR Location: Brisbane Reports To: Kim Lee` });
+    await hr.onTicketCreated(parent.id, 1);
+    jest.clearAllMocks();
+    const nh = fsNotice({ subject: `NH Laptop - Brisbane - AU - jdoe - ${day(14)}`, sender: 'jdoe@bgcengineering.ca', text: `Start Date: ${day(14)} Username: jdoe Full Name: Jane D. ID: 2249 Email: jdoe@x.ca Location: Brisbane - AU` });
+    nh.status = 'Closed';
+    const ev = await hr.onTicketCreated(nh.id, 1);
+    expect(ev).toMatchObject({ decision: 'link_nh', outcome: 'done' });
+    expect(ticketSvc.updateFsTicket.mock.calls.filter((c) => c[2].status === 'Closed')).toHaveLength(0);
+    expect(db.members.find((m) => m.ticketId === nh.id)).toMatchObject({ role: 'linked', templateKey: 'nh_laptop' });
+    const held = fsNotice({ subject: `NH Workstation - Brisbane - AU - jdoe - ${day(14)}`, sender: 'jdoe@bgcengineering.ca', text: `Start Date: ${day(14)} Username: jdoe Full Name: Jane D. ID: 2249 Email: jdoe@x.ca Location: Brisbane - AU` });
+    held.assignedTechId = 2;
+    await hr.onTicketCreated(held.id, 1);
+    expect(ticketSvc.updateFsTicket.mock.calls.filter((c) => c[2].status === 'Closed')).toHaveLength(0);
+    expect(held.status).not.toBe('Closed');
+  });
 });
 
 // ---------------------------------------------------------------- leave

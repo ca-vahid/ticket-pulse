@@ -1274,7 +1274,7 @@ class HrLifecycleService {
     const tz = await this._timeZone(parent.workspaceId);
     const candidates = await soft(() => prisma.ticket.findMany({
       where: { workspaceId: parent.workspaceId, subject: { startsWith: 'NH ' }, createdAt: { gte: new Date(Date.now() - 30 * 86400e3) }, id: { not: parent.id } },
-      select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, description: true, descriptionText: true, status: true, createdAt: true, requester: { select: { email: true } } },
+      select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, description: true, descriptionText: true, status: true, createdAt: true, assignedTechId: true, requester: { select: { email: true } } },
       take: 50,
       orderBy: { id: 'desc' },
     }), []);
@@ -1373,7 +1373,24 @@ class HrLifecycleService {
       update: {},
     });
     const childTitle = c.nhKind === 'workstation' ? 'Workstation' : 'Laptop';
-    // Never quote the NH body: it can carry the initial password.
+    const childKey = c.nhKind === 'workstation' ? 'workstation' : 'laptop';
+    // Stop-gap (9 Oct 2026) while the account script still files NH tickets:
+    // when the family already has that child, the NH ticket is the same work
+    // twice. Pair the two with a note each way and close the NH ticket before
+    // it is routed to a second person. Never quote the NH body: it can carry
+    // the initial password — the notes only point at the ticket.
+    const fam = await this._familyTickets(family);
+    const twin = (fam.members || []).find((m) => m.member.role === 'child' && m.member.templateKey === childKey && m.ticket.id !== nh.id) || null;
+    // Somebody already holds the NH ticket: leave it to them, link only.
+    if (twin && !nh.assignedTechId && !(await this._isTerminal(nh.workspaceId, nh.status))) {
+      const owner = twin.ticket.assignedTech?.name || null;
+      await this._note(nh, `<p><strong>Onboarding:</strong> this is the same work as ${esc(ticketDisplayRef(twin.ticket))} (${esc(childTitle)}) in the onboarding of ${esc(family.personName)} (parent ${esc(ticketDisplayRef(parent))})${owner ? `, which ${esc(owner)} has` : ''}. Closed as a duplicate — the account details stay on this ticket.</p>`, out);
+      await this._note(twin.ticket, `<p><strong>Onboarding:</strong> the account script filed ${esc(ticketDisplayRef(nh))} (NH ${esc(childTitle)}) for the same work. It was closed as a duplicate; the account details for ${esc(family.personName)} are on that ticket.</p>`, out);
+      const closed = await this._close(nh, out);
+      out.paired = { nhTicketId: nh.id, childTicketId: twin.ticket.id, closed };
+      if (closed) plan.summary = `${family.personName}: NH ${childTitle} ticket closed as a duplicate of ${ticketDisplayRef(twin.ticket)} and linked to the onboarding family`;
+      return;
+    }
     await this._note(nh, `<p><strong>Onboarding:</strong> part of the onboarding of ${esc(family.personName)} (parent ${esc(ticketDisplayRef(parent))}). The ${esc(childTitle)} child ticket there covers this work — no duplicate child was created.</p>`, out);
     await this._note(parent, `<p><strong>Onboarding:</strong> the automation's ${esc(ticketDisplayRef(nh))} (NH ${esc(childTitle)}) was linked to this family.</p>`, out);
   }
