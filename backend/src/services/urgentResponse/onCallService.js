@@ -4,7 +4,7 @@ import { AuthorizationError, ConflictError, NotFoundError, ValidationError } fro
 import settingsService, { soft } from './settingsService.js';
 import { getDateColumnMonthDay } from '../../utils/timezone.js';
 import {
-  coversInWindow, leaveDaysInWindow, localParts, onCallDays, onCallUntil, onCallWeek, onCallWeekByIndex, rangeLabel, resolveOnCall,
+  addDaysStr, coversInWindow, handoverInstant, leaveDaysInWindow, localParts, onCallDays, onCallUntil, onCallWeek, onCallWeekByIndex, rangeLabel, resolveOnCall,
   sentenceFor, uncoveredLeaveDays, upcomingWeeks, weekSegments,
 } from './rules.js';
 
@@ -186,6 +186,18 @@ class UrgentResponseOnCallService {
   // ---- the schedule --------------------------------------------------------
 
   /**
+   * The leave days of a week that nobody covers and that can still be covered.
+   * A day that is already over is history, not a gap to fill: without this a
+   * cover set on the evening of the first day away left the week saying
+   * "needs cover" until the handover (IT, 10 Oct 2026).
+   */
+  _openGaps(leaveDays, covers, week, timezone, from) {
+    const now = from.getTime();
+    return uncoveredLeaveDays(leaveDays, covers, week.startsAt, week.endsAt, timezone)
+      .filter((day) => handoverInstant(addDaysStr(day, 1), '00:00', timezone).getTime() > now);
+  }
+
+  /**
    * The next weeks of the rotation, the first being the week that holds `from`.
    * @returns {{ timezone, handoverDay, handoverTime, configured, order: number[], weeks: object[] }}
    *   week: { index, startsAt, endsAt, scheduled: {id,name}|null, covers: [{ id, technician, startsAt, endsAt, note, source }],
@@ -229,7 +241,7 @@ class UrgentResponseOnCallService {
             return { id, technician, startsAt, endsAt, note, source };
           }),
           leaveDays,
-          needsCover: uncoveredLeaveDays(leaveDays, mine, week.startsAt, week.endsAt, timezone).length > 0,
+          needsCover: this._openGaps(leaveDays, mine, week, timezone, from).length > 0,
           openRequest: open ? {
             id: open.id, status: open.status, askedCount: listOf(open.askedTechnicianIds).length, declinedCount: listOf(open.responses).filter((r) => r?.answer === 'decline').length,
           } : null,
@@ -346,7 +358,7 @@ class UrgentResponseOnCallService {
     const weekOf = new Map(plan.weeks.map((w) => [w.index, w]));
     const uncovered = new Map(plan.weeks.map((w) => [
       w.index,
-      new Set(uncoveredLeaveDays(w.leaveDays, coversInWindow(covers, w.startsAt, w.endsAt), w.startsAt, w.endsAt, timezone)),
+      new Set(this._openGaps(w.leaveDays, coversInWindow(covers, w.startsAt, w.endsAt), w, timezone, from)),
     ]));
 
     // The next change of hands after `from`: the first stretch that starts later with somebody else.
