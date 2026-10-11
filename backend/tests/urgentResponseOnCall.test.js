@@ -126,6 +126,28 @@ describe('schedule', () => {
     expect(plan.weeks[0]).toMatchObject({ leaveDays: ['2026-10-15', '2026-10-16'], needsCover: true });
   });
 
+  test('a leave day that is already over no longer asks for cover; one still running does', async () => {
+    // Away Thu 15 and Fri 16; the cover only starts Thursday evening, so most of Thursday had nobody.
+    prismaMock.technicianLeave.findMany.mockResolvedValue([leave(11, '2026-10-15'), leave(11, '2026-10-16')]);
+    prismaMock.urgentResponseOnCallCover.findMany.mockResolvedValue([coverRow(3, { startsAt: at('2026-10-15', '20:26'), endsAt: WEEK0.endsAt })]);
+    // Thursday afternoon: the gap is now, and it shows.
+    let plan = await onCall.schedule(1, { from: at('2026-10-15', '15:00'), weeks: 1 });
+    expect(plan.weeks[0]).toMatchObject({ leaveDays: ['2026-10-15', '2026-10-16'], needsCover: true });
+    // Saturday: Thursday is history and the rest is covered.
+    plan = await onCall.schedule(1, { from: at('2026-10-17', '22:00'), weeks: 1 });
+    expect(plan.weeks[0]).toMatchObject({ leaveDays: ['2026-10-15', '2026-10-16'], needsCover: false });
+    // The page's days agree with the week.
+    const board = await onCall.board(1, { from: at('2026-10-17', '22:00'), weeks: 1 });
+    expect(board.weeks[0].needsCover).toBe(false);
+    expect(board.days.find((d) => d.date === '2026-10-15')).toMatchObject({ away: true, needsCover: false });
+  });
+
+  test('a day away with no cover at all still asks for cover until that day is over', async () => {
+    prismaMock.technicianLeave.findMany.mockResolvedValue([leave(11, '2026-10-16')]);
+    expect((await onCall.schedule(1, { from: at('2026-10-16', '23:30'), weeks: 1 })).weeks[0].needsCover).toBe(true);
+    expect((await onCall.schedule(1, { from: at('2026-10-17', '00:00'), weeks: 1 })).weeks[0].needsCover).toBe(false);
+  });
+
   test('an open request shows on its week with the asked and declined counts', async () => {
     prismaMock.urgentResponseCoverRequest.findMany.mockResolvedValue([requestRow(7, { askedTechnicianIds: [22, 33, 44, 55], responses: [{ technicianId: 22, answer: 'decline', at: 'x' }] })]);
     const plan = await onCall.schedule(1, { from: at('2026-10-14', '09:00'), weeks: 2 });

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.38-preview';
+export const APP_VERSION = '4.2.39-preview';
 
 export const changelog = [
+  {
+    version: '4.2.39-preview',
+    date: 'October 10, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>On-call: &ldquo;Needs cover&rdquo; only for days that can still be covered</strong> &mdash; a week kept saying &ldquo;Needs cover&rdquo; when the only uncovered time was a day already over, for example when a cover was set on the evening of the first day away. A day that has passed no longer counts, on the On-call page, in Settings and in the daily reminder to the coordinator.' },
+    ],
+  },
   {
     version: '4.2.38-preview',
     date: 'October 10, 2026',
