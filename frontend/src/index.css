@@ -407,6 +407,18 @@ code {
   html[data-motion="reduce"] .tp-badge-pulse {
     animation: none;
   }
+  /* On-call page (10 Oct 2026): the dot beside "Has the phone" breathes. */
+  @keyframes tpOnCallBreathe {
+    0% { transform: scale(1); opacity: 0.6; }
+    70%, 100% { transform: scale(2.6); opacity: 0; }
+  }
+  .tp-on-call-breathe {
+    animation: tpOnCallBreathe 2.4s ease-out infinite;
+  }
+  html[data-motion="reduce"] .tp-on-call-breathe {
+    animation: none;
+    opacity: 0;
+  }
   /* Ticket page header artwork (16 Sep 2026): generated glass-ribbon
      backdrops, one per theme, sitting behind the card content at low
      contrast so text stays readable. Anchored top-right like the art. */

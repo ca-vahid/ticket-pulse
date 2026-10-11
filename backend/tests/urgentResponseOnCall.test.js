@@ -12,6 +12,7 @@ const TZ = 'America/Vancouver';
 const prismaMock = {
   technician: { findMany: jest.fn() },
   technicianLeave: { findMany: jest.fn() },
+  holiday: { findMany: jest.fn() },
   urgentResponseOnCallCover: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
   urgentResponseCoverRequest: { findMany: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
   urgentResponseAction: { create: jest.fn() },
@@ -63,6 +64,7 @@ beforeEach(() => {
   settingsMock.technicianForEmail.mockResolvedValue(null);
   prismaMock.technician.findMany.mockImplementation(async ({ where }) => PEOPLE.filter((p) => where.id.in.includes(p.id)));
   prismaMock.technicianLeave.findMany.mockResolvedValue([]);
+  prismaMock.holiday.findMany.mockResolvedValue([]);
   prismaMock.urgentResponseOnCallCover.findMany.mockResolvedValue([]);
   prismaMock.urgentResponseOnCallCover.findFirst.mockResolvedValue(null);
   prismaMock.urgentResponseOnCallCover.create.mockImplementation(async ({ data }) => coverRow(70, data));
@@ -136,6 +138,105 @@ describe('schedule', () => {
     prismaMock.urgentResponseCoverRequest.findMany.mockRejectedValue(new Error('relation does not exist'));
     const plan = await onCall.schedule(1, { from: at('2026-10-14', '09:00'), weeks: 2 });
     expect(plan.weeks.map((w) => w.scheduled.id)).toEqual([11, 22]);
+  });
+});
+
+describe('board (the /on-call page)', () => {
+  const FACES = PEOPLE.map((p) => ({ ...p, photoUrl: `data:image/png;base64,${p.id}`, location: 'Vancouver', timezone: TZ }));
+  const withFaces = () => prismaMock.technician.findMany.mockImplementation(async ({ where, select }) => FACES
+    .filter((p) => where.id.in.includes(p.id))
+    .map((p) => (select.photoUrl ? p : { id: p.id, name: p.name, email: p.email, isActive: p.isActive })));
+
+  test('twelve weeks, each cut into the stretches one person holds, with one face per person', async () => {
+    withFaces();
+    const board = await onCall.board(1, { from: at('2026-10-14', '09:00') });
+    expect(board.weeks).toHaveLength(12);
+    expect(board.weeks[0].segments).toEqual([{ technicianId: 11, startsAt: WEEK0.startsAt, endsAt: WEEK0.endsAt, cover: false }]);
+    expect(board.order).toEqual([11, 22, 33]);
+    expect(Object.keys(board.people).map(Number).sort()).toEqual([11, 22, 33]);
+    expect(board.people[11]).toEqual({ id: 11, name: 'Andrew Fong', email: 'afong@example.com', photoUrl: 'data:image/png;base64,11', location: 'Vancouver', timezone: TZ, isActive: true });
+    // The photos are read ONCE, by person id, never beside a ticket or a week.
+    const photoReads = prismaMock.technician.findMany.mock.calls.filter(([q]) => q.select.photoUrl);
+    expect(photoReads).toHaveLength(1);
+    expect(photoReads[0][0]).toMatchObject({ where: { workspaceId: 1, id: { in: [11, 22, 33] } }, take: 3 });
+  });
+
+  test('one entry per local day: who has the phone that night, and who had it in the morning', async () => {
+    withFaces();
+    const board = await onCall.board(1, { from: at('2026-10-14', '09:00'), weeks: 2 });
+    // Mon 12 Oct 17:00 → Mon 26 Oct 17:00 is fifteen local dates.
+    expect(board.days).toHaveLength(15);
+    expect(board.days[0]).toEqual({ date: '2026-10-12', technicianId: 11, morningTechnicianId: 11, cover: false, weekIndex: 0, holiday: null, away: false, needsCover: false });
+    // The handover day: Andrew in the morning, Maria that night.
+    expect(board.days.find((d) => d.date === '2026-10-19')).toMatchObject({ technicianId: 22, morningTechnicianId: 11, weekIndex: 1 });
+    expect(board.days[14]).toMatchObject({ date: '2026-10-26', technicianId: 22, morningTechnicianId: 22 });
+  });
+
+  test('a cover cuts the week, colours its days, and is the next change of hands', async () => {
+    withFaces();
+    prismaMock.urgentResponseOnCallCover.findMany.mockResolvedValue([
+      coverRow(5, { coverTechnicianId: 33, startsAt: at('2026-10-15', '17:00'), endsAt: at('2026-10-17', '17:00') }),
+    ]);
+    const board = await onCall.board(1, { from: at('2026-10-14', '09:00'), weeks: 2 });
+    expect(board.weeks[0].segments).toEqual([
+      { technicianId: 11, startsAt: WEEK0.startsAt, endsAt: at('2026-10-15', '17:00'), cover: false },
+      { technicianId: 33, startsAt: at('2026-10-15', '17:00'), endsAt: at('2026-10-17', '17:00'), cover: true },
+      { technicianId: 11, startsAt: at('2026-10-17', '17:00'), endsAt: WEEK0.endsAt, cover: false },
+    ]);
+    expect(board.days.find((d) => d.date === '2026-10-15')).toMatchObject({ technicianId: 33, morningTechnicianId: 11, cover: true });
+    expect(board.days.find((d) => d.date === '2026-10-16')).toMatchObject({ technicianId: 33, morningTechnicianId: 33, cover: true });
+    expect(board.days.find((d) => d.date === '2026-10-17')).toMatchObject({ technicianId: 11, morningTechnicianId: 33, cover: false });
+    expect(board.next).toEqual({ technicianId: 33, startsAt: at('2026-10-15', '17:00') });
+  });
+
+  test('the week before, and the next handover when nothing else changes', async () => {
+    withFaces();
+    const board = await onCall.board(1, { from: at('2026-10-14', '09:00'), weeks: 2 });
+    expect(board.previous).toEqual({ technicianId: 33, scheduledTechnicianId: 33, startsAt: at('2026-10-05', '17:00'), endsAt: WEEK0.startsAt });
+    expect(board.next).toEqual({ technicianId: 22, startsAt: WEEK0.endsAt });
+  });
+
+  test('a rotation of one person has no next change of hands', async () => {
+    withFaces();
+    settingsMock.getSettings.mockResolvedValue({ workspaceId: 1, ...SETTINGS, onCallOrder: [11] });
+    expect((await onCall.board(1, { from: at('2026-10-14', '09:00'), weeks: 3 })).next).toBeNull();
+  });
+
+  test('holidays of this workspace and the shared ones land on their day; leave days are marked', async () => {
+    withFaces();
+    prismaMock.holiday.findMany.mockResolvedValue([
+      { name: 'Thanksgiving', date: new Date('2026-10-12T00:00:00Z'), isRecurring: false },
+      { name: 'Team day', date: new Date('2020-10-20T00:00:00Z'), isRecurring: true },
+      { name: 'Long ago', date: new Date('2025-10-13T00:00:00Z'), isRecurring: false },
+    ]);
+    prismaMock.technicianLeave.findMany.mockResolvedValue([leave(11, '2026-10-15')]);
+    const board = await onCall.board(1, { from: at('2026-10-14', '09:00'), weeks: 2 });
+    expect(board.holidays).toEqual([{ date: '2026-10-12', name: 'Thanksgiving' }, { date: '2026-10-20', name: 'Team day' }]);
+    expect(board.days.find((d) => d.date === '2026-10-12').holiday).toBe('Thanksgiving');
+    expect(board.days.find((d) => d.date === '2026-10-15')).toMatchObject({ away: true, needsCover: true, holiday: null });
+    expect(board.days.find((d) => d.date === '2026-10-16')).toMatchObject({ away: false, needsCover: false });
+    expect(prismaMock.holiday.findMany.mock.calls[0][0]).toMatchObject({ where: { isEnabled: true, OR: [{ workspaceId: 1 }, { workspaceId: null }] }, take: 500 });
+  });
+
+  test('no order saved: an empty board, and nothing more is read', async () => {
+    settingsMock.getSettings.mockResolvedValue({ workspaceId: 1, ...normalizeSettings({}) });
+    expect(await onCall.board(1, { from: at('2026-10-14', '09:00') })).toMatchObject({
+      configured: false, weeks: [], order: [], people: {}, days: [], holidays: [], previous: null, next: null,
+    });
+    expect(prismaMock.holiday.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.technician.findMany).not.toHaveBeenCalled();
+  });
+
+  test('a missing holiday table or photo read degrades to a board without them', async () => {
+    prismaMock.holiday.findMany.mockRejectedValue(new Error('relation does not exist'));
+    prismaMock.technician.findMany.mockImplementation(async ({ where, select }) => {
+      if (select.photoUrl) throw new Error('boom');
+      return PEOPLE.filter((p) => where.id.in.includes(p.id));
+    });
+    const board = await onCall.board(1, { from: at('2026-10-14', '09:00'), weeks: 2 });
+    expect(board.people).toEqual({});
+    expect(board.holidays).toEqual([]);
+    expect(board.weeks.map((w) => w.scheduled.name)).toEqual(['Andrew Fong', 'Maria Lee']);
   });
 });
 

@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.2.37-preview';
+export const APP_VERSION = '4.2.38-preview';
 
 export const changelog = [
+  {
+    version: '4.2.38-preview',
+    date: 'October 10, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>On-call page, redrawn</strong> &mdash; the page now opens on who has the phone right now: their photo, until when, how long is left, how far through their turn they are, and buttons to reach them by Teams or e-mail. Beside it: who takes over next and when, and your own next turn.' },
+      { type: 'added', html: '<strong>The next seven nights</strong> &mdash; under the person on call, one face per night for the coming week, with holidays marked.' },
+      { type: 'added', html: '<strong>Twelve weeks at a glance</strong> &mdash; a strip with one block per week in its person&rsquo;s colour, split where a cover takes over, with a line where today is. Pick a block to find that week in the list. The list now shows faces, &ldquo;This week / Next week / In 3 weeks&rdquo;, the holidays inside each week and the days the scheduled person is away.' },
+      { type: 'added', html: '<strong>Calendar view</strong> &mdash; switch from Weeks to Calendar to see three months as grids. Each day takes the colour of whoever has the phone that night; a handover day is split in two colours; holidays and days that need cover are marked. Pick a day and the page says it in words. Your choice of view is remembered.' },
+      { type: 'added', html: '<strong>The rotation, as people</strong> &mdash; the order shown as faces, with who has this week and the date each person&rsquo;s next week starts.' },
+      { type: 'added', html: '<strong>Add on-call to your calendar</strong> &mdash; &ldquo;Add my turns to my calendar&rdquo; downloads your own turns as a calendar file for Outlook; &ldquo;Calendar file&rdquo; downloads the whole schedule. The file is a copy: download it again after a cover changes.' },
+      { type: 'improved', html: '<strong>On-call page for admins</strong> &mdash; a &ldquo;Change the rotation&rdquo; link goes straight to Settings &rarr; Urgent Response.' },
+    ],
+  },
   {
     version: '4.2.37-preview',
     date: 'October 10, 2026',

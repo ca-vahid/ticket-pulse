@@ -418,6 +418,62 @@ export function uncoveredLeaveDays(leaveDays, covers, startsAt, endsAt, timezone
   });
 }
 
+/**
+ * A week cut into the stretches one person holds: the scheduled person, broken
+ * by the covers in force (the same precedence as resolveOnCall).
+ * @returns {Array<{ technicianId: number|null, startsAt: Date, endsAt: Date, cover: boolean, coverId: number|null }>}
+ */
+export function weekSegments(week, covers) {
+  const from = time(week.startsAt);
+  const to = time(week.endsAt);
+  const inside = coversInWindow(covers, week.startsAt, week.endsAt);
+  const edges = [...new Set([from, to, ...inside.flatMap((c) => [time(c.startsAt), time(c.endsAt)]).filter((t) => t > from && t < to)])].sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < edges.length - 1; i += 1) {
+    const held = resolveOnCall(week, inside, new Date(edges[i]));
+    const last = out[out.length - 1];
+    const coverId = held.cover ? held.cover.id ?? null : null;
+    if (last && last.technicianId === held.technicianId && last.coverId === coverId) last.endsAt = new Date(edges[i + 1]);
+    else out.push({ technicianId: held.technicianId, startsAt: new Date(edges[i]), endsAt: new Date(edges[i + 1]), cover: Boolean(held.cover), coverId });
+  }
+  return out;
+}
+
+/**
+ * One entry per local date of the schedule: who has the phone that night
+ * (`technicianId`, the holder at the last minute of the day) and who had it in
+ * the morning (`morningTechnicianId`) — they differ on a handover day or when
+ * a cover starts or ends. `weeks` are consecutive rotation weeks.
+ * @returns {Array<{ date: string, technicianId: number|null, morningTechnicianId: number|null, cover: boolean, weekIndex: number|null }>}
+ */
+export function onCallDays(weeks, covers, timezone) {
+  const list = Array.isArray(weeks) ? weeks : [];
+  if (!list.length) return [];
+  const first = time(list[0].startsAt);
+  const last = time(list[list.length - 1].endsAt);
+  const weekAt = (t) => list.find((w) => time(w.startsAt) <= t && t < time(w.endsAt)) || null;
+  const holderAt = (t) => {
+    const week = weekAt(t);
+    return week ? { week, ...resolveOnCall(week, covers, new Date(t)) } : null;
+  };
+  const out = [];
+  let day = localParts(new Date(first), timezone).dateStr;
+  const lastDay = localParts(new Date(last - 1), timezone).dateStr;
+  for (let guard = 0; day <= lastDay && guard < 800; guard += 1) {
+    const night = holderAt(Math.min(zonedMinutes(day, 1440, timezone).getTime() - 60000, last - 1));
+    const morning = holderAt(Math.max(zonedMinutes(day, 0, timezone).getTime(), first));
+    out.push({
+      date: day,
+      technicianId: night?.technicianId ?? null,
+      morningTechnicianId: morning?.technicianId ?? null,
+      cover: Boolean(night?.cover),
+      weekIndex: night?.week?.index ?? null,
+    });
+    day = addDaysStr(day, 1);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // The sentence
 
@@ -704,7 +760,7 @@ export default {
   DEFAULT_SETTINGS, SETTINGS_FIELDS, PEOPLE_FIELDS, URGENT_RESPONSE_MODES, UNDOABLE_ACTIONS,
   atWork, awayPhrase, rankResponders, responderPhrase,
   handoverInstant, onCallWeek, onCallWeekByIndex, upcomingWeeks, alignedAnchorDate, anchorDateFor,
-  resolveOnCall, onCallUntil, coversInWindow, leaveDaysInWindow, uncoveredLeaveDays,
+  resolveOnCall, onCallUntil, coversInWindow, leaveDaysInWindow, uncoveredLeaveDays, weekSegments, onCallDays,
   sentenceFor, rangeLabel, normalizeSettings, validateSettings, rowToSettings, settingsToRow, widensScope,
   localParts, toDateStr, addDaysStr, timeToMinutes, minutesToTime, safeZone,
 };

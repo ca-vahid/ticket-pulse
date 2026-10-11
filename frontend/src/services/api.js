@@ -2118,7 +2118,8 @@ export const urgentResponseAPI = {
   getActions: (params = {}) => api.get('/urgent-response/actions', { params }),
   getStats: (days = 30) => api.get('/urgent-response/stats', { params: { days } }),
   undoAction: (id) => api.post(`/urgent-response/actions/${id}/undo`),
-  getOnCall: () => api.get('/urgent-response/on-call'),
+  // The page asks for the default (12 weeks); Settings shows 8.
+  getOnCall: (weeks = null) => api.get('/urgent-response/on-call', weeks ? { params: { weeks } } : undefined),
   createCover: (body) => api.post('/urgent-response/on-call/covers', body),
   cancelCover: (id) => api.delete(`/urgent-response/on-call/covers/${id}`),
   createCoverRequest: (body) => api.post('/urgent-response/on-call/requests', body),

@@ -22,6 +22,7 @@ const settingsSvc = {
 };
 const onCallSvc = {
   schedule: jest.fn(),
+  board: jest.fn(),
   current: jest.fn(),
   requestsFor: jest.fn(),
   respond: jest.fn(),
@@ -89,6 +90,14 @@ beforeEach(() => {
   settingsSvc.listChanges.mockResolvedValue([{ id: 1, field: 'mode' }]);
   settingsSvc.technicianForEmail.mockImplementation(async (_ws, email) => (email === AGENT.email ? { id: 11, name: 'Andrew Fong', email } : null));
   onCallSvc.schedule.mockResolvedValue({ timezone: 'America/Vancouver', handoverDay: 1, handoverTime: '17:00', configured: true, order: [11, 22], weeks: [WEEK] });
+  onCallSvc.board.mockResolvedValue({
+    timezone: 'America/Vancouver', handoverDay: 1, handoverTime: '17:00', configured: true, order: [11, 22], weeks: [WEEK],
+    people: { 11: { id: 11, name: 'Andrew Fong', email: 'afong@example.com', photoUrl: 'data:image/png;base64,AA', location: 'Vancouver', timezone: 'America/Vancouver', isActive: true } },
+    days: [{ date: '2026-10-12', technicianId: 11, morningTechnicianId: 22, cover: false, weekIndex: 0, holiday: 'Thanksgiving', away: false, needsCover: false }],
+    holidays: [{ date: '2026-10-12', name: 'Thanksgiving' }],
+    previous: { technicianId: 22, scheduledTechnicianId: 22, startsAt: '2026-10-06T00:00:00.000Z', endsAt: '2026-10-13T00:00:00.000Z' },
+    next: { technicianId: 22, startsAt: '2026-10-20T00:00:00.000Z' },
+  });
   onCallSvc.current.mockResolvedValue({
     configured: true, timezone: 'America/Vancouver', technician: { id: 11, name: 'Andrew Fong', email: 'afong@example.com' }, scheduled: { id: 11, name: 'Andrew Fong' },
     cover: null, until: '2026-10-20T00:00:00.000Z', onLeaveNoCover: false, week: { index: 0 },
@@ -125,23 +134,55 @@ describe('any member, agents included', () => {
     const r = await request(app(AGENT)).get('/api/urgent-response/on-call');
     expect(r.status).toBe(200);
     expect(r.body.data).toEqual({
+      now: expect.any(String),
       timezone: 'America/Vancouver',
       handoverDay: 1,
       handoverTime: '17:00',
-      current: { technician: { id: 11, name: 'Andrew Fong' }, scheduled: { id: 11, name: 'Andrew Fong' }, cover: null, until: '2026-10-20T00:00:00.000Z' },
+      current: {
+        technician: { id: 11, name: 'Andrew Fong' }, scheduled: { id: 11, name: 'Andrew Fong' }, cover: null, until: '2026-10-20T00:00:00.000Z',
+        onLeaveNoCover: false, week: { index: 0 },
+      },
       weeks: [WEEK],
-      me: { technicianId: 11 },
+      order: [11, 22],
+      people: { 11: expect.objectContaining({ name: 'Andrew Fong', photoUrl: 'data:image/png;base64,AA' }) },
+      days: [expect.objectContaining({ date: '2026-10-12', technicianId: 11, holiday: 'Thanksgiving' })],
+      holidays: [{ date: '2026-10-12', name: 'Thanksgiving' }],
+      previous: expect.objectContaining({ technicianId: 22 }),
+      next: { technicianId: 22, startsAt: '2026-10-20T00:00:00.000Z' },
+      me: { technicianId: 11, inRotation: true, canManage: false },
     });
-    expect(onCallSvc.schedule).toHaveBeenCalledWith(1, { from: expect.any(Date), weeks: 8 });
+    // Twelve weeks unless the page asks otherwise; the same instant feeds the schedule and "now".
+    expect(onCallSvc.board).toHaveBeenCalledWith(1, { from: expect.any(Date), weeks: 12 });
+    expect(onCallSvc.current).toHaveBeenCalledWith(1, onCallSvc.board.mock.calls[0][1].from);
     expect(settingsSvc.technicianForEmail).toHaveBeenCalledWith(1, 'afong@example.com');
   });
 
+  test('GET /on-call?weeks=4 passes the number on; a technician outside the order is not in the rotation', async () => {
+    settingsSvc.technicianForEmail.mockResolvedValue({ id: 99, name: 'Somebody Else', email: 'afong@example.com' });
+    const r = await request(app(AGENT)).get('/api/urgent-response/on-call?weeks=4');
+    expect(onCallSvc.board).toHaveBeenCalledWith(1, { from: expect.any(Date), weeks: '4' });
+    expect(r.body.data.me).toEqual({ technicianId: 99, inRotation: false, canManage: false });
+  });
+
+  test('GET /on-call tells an admin (global or of this workspace) that they can change the rotation', async () => {
+    expect((await request(app(ADMIN)).get('/api/urgent-response/on-call')).body.data.me.canManage).toBe(true);
+    wsRepo.getAccessRole.mockResolvedValue('admin');
+    expect((await request(app(MEMBER)).get('/api/urgent-response/on-call')).body.data.me.canManage).toBe(true);
+    wsRepo.getAccessRole.mockRejectedValue(new Error('db down'));
+    const r = await request(app(MEMBER)).get('/api/urgent-response/on-call');
+    expect(r.status).toBe(200);
+    expect(r.body.data.me.canManage).toBe(false);
+  });
+
   test('GET /on-call for someone who is not a technician here: me is null; nobody on call: nulls', async () => {
-    onCallSvc.schedule.mockResolvedValue({ timezone: 'America/Vancouver', handoverDay: 1, handoverTime: '17:00', configured: false, order: [], weeks: [] });
+    onCallSvc.board.mockResolvedValue({ timezone: 'America/Vancouver', handoverDay: 1, handoverTime: '17:00', configured: false, order: [], weeks: [] });
     onCallSvc.current.mockResolvedValue({ configured: false, technician: null, scheduled: null, cover: null, until: null });
     const r = await request(app(MEMBER)).get('/api/urgent-response/on-call');
     expect(r.status).toBe(200);
-    expect(r.body.data).toMatchObject({ current: { technician: null, scheduled: null, cover: null, until: null }, weeks: [], me: { technicianId: null } });
+    expect(r.body.data).toMatchObject({
+      current: { technician: null, scheduled: null, cover: null, until: null, onLeaveNoCover: false, week: null },
+      weeks: [], order: [], people: {}, days: [], holidays: [], previous: null, next: null, me: { technicianId: null, inRotation: false, canManage: false },
+    });
   });
 
   test('a cookie-less (Bearer) agent is recognised the same way', async () => {

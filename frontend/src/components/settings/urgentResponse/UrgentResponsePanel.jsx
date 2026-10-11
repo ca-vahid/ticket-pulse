@@ -85,7 +85,7 @@ export default function UrgentResponsePanel({ initialTab = 'rules', previewDelay
       .catch((err) => setLoadError(err?.message || 'Could not load the urgent response settings'));
   }, []);
   // The schedule also carries the time zone, for a server that does not send it with the settings.
-  const loadOnCall = useCallback(() => urgentResponseAPI.getOnCall()
+  const loadOnCall = useCallback(() => urgentResponseAPI.getOnCall(8)
     .then((res) => { setOnCall(res?.data || null); setOnCallError(null); })
     .catch((err) => setOnCallError(err?.message || 'Could not load the on-call schedule')), []);
   useEffect(() => { loadSettings(); loadOnCall(); }, [loadSettings, loadOnCall]);

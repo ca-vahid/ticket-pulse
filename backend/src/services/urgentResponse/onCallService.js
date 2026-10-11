@@ -2,9 +2,10 @@ import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
 import { AuthorizationError, ConflictError, NotFoundError, ValidationError } from '../../utils/errors.js';
 import settingsService, { soft } from './settingsService.js';
+import { getDateColumnMonthDay } from '../../utils/timezone.js';
 import {
-  coversInWindow, leaveDaysInWindow, localParts, onCallUntil, onCallWeek, rangeLabel, resolveOnCall,
-  sentenceFor, uncoveredLeaveDays, upcomingWeeks,
+  coversInWindow, leaveDaysInWindow, localParts, onCallDays, onCallUntil, onCallWeek, onCallWeekByIndex, rangeLabel, resolveOnCall,
+  sentenceFor, uncoveredLeaveDays, upcomingWeeks, weekSegments,
 } from './rules.js';
 
 /**
@@ -268,6 +269,113 @@ class UrgentResponseOnCallService {
       until: onCallUntil(week, covers, at),
       onLeaveNoCover,
       week: { index: week.index, startsAt: week.startsAt, endsAt: week.endsAt },
+    };
+  }
+
+  // ---- the board (the /on-call page) ---------------------------------------
+
+  /** id → the face of a person: name, e-mail, office and ONE photo each (never per row of anything). */
+  async _faces(workspaceId, ids) {
+    const wanted = [...new Set(listOf(ids).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!wanted.length) return {};
+    const rows = await soft(() => prisma.technician.findMany({
+      where: { workspaceId: Number(workspaceId), id: { in: wanted } },
+      select: { id: true, name: true, email: true, photoUrl: true, location: true, timezone: true, isActive: true },
+      take: wanted.length,
+    }), []);
+    return Object.fromEntries(rows.map((r) => [r.id, {
+      id: r.id, name: r.name, email: r.email || null, photoUrl: r.photoUrl || null, location: r.location || null, timezone: r.timezone || null, isActive: r.isActive !== false,
+    }]));
+  }
+
+  /** The enabled holidays (this workspace's and the shared ones) that fall on the given local dates: 'yyyy-MM-dd' → name. */
+  async _holidays(workspaceId, dates) {
+    const days = listOf(dates);
+    if (!days.length) return {};
+    const rows = await soft(() => prisma.holiday.findMany({
+      where: { isEnabled: true, OR: [{ workspaceId: Number(workspaceId) }, { workspaceId: null }] },
+      select: { name: true, date: true, isRecurring: true },
+      take: 500,
+    }), []);
+    const exact = new Map();
+    const recurring = new Map();
+    for (const row of rows) {
+      if (!row?.date) continue;
+      if (row.isRecurring) {
+        const monthDay = getDateColumnMonthDay(row.date);
+        if (monthDay && !recurring.has(monthDay)) recurring.set(monthDay, row.name);
+      } else {
+        const key = new Date(row.date).toISOString().slice(0, 10);
+        if (!exact.has(key)) exact.set(key, row.name);
+      }
+    }
+    const out = {};
+    for (const day of days) {
+      const name = exact.get(day) || recurring.get(day.slice(5)) || null;
+      if (name) out[day] = name;
+    }
+    return out;
+  }
+
+  /**
+   * Everything the /on-call page draws, in one read: the weeks (as schedule()
+   * gives them) each cut into the stretches one person holds, one entry per
+   * calendar day (who has the phone that night, holidays, leave), the rotation
+   * order, the faces, the week before and the next change of hands.
+   * @returns {{ configured, timezone, handoverDay, handoverTime, order: number[], people: object, weeks: object[],
+   *   days: Array<{ date, technicianId, morningTechnicianId, cover, weekIndex, holiday, away, needsCover }>,
+   *   holidays: Array<{ date, name }>, previous: { technicianId, scheduledTechnicianId, startsAt, endsAt }|null,
+   *   next: { technicianId, startsAt }|null }}
+   */
+  async board(workspaceId, { from = new Date(), weeks = 12 } = {}) {
+    const ws = Number(workspaceId);
+    const plan = await this.schedule(ws, { from, weeks });
+    const empty = { ...plan, people: {}, days: [], holidays: [], previous: null, next: null };
+    if (!plan.configured || !plan.weeks.length) return empty;
+
+    const { settings, timezone } = await this._context(ws);
+    const first = plan.weeks[0];
+    const last = plan.weeks[plan.weeks.length - 1];
+    const before = onCallWeekByIndex(settings, timezone, first.index - 1);
+    const covers = await this._covers(ws, before.startsAt, last.endsAt);
+
+    const rota = plan.weeks.map((w) => ({ index: w.index, startsAt: new Date(w.startsAt), endsAt: new Date(w.endsAt), technicianId: w.scheduled?.id ?? null }));
+    const segmentsOf = new Map(rota.map((w) => [w.index, weekSegments(w, covers)]));
+    const days = onCallDays(rota, covers, timezone);
+    const holidayNames = await this._holidays(ws, days.map((d) => d.date));
+    const weekOf = new Map(plan.weeks.map((w) => [w.index, w]));
+    const uncovered = new Map(plan.weeks.map((w) => [
+      w.index,
+      new Set(uncoveredLeaveDays(w.leaveDays, coversInWindow(covers, w.startsAt, w.endsAt), w.startsAt, w.endsAt, timezone)),
+    ]));
+
+    // The next change of hands after `from`: the first stretch that starts later with somebody else.
+    const flat = rota.flatMap((w) => segmentsOf.get(w.index));
+    const now = from.getTime();
+    const holding = flat.find((seg) => seg.startsAt.getTime() <= now && now < seg.endsAt.getTime()) || null;
+    const coming = flat.find((seg) => seg.startsAt.getTime() > now && seg.technicianId !== (holding?.technicianId ?? null)) || null;
+    const heldBefore = resolveOnCall(before, covers, new Date(before.endsAt.getTime() - 1));
+
+    const ids = [
+      ...plan.order, ...flat.map((seg) => seg.technicianId), ...covers.flatMap((c) => [c.coverTechnicianId, c.originalTechnicianId]),
+      before.technicianId, heldBefore.technicianId,
+    ];
+    return {
+      ...plan,
+      people: await this._faces(ws, ids),
+      weeks: plan.weeks.map((w) => ({
+        ...w,
+        segments: segmentsOf.get(w.index).map(({ technicianId, startsAt, endsAt, cover }) => ({ technicianId, startsAt, endsAt, cover })),
+      })),
+      days: days.map((d) => ({
+        ...d,
+        holiday: holidayNames[d.date] || null,
+        away: listOf(weekOf.get(d.weekIndex)?.leaveDays).includes(d.date),
+        needsCover: uncovered.get(d.weekIndex)?.has(d.date) === true,
+      })),
+      holidays: Object.entries(holidayNames).map(([date, name]) => ({ date, name })),
+      previous: { technicianId: heldBefore.technicianId, scheduledTechnicianId: before.technicianId, startsAt: before.startsAt, endsAt: before.endsAt },
+      next: coming ? { technicianId: coming.technicianId, startsAt: coming.startsAt } : null,
     };
   }
 
