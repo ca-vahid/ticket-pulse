@@ -2,8 +2,8 @@ import { formatInTimeZone, getTimezoneOffset } from 'date-fns-tz';
 import {
   DEFAULT_SETTINGS, SETTINGS_FIELDS,
   alignedAnchorDate, anchorDateFor, atWork, awayPhrase, coversInWindow, handoverInstant, leaveDaysInWindow,
-  normalizeSettings, onCallUntil, onCallWeek, rangeLabel, rankResponders, resolveOnCall, responderPhrase,
-  rowToSettings, sentenceFor, settingsToRow, uncoveredLeaveDays, upcomingWeeks, validateSettings, widensScope,
+  normalizeSettings, onCallDays, onCallUntil, onCallWeek, onCallWeekByIndex, rangeLabel, rankResponders, resolveOnCall, responderPhrase,
+  rowToSettings, sentenceFor, settingsToRow, uncoveredLeaveDays, upcomingWeeks, validateSettings, weekSegments, widensScope,
 } from '../src/services/urgentResponse/rules.js';
 
 /**
@@ -521,5 +521,44 @@ describe('settings', () => {
     expect(widensScope(base, { ...base, clockNotifyMinutes: 5 })).toBe(false);
     expect(widensScope(base, { ...base, assignPriorities: [4] })).toBe(false); // layer 1 has no clock
     expect(widensScope({ ...base, clockPriorities: [4, 3] }, base)).toBe(false);
+  });
+});
+
+describe('weekSegments and onCallDays (what the on-call page draws)', () => {
+  const ROTA = normalizeSettings({ onCallOrder: [11, 22], onCallHandoverDay: 1, onCallHandoverTime: '17:00', onCallAnchorDate: '2026-10-12' });
+  const week = (i) => onCallWeekByIndex(ROTA, VANCOUVER, i);
+  const v = (dateStr, time) => handoverInstant(dateStr, time, VANCOUVER);
+  const cover = (id, technicianId, from, to, extra = {}) => ({ id, coverTechnicianId: technicianId, originalTechnicianId: 11, startsAt: from, endsAt: to, cancelledAt: null, ...extra });
+
+  test('no cover: the whole week is the scheduled person', () => {
+    expect(weekSegments(week(0), [])).toEqual([{ technicianId: 11, startsAt: v('2026-10-12', '17:00'), endsAt: v('2026-10-19', '17:00'), cover: false, coverId: null }]);
+  });
+
+  test('overlapping covers: the one created last wins, and a cancelled one is ignored', () => {
+    const covers = [
+      cover(1, 22, v('2026-10-13', '17:00'), v('2026-10-16', '17:00')),
+      cover(2, 33, v('2026-10-14', '17:00'), v('2026-10-15', '17:00')),
+      cover(3, 44, v('2026-10-17', '00:00'), v('2026-10-18', '00:00'), { cancelledAt: new Date() }),
+    ];
+    expect(weekSegments(week(0), covers).map((s) => [s.technicianId, s.cover])).toEqual([[11, false], [22, true], [33, true], [22, true], [11, false]]);
+  });
+
+  test('a cover that runs past the week is cut at the handover', () => {
+    const segs = weekSegments(week(0), [cover(1, 22, v('2026-10-18', '17:00'), v('2026-10-21', '17:00'))]);
+    expect(segs[segs.length - 1]).toMatchObject({ technicianId: 22, endsAt: v('2026-10-19', '17:00') });
+  });
+
+  test('days run from the first handover day to the last, in the workspace zone', () => {
+    const days = onCallDays([week(0), week(1)], [], VANCOUVER);
+    expect(days[0].date).toBe('2026-10-12');
+    expect(days[days.length - 1].date).toBe('2026-10-26');
+    expect(days.filter((d) => d.technicianId !== d.morningTechnicianId).map((d) => d.date)).toEqual(['2026-10-19']);
+    expect(onCallDays([], [], VANCOUVER)).toEqual([]);
+  });
+
+  test('the week the clocks change still has seven nights', () => {
+    const days = onCallDays([week(2), week(3)], [], LA); // Mon 26 Oct → Mon 9 Nov, across 1 Nov
+    expect(days).toHaveLength(15);
+    expect(new Set(days.map((d) => d.date)).size).toBe(15);
   });
 });

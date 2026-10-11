@@ -14,7 +14,7 @@ import { URGENT_RESPONSE_MODES } from '../services/urgentResponse/rules.js';
  * theirs to read and answer.
  *
  *   GET  /status                          any member or agent — the mode, and whether an on-call order is saved
- *   GET  /on-call                         the schedule, who is on call now, me
+ *   GET  /on-call                         the schedule (weeks, days, faces, rotation order), who is on call now, me
  *   GET  /on-call/requests/mine           open cover requests waiting for my answer
  *   POST /on-call/requests/:id/respond    accept | decline (first accept wins)
  *   everything else                       workspace admins (requireAdmin)
@@ -31,6 +31,22 @@ const engine = async () => (await import('../services/urgentResponse/urgentRespo
 
 async function myTechnician(req) {
   return settingsService.technicianForEmail(req.workspaceId, sessionUser(req)?.email);
+}
+
+/**
+ * May this person change the rotation (the same rule as requireAdmin, asked
+ * quietly: the page only uses it to show a link to Settings)? Never throws.
+ */
+async function canManage(req) {
+  try {
+    const user = sessionUser(req);
+    if (user?.role === 'admin') return true;
+    if (!user?.email || !req.workspaceId) return false;
+    const { default: wsRepo } = await import('../services/workspaceRepository.js');
+    return (await wsRepo.getAccessRole(user.email, req.workspaceId)) === 'admin';
+  } catch {
+    return false;
+  }
 }
 
 function idParam(req) {
@@ -55,12 +71,15 @@ router.get('/status', asyncHandler(async (req, res) => {
 
 router.get('/on-call', asyncHandler(async (req, res) => {
   const now = new Date();
-  const plan = await onCallService.schedule(req.workspaceId, { from: now, weeks: req.query.weeks || 8 });
+  // The page draws faces, a calendar and the rotation: one read gives it all (one photo per person).
+  const plan = await onCallService.board(req.workspaceId, { from: now, weeks: req.query.weeks || 12 });
   const current = await onCallService.current(req.workspaceId, now);
   const me = await myTechnician(req);
+  const order = Array.isArray(plan.order) ? plan.order : [];
   res.json({
     success: true,
     data: {
+      now,
       timezone: plan.timezone,
       handoverDay: plan.handoverDay,
       handoverTime: plan.handoverTime,
@@ -69,9 +88,17 @@ router.get('/on-call', asyncHandler(async (req, res) => {
         scheduled: current.scheduled,
         cover: current.cover,
         until: current.until,
+        onLeaveNoCover: current.onLeaveNoCover === true,
+        week: current.week || null,
       },
       weeks: plan.weeks,
-      me: { technicianId: me?.id ?? null },
+      order,
+      people: plan.people || {},
+      days: plan.days || [],
+      holidays: plan.holidays || [],
+      previous: plan.previous || null,
+      next: plan.next || null,
+      me: { technicianId: me?.id ?? null, inRotation: me ? order.includes(me.id) : false, canManage: await canManage(req) },
     },
   });
 }));
