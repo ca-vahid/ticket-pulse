@@ -49,6 +49,7 @@ export const settingsKey = (workspaceId) => `ticket_grouping_ws${Number(workspac
 export const RUN_MODEL = 'ticket-grouping';
 const DAY = 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = Number(process.env.TICKET_GROUPING_INTERVAL_MS) || 5 * 60 * 1000;
+const RESTORE_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 const SWEEP_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const SWEEP_MIN_AGE_MS = 10 * 60 * 1000;
 const SWEEP_PEOPLE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -417,6 +418,49 @@ class TicketGroupingService {
     await soft(() => prisma.ticket.update({ where: { id: ticket.id }, data }));
   }
 
+  /**
+   * A copy that is still closed into another ticket but lost its "Grouped: ..." mark gets it back
+   * (until 12 Oct 2026 the FreshService sync wrote the matching noise rule's name over it, and a
+   * noise guard could take the copy back into the totals). Undo removes the link first, so a copy
+   * a person put back is never marked again.
+   */
+  async _restoreMarks(workspaceId, now = new Date()) {
+    const events = await soft(() => prisma.ticketGroupingEvent.findMany({
+      where: { workspaceId, state: 'applied', kind: { in: ['repeat', 'duplicate', 'update'] }, createdAt: { gte: new Date(now.getTime() - RESTORE_LOOKBACK_MS) } },
+      select: { ticketId: true, targetTicketId: true, kind: true }, orderBy: { id: 'desc' }, take: 500,
+    }), []);
+    if (!events?.length) return 0;
+    const lost = await soft(() => prisma.ticket.findMany({
+      where: {
+        id: { in: events.map((e) => e.ticketId) }, workspaceId,
+        OR: [{ isNoise: false }, { noiseRuleMatched: null }, { NOT: { noiseRuleMatched: { startsWith: 'Grouped:' } } }],
+      },
+      select: { id: true }, take: 500,
+    }), []);
+    if (!lost?.length) return 0;
+    const lostIds = new Set(lost.map((t) => t.id));
+    const linked = await this._duplicateIds([...lostIds]);
+    const todo = events.filter((e) => lostIds.has(e.ticketId) && linked.has(e.ticketId) && e.targetTicketId);
+    if (!todo.length) return 0;
+    const targets = await soft(() => prisma.ticket.findMany({
+      where: { id: { in: [...new Set(todo.map((e) => e.targetTicketId))] }, workspaceId },
+      select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+    }), []);
+    const refs = new Map((targets || []).map((t) => [t.id, ticketDisplayRef(t)]));
+    let restored = 0;
+    const done = new Set();
+    for (const e of todo) {
+      const ref = refs.get(e.targetTicketId);
+      if (!ref || done.has(e.ticketId)) continue;
+      done.add(e.ticketId);
+      const label = e.kind === 'repeat' ? `Grouped: repeat of ${ref}` : `Grouped: same request as ${ref}`;
+      const ok = await soft(() => prisma.ticket.update({ where: { id: e.ticketId }, data: { isNoise: true, noiseRuleMatched: label.slice(0, 100) } }));
+      if (ok) restored += 1;
+    }
+    if (restored) logger.info(`Ticket grouping: restored the Grouped mark on ${restored} cop${restored === 1 ? 'y' : 'ies'} in workspace ${workspaceId}`);
+    return restored;
+  }
+
   async _supersedeQueuedRuns(ticketId, reason) {
     await soft(() => prisma.assignmentPipelineRun.updateMany({ where: { ticketId, status: 'queued' }, data: { status: 'superseded', errorMessage: reason.slice(0, 200) } }));
   }
@@ -629,7 +673,7 @@ class TicketGroupingService {
 
   /** Recent open tickets nobody has looked at yet, oldest first. Never throws. */
   async sweep(now = new Date()) {
-    const out = { workspaces: 0, looked: 0, handled: 0 };
+    const out = { workspaces: 0, looked: 0, handled: 0, restored: 0 };
     if (this._sweeping) return out;
     this._sweeping = true;
     try {
@@ -637,6 +681,7 @@ class TicketGroupingService {
       for (const { id: workspaceId } of workspaces) {
         if (!(await this.isOn(workspaceId))) continue;
         out.workspaces += 1;
+        out.restored += await this._restoreMarks(workspaceId, now);
         const open = await prisma.ticket.findMany({
           where: {
             workspaceId, isNoise: false, status: { notIn: TERMINAL_STATUSES }, requesterId: { not: null },

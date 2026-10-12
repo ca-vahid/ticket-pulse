@@ -1672,7 +1672,18 @@ class SyncService {
     let effectiveIsNoise = isNoise;
     let effectiveNoiseRuleId = ruleId;
     let noiseVerdictPreserved = false;
-    if (
+    // Ticket grouping (12 Oct 2026): a copy closed into another ticket is out of
+    // the totals with "Grouped: ..." as its reason. A noise rule that matches the
+    // same subject agrees on the flag, so the flip guard below never ran and the
+    // rule's name was written over the reason. The grouped mark stands until Undo
+    // clears it.
+    const groupedCopy = existingTicket?.isNoise === true
+      && String(existingTicket.noiseRuleMatched || '').startsWith('Grouped:');
+    if (groupedCopy) {
+      noiseVerdictPreserved = true;
+      effectiveIsNoise = undefined;
+      effectiveNoiseRuleId = undefined;
+    } else if (
       existingTicket
       && typeof existingTicket.isNoise === 'boolean'
       && existingTicket.isNoise !== isNoise

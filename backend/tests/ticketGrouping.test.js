@@ -405,11 +405,50 @@ describe('the sweep', () => {
     prismaMock.ticket.findMany.mockResolvedValueOnce([{ id: 11, createdAt: at('2026-10-10T00:00:00Z') }, { id: 12, createdAt: at('2026-10-12T03:00:00Z') }]);
     prismaMock.ticketGroupingEvent.findMany.mockResolvedValue([{ ticketId: 12 }]);
     const spy = jest.spyOn(grouping, 'evaluateTicket').mockResolvedValue({ handled: true, skipAi: true, kind: 'repeat', targetId: 10, targetRef: '#246525', reason: 'x' });
+    const marks = jest.spyOn(grouping, '_restoreMarks').mockResolvedValue(0);
     prismaMock.assignmentPipelineRun.create.mockResolvedValue({ id: 1 });
     const out = await grouping.sweep(now);
-    expect(out).toEqual({ workspaces: 1, looked: 1, handled: 1 });
+    expect(out).toEqual({ workspaces: 1, looked: 1, handled: 1, restored: 0 });
+    expect(marks).toHaveBeenCalledWith(1, now);
     expect(spy).toHaveBeenCalledWith(11, 1, { machineOnly: true });
     expect(prismaMock.assignmentPipelineRun.create.mock.calls[0][0].data).toMatchObject({ ticketId: 11, decision: 'duplicate_dismissed', triggerSource: 'grouping_sweep', llmModel: 'ticket-grouping' });
     spy.mockRestore();
+    marks.mockRestore();
+  });
+
+  // 12 Oct 2026: the FreshService sync wrote "Veeam / Hyper-V Backup Errors" over "Grouped: repeat of #246525"
+  // on IT's closed copies, and one copy was back in the totals.
+  test('a copy that lost its Grouped mark gets it back, as long as it is still closed into the other ticket', async () => {
+    const now = at('2026-10-12T22:00:00Z');
+    prismaMock.ticketGroupingEvent.findMany.mockResolvedValue([
+      { ticketId: 21, targetTicketId: 10, kind: 'repeat' },
+      { ticketId: 22, targetTicketId: 10, kind: 'repeat' },
+      { ticketId: 23, targetTicketId: 60, kind: 'update' },
+      { ticketId: 24, targetTicketId: 10, kind: 'repeat' },
+    ]);
+    // 21 has the rule's name, 23 is back in the totals, 24 was put back by a person (no link); 22 is fine.
+    prismaMock.ticket.findMany
+      .mockResolvedValueOnce([{ id: 21 }, { id: 23 }, { id: 24 }])
+      .mockResolvedValueOnce([{ id: 10, origin: 'freshservice', freshserviceTicketId: 246525n }, { id: 60, origin: 'ticketpulse', nativeNumber: 1900 }]);
+    prismaMock.ticketLink.findMany.mockResolvedValue([{ ticketId: 21 }, { ticketId: 23 }]);
+    prismaMock.ticket.update.mockResolvedValue({ id: 1 });
+
+    expect(await grouping._restoreMarks(1, now)).toBe(2);
+
+    const where = prismaMock.ticket.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([{ isNoise: false }, { noiseRuleMatched: null }, { NOT: { noiseRuleMatched: { startsWith: 'Grouped:' } } }]);
+    expect(prismaMock.ticketGroupingEvent.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 1, state: 'applied' });
+    const writes = prismaMock.ticket.update.mock.calls.map((c) => c[0]);
+    expect(writes).toEqual([
+      { where: { id: 21 }, data: { isNoise: true, noiseRuleMatched: 'Grouped: repeat of #246525' } },
+      { where: { id: 23 }, data: { isNoise: true, noiseRuleMatched: 'Grouped: same request as TP-1900' } },
+    ]);
+  });
+
+  test('nothing is written when every copy still has its mark', async () => {
+    prismaMock.ticketGroupingEvent.findMany.mockResolvedValue([{ ticketId: 21, targetTicketId: 10, kind: 'repeat' }]);
+    prismaMock.ticket.findMany.mockResolvedValueOnce([]);
+    expect(await grouping._restoreMarks(1, at('2026-10-12T22:00:00Z'))).toBe(0);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
   });
 });
