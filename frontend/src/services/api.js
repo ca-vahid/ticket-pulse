@@ -1394,6 +1394,11 @@ export const knowledgeAPI = {
   ticketCapture: (ticketId) => api.get(`/knowledge/tickets/${ticketId}/capture`, { _speculative: true }),
   captureTicket: (ticketId, data) => apiLongTimeout.post(`/knowledge/tickets/${ticketId}/capture`, data, { timeout: 120000 }),
   tidy: (data) => apiLongTimeout.post('/knowledge/tidy', data, { timeout: 90000 }),
+  // The nightly review, the coverage map and calibration (phases 4 and 5).
+  coverage: () => api.get('/knowledge/coverage'),
+  steward: () => api.get('/knowledge/steward'),
+  runSteward: () => apiLongTimeout.post('/knowledge/steward/run', {}, { timeout: 120000 }),
+  calibration: () => api.get('/knowledge/calibration'),
   search: (q, params = {}) => api.get('/knowledge/search', { params: { ...params, q } }),
   listPlaybooks: () => api.get('/knowledge/playbooks'),
   getPlaybook: (id) => api.get(`/knowledge/playbooks/${id}`),

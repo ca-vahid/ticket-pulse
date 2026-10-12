@@ -7,6 +7,7 @@ import { Switch } from '../ui';
 import { Loading, textareaClass } from './knowledgeUi';
 import { StayQuietList } from './StayQuietEditor';
 import { levelLabel, levelOptions, progressWords, readinessState } from './answeringFormat';
+import { calibrationWords } from './coverageFormat';
 
 /**
  * Knowledge → Answering (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 5): one
@@ -218,6 +219,11 @@ function DialRow({ entry, isDefault = false, isSub = false, parentName = null, r
           {!isDefault && !isSub && <Evidence category={entry} />}
           {!isDefault && !isSub && entry.readiness && !entry.resolved.alwaysChecked && !entry.readiness.met && readinessState(entry).tone === 'progress' && (
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{progressWords(entry.readiness)}</p>
+          )}
+          {!isDefault && !isSub && calibrationWords(entry.calibration) && (
+            <p className={`mt-0.5 text-[11px] ${entry.highReliable === false ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground/80'}`} data-testid={`answering-calibration-${id}`}>
+              {entry.highReliable === false ? 'Paused one level down: ' : ''}{calibrationWords(entry.calibration)}
+            </p>
           )}
         </div>
       </div>

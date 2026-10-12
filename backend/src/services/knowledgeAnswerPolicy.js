@@ -55,6 +55,35 @@ const MAX_STAY_QUIET = 20;
 const MAX_STAY_QUIET_CHARS = 300;
 const ROWS_CACHE_MS = 30 * 1000;
 const READINESS_CACHE_MS = 10 * 60 * 1000;
+/**
+ * Calibration (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 6): once a category
+ * has at least this many judged "sure" answers, fewer than this share right
+ * means "sure" stopped meaning sure there, and sure answers are treated as
+ * "fairly sure" (one level down) until the numbers recover.
+ */
+export const CALIBRATION_MIN_JUDGED = 10;
+export const CALIBRATION_MIN_RIGHT_PCT = 80;
+export const CALIBRATION_DAYS = 90;
+const CALIBRATION_CACHE_MS = 10 * 60 * 1000;
+
+/**
+ * What people said about a run, as right / not right / unknown. Pure.
+ * A review verdict wins; otherwise what the agent did with the suggestion.
+ */
+export function judgedOf(run) {
+  if (run?.reviewVerdict === 'good') return 'right';
+  if (run?.reviewVerdict) return 'not_right';
+  if (run?.decision === 'agent_sent') return 'right';
+  if (run?.decision === 'agent_edited_sent' || run?.decision === 'agent_dismissed') return 'not_right';
+  return null;
+}
+
+/** Pure: is "sure" still reliable, given { judged, right } for the high band? */
+export function highReliable({ judged = 0, right = 0 } = {}) {
+  if (Number(judged) < CALIBRATION_MIN_JUDGED) return true;
+  return (Number(right) / Number(judged)) * 100 >= CALIBRATION_MIN_RIGHT_PCT;
+}
+
 export const SEND_LOCKED_MESSAGE = 'This category has not earned "Send when sure" yet: it needs enough reviewed answers first';
 export const SEND_ALWAYS_CHECKED_MESSAGE = 'A category that is always checked by a person can go as far as "Suggest to agent", never "Send when sure"';
 
@@ -246,9 +275,12 @@ class KnowledgeAnswerPolicyService {
 
   _readinessCache = new Map();
 
+  _calibrationCache = new Map();
+
   clearCache(workspaceId = null) {
-    if (workspaceId === null) { this._rowsCache.clear(); this._readinessCache.clear(); return; }
+    if (workspaceId === null) { this._rowsCache.clear(); this._readinessCache.clear(); this._calibrationCache.clear(); return; }
     this._rowsCache.delete(Number(workspaceId));
+    this._calibrationCache.delete(Number(workspaceId));
     for (const key of [...this._readinessCache.keys()]) if (key.startsWith(`${Number(workspaceId)}:`)) this._readinessCache.delete(key);
   }
 
@@ -289,6 +321,45 @@ class KnowledgeAnswerPolicyService {
     return evaluateReadiness({ ...readinessEvidence(rows || [], {}), sensitive: alwaysChecked === true }, READINESS);
   }
 
+  /**
+   * Per top category and band: how many answers people judged, and how many
+   * of those were right. Map-like object { [categoryId]: { high, medium, low: { judged, right } } }.
+   * Test and backtest runs never count. Never throws.
+   */
+  async calibration(workspaceId, { now = Date.now() } = {}) {
+    const ws = Number(workspaceId);
+    const hit = this._calibrationCache.get(ws);
+    if (hit && now - hit.at < CALIBRATION_CACHE_MS) return hit.value;
+    const rows = await Promise.resolve()
+      .then(() => prisma.autoHelpRun.findMany({
+        where: {
+          workspaceId: ws, trigger: 'categorized', confidenceBand: { not: null }, categoryId: { not: null },
+          createdAt: { gte: new Date(now - CALIBRATION_DAYS * 86400e3) },
+          OR: [{ reviewVerdict: { not: null } }, { decision: { not: null } }],
+        },
+        select: { categoryId: true, confidenceBand: true, reviewVerdict: true, decision: true },
+        orderBy: { createdAt: 'desc' },
+        take: 5000,
+      }))
+      .catch(() => []);
+    const value = {};
+    for (const r of rows || []) {
+      const judged = judgedOf(r);
+      if (!judged || !BANDS.includes(r.confidenceBand)) continue;
+      const cat = value[r.categoryId] || (value[r.categoryId] = { high: { judged: 0, right: 0 }, medium: { judged: 0, right: 0 }, low: { judged: 0, right: 0 } });
+      cat[r.confidenceBand].judged += 1;
+      if (judged === 'right') cat[r.confidenceBand].right += 1;
+    }
+    this._calibrationCache.set(ws, { at: now, value });
+    return value;
+  }
+
+  /** Is a "sure" answer in this category still to be trusted as sure? Fails soft to yes (the other locks still hold). */
+  async highIsReliable(workspaceId, categoryId) {
+    const table = await this.calibration(workspaceId).catch(() => ({}));
+    return highReliable(table?.[Number(categoryId)]?.high);
+  }
+
   async cachedCategoryReadiness(workspaceId, categoryId, { alwaysChecked = false, now = Date.now() } = {}) {
     const key = `${Number(workspaceId)}:${Number(categoryId) || 0}:${alwaysChecked ? 1 : 0}`;
     const hit = this._readinessCache.get(key);
@@ -316,6 +387,7 @@ class KnowledgeAnswerPolicyService {
    */
   async list(workspaceId) {
     const ws = Number(workspaceId);
+    const calibration = await this.calibration(ws).catch(() => ({}));
     const [rows, cats, articleCounts, runCounts] = await Promise.all([
       this.rows(ws, { fresh: true }).catch(() => []),
       this._categories(ws),
@@ -352,6 +424,9 @@ class KnowledgeAnswerPolicyService {
         own: rowView(byId.get(top.id)),
         resolved,
         readiness,
+        // How often "sure" was right here, and whether it still counts as sure.
+        calibration: calibration[top.id] || null,
+        highReliable: highReliable(calibration[top.id]?.high),
         articles: articles.get(top.id) || 0,
         runs30: runs.get(top.id) || { drafted: 0, answered: 0, total: 0 },
         subcategories: (cats || []).filter((c) => c.parentId === top.id).map((sub) => ({
@@ -366,6 +441,7 @@ class KnowledgeAnswerPolicyService {
       levels: LEVELS.map((value) => ({ value, label: LEVEL_LABELS[value] })),
       defaults: { level: DEFAULT_LEVEL, bar: DEFAULT_BAR },
       readinessBar: READINESS,
+      calibrationBar: { minJudged: CALIBRATION_MIN_JUDGED, minRightPct: CALIBRATION_MIN_RIGHT_PCT, days: CALIBRATION_DAYS },
       default: { own: rowView(byId.get(DEFAULT_CATEGORY_ID)), resolved: resolvePolicy(rows, {}) },
       categories,
     };

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import { Inbox as InboxIcon } from 'lucide-react';
-import { knowledgeAPI } from '../../services/api';
+import { knowledgeAPI, knowledgeGrowthAPI } from '../../services/api';
 import { timeAgo } from '../tickets/ticketUi';
 import { EmptyState, Loading, PersonLine, textareaClass } from './knowledgeUi';
 import { PanelTabs } from './builderUi';
@@ -96,6 +96,23 @@ function Detail({ id, onDone }) {
   if (!item) return <Loading label="Opening…" className="py-10" />;
   const k = kindOf(item);
   const tickets = Array.isArray(item.evidence?.ticketIds) ? item.evidence.ticketIds.slice(0, 8) : [];
+  // A merge the review found has no merged text: nothing is archived on a guess.
+  const bareMerge = item.kind === 'merge' && !item.proposed?.bodyHtml;
+  const canDraft = item.kind === 'gap' && item.canDecide && tickets.length > 0;
+  // Drafting opens the draft in the editor (it does not go back to the list).
+  const draftFromGap = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await knowledgeGrowthAPI.draftFromTickets({ ticketIds: item.evidence.ticketIds, topic: item.title.replace(/^Not written down:\s*/, ''), kind: 'gap' });
+      await knowledgeAPI.acceptSuggestion(item.id, {}).catch(() => {});
+      const id = res?.data?.article?.id;
+      if (id) navigate(`/knowledge/articles/${id}`); else onDone('Drafted');
+    } catch (err) {
+      setError(err?.message || 'The draft could not be written');
+      setBusy(false);
+    }
+  };
   const editable = item.canDecide && item.articleId && ['review', 'edit', 'add_section', 'flag'].includes(item.kind);
 
   return (
@@ -132,14 +149,27 @@ function Detail({ id, onDone }) {
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
         {item.canDecide ? (
           <>
+            {canDraft && (
+              <button type="button" disabled={busy} onClick={draftFromGap} className="tp-focus-ring h-9 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50" data-testid="inbox-draft">
+                {busy ? 'Drafting…' : 'Draft from these tickets'}
+              </button>
+            )}
+            {bareMerge && item.article && (
+              <button type="button" disabled={busy} onClick={() => navigate(`/knowledge/articles/${item.article.id}`)} className="tp-focus-ring h-9 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+                Open the kept article in the editor
+              </button>
+            )}
             <button
               type="button"
               disabled={busy || (item.kind === 'question' && answer.trim().length < 2)}
-              onClick={() => run(() => knowledgeAPI.acceptSuggestion(item.id, item.kind === 'question' ? { answer: answer.trim() } : {}), k.done)}
-              className="tp-focus-ring h-9 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              onClick={() => run(() => knowledgeAPI.acceptSuggestion(item.id, item.kind === 'question' ? { answer: answer.trim() } : bareMerge ? { keepAsIs: true } : {}), k.done)}
+              className={canDraft || bareMerge
+                ? 'tp-focus-ring h-9 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50'
+                : 'tp-focus-ring h-9 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50'}
+              title={bareMerge ? 'The kept article already says everything the other one does' : undefined}
               data-testid="inbox-accept"
             >
-              {k.accept}
+              {bareMerge ? 'Archive the other one' : k.accept}
             </button>
             {editable && (
               <button type="button" disabled={busy} onClick={() => navigate(`/knowledge/articles/${item.articleId}`)} className="tp-focus-ring h-9 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted">

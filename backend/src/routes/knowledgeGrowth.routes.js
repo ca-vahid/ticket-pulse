@@ -28,6 +28,9 @@ export function _resetDraftRateLimit() { draftHits.clear(); }
 
 export default function knowledgeGrowthRoutes({
   requireKnowledgeManager, requireKnowledgeReviewer = requireKnowledgeManager, sessionUser, actorOf,
+  // Rights by skill: drafting an article from tickets is for anyone who may
+  // write knowledge somewhere (the draft is theirs to check before publishing).
+  requireKnowledgeWriter = requireKnowledgeManager,
 }) {
   const router = express.Router();
   const wantsRefresh = (req) => req.query.refresh === '1' || req.query.refresh === 'true';
@@ -66,7 +69,7 @@ export default function knowledgeGrowthRoutes({
   // ---------- drafts from solved tickets ----------
 
   /** A gap cluster or hand-picked tickets (ids or refs like TP-1234 / #241406) -> a draft article. */
-  router.post('/drafts', requireKnowledgeManager, draftRateLimit, asyncHandler(async (req, res) => {
+  router.post('/drafts', requireKnowledgeWriter, draftRateLimit, asyncHandler(async (req, res) => {
     const body = req.body || {};
     const ids = Array.isArray(body.ticketIds) ? body.ticketIds.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
     const refs = Array.isArray(body.ticketRefs) ? body.ticketRefs.map((r) => String(r || '').trim()).filter(Boolean) : [];
@@ -85,7 +88,7 @@ export default function knowledgeGrowthRoutes({
   }));
 
   /** "Turn into an article" on a ticket with a verified solution (reopens its draft when one exists). */
-  router.post('/drafts/from-ticket/:ticketId', requireKnowledgeManager, draftRateLimit, asyncHandler(async (req, res) => {
+  router.post('/drafts/from-ticket/:ticketId', requireKnowledgeWriter, draftRateLimit, asyncHandler(async (req, res) => {
     const result = await articleDraftService.draftFromTicket(req.workspaceId, req.params.ticketId, actorOf(req));
     res.status(result.reused ? 200 : 201).json({ success: true, data: result });
   }));

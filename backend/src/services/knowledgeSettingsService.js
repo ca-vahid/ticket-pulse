@@ -41,6 +41,7 @@ function view(row, workspaceId) {
       askDailyCap: Number.isInteger(row.askDailyCap) ? row.askDailyCap : 1,
       inboxWeeklyCap: Number.isInteger(row.inboxWeeklyCap) ? row.inboxWeeklyCap : 5,
       stewardEnabled: row.stewardEnabled === true,
+      stewardState: row.stewardState && typeof row.stewardState === 'object' ? row.stewardState : null,
       updatedBy: row.updatedBy ?? null,
       updatedAt: row.updatedAt ?? null,
     } : {}),

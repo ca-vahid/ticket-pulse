@@ -191,6 +191,15 @@ describe('suggestions', () => {
     expect(answered.decisionNote).toBe('Yes, still CAD only.');
   });
 
+  test('a merge with no merged text archives nothing unless the person says the kept article already covers it', async () => {
+    prismaMock.knowledgeSuggestion.findFirst.mockResolvedValue(OPEN({ kind: 'merge', otherArticleId: 8, proposed: null }));
+    await expect(suggestions.accept(1, 5, EXPERT)).rejects.toThrow(/Move what is still needed into the kept article first/);
+    expect(articleMock.remove).not.toHaveBeenCalled();
+    await suggestions.accept(1, 5, EXPERT, { keepAsIs: true });
+    expect(articleMock.update).not.toHaveBeenCalled();
+    expect(articleMock.remove).toHaveBeenCalledWith(1, 8, expect.anything());
+  });
+
   test('no skill, no accept; an item already dealt with cannot be decided twice; the person it was sent to can dismiss or put it off', async () => {
     prismaMock.knowledgeSuggestion.findFirst.mockResolvedValue(OPEN({ categoryId: 20, subcategoryId: null }));
     await expect(suggestions.accept(1, 5, MID)).rejects.toMatchObject({ code: 'knowledge_suggestion_rights' });

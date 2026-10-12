@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.43-preview';
+export const APP_VERSION = '4.2.44-preview';
 
 export const changelog = [
+  {
+    version: '4.2.44-preview',
+    date: 'October 11, 2026',
+    entries: [
+      { type: 'added', html: '<strong>A nightly review of the Library (off until switched on)</strong> &mdash; Knowledge &rarr; Settings &rarr; &ldquo;Who writes knowledge&rdquo; has a new switch. Each night the review looks for articles that say the same thing, articles nobody has used in 180 days, articles past their review date that are still used in answers, articles that break the house rules (no numbered steps, a price, a server address), questions that keep coming with nothing written, and places where agents now tell people something the article does not. Everything it finds goes to the Inbox of people with the skill, with the tickets behind it. It never changes an article by itself. &ldquo;Review now&rdquo; runs it on the spot.' },
+      { type: 'added', html: '<strong>Where writing something down would help most</strong> &mdash; the Gaps tab now opens with a table by category for the last 30 days: tickets, how many needed a person, how many were answered, how many had nothing to be answered from, how many articles there are and how many people could write there. The biggest gap is at the top, with one sentence on what stands out.' },
+      { type: 'improved', html: '<strong>Gaps you can act on from the Inbox</strong> &mdash; a &ldquo;Not written down&rdquo; item has a &ldquo;Draft from these tickets&rdquo; button that writes a draft from how those tickets were answered and opens it. Two articles that say the same thing show side by side: open the one to keep in the editor, or archive the other when the kept one already covers it. Nothing is archived on a guess.' },
+      { type: 'improved', html: '<strong>Drafting from tickets is by skill</strong> &mdash; anyone who may write knowledge in a category can draft an article from solved tickets, not only workspace admins.' },
+      { type: 'added', html: '<strong>&ldquo;Sure&rdquo; has to stay sure</strong> &mdash; for each category the Answering page now says how often answers rated Sure were judged right (for example &ldquo;sure answers were right 9 of 11 times&rdquo;). If that falls under 80 % once at least ten have been judged, sure answers in that category are treated one level down until the numbers recover, and the row says so.' },
+      { type: 'improved', html: '<strong>Settings say which switches still apply</strong> &mdash; in a workspace that answers from Knowledge first, Settings notes that the approve-mode and after-hours switches are replaced by the per-category levels in Answering.' },
+    ],
+  },
   {
     version: '4.2.43-preview',
     date: 'October 11, 2026',

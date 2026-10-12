@@ -289,6 +289,11 @@ class KnowledgeSuggestionService {
       }, actor, opts);
     } else if (row.kind === 'merge') {
       if (!row.articleId || !row.otherArticleId) throw new ValidationError('A merge needs two articles');
+      // Nothing is archived on a guess: without a merged text the person
+      // must say the kept article already covers everything.
+      if (!proposed.bodyHtml && edits?.keepAsIs !== true) {
+        throw new ValidationError('Move what is still needed into the kept article first (open it in the editor), then archive the other one');
+      }
       if (proposed.bodyHtml) await knowledgeArticleService.update(workspaceId, row.articleId, { bodyHtml: proposed.bodyHtml, ...(proposed.title ? { title: proposed.title } : {}) }, actor, opts);
       await knowledgeArticleService.remove(workspaceId, row.otherArticleId, actor);
     } else if (row.kind === 'retire') {
