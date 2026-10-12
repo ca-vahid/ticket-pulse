@@ -223,6 +223,26 @@ class AssignmentPipelineService {
       }
     }
 
+    // ── Ticket grouping (automatic triggers only, 11 Oct 2026) ───────────
+    // The same alert again while its ticket is still open, or a person's
+    // second ticket about the same request: closed into the first one before
+    // any AI run is queued (plans/TICKET_GROUPING_PLAN.md). Off unless the
+    // workspace turned it on; every action has an undo under Tickets, Grouped.
+    if (!isManual && !reboundFrom && !isPriorityAssessmentOnly) {
+      try {
+        const { default: ticketGroupingService } = await import('./ticketGrouping/groupingService.js');
+        const grouping = await ticketGroupingService.evaluateTicket(ticketId, workspaceId, { triggerSource });
+        if (grouping?.handled && grouping.skipAi) {
+          const run = grouping.already ? null : await ticketGroupingService.recordRun(ticketId, workspaceId, triggerSource, grouping);
+          if (run) this._broadcastRunUpdate(workspaceId, ticketId, run.id, 'completed');
+          emit({ type: 'complete', runId: run?.id || null });
+          return { skipped: true, reason: 'ticket_grouped', grouping: grouping.kind, groupedIntoTicketId: grouping.targetId || null, runId: run?.id || null };
+        }
+      } catch (err) {
+        logger.warn('Ticket grouping failed (non-fatal, continuing with run)', { ticketId, workspaceId, error: err.message });
+      }
+    }
+
     // ── Duplicate-burst guard (automatic triggers only) ─────────────────
     // Same requester + same normalized subject within a 15-minute window ⇒
     // link as duplicate of the first copy and skip the LLM entirely (one

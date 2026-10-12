@@ -278,6 +278,7 @@ function App() {
                           </TicketsRoute>
                         }
                       />
+                      <Route path="/tickets/grouped" element={<Navigate to="/tickets?view=grouped" replace />} />
                       <Route
                         path="/tickets/:id"
                         element={

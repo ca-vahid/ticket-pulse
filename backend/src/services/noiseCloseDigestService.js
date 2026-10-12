@@ -104,8 +104,12 @@ class NoiseCloseDigestService {
       const name = r.recommendation?.noiseRuleMatched || 'Unnamed rule';
       ruleCounts[name] = (ruleCounts[name] || 0) + 1;
     }
+    // Ticket grouping (11 Oct 2026): what was grouped on its own and what waits for a person.
+    const grouping = await Promise.resolve()
+      .then(async () => (await import('./ticketGrouping/groupingService.js')).default.digest(workspaceId, { since, until }))
+      .catch(() => null);
     return {
-      since, until,
+      since, until, grouping,
       aiClosed: aiClosed.map((r) => ({
         runId: r.id,
         ref: ticketRef(r.ticket),
@@ -155,7 +159,52 @@ class NoiseCloseDigestService {
 ${digest.aiClosed.length ? table(`<tr>${th('Ticket')}${th('Subject and why it was closed')}${th('')}</tr>`, rows) : ''}${more}
 ${digest.held.length ? `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a;margin:12px 0 6px;"><strong>Held for a person instead of closed (${digest.held.length})</strong></p>${table(`<tr>${th('Ticket')}${th('Why it was held')}</tr>`, heldRows)}` : ''}
 ${ruleLine}
+${this.renderGrouping(digest.grouping, { baseUrl })}
 </td></tr></table></td></tr></table></body></html>`;
+  }
+
+  /** The "Grouped tickets" part of the mail: repeats closed into open tickets, tickets combined, suggestions waiting. */
+  renderGrouping(grouping, { baseUrl }) {
+    if (!grouping) return '';
+    const font = 'font-family:Segoe UI,Arial,sans-serif;';
+    const cell = `padding:8px 10px;border-bottom:1px solid #e2e8f0;${font}font-size:13px;color:#0f172a;vertical-align:top;`;
+    const muted = 'color:#64748b;';
+    const page = `${baseUrl}/tickets/grouped`;
+    const p = (html) => `<p style="${font}font-size:13px;color:#334155;margin:6px 0;">${html}</p>`;
+    const table = (body) => `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin:8px 0 14px;">${body}</table>`;
+    const pairRow = (e) => `
+      <tr>
+        <td style="${cell}white-space:nowrap;font-weight:600;">${esc(e.ticket.ref)}</td>
+        <td style="${cell}">${esc(e.ticket.subject)}<br><span style="${muted}">${e.kind === 'related' ? 'related to' : 'into'} ${esc(e.target.ref)}: ${esc(e.target.subject)}</span>${e.reason ? `<br><span style="${muted}">${esc(e.reason)}</span>` : ''}${e.retraction ? '<br><span style="color:#b45309;">The requester says it is no longer needed.</span>' : ''}</td>
+      </tr>`;
+    const parts = [`<p style="${font}font-size:14px;color:#0f172a;margin:18px 0 6px;"><strong>Grouped tickets</strong></p>`];
+    if (grouping.repeatTotal) {
+      const list = grouping.repeats.slice(0, 12).map((r) => `${esc(r.ref)} (${r.count})`).join(', ');
+      parts.push(p(`${grouping.repeatTotal} repeat alert${grouping.repeatTotal === 1 ? ' was' : 's were'} closed into ${grouping.repeats.length} open ticket${grouping.repeats.length === 1 ? '' : 's'}: ${list}${grouping.repeats.length > 12 ? ', and more' : ''}. The open tickets were not touched.`));
+    }
+    if (grouping.combined.length) {
+      parts.push(p(`<strong>Combined on its own (${grouping.combined.length})</strong>`));
+      parts.push(table(grouping.combined.slice(0, MAX_LISTED).map(pairRow).join('')));
+    }
+    if (grouping.waiting.length) {
+      parts.push(p(`<strong>Waiting for you (${grouping.waiting.length})</strong>`));
+      parts.push(table(grouping.waiting.slice(0, MAX_LISTED).map(pairRow).join('')));
+    }
+    parts.push(p(`<a href="${esc(page)}" style="color:#1d4ed8;">Review, undo or change what is grouped</a>`));
+    return parts.join('\n');
+  }
+
+  /** Workspaces with ticket grouping on that the noise query did not return. Never throws. */
+  async _groupingOnlyWorkspaces(already) {
+    try {
+      const { default: ticketGroupingService } = await import('./ticketGrouping/groupingService.js');
+      const rows = await prisma.workspace.findMany({ where: { isActive: true, id: { notIn: [...SANDBOX_WORKSPACES, ...already] } }, select: { id: true, name: true, isActive: true } });
+      const out = [];
+      for (const w of rows) if (await ticketGroupingService.isOn(w.id)) out.push({ workspaceId: w.id, workspace: { name: w.name, isActive: true } });
+      return out;
+    } catch {
+      return [];
+    }
   }
 
   /** The 08:00 weekday job. Never throws. */
@@ -168,14 +217,15 @@ ${ruleLine}
         select: { workspaceId: true, workspace: { select: { name: true, isActive: true } } },
       });
       const baseUrl = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
-      for (const cfg of configs) {
+      const all = [...configs, ...(await this._groupingOnlyWorkspaces(configs.map((c) => c.workspaceId)))];
+      for (const cfg of all) {
         const workspaceId = cfg.workspaceId;
         if (cfg.workspace && cfg.workspace.isActive === false) continue;
         if (!(await this.enabled(workspaceId))) continue;
         try {
           const win = await this.window(workspaceId, now);
           const digest = await this.buildDigest(workspaceId, win);
-          if (!digest.aiClosed.length && !digest.held.length) {
+          if (!digest.aiClosed.length && !digest.held.length && !digest.grouping) {
             if (!dryRun) await settingsRepository.set(digestLastSentKey(workspaceId), now.toISOString());
             out.push({ workspaceId, skipped: 'nothing_to_report' });
             continue;
@@ -184,7 +234,9 @@ ${ruleLine}
           if (!to.length) { out.push({ workspaceId, skipped: 'no_recipients' }); continue; }
           const workspaceName = cfg.workspace?.name || `Workspace ${workspaceId}`;
           const html = this.renderHtml(digest, { workspaceName, baseUrl });
-          const subject = `Ticket Pulse: ${digest.aiClosed.length} closed as noise${digest.held.length ? `, ${digest.held.length} held` : ''} - ${workspaceName}`;
+          const grouped = digest.grouping ? digest.grouping.repeatTotal + digest.grouping.combined.length : 0;
+          const groupingBit = digest.grouping ? `, ${grouped} grouped${digest.grouping.waiting.length ? `, ${digest.grouping.waiting.length} to review` : ''}` : '';
+          const subject = `Ticket Pulse: ${digest.aiClosed.length} closed as noise${digest.held.length ? `, ${digest.held.length} held` : ''}${groupingBit} - ${workspaceName}`;
           if (dryRun) { out.push({ workspaceId, dryRun: true, to, subject, html, digest }); continue; }
           const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
           const result = await sendTransactionalEmail({ workspaceId, to, subject, html, label: 'noise-close-digest' });

@@ -10,6 +10,7 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import TicketPreview from '../components/tickets/TicketPreview';
 import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
+import GroupedTicketsPanel from '../components/tickets/GroupedTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import TicketSearchBox from '../components/tickets/TicketSearchBox';
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
@@ -326,6 +327,8 @@ export default function Tickets() {
   const impactFilter = searchParams.get('impact') || '';
   const urgencyFilter = searchParams.get('urgency') || '';
   const view = searchParams.get('view') || '';
+  // Scheduled and Grouped are panels of their own: the queue and its banners stand aside.
+  const panelView = view === 'scheduled' || view === 'grouped';
   const aiState = searchParams.get('aiState') || '';
   const approval = searchParams.get('approval') || '';
   const approvalCategory = searchParams.get('approvalCategory') || '';
@@ -1891,7 +1894,7 @@ export default function Tickets() {
                     )}
                   </div>
                   {/* Right end: AI-approval worklist connector + pagination */}
-                  {view !== 'scheduled' && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
+                  {!panelView && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
                     <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
                       {(stats?.awaitingApproval || 0) > 0 && (
                         <button
@@ -1922,7 +1925,7 @@ export default function Tickets() {
 
                 {/* Results — the peek is a fixed overlay drawer, so nothing here reflows */}
                 <div className="relative">
-                  {(pendingCount > 0 || refreshState !== 'idle') && view !== 'scheduled' && (
+                  {(pendingCount > 0 || refreshState !== 'idle') && !panelView && (
                     <LiveUpdatePill count={pendingCount} state={refreshState} onApply={applyPendingUpdates} />
                   )}
 
@@ -1930,12 +1933,14 @@ export default function Tickets() {
                       more of them. Only while a text search is running — on the
                       plain default view this would permanently report the
                       16,000 closed tickets we deliberately do not show. */}
-                  {!isLoading && urlSearch && tickets.length > 0 && view !== 'scheduled' && (
+                  {!isLoading && urlSearch && tickets.length > 0 && !panelView && (
                     <FilterReliefNotice relief={relief} variant="inline" onWiden={widenFilters} />
                   )}
 
                   {view === 'scheduled' ? (
                     <ScheduledTicketsPanel ticketingOn={ticketingOn} />
+                  ) : view === 'grouped' ? (
+                    <GroupedTicketsPanel />
                   ) : isLoading ? (
                     <div className="tp-card rounded-xl p-16 flex items-center justify-center">
                       <Activity className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-300" aria-label="Loading tickets" />

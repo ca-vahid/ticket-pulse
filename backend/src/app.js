@@ -478,6 +478,18 @@ async function initialize() {
       }
     }
 
+    // Ticket grouping: the 5-minute catch-up behind the arrival check - repeats
+    // of an open alert and second tickets about one request
+    // (plans/TICKET_GROUPING_PLAN.md). Kill switch TICKET_GROUPING_SWEEP_ENABLED=false.
+    if (config.sync.enableScheduledSync && process.env.TICKET_GROUPING_SWEEP_ENABLED !== 'false') {
+      try {
+        const { default: ticketGroupingService } = await import('./services/ticketGrouping/groupingService.js');
+        ticketGroupingService.start();
+      } catch (e) {
+        logger.warn('Ticket grouping sweep failed to start (non-fatal):', e.message);
+      }
+    }
+
     // Auto-help settle jobs: their own tick and running guard, never inside
     // the park sweep (a drain runs model calls — audit S1, 26 Sep 2026).
     try {

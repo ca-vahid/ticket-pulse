@@ -424,6 +424,11 @@ class AlertCorrelationService {
   async _storm(compiled, ticket, fired, ctx) {
     const { rule } = compiled;
     const { result, dryRun, session } = ctx;
+    // Where ticket grouping is on it owns repeats: one open ticket per failing
+    // thing, no time window (11 Oct 2026: an hourly backup failure kept
+    // falling out of the storm window and made 11 parents for one incident).
+    // The Fired/Resolved pairs above stay with this engine.
+    if (await this._groupingOwnsRepeats(ticket.workspaceId)) return false;
     const family = fired.family || `rule:${rule.id}`;
     const windowStart = new Date(new Date(ticket.createdAt).getTime() - rule.stormWindowMinutes * 60000);
     // A storm is about arrival volume, so siblings count whatever their status;
@@ -476,6 +481,15 @@ class AlertCorrelationService {
     result.storm = { rootId: root.id, rootRef, childId: ticket.id, count: siblings.length + 1 };
     await this._bump(rule, dryRun, result);
     return true;
+  }
+
+  async _groupingOwnsRepeats(workspaceId) {
+    try {
+      const { default: ticketGroupingService } = await import('./ticketGrouping/groupingService.js');
+      return await ticketGroupingService.isOn(workspaceId);
+    } catch {
+      return false;
+    }
   }
 
   // ------------------------------------------------------------- lookups
