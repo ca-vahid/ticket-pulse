@@ -16,6 +16,7 @@ import knowledgeGrowthRoutes from './knowledgeGrowth.routes.js';
 import knowledgeAnswerPolicy from '../services/knowledgeAnswerPolicy.js';
 import knowledgeRights from '../services/knowledgeRights.js';
 import knowledgeSignals from '../services/knowledgeSignals.js';
+import knowledgeSuggestionService from '../services/knowledgeSuggestionService.js';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): articles, playbooks,
@@ -164,6 +165,9 @@ router.get('/settings', asyncHandler(async (req, res) => {
       canApprove,
       // Rights by skill: where this person may write or check articles.
       rights: await knowledgeRights.summary(sessionUser(req), req.workspaceId),
+      // How many inbox items wait for this person (the number on the Inbox tab).
+      inboxCount: await knowledgeSuggestionService.list(req.workspaceId, sessionUser(req), { scope: 'mine', limit: 1 })
+        .then((r) => r?.counts?.mine || 0).catch(() => 0),
       // P1: approve needs the workspace switch; auto is locked by the build.
       modes: AUTO_HELP_MODES,
       modeLocked: !settings.approveModeEnabled,
@@ -363,6 +367,22 @@ router.post('/articles/:id/flag', asyncHandler(async (req, res) => {
   const note = String(req.body?.note || '').trim();
   if (note.length < 3) throw new ValidationError('Say in a few words what is wrong or unclear');
   const result = await knowledgeSignals.flag(req.workspaceId, article.id, { note, ticketId: Number(req.body?.ticketId) || null, actor: actorOf(req) });
+  // The flag reaches people with the skill through the inbox (one open item per article).
+  await knowledgeSuggestionService.create(req.workspaceId, {
+    kind: 'flag',
+    title: `Something is wrong in: ${article.title}`,
+    why: note,
+    articleId: article.id,
+    categoryId: article.categoryId,
+    subcategoryId: article.subcategoryId,
+    evidence: { note, by: actorOf(req).email, ticketId: Number(req.body?.ticketId) || null, needsLook: result.demoted === true },
+    impact: Number(article.timesQuoted) || 0,
+    source: 'agent_flag',
+    createdBy: actorOf(req).email,
+    excludeAssignees: [actorOf(req).email],
+    dedupeKey: `flag:article:${article.id}`,
+    reopen: true,
+  }).catch((err) => logger.warn(`Knowledge flag on article ${article.id}: inbox item not made (${err.message})`));
   logger.info(`Knowledge article ${article.id} flagged by ${actorOf(req).email || 'unknown'}${result.demoted ? ' (now needs a look)' : ''}`);
   res.status(201).json({ success: true, data: result });
 }));
@@ -596,6 +616,121 @@ router.get('/tickets/:ticketId/knowledge', asyncHandler(async (req, res) => {
 
 router.get('/waiting', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await autoHelpRunner.waiting(req.workspaceId) });
+}));
+
+// ---------- the inbox (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 10) ----------
+
+router.get('/inbox', asyncHandler(async (req, res) => {
+  const { scope, status, kind, articleId, limit, offset } = req.query;
+  res.json({ success: true, data: await knowledgeSuggestionService.list(req.workspaceId, sessionUser(req), { scope, status, kind, articleId, limit, offset }) });
+}));
+
+router.get('/suggestions/:id', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeSuggestionService.get(req.workspaceId, req.params.id, sessionUser(req)) });
+}));
+
+/**
+ * Propose something (anyone with a skill in the category, basic included):
+ * a new article or a change, for someone with the skill to accept.
+ */
+router.post('/suggestions', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  if (!['new_article', 'edit', 'add_section'].includes(body.kind)) throw new ValidationError('You can propose a new article, a change or a section');
+  let target = { categoryId: body.categoryId ?? null, subcategoryId: body.subcategoryId ?? null };
+  if (body.articleId) {
+    const article = await knowledgeArticleService.get(req.workspaceId, body.articleId);
+    target = targetOf(article);
+  }
+  const my = await rightsIn(req, target);
+  if (!my.propose) throw new AuthorizationError('Proposing knowledge needs a skill in that category', 'knowledge_propose_required');
+  const me = actorOf(req).email;
+  const { suggestion } = await knowledgeSuggestionService.create(req.workspaceId, {
+    kind: body.kind,
+    title: body.title,
+    why: body.why || null,
+    articleId: body.articleId || null,
+    categoryId: target.categoryId,
+    subcategoryId: target.subcategoryId,
+    proposed: body.proposed && typeof body.proposed === 'object' ? {
+      ...(body.proposed.title ? { title: String(body.proposed.title).slice(0, 300) } : {}),
+      ...(body.proposed.bodyHtml ? { bodyHtml: String(body.proposed.bodyHtml).slice(0, 100000) } : {}),
+      ...(body.proposed.sectionHtml ? { sectionHtml: String(body.proposed.sectionHtml).slice(0, 50000) } : {}),
+      ...(target.categoryId ? { categoryId: target.categoryId, subcategoryId: target.subcategoryId } : {}),
+    } : null,
+    evidence: body.ticketId ? { ticketIds: [Number(body.ticketId)] } : null,
+    source: 'person',
+    createdBy: me,
+    excludeAssignees: [me],
+  });
+  res.status(201).json({ success: true, data: suggestion });
+}));
+
+router.post('/suggestions/:id/accept', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeSuggestionService.accept(req.workspaceId, req.params.id, sessionUser(req), req.body || {}) });
+}));
+
+router.post('/suggestions/:id/dismiss', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeSuggestionService.dismiss(req.workspaceId, req.params.id, sessionUser(req), { note: req.body?.note }) });
+}));
+
+router.post('/suggestions/:id/snooze', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeSuggestionService.snooze(req.workspaceId, req.params.id, sessionUser(req), { days: req.body?.days }) });
+}));
+
+// ---------- contribution in the flow of work (section 8) ----------
+
+// Loaded on first use: the capture service pulls in the drafter, which tests of other routes mock with a short export list.
+const captureService = async () => (await import('../services/knowledgeCaptureService.js')).default;
+
+/** Should the person closing this ticket be asked to save their answer? (Records the ask when yes.) */
+router.get('/tickets/:ticketId/capture', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await captureService()).shouldAsk(req.workspaceId, req.params.ticketId, sessionUser(req)) });
+}));
+
+/** "Save my answer as knowledge" (decision yes) or "Not now". */
+router.post('/tickets/:ticketId/capture', testRateLimit, asyncHandler(async (req, res) => {
+  const decision = req.body?.decision === 'not_now' ? 'not_now' : 'yes';
+  res.status(decision === 'yes' ? 201 : 200).json({ success: true, data: await (await captureService()).capture(req.workspaceId, req.params.ticketId, sessionUser(req), { decision }) });
+}));
+
+/** Rough notes -> a house-style article proposal. Nothing is saved. */
+router.post('/tidy', testRateLimit, asyncHandler(async (req, res) => {
+  const profile = await knowledgeRights.summary(sessionUser(req), req.workspaceId);
+  if (!profile.canPropose) throw new AuthorizationError('Writing knowledge needs a skill in some category', 'knowledge_propose_required');
+  res.json({ success: true, data: await (await captureService()).tidy(req.workspaceId, { text: req.body?.text, title: req.body?.title }) });
+}));
+
+/** Knowledge → Home: what waits for me, and how my categories are doing. */
+router.get('/home', asyncHandler(async (req, res) => {
+  const user = sessionUser(req);
+  const [inbox, rights, library, dial] = await Promise.all([
+    knowledgeSuggestionService.list(req.workspaceId, user, { scope: 'categories', limit: 6 }),
+    knowledgeRights.summary(user, req.workspaceId),
+    knowledgeArticleService.library(req.workspaceId, { email: user?.email || null }),
+    knowledgeAnswerPolicy.list(req.workspaceId).catch(() => ({ categories: [] })),
+  ]);
+  const dialById = new Map((dial.categories || []).map((c) => [c.id, c]));
+  // My categories: the top categories I have a skill in (directly or through a subcategory).
+  const mine = (library.categories || []).filter((c) => rights.isAdmin || rights.categories[c.id] || (c.subcategories || []).some((s) => rights.categories[s.id]));
+  res.json({
+    success: true,
+    data: {
+      rights: { isAdmin: rights.isAdmin, canPropose: rights.canPropose, canWriteSomewhere: rights.canWriteSomewhere, canCheckSomewhere: rights.canCheckSomewhere, technician: rights.technician },
+      inbox: { counts: inbox.counts, items: inbox.items },
+      totals: library.totals,
+      mine: library.mine,
+      categories: mine.map((c) => {
+        const d = dialById.get(c.id);
+        return {
+          id: c.id, name: c.name, articles: c.articles, drafts: c.drafts, attention: c.attention, notChecked: c.notChecked,
+          // An admin's reach is not a skill: no level is shown for it.
+          level: rights.isAdmin ? 0 : (rights.categories[c.id]?.level || Math.max(0, ...(c.subcategories || []).map((s) => rights.categories[s.id]?.level || 0))),
+          runs30: d?.runs30 || { total: 0, answered: 0 },
+          dayLevel: d?.resolved?.dayLevel || 'draft',
+        };
+      }),
+    },
+  });
 }));
 
 // Knowledge that grows (P1): gaps, drafts from tickets, FreshService import,

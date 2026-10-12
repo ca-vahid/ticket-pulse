@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { BookOpen, ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, NotebookPen, Plus, Search, X } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
 import { timeAgo } from '../tickets/ticketUi';
@@ -242,6 +242,9 @@ export default function LibraryPanel({ canWrite = false }) {
     <div data-testid="library-panel">
       {canWrite && (
         <TabActions>
+          <button type="button" onClick={() => navigate(newHref.replace('/articles/new', '/articles/from-notes'))} className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted">
+            <NotebookPen className="h-4 w-4" aria-hidden="true" /> From rough notes
+          </button>
           <button type="button" onClick={() => navigate(newHref)} className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90">
             <Plus className="h-4 w-4" aria-hidden="true" /> New article
           </button>

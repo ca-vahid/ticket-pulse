@@ -1,6 +1,20 @@
-export const APP_VERSION = '4.2.42-preview';
+export const APP_VERSION = '4.2.43-preview';
 
 export const changelog = [
+  {
+    version: '4.2.43-preview',
+    date: 'October 11, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Knowledge &rarr; Inbox</strong> &mdash; everything in Knowledge that needs a person is now in one place and in one shape: what it is, why it was raised, the tickets behind it and the proposed change, with the same few buttons: accept, open in the editor, &ldquo;Not now&rdquo; (back in a week) or dismiss. A proposed change is shown next to today&rsquo;s text. Items are sorted by how many tickets they would touch, sent to at most two people who have the skill for the category, and close by themselves after four weeks. J and K move through the list, A accepts, D dismisses.' },
+      { type: 'added', html: '<strong>Knowledge &rarr; Home</strong> &mdash; Knowledge now opens on Home: what is waiting for you, and the categories you have a skill in with how many articles each has, how many are not checked yet or need attention, and how many tickets were answered there in 30 days. A person sees their own items and categories; there is no ranking of people.' },
+      { type: 'added', html: '<strong>Add from rough notes</strong> &mdash; paste what you know the way you would tell a colleague and press Tidy. It is rewritten into a short article (a title, numbered steps, when it does not apply) using only what your notes say, shown next to the notes, with a list of what is still missing. Names, phone numbers and addresses are removed. Nothing is saved until you continue: people who may write in that category get a draft in the editor; people who may only propose send it to someone with the skill.' },
+      { type: 'added', html: '<strong>Save your answer when you close a ticket (off until switched on)</strong> &mdash; Knowledge &rarr; Settings &rarr; &ldquo;Who writes knowledge&rdquo; has a switch that asks the agent who resolves a ticket to save their answer as knowledge. It asks only when it is worth it: nothing in the Library covers the ticket, the same kind of request came in at least three times in 90 days, the agent wrote a real answer and has the skill for the category. Once a day per person at most, never twice for one ticket, and &ldquo;Not now&rdquo; is remembered for a month. &ldquo;Save it&rdquo; is one click: a draft is written from the replies and waits in the inbox for a quick check.' },
+      { type: 'added', html: '<strong>Using an answer checks its articles</strong> &mdash; when an agent sends a suggested answer as it is, or judges a draft Good, that counts for every article the answer quoted. An article marked &ldquo;Not checked yet&rdquo; becomes Checked once two different people have done so and nobody has flagged it since its text last changed.' },
+      { type: 'improved', html: '<strong>&ldquo;Something is wrong&rdquo; reaches someone</strong> &mdash; flagging an article now puts one item in the inbox of people with the skill for its category (never the person who flagged it), with the sentence that was written.' },
+      { type: 'added', html: '<strong>Who writes knowledge is a setting</strong> &mdash; Knowledge &rarr; Settings: the skill level that can write and fix articles (Intermediate and up by default) and the level that can confirm an article as Checked (Advanced and up by default).' },
+      { type: 'improved', html: '<strong>Fewer tabs for agents</strong> &mdash; people who do not run Auto-help see Home, Library, Inbox and Gaps. Answering, Activity and Settings show for admins and reviewers. The Inbox tab shows how many items wait for you.' },
+    ],
+  },
   {
     version: '4.2.42-preview',
     date: 'October 11, 2026',

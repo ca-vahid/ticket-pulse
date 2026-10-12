@@ -27,6 +27,9 @@ export const BAD_KINDS = Object.freeze(['wrong', 'flagged']);
 /** Bad signals, from different tickets or people, that take an article out of automatic answers. */
 export const DEMOTE_AFTER = 2;
 export const SIGNAL_WINDOW_MS = 90 * 86400e3;
+/** Different people who used an article's answer as it was, after which it counts as checked ("reuse is review"). */
+export const CHECKED_BY_REUSE_AFTER = 2;
+export const REUSE_CHECKER = 'reuse';
 const MAX_NOTE = 1000;
 
 /** The article ids an Auto-help run's answer cited ({ sources: [{ type, id, cited }] }). Pure. */
@@ -79,6 +82,7 @@ class KnowledgeSignalsService {
     for (const articleId of ids) {
       await this.record(workspaceId, { kind: verdict, articleId, categoryId: run.categoryId ?? null, ticketId: run.ticketId, runId: run.id, actor: actor?.email || actor?.name || null });
       if (verdict === 'wrong' && await this.demoteIfDoubtful(workspaceId, articleId)) demoted.push(articleId);
+      if (verdict === 'good') await this.promoteIfReused(workspaceId, articleId);
     }
     return demoted;
   }
@@ -115,6 +119,38 @@ class KnowledgeSignalsService {
       return done;
     } catch (err) {
       logger.warn(`Knowledge article ${id}: doubt check failed (${err.message})`);
+      return false;
+    }
+  }
+
+  /**
+   * Reuse is review: a "Not checked yet" article whose answers two different
+   * people judged good since its text last changed becomes Checked, without
+   * anyone having to open it. A doubtful article ("needs a look") never is:
+   * that takes a person with the skill. Returns true when it was promoted now.
+   */
+  async promoteIfReused(workspaceId, articleId) {
+    const ws = Number(workspaceId);
+    const id = Number(articleId);
+    try {
+      const article = await prisma.knowledgeArticle.findFirst({ where: { id, workspaceId: ws }, select: { id: true, status: true, confidence: true, updatedAt: true } });
+      if (!article || article.status !== 'published' || article.confidence !== 'not_checked') return false;
+      const signals = await prisma.knowledgeSignal.findMany({
+        where: { workspaceId: ws, articleId: id, kind: { in: ['good', 'wrong', 'flagged'] }, createdAt: { gte: article.updatedAt } },
+        select: { id: true, kind: true, ticketId: true, actor: true },
+        take: 200,
+      });
+      if (distinctBad(signals) > 0) return false;
+      const people = new Set(signals.filter((x) => x.kind === 'good' && x.actor).map((x) => String(x.actor).toLowerCase()));
+      if (people.size < CHECKED_BY_REUSE_AFTER) return false;
+      const res = await prisma.knowledgeArticle.updateMany({
+        where: { id, workspaceId: ws, status: 'published', confidence: 'not_checked' },
+        data: { confidence: 'checked', checkedBy: REUSE_CHECKER, checkedAt: new Date(), lastVerifiedAt: new Date() },
+      });
+      if (res?.count) logger.info(`Knowledge article ${id} (ws ${ws}) is Checked by reuse: ${people.size} people judged its answers good`);
+      return (res?.count || 0) > 0;
+    } catch (err) {
+      logger.warn(`Knowledge article ${id}: reuse check failed (${err.message})`);
       return false;
     }
   }

@@ -18,10 +18,15 @@ export const DEFAULT_KNOWLEDGE_SETTINGS = Object.freeze({
   reviewDigestSentAt: null,
 });
 
+/** The skill levels a workspace can require for writing and for checking. */
+export const CONTRIBUTION_LEVELS = Object.freeze(['basic', 'intermediate', 'advanced', 'expert']);
+const CONTRIBUTION_DEFAULTS = Object.freeze({ publishLevel: 'intermediate', checkLevel: 'advanced', askAtClose: false, askDailyCap: 1, inboxWeeklyCap: 5, stewardEnabled: false });
+
 function view(row, workspaceId) {
   return {
     workspaceId: Number(workspaceId),
     ...DEFAULT_KNOWLEDGE_SETTINGS,
+    ...CONTRIBUTION_DEFAULTS,
     ...(row ? {
       fsImportEnabled: row.fsImportEnabled === true,
       fsFolderIds: Array.isArray(row.fsFolderIds) ? row.fsFolderIds.map(String) : [],
@@ -29,6 +34,13 @@ function view(row, workspaceId) {
       fsImportedAt: row.fsImportedAt ?? null,
       reviewDigestEnabled: row.reviewDigestEnabled === true,
       reviewDigestSentAt: row.reviewDigestSentAt ?? null,
+      // Contribution by skill and the nightly review (plans/KNOWLEDGE_SIMPLIFY_PLAN.md sections 7-10).
+      publishLevel: CONTRIBUTION_LEVELS.includes(row.publishLevel) ? row.publishLevel : 'intermediate',
+      checkLevel: CONTRIBUTION_LEVELS.includes(row.checkLevel) ? row.checkLevel : 'advanced',
+      askAtClose: row.askAtClose === true,
+      askDailyCap: Number.isInteger(row.askDailyCap) ? row.askDailyCap : 1,
+      inboxWeeklyCap: Number.isInteger(row.inboxWeeklyCap) ? row.inboxWeeklyCap : 5,
+      stewardEnabled: row.stewardEnabled === true,
       updatedBy: row.updatedBy ?? null,
       updatedAt: row.updatedAt ?? null,
     } : {}),
@@ -60,8 +72,27 @@ class KnowledgeSettingsService {
     if (input.fsImportEnabled !== undefined) data.fsImportEnabled = input.fsImportEnabled === true;
     if (input.fsFolderIds !== undefined) data.fsFolderIds = cleanFolderIds(input.fsFolderIds);
     if (input.reviewDigestEnabled !== undefined) data.reviewDigestEnabled = input.reviewDigestEnabled === true;
+    for (const field of ['publishLevel', 'checkLevel']) {
+      if (input[field] === undefined) continue;
+      if (!CONTRIBUTION_LEVELS.includes(input[field])) throw new ValidationError(`${field} must be one of: ${CONTRIBUTION_LEVELS.join(', ')}`);
+      data[field] = input[field];
+    }
+    if (input.askAtClose !== undefined) data.askAtClose = input.askAtClose === true;
+    if (input.stewardEnabled !== undefined) data.stewardEnabled = input.stewardEnabled === true;
+    for (const [field, min, max] of [['askDailyCap', 1, 5], ['inboxWeeklyCap', 1, 20]]) {
+      if (input[field] === undefined) continue;
+      const n = Number(input[field]);
+      if (!Number.isInteger(n) || n < min || n > max) throw new ValidationError(`${field} must be a whole number from ${min} to ${max}`);
+      data[field] = n;
+    }
     if (!Object.keys(data).length) throw new ValidationError('Nothing to change');
     const current = await this.get(workspaceId);
+    // Checking can never need less skill than writing.
+    const publish = data.publishLevel ?? current.publishLevel;
+    const check = data.checkLevel ?? current.checkLevel;
+    if (CONTRIBUTION_LEVELS.indexOf(check) < CONTRIBUTION_LEVELS.indexOf(publish)) {
+      throw new ValidationError('The level that can check articles cannot be lower than the level that can write them');
+    }
     if ((data.fsImportEnabled ?? current.fsImportEnabled) && !(data.fsFolderIds ?? current.fsFolderIds).length) {
       throw new ValidationError('Pick at least one FreshService folder before switching the import on');
     }
