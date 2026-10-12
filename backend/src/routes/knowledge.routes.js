@@ -505,8 +505,8 @@ router.post('/playbooks/:id/test', requireKnowledgeManager, testRateLimit, async
 // ---------- runs / waiting ----------
 
 router.get('/runs', asyncHandler(async (req, res) => {
-  const { status, playbookId, ticketId, from, to, limit, offset } = req.query;
-  res.json({ success: true, data: await autoHelpRunner.listRuns(req.workspaceId, { status, playbookId, ticketId, from, to, limit, offset }) });
+  const { status, playbookId, ticketId, from, to, limit, offset, q, categoryId, band, review, trigger, result } = req.query;
+  res.json({ success: true, data: await autoHelpRunner.listRuns(req.workspaceId, { status, playbookId, ticketId, from, to, limit, offset, q, categoryId, band, review, trigger, result }) });
 }));
 
 /** Per-playbook shadow summary with N (R6). Registered before /runs/:id. */

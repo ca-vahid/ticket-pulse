@@ -45,7 +45,9 @@ export function cleanSummaryRecipients(raw) {
 
 // Auto-help e-mail signature (30 Sep 2026): the same spacing choices as a
 // person's own signature (userSignatureService), applied when appended.
-export const SIGNATURE_SPACINGS = Object.freeze(['tight', 'normal', 'relaxed']);
+// 'exact' (12 Oct 2026): the signature goes out exactly as pasted, margins included
+// (a designed table signature with its own spacing).
+export const SIGNATURE_SPACINGS = Object.freeze(['tight', 'normal', 'relaxed', 'exact']);
 export const SIGNATURE_WITH = Object.freeze(['replace', 'both']);
 const SIGNATURE_MARGIN = Object.freeze({ tight: '0', normal: '0 0 4px', relaxed: '0 0 10px' });
 
@@ -69,6 +71,7 @@ export function autoHelpSignature(settings) {
   const raw = String(settings.signatureHtml || '').trim();
   const text = String(settings.signatureText || '').trim() || htmlToPlain(raw);
   if (!raw && !text) return null;
+  if (settings.signatureSpacing === 'exact') return { html: raw, text };
   const margin = SIGNATURE_MARGIN[settings.signatureSpacing] ?? SIGNATURE_MARGIN.tight;
   const html = raw.replace(/<p\b([^>]*)>/gi, (match, attrs) => {
     const styleMatch = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);

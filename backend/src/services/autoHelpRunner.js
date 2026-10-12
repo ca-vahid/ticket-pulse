@@ -115,6 +115,10 @@ export const SOLUTION_QUOTA = 2;
 export const REQUESTER_DAILY_CAP = 2;
 /** Triggers that probe a playbook on chosen tickets: always shadow, skips become warnings. */
 export const PROBE_TRIGGERS = Object.freeze(['test', 'backtest']);
+/** A live answer nobody has judged yet (the Activity page's "To review"). */
+const NEEDS_REVIEW = Object.freeze({
+  status: { in: ['drafted', 'staged', 'sent'] }, reviewVerdict: null, trigger: { notIn: ['test', 'backtest'] },
+});
 export const STALE_RUN_MS = 10 * 60 * 1000;
 const STALE_SWEEP_EVERY_MS = 15 * 60 * 1000;
 const SOLUTION_POOL = 60;
@@ -2283,18 +2287,27 @@ class AutoHelpRunner {
   async _decorate(workspaceId, rows) {
     const ticketIds = [...new Set(rows.map((r) => r.ticketId))];
     const playbookIds = [...new Set(rows.map((r) => r.playbookId).filter(Boolean))];
-    const [tickets, playbooks] = await Promise.all([
+    const categoryIds = [...new Set(rows.flatMap((r) => [r.categoryId, r.subcategoryId]).filter(Boolean))];
+    const [tickets, playbooks, categories] = await Promise.all([
       ticketIds.length ? Promise.resolve().then(() => prisma.ticket.findMany({
         where: { workspaceId: Number(workspaceId), id: { in: ticketIds } },
-        select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, status: true },
+        select: {
+          id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, status: true,
+          requester: { select: { name: true } },
+        },
       })).catch(() => []) : [],
       playbookIds.length ? Promise.resolve().then(() => prisma.autoHelpPlaybook.findMany({
         where: { workspaceId: Number(workspaceId), id: { in: playbookIds } },
         select: { id: true, name: true, minConfidence: true },
       })).catch(() => []) : [],
+      categoryIds.length ? Promise.resolve().then(() => prisma.competencyCategory.findMany({
+        where: { id: { in: categoryIds } },
+        select: { id: true, name: true },
+      })).catch(() => []) : [],
     ]);
     const tById = new Map((tickets || []).map((t) => [t.id, t]));
     const pById = new Map((playbooks || []).map((p) => [p.id, p]));
+    const cById = new Map((categories || []).map((c) => [c.id, c.name]));
     return rows.map((r) => {
       const t = tById.get(r.ticketId);
       const p = pById.get(r.playbookId);
@@ -2303,6 +2316,9 @@ class AutoHelpRunner {
         ticketRef: t ? ticketDisplayRef(t) : `#${r.ticketId}`,
         ticketSubject: t?.subject || null,
         ticketStatus: t?.status || null,
+        requesterName: t?.requester?.name || null,
+        categoryName: cById.get(r.categoryId) || null,
+        subcategoryName: cById.get(r.subcategoryId) || null,
         playbookName: p?.name || null,
         minConfidence: p?.minConfidence ?? null,
       });
@@ -2322,12 +2338,51 @@ class AutoHelpRunner {
     return { name: tech?.name || null, email: e, photoUrl: tech?.photoUrl || null };
   }
 
-  async listRuns(workspaceId, { status = null, playbookId = null, ticketId = null, from = null, to = null, limit = 50, offset = 0 } = {}) {
+  /**
+   * Ticket ids a search box entry points at (12 Oct 2026): a number is a
+   * ticket number (FreshService or TP-<n>), anything else is looked for in
+   * the subject. Capped, so a broad word cannot build a huge IN list.
+   */
+  async _ticketIdsForSearch(workspaceId, q) {
+    const text = String(q || '').trim().slice(0, 120);
+    if (!text) return null;
+    const digits = /^(?:#|tp-)?\s*(\d{1,12})$/i.exec(text);
+    const or = [{ subject: { contains: text, mode: 'insensitive' } }];
+    if (digits) {
+      or.push({ nativeNumber: Number(digits[1]) });
+      or.push({ freshserviceTicketId: BigInt(digits[1]) });
+    }
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticket.findMany({
+        where: { workspaceId: Number(workspaceId), OR: or },
+        select: { id: true }, orderBy: { id: 'desc' }, take: 400,
+      }))
+      .catch(() => []);
+    return (rows || []).map((r) => r.id);
+  }
+
+  async listRuns(workspaceId, {
+    status = null, playbookId = null, ticketId = null, from = null, to = null, limit = 50, offset = 0,
+    q = null, categoryId = null, band = null, review = null, trigger = null, result = null,
+  } = {}) {
     this._maybeSweep();
     const where = { workspaceId: Number(workspaceId) };
     if (status && RUN_STATUSES.includes(status)) where.status = status;
     if (Number(playbookId)) where.playbookId = Number(playbookId);
     if (Number(ticketId)) where.ticketId = Number(ticketId);
+    // Filters added 12 Oct 2026 (Activity page): search, category, how sure,
+    // judged or not, live or test.
+    const and = [];
+    if (Number(categoryId)) and.push({ OR: [{ categoryId: Number(categoryId) }, { subcategoryId: Number(categoryId) }] });
+    if (['high', 'medium', 'low'].includes(band)) where.confidenceBand = band;
+    if (trigger === 'live') where.trigger = { notIn: [...PROBE_TRIGGERS] };
+    else if (trigger === 'test') where.trigger = { in: [...PROBE_TRIGGERS] };
+    if (review === 'done') where.reviewVerdict = { not: null };
+    else if (review === 'needs') and.push(NEEDS_REVIEW);
+    if (result === 'needs_person') where.gateDecision = 'needs_person';
+    const found = await this._ticketIdsForSearch(workspaceId, q);
+    if (found) where.ticketId = Number(ticketId) ? Number(ticketId) : { in: found };
+    if (and.length) where.AND = and;
     const created = {};
     const fromDate = from ? new Date(from) : null;
     const toDate = to ? new Date(to) : null;
@@ -2340,9 +2395,13 @@ class AutoHelpRunner {
     // filter itself), for the Activity page's outcome line (29 Sep 2026).
     const countWhere = { ...where };
     delete countWhere.status;
-    const [rows, total, byStatus] = await Promise.all([
+    // What still waits for a verdict under the same time / rule filters.
+    const needsWhere = { workspaceId: where.workspaceId, AND: [NEEDS_REVIEW] };
+    if (where.playbookId) needsWhere.playbookId = where.playbookId;
+    if (where.createdAt) needsWhere.createdAt = where.createdAt;
+    const [rows, total, byStatus, needsReview] = await Promise.all([
       Promise.resolve().then(() => prisma.autoHelpRun.findMany({
-        where, orderBy: { createdAt: 'desc' }, take, skip,
+        where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take, skip,
         select: {
           id: true, ticketId: true, playbookId: true, playbookVersion: true, mode: true, trigger: true, status: true,
           confidence: true, draftSubject: true, gateDecision: true, outcome: true, outcomeAt: true, error: true, checks: true,
@@ -2354,9 +2413,10 @@ class AutoHelpRunner {
       })).catch((err) => { logger.warn(`Auto-help run list failed (ws ${workspaceId}): ${err.message}`); return []; }),
       Promise.resolve().then(() => prisma.autoHelpRun.count({ where })).catch(() => 0),
       Promise.resolve().then(() => prisma.autoHelpRun.groupBy({ by: ['status'], where: countWhere, _count: { _all: true } })).catch(() => []),
+      Promise.resolve().then(() => prisma.autoHelpRun.count({ where: needsWhere })).catch(() => 0),
     ]);
     const statusCounts = Object.fromEntries((byStatus || []).map((g) => [g.status, g._count?._all || 0]));
-    return { items: await this._decorate(workspaceId, rows), total, statusCounts };
+    return { items: await this._decorate(workspaceId, rows), total, statusCounts, needsReview, limit: take, offset: skip };
   }
 
   async getRun(workspaceId, id) {
@@ -2365,14 +2425,41 @@ class AutoHelpRunner {
       .then(() => prisma.autoHelpRun.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) } }))
       .catch(() => null);
     if (!row) throw new NotFoundError('Run not found');
-    const [[view], createdByPerson, reviewedByPerson, decidedByPerson, teamOutcome] = await Promise.all([
+    const [[view], createdByPerson, reviewedByPerson, decidedByPerson, teamOutcome, request] = await Promise.all([
       this._decorate(workspaceId, [row]),
       row.createdBy ? this._person(workspaceId, row.createdBy) : null,
       row.reviewedBy ? this._person(workspaceId, row.reviewedBy) : null,
       row.decidedBy ? this._person(workspaceId, row.decidedBy) : null,
       this._teamOutcome(workspaceId, row),
+      this._request(workspaceId, row),
     ]);
-    return { ...view, createdByPerson, reviewedByPerson, decidedByPerson, teamOutcome };
+    return { ...view, createdByPerson, reviewedByPerson, decidedByPerson, teamOutcome, request };
+  }
+
+  /** What the requester asked, for the run page (12 Oct 2026). Never throws. */
+  async _request(workspaceId, run) {
+    const t = await Promise.resolve()
+      .then(() => prisma.ticket.findFirst({
+        where: { id: run.ticketId, workspaceId: Number(workspaceId) },
+        select: {
+          subject: true, description: true, descriptionText: true, createdAt: true, priority: true, category: true, subCategory: true,
+          requester: { select: { name: true, email: true, jobTitle: true, department: true } },
+          assignedTech: { select: { name: true } },
+        },
+      }))
+      .catch(() => null);
+    if (!t) return null;
+    const text = (t.descriptionText || (t.description ? htmlToText(t.description) : '') || '').split('\n').map((l) => l.trim()).filter(Boolean).join('\n').trim();
+    return safeJson({
+      subject: t.subject || null,
+      text: clip(text, 6000),
+      createdAt: t.createdAt || null,
+      priority: t.priority ?? null,
+      category: t.category || null,
+      subCategory: t.subCategory || null,
+      requester: t.requester ? { name: t.requester.name || null, email: t.requester.email || null, jobTitle: t.requester.jobTitle || null, department: t.requester.department || null } : null,
+      assigneeName: t.assignedTech?.name || null,
+    });
   }
 
   /**

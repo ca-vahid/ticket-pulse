@@ -374,8 +374,16 @@ const IMAGE_EXT = { jpeg: 'jpg', jpg: 'jpg', png: 'png', gif: 'gif', webp: 'webp
  */
 export function extractInlineImages(html) {
   if (typeof html !== 'string' || !/data:image\//i.test(html)) return { html, files: [] };
+  // The Auto-help signature block rides at the end of the body (buildPreview).
+  // Its logo is part of the signature, not a pasted picture: lifting it left
+  // "[Pasted image attached: …]" where the logo belongs (12 Oct 2026).
+  const mark = html.indexOf('data-tp-signature="auto-help"');
+  const cut = mark >= 0 ? html.lastIndexOf('<div', mark) : -1;
+  const head = cut >= 0 ? html.slice(0, cut) : html;
+  const tail = cut >= 0 ? html.slice(cut) : '';
+  if (!/data:image\//i.test(head)) return { html, files: [] };
   const files = [];
-  const out = html.replace(
+  const out = head.replace(
     /<img\b[^>]*?\bsrc\s*=\s*(["'])\s*data:(image\/([a-z0-9.+-]+));base64,([A-Za-z0-9+/=\s]+?)\1[^>]*>/gi,
     (match, _q, mime, sub, b64) => {
       if (files.length >= MAX_INLINE_IMAGES) return '';
@@ -387,7 +395,7 @@ export function extractInlineImages(html) {
       return `<p><em>[Pasted image attached: ${name}]</em></p>`;
     },
   );
-  return { html: out, files };
+  return { html: `${out}${tail}`, files };
 }
 
 function logOversizeBody(html, context = {}) {

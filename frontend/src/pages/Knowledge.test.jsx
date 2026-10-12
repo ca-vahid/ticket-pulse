@@ -410,7 +410,7 @@ describe('Knowledge page', () => {
   test('run detail shows who ran it as avatar + name, never the bare e-mail, and the draft in the white e-mail well', async () => {
     renderAt('/knowledge/activity/5');
     const detail = await screen.findByTestId('run-detail');
-    expect(within(detail).getAllByTestId('person-line')[0]).toHaveTextContent('Vahid Pelarak');
+    expect(within(within(detail).getByTestId('run-facts')).getAllByTestId('person-line')[0]).toHaveTextContent('Vahid Pelarak');
     expect(detail).not.toHaveTextContent('vahid.pelarak@example.com');
     expect(within(detail).getByTestId('email-well')).toHaveClass('tp-light', 'bg-card');
   });

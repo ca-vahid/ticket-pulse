@@ -160,7 +160,7 @@ export default function Knowledge() {
                 {tab === 'answering' && <AnsweringPanel canManage={canManage} onSettingsChange={(next) => { if (next) setSettings((prev) => ({ ...(prev || {}), ...next })); }} />}
                 {tab === 'waiting' && <WaitingPanel />}
                 {tab === 'approvals' && <ApprovalsPanel />}
-                {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} />}
+                {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} categories={categories} />}
                 {tab === 'settings' && <KnowledgeSettingsPanel settings={settings} onChange={setSettings} />}
               </section>
             )}

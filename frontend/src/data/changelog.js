@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.48-preview';
+export const APP_VERSION = '4.2.49-preview';
 
 export const changelog = [
+  {
+    version: '4.2.49-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Knowledge &rarr; Activity shows every run, a page at a time</strong> &mdash; the list used to stop at the newest 50. It now has pages (25, 50 or 100 a page) with the count, and the page and every filter are kept in the address, so Back from a run, a refresh and a shared link land on the same list.' },
+      { type: 'added', html: '<strong>Find a run</strong> &mdash; search by ticket number or words in the subject, and filter by category, by how sure the answer was, by whether it has been reviewed, and by live tickets or tests. Each row now says who asked, the category, how sure the answer was and whether it still needs a review. &ldquo;N to review&rdquo; at the top jumps to the answers nobody has judged yet.' },
+      { type: 'improved', html: '<strong>A run opens on its own page</strong> &mdash; like a ticket, in place of the narrow side panel. It reads top to bottom: what was asked, what the requester would get, what the team actually replied; on a wide screen the answer and the team&rsquo;s reply can sit side by side. The right side holds your review, why the answer was rated the way it was, the facts about the run and the articles it used.' },
+      { type: 'added', html: '<strong>Review one after another</strong> &mdash; Previous and Next (or K and J) walk the list you came from, the page says where you are (&ldquo;12 of 425&rdquo;), and &ldquo;Save and next&rdquo; records your verdict and opens the next run. &ldquo;Copy link&rdquo; gives a link to the run.' },
+      { type: 'added', html: '<strong>A designed e-mail signature for Auto-help</strong> &mdash; Knowledge &rarr; Settings &rarr; E-mail signature has &ldquo;Edit the HTML&rdquo; for a signature built as a table with a logo, and a fourth spacing choice, &ldquo;As pasted&rdquo;, that leaves its own spacing alone. The preview shows it exactly as requesters get it.' },
+      { type: 'fixed', html: '<strong>A logo in the Auto-help signature stays in the signature</strong> &mdash; a picture embedded in the signature would have been taken out and attached as &ldquo;pasted-image-1.png&rdquo; when an answer was sent. Pictures pasted into the answer itself still become attachments.' },
+    ],
+  },
   {
     version: '4.2.48-preview',
     date: 'October 12, 2026',
