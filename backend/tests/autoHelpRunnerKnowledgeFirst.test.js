@@ -315,6 +315,23 @@ describe('knowledge-first: the dial', () => {
     expect(deliveryMock.stageRun).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'auto', policy: expect.objectContaining({ sendPermitted: true, afterHours: true }) }));
   });
 
+  test('calibration: where "sure" answers were not right often enough, a sure answer drops a level', async () => {
+    prismaMock.knowledgeCategoryPolicy.findMany.mockResolvedValue([policyRow(10, { dayLevel: 'suggest' })]);
+    // The policy service reads judged runs for the calibration table: 10 sure answers, 5 right.
+    prismaMock.autoHelpRun.findMany.mockImplementation(async ({ where }) => (where?.confidenceBand ? [
+      ...Array.from({ length: 5 }, () => ({ categoryId: 10, confidenceBand: 'high', reviewVerdict: 'good', decision: null })),
+      ...Array.from({ length: 5 }, () => ({ categoryId: 10, confidenceBand: 'high', reviewVerdict: 'wrong', decision: null })),
+    ] : []));
+    gatewayMock.runToolTurn.mockResolvedValueOnce(triage('yes')).mockResolvedValueOnce(answer());
+
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+
+    expect(run.status).toBe('drafted');
+    expect(updated()).toMatchObject({ confidenceBand: 'medium', mode: 'shadow' });
+    expect(updated().evidence.misses.map((m) => m.key)).toEqual(['sure_not_reliable']);
+    expect(deliveryMock.stageRun).not.toHaveBeenCalled();
+  });
+
   test('an always-checked category never gets a send permit, whatever its level and evidence', async () => {
     availabilityMock.isBusinessHours.mockResolvedValue({ isBusinessHours: false });
     prismaMock.knowledgeCategoryPolicy.findMany.mockResolvedValue([policyRow(10, { nightLevel: 'send', alwaysChecked: true })]);

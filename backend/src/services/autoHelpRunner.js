@@ -1355,6 +1355,17 @@ class AutoHelpRunner {
             .then(() => knowledgeAnswerPolicy.cachedCategoryReadiness(ws, ticket.internalCategoryId, { alwaysChecked: kf.policy.alwaysChecked }))
             .catch(() => ({ met: false })))?.met === true
           : false;
+        // Calibration: where "sure" answers stopped being right often enough,
+        // a sure answer is treated as fairly sure until the numbers recover.
+        if (outcome.band === 'high' && kf.ceiling !== 'draft') {
+          const reliable = await Promise.resolve()
+            .then(() => knowledgeAnswerPolicy.highIsReliable(ws, ticket.internalCategoryId))
+            .catch(() => true);
+          if (!reliable) {
+            outcome.band = 'medium';
+            outcome.evidence = { ...(outcome.evidence || {}), misses: [...(outcome.evidence?.misses || []), { key: 'sure_not_reliable', label: 'Sure answers in this category were not right often enough lately' }] };
+          }
+        }
         kfAction = decideAction({
           policy: kf.policy,
           afterHours: kf.afterHours,

@@ -17,6 +17,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jes
 const {
   default: service, resolvePolicy, confidenceBand, decideAction, applyBand, stepDown, normalizePolicyInput,
   LEVELS, DEFAULT_BAR, STRONG_MATCH_SCORE, SEND_LOCKED_MESSAGE, SEND_ALWAYS_CHECKED_MESSAGE,
+  judgedOf, highReliable, CALIBRATION_MIN_JUDGED,
 } = await import('../src/services/knowledgeAnswerPolicy.js');
 
 const row = (categoryId, over = {}) => ({ workspaceId: 1, categoryId, dayLevel: null, nightLevel: null, bar: null, alwaysChecked: null, notes: null, stayQuietWhen: [], ...over });
@@ -217,5 +218,42 @@ describe('service', () => {
     expect(software.readiness.met).toBe(false);
     expect(software.subcategories[0]).toMatchObject({ id: 101, own: { dayLevel: 'draft' }, resolved: { dayLevel: 'draft', nightLevel: 'off' } });
     expect(out.categories.find((c) => c.id === 20)).toMatchObject({ own: null, resolved: { dayLevel: 'draft', nightLevel: 'off' }, articles: 0 });
+  });
+});
+
+describe('calibration: does "sure" still mean sure?', () => {
+  test('what people said about a run: a review wins, otherwise what the agent did with the suggestion', () => {
+    expect(judgedOf({ reviewVerdict: 'good', decision: 'agent_dismissed' })).toBe('right');
+    expect(judgedOf({ reviewVerdict: 'partial' })).toBe('not_right');
+    expect(judgedOf({ decision: 'agent_sent' })).toBe('right');
+    expect(judgedOf({ decision: 'agent_edited_sent' })).toBe('not_right');
+    expect(judgedOf({ decision: 'auto_sent' })).toBeNull();
+    expect(judgedOf({})).toBeNull();
+  });
+
+  test('too few judged answers never pauses anything; enough of them under 80 % right does', () => {
+    expect(highReliable({ judged: CALIBRATION_MIN_JUDGED - 1, right: 0 })).toBe(true);
+    expect(highReliable({ judged: 10, right: 8 })).toBe(true);
+    expect(highReliable({ judged: 10, right: 7 })).toBe(false);
+    expect(highReliable(undefined)).toBe(true);
+  });
+
+  test('the table per category and band counts only judged, real runs; a failed read reads as reliable', async () => {
+    prismaMock.autoHelpRun.findMany.mockResolvedValue([
+      ...Array.from({ length: 6 }, () => ({ categoryId: 10, confidenceBand: 'high', reviewVerdict: 'good', decision: null })),
+      ...Array.from({ length: 5 }, () => ({ categoryId: 10, confidenceBand: 'high', reviewVerdict: 'wrong', decision: null })),
+      { categoryId: 10, confidenceBand: 'medium', reviewVerdict: null, decision: 'agent_sent' },
+      { categoryId: 10, confidenceBand: 'high', reviewVerdict: null, decision: 'auto_sent' },
+      { categoryId: 20, confidenceBand: 'weird', reviewVerdict: 'good', decision: null },
+    ]);
+    const table = await service.calibration(1);
+    expect(table[10]).toEqual({ high: { judged: 11, right: 6 }, medium: { judged: 1, right: 1 }, low: { judged: 0, right: 0 } });
+    expect(table[20]).toBeUndefined();
+    expect(prismaMock.autoHelpRun.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 1, trigger: 'categorized' });
+    expect(await service.highIsReliable(1, 10)).toBe(false);
+    expect(await service.highIsReliable(1, 20)).toBe(true);
+    service.clearCache();
+    prismaMock.autoHelpRun.findMany.mockRejectedValue(new Error('db down'));
+    expect(await service.highIsReliable(1, 10)).toBe(true);
   });
 });

@@ -123,6 +123,11 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
         </p>
       )}
 
+      {settings.knowledgeFirst === true && (
+        <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground" data-testid="knowledge-first-note">
+          This workspace answers from Knowledge first. What an answer may do (draft, suggest to an agent, send when sure) is set per category in Answering, by business hours and after hours, so the approve-mode and after-hours switches below are not used here.
+        </p>
+      )}
       <SettingsSection id="kh-settings-autohelp" title="Auto-help" hint="Drafts a first answer from Knowledge for new tickets that match a playbook.">
         <Row>
           <Switch

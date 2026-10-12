@@ -1,6 +1,6 @@
 # Knowledge, simplified: plan
 
-_Status (12 Oct 2026): approved by Vahid on 11 Oct with all recommendations. Phase 0 (replay) done; phase 1 shipped as 4.2.40 and is on for IT at Draft only; phase 2 shipped as 4.2.42; phase 3 shipped as 4.2.43 (ask-at-close is off until switched on). Phases 4 and 5 in progress._
+_Status (12 Oct 2026): approved by Vahid on 11 Oct with all recommendations. All phases are built and shipped: phase 0 (replay), phase 1 = 4.2.40 (on for IT, every category at Draft only), phase 2 = 4.2.42, phase 3 = 4.2.43, phases 4 and 5 = 4.2.44. Switched off until Vahid turns them on: the ask at close and the nightly review (Settings), and every level above Draft only (Answering). Not built: sections as their own table, TanStack Query / Virtual, a full-text index and pgvector; the JSON sections and the current search hold at today's size._
 _Sources: code review of main, a read-only look at IT's production data for the last 30 days, and vendor/standards research (links at the end)._
 
 ## 1. The short version

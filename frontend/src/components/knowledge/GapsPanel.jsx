@@ -4,6 +4,7 @@ import {
   Activity, ChevronRight, FileText, Lightbulb, ListPlus, RefreshCw, SearchX, Sparkles,
 } from 'lucide-react';
 import { knowledgeGrowthAPI } from '../../services/api';
+import CoverageTable from './CoverageTable';
 import FancySelect from '../common/FancySelect';
 import { timeAgo } from '../tickets/ticketUi';
 import { EmptyState, Loading } from './knowledgeUi';
@@ -198,6 +199,7 @@ export default function GapsPanel({ canManage = false, canRefresh = canManage })
   const groups = data?.playbooks || [];
   return (
     <div className="space-y-5" data-testid="gaps-panel">
+      <CoverageTable />
       {canManage && (
         <TabActions>
           <button

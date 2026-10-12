@@ -77,10 +77,17 @@ class KnowledgeGrowthWorker {
           done.fsImport = await fsSolutionImportService.runAll().catch((err) => ({ error: err.message }));
           state.fsImportAt = now.toISOString();
         }
+        // The nightly Knowledge review (workspaces with it switched on):
+        // suggestions for people, never an edit of a published article.
+        if (this._due(state.stewardAt, now)) {
+          const { default: knowledgeStewardService } = await import('./knowledgeStewardService.js');
+          done.steward = await knowledgeStewardService.runAll({ now }).catch((err) => ({ error: err.message }));
+          state.stewardAt = now.toISOString();
+        }
       }
       const { default: digest } = await import('./knowledgeReviewDigestService.js');
       done.digest = await digest.tick(now).catch((err) => ({ error: err.message }));
-      if (done.solutions || done.fsImport) await this._save(state);
+      if (done.solutions || done.fsImport || done.steward) await this._save(state);
       return done;
     } finally {
       this.running = false;

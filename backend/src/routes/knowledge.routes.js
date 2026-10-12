@@ -89,6 +89,15 @@ async function canReviewRun(req, runId) {
   return false;
 }
 
+/** Anyone who may write knowledge in some category (or manage Knowledge). */
+function requireKnowledgeWriter(req, _res, next) {
+  Promise.resolve()
+    .then(async () => (await canManageKnowledge(sessionUser(req), req.workspaceId))
+      || (await knowledgeRights.summary(sessionUser(req), req.workspaceId)).canWriteSomewhere === true)
+    .then((ok) => (ok ? next() : next(new AuthorizationError('Drafting an article needs the skill to write knowledge in some category', 'knowledge_write_required'))))
+    .catch(next);
+}
+
 function requireKnowledgeReviewer(req, _res, next) {
   knowledgeCapability(sessionUser(req), req.workspaceId, 'review')
     .then((ok) => (ok ? next() : next(new AuthorizationError('Only workspace admins and reviewers can review Auto-help drafts', 'knowledge_review_required'))))
@@ -216,6 +225,11 @@ router.get('/answering', asyncHandler(async (req, res) => {
     canManageKnowledge(sessionUser(req), req.workspaceId),
   ]);
   res.json({ success: true, data: { ...dial, knowledgeFirst: settings.knowledgeFirst === true, enabled: settings.enabled === true, afterHoursNow, canManage } });
+}));
+
+/** How often each confidence band was right, per category (the calibration table in Activity). */
+router.get('/calibration', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeAnswerPolicy.calibration(req.workspaceId) });
 }));
 
 router.put('/answering/:categoryId', requireKnowledgeManager, asyncHandler(async (req, res) => {
@@ -700,6 +714,74 @@ router.post('/tidy', testRateLimit, asyncHandler(async (req, res) => {
   res.json({ success: true, data: await (await captureService()).tidy(req.workspaceId, { text: req.body?.text, title: req.body?.title }) });
 }));
 
+// ---------- the nightly review and the coverage map (sections 9 and 11) ----------
+
+/** When the review last ran and what it raised. */
+router.get('/steward', asyncHandler(async (req, res) => {
+  const { default: knowledgeSettingsService } = await import('../services/knowledgeSettingsService.js');
+  const s = await knowledgeSettingsService.get(req.workspaceId);
+  res.json({ success: true, data: { enabled: s.stewardEnabled === true, last: s.stewardState || null } });
+}));
+
+/** "Review now": every check that needs no model call, on demand. */
+router.post('/steward/run', requireKnowledgeManager, testRateLimit, asyncHandler(async (req, res) => {
+  const { default: knowledgeStewardService } = await import('../services/knowledgeStewardService.js');
+  const state = await knowledgeStewardService.runForWorkspace(req.workspaceId, { withModel: false });
+  logger.info(`Knowledge review run by ${actorOf(req).email || 'unknown'} (ws ${req.workspaceId})`);
+  res.json({ success: true, data: state });
+}));
+
+/**
+ * The coverage map: per top category, the demand, what Auto-help did with
+ * it and what the Library holds. About topics, never about people (the
+ * people count is how many could write there, not who).
+ */
+router.get('/coverage', asyncHandler(async (req, res) => {
+  const ws = req.workspaceId;
+  const since = new Date(Date.now() - 30 * 86400e3);
+  const soft = (fn, fallback) => Promise.resolve().then(fn).catch(() => fallback);
+  const [library, runs, tickets, misses, open, skills] = await Promise.all([
+    knowledgeArticleService.library(ws, {}),
+    soft(() => prisma.autoHelpRun.groupBy({ by: ['categoryId', 'status', 'gateDecision'], where: { workspaceId: ws, trigger: 'categorized', createdAt: { gte: since } }, _count: true }), []),
+    soft(() => prisma.ticket.groupBy({ by: ['internalCategoryId'], where: { workspaceId: ws, isNoise: false, createdAt: { gte: since } }, _count: true }), []),
+    soft(() => prisma.knowledgeSignal.groupBy({ by: ['categoryId'], where: { workspaceId: ws, kind: 'search_miss', createdAt: { gte: since } }, _count: true }), []),
+    soft(() => prisma.knowledgeSuggestion.groupBy({ by: ['categoryId', 'kind'], where: { workspaceId: ws, status: 'open' }, _count: true }), []),
+    soft(() => prisma.technicianCompetency.findMany({
+      where: { workspaceId: ws, technician: { isActive: true }, proficiencyLevel: { in: ['intermediate', 'advanced', 'expert'] } },
+      select: { technicianId: true, competencyCategory: { select: { id: true, parentId: true } } },
+      take: 5000,
+    }), []),
+  ]);
+  const n = (v) => Number(v?._count) || 0;
+  const writers = new Map();
+  for (const sk of skills) {
+    const top = sk.competencyCategory?.parentId || sk.competencyCategory?.id;
+    if (!top) continue;
+    if (!writers.has(top)) writers.set(top, new Set());
+    writers.get(top).add(sk.technicianId);
+  }
+  const rows = (library.categories || []).map((c) => {
+    const mine = runs.filter((r) => r.categoryId === c.id);
+    const sum = (pred) => mine.filter(pred).reduce((t, r) => t + n(r), 0);
+    return {
+      id: c.id,
+      name: c.name,
+      tickets30: n(tickets.find((t) => t.internalCategoryId === c.id)),
+      answered: sum((r) => ['drafted', 'staged', 'sent'].includes(r.status)),
+      needsPerson: sum((r) => r.gateDecision === 'needs_person'),
+      notAnswered: sum((r) => r.status === 'not_answerable' && ['no_sources', 'insufficient_context', 'model_declined', 'no_grounded_source', 'uncited_step'].includes(r.gateDecision)),
+      articles: c.articles,
+      notChecked: c.notChecked,
+      attention: c.attention,
+      searchMisses: n(misses.find((m) => m.categoryId === c.id)),
+      openGaps: open.filter((o) => o.categoryId === c.id && o.kind === 'gap').reduce((t, o) => t + n(o), 0),
+      openItems: open.filter((o) => o.categoryId === c.id).reduce((t, o) => t + n(o), 0),
+      couldWrite: writers.get(c.id)?.size || 0,
+    };
+  });
+  res.json({ success: true, data: { days: 30, categories: rows } });
+}));
+
 /** Knowledge → Home: what waits for me, and how my categories are doing. */
 router.get('/home', asyncHandler(async (req, res) => {
   const user = sessionUser(req);
@@ -735,6 +817,6 @@ router.get('/home', asyncHandler(async (req, res) => {
 
 // Knowledge that grows (P1): gaps, drafts from tickets, FreshService import,
 // review digest, backtests — behind the same role gates as everything above.
-router.use(knowledgeGrowthRoutes({ requireKnowledgeManager, requireKnowledgeReviewer, sessionUser, actorOf }));
+router.use(knowledgeGrowthRoutes({ requireKnowledgeManager, requireKnowledgeReviewer, requireKnowledgeWriter, sessionUser, actorOf }));
 
 export default router;
