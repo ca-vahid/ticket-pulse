@@ -38,6 +38,7 @@ import handBacksRoutes from './handBacks.routes.js';
 import teamRoutingSettingsRoutes from './teamRoutingSettings.routes.js';
 import hrLifecycleRoutes from './hrLifecycle.routes.js';
 import urgentResponseRoutes from './urgentResponse.routes.js';
+import ticketGroupingRoutes from './ticketGrouping.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import usageRoutes from './usage.routes.js';
 import siteStatsRoutes from './siteStats.routes.js';
@@ -131,6 +132,7 @@ router.use('/sse', requireWorkspace, requireWorkspaceMemberOrAgent, sseRoutes);
 // as /sse — agents read the on-call schedule and answer the cover requests
 // sent to them. Rules, log, covers and settings are requireAdmin inside the router.
 router.use('/urgent-response', requireWorkspace, requireWorkspaceMemberOrAgent, urgentResponseRoutes);
+router.use('/ticket-grouping', requireWorkspace, ticketGroupingRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 

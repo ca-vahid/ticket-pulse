@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.40-preview';
+export const APP_VERSION = '4.2.41-preview';
 
 export const changelog = [
+  {
+    version: '4.2.41-preview',
+    date: 'October 11, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Grouping: one ticket per problem</strong> &mdash; when the same alert arrives again while its ticket is still open (a backup that fails every hour), the new copy is closed into the open ticket and counted there: &ldquo;seen 53 times&rdquo;. The first ticket is never touched and stays open until somebody resolves it. A different server is a different problem and keeps its own ticket. Switched on per workspace; on in IT.' },
+      { type: 'added', html: '<strong>Grouping: the same request twice</strong> &mdash; when a person&rsquo;s second ticket is the same request as one they already have open (a second channel such as a Teams message, or a follow-up sent as a new e-mail), Ticket Pulse combines it into the first before anybody is assigned, and tells the first ticket what the second one said, including &ldquo;the requester says this is no longer needed&rdquo;. It does this on its own only when it is sure, it is the same person and the first ticket is still open. Anything less is a suggestion for a person.' },
+      { type: 'added', html: '<strong>Tickets &rarr; Grouped</strong> &mdash; a new view in the Tickets rail for coordinators and admins: what waits for your decision (Combine, Link or Not related), every alert that repeated with its copies, what was combined on its own, each with <strong>Undo</strong>, and the senders Ticket Pulse has learned. An admin can turn grouping off, switch people&rsquo;s tickets to suggest-only, or correct what a sender is (&ldquo;Repeats itself&rdquo; or &ldquo;Every mail is its own item&rdquo;).' },
+      { type: 'added', html: '<strong>Grouping in the morning e-mail</strong> &mdash; the weekday &ldquo;closed as noise&rdquo; e-mail to admins now also says how many repeats were closed into which tickets, what was combined, and what waits for you, with a link to the Grouped view.' },
+      { type: 'improved', html: '<strong>Grouped copies do not inflate the numbers</strong> &mdash; a repeat or a combined copy is left out of the ticket totals, like noise, and takes the category of the ticket it joined. Undo puts it back as its own ticket and counts it again.' },
+      { type: 'changed', html: '<strong>Alert storms retired where grouping is on</strong> &mdash; the older rule that folded a burst of alerts under a parent (three alerts in two hours) kept missing slow, steady repeats: one weekend-long backup failure became 11 parent tickets. Where grouping is on it no longer runs. The &ldquo;Fired&rdquo; / &ldquo;Resolved&rdquo; pairing in Settings &rarr; Alert correlation is unchanged.' },
+    ],
+  },
   {
     version: '4.2.40-preview',
     date: 'October 11, 2026',

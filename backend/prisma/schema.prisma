@@ -4959,3 +4959,48 @@ model UsageStatsView {
   @@index([at])
   @@map("usage_stats_views")
 }
+
+/// Ticket grouping (plans/TICKET_GROUPING_PLAN.md): what kind of mail one sender + subject shape is.
+/// kind: repeating (the same thing again while the problem lasts) | distinct (every mail is its own item) | unsure.
+model TicketGroupingSender {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  sender        String    @db.VarChar(255)
+  template      String    @db.VarChar(300)
+  kind          String    @db.VarChar(20)
+  enabled       Boolean   @default(true)
+  decidedBy     String    @default("ai") @map("decided_by") @db.VarChar(255)
+  reason        String?   @db.Text
+  sampleSubject String?   @map("sample_subject") @db.Text
+  repeatCount   Int       @default(0) @map("repeat_count")
+  lastRepeatAt  DateTime? @map("last_repeat_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, sender, template], map: "uq_ticket_grouping_senders")
+  @@map("ticket_grouping_senders")
+}
+
+/// One row per ticket the grouping engine looked at.
+/// kind: repeat | duplicate | update | related | checked. state: applied | suggested | undone | dismissed | none.
+model TicketGroupingEvent {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  ticketId       Int       @map("ticket_id")
+  targetTicketId Int?      @map("target_ticket_id")
+  kind           String    @db.VarChar(20)
+  state          String    @db.VarChar(20)
+  confidence     String?   @db.VarChar(10)
+  retraction     Boolean   @default(false)
+  reason         String?   @db.Text
+  details        Json?
+  senderId       Int?      @map("sender_id")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(6)
+  decidedBy      String?   @map("decided_by") @db.VarChar(255)
+
+  @@index([workspaceId, createdAt], map: "idx_ticket_grouping_events_ws")
+  @@index([ticketId], map: "idx_ticket_grouping_events_ticket")
+  @@index([targetTicketId], map: "idx_ticket_grouping_events_target")
+  @@map("ticket_grouping_events")
+}

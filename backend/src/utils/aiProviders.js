@@ -17,6 +17,8 @@ export const AI_OPERATIONS = [
   'ticket_thread_summary',
   // Requester-sentiment classification (gap plan 2 P5.1) — cheap tier.
   'requester_sentiment',
+  // Ticket grouping (11 Oct 2026): "does this sender repeat itself?" and "is this the same request?" - cheap tier.
+  'ticket_grouping',
   // Analytics Reports narrative (feedback 07-14) — meeting-brief writing.
   'analytics_report',
   // Autofill intake extraction (Phase AF): multimodal — pasted text + screenshots
@@ -132,7 +134,7 @@ export const MODEL_METADATA = [
     label: 'Claude Haiku 4.5',
     // Explicit allow-list: the cheap tier never sees image-bearing ops
     // (ticket_intake_extract stays out on purpose).
-    operations: ['ticket_reclassification', 'calendar_leave', 'requester_sentiment'],
+    operations: ['ticket_reclassification', 'calendar_leave', 'requester_sentiment', 'ticket_grouping'],
     supportsStreaming: false,
     supportsTools: false,
     supportsJson: true,
@@ -268,7 +270,7 @@ export function anthropicRequestRules(model) {
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);
   if (normalizedProvider === AI_PROVIDER_OPENAI) return DEFAULT_OPENAI_MODEL;
-  if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment') {
+  if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment' || operation === 'ticket_grouping') {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }
   if (operation === 'daily_review_consolidation') {

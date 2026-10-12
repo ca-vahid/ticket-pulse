@@ -2112,6 +2112,16 @@ export const hrLifecycleAPI = {
  * cover requests are open to members; everything else is workspace-admin only.
  * Responses are { success, data }.
  */
+// Ticket grouping (plans/TICKET_GROUPING_PLAN.md): the Grouped view of Tickets.
+export const ticketGroupingAPI = {
+  get: (days = 14) => api.get('/ticket-grouping', { params: { days } }),
+  undo: (id) => api.post(`/ticket-grouping/events/${id}/undo`),
+  accept: (id) => api.post(`/ticket-grouping/events/${id}/accept`),
+  dismiss: (id) => api.post(`/ticket-grouping/events/${id}/dismiss`),
+  saveSettings: (body) => api.put('/ticket-grouping/settings', body),
+  updateSender: (id, body) => api.patch(`/ticket-grouping/senders/${id}`, body),
+};
+
 export const urgentResponseAPI = {
   getStatus: () => api.get('/urgent-response/status'),
   getSettings: () => api.get('/urgent-response/settings'),

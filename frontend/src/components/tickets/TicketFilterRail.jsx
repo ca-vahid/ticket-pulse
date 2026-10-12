@@ -6,7 +6,7 @@ import {
   endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subDays, subMonths, subWeeks,
 } from 'date-fns';
 import {
-  BadgeCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
+  BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
   GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
@@ -600,6 +600,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     { key: 'resolved', label: 'Recently resolved', params: { segment: 'resolved' } },
     { key: 'solutions', label: 'Verified solutions', params: { solution: 'verified', status: 'any' }, icon: BadgeCheck },
     { key: 'scheduled', label: 'Scheduled', params: { view: 'scheduled' }, icon: CalendarClock },
+    // Grouped (plans/TICKET_GROUPING_PLAN.md): repeats closed into an open ticket, tickets combined, suggestions to decide.
+    { key: 'grouped', label: 'Grouped', params: { view: 'grouped' }, icon: Layers },
     // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose, soonest wake first.
     { key: 'parked', label: 'Parked', params: { segment: 'parked', status: 'any', sort: 'parkedUntil', dir: 'asc' }, icon: PauseCircle },
     // Auto-help (plans/AUTO_HELP_PLAN.md): tickets an automatic answer is
@@ -1390,6 +1392,7 @@ export function ActiveFilterBar({ meta }) {
   if (origin) chips.push({ label: origin === 'ticketpulse' ? 'Born in Ticket Pulse' : 'From FreshService', onRemove: () => patch({ origin: null }) });
   if (get('noise') === 'only') chips.push({ label: 'Noise & spam', onRemove: () => patch({ noise: null }) });
   if (get('view') === 'scheduled') chips.push({ label: 'Scheduled view', onRemove: () => patch({ view: null }) });
+  if (get('view') === 'grouped') chips.push({ label: 'Grouped view', onRemove: () => patch({ view: null }) });
   if (get('aiState') === 'suggested') chips.push({ label: 'Awaiting AI approval', onRemove: () => patch({ aiState: null }) });
   const approvalMode = get('approval');
   if (approvalMode) chips.push({ label: (APPROVAL_FILTERS.find((f) => f.v === approvalMode) || {}).label || `Approval: ${approvalMode}`, onRemove: () => patch({ approval: null }) });
