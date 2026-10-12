@@ -373,7 +373,7 @@ describe('FS-born replies via the Ticket Pulse lane (per-workspace flag, default
     expect(call.to).toEqual(['rita@example.com']);
     expect(call.fromName).toBe('Soheil Nasiri');
     expect(call.subject).toBe('Re: Laptop will not boot [#239470]');
-    expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.stringContaining('e-mailed by Ticket Pulse'), expect.objectContaining({ isPrivate: false }));
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(239470, expect.stringContaining('e-mailed to the requester by Ticket Pulse'), expect.objectContaining({ isPrivate: false }));
     expect(fsClientMock.addNote.mock.calls[0][1]).toContain('We are on it!');
     expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mirrorState: 'mirrored', externalEntryId: 'fs-conversation:1042916726' }),

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.52-preview';
+export const APP_VERSION = '4.2.53-preview';
 
 export const changelog = [
+  {
+    version: '4.2.53-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Notes copied to FreshService say who wrote them</strong> &mdash; FreshService shows every note Ticket Pulse writes as posted by &ldquo;Ticket Pulse&rdquo;, and the first line of the note used to open with a bold &ldquo;[Ticket Pulse mirror]&rdquo;, which read as the author. The first line now leads with the person&rsquo;s name in bold, then what it is (&#128274; internal note, or &#9993;&#65039; a reply the requester has already been e-mailed), then the ticket, with a link to it in Ticket Pulse on internal notes. The &ldquo;[Ticket Pulse mirror]&rdquo; words are still there, small and grey at the end of the line, so FreshService rules that look for them keep working. The same change applies to notes and replies written from Ticket Pulse on FreshService tickets.' },
+    ],
+  },
   {
     version: '4.2.52-preview',
     date: 'October 12, 2026',

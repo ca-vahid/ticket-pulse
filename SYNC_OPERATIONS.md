@@ -877,7 +877,7 @@ Ticket Pulse outage.
   order per ticket** through the shared FS rate limiter at `low` priority.
 - `create_ticket` posts the snapshot on behalf of the requester email (FS
   auto-creates the contact; we backfill `Requester.freshserviceId`), stores the
-  FS id on the ticket, and drops a private `[Ticket Pulse mirror]` intro note.
+  FS id on the ticket, and drops a private `[Ticket Pulse mirror]` intro note. Since v4.2.53 the first line of every note Ticket Pulse writes on a FreshService ticket is built by `utils/fsNoteHeader.js`: the writer's name in bold, what it is, the ticket, and the marker words small at the END of the line (they must stay in the body: the reconcile skips our own notes by `includes('[Ticket Pulse mirror]')` and FreshService rules exclude on the same words).
 - Public replies mirror as **public notes** (portal-visible, no requester email
   — Ticket Pulse already emailed them). Internal notes mirror privately.
 - Retry with exponential backoff (5m → 6h cap); after 8 attempts a job goes
