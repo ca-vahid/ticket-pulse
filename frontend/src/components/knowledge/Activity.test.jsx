@@ -85,10 +85,18 @@ describe('the run list', () => {
     api.listRuns.mockResolvedValue(page([run()], 120));
     at('/knowledge/activity?page=2');
     await screen.findByTestId('runs-table');
+    // One Filters button holds the selects; nothing is open until it is asked for.
+    expect(screen.queryByTestId('filters-panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('filters-button'));
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: '74' } });
     fireEvent.change(screen.getByLabelText('How sure'), { target: { value: 'low' } });
     fireEvent.change(screen.getByLabelText('Live or test'), { target: { value: 'live' } });
     await waitFor(() => expect(api.listRuns).toHaveBeenLastCalledWith(expect.objectContaining({ categoryId: '74', band: 'low', trigger: 'live', offset: 0 })));
+    // The filters in use read as words, each with its own remove, and the button counts them.
+    expect(screen.getByTestId('filters-button')).toHaveTextContent('Filters3');
+    expect(screen.getByTestId('filters-in-use')).toHaveTextContent('Software & Apps');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the filter: Doubtful' }));
+    await waitFor(() => expect(screen.getByTestId('filters-button')).toHaveTextContent('Filters2'));
     fireEvent.change(screen.getByLabelText('Search runs by ticket number or subject'), { target: { value: '246501' } });
     await waitFor(() => expect(api.listRuns).toHaveBeenLastCalledWith(expect.objectContaining({ q: '246501' })));
     fireEvent.click(screen.getByTestId('clear-filters'));
