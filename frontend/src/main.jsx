@@ -6,9 +6,12 @@ import { msalConfig } from './config/msalConfig';
 import App from './App.jsx';
 import './index.css';
 import { installMotionPreference } from './utils/motionPreference';
+import { installPwa } from './utils/pwa';
 
 // Motion is decided by the app (On by default) before the first paint.
 installMotionPreference();
+// Installable app: service worker + the browser's install prompt.
+installPwa();
 
 const msalInstance = new PublicClientApplication(msalConfig);
 
