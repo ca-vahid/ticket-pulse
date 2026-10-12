@@ -136,7 +136,7 @@ describe('Knowledge page', () => {
   test('renders the six tabs with no page header; /knowledge lands on Articles; settings live on their own tab', async () => {
     renderAt('/knowledge');
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Gaps', 'Playbooks', 'Waiting', 'Activity', 'Settings']);
+    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Gaps', 'Playbooks', 'Answering', 'Waiting', 'Activity', 'Settings']);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('No articles yet')).toBeInTheDocument();
     // 26 Sep 2026 (Vahid): no "Knowledge — Answers we can stand behind…" header, no settings above the tabs.

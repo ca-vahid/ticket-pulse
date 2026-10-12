@@ -18,7 +18,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
-export const PROMPT_KEYS = Object.freeze(['answer', 'route', 'check']);
+export const PROMPT_KEYS = Object.freeze(['answer', 'route', 'check', 'triage']);
 export const MAX_GUIDANCE_CHARS = 4000;
 
 export const PROMPT_DEFAULTS = Object.freeze({
@@ -28,12 +28,20 @@ export const PROMPT_DEFAULTS = Object.freeze({
     'Choose a playbook only when the ticket is clearly the kind of request it is for. When none fits, choose 0 - a person picks the ticket up.',
   ].join('\n'),
   check: 'Be strict.',
+  // Knowledge-first (plans/KNOWLEDGE_SIMPLIFY_PLAN.md): can written
+  // instructions help this requester, or must a person do something?
+  triage: [
+    'Say "yes" when a written answer is a useful first reply: the requester can do it themselves (install or set something up, fix a common error on their own device), or one of the articles found explains how this kind of request works, even when a person on the team finishes it afterwards (for example how to get a paid licence, an AI tool, or access to a project).',
+    'Say "no" when only a person can move this forward and no article found is about it: alerts and reports sent by a system, work on a server, network, backup or account, equipment to order or hand over, a fault that needs investigating, a forwarded thread with no question, a thank-you.',
+    'Say "unclear" when you cannot tell, or the ticket has too little text to judge.',
+  ].join('\n'),
 });
 
 export const PROMPT_LABELS = Object.freeze({
   answer: { title: 'Answer writing', hint: 'Voice and style of the answer the requester gets.' },
   route: { title: 'Playbook choice', hint: 'How the AI decides which playbook (if any) answers a ticket.' },
   check: { title: 'Answer check', hint: 'How strict the check "does the knowledge really cover this?" is.' },
+  triage: { title: 'Can instructions help?', hint: 'How the AI decides whether a request can be answered with written instructions or needs a person (knowledge-first order).' },
 });
 
 const CACHE_MS = 60 * 1000;
@@ -77,7 +85,7 @@ class AutoHelpPromptService {
       .then(() => prisma.autoHelpPromptVersion.findMany({ where: { workspaceId: ws, status: 'published' } }))
       .catch((err) => { logger.warn(`Auto-help prompts: read failed (ws ${ws}), using defaults: ${err.message}`); return []; });
     const bodies = { ...PROMPT_DEFAULTS };
-    const versions = { answer: null, route: null, check: null };
+    const versions = Object.fromEntries(PROMPT_KEYS.map((k) => [k, null]));
     for (const r of rows || []) {
       if (!PROMPT_KEYS.includes(r.key) || !String(r.body || '').trim()) continue;
       bodies[r.key] = r.body;

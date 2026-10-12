@@ -16,6 +16,7 @@
  */
 import prisma from './prisma.js';
 import autoHelpPlaybookService from './autoHelpPlaybookService.js';
+import knowledgeAnswerPolicy from './knowledgeAnswerPolicy.js';
 import { SENT_DECISIONS, PRE_SEND_OUTCOMES } from './autoHelpOutcomes.js';
 
 export const AUTO_HELP_STATES = Object.freeze([
@@ -77,7 +78,25 @@ async function pendingJob(ticketId) {
  */
 export async function expectedFor(ticketId, workspaceId, { settings = null, at = new Date() } = {}) {
   const s = settings || await soft(() => autoHelpPlaybookService.getSettings(workspaceId));
-  if (!s?.enabled || !s.approveModeEnabled) return false;
+  if (!s?.enabled) return false;
+  // Knowledge-first: the ticket's category must be set to "Send when sure"
+  // for this time of day, not always checked, and have earned it.
+  if (s.knowledgeFirst === true) {
+    const ticket = await soft(() => prisma.ticket.findFirst({
+      where: { id: Number(ticketId), workspaceId: Number(workspaceId) },
+      select: { internalCategoryId: true, internalSubcategoryId: true },
+    }));
+    if (!ticket) return false;
+    const policy = await soft(() => knowledgeAnswerPolicy.resolveForTicket(workspaceId, ticket));
+    if (!policy || policy.alwaysChecked) return false;
+    const afterHours = await soft(() => autoHelpPlaybookService.isAfterHours(workspaceId, { at }), false);
+    if ((afterHours ? policy.nightLevel : policy.dayLevel) !== 'send') return false;
+    const ready = await soft(() => knowledgeAnswerPolicy.cachedCategoryReadiness(workspaceId, ticket.internalCategoryId));
+    if (ready?.met !== true) return false;
+    const kfRun = await latestRealRun(ticketId);
+    return !kfRun || stateOfRun(kfRun) === 'pending';
+  }
+  if (!s.approveModeEnabled) return false;
   const byBuild = autoHelpPlaybookService.autoModeAllowed() === true && Number(await soft(() => prisma.autoHelpPlaybook.count({
     where: { workspaceId: Number(workspaceId), enabled: true, mode: 'auto', sensitive: false },
   }), 0)) > 0;

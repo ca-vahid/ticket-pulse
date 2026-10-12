@@ -115,7 +115,9 @@ function PlaybookGaps({ group, canManage, busyKey, onDraft }) {
         <IconTile icon={Lightbulb} size="sm" tone="amber" />
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[15px] font-semibold text-foreground">
-            <Link to={`/knowledge/playbooks/${group.playbookId}`} className="tp-focus-ring rounded hover:underline">{group.playbookName}</Link>
+            {group.groupKind === 'category'
+              ? <span>{group.playbookName}</span>
+              : <Link to={`/knowledge/playbooks/${group.playbookId}`} className="tp-focus-ring rounded hover:underline">{group.playbookName}</Link>}
           </h3>
           <p className="text-xs text-muted-foreground">
             {`${group.tickets} ticket${group.tickets === 1 ? '' : 's'} · ${repeated.length} repeated question${repeated.length === 1 ? '' : 's'}${oneOffs.length ? ` · ${oneOffs.length} one-off` : ''}`}
@@ -209,7 +211,9 @@ export default function GapsPanel({ canManage = false, canRefresh = canManage })
       )}
       <div className="tp-card flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:p-4">
         <p className="min-w-0 flex-1 text-[13px] text-muted-foreground">
-          Questions Auto-help could not answer from Knowledge, and tickets in a playbook&rsquo;s area it did not pick up — grouped by what they ask.
+          {data?.groupedBy === 'category'
+            ? 'Questions Auto-help could not answer from Knowledge, by category and grouped by what they ask.'
+            : <>Questions Auto-help could not answer from Knowledge, and tickets in a playbook&rsquo;s area it did not pick up — grouped by what they ask.</>}
         </p>
         <div className="flex items-center gap-2">
           <div className="w-40"><FancySelect value={days} onChange={setDays} options={WINDOWS} aria-label="Time window" /></div>
@@ -239,7 +243,7 @@ export default function GapsPanel({ canManage = false, canRefresh = canManage })
         </div>
       ) : data && (
         <>
-          {groups.map((g) => <PlaybookGaps key={g.playbookId} group={g} canManage={canManage} busyKey={busyKey} onDraft={draft} />)}
+          {groups.map((g) => <PlaybookGaps key={g.groupKey || g.playbookId} group={g} canManage={canManage} busyKey={busyKey} onDraft={draft} />)}
           <p className="px-1 text-[11px] text-muted-foreground/75">
             {data.totals?.tickets || 0} tickets, grouped {data.mode === 'dense' ? 'by meaning' : 'by shared words'}
             {data.generatedAt ? ` · worked out ${timeAgo(data.generatedAt)}` : ''}.

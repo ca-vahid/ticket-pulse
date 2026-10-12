@@ -53,6 +53,8 @@ const RUN_STATUS = {
   no_match: { label: 'No match', Icon: CircleSlash, tone: 'text-muted-foreground' },
   // Knowledge v2 (MEGA 09-28): in scope, but the AI fit check said this playbook doesn't fit.
   not_this_playbook: { label: 'Not this playbook', Icon: CircleSlash, tone: 'text-muted-foreground' },
+  // Knowledge-first: the triage check said a person has to do something.
+  needs_person: { label: 'Needs a person', Icon: CircleSlash, tone: 'text-muted-foreground' },
   skipped: { label: 'Skipped', Icon: SkipForward, tone: 'text-muted-foreground' },
   staged: { label: 'Staged', Icon: FileCheck2, tone: 'text-primary' },
   sent: { label: 'Sent', Icon: Check, tone: 'text-emerald-700 dark:text-emerald-300' },

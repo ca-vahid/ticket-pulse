@@ -459,12 +459,14 @@ class AutoHelpDeliveryService {
    * fields that changed (status / gateDecision / proposedReplyId / …) or null
    * when it stays a recorded draft for a reason already on the run.
    */
-  async stageRun({ run, ticket, playbook, settings, mode, confidence, gateDecision, preview, body, autoSendEligible }) {
+  async stageRun({ run, ticket, playbook, settings, mode, confidence, gateDecision, preview, body, autoSendEligible, policy = null }) {
     if (!run?.id || !preview?.html) return null;
     const detail = withHistory(run.outcomeDetail, 'drafted', { mode });
     // Gates a staged answer must pass: grounded (not partial) and at the bar.
     if (!STAGEABLE_GATES.includes(gateDecision)) return null;
-    const bar = Number(playbook.minConfidence ?? 0.8);
+    // Knowledge-first: the category's dial carries the bar and the send permit
+    // (`policy` = { bar, sendPermitted, afterHours }); otherwise the playbook does.
+    const bar = Number(policy?.bar ?? playbook.minConfidence ?? 0.8);
     if (confidence === null || confidence === undefined || Number(confidence) < bar) {
       const data = { gateDecision: GATE.BELOW_CONFIDENCE, outcomeDetail: safeJson({ ...detail, stage: { skipped: 'below_confidence', previousGate: gateDecision, bar } }) };
       await prisma.autoHelpRun.update({ where: { id: run.id }, data });
@@ -476,8 +478,10 @@ class AutoHelpDeliveryService {
     // — allows it and the playbook is not sensitive (re-checked here, not
     // only upstream). Otherwise it is staged for a person, as in approve mode.
     if (mode === 'auto' && autoSendEligible && !AUTO_SEND_INELIGIBLE_GATES.includes(gateDecision)) {
-      const permit = await this._autoSendPermit(ticket.workspaceId, playbook, settings);
-      if (permit.ok) return this._autoSend({ run, ticket, playbook, settings, preview, body, detail, scheduled: permit.scheduled });
+      const permit = policy
+        ? { ok: policy.sendPermitted === true && settings?.enabled === true && playbook?.sensitive !== true, scheduled: policy.afterHours === true }
+        : await this._autoSendPermit(ticket.workspaceId, playbook, settings);
+      if (permit.ok) return this._autoSend({ run, ticket, playbook, settings, preview, body, detail, scheduled: permit.scheduled, permit });
     }
 
     const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
@@ -536,8 +540,8 @@ class AutoHelpDeliveryService {
   }
 
   /** Auto mode: the build switch (locked) or the after-hours schedule. */
-  async _autoSend({ run, ticket, playbook, settings, preview, body, detail, scheduled = false }) {
-    const permit = await this._autoSendPermit(ticket.workspaceId, playbook, settings);
+  async _autoSend({ run, ticket, playbook, settings, preview, body, detail, scheduled = false, permit: given = null }) {
+    const permit = given || await this._autoSendPermit(ticket.workspaceId, playbook, settings);
     if (!permit.ok) {
       throw refusal('Auto sending is not allowed for this playbook', 'auto_help_auto_refused');
     }
@@ -840,7 +844,8 @@ class AutoHelpDeliveryService {
       .catch(() => null);
     if (merged) throw refusal('This ticket was merged into another one — the Auto-help answer was not sent', 'auto_help_ticket_merged');
     if (!settings?.enabled) throw refusal('Auto-help is switched off for this workspace — the answer was not sent', 'auto_help_off');
-    if (requireApprove && !settings?.approveModeEnabled) throw refusal('Approve mode is switched off for this workspace — the answer was not sent', 'auto_help_approve_off');
+    // Knowledge-first: the category dial staged this answer; there is no separate approve switch.
+    if (requireApprove && !settings?.approveModeEnabled && settings?.knowledgeFirst !== true) throw refusal('Approve mode is switched off for this workspace — the answer was not sent', 'auto_help_approve_off');
     if (!playbook) throw refusal('The playbook behind this suggestion was deleted — the answer was not sent', 'auto_help_playbook_missing');
     if (playbook.enabled !== true) throw refusal(`The playbook "${playbook.name}" is switched off — the answer was not sent`, 'auto_help_playbook_off');
     return ticket;

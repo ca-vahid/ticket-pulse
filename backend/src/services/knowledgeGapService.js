@@ -49,6 +49,8 @@ export const GAP_REASON_LABELS = Object.freeze({
   model_declined: 'What was found did not answer it',
   [NOT_PICKED_UP]: 'In the playbook\'s category, but its keywords did not pick it up',
 });
+/** Knowledge-first outcomes that are not gaps in the knowledge: a person had to act, or the category is Off. */
+export const NOT_A_GAP_GATES = Object.freeze(['needs_person', 'category_off']);
 /** Runs that probe a playbook, not requests from people: never a gap, never an answer. */
 export const PROBE_TRIGGERS = Object.freeze(['test', 'backtest']);
 export const DEFAULT_DAYS = 90;
@@ -152,7 +154,17 @@ class KnowledgeGapService {
     const since = new Date(Date.now() - days * 86400e3);
     const empty = { generatedAt: new Date(), days, mode: null, totals: { tickets: 0, clusters: 0 }, playbooks: [] };
 
-    const [runs, playbookRows] = await Promise.all([
+    // Knowledge-first workspaces (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 11):
+    // gaps are grouped by the ticket's top category, so a category with no
+    // playbook shows its gaps too. A ticket the triage sent to a person
+    // ('needs_person') or whose category is Off was never a gap in the knowledge.
+    const [settingsRow, categoryRows] = await Promise.all([
+      Promise.resolve().then(() => prisma.autoHelpSettings.findUnique({ where: { workspaceId: ws }, select: { knowledgeFirst: true } })).catch(() => null),
+      Promise.resolve().then(() => prisma.competencyCategory.findMany({ where: { workspaceId: ws, parentId: null }, select: { id: true, name: true }, take: 500 })).catch(() => []),
+    ]);
+    const byCategory = settingsRow?.knowledgeFirst === true;
+    const categoryName = new Map((categoryRows || []).map((c) => [c.id, c.name]));
+    const [allRuns, playbookRows] = await Promise.all([
       Promise.resolve().then(() => prisma.autoHelpRun.findMany({
         where: {
           workspaceId: ws,
@@ -173,7 +185,11 @@ class KnowledgeGapService {
         take: 200,
       })).catch(() => []),
     ]);
-    if (!runs?.length || !playbookRows?.length) return empty;
+    const runs = (allRuns || []).filter((r) => !NOT_A_GAP_GATES.includes(r.gateDecision)
+      // By category only the knowledge's own misses count: an old "no playbook
+      // fits" row was never checked against the articles.
+      && (!byCategory || r.status === 'not_answerable'));
+    if (!runs.length || (!byCategory && !playbookRows?.length)) return empty;
     const playbooks = [...playbookRows].sort((a, b) => (Number(b.priority ?? 100) - Number(a.priority ?? 100)) || (a.id - b.id));
 
     // Latest gap run per ticket.
@@ -204,9 +220,15 @@ class KnowledgeGapService {
       if (!run) continue;
       const answered = answeredAfter.get(t.id);
       if (answered && answered > new Date(run.createdAt)) continue;
-      const pb = run.playbookId
-        ? playbooks.find((p) => p.id === run.playbookId)
-        : playbooks.find((p) => coversCategory(p, t));
+      let pb;
+      if (byCategory) {
+        const cat = Number(t.internalCategoryId) || 0;
+        pb = { id: `c${cat}`, name: categoryName.get(cat) || 'Not categorised', enabled: true, categoryId: cat || null, isCategory: true };
+      } else {
+        pb = run.playbookId
+          ? playbooks.find((p) => p.id === run.playbookId)
+          : playbooks.find((p) => coversCategory(p, t));
+      }
       if (!pb) continue; // not in any playbook's area: not a gap we can act on here
       const reason = run.status === 'no_match' ? NOT_PICKED_UP : run.gateDecision;
       if (!groups.has(pb.id)) groups.set(pb.id, { playbook: pb, items: [] });
@@ -271,9 +293,13 @@ class KnowledgeGapService {
       const views = clusters.map((c) => this._clusterView(g.playbook, c, mode, allTexts, drafted || []));
       clusterCount += views.length;
       out.push({
-        playbookId: g.playbook.id,
+        playbookId: g.playbook.isCategory ? null : g.playbook.id,
         playbookName: g.playbook.name,
         enabled: g.playbook.enabled,
+        // Knowledge-first: the group is a top category, not a playbook.
+        groupKind: g.playbook.isCategory ? 'category' : 'playbook',
+        groupKey: String(g.playbook.id),
+        categoryId: g.playbook.categoryId ?? null,
         tickets: items.length,
         clusters: views,
       });
@@ -283,6 +309,7 @@ class KnowledgeGapService {
       generatedAt: new Date(),
       days,
       mode,
+      groupedBy: byCategory ? 'category' : 'playbook',
       totals: { tickets: allTickets.length, clusters: clusterCount },
       playbooks: out,
     };

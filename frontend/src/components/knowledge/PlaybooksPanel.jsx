@@ -80,24 +80,28 @@ function PlaybookList({ categories, canManage }) {
                     <span className="min-w-0 truncate text-[15px] font-semibold text-foreground">{pb.name}</span>
                     <StatusBadge tone={pb.enabled ? 'success' : 'muted'}>{pb.enabled ? 'Active' : 'Off'}</StatusBadge>
                   </span>
-                  <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">{categoryLabel(categories, pb.categoryId, pb.subcategoryIds)}</span>
+                  <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                    {pb.isDefault ? 'Everything with no special handling · what its answers may do is set in Answering' : categoryLabel(categories, pb.categoryId, pb.subcategoryIds)}
+                  </span>
                   <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      {pb.mode === 'approve' || pb.mode === 'auto' ? <Send className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
-                      {MODE_SHORT[pb.mode] || 'Shadow'}
-                    </span>
+                    {!pb.isDefault && (
+                      <span className="inline-flex items-center gap-1">
+                        {pb.mode === 'approve' || pb.mode === 'auto' ? <Send className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {MODE_SHORT[pb.mode] || 'Shadow'}
+                      </span>
+                    )}
                     {pb.sensitive && <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />sensitive</span>}
                     {(pb.stayQuietWhen || []).length > 0 && (
                       <span className="inline-flex items-center gap-1"><Hand className="h-3.5 w-3.5" aria-hidden="true" />{pb.stayQuietWhen.length} stay-quiet rule{pb.stayQuietWhen.length === 1 ? '' : 's'}</span>
                     )}
-                    <span>priority {pb.priority}</span>
+                    {!pb.isDefault && <span>priority {pb.priority}</span>}
                     <span>{pb.lastRunAt ? `last run ${timeAgo(pb.lastRunAt)} · ${pb.runCount} run${pb.runCount === 1 ? '' : 's'}` : 'never run'}</span>
                   </span>
                 </Link>
                 {/* Outside the card link: the article titles are links of their own. */}
                 <PlaybookSummary summary={pb.summary} className="mt-2 border-t border-border/60 pt-2" small testId={`playbook-summary-${pb.id}`} />
               </div>
-              {canManage && (
+              {canManage && !pb.isDefault && (
                 <Switch
                   checked={pb.enabled}
                   disabled={busyId === pb.id || (!pb.enabled && !pb.categoryId)}
