@@ -300,12 +300,14 @@ describe('Not this playbook', () => {
   test('Activity row and drawer say "Not this playbook" with the AI reason', async () => {
     api.listRuns.mockResolvedValue({ success: true, data: { items: [RUN], total: 1 } });
     api.getRun.mockResolvedValue({ success: true, data: RUN });
-    renderAt('/knowledge/activity/31');
+    renderAt('/knowledge/activity');
     const table = await screen.findByTestId('runs-table');
-    // The open drawer hides the page from the accessibility tree, so find the row by its cell.
     const row = within(table).getByTestId('row-not-this-playbook').closest('tr');
     expect(within(row).getByText('Not this playbook')).toHaveAttribute('title', 'Why: Asks for a new laptop, not an app install.');
     expect(within(row).getByTestId('row-not-this-playbook')).toHaveTextContent('Asks for a new laptop, not an app install.');
+    // A run has its own page (12 Oct 2026), no longer a drawer over the list.
+    cleanup();
+    renderAt('/knowledge/activity/31');
     const drawer = await screen.findByTestId('run-not-this-playbook');
     expect(drawer).toHaveTextContent('Asks for a new laptop, not an app install.');
     expect(screen.getByTestId('run-detail')).toHaveTextContent('decided it doesn’t fit');

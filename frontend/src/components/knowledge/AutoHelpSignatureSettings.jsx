@@ -9,7 +9,26 @@ const SPACINGS = [
   ['tight', 'Tight', 'Lines stack directly — matches Outlook and FreshService'],
   ['normal', 'Normal', 'A little breathing room between lines'],
   ['relaxed', 'Relaxed', 'Roomier, for short signatures'],
+  ['exact', 'As pasted', 'Nothing is adjusted: for a designed signature that carries its own spacing'],
 ];
+/** The signature as requesters get it: "As pasted" leaves every margin alone. */
+const spaced = (html, spacing) => (spacing === 'exact' ? html : applySignatureSpacing(html, spacing));
+/** Plain text of an HTML signature (the text part of the e-mail). */
+const NL = String.fromCharCode(10);
+const NBSP = String.fromCharCode(160);
+function plainOf(html) {
+  const el = document.createElement('div');
+  el.innerHTML = String(html || '');
+  el.querySelectorAll('br').forEach((node) => node.replaceWith(NL));
+  el.querySelectorAll('p,div,tr,li').forEach((node) => node.append(NL));
+  return (el.textContent || '')
+    .split(NL)
+    .map((line) => line.split(NBSP).join(' ').split(' ').filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join(NL);
+}
+/** A table or picture signature is edited as HTML: the rich editor would flatten it. */
+const needsSource = (html) => /<table|<img/i.test(String(html || ''));
 const WITH = [
   ['replace', 'Use this signature instead of theirs', 'The answer goes out with the Auto-help signature only.'],
   ['both', 'Add their own signature after this one', 'The Auto-help signature, then the sending agent’s own.'],
@@ -26,12 +45,14 @@ export default function AutoHelpSignatureSettings({ settings, canManage, busy, s
   const [text, setText] = useState(settings?.signatureText || '');
   const [spacing, setSpacing] = useState(settings?.signatureSpacing || 'tight');
   const [withMode, setWithMode] = useState(settings?.signatureWith || 'replace');
+  const [source, setSource] = useState(() => needsSource(settings?.signatureHtml));
 
   useEffect(() => {
     setHtml(settings?.signatureHtml || '');
     setText(settings?.signatureText || '');
     setSpacing(settings?.signatureSpacing || 'tight');
     setWithMode(settings?.signatureWith || 'replace');
+    if (needsSource(settings?.signatureHtml)) setSource(true);
   }, [settings?.signatureHtml, settings?.signatureText, settings?.signatureSpacing, settings?.signatureWith]);
 
   const dirty = (html || '') !== (settings?.signatureHtml || '')
@@ -59,8 +80,34 @@ export default function AutoHelpSignatureSettings({ settings, canManage, busy, s
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-2">
-              <p className="text-xs font-medium text-foreground/85">Signature</p>
-              {canManage ? (
+              <div className="flex items-center gap-3">
+                <p className="text-xs font-medium text-foreground/85">Signature</p>
+                {canManage && (
+                  <button
+                    type="button"
+                    aria-pressed={source}
+                    onClick={() => setSource((v) => !v)}
+                    disabled={source && needsSource(html)}
+                    title={source && needsSource(html) ? 'A signature with a table or a picture is edited as HTML so its layout is kept' : undefined}
+                    className="tp-focus-ring ml-auto rounded px-1.5 text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+                    data-testid="signature-source-toggle"
+                  >
+                    {source ? 'Editing the HTML' : 'Edit the HTML'}
+                  </button>
+                )}
+              </div>
+              {canManage && source ? (
+                <textarea
+                  value={html}
+                  onChange={(e) => { setHtml(e.target.value); setText(plainOf(e.target.value)); }}
+                  spellCheck={false}
+                  rows={12}
+                  aria-label="Auto-help signature HTML"
+                  placeholder="Paste the signature’s HTML here: tables, colours and the logo are kept exactly."
+                  className="tp-focus-ring settings-scrollbar w-full rounded-lg border border-input bg-card px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground placeholder:text-muted-foreground/75"
+                  data-testid="signature-source"
+                />
+              ) : canManage ? (
                 <RichTextEditor
                   value={html}
                   onChange={(next) => { setHtml(next.html); setText(next.text); }}
@@ -69,7 +116,11 @@ export default function AutoHelpSignatureSettings({ settings, canManage, busy, s
                   minHeight={120}
                 />
               ) : null}
-              <p className="text-[11px] text-muted-foreground/75">Tip: copy a signature from Outlook and paste it here — the formatting is kept.</p>
+              <p className="text-[11px] text-muted-foreground/75">
+                {source
+                  ? 'Paste the HTML of a designed signature (a table with a logo). Choose “As pasted” below so its own spacing is kept.'
+                  : 'Tip: copy a signature from Outlook and paste it here. For a table with a logo, use “Edit the HTML”.'}
+              </p>
 
               <p className="pt-1 text-xs font-medium text-foreground/85" id="kh-sig-spacing">Line spacing</p>
               <div className="inline-flex rounded-lg border border-input bg-card p-0.5" role="radiogroup" aria-labelledby="kh-sig-spacing">
@@ -117,7 +168,7 @@ export default function AutoHelpSignatureSettings({ settings, canManage, busy, s
                 <p className="text-muted-foreground">…the answer and the follow-up line, then:</p>
                 <div className="mt-2">
                   {String(html || '').trim()
-                    ? <SafeHtml html={applySignatureSpacing(html, spacing)} isDark={false} />
+                    ? <SafeHtml html={spaced(html, spacing)} isDark={false} />
                     : <p className="text-muted-foreground/75">Nothing yet — paste a signature on the left.</p>}
                 </div>
                 {withMode === 'both' && <p className="mt-2 text-xs text-muted-foreground">…then the sending agent&rsquo;s own signature.</p>}

@@ -321,8 +321,10 @@ describe('Activity: stayed-quiet runs', () => {
     api.listRuns.mockResolvedValue({ success: true, data: { items: [RUN], total: 1 } });
     api.getRun.mockResolvedValue({ success: true, data: RUN });
     api.runsSummary.mockResolvedValue({ success: true, data: [{ playbookId: 3, playbookName: 'Software installs', mode: 'shadow', runs: 5, drafted: 1, draftedPct: 20, reviewed: 0, wrong: 0, stayedQuiet: 2, bar: {}, approve: {}, outcomes: {}, readiness: { criteria: [] } }] });
-    renderAt('/knowledge/activity/21');
+    renderAt('/knowledge/activity');
     expect(await screen.findByTestId('row-stayed-quiet')).toHaveTextContent('Stayed quiet: Any sign of a security incident');
+    cleanup();
+    renderAt('/knowledge/activity/21');
     const drawer = await screen.findByTestId('run-stayed-quiet');
     expect(drawer).toHaveTextContent('Unknown sign-in from abroad');
     expect(drawer).toHaveTextContent('A workspace-wide rule, caught by the answer check.');
@@ -466,8 +468,9 @@ describe('Activity: runs view and the run panel', () => {
     api.getRun.mockResolvedValue({ success: true, data: RUN });
     renderAt('/knowledge/activity/101');
     expect(await screen.findByTestId('dropped-steps')).toHaveTextContent('Use PDF-XChange instead.');
-    // The open panel hides the page from the accessibility tree: find the row by its label.
-    const row = screen.getByTestId('runs-table').querySelector('tr[aria-label="Run on #244642"]');
+    cleanup();
+    renderAt('/knowledge/activity');
+    const row = (await screen.findByTestId('runs-table')).querySelector('tr[aria-label="Run on #244642"]');
     expect(row).toHaveTextContent('Drafted without step 2 (not in the knowledge)');
     api.listRuns.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
   });
