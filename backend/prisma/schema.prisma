@@ -3979,6 +3979,13 @@ model KnowledgeArticle {
   // (fs_solution) and where a drafted article came from (tickets that fed it).
   fsUpdatedAt     DateTime? @map("fs_updated_at") @db.Timestamptz(6)
   sourceMeta      Json?     @map("source_meta")
+  // Library (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 7): not_checked |
+  // checked (a person with the skill confirmed it, or two agents reused it
+  // unchanged) | needs_look (doubtful: out of automatic answers).
+  confidence      String    @default("not_checked") @db.VarChar(20)
+  checkedBy       String?   @map("checked_by") @db.VarChar(255)
+  checkedAt       DateTime? @map("checked_at") @db.Timestamptz(6)
+  version         Int       @default(1)
 
   @@index([workspaceId, status], map: "idx_knowledge_articles_ws_status")
   // Partial unique index in SQL only (Prisma cannot express WHERE):
@@ -4007,6 +4014,86 @@ model TicketSolutionEmbedding {
 
 // Auto-help P1: per-workspace Knowledge switches (FreshService solution
 // import, weekly review digest). Both default off.
+// Every saved version of an article: safe edits and one-click restore.
+model KnowledgeArticleVersion {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  articleId     Int      @map("article_id")
+  version       Int
+  title         String   @db.VarChar(300)
+  bodyHtml      String   @default("") @map("body_html") @db.Text
+  status        String   @db.VarChar(20)
+  categoryId    Int?     @map("category_id")
+  subcategoryId Int?     @map("subcategory_id")
+  tags          String[] @default([])
+  changedBy     String?  @map("changed_by") @db.VarChar(255)
+  changeNote    String?  @map("change_note") @db.Text
+  suggestionId  Int?     @map("suggestion_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([articleId, version], map: "idx_knowledge_article_versions_article")
+  @@map("knowledge_article_versions")
+}
+
+// What happened to an article in use: good | partial | wrong (a reviewed
+// answer that quoted it), edited, flagged, inserted, search_miss,
+// ask_shown | ask_accepted | ask_not_now (save-at-close).
+model KnowledgeSignal {
+  id           Int      @id @default(autoincrement())
+  workspaceId  Int      @map("workspace_id")
+  kind         String   @db.VarChar(30)
+  articleId    Int?     @map("article_id")
+  sectionIndex Int?     @map("section_index")
+  categoryId   Int?     @map("category_id")
+  ticketId     Int?     @map("ticket_id")
+  runId        Int?     @map("run_id")
+  actor        String?  @db.VarChar(255)
+  note         String?  @db.Text
+  meta         Json?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, articleId, createdAt], map: "idx_knowledge_signals_ws_article")
+  @@index([workspaceId, kind, createdAt], map: "idx_knowledge_signals_ws_kind")
+  @@index([workspaceId, actor, kind, createdAt], map: "idx_knowledge_signals_actor")
+  @@map("knowledge_signals")
+}
+
+// The inbox (section 10): everything that needs a person, in one shape.
+// kind: new_article | add_section | edit | merge | retire | question | flag | gap | review
+// status: open | accepted | dismissed | expired
+model KnowledgeSuggestion {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  kind            String    @db.VarChar(30)
+  status          String    @default("open") @db.VarChar(20)
+  articleId       Int?      @map("article_id")
+  otherArticleId  Int?      @map("other_article_id")
+  categoryId      Int?      @map("category_id")
+  subcategoryId   Int?      @map("subcategory_id")
+  title           String    @db.VarChar(300)
+  why             String?   @db.Text
+  proposed        Json?
+  evidence        Json?
+  impact          Float     @default(0)
+  source          String    @default("person") @db.VarChar(30)
+  assignedTo      String[]  @default([]) @map("assigned_to")
+  dedupeKey       String?   @map("dedupe_key") @db.VarChar(200)
+  createdBy       String?   @map("created_by") @db.VarChar(255)
+  decidedBy       String?   @map("decided_by") @db.VarChar(255)
+  decidedAt       DateTime? @map("decided_at") @db.Timestamptz(6)
+  decisionNote    String?   @map("decision_note") @db.Text
+  resultArticleId Int?      @map("result_article_id")
+  snoozedUntil    DateTime? @map("snoozed_until") @db.Timestamptz(6)
+  expiresAt       DateTime? @map("expires_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, dedupeKey], map: "uq_knowledge_suggestions_ws_dedupe")
+  @@index([workspaceId, status, impact], map: "idx_knowledge_suggestions_ws_status")
+  @@index([articleId, status], map: "idx_knowledge_suggestions_article")
+  @@map("knowledge_suggestions")
+}
+
 model KnowledgeSettings {
   workspaceId         Int       @id @map("workspace_id")
   fsImportEnabled     Boolean   @default(false) @map("fs_import_enabled")
@@ -4015,6 +4102,14 @@ model KnowledgeSettings {
   fsImportedAt        DateTime? @map("fs_imported_at") @db.Timestamptz(6)
   reviewDigestEnabled Boolean   @default(false) @map("review_digest_enabled")
   reviewDigestSentAt  DateTime? @map("review_digest_sent_at") @db.Timestamptz(6)
+  // Contribution by skill and the nightly review (sections 7-10).
+  publishLevel        String    @default("intermediate") @map("publish_level") @db.VarChar(20)
+  checkLevel          String    @default("advanced") @map("check_level") @db.VarChar(20)
+  askAtClose          Boolean   @default(false) @map("ask_at_close")
+  askDailyCap         Int       @default(1) @map("ask_daily_cap")
+  stewardEnabled      Boolean   @default(false) @map("steward_enabled")
+  stewardState        Json?     @map("steward_state")
+  inboxWeeklyCap      Int       @default(5) @map("inbox_weekly_cap")
   updatedBy           String?   @map("updated_by") @db.VarChar(255)
   updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 

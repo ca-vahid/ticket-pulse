@@ -69,7 +69,7 @@ const PHONES = {
 const ARTICLE = {
   id: 12, title: 'Install Bluebeam Revu from Company Portal',
   bodyText: 'Install Bluebeam Revu on your laptop: open Company Portal, search for Bluebeam Revu, choose Install.',
-  tags: ['bluebeam', 'install', 'laptop'], categoryId: 10, subcategoryId: 101, embedding: [], updatedAt: new Date(), lastVerifiedAt: new Date(), reviewEveryDays: 180,
+  tags: ['bluebeam', 'install', 'laptop'], categoryId: 10, subcategoryId: 101, embedding: [], updatedAt: new Date(), lastVerifiedAt: new Date(), confidence: 'checked', reviewEveryDays: 180,
   status: 'published', sections: null,
 };
 const policyRow = (categoryId, over = {}) => ({ workspaceId: 1, categoryId, dayLevel: null, nightLevel: null, bar: null, alwaysChecked: null, notes: null, stayQuietWhen: [], ...over });
@@ -282,7 +282,7 @@ describe('knowledge-first: the dial', () => {
   test('Suggest to agent + a medium answer steps down to a recorded draft: nothing is staged', async () => {
     prismaMock.knowledgeCategoryPolicy.findMany.mockResolvedValue([policyRow(10, { dayLevel: 'suggest' })]);
     // The article was never checked by a person: one miss, medium.
-    prismaMock.knowledgeArticle.findMany.mockResolvedValue([{ ...ARTICLE, lastVerifiedAt: null }]);
+    prismaMock.knowledgeArticle.findMany.mockResolvedValue([{ ...ARTICLE, confidence: 'not_checked' }]);
     gatewayMock.runToolTurn.mockResolvedValueOnce(triage('yes')).mockResolvedValueOnce(answer());
 
     const run = await runner.runForTicket(55, { trigger: 'categorized' });

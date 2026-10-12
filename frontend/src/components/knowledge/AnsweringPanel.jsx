@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Lock, Moon, Sun } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
@@ -161,7 +162,7 @@ function DialRow({ entry, isDefault = false, isSub = false, parentName = null, r
     : entry.resolved.alwaysChecked ? 'Always checked by a person' : !ready ? 'Not earned yet' : null;
   return (
     <div className={isSub ? '' : 'border-t border-border first:border-t-0'} data-testid={`answering-row-${id}`}>
-      <div className={`grid items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)] ${isSub ? 'bg-muted/20 py-2.5' : ''}`}>
+      <div className={`grid items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-5 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.1fr)] ${isSub ? 'bg-muted/20 py-2.5' : ''}`}>
         <div className="flex min-w-0 items-center gap-2">
           {onToggle ? (
             <button
@@ -215,7 +216,7 @@ function DialRow({ entry, isDefault = false, isSub = false, parentName = null, r
         </div>
         <div className="min-w-0 pl-8 md:pl-0">
           {!isDefault && !isSub && <Evidence category={entry} />}
-          {!isDefault && !isSub && entry.readiness && !entry.resolved.alwaysChecked && !entry.readiness.met && (
+          {!isDefault && !isSub && entry.readiness && !entry.resolved.alwaysChecked && !entry.readiness.met && readinessState(entry).tone === 'progress' && (
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{progressWords(entry.readiness)}</p>
           )}
         </div>
@@ -231,11 +232,20 @@ export default function AnsweringPanel({ canManage = false, onSettingsChange = n
   const [busyId, setBusyId] = useState(null);
   const [open, setOpen] = useState(() => new Set());
   const [switching, setSwitching] = useState(false);
+  const [playbooks, setPlaybooks] = useState([]);
 
   const load = useCallback(() => knowledgeAPI.answering()
     .then((res) => { setData(res?.data || null); setError(null); })
     .catch((err) => setError(err?.message || 'Could not load the answering settings')), []);
   useEffect(() => { load(); }, [load]);
+  // Special handling (the playbooks that are left): optional, so a failed read shows none.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => knowledgeAPI.listPlaybooks())
+      .then((res) => { if (!cancelled) setPlaybooks(Array.isArray(res?.data) ? res.data : []); })
+      .catch(() => { if (!cancelled) setPlaybooks([]); });
+    return () => { cancelled = true; };
+  }, []);
 
   const save = async (categoryId, patch) => {
     setBusyId(categoryId);
@@ -343,6 +353,41 @@ export default function AnsweringPanel({ canManage = false, onSettingsChange = n
                 )}
               </DialRow>
             ))}
+          </section>
+
+          <section className="tp-card px-4 py-4 sm:px-5" aria-labelledby="answering-special-title" data-testid="answering-special">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 id="answering-special-title" className="text-sm font-semibold text-foreground">Special handling</h2>
+              <Link to="/knowledge/playbooks" className="tp-focus-ring rounded text-xs font-medium text-primary hover:underline">Manage</Link>
+            </div>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+              Most tickets are answered from the articles alone. A few kinds of request need their own instructions, tools or questions; each of those has a playbook.
+            </p>
+            {(() => {
+              const special = playbooks.filter((pb) => !pb.isDefault);
+              const base = playbooks.find((pb) => pb.isDefault);
+              return (
+                <ul className="mt-3 divide-y divide-border/60">
+                  {special.length === 0 && <li className="py-2 text-[13px] text-muted-foreground">None. Every ticket is answered from the articles.</li>}
+                  {special.map((pb) => (
+                    <li key={pb.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2">
+                      <Link to={`/knowledge/playbooks/${pb.id}`} className="tp-focus-ring min-w-0 truncate rounded text-[13px] font-medium text-foreground hover:underline">{pb.name}</Link>
+                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className={`h-1.5 w-1.5 rounded-full ${pb.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
+                        {pb.enabled ? 'On' : 'Off'}
+                      </span>
+                      {pb.match?.whenToHelp && <span className="min-w-0 flex-1 basis-full truncate text-xs text-muted-foreground sm:basis-0">{pb.match.whenToHelp}</span>}
+                    </li>
+                  ))}
+                  {base && (
+                    <li className="flex flex-wrap items-center gap-x-3 py-2">
+                      <Link to={`/knowledge/playbooks/${base.id}`} className="tp-focus-ring rounded text-[13px] font-medium text-foreground hover:underline">Everything else</Link>
+                      <span className="text-xs text-muted-foreground">Follow-up, tools and wording for answers that have no special handling</span>
+                    </li>
+                  )}
+                </ul>
+              );
+            })()}
           </section>
 
           <p className="px-1 text-xs leading-relaxed text-muted-foreground">

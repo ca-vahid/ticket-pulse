@@ -580,7 +580,12 @@ function ArticleEditor({ articleId, categories, canManage }) {
     const carried = location.state?.afterCreate || null;
     setSimilar(carried?.similar || []);
     if (carried?.savedAt) setSavedAt(new Date(carried.savedAt));
-    if (isNew) { setForm(EMPTY); return undefined; }
+    if (isNew) {
+      // "New article" from a category in the Library starts filed there.
+      const sp = new URLSearchParams(location.search);
+      setForm({ ...EMPTY, categoryId: Number(sp.get('c')) || null, subcategoryId: Number(sp.get('s')) || null });
+      return undefined;
+    }
     let cancelled = false;
     setForm(null);
     knowledgeAPI.getArticle(articleId)
@@ -592,10 +597,13 @@ function ArticleEditor({ articleId, categories, canManage }) {
   const set = useCallback((patch) => { setForm((f) => ({ ...f, ...patch })); setDirty(true); }, []);
   const top = categories.find((c) => c.id === Number(form?.categoryId));
   // FreshService-imported articles are read-only here (edited in FreshService).
-  const editable = canManage && !form?.readOnly;
+  // Rights by skill: the server says whether this person may write this article.
+  const editable = (canManage || form?.my?.write === true) && !form?.readOnly;
 
   if (error && !form) return <p className="text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>;
   if (!form) return <Loading label="Loading article…" />;
+  // Back goes to the article as people read it (or to the Library for a new one).
+  const backTo = isNew ? '/knowledge/library' : `/knowledge/library/${articleId}`;
 
   const save = async () => {
     setSaving(true);
@@ -734,7 +742,7 @@ function ArticleEditor({ articleId, categories, canManage }) {
     return (
       <div className="animate-fadeIn space-y-4">
         <TabActions>
-          <GuardedLink to="/knowledge/articles" aria-label="All articles" className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted sm:px-3">
+          <GuardedLink to={backTo} aria-label="All articles" className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted sm:px-3">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" /> <span className="hidden sm:inline">All articles</span>
           </GuardedLink>
         </TabActions>
@@ -754,7 +762,7 @@ function ArticleEditor({ articleId, categories, canManage }) {
     <div className="animate-fadeIn" data-testid="article-editor">
       <TabActions>
         {dirty ? <span className="hidden text-xs font-medium text-amber-700 dark:text-amber-300 sm:inline">Unsaved changes</span> : savedAt && <span className="hidden text-xs text-muted-foreground sm:inline">Saved {timeAgo(savedAt)}</span>}
-        <GuardedLink to="/knowledge/articles" aria-label="All articles" className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted sm:px-3">
+        <GuardedLink to={backTo} aria-label="All articles" className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted sm:px-3">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" /> <span className="hidden sm:inline">All articles</span>
         </GuardedLink>
         <button type="button" onClick={save} disabled={saving || !form.title.trim()} className="tp-focus-ring inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-60">
@@ -897,3 +905,6 @@ export default function ArticlesPanel({ itemId, categories = [], canManage = fal
   if (itemId) return <ArticleEditor articleId={itemId} categories={categories} canManage={canManage} />;
   return <ArticleList categories={categories} canManage={canManage} />;
 }
+
+/** The article editor on its own (the Library lists and shows articles; this edits one). */
+export { ArticleEditor };

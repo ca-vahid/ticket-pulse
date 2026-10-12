@@ -381,6 +381,37 @@ code {
     max-width: 100%;
     overflow-x: auto;
   }
+  /* Knowledge article, to read (Library): a text column, not a form. Tokens
+     only, so it themes with the app. */
+  .tp-article {
+    max-width: 72ch;
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: hsl(var(--foreground) / 0.9);
+    overflow-wrap: anywhere;
+  }
+  .tp-article > :first-child { margin-top: 0; }
+  .tp-article h1, .tp-article h2, .tp-article h3 {
+    color: hsl(var(--foreground));
+    font-weight: 600;
+    line-height: 1.35;
+    scroll-margin-top: 5rem;
+  }
+  .tp-article h1 { font-size: 1.25rem; margin: 1.75rem 0 0.5rem; }
+  .tp-article h2 { font-size: 1.0625rem; margin: 1.75rem 0 0.5rem; padding-top: 0.25rem; }
+  .tp-article h3 { font-size: 0.9375rem; margin: 1.25rem 0 0.375rem; }
+  .tp-article p { margin: 0.625rem 0; }
+  .tp-article ol, .tp-article ul { margin: 0.625rem 0; padding-left: 1.5rem; }
+  .tp-article ol { list-style: decimal; }
+  .tp-article ul { list-style: disc; }
+  .tp-article li { margin: 0.3rem 0; padding-left: 0.125rem; }
+  .tp-article li::marker { color: hsl(var(--muted-foreground)); }
+  .tp-article a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 2px; }
+  .tp-article code { font-size: 0.875em; padding: 0.1em 0.35em; border-radius: 0.3rem; background: hsl(var(--muted)); }
+  .tp-article blockquote { margin: 0.75rem 0; padding-left: 0.875rem; border-left: 3px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+  .tp-article table { border-collapse: collapse; margin: 0.75rem 0; font-size: 0.875rem; }
+  .tp-article th, .tp-article td { border: 1px solid hsl(var(--border)); padding: 0.375rem 0.625rem; text-align: left; }
+  .tp-article img { max-width: 100%; height: auto; border-radius: 0.5rem; }
   /* Full-width train: long prose stays readable on a wide screen — the page
      is not capped, the text column is (≈110 characters). Tables still scroll. */
   html[data-layout="full"] .tp-rich-body,

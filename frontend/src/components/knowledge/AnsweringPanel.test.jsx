@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { actionWords, levelOptions, progressWords, readinessState } from './answeringFormat';
 
 // Knowledge → Answering: the dial per category (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 5).
-const api = { answering: vi.fn(), updateAnswering: vi.fn(), updateSettings: vi.fn() };
+const api = { answering: vi.fn(), updateAnswering: vi.fn(), updateSettings: vi.fn(), listPlaybooks: vi.fn() };
+const render = (ui) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 vi.mock('../../services/api', () => ({ get knowledgeAPI() { return api; } }));
 // The app's select opens a portal; a plain select keeps the test about the panel.
 vi.mock('../common/FancySelect', () => ({
@@ -48,6 +50,11 @@ beforeEach(() => {
   api.answering.mockResolvedValue({ data: DIAL });
   api.updateAnswering.mockImplementation(async () => ({ data: DIAL }));
   api.updateSettings.mockResolvedValue({ data: { knowledgeFirst: false } });
+  api.listPlaybooks.mockResolvedValue({ data: [
+    { id: 2, name: 'Phones & mobile', enabled: true, isDefault: false, match: { whenToHelp: 'Roaming and travel data questions.' } },
+    { id: 1, name: 'Software, apps & licences', enabled: false, isDefault: false, match: {} },
+    { id: 40, name: 'Knowledge answers', enabled: true, isDefault: true, match: {} },
+  ] });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -129,6 +136,18 @@ describe('AnsweringPanel', () => {
     const subs = screen.getByTestId('answering-subs-10');
     expect(within(subs).getByText('OpenGround')).toBeInTheDocument();
     expect(within(subs).getAllByRole('option', { name: 'Same as Software & Apps' })).toHaveLength(2);
+  });
+
+  test('special handling: the playbooks that are left, on or off in words, and the rule for everything else', async () => {
+    render(<AnsweringPanel canManage />);
+    const box = await screen.findByTestId('answering-special');
+    await waitFor(() => expect(within(box).getByRole('link', { name: 'Phones & mobile' })).toHaveAttribute('href', '/knowledge/playbooks/2'));
+    expect(within(box).getByText('Roaming and travel data questions.')).toBeInTheDocument();
+    expect(within(box).getByText('On')).toBeInTheDocument();
+    expect(within(box).getByText('Off')).toBeInTheDocument();
+    expect(within(box).getByRole('link', { name: 'Everything else' })).toHaveAttribute('href', '/knowledge/playbooks/40');
+    expect(within(box).queryByText('Knowledge answers')).not.toBeInTheDocument();
+    expect(within(box).getByRole('link', { name: 'Manage' })).toHaveAttribute('href', '/knowledge/playbooks');
   });
 
   test('the order switch saves the workspace setting and says what each state means', async () => {

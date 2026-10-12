@@ -36,6 +36,18 @@ import { htmlToText, splitArticleSections } from '../utils/articleSections.js';
 export const ARTICLE_STATUSES = Object.freeze(['draft', 'published', 'archived']);
 export const ARTICLE_SOURCES = Object.freeze(['tp', 'fs_solution', 'verified_ticket']);
 /**
+ * How far an article can be trusted (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 7):
+ *   not_checked  written, not yet confirmed by someone with the skill
+ *   checked      confirmed by a person (or reused unchanged by two agents)
+ *   needs_look   doubtful (marked wrong in use, or flagged): out of automatic answers
+ */
+export const ARTICLE_CONFIDENCE = Object.freeze(['not_checked', 'checked', 'needs_look']);
+/** The one word the Library shows per article. */
+export const ARTICLE_HEALTH = Object.freeze(['draft', 'archived', 'needs_look', 'out_of_date', 'checked', 'not_checked']);
+/** Fields whose change makes a new version. */
+const VERSION_FIELDS = ['title', 'bodyHtml', 'status', 'categoryId', 'subcategoryId', 'tags'];
+const VERSIONS_KEPT = 200;
+/**
  * Where an article came from, in words (Knowledge v2). Provenance lives in
  * source / sourceMeta, not in the tags. Tags are Topics: shown for browsing,
  * and they also count in search (a topic hit weighs like a title hit).
@@ -65,7 +77,7 @@ const VECTOR_SCAN_MAX = 5000;
 const SEMANTIC_SHORTLIST = 50;
 const SEARCH_SELECT = Object.freeze({
   id: true, title: true, bodyText: true, tags: true, categoryId: true, subcategoryId: true, updatedAt: true,
-  createdAt: true, lastVerifiedAt: true, reviewEveryDays: true,
+  createdAt: true, lastVerifiedAt: true, reviewEveryDays: true, confidence: true,
 });
 // Candidates whose sections are read for the final, section-level score.
 const SECTION_POOL = 60;
@@ -267,6 +279,16 @@ export function playbooksReaching(article, playbooks = []) {
 }
 
 /** API shape: never ships the vector, only whether one exists. */
+/** The article's health in one word (ARTICLE_HEALTH). Pure. */
+export function healthOf(row, now = Date.now()) {
+  if (!row) return 'draft';
+  if (row.status === 'archived') return 'archived';
+  if (row.status === 'draft') return 'draft';
+  if (row.confidence === 'needs_look') return 'needs_look';
+  if (isReviewOverdue(row, now)) return 'out_of_date';
+  return row.confidence === 'checked' ? 'checked' : 'not_checked';
+}
+
 export function articleView(row, { withBody = true, now = Date.now() } = {}) {
   if (!row) return null;
   const { embedding, sections, ...rest } = row;
@@ -284,6 +306,9 @@ export function articleView(row, { withBody = true, now = Date.now() } = {}) {
     reviewDueAt: reviewDueAt(row),
     needsReview: isReviewOverdue(row, now),
     readOnly: row.source === 'fs_solution',
+    confidence: ARTICLE_CONFIDENCE.includes(row.confidence) ? row.confidence : 'not_checked',
+    health: healthOf(row, now),
+    version: Number(row.version) || 1,
   };
 }
 
@@ -329,6 +354,7 @@ function normalizeInput(input = {}, { partial = false } = {}) {
 class KnowledgeArticleService {
   async list(workspaceId, {
     q = '', status = null, categoryId = null, review = null, topic = null, owner = null, source = null, sort = null, limit = 100, offset = 0,
+    subcategoryId = null, confidence = null, uncategorised = false,
   } = {}) {
     const where = { workspaceId: Number(workspaceId) };
     // "Needs review": published articles past their review date. Dates are
@@ -350,6 +376,11 @@ class KnowledgeArticleService {
     const and = [];
     const cat = intOrNull(categoryId);
     if (cat) and.push({ OR: [{ categoryId: cat }, { subcategoryId: cat }] });
+    // Library (section 12): a subcategory, "no category yet", and the trust state.
+    const sub = intOrNull(subcategoryId);
+    if (sub) and.push({ subcategoryId: sub });
+    if (uncategorised === true || uncategorised === 'true') and.push({ categoryId: null });
+    if (ARTICLE_CONFIDENCE.includes(confidence)) and.push({ confidence });
     const text = String(q || '').trim();
     if (text) {
       and.push({
@@ -559,27 +590,104 @@ class KnowledgeArticleService {
    * @param {object} [options.sourceMeta] server-side provenance only (drafted
    *   from tickets, FreshService folder) - never taken from a request body.
    */
-  async create(workspaceId, input, actor = null, { sourceMeta = null } = {}) {
+  /**
+   * `canCheck` = the person may confirm articles here (an admin, or someone
+   * advanced / expert in the category): what they publish is Checked. Anyone
+   * else publishes as "Not checked yet".
+   */
+  async create(workspaceId, input, actor = null, { sourceMeta = null, canCheck = true, changeNote = null, suggestionId = null } = {}) {
     const data = normalizeInput(input);
     const now = new Date();
+    const by = actor?.email || actor?.name || null;
+    const checked = data.status === 'published' && canCheck;
     const row = await prisma.knowledgeArticle.create({
       data: {
         ...data,
         workspaceId: Number(workspaceId),
         ownerEmail: data.ownerEmail || cleanEmail(actor?.email) || null,
         ...(data.status === 'published' ? { lastVerifiedAt: now } : {}),
+        confidence: checked ? 'checked' : 'not_checked',
+        ...(checked ? { checkedBy: by, checkedAt: now } : {}),
+        version: 1,
         contentHash: hashOf(data.title, data.bodyText),
         ...(sourceMeta && typeof sourceMeta === 'object' ? { sourceMeta } : {}),
         createdBy: actor?.email || actor?.name || null,
         updatedBy: actor?.email || actor?.name || null,
       },
     });
+    await this._saveVersion(row, { by, changeNote: changeNote || 'Created', suggestionId });
     const indexed = row.status === 'published' ? await this.indexArticle(row) : null;
     const similarTitles = await this.similarTitles(workspaceId, row.title, row.id);
     return { ...articleView(indexed || row), warnings: { similarTitles } };
   }
 
-  async update(workspaceId, id, input, actor = null) {
+  /** One row per saved version. Never throws: history must not block a save. */
+  async _saveVersion(row, { by = null, changeNote = null, suggestionId = null } = {}) {
+    await Promise.resolve()
+      .then(() => prisma.knowledgeArticleVersion.create({
+        data: {
+          workspaceId: row.workspaceId,
+          articleId: row.id,
+          version: Number(row.version) || 1,
+          title: row.title,
+          bodyHtml: row.bodyHtml || '',
+          status: row.status,
+          categoryId: row.categoryId ?? null,
+          subcategoryId: row.subcategoryId ?? null,
+          tags: Array.isArray(row.tags) ? row.tags : [],
+          changedBy: by,
+          changeNote: changeNote ? String(changeNote).slice(0, 500) : null,
+          suggestionId: suggestionId ? Number(suggestionId) : null,
+        },
+      }))
+      .catch((err) => logger.warn(`Knowledge article ${row?.id}: version ${row?.version} not recorded (${err.message})`));
+  }
+
+  /** The saved versions of an article, newest first, without bodies. */
+  async versions(workspaceId, id) {
+    const article = await this.get(workspaceId, id);
+    const rows = await Promise.resolve()
+      .then(() => prisma.knowledgeArticleVersion.findMany({
+        where: { workspaceId: Number(workspaceId), articleId: article.id },
+        orderBy: { version: 'desc' },
+        take: VERSIONS_KEPT,
+        select: { id: true, version: true, title: true, status: true, changedBy: true, changeNote: true, suggestionId: true, createdAt: true },
+      }))
+      .catch(() => []);
+    return { current: article.version, items: rows || [] };
+  }
+
+  async getVersion(workspaceId, id, version) {
+    const row = await Promise.resolve()
+      .then(() => prisma.knowledgeArticleVersion.findFirst({ where: { workspaceId: Number(workspaceId), articleId: Number(id), version: Number(version) } }))
+      .catch(() => null);
+    if (!row) throw new NotFoundError('That version was not found');
+    return row;
+  }
+
+  /** Put an older version back: a NEW version with that one's content (nothing is ever lost). */
+  async restore(workspaceId, id, version, actor = null, { canCheck = true } = {}) {
+    const old = await this.getVersion(workspaceId, id, version);
+    return this.update(workspaceId, id, {
+      title: old.title, bodyHtml: old.bodyHtml, categoryId: old.categoryId, subcategoryId: old.subcategoryId, tags: old.tags,
+    }, actor, { canCheck, changeNote: `Restored version ${old.version}` });
+  }
+
+  /**
+   * Take a doubtful article out of automatic answers (it can still be read,
+   * and quoted in drafts for agents, marked as such). Never throws.
+   */
+  async markNeedsLook(workspaceId, id, { by = null } = {}) {
+    return Promise.resolve()
+      .then(() => prisma.knowledgeArticle.updateMany({
+        where: { id: Number(id), workspaceId: Number(workspaceId), status: 'published', confidence: { not: 'needs_look' } },
+        data: { confidence: 'needs_look', updatedBy: by },
+      }))
+      .then((res) => (res?.count || 0) > 0)
+      .catch((err) => { logger.warn(`Knowledge article ${id}: could not be marked "needs a look" (${err.message})`); return false; });
+  }
+
+  async update(workspaceId, id, input, actor = null, { canCheck = true, changeNote = null, suggestionId = null } = {}) {
     const existing = await Promise.resolve()
       .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) } }))
       .catch(() => null);
@@ -593,11 +701,22 @@ class KnowledgeArticleService {
     const contentHash = hashOf(title, bodyText);
     const contentChanged = contentHash !== existing.contentHash;
     const publishing = status === 'published' && existing.status !== 'published';
+    const by = actor?.email || actor?.name || null;
+    const versioned = VERSION_FIELDS.some((f) => data[f] !== undefined && JSON.stringify(data[f]) !== JSON.stringify(existing[f]));
+    // A changed or newly published article is Checked when the person may
+    // confirm articles here; otherwise it goes back to "Not checked yet".
+    const edited = ['title', 'bodyHtml'].some((f) => data[f] !== undefined && data[f] !== existing[f]);
+    const touchesTrust = status === 'published' && (edited || publishing);
+    const trust = !touchesTrust ? {} : canCheck
+      ? { confidence: 'checked', checkedBy: by, checkedAt: new Date() }
+      : { confidence: 'not_checked' };
     const row = await prisma.knowledgeArticle.update({
       where: { id: existing.id },
       data: {
         ...data,
         contentHash,
+        ...trust,
+        ...(versioned ? { version: (Number(existing.version) || 1) + 1 } : {}),
         // Publishing counts as verifying: someone just stood behind it.
         ...(publishing ? { lastVerifiedAt: new Date() } : {}),
         // Stale vectors are worse than none: a changed body re-indexes below.
@@ -605,6 +724,7 @@ class KnowledgeArticleService {
         updatedBy: actor?.email || actor?.name || null,
       },
     });
+    if (versioned) await this._saveVersion(row, { by, changeNote, suggestionId });
     const hasSections = Array.isArray(row.sections) && row.sections.length > 0;
     const needsIndex = row.status === 'published' && (contentChanged || !hasSections || !(row.embedding || []).length);
     const indexed = needsIndex ? await this.indexArticle(row) : null;
@@ -621,9 +741,75 @@ class KnowledgeArticleService {
     assertEditable(existing);
     const row = await prisma.knowledgeArticle.update({
       where: { id: existing.id },
-      data: { lastVerifiedAt: new Date(), updatedBy: actor?.email || actor?.name || null },
+      data: {
+        lastVerifiedAt: new Date(),
+        // Checking an article is also what brings a doubtful one back.
+        confidence: 'checked',
+        checkedBy: actor?.email || actor?.name || null,
+        checkedAt: new Date(),
+        updatedBy: actor?.email || actor?.name || null,
+      },
     });
     return articleView(row);
+  }
+
+  /**
+   * The Library's tree (section 12): per top category and subcategory, how
+   * many articles there are and how many need attention, plus the totals and
+   * the signed-in person's own. One grouped read; fails soft to zeros.
+   */
+  async library(workspaceId, { email = null } = {}) {
+    const ws = Number(workspaceId);
+    const [rows, cats] = await Promise.all([
+      Promise.resolve().then(() => prisma.knowledgeArticle.findMany({
+        where: { workspaceId: ws, status: { not: 'archived' } },
+        select: { id: true, status: true, categoryId: true, subcategoryId: true, confidence: true, lastVerifiedAt: true, reviewEveryDays: true, createdAt: true, ownerEmail: true },
+        take: 10000,
+      })).catch(() => []),
+      Promise.resolve().then(() => prisma.competencyCategory.findMany({
+        where: { workspaceId: ws, isActive: true },
+        select: { id: true, name: true, parentId: true, sortOrder: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        take: 2000,
+      })).catch(() => []),
+    ]);
+    const now = Date.now();
+    const blank = () => ({ articles: 0, drafts: 0, attention: 0, notChecked: 0 });
+    const add = (bucket, row) => {
+      const health = healthOf(row, now);
+      if (health === 'draft') bucket.drafts += 1; else bucket.articles += 1;
+      if (health === 'needs_look' || health === 'out_of_date') bucket.attention += 1;
+      if (health === 'not_checked') bucket.notChecked += 1;
+    };
+    const byCat = new Map();
+    const bySub = new Map();
+    const totals = blank();
+    const none = blank();
+    const mine = blank();
+    const me = cleanEmail(email);
+    for (const r of rows || []) {
+      add(totals, r);
+      if (me && cleanEmail(r.ownerEmail) === me) add(mine, r);
+      if (!r.categoryId) { add(none, r); continue; }
+      if (!byCat.has(r.categoryId)) byCat.set(r.categoryId, blank());
+      add(byCat.get(r.categoryId), r);
+      if (r.subcategoryId) {
+        if (!bySub.has(r.subcategoryId)) bySub.set(r.subcategoryId, blank());
+        add(bySub.get(r.subcategoryId), r);
+      }
+    }
+    const tops = (cats || []).filter((c) => c.parentId === null);
+    return {
+      totals,
+      mine,
+      uncategorised: none,
+      categories: tops.map((top) => ({
+        id: top.id,
+        name: top.name,
+        ...(byCat.get(top.id) || blank()),
+        subcategories: (cats || []).filter((c) => c.parentId === top.id).map((sub) => ({ id: sub.id, name: sub.name, ...(bySub.get(sub.id) || blank()) })),
+      })),
+    };
   }
 
   /**
@@ -852,6 +1038,7 @@ class KnowledgeArticleService {
         },
         stale,
         needsReview: stale,
+        confidence: r.confidence || 'not_checked',
         lastVerifiedAt: r.lastVerifiedAt || null,
         reviewDueAt: reviewDueAt(r),
       });
