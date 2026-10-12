@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ListChecks, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ListChecks, Search, SlidersHorizontal, X } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
 import { formatDayTime, timeAgo } from '../tickets/ticketUi';
@@ -20,6 +21,12 @@ import { pageWords, rememberList } from './activityList';
  *   By playbook     one compact row per playbook (PlaybookMetrics).
  * Every filter and the page live in the URL, so Back from a run, F5 and a
  * shared link land on the same list (12 Oct 2026).
+ *
+ * One bar, not four rows (13 Oct 2026): the view switch (Answers, By
+ * playbook, the two waiting lists) belongs to the page (Knowledge.jsx); this
+ * panel puts the search and ONE "Filters" button at the right end of that
+ * same row (toolsNode), and the filters in use read as words on the counts
+ * line, each with its own remove.
  */
 
 const PAGE_SIZES = [25, 50, 100].map((n) => ({ value: String(n), label: `${n} a page` }));
@@ -104,7 +111,7 @@ function Pager({ offset, size, shown, total, onPage, onSize }) {
   );
 }
 
-function RunsView({ filters, set, canReview }) {
+function RunsView({ filters, set, canReview, inUse = null }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [data, setData] = useState(null);
@@ -139,16 +146,19 @@ function RunsView({ filters, set, canReview }) {
     <div className="space-y-3" data-testid="runs-view">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {counts && <OutcomeLine counts={counts} total={allTotal} value={status} onChange={(v) => set({ status: v })} />}
-        {canReview && needs > 0 && review !== 'needs' && (
-          <button
-            type="button"
-            onClick={() => set({ review: 'needs', status: '' })}
-            className="tp-focus-ring ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted"
-            data-testid="to-review"
-          >
-            <span className="tabular-nums text-primary">{needs}</span> to review
-          </button>
-        )}
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          {inUse}
+          {canReview && needs > 0 && review !== 'needs' && (
+            <button
+              type="button"
+              onClick={() => set({ review: 'needs', status: '' })}
+              className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-foreground hover:bg-muted"
+              data-testid="to-review"
+            >
+              <span className="tabular-nums text-primary">{needs}</span> to review
+            </button>
+          )}
+        </div>
       </div>
       {error && <p className="text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
       {!data && !error ? <Loading label="Loading activity…" /> : data && data.items.length === 0 ? (
@@ -258,11 +268,6 @@ function PlaybooksView({ playbookId, range }) {
   return <PlaybookMetrics items={items} autoModeAllowed={autoModeAllowed} />;
 }
 
-const VIEWS = [
-  { value: 'runs', label: 'Runs' },
-  { value: 'playbooks', label: 'By playbook' },
-];
-
 /** The search box: typed text reaches the URL after a short pause. */
 function SearchBox({ value, onChange }) {
   const [text, setText] = useState(value);
@@ -273,7 +278,7 @@ function SearchBox({ value, onChange }) {
     return () => clearTimeout(t);
   }, [text, value, onChange]);
   return (
-    <div className="relative sm:w-64">
+    <div className="relative w-full sm:w-60">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
       <input
         type="search"
@@ -287,8 +292,54 @@ function SearchBox({ value, onChange }) {
   );
 }
 
-/** Knowledge → Activity: Runs / By playbook with shared filters; a run id opens the run page. */
-export default function ActivityPanel({ runId = null, canReview = false, categories = [] }) {
+/** One "Filters" button; the selects open under it and close on Escape or a click outside. */
+function FiltersButton({ count, children }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      // A select's own list may render outside this box: keep the panel open for it.
+      if (box.current?.contains(e.target) || e.target.closest?.('[role="listbox"],[role="option"]')) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="kh-activity-filters"
+        onClick={() => setOpen((v) => !v)}
+        className={`tp-focus-ring inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-sm font-medium transition-colors ${
+          count ? 'border-primary/40 bg-primary/10 text-primary' : 'border-input bg-card text-foreground/85 hover:bg-muted'
+        }`}
+        data-testid="filters-button"
+      >
+        <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+        Filters{count ? <span className="tabular-nums">{count}</span> : null}
+      </button>
+      {open && (
+        <div
+          id="kh-activity-filters"
+          role="group"
+          aria-label="Filters"
+          className="absolute right-0 top-full z-30 mt-2 grid w-[min(34rem,calc(100vw-2rem))] grid-cols-1 gap-2 rounded-xl border border-border bg-card p-3 shadow-soft animate-fadeIn sm:grid-cols-2"
+          data-testid="filters-panel"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Knowledge → Activity: the runs or the per-playbook view; a run id opens the run page. */
+export default function ActivityPanel({ runId = null, canReview = false, categories = [], toolsNode = null }) {
   const [params, setParams] = useSearchParams();
   const view = params.get('view') === 'playbooks' ? 'playbooks' : 'runs';
   const [playbooks, setPlaybooks] = useState([]);
@@ -334,53 +385,57 @@ export default function ActivityPanel({ runId = null, canReview = false, categor
 
   if (runId) return <RunPage runId={runId} canReview={canReview} />;
 
-  const anyFilter = Boolean(filters.q || filters.categoryId || filters.band || filters.review || filters.trigger || filters.playbookId || filters.range || filters.status);
-  const clear = () => setParams(view === 'playbooks' ? { view: 'playbooks' } : {}, { replace: true });
+  const runs = view === 'runs';
+  // The selects behind "Filters", and each one in use as words with its own remove.
+  const FIELDS = [
+    runs && categoryOptions.length > 1 ? { key: 'categoryId', label: 'Category', options: categoryOptions } : null,
+    runs ? { key: 'band', label: 'How sure', options: BAND_OPTIONS } : null,
+    runs ? { key: 'review', label: 'Review', options: REVIEW_OPTIONS } : null,
+    runs ? { key: 'trigger', label: 'Live or test', options: TRIGGER_OPTIONS } : null,
+    { key: 'playbookId', label: 'Playbook', options: playbookOptions },
+    { key: 'range', label: 'When', options: RANGE_OPTIONS },
+  ].filter(Boolean);
+  const used = FIELDS
+    .filter((f) => filters[f.key])
+    .map((f) => ({ ...f, word: f.options.find((o) => String(o.value) === String(filters[f.key]))?.label || filters[f.key] }));
+  const clear = () => setParams(runs ? {} : { view: 'playbooks' }, { replace: true });
+  const anyFilter = used.length > 0 || Boolean(filters.q || filters.status);
+
+  const tools = (
+    <div className="flex w-full items-center gap-2 sm:w-auto" data-testid="activity-filters">
+      {runs && <SearchBox value={filters.q} onChange={(v) => set({ q: v })} />}
+      <FiltersButton count={used.length}>
+        {FIELDS.map((f) => (
+          <label key={f.key} className="block min-w-0">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">{f.label}</span>
+            <FancySelect value={filters[f.key]} onChange={(v) => set({ [f.key]: v })} options={f.options} aria-label={f.label} className="h-9" />
+          </label>
+        ))}
+      </FiltersButton>
+    </div>
+  );
+  const inUse = anyFilter ? (
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" data-testid="filters-in-use">
+      {used.map((f) => (
+        <button key={f.key} type="button" onClick={() => set({ [f.key]: '' })} className="tp-focus-ring inline-flex items-center gap-1 rounded text-foreground/85 hover:text-foreground" aria-label={`Remove the filter: ${f.word}`}>
+          {f.word} <X className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+        </button>
+      ))}
+      <button type="button" onClick={clear} className="tp-focus-ring rounded font-medium text-primary hover:underline" data-testid="clear-filters">Clear all</button>
+    </p>
+  ) : null;
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center" data-testid="activity-filters">
-        <div role="tablist" aria-label="Activity view" className="inline-flex self-start rounded-lg border border-border bg-card p-0.5">
-          {VIEWS.map((v) => (
-            <button
-              key={v.value}
-              type="button"
-              role="tab"
-              aria-selected={view === v.value}
-              onClick={() => set({ view: v.value === 'runs' ? '' : v.value })}
-              className={`tp-focus-ring h-8 rounded-md px-3.5 text-sm font-medium transition-colors ${
-                view === v.value ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
-        {view === 'runs' && <SearchBox value={filters.q} onChange={(v) => set({ q: v })} />}
-        <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:flex-wrap">
-          {view === 'runs' && categoryOptions.length > 1 && (
-            <div className="sm:w-48"><FancySelect value={filters.categoryId} onChange={(v) => set({ categoryId: v })} options={categoryOptions} aria-label="Category" className="h-9" /></div>
-          )}
-          {view === 'runs' && (
-            <>
-              <div className="sm:w-40"><FancySelect value={filters.band} onChange={(v) => set({ band: v })} options={BAND_OPTIONS} aria-label="How sure" className="h-9" /></div>
-              <div className="sm:w-40"><FancySelect value={filters.review} onChange={(v) => set({ review: v })} options={REVIEW_OPTIONS} aria-label="Review" className="h-9" /></div>
-              <div className="sm:w-44"><FancySelect value={filters.trigger} onChange={(v) => set({ trigger: v })} options={TRIGGER_OPTIONS} aria-label="Live or test" className="h-9" /></div>
-            </>
-          )}
-          <div className="sm:w-48"><FancySelect value={filters.playbookId} onChange={(v) => set({ playbookId: v })} options={playbookOptions} aria-label="Playbook" className="h-9" /></div>
-          <div className="sm:w-40"><FancySelect value={filters.range} onChange={(v) => set({ range: v })} options={RANGE_OPTIONS} aria-label="When" className="h-9" /></div>
-          {anyFilter && (
-            <button type="button" onClick={clear} className="tp-focus-ring inline-flex h-9 items-center gap-1 rounded-lg px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="clear-filters">
-              <X className="h-3.5 w-3.5" aria-hidden="true" /> Clear
-            </button>
-          )}
-        </div>
-      </div>
-
-      {view === 'runs'
-        ? <RunsView filters={filters} set={set} canReview={canReview} />
-        : <PlaybooksView playbookId={filters.playbookId} range={filters.range} />}
+      {toolsNode ? createPortal(tools, toolsNode) : <div className="flex justify-end">{tools}</div>}
+      {runs
+        ? <RunsView filters={filters} set={set} canReview={canReview} inUse={inUse} />
+        : (
+          <>
+            {inUse && <div className="flex justify-end">{inUse}</div>}
+            <PlaybooksView playbookId={filters.playbookId} range={filters.range} />
+          </>
+        )}
     </div>
   );
 }

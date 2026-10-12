@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.49-preview';
+export const APP_VERSION = '4.2.50-preview';
 
 export const changelog = [
+  {
+    version: '4.2.50-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Knowledge &rarr; Activity: one bar where there were four rows</strong> &mdash; Answers, By playbook, Waiting on requesters and Waiting for an agent are now one row of views, with the search and a single &ldquo;Filters&rdquo; button at its right end. The button opens the six filters and shows how many are in use; the ones in use read as words on the counts line, each with its own &times;, next to &ldquo;Clear all&rdquo; and &ldquo;N to review&rdquo;.' },
+    ],
+  },
   {
     version: '4.2.49-preview',
     date: 'October 12, 2026',

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Home, Inbox, Settings2, SlidersHorizontal, X } from 'lucide-react';
 import { knowledgePictogram } from '../components/v4/KnowledgePictogram';
 import AppHeader from '../components/AppHeader';
@@ -21,7 +21,7 @@ import HomePanel from '../components/knowledge/HomePanel';
 import InboxPanel from '../components/knowledge/InboxPanel';
 import NotesToArticle from '../components/knowledge/NotesToArticle';
 import { ConfirmDialog, KnowledgeGuardContext, Loading } from '../components/knowledge/knowledgeUi';
-import { PanelTabs, TabActionsContext } from '../components/knowledge/builderUi';
+import { TabActionsContext } from '../components/knowledge/builderUi';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): the articles we can
@@ -71,6 +71,8 @@ export default function Knowledge() {
   const [dirty, setDirtyState] = useState(false);
   const [pendingNav, setPendingNav] = useState(null);
   const [actionsNode, setActionsNode] = useState(null);
+  const [activityTools, setActivityTools] = useState(null);
+  const [query] = useSearchParams();
   const dirtyRef = useRef(false);
 
   useEffect(() => {
@@ -113,10 +115,14 @@ export default function Knowledge() {
   const inboxCount = Number(settings?.inboxCount) || 0;
   // A tab click also closes an open article / playbook / run on the same tab.
   const selectTab = (id) => { if (id !== tab || itemId) leave(`/knowledge/${id}`); };
+  // One row for everything under Activity (13 Oct 2026): the four views as
+  // quiet tabs, with the list's search and Filters button at the right end.
+  const activityView = tab === 'activity' && query.get('view') === 'playbooks' ? 'playbooks' : tab;
   const activityViews = [
-    { id: 'activity', label: 'Answers' },
-    { id: 'waiting', label: 'Waiting on requesters' },
-    ...(settings?.canApprove === true ? [{ id: 'approvals', label: 'Waiting for an agent' }] : []),
+    { id: 'activity', label: 'Answers', to: '/knowledge/activity' },
+    { id: 'playbooks', label: 'By playbook', to: '/knowledge/activity?view=playbooks' },
+    { id: 'waiting', label: 'Waiting on requesters', to: '/knowledge/waiting' },
+    ...(settings?.canApprove === true ? [{ id: 'approvals', label: 'Waiting for an agent', to: '/knowledge/approvals' }] : []),
   ];
 
   return (
@@ -150,9 +156,26 @@ export default function Knowledge() {
                 {tab === 'inbox' && <InboxPanel itemId={itemId || null} isAdmin={settings?.rights?.isAdmin === true} />}
                 {tab === 'articles' && itemId === 'from-notes' && <NotesToArticle categories={categories} rights={settings?.rights || null} />}
                 {tab === 'articles' && itemId !== 'from-notes' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canWrite} />}
-                {activeTab === 'activity' && !itemId && activityViews.length > 1 && (
-                  <div className="mb-4 max-w-xl">
-                    <PanelTabs tabs={activityViews} activeId={tab} onSelect={(id) => leave(`/knowledge/${id}`)} ariaLabel="Activity views" idPrefix="knowledge-activity" />
+                {activeTab === 'activity' && !itemId && (
+                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center" data-testid="activity-bar">
+                    <div role="tablist" aria-label="Activity views" className="settings-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto">
+                      {activityViews.map((v) => (
+                        <button
+                          key={v.id}
+                          type="button"
+                          role="tab"
+                          id={`knowledge-activity-tab-${v.id}`}
+                          aria-selected={activityView === v.id}
+                          onClick={() => { if (activityView !== v.id) leave(v.to); }}
+                          className={`tp-focus-ring h-9 flex-shrink-0 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors ${
+                            activityView === v.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div ref={setActivityTools} className="flex items-center sm:ml-auto" />
                   </div>
                 )}
                 {tab === 'gaps' && <GapsPanel canManage={canManage} canRefresh={canManage || settings?.canReview === true} />}
@@ -160,7 +183,7 @@ export default function Knowledge() {
                 {tab === 'answering' && <AnsweringPanel canManage={canManage} onSettingsChange={(next) => { if (next) setSettings((prev) => ({ ...(prev || {}), ...next })); }} />}
                 {tab === 'waiting' && <WaitingPanel />}
                 {tab === 'approvals' && <ApprovalsPanel />}
-                {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} categories={categories} />}
+                {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} categories={categories} toolsNode={activityTools} />}
                 {tab === 'settings' && <KnowledgeSettingsPanel settings={settings} onChange={setSettings} />}
               </section>
             )}
