@@ -10,6 +10,7 @@ import ApprovalComposer, { ConfirmSheet } from '../components/tickets/ApprovalCo
 import ApprovalTicketBrief from '../components/approvals/ApprovalTicketBrief';
 import { groupApprovals, splitImageRefs } from '../utils/approvalBrief';
 import AppHeader from '../components/AppHeader';
+import PullToRefresh from '../components/common/PullToRefresh';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import FancySelect from '../components/common/FancySelect';
@@ -685,6 +686,7 @@ export default function ApprovalsInbox() {
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
       <AppHeader activePage="approvals" />
+      <PullToRefresh onRefresh={() => load({ silent: true })} />
       <main className={applyWidth('max-w-5xl mx-auto px-4 sm:px-6 py-5 pb-24 lg:pb-6 animate-fadeIn', layoutWidth)}>
         {/* Hero — small, one line. Phones skip it (12 Oct 2026): the tab bar below
             already says where you are, and the band cost a fifth of the screen. */}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -6,6 +6,7 @@ import {
   LogOut,
   MoreHorizontal,
   Settings,
+  Smartphone,
   Sparkles,
   UserCircle2,
   X,
@@ -17,6 +18,7 @@ import { scrubFreeText as scrubDemoText, useDemoMode } from '../../utils/demoMod
 import { cn } from '../../lib/utils';
 import { APP_VERSION } from '../../data/changelog';
 import ChangelogModal from '../ChangelogModal';
+import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../../utils/pwa';
 import ThemeControl from './ThemeControl';
 import LayoutControl from './LayoutControl';
 import MotionControl from './MotionControl';
@@ -49,6 +51,12 @@ export default function MobileTabBar() {
   const demoMode = useDemoMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
+  // Install as an app (12 Oct 2026): Chrome hands us a prompt; Safari on an
+  // iPhone has none, so the row explains the two taps instead.
+  const [, bumpInstall] = useState(0);
+  const [iosHelp, setIosHelp] = useState(false);
+  useEffect(() => onInstallChange(() => bumpInstall((n) => n + 1)), []);
+  const showInstall = !isStandalone() && (canPromptInstall() || isIos());
 
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id || null;
@@ -241,6 +249,27 @@ export default function MobileTabBar() {
                 </div>
               )}
 
+              {showInstall && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="install-app"
+                    aria-expanded={canPromptInstall() ? undefined : iosHelp}
+                    onClick={() => { if (canPromptInstall()) { setMoreOpen(false); promptInstall(); } else { setIosHelp((v) => !v); } }}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground hover:bg-muted"
+                  >
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300">
+                      <Smartphone className="h-[20px] w-[20px]" />
+                    </span>
+                    <span className="flex-1">Install as an app</span>
+                  </button>
+                  {iosHelp && (
+                    <p className="px-4 pb-3 pl-[4.25rem] text-xs leading-snug text-muted-foreground">
+                      In Safari, tap the Share button, then &ldquo;Add to Home Screen&rdquo;.
+                    </p>
+                  )}
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => { setMoreOpen(false); setShowChangelog(true); }}

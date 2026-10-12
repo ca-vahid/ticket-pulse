@@ -27,6 +27,7 @@ import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import { mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import PhoneSwipeRow from '../components/tickets/PhoneSwipeRow';
+import PullToRefresh from '../components/common/PullToRefresh';
 import StatusPicker from '../components/tickets/StatusPicker';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
@@ -1683,6 +1684,7 @@ export default function Tickets() {
       <AppHeader activePage="tickets" />
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
+      <PullToRefresh onRefresh={() => Promise.allSettled([fetchTickets({ silent: true }), fetchStats()])} />
       <main className={applyWidth('max-w-[2200px] mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn', layoutWidth)}>
         {/* Page header (v3.8.31): one slim row. The artwork band spent ~94 px and
             a subtitle to repeat the page you are already on; the title, the

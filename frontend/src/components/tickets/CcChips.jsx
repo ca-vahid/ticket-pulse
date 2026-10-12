@@ -23,13 +23,19 @@ export default function CcChips({
   // access. disabled: keep the row but block edits while a save is in flight.
   readOnly = false,
   disabled = false,
+  // Phone composer (12 Oct 2026): show this many chips and fold the rest
+  // behind a "+N more" button. 0 = always show all.
+  collapseAfter = 0,
 }) {
   const [input, setInput] = useState('');
   const [results, setResults] = useState([]); // [{name, email, hint}]
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(-1);
+  const [showAll, setShowAll] = useState(false);
   const boxRef = useRef(null);
+  const foldable = collapseAfter > 0 && value.length > collapseAfter;
+  const shown = foldable && !showAll ? value.slice(0, collapseAfter) : value;
 
   const trimmed = input.trim();
   const invalid = trimmed.length > 0 && !EMAIL_RE.test(trimmed) && !open;
@@ -131,7 +137,7 @@ export default function CcChips({
             straight through the container's right border, because an inline-flex
             child will not shrink below its content unless told to. The full
             address stays available on hover. */}
-        {value.map((email) => (
+        {shown.map((email) => (
           <span
             key={email}
             title={email}
@@ -151,6 +157,17 @@ export default function CcChips({
             )}
           </span>
         ))}
+        {foldable && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            aria-expanded={showAll}
+            data-testid="cc-fold"
+            className="tp-focus-ring rounded-full px-2 py-0.5 text-xs font-semibold text-blue-700 dark:text-blue-200"
+          >
+            {showAll ? 'Show fewer' : `+${value.length - collapseAfter} more`}
+          </button>
+        )}
         {readOnly && value.length === 0 && (
           <span className="text-xs text-muted-foreground/75">{placeholder}</span>
         )}

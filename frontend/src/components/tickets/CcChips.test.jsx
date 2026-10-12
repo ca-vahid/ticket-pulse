@@ -7,6 +7,23 @@ import CcChips from './CcChips';
 afterEach(cleanup);
 
 describe('CcChips', () => {
+  test('collapseAfter folds the extra chips behind a +N more button', () => {
+    const value = ['a@x.io', 'b@x.io', 'c@x.io', 'd@x.io'];
+    render(<CcChips value={value} onChange={() => {}} collapseAfter={2} />);
+    expect(screen.getByText('a@x.io')).toBeInTheDocument();
+    expect(screen.queryByText('c@x.io')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '+2 more' }));
+    expect(screen.getByText('d@x.io')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(screen.queryByText('d@x.io')).not.toBeInTheDocument();
+  });
+
+  test('without collapseAfter every chip shows and there is no fold button', () => {
+    render(<CcChips value={['a@x.io', 'b@x.io', 'c@x.io']} onChange={() => {}} />);
+    expect(screen.getByText('c@x.io')).toBeInTheDocument();
+    expect(screen.queryByTestId('cc-fold')).not.toBeInTheDocument();
+  });
+
   test('Enter commits a valid email as a chip', () => {
     const onChange = vi.fn();
     render(<CcChips value={[]} onChange={onChange} />);

@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.2.46-preview';
+export const APP_VERSION = '4.2.47-preview';
 
 export const changelog = [
+  {
+    version: '4.2.47-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The ticket itself is on the first screen of a phone</strong> — a long subject shows two lines (tap it for the rest) and the requester is one line with name and place. The arrow beside it opens their e-mail, phone, other tickets and Also for.' },
+      { type: 'improved', html: '<strong>Cc in the phone reply box folds</strong> — it shows the first two addresses and a “+7 more” button, so the text box is no longer a screen further down on a ticket with many people in Cc.' },
+      { type: 'added', html: '<strong>Pull down to refresh</strong> — on a phone, pull the Tickets or Approvals page down from the top to reload the list. It replaces the browser’s own pull, which reloaded the whole site.' },
+      { type: 'added', html: '<strong>Install Ticket Pulse as an app</strong> — on a phone, More → “Install as an app” puts Ticket Pulse on the home screen and opens it full screen without the browser bars. On an iPhone the row shows the two taps Safari needs (Share, then Add to Home Screen).' },
+    ],
+  },
   {
     version: '4.2.46-preview',
     date: 'October 12, 2026',

@@ -71,6 +71,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { ticketsAPI, uiPreferencesAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
+import useIsPhone from '../hooks/useIsPhone';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
@@ -802,6 +803,11 @@ export default function TicketDetail() {
   };
   const [taskOpenCount, setTaskOpenCount] = useState(0); // drives the Tasks tab badge
   const [mobileAssignOpen, setMobileAssignOpen] = useState(false); // mobile assign bottom sheet
+  // Phone header (12 Oct 2026): a long subject shows two lines and the
+  // requester's contact lines fold away, so the description is on screen one.
+  const isPhone = useIsPhone();
+  const [subjectFull, setSubjectFull] = useState(false);
+  const [requesterOpen, setRequesterOpen] = useState(false);
   // Phone (12 Oct 2026): the properties column opens as a sheet from the
   // action bar instead of sitting under the whole conversation.
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -2291,7 +2297,8 @@ export default function TicketDetail() {
                       ) : (
                         <h1
                           onMouseEnter={liveChanges.subject ? () => ackChange('subject') : undefined}
-                          className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${
+                          onClick={isPhone ? () => setSubjectFull((v) => !v) : undefined}
+                          className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${subjectFull ? '' : 'max-sm:line-clamp-2'} ${
                             liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
                           }`}
                         >
@@ -2359,7 +2366,7 @@ export default function TicketDetail() {
                     </div>
                   </div>
 
-                  <p className="text-xs text-muted-foreground/75 mt-1">
+                  <p className="text-xs text-muted-foreground/75 mt-1 max-sm:truncate">
                 Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
                     {ticket.requester?.name ? <> by <span className="text-muted-foreground font-medium">{ticket.requester.name}</span></> : null}
                     {ticket.resolvedAt ? <> · resolved <span title={new Date(ticket.resolvedAt).toLocaleString()}>{timeAgo(ticket.resolvedAt)}</span></> : null}
@@ -2742,11 +2749,11 @@ export default function TicketDetail() {
                     <div>
                       <div className="flex items-start gap-3">
                         {requesterIntegrationIdentity(ticket.requester) ? (
-                          <IntegrationAvatar identity={requesterIntegrationIdentity(ticket.requester)} size="h-12 w-12" className="ring-2" />
+                          <IntegrationAvatar identity={requesterIntegrationIdentity(ticket.requester)} size="h-9 w-9 sm:h-12 sm:w-12" className="ring-2" />
                         ) : requesterPhoto ? (
-                          <img src={requesterPhoto} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-card shadow-subtle flex-shrink-0" />
+                          <img src={requesterPhoto} alt="" className="h-9 w-9 sm:h-12 sm:w-12 rounded-full object-cover ring-2 ring-card shadow-subtle flex-shrink-0" />
                         ) : (
-                          <PersonAvatar name={ticket.requester.name} size="h-12 w-12" textSize="text-base" />
+                          <PersonAvatar name={ticket.requester.name} size="h-9 w-9 sm:h-12 sm:w-12" textSize="text-sm sm:text-base" />
                         )}
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-bold text-foreground truncate">
@@ -2765,7 +2772,7 @@ export default function TicketDetail() {
                             <Link
                               to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester.name || '')}&status=any`}
                               title={`View all tickets from ${ticket.requester.name || 'this requester'}`}
-                              className="tp-focus-ring mt-1 inline-flex items-center gap-1 rounded text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-200"
+                              className={`tp-focus-ring mt-1 inline-flex items-center gap-1 rounded text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-200 ${requesterOpen ? '' : 'max-sm:hidden'}`}
                             >
                               <History className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                               {related.sameRequesterCount} other ticket{related.sameRequesterCount === 1 ? '' : 's'}
@@ -2773,9 +2780,19 @@ export default function TicketDetail() {
                             </Link>
                           )}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => setRequesterOpen((v) => !v)}
+                          aria-expanded={requesterOpen}
+                          aria-label={requesterOpen ? 'Hide requester contact' : 'Show requester contact'}
+                          data-testid="requester-toggle"
+                          className="tp-focus-ring -mr-1 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground sm:hidden"
+                        >
+                          <ChevronDown className={`h-4 w-4 transition-transform ${requesterOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                        </button>
                       </div>
 
-                      <ul className="mt-3 space-y-1 text-xs" aria-label="Requester contact">
+                      <ul className={`mt-3 space-y-1 text-xs ${requesterOpen ? '' : 'max-sm:hidden'}`} aria-label="Requester contact">
                         {ticket.requester.email && (
                           <li className="flex items-center gap-2 min-w-0">
                             <Mail className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -2834,7 +2851,7 @@ export default function TicketDetail() {
                           button + count, the chip editor and its helper copy inside.
                           Every reply to the requester reaches these people; the FS copy
                           carries them as cc_emails (TP-born → PATCH; FS-born → write-back). */}
-                      <div ref={alsoForRef} className="relative mt-3" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
+                      <div ref={alsoForRef} className={`relative mt-3 ${requesterOpen ? '' : 'max-sm:hidden'}`} data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
                         <button
                           type="button"
                           onClick={() => setAlsoForOpen((v) => !v)}
@@ -3406,7 +3423,7 @@ export default function TicketDetail() {
                         )}
                         {composerMode === 'reply' && (
                           <div className="mb-2">
-                            <CcChips value={composerCc} onChange={setComposerCc} />
+                            <CcChips value={composerCc} onChange={setComposerCc} collapseAfter={isPhone ? 2 : 0} />
                             {/* QA 09-09 #6: removing an additional requester here
                                 drops them from THIS reply only — they stay on the
                                 ticket and receive the next one. Say so, and point
