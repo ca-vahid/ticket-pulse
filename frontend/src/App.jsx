@@ -513,7 +513,8 @@ function App() {
                   <ViewAsBanner />
                   {/* Admin health banners share one bottom-left stack so email +
                   stale-sync warnings never overlap each other. */}
-                  <div className="fixed bottom-3 left-3 z-[9998] flex flex-col gap-2">
+                  {/* Phones (12 Oct 2026): above the bottom tab bar, not on top of it. */}
+                  <div className="fixed bottom-3 left-3 z-[9998] flex flex-col gap-2 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] max-md:right-3">
                     <SyncHealthBanner />
                     <EmailHealthBanner />
                   </div>

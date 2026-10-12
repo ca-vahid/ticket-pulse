@@ -144,3 +144,24 @@ describe('TechCard — mobile stat presentation (simple style)', () => {
     expect(screen.queryByText('Coord')).toBeNull();
   });
 });
+
+// 12 Oct 2026: the dashboard's "Expand all" did nothing on a phone, because the
+// phone cards never received the switch.
+describe('TechCard — Expand all from the dashboard', () => {
+  const toggle = () => screen.getByRole('button', { name: /View tickets|Hide tickets/ });
+
+  test('follows the switch when it flips, and still opens by hand', () => {
+    const { rerender } = renderCard(technician);
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    const again = (forceExpand) => rerender(<MemoryRouter><TechCard technician={technician} viewMode="daily" forceExpand={forceExpand} /></MemoryRouter>);
+    again(true);
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    again(false);
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('a card that mounts while the switch is on starts open', () => {
+    renderCard(technician, { forceExpand: true });
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+  });
+});

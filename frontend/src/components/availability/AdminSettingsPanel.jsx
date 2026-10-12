@@ -35,8 +35,8 @@ export default function AdminSettingsPanel({ config, error, reload, toast }) {
 
   const Section = active.C;
   return (
-    <div className="grid gap-5 lg:grid-cols-[11rem_minmax(0,1fr)]">
-      <nav aria-label="Availability settings" className="-mx-1 overflow-x-auto lg:mx-0 lg:overflow-visible">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[11rem_minmax(0,1fr)]">
+      <nav aria-label="Availability settings" className="tp-swipe-row -mx-1 min-w-0 overflow-x-auto lg:mx-0 lg:overflow-visible">
         <ul className="flex gap-0.5 px-1 lg:flex-col lg:px-0">
           {SECTIONS.map((s) => {
             const on = s.id === active.id;

@@ -2250,8 +2250,10 @@ export default function TicketDetail() {
                   {/* Row 1 (16 Sep 2026): the subject IS the top — big priority and
                       status badges on the right, and the Pick up call-to-action
                       under them when nobody has the ticket yet. */}
-                  <div className="flex flex-wrap items-start gap-3">
-                    <div className="min-w-0 flex-1">
+                  {/* Phone (12 Oct 2026): badges on their own line above the subject, so
+                      the subject has the full width instead of one word a line. */}
+                  <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3">
+                    <div className="min-w-0 sm:flex-1">
                       {editingSubject ? (
                         <input
                           autoFocus
@@ -2307,16 +2309,16 @@ export default function TicketDetail() {
                         />
                       ))}
                     </div>
-                    <div className="flex flex-shrink-0 flex-col items-end gap-2">
+                    <div className="flex flex-shrink-0 flex-row flex-wrap items-center gap-2 sm:flex-col sm:flex-nowrap sm:items-end">
                       <div
                         onMouseEnter={() => { ackChange('status'); ackChange('priority'); }}
                         className={`flex items-center gap-2 rounded-xl transition-all ${
                           liveChanges.status || liveChanges.priority ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 p-1' : ''
                         }`}
                       >
-                        <PriorityBadge priority={ticket.priority} />
+                        <PriorityBadge priority={ticket.priority} className="max-sm:gap-1.5 max-sm:px-2.5 max-sm:py-1 max-sm:text-xs" />
                         {/* Parked reads "Parked" (FreshService still sees Pending). */}
-                        <StatusBadge status={ticket.parkedUntil ? 'Parked' : ticket.status} tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
+                        <StatusBadge status={ticket.parkedUntil ? 'Parked' : ticket.status} tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} className="max-sm:gap-1.5 max-sm:px-2.5 max-sm:py-1 max-sm:text-xs" />
                         {ticket.solutionVerifiedAt && <SolutionMark withLabel className="ml-1" />}
                       </div>
                       {canPickUp && (
@@ -2330,7 +2332,7 @@ export default function TicketDetail() {
                           }`}
                         >
                           {savingField === 'pickup' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <ActionIcon name="pickup" className="h-5 w-5 brightness-0 invert" />}
-                          {confirmPickup ? 'Confirm pick up?' : 'Pick up this ticket'}
+                          {confirmPickup ? 'Confirm pick up?' : <><span className="sm:hidden">Pick up</span><span className="hidden sm:inline">Pick up this ticket</span></>}
                         </button>
                       )}
                     </div>
@@ -2436,7 +2438,7 @@ export default function TicketDetail() {
                         onBlur={() => setConfirmDelete(false)}
                         disabled={savingField === 'delete'}
                         title="Delete this Ticket Pulse ticket"
-                        className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                        className={`tp-focus-ring hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
                           confirmDelete
                             ? 'border-red-600 bg-red-600 text-white hover:bg-red-700'
                             : 'border-border bg-card text-muted-foreground hover:border-red-300 hover:text-red-700 dark:hover:border-red-500/40 dark:hover:text-red-200'
@@ -2450,7 +2452,7 @@ export default function TicketDetail() {
                       onClick={() => setNoiseFlag(!ticket.isNoise)}
                       disabled={savingField === 'noise'}
                       title={ticket.isNoise ? 'Put this ticket back in the default queue' : 'Flag as noise — leaves the default queue (Views → Noise & spam)'}
-                      className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                      className={`tp-focus-ring hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
                         ticket.isNoise
                           ? 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200 dark:hover:bg-violet-500/20'
                           : 'border-border bg-card text-muted-foreground hover:border-violet-300 hover:text-violet-700 dark:hover:border-violet-500/40 dark:hover:text-violet-200'
@@ -2467,7 +2469,7 @@ export default function TicketDetail() {
                       title={ticket.solutionVerifiedAt
                         ? 'Remove the verified-solution mark'
                         : 'Mark this ticket as a verified solution — it shows up for tickets in the same category'}
-                      className={`tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                      className={`tp-focus-ring hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
                         ticket.solutionVerifiedAt
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
                           : 'border-border bg-card text-muted-foreground hover:border-emerald-300 hover:text-emerald-700 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200'
@@ -2533,13 +2535,13 @@ export default function TicketDetail() {
                         className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-muted-foreground hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-60 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200"
                       >
                         {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />}
-                        Close ticket
+                        Close<span className="max-sm:sr-only"> ticket</span>
                       </button>
                     )}
                     <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
                     <span ref={noiseMenuRef} className="relative">
                       <button
-                        onClick={() => setNoiseMenuOpen((v) => !v)}
+                        onClick={() => { setConfirmDelete(false); setNoiseMenuOpen((v) => !v); }}
                         aria-expanded={noiseMenuOpen}
                         aria-haspopup="menu"
                         aria-label="More actions"
@@ -2548,10 +2550,28 @@ export default function TicketDetail() {
                         className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''}`}
                       >
                         {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
-                        More
+                        <span className="max-sm:sr-only">More</span>
                       </button>
                       {noiseMenuOpen && (
-                        <span className="absolute left-0 top-full mt-1 z-30 w-64 tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
+                        <span className="absolute left-0 max-sm:left-auto max-sm:right-0 top-full mt-1 z-30 w-64 max-w-[calc(100vw-4rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
+                          {/* Phone: the three actions that leave the row live here. */}
+                          <span className="flex flex-col sm:hidden" data-testid="more-actions-phone">
+                            <button onClick={() => { setNoiseFlag(!ticket.isNoise); setNoiseMenuOpen(false); }} disabled={savingField === 'noise'} role="menuitem" className={moreItemClass}>
+                              <ActionIcon name="noise" className="h-5 w-5" /> {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
+                            </button>
+                            <button
+                              onClick={() => { if (ticket.solutionVerifiedAt) setSolutionFlag(false); else setSolutionPrompt({ note: ticket.solutionNote || ticket.resolutionNote || '' }); setNoiseMenuOpen(false); }}
+                              disabled={savingField === 'solution'} role="menuitem" className={moreItemClass}
+                            >
+                              <BadgeCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.solutionVerifiedAt ? 'Remove solution mark' : 'Mark as solution'}
+                            </button>
+                            {isNative && canReview && (
+                              <button onClick={deleteTicket} disabled={savingField === 'delete'} role="menuitem" className={`${moreItemClass} ${confirmDelete ? '!text-red-700 dark:!text-red-200' : ''}`}>
+                                <ActionIcon name="delete" className="h-5 w-5" /> {confirmDelete ? 'Tap again to delete' : 'Delete'}
+                              </button>
+                            )}
+                            <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                          </span>
                           <button onClick={() => { window.print(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
                             <ActionIcon name="print" className="h-5 w-5" /> Print
                           </button>
