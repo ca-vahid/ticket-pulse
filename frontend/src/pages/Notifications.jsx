@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
 import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
 import TeamsNotificationsPanel from '../components/agent/TeamsNotificationsPanel';
+import DevicePushPanel from '../components/agent/DevicePushPanel';
 
 /**
  * Dedicated Notifications page (its own destination from the account menu) —
@@ -66,6 +67,7 @@ export default function Notifications() {
         </div>
 
         <div className="space-y-5">
+          <DevicePushPanel />
           <TeamsNotificationsPanel />
           <NotificationSettingsPanel />
           <AgentAlertsPanel />

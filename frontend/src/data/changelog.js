@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.47-preview';
+export const APP_VERSION = '4.2.48-preview';
 
 export const changelog = [
+  {
+    version: '4.2.48-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Notifications on your phone or browser</strong> — turn on “Notifications on this phone” in More (or “This device” on the Mail &amp; alerts page) and Ticket Pulse notifies that device when a ticket is assigned to you, the requester replies, someone adds a note, a ticket is reopened or its SLA is close, and when an approval waits for you. A tap opens the ticket or Approvals.' },
+      { type: 'improved', html: '<strong>One set of choices</strong> — device notifications follow what you already chose under Microsoft Teams: an event set to Off or Digest is not sent, you are never told about your own action, muted tickets stay quiet, and leave, work hours and quiet hours are respected (urgent still comes through).' },
+      { type: 'improved', html: '<strong>iPhone</strong> — Apple only allows notifications from an installed app: use More → Install as an app first, open Ticket Pulse from the home screen, then turn notifications on.' },
+    ],
+  },
   {
     version: '4.2.47-preview',
     date: 'October 12, 2026',

@@ -556,6 +556,11 @@ async function dispatchTeamsNotifications(eventContext) {
     const { default: teamsNotificationService } = await import('./teamsNotificationService.js');
     teamsNotificationService.onTicketEvent(eventContext);
   } catch { /* notifications never break the pipeline */ }
+  // The same events to the person's own phone or browser (12 Oct 2026).
+  try {
+    const { default: webPushService } = await import('./webPushService.js');
+    webPushService.onTicketEvent(eventContext);
+  } catch { /* notifications never break the pipeline */ }
 }
 
 async function dispatchLifecycleWebhook(eventContext) {

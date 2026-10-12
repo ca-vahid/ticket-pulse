@@ -1839,6 +1839,10 @@ class TicketApprovalService {
     import('./teamsNotificationService.js')
       .then(({ default: teams }) => teams.notifyApproval({ approval, ticket, decisionUrl, categoryName, requestedByName, note: approval.requestNote || null }))
       .catch(() => {});
+    // And to the approver's own phone or browser, when they turned that on.
+    import('./webPushService.js')
+      .then(({ default: push }) => push.notifyApproval({ approval, ticket, categoryName, requestedByName, note: approval.requestNote || null }))
+      .catch(() => {});
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     // `ticket` → Reply-To +tp/+fs and threading headers, so an approver's

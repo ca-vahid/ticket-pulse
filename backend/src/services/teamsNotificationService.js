@@ -47,8 +47,8 @@ export const DEFAULT_OPTIONS = {
   digestTime: '08:00',
 };
 
-/** Ticket event type → [preference key, recipient kind]. */
-const EVENT_MAP = {
+/** Ticket event type → [preference key, recipient kind]. Shared with webPushService. */
+export const EVENT_MAP = {
   'ticket.assigned': [['assigned', 'assignee']],
   'ticket.reassigned': [['assigned', 'assignee'], ['unassigned_from_me', 'previous']],
   'ticket.reply_received': [['requester_replied', 'assignee']],

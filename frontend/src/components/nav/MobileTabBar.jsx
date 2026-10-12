@@ -18,6 +18,7 @@ import { scrubFreeText as scrubDemoText, useDemoMode } from '../../utils/demoMod
 import { cn } from '../../lib/utils';
 import { APP_VERSION } from '../../data/changelog';
 import ChangelogModal from '../ChangelogModal';
+import DevicePushPanel from '../agent/DevicePushPanel';
 import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from '../../utils/pwa';
 import ThemeControl from './ThemeControl';
 import LayoutControl from './LayoutControl';
@@ -249,6 +250,7 @@ export default function MobileTabBar() {
                 </div>
               )}
 
+              <DevicePushPanel compact />
               {showInstall && (
                 <>
                   <button

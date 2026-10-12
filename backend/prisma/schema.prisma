@@ -5099,3 +5099,19 @@ model TicketGroupingEvent {
   @@index([targetTicketId], map: "idx_ticket_grouping_events_target")
   @@map("ticket_grouping_events")
 }
+
+/// One browser or installed app a person turned notifications on for (web push).
+model PushSubscription {
+  id         Int       @id @default(autoincrement())
+  email      String    @db.VarChar(255) // lower-cased owner
+  endpoint   String    @unique @db.VarChar(1000)
+  p256dh     String    @db.VarChar(255)
+  auth       String    @db.VarChar(255)
+  userAgent  String?   @map("user_agent") @db.VarChar(255)
+  failCount  Int       @default(0) @map("fail_count")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSentAt DateTime? @map("last_sent_at") @db.Timestamptz(6)
+
+  @@index([email], map: "idx_push_subscriptions_email")
+  @@map("push_subscriptions")
+}

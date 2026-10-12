@@ -1,6 +1,6 @@
 {
   "name": "ticket-pulse-backend",
-  "version": "4.2.44-preview",
+  "version": "4.2.48-preview",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Backend API",
   "main": "src/app.js",
@@ -51,6 +51,7 @@
     "openai": "^6.9.0",
     "pg": "^8.16.3",
     "sanitize-html": "^2.17.4",
+    "web-push": "^3.6.7",
     "winston": "^3.14.2",
     "zod": "^3.23.8"
   },
