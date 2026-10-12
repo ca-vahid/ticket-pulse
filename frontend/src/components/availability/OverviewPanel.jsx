@@ -46,16 +46,18 @@ function OutThisWeek({ entries, byEmail, today, holidays, loading }) {
         return (
           <li key={`${e.email}-${e.id ?? i}`} className="flex items-center gap-3 py-2.5">
             <TeamAvatar email={e.email} name={name} byEmail={byEmail} size="h-9 w-9" textSize="text-xs" />
-            <div className="min-w-0 leading-tight">
+            <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-sm font-medium text-foreground">{name}</p>
-              <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-                <span className={`h-1.5 w-1.5 rounded-full ${COLOR_DOT[e.color] || COLOR_DOT.slate}`} aria-hidden="true" />
+              {/* One run of text (12 Oct 2026): as separate flex items the dot and the
+                  dates each wrapped onto their own line on a phone. */}
+              <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
+                <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${COLOR_DOT[e.color] || COLOR_DOT.slate}`} aria-hidden="true" />
                 <span>{e.label || 'Away'}{e.status === 'pending' ? ' · waiting for approval' : ''}</span>
-                <span aria-hidden="true">·</span>
-                <span>{fmtRange(e)}</span>
+                <span aria-hidden="true"> · </span>
+                <span className="whitespace-nowrap">{fmtRange(e)}</span>
               </p>
             </div>
-            <span className={`ml-auto whitespace-nowrap text-xs ${e.endDate < today ? 'text-muted-foreground/70' : 'text-muted-foreground'}`}>{when}</span>
+            <span className={`ml-auto flex-shrink-0 whitespace-nowrap text-xs ${e.endDate < today ? 'text-muted-foreground/70' : 'text-muted-foreground'}`}>{when}</span>
           </li>
         );
       })}

@@ -8,8 +8,9 @@ import { useRef } from 'react';
  * A badge is part of the tab's accessible name ("Gaps, 3 new"; badgeLabel
  * replaces "new"), so a screen reader announces the count too.
  * WAI-ARIA tabs pattern: roving tabindex, arrow keys, Home/End. The selected
- * tab gets a soft blue fill and an underline accent. Labels hide below `sm`
- * (the icon keeps an aria-label so the tab stays named). `children` renders
+ * tab gets a soft blue fill and an underline accent. Labels show at every
+ * width since 12 Oct 2026 (six bare icons on a phone said nothing); the row
+ * scrolls sideways when the tabs do not fit. `children` renders
  * at the right end of the row — the page's actions for the open tab; below
  * `sm` they wrap onto their own row instead of squeezing the tabs.
  */
@@ -41,7 +42,7 @@ export default function LightTabBar({ tabs, activeId, onSelect, ariaLabel, idPre
         role="tablist"
         aria-label={ariaLabel}
         onKeyDown={onKeyDown}
-        className="-mb-px flex min-w-0 max-w-full items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        className="tp-swipe-row -mb-px flex min-w-0 max-w-full items-end gap-0.5 overflow-x-auto overflow-y-hidden max-sm:-mx-4 max-sm:w-[calc(100%+2rem)] max-sm:max-w-[calc(100%+2rem)] max-sm:px-4"
       >
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -59,14 +60,14 @@ export default function LightTabBar({ tabs, activeId, onSelect, ariaLabel, idPre
               title={tab.title}
               tabIndex={isActive ? 0 : -1}
               onClick={() => onSelect(tab.id)}
-              className={`relative flex h-11 items-center gap-2 whitespace-nowrap rounded-t-lg border-b-2 px-3 text-sm font-medium transition-colors touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4 ${
+              className={`relative flex h-11 flex-shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-t-lg border-b-2 px-2.5 text-sm sm:gap-2 font-medium transition-colors touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-4 ${
                 isActive
                   ? 'border-primary bg-primary/[0.07] text-primary dark:bg-primary/15'
                   : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
               }`}
             >
-              {Icon && <Icon className="h-[18px] w-[18px] sm:h-4 sm:w-4" aria-hidden="true" />}
-              <span className="hidden sm:inline">{tab.label}</span>
+              {Icon && <Icon className="h-4 w-4" aria-hidden="true" />}
+              <span>{tab.label}</span>
               {tab.badge > 0 && (
                 <span aria-hidden="true" className="ml-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-amber-900 dark:bg-amber-500/20 dark:text-amber-200">
                   {tab.badge}

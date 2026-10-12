@@ -121,7 +121,7 @@ export default function BalancesSection({ config, toast }) {
       ) : !rows.length ? (
         <p className="py-4 text-sm text-muted-foreground">No balances for {year}.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full min-w-[42rem] text-sm">
             <thead><tr><th className={TH}>Person</th><th className={TH}>Type</th><th className={`${TH} text-right`}>Entitled</th><th className={`${TH} text-right`}>Adjusted</th><th className={`${TH} text-right`}>Taken</th><th className={`${TH} text-right`}>Booked</th><th className={`${TH} text-right`}>Pending</th><th className={`${TH} text-right`}>Left</th><th className={TH}><span className="sr-only">Adjust</span></th></tr></thead>
             <tbody className="divide-y divide-border">

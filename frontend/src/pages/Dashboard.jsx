@@ -1819,7 +1819,7 @@ export default function Dashboard() {
           {/* Single merged controls row: Team identity + view controls (left)
               and Search + Category + Legend popover (right). Wraps on narrow
               screens via flex-wrap. */}
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap lg:gap-3">
+          <div className="mb-3 flex flex-row flex-wrap items-center gap-2 lg:gap-3">
             {/* Team identity */}
             <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start sm:flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
@@ -1834,8 +1834,32 @@ export default function Dashboard() {
                   ({searchTerm || hasActiveCategoryFilter ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
                 </span>
               </div>
-              <span className="rounded-full bg-card/80 px-2 py-1 text-[10px] font-semibold text-muted-foreground shadow-sm sm:hidden">
-                {isCompactView ? 'Compact on desktop' : 'Cards'}
+              {/* Phone (12 Oct 2026): the two switches worth a tap, as icons on the
+                  title line. Layout, style and demo mode stay on the desktop. */}
+              <span className="flex items-center gap-1.5 sm:hidden" data-testid="dashboard-phone-controls">
+                <button
+                  type="button"
+                  onClick={handleToggleNoise}
+                  aria-pressed={excludeNoise}
+                  aria-label={excludeNoise ? 'Noise tickets are hidden. Show them' : 'Hide noise tickets'}
+                  className={`tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                    excludeNoise ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:ring-amber-500/40' : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {excludeNoise ? <VolumeX className="h-4 w-4" aria-hidden="true" /> : <Volume2 className="h-4 w-4" aria-hidden="true" />}
+                  {excludeNoise ? 'Noise off' : 'Noise'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExpandAllOverride((prev) => (prev === true ? false : true))}
+                  aria-pressed={expandAllOverride === true}
+                  className={`tp-focus-ring inline-flex h-9 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition-colors ${
+                    expandAllOverride === true ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200' : 'bg-muted text-foreground/85'
+                  }`}
+                >
+                  {expandAllOverride === true ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                  {expandAllOverride === true ? 'Collapse all' : 'Expand all'}
+                </button>
               </span>
             </div>
 
@@ -1887,7 +1911,7 @@ export default function Dashboard() {
 
             <button
               onClick={handleToggleNoise}
-              className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors sm:flex-shrink-0 ${
+              className={`hidden sm:flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors sm:flex-shrink-0 ${
                 excludeNoise
                   ? 'bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-200 dark:hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 ring-1 ring-amber-300 dark:ring-amber-500/40'
                   : 'bg-muted hover:bg-secondary text-muted-foreground'
@@ -1897,7 +1921,7 @@ export default function Dashboard() {
               {excludeNoise ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               <span>{excludeNoise ? 'Noise Hidden' : 'Hide Noise'}</span>
             </button>
-            <DemoModeToggle onChange={() => { forceRefreshNoCache().catch(() => {}); }} />
+            <span className="hidden sm:inline-flex"><DemoModeToggle onChange={() => { forceRefreshNoCache().catch(() => {}); }} /></span>
             {hiddenTechnicians.length > 0 && (
               <button
                 onClick={() => setShowHidden(!showHidden)}
@@ -1910,7 +1934,7 @@ export default function Dashboard() {
             {isCompactView && (
               <button
                 onClick={() => setExpandAllOverride(prev => prev === true ? null : true)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
+                className={`hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
                   expandAllOverride === true
                     ? 'bg-blue-100 dark:bg-blue-500/20 hover:bg-blue-200 dark:hover:bg-blue-500/30 text-blue-700 dark:text-blue-200'
                     : 'bg-muted hover:bg-secondary text-foreground/85'
@@ -1929,7 +1953,7 @@ export default function Dashboard() {
               onChange={setSearchTerm}
               placeholder="Search tickets..."
               resultsCount={searchTerm || hasActiveCategoryFilter ? searchResultsCount : null}
-              className="w-full sm:flex-1 sm:min-w-[200px] sm:max-w-md sm:ml-auto"
+              className="min-w-0 flex-1 basis-40 sm:min-w-[200px] sm:max-w-md sm:ml-auto"
             />
             {isCanonicalCategoryMode ? (
               <CanonicalCategoryFilter
@@ -1937,7 +1961,7 @@ export default function Dashboard() {
                 selectedCategoryIds={selectedCanonicalCategories.categoryIds || []}
                 selectedSubcategoryIds={selectedCanonicalCategories.subcategoryIds || []}
                 onChange={setSelectedCanonicalCategories}
-                className="w-full sm:w-auto"
+                className="max-sm:order-last max-sm:!w-auto max-sm:[&>button]:!w-auto"
               />
             ) : (
               <CategoryFilter
@@ -1945,7 +1969,7 @@ export default function Dashboard() {
                 selected={selectedCategories}
                 onChange={setSelectedCategories}
                 placeholder="Category"
-                className="w-full sm:w-auto"
+                className="max-sm:order-last max-sm:!w-auto max-sm:[&>div]:!w-auto max-sm:[&_button]:!w-auto"
               />
             )}
             {(searchTerm || hasActiveCategoryFilter || (viewMode === 'monthly' && monthlyData)) && (
@@ -2174,6 +2198,7 @@ export default function Dashboard() {
                             searchTerm={searchTerm}
                             selectedCategories={selectedCategories}
                             canonicalCategoryFilter={selectedCanonicalCategories}
+                            forceExpand={expandAllOverride}
                             simple={simpleStyle}
                             topLoad={tech.id === topLoadTechId}
                           />
@@ -2203,6 +2228,7 @@ export default function Dashboard() {
                           searchTerm={searchTerm}
                           selectedCategories={selectedCategories}
                           canonicalCategoryFilter={selectedCanonicalCategories}
+                          forceExpand={expandAllOverride}
                           simple={simpleStyle}
                           topLoad={tech.id === topLoadTechId}
                         />

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import {
   Ban, CheckCircle2, Clock, XCircle,
   Loader2, Check, X, MessageCircleQuestion, Inbox, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
-  Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp, Tag,
+  Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp, Tag, ListFilter,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer, { ConfirmSheet } from '../components/tickets/ApprovalComposer';
@@ -393,9 +393,9 @@ function StatusBlock({ status }) {
   const meta = STATUS_META[status] || {};
   const ic = STATUS_ICON[status] || STATUS_ICON.cancelled;
   return (
-    <div className="flex w-[4.5rem] flex-shrink-0 flex-col items-center gap-1 pt-0.5 text-center" data-testid="approval-status">
-      <StatusGlyph status={status} size="h-8 w-8" />
-      <span className={`text-[11.5px] font-semibold leading-tight ${ic.text}`}>{meta.label || status}</span>
+    <div className="flex w-12 flex-shrink-0 flex-col items-center gap-1 pt-0.5 text-center sm:w-[4.5rem]" data-testid="approval-status">
+      <StatusGlyph status={status} size="h-7 w-7 sm:h-8 sm:w-8" />
+      <span className={`text-[10px] font-semibold leading-tight sm:text-[11.5px] ${ic.text}`}>{meta.label || status}</span>
     </div>
   );
 }
@@ -521,6 +521,8 @@ export default function ApprovalsInbox() {
   const [filters, setFilters] = useState(() => filtersFromParams(searchParams));
   const [debouncedQ, setDebouncedQ] = useState(filters.q.trim());
   const [expanded, setExpanded] = useState(() => new Set());
+  // Phones keep the filters folded behind one button (12 Oct 2026).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   // Filter changes refetch SILENTLY (a spinner replacing the filter bar while
   // you type lost focus and flashed) — a small inline indicator instead.
@@ -684,8 +686,9 @@ export default function ApprovalsInbox() {
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
       <AppHeader activePage="approvals" />
       <main className={applyWidth('max-w-5xl mx-auto px-4 sm:px-6 py-5 pb-24 lg:pb-6 animate-fadeIn', layoutWidth)}>
-        {/* Hero — small, one line */}
-        <div className="tp-card tp-ticket-header relative mb-4 flex items-center gap-3 rounded-2xl px-4 py-3">
+        {/* Hero — small, one line. Phones skip it (12 Oct 2026): the tab bar below
+            already says where you are, and the band cost a fifth of the screen. */}
+        <div className="tp-card tp-ticket-header relative mb-4 hidden items-center gap-3 rounded-2xl px-4 py-3 sm:flex" data-testid="approvals-hero">
           <span className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-blue-50 shadow-subtle ring-1 ring-blue-100 dark:bg-blue-500/15 dark:ring-blue-500/20">
             <BrandArt name="approval-inbox" className="h-8 w-8" />
           </span>
@@ -707,7 +710,7 @@ export default function ApprovalsInbox() {
 
         {/* Reviewer/admin tabs: my inbox vs. everything in the workspace vs. categories — each its own URL */}
         {canReview && (
-          <div role="tablist" className="mb-4 flex items-end gap-1 border-b border-border">
+          <div role="tablist" className="tp-swipe-row -mx-4 mb-3 flex items-end gap-1 overflow-x-auto overflow-y-hidden border-b border-border px-4 sm:mx-0 sm:mb-4 sm:overflow-visible sm:px-0">
             {[
               { k: 'mine', label: 'For you', Icon: Inbox },
               { k: 'all', label: 'All approvals', Icon: ClipboardList },
@@ -719,7 +722,7 @@ export default function ApprovalsInbox() {
                 to={tabPath(k)}
                 aria-selected={view === k}
                 onClick={(e) => { e.preventDefault(); goTab(k); }}
-                className={`tp-focus-ring relative -mb-px inline-flex items-center gap-1.5 overflow-hidden rounded-t-lg border px-3.5 py-2 text-sm font-semibold transition-colors ${
+                className={`tp-focus-ring relative -mb-px inline-flex flex-shrink-0 snap-start items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-t-lg border px-3 py-2 text-sm font-semibold transition-colors sm:px-3.5 ${
                   view === k ? 'border-border border-b-card bg-card text-emerald-700 dark:text-emerald-200' : 'border-transparent bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground/85'
                 }`}
               >
@@ -746,7 +749,7 @@ export default function ApprovalsInbox() {
         ) : view === 'all' && canReview ? (
           <div className="space-y-3" data-testid="approvals-all">
             {/* Status strip = counts at a glance and one-click toggles (several may be on). */}
-            <div role="group" aria-label="Approvals by status" className="tp-card flex divide-x divide-border/70 overflow-hidden rounded-xl">
+            <div role="group" aria-label="Approvals by status" className="tp-card tp-swipe-row flex divide-x divide-border/70 overflow-x-auto rounded-xl sm:overflow-hidden">
               {STAT_TILES.map(({ key, label, color }) => {
                 const active = chosenStatuses.includes(key);
                 return (
@@ -755,11 +758,11 @@ export default function ApprovalsInbox() {
                     type="button"
                     onClick={() => toggleStatus(key)}
                     aria-pressed={active}
-                    className={`tp-focus-ring relative flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition-colors ${active ? 'bg-muted/70' : 'hover:bg-muted/40'}`}
+                    className={`tp-focus-ring relative flex flex-shrink-0 snap-start items-center gap-2 px-3 py-2 text-left transition-colors sm:min-w-0 sm:flex-1 sm:flex-shrink ${active ? 'bg-muted/70' : 'hover:bg-muted/40'}`}
                   >
                     <StatusGlyph status={key} size="h-7 w-7" icon="h-3.5 w-3.5" />
                     <span className={`text-lg font-bold leading-none tabular-nums ${color}`}>{overview?.stats?.[key] ?? 0}</span>
-                    <span className="hidden truncate text-xs font-medium text-muted-foreground sm:inline">{label}</span>
+                    <span className="whitespace-nowrap text-xs font-medium text-muted-foreground sm:truncate">{label}</span>
                     {active && <span className={`absolute inset-x-0 bottom-0 h-0.5 ${STATUS_META[key].dot}`} aria-hidden="true" />}
                   </button>
                 );
@@ -769,7 +772,7 @@ export default function ApprovalsInbox() {
             {/* Filter bar — everything in one row, nothing behind "More filters" */}
             <div className="tp-card rounded-xl p-2.5" data-testid="approvals-filters">
               <div className="flex flex-wrap items-center gap-2">
-                <label className="relative min-w-[200px] flex-1">
+                <label className="relative min-w-0 flex-1 basis-40 sm:min-w-[200px]">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
                   <input
                     type="text"
@@ -780,32 +783,44 @@ export default function ApprovalsInbox() {
                     className="tp-focus-ring h-9 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm placeholder:text-muted-foreground/75"
                   />
                 </label>
-                <div className="w-36">
-                  <StatusFilter value={filters.status} onChange={(v) => setFilter({ status: v })} stats={overview?.stats} />
-                </div>
-                <div className="w-44">
-                  <FancySelect value={filters.categoryId} onChange={(v) => setFilter({ categoryId: v })} options={categoryOptions} aria-label="Approval category" />
-                </div>
-                <div className="w-40">
-                  <PersonFilter id="ap-f-approver" label="Approver" placeholder="Any approver" value={filters.approver} onChange={(v) => setFilter({ approver: v })} people={personOptions} />
-                </div>
-                <div className="w-40">
-                  <PersonFilter id="ap-f-requested-by" label="Requested by" placeholder="Any requester" value={filters.requestedBy} onChange={(v) => setFilter({ requestedBy: v })} people={personOptions} />
-                </div>
-                <WhenFilter className="w-40" value={filters.when} onChange={(v) => setFilter({ when: v })} />
-                <div className="w-36">
-                  <FancySelect value={filters.sort} onChange={(v) => setFilter({ sort: v })} options={SORT_OPTIONS} aria-label="Sort approvals" />
-                </div>
-                {refreshing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/60" aria-label="Updating" />}
                 <button
                   type="button"
-                  onClick={exportCsv}
-                  disabled={!(overview?.items?.length)}
-                  title="Download the rows below as CSV"
-                  className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-semibold text-muted-foreground hover:border-blue-300 hover:text-blue-700 disabled:opacity-50 dark:hover:border-blue-500/40 dark:hover:text-blue-200"
+                  onClick={() => setFiltersOpen((v) => !v)}
+                  aria-expanded={filtersOpen}
+                  aria-controls="approvals-more-filters"
+                  data-testid="approvals-filters-toggle"
+                  className={`tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold sm:hidden ${filtersOpen || activeFilterCount > 0 ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200' : 'border-border bg-card text-muted-foreground'}`}
                 >
-                  <Download className="h-3.5 w-3.5" aria-hidden="true" /> Export CSV
+                  <ListFilter className="h-3.5 w-3.5" aria-hidden="true" /> Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
                 </button>
+                <div id="approvals-more-filters" className={`${filtersOpen ? 'grid' : 'hidden'} w-full grid-cols-2 gap-2 sm:contents`}>
+                  <div className="w-full sm:w-36">
+                    <StatusFilter value={filters.status} onChange={(v) => setFilter({ status: v })} stats={overview?.stats} />
+                  </div>
+                  <div className="w-full sm:w-44">
+                    <FancySelect value={filters.categoryId} onChange={(v) => setFilter({ categoryId: v })} options={categoryOptions} aria-label="Approval category" />
+                  </div>
+                  <div className="w-full sm:w-40">
+                    <PersonFilter id="ap-f-approver" label="Approver" placeholder="Any approver" value={filters.approver} onChange={(v) => setFilter({ approver: v })} people={personOptions} />
+                  </div>
+                  <div className="w-full sm:w-40">
+                    <PersonFilter id="ap-f-requested-by" label="Requested by" placeholder="Any requester" value={filters.requestedBy} onChange={(v) => setFilter({ requestedBy: v })} people={personOptions} />
+                  </div>
+                  <WhenFilter className="w-full sm:w-40" value={filters.when} onChange={(v) => setFilter({ when: v })} />
+                  <div className="w-full sm:w-36">
+                    <FancySelect value={filters.sort} onChange={(v) => setFilter({ sort: v })} options={SORT_OPTIONS} aria-label="Sort approvals" />
+                  </div>
+                  {refreshing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/60" aria-label="Updating" />}
+                  <button
+                    type="button"
+                    onClick={exportCsv}
+                    disabled={!(overview?.items?.length)}
+                    title="Download the rows below as CSV"
+                    className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-semibold text-muted-foreground hover:border-blue-300 hover:text-blue-700 disabled:opacity-50 dark:hover:border-blue-500/40 dark:hover:text-blue-200"
+                  >
+                    <Download className="h-3.5 w-3.5" aria-hidden="true" /> Export CSV
+                  </button>
+                </div>
               </div>
               {activeFilterCount > 0 && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -832,7 +847,7 @@ export default function ApprovalsInbox() {
                   const decided = cleanNoteText(a.decisionNote || a.conditionNote || '');
                   return (
                     <li key={g.key} className="tp-card overflow-hidden rounded-xl transition-shadow hover:shadow-subtle" data-testid="approval-row">
-                      <div {...rowToggleProps(isOpen, () => toggleExpanded(a.id), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-4 px-4 py-4 hover:bg-muted/25">
+                      <div {...rowToggleProps(isOpen, () => toggleExpanded(a.id), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-2.5 px-3 py-3.5 hover:bg-muted/25 sm:gap-4 sm:px-4 sm:py-4">
                         <StatusBlock status={a.status} />
                         <div className="min-w-0 flex-1">
                           <CategoryLine name={a.categoryName} />
@@ -882,7 +897,7 @@ export default function ApprovalsInbox() {
                     const isOpen = openId === a.id;
                     return (
                       <li key={a.id} className="tp-card overflow-hidden rounded-xl" data-testid="inbox-row">
-                        <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-4 px-4 py-4 hover:bg-muted/25">
+                        <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer flex-wrap gap-x-2.5 gap-y-2 px-3 py-3.5 hover:bg-muted/25 sm:flex-nowrap sm:gap-4 sm:px-4 sm:py-4">
                           <StatusBlock status="pending" />
                           <div className="min-w-0 flex-1">
                             <CategoryLine name={a.categoryName} />
@@ -895,7 +910,7 @@ export default function ApprovalsInbox() {
                             <PeopleLine a={a} className="mt-2" />
                             {!isOpen && <RequestLine note={a.requestNote} />}
                           </div>
-                          <div className="flex flex-shrink-0 flex-col items-end gap-2">
+                          <div className="flex flex-shrink-0 gap-2 max-sm:basis-full max-sm:flex-row max-sm:items-center max-sm:justify-end max-sm:gap-3 sm:flex-col sm:items-end">
                             <When at={a.createdAt} />
                             {!isOpen && (
                               <button

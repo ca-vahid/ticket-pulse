@@ -97,8 +97,8 @@ export default function Availability() {
     <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
       <AppHeader activePage="availability" />
       <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-        <LightTabBar tabs={tabs} activeId={tab} onSelect={(id) => navigate(`/availability/${id}`)} ariaLabel="Availability sections" idPrefix="availability">
-          {me?.person?.name && <span className="text-xs text-muted-foreground">{me.person.name}</span>}
+        <LightTabBar tabs={tabs} activeId={tab} onSelect={(id) => navigate(`/availability/${id}`)} ariaLabel="Availability sections" idPrefix="availability" className="max-sm:[&>div:nth-child(2)]:hidden">
+          {me?.person?.name && <span className="hidden text-xs text-muted-foreground sm:inline">{me.person.name}</span>}
         </LightTabBar>
         {me && error && <div className="mb-4"><ErrorNote>{error}</ErrorNote></div>}
         {body}

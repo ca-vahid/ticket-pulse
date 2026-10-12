@@ -179,14 +179,14 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
             key={p}
             onClick={() => go(p)}
             aria-current={p === page ? 'page' : undefined}
-            className={`tp-focus-ring min-w-[34px] px-2 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+            className={`tp-focus-ring min-w-[34px] px-2 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${p === page ? '' : 'max-sm:hidden'} ${
               p === page ? 'bg-blue-600 text-white border-blue-600 shadow-subtle' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200'
             }`}
           >
             {p.toLocaleString()}
           </button>
         ) : (
-          <span key={`gap-${i}`} className="px-0.5 text-xs text-muted-foreground/75" aria-hidden="true">…</span>
+          <span key={`gap-${i}`} className="px-0.5 text-xs text-muted-foreground/75 max-sm:hidden" aria-hidden="true">…</span>
         )))}
         <button onClick={() => go(page + 1)} disabled={page >= totalPages} aria-label="Next page" className={`${navBtn} pr-1.5`}>
           Next
@@ -1641,10 +1641,10 @@ export default function Tickets() {
         {/* Page header (v3.8.31): one slim row. The artwork band spent ~94 px and
             a subtitle to repeat the page you are already on; the title, the
             workspace and both actions fit on a single 33 px line. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 min-w-0">
+        <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4 sm:flex-wrap sm:gap-3">
+          <div className="flex items-baseline gap-x-2.5 gap-y-1 min-w-0 sm:flex-wrap">
             <h1 className="text-lg font-bold text-foreground">Tickets</h1>
-            <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground">
+            <span className="min-w-0 truncate rounded-full bg-muted px-2.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground">
               {currentWorkspace?.name ? `${currentWorkspace.name} workspace` : 'Workspace'}
             </span>
           </div>
@@ -1652,19 +1652,19 @@ export default function Tickets() {
             <button
               onClick={exportCsv}
               disabled={isExporting || isLoading}
-              className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
+              className="tp-focus-ring inline-flex flex-shrink-0 items-center gap-1.5 px-2.5 sm:px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
               title="Export the current filtered list as CSV (up to 5000 rows)"
             >
               <Download className="w-4 h-4" aria-hidden="true" />
-              {isExporting ? 'Exporting…' : 'Export'}
+              <span className="max-sm:sr-only">{isExporting ? 'Exporting…' : 'Export'}</span>
             </button>
             {ticketingOn && (
               <button
                 onClick={() => navigate('/tickets/new')}
-                className="tp-focus-ring inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg shadow-subtle hover:bg-blue-700 transition-colors"
+                className="tp-focus-ring inline-flex flex-shrink-0 items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg shadow-subtle hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-4 h-4" aria-hidden="true" />
-                New ticket
+                New<span className="max-sm:sr-only"> ticket</span>
               </button>
             )}
           </div>
@@ -1698,7 +1698,9 @@ export default function Tickets() {
             {/* KPI stat cards — colored icon tile + large number + label.
                 The set comes from meta.queueCards (admin-configurable, Phase
                 FC); the hover gear deep-links admins to the configurator. */}
-            <div className="relative group/cards grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4" role="group" aria-label="Quick segments">
+            {/* Phone (12 Oct 2026): one line you swipe sideways, not a wall of six
+                cards that pushed the list off the first screen. */}
+            <div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
               {queueCards.map((key) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
                 // "All tickets" only lights up when the view really is all
@@ -1718,18 +1720,18 @@ export default function Tickets() {
                     // (QA 08-04 #1). Other cards carry their own segment scope.
                     onClick={() => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null })}
                     aria-pressed={active}
-                    className={`tp-focus-ring flex items-center gap-3 text-left px-3.5 py-3 rounded-xl bg-card border transition-all ${
-                      active ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle hover:border-border hover:shadow-soft'
+                    className={`tp-focus-ring flex flex-shrink-0 snap-start items-center gap-2 sm:gap-3 text-left px-2.5 py-2 sm:px-3.5 sm:py-3 rounded-xl bg-card border transition-all sm:flex-shrink ${
+                      active ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-inset sm:ring-offset-0 ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle hover:border-border hover:shadow-soft'
                     }`}
                   >
-                    <span className={`h-10 w-10 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
-                      <Icon className="w-5 h-5" aria-hidden="true" />
+                    <span className={`h-7 w-7 sm:h-10 sm:w-10 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
+                      <Icon className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true" />
                     </span>
                     <span className="min-w-0">
-                      <span className={`block text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
+                      <span className={`block text-lg sm:text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
                         {count == null ? '–' : count.toLocaleString()}
                       </span>
-                      <span className="block text-[11px] font-medium text-muted-foreground truncate mt-1">{seg.label}</span>
+                      <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1">{seg.label}</span>
                     </span>
                   </button>
                 );
@@ -1808,7 +1810,7 @@ export default function Tickets() {
                     )}
                   </button>
                   <TicketSearchBox
-                    className="md:hidden order-3 basis-full min-w-0"
+                    className="md:hidden order-first basis-full min-w-0"
                     shortcut={false}
                     value={search}
                     onChange={setSearch}
@@ -1917,7 +1919,13 @@ export default function Tickets() {
                         </button>
                       )}
                       {tickets.length > 0 && (
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
+                        <>
+                          {/* Phone: the count only; the full pager sits under the list. */}
+                          <span className="text-xs tabular-nums text-muted-foreground sm:hidden" data-testid="queue-count-phone">{total.toLocaleString()} ticket{total === 1 ? '' : 's'}</span>
+                          <div className="hidden sm:block">
+                            <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
+                          </div>
+                        </>
                       )}
                     </div>
                   )}

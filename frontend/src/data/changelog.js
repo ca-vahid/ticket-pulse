@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.44-preview';
+export const APP_VERSION = '4.2.45-preview';
 
 export const changelog = [
+  {
+    version: '4.2.45-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Ticket page on a phone</strong> — priority and status sit on one line above the subject, so the subject reads across the full width instead of one word a line. The action row is one line (Edit, Macros, Close, More); Mark as noise, Mark as solution and Delete moved into More.' },
+      { type: 'improved', html: '<strong>Tickets list on a phone</strong> — the six count cards are one line you swipe sideways, search comes first, and the page controls moved under the list, so tickets start near the top of the screen.' },
+      { type: 'fixed', html: '<strong>Dashboard on a phone</strong> — Expand all / Collapse all now opens and closes every card. The controls shrank to one line (Noise, Expand all) with search and Categories on the next.' },
+      { type: 'improved', html: '<strong>Approvals on a phone</strong> — the banner is gone, the status counts are a swipe row with their names, and the filters fold behind one Filters button. Rows give more width to the request.' },
+      { type: 'improved', html: '<strong>Availability on a phone</strong> — the tabs show their names (also in Knowledge and Comings &amp; Goings), “Out this week” rows no longer break mid-line, and the settings tables no longer make the whole page scroll sideways.' },
+      { type: 'fixed', html: '<strong>Warnings on a phone</strong> — the sync and e-mail warnings now sit above the bottom tab bar instead of covering it.' },
+    ],
+  },
   {
     version: '4.2.44-preview',
     date: 'October 11, 2026',

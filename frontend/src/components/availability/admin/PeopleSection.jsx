@@ -140,7 +140,7 @@ export default function PeopleSection({ config, reload, toast }) {
         <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <input type="search" className={`${INPUT} pl-8`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a person" aria-label="Find a person" />
       </div>
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full min-w-[46rem] text-sm">
           <thead><tr><th className={TH}>Person</th><th className={TH}>Office</th><th className={TH}>Start date</th><th className={TH}>Working days</th><th className={TH}>Hours/day</th>{tracked.map((t) => <th key={t.id} className={TH} title="Days per year; empty uses the leave type's default">{t.name} days/yr</th>)}</tr></thead>
           <tbody className="divide-y divide-border">

@@ -1357,3 +1357,15 @@ html[data-motion="reduce"] /* NEW chip: stay fully visible (the animation's `bot
 html[data-motion="reduce"] .tp-history-new {
   animation: none;
 }
+
+/* A row you swipe sideways on a phone (12 Oct 2026): stat cards, status
+   counts, tab bars. Snaps to items and keeps the scrollbar out of sight; the
+   row bleeds to the screen edge so the next item peeks in. */
+.tp-swipe-row {
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 1rem;
+}
+.tp-swipe-row::-webkit-scrollbar { display: none; }

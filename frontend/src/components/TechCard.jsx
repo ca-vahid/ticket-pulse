@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Bot, RotateCcw, ChevronDown, Ticket as TicketIcon } from 'lucide-react';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
@@ -120,9 +120,16 @@ const getInitials = (name) => {
   return '??';
 };
 
-export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], canonicalCategoryFilter = null, simple = false, topLoad = false }) {
+export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], canonicalCategoryFilter = null, simple = false, topLoad = false, forceExpand = null }) {
   const navigate = useNavigate();
   const [ticketsOpen, setTicketsOpen] = useState(false);
+  // Dashboard "Expand all" / "Collapse all" (phones, 12 Oct 2026): follows the
+  // switch when it is flipped; a card can still be opened or closed by hand after.
+  const firstForce = useRef(true);
+  useEffect(() => {
+    if (firstForce.current) { firstForce.current = false; if (forceExpand !== true) return; }
+    setTicketsOpen(forceExpand === true);
+  }, [forceExpand]);
   const hoverTimerRef = useRef(null);
 
   // Inline ticket drilldown (mobile) — reuses the dashboard's grouped-ticket

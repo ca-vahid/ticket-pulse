@@ -82,7 +82,9 @@ export default function LeaveTypesSection({ config, reload, toast }) {
       >
         Leave types
       </SectionTitle>
-      <div className="overflow-x-auto">
+      {/* relative: the table's sr-only labels are absolutely positioned and, without a
+          positioned box here, escaped the scroller and widened the whole page on a phone. */}
+      <div className="relative overflow-x-auto">
         <table className="w-full min-w-[40rem] text-sm">
           <thead><tr><th className={TH}>Type</th><th className={TH}>Shows as</th><th className={TH}>Approval</th><th className={TH}>Balance</th><th className={TH}>Status</th><th className={TH}><span className="sr-only">Edit</span></th></tr></thead>
           <tbody className="divide-y divide-border">

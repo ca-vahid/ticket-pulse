@@ -44,7 +44,7 @@ export default function OfficesSection({ config, reload, toast }) {
       >
         Offices
       </SectionTitle>
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full min-w-[32rem] text-sm">
           <thead><tr><th className={TH}>Office</th><th className={TH}>Province</th><th className={TH}>Time zone</th><th className={TH}>People</th><th className={TH}>Status</th><th className={TH}><span className="sr-only">Edit</span></th></tr></thead>
           <tbody className="divide-y divide-border">
