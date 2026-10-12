@@ -172,7 +172,7 @@ export default function BulkActionBar({
       role="region"
       aria-label="Bulk actions"
       data-testid="bulk-action-bar"
-      className="fixed bottom-6 left-1/2 z-40 w-max max-w-[94vw] -translate-x-1/2 animate-fadeIn rounded-2xl border border-border bg-card/95 shadow-soft backdrop-blur supports-[backdrop-filter]:bg-card/85"
+      className="fixed bottom-6 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-1/2 z-40 w-max max-w-[94vw] -translate-x-1/2 animate-fadeIn rounded-2xl border border-border bg-card/95 shadow-soft backdrop-blur supports-[backdrop-filter]:bg-card/85"
     >
       {bulkResult ? (
         <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">

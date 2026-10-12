@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Image as ImageIcon, Activity, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -802,6 +802,18 @@ export default function TicketDetail() {
   };
   const [taskOpenCount, setTaskOpenCount] = useState(0); // drives the Tasks tab badge
   const [mobileAssignOpen, setMobileAssignOpen] = useState(false); // mobile assign bottom sheet
+  // Phone (12 Oct 2026): the properties column opens as a sheet from the
+  // action bar instead of sitting under the whole conversation.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const composerSectionRef = useRef(null);
+  useEffect(() => {
+    if (!detailsOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setDetailsOpen(false); };
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = prev; document.removeEventListener('keydown', onKey); };
+  }, [detailsOpen]);
 
   const [ticket, setTicket] = useState(null);
   const [meta, setMeta] = useState(null);
@@ -1060,6 +1072,15 @@ export default function TicketDetail() {
     }
     setComposerMode(mode);
     setTimeout(() => composerRef.current?.focus(), 0);
+  };
+  // Phone action bar: jump to the composer in the chosen mode from anywhere.
+  const jumpToComposer = (mode) => {
+    if (pageTab !== 'conversation') setPageTab('conversation');
+    switchComposerMode(mode);
+    setTimeout(() => {
+      composerSectionRef.current?.scrollIntoView?.({ behavior: 'auto', block: 'center' });
+      composerRef.current?.focus();
+    }, 80);
   };
 
   // Re-seed on "Also for" changes (Phase MR4): the ticket's list changed
@@ -2194,7 +2215,7 @@ export default function TicketDetail() {
       <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
-      <main className={applyWidth('max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn', layoutWidth)}>
+      <main className={applyWidth('max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-36 md:pb-6 animate-fadeIn', layoutWidth)}>
         <div className="flex items-center justify-between mb-4 print-hide">
           <button
             onClick={() => {
@@ -2882,7 +2903,14 @@ export default function TicketDetail() {
                 </span>
                 {(canWrite || fsEditable) && <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-muted-foreground/50" aria-hidden="true" />}
               </button>
-              <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
+              <button
+                type="button"
+                onClick={() => setDetailsOpen(true)}
+                aria-label={`Status ${ticket.status}. Open ticket details`}
+                className="tp-focus-ring flex-shrink-0 rounded-lg p-1 md:pointer-events-none"
+              >
+                <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
+              </button>
             </div>
             <MobileAssignSheet
               ticket={ticket}
@@ -3135,7 +3163,7 @@ export default function TicketDetail() {
 
                     {/* Composer */}
                     {canConverse ? (
-                      <section className="tp-card rounded-xl p-3.5 print-hide" aria-label="Reply composer">
+                      <section ref={composerSectionRef} className="tp-card rounded-xl p-3.5 print-hide scroll-mb-32" aria-label="Reply composer">
                         {/* QA 07-06 #10: wraps + compact labels under sm so nothing
                             (Templates, Quick notes) ever exceeds a phone viewport. */}
                         <div role="group" aria-label="Composer mode" className="flex flex-wrap items-center gap-1.5 mb-2.5">
@@ -3726,7 +3754,32 @@ export default function TicketDetail() {
               </div>
 
               {/* Sidebar */}
-              <aside className="space-y-4 lg:col-start-2 lg:row-start-1" aria-label="Ticket properties">
+              {detailsOpen && (
+                <button
+                  type="button"
+                  aria-label="Close ticket details"
+                  onClick={() => setDetailsOpen(false)}
+                  className="fixed inset-0 z-[58] cursor-default bg-black/45 md:hidden"
+                />
+              )}
+              <aside
+                className={`space-y-4 lg:col-start-2 lg:row-start-1 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-[59] max-md:max-h-[84dvh] max-md:overflow-y-auto max-md:overscroll-contain max-md:rounded-t-2xl max-md:border-t max-md:border-border max-md:bg-background max-md:px-4 max-md:pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] max-md:shadow-soft ${detailsOpen ? 'motion-on:max-md:animate-in motion-on:max-md:slide-in-from-bottom motion-on:max-md:duration-200' : 'max-md:hidden'}`}
+                aria-label="Ticket properties"
+                data-testid="ticket-properties"
+                data-sheet-open={detailsOpen ? 'true' : 'false'}
+              >
+                <div className="sticky top-0 z-10 -mx-4 flex items-center gap-2 border-b border-border/60 bg-background px-4 py-2.5 md:hidden">
+                  <span aria-hidden="true" className="absolute left-1/2 top-1 h-1 w-9 -translate-x-1/2 rounded-full bg-muted-foreground/30" />
+                  <span className="min-w-0 flex-1 truncate pt-1 text-sm font-semibold text-foreground">Details · {ticket.displayRef}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDetailsOpen(false)}
+                    className="tp-focus-ring mt-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary"
+                    data-testid="ticket-details-done"
+                  >
+                    Done
+                  </button>
+                </div>
                 {/* Status & SLA */}
                 <div className="tp-card rounded-xl p-4 space-y-3.5">
                   <SidebarField label="Status" flash={Boolean(liveChanges.status)} onAck={() => ackChange('status')}>
@@ -4231,6 +4284,48 @@ export default function TicketDetail() {
                 )}
 
               </aside>
+            </div>
+            {/* Phone action bar (12 Oct 2026): the three things done most on a
+                ticket, one thumb away wherever the page is scrolled. Sits just
+                above the tab bar. */}
+            <div
+              className="fixed inset-x-0 bottom-[calc(49px+env(safe-area-inset-bottom,0px))] z-30 border-t border-border bg-card/95 px-3 py-2 backdrop-blur md:hidden print-hide"
+              role="toolbar"
+              aria-label="Ticket actions"
+              data-testid="ticket-phone-bar"
+            >
+              <div className="mx-auto flex max-w-lg items-center gap-2">
+                {canConverse && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => jumpToComposer('reply')}
+                      className="tp-focus-ring inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground"
+                      data-testid="phone-bar-reply"
+                    >
+                      <Mail className="h-4 w-4" aria-hidden="true" /> Reply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => jumpToComposer('note')}
+                      className="tp-focus-ring inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200"
+                      data-testid="phone-bar-note"
+                    >
+                      <StickyNote className="h-4 w-4" aria-hidden="true" /> Note
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(true)}
+                  aria-haspopup="dialog"
+                  aria-expanded={detailsOpen}
+                  className="tp-focus-ring inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-semibold text-foreground/85"
+                  data-testid="phone-bar-details"
+                >
+                  <SlidersHorizontal className="h-4 w-4" aria-hidden="true" /> Details
+                </button>
+              </div>
             </div>
           </>
         )}
