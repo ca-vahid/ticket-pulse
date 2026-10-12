@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.50-preview';
+export const APP_VERSION = '4.2.51-preview';
 
 export const changelog = [
+  {
+    version: '4.2.51-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Grouped copies say why they were closed</strong> &mdash; a repeat alert that was closed into its open ticket showed the name of a noise rule (&ldquo;Veeam / Hyper-V Backup Errors&rdquo;) as its reason, where it should say &ldquo;Grouped: repeat of #246525&rdquo;. The sync from FreshService was writing the rule&rsquo;s name over it whenever a noise rule matched the same subject. The reason now stays until someone presses Undo. Copies that already lost it, and one copy that was back in the totals, are put right within five minutes of this release.' },
+    ],
+  },
   {
     version: '4.2.50-preview',
     date: 'October 12, 2026',

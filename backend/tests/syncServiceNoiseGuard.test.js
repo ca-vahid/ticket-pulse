@@ -237,6 +237,29 @@ describe('syncService isNoise durability guard (NT-10)', () => {
     expect(result.isNoise).toBe(true);
   });
 
+  test('keeps the Grouped reason on a copy closed into another ticket when a noise rule matches the same subject', async () => {
+    // Prod, 12 Oct 2026: IT's grouped backup copies showed "Veeam / Hyper-V Backup Errors". The rule agrees
+    // the ticket is noise, so the flip guard never ran and the rule's name replaced "Grouped: repeat of #246525".
+    const existingTicket = {
+      id: 42510,
+      freshserviceTicketId: BigInt(239931),
+      isNoise: true,
+      noiseRuleMatched: 'Grouped: repeat of #246525',
+      assignedTechId: null,
+      status: 'Closed',
+    };
+    noiseRuleServiceMock.evaluate.mockResolvedValue({ isNoise: true, ruleId: 'Veeam / Hyper-V Backup Errors', category: 'backup' });
+
+    const result = await syncService.syncFreshServiceTicketSnapshot(1, { id: 239931 }, snapshotOptions(existingTicket));
+
+    const upsertArg = ticketRepositoryMock.upsert.mock.calls[0][0];
+    expect(upsertArg.isNoise).toBeUndefined();
+    expect(upsertArg.noiseRuleMatched).toBeUndefined();
+    expect(prismaMock.assignmentPipelineRun.findFirst).not.toHaveBeenCalled();
+    expect(result.noiseVerdictPreserved).toBe(true);
+    expect(result.noiseRuleMatched).toBe('Grouped: repeat of #246525');
+  });
+
   test('does not flip isNoise false→true when a decided run exists (veto durability)', async () => {
     // A never-noise veto / admin decision left the ticket at isNoise=false;
     // a matching subject rule on a later sync must not re-flag it.
