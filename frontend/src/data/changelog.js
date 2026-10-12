@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.51-preview';
+export const APP_VERSION = '4.2.52-preview';
 
 export const changelog = [
+  {
+    version: '4.2.52-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Assignment has the same tabs as the rest of the app</strong> &mdash; the blue and purple banner is gone. Ticket Queue, Ticket History, Hand-backs and the other sections are now the light tabs that Knowledge, On/Offboarding and Availability use, with Today / 7d / 30d / All at the right end. On a phone the tabs show their names and scroll sideways, where they used to be bare icons.' },
+    ],
+  },
   {
     version: '4.2.51-preview',
     date: 'October 12, 2026',

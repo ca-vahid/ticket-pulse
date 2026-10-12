@@ -1,8 +1,8 @@
 import { useRef } from 'react';
 
 /**
- * The light section tab bar (Knowledge redesign, 26 Sep 2026 — Vahid chose
- * light tabs for Knowledge; Assignment keeps GradientTabBar).
+ * The light section tab bar (Knowledge redesign, 26 Sep 2026). Every section
+ * with sub-tabs uses it; Assignment moved over on 12 Oct 2026.
  *
  * tabs: [{ id, label, icon: LucideIcon, badge?: number, badgeLabel?: string, title?: string }]
  * A badge is part of the tab's accessible name ("Gaps, 3 new"; badgeLabel

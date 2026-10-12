@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import GradientTabBar from '../components/common/GradientTabBar';
+import LightTabBar from '../components/common/LightTabBar';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { formatInTimeZone } from 'date-fns-tz';
 import { aiProviderAPI, assignmentAPI, workspaceAPI } from '../services/api';
@@ -5076,40 +5076,37 @@ export default function AssignmentReview() {
   return (
     <AppShell
       activePage="assignments"
+      contentClassName="max-w-7xl mx-auto w-full px-4 py-3"
       headerProps={{ extraActions: activeTab === 'queue' ? assignmentHeaderAction : null }}
     >
-      {/* Purple gradient tab bar (shared with Knowledge — components/common/GradientTabBar) */}
-      <GradientTabBar
+      {/* The light tab bar every section uses (Knowledge, On/Offboarding, Availability). */}
+      <LightTabBar
         tabs={TABS.map((tab) => ({ ...tab, badge: tab.id === 'competency-requests' ? competencyRequestCount : 0 }))}
         activeId={activeTab}
         onSelect={setActiveTab}
         ariaLabel="Assignment sections"
         idPrefix="assignment"
       >
-        {/* Time-range filter — visible on Ticket Queue tab, integrated into the purple header */}
+        {/* Time range for the Ticket Queue tab. */}
         {activeTab === 'queue' && (
-          <>
-            <div className="flex-1" />
-            <div className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-white/15 ring-1 ring-white/20 p-0.5">
-              {['24h', '7d', '30d', 'all'].map((range) => (
-                <button
-                  key={range}
-                  type="button"
-                  onClick={() => setTimeRange(range)}
-                  title={range === '24h' ? 'Current Pacific day' : undefined}
-                  className={`rounded px-2 py-1 text-[11px] font-semibold transition-all touch-manipulation ${
-                    timeRange === range
-                      ? 'bg-card text-foreground shadow-sm'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  {range === 'all' ? 'All' : range === '24h' ? 'Today' : range}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="flex items-center gap-1" role="group" aria-label="Time range" data-testid="assignment-time-range">
+            {['24h', '7d', '30d', 'all'].map((range) => (
+              <button
+                key={range}
+                type="button"
+                aria-pressed={timeRange === range}
+                onClick={() => setTimeRange(range)}
+                title={range === '24h' ? 'Current Pacific day' : undefined}
+                className={`tp-focus-ring rounded-md px-2.5 py-1 text-sm touch-manipulation ${
+                  timeRange === range ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {range === 'all' ? 'All' : range === '24h' ? 'Today' : range}
+              </button>
+            ))}
+          </div>
         )}
-      </GradientTabBar>
+      </LightTabBar>
 
       {/* Content */}
       <div role="tabpanel" id={`assignment-panel-${activeTab}`} aria-labelledby={`assignment-tab-${activeTab}`}>
