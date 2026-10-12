@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
-  AlignJustify, Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
+  AlignJustify, CheckCheck, Columns3, Hand, ListChecks, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -26,9 +26,11 @@ import BulkSelectionPanel from '../components/tickets/BulkSelectionPanel';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import { mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
+import PhoneSwipeRow from '../components/tickets/PhoneSwipeRow';
+import StatusPicker from '../components/tickets/StatusPicker';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SolutionMark, StateChip, StatusPill, TagChip, TypePill,
+  ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SlaChip, SolutionMark, StateChip, StatusPill, TagChip, TypePill,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkedMark } from '../components/tickets/ParkControls';
@@ -799,6 +801,12 @@ export default function Tickets() {
   // ---- AI assignment: live modal + the Assignment Review connector chip ----
   const [aiTicket, setAiTicket] = useState(null); // ticket whose pipeline modal is open
   const [assignSheetTicket, setAssignSheetTicket] = useState(null); // mobile touch-first assign sheet
+  // Phone list (12 Oct 2026): which card is slid open, whether cards show
+  // their select boxes, and whether the one-time swipe hint is still up.
+  const [swipedId, setSwipedId] = useState(null);
+  const [phoneSelect, setPhoneSelect] = useState(false);
+  const [swipeHint, setSwipeHint] = useState(() => { try { return localStorage.getItem('tp_swipe_hint_seen') !== '1'; } catch { return false; } });
+  const dismissSwipeHint = () => { setSwipeHint(false); try { localStorage.setItem('tp_swipe_hint_seen', '1'); } catch { /* private mode */ } };
   // { message, undo?, tone?, action? } — instant-save feedback (QA 07-06 #3);
   // tone 'red' for loud failures (Phase MB3), `action` {label, run} for a
   // one-click follow-up like "Show it" (Phase MB4).
@@ -1079,6 +1087,35 @@ export default function Tickets() {
       reject,
     });
   }), [statusDefs]);
+  // ---- Phone quick actions (12 Oct 2026). FreshService tickets go through
+  // the same confirm the desktop pickers use; Ticket Pulse ones save at once
+  // with an Undo.
+  const myTechId = meta?.actor?.technicianId || null;
+  const phonePickUp = async (ticket, viaFs) => {
+    try {
+      if (viaFs) await fsAssign(ticket, myTechId);
+      else await ticketsAPI.assign(ticket.id, myTechId);
+      onManualAssigned(ticket.id, myTechId);
+      refreshAfterEdit();
+      showToast(`${ticket.displayRef} is yours`);
+    } catch (err) {
+      if (err?.message !== 'cancelled') showToast(err?.response?.data?.message || err?.message || `Could not pick up ${ticket.displayRef}`, null, { tone: 'red' });
+    }
+  };
+  const phoneResolve = async (ticket, viaFs) => {
+    const prev = ticket.status;
+    try {
+      if (viaFs) await fsStatusChange(ticket, 'Resolved');
+      else await ticketsAPI.setStatus(ticket.id, 'Resolved');
+      refreshAfterEdit();
+      showToast(`${ticket.displayRef} → Resolved`, viaFs ? null : (async () => {
+        try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
+      }));
+    } catch (err) {
+      refreshAfterEdit();
+      if (err?.message !== 'cancelled') showToast(err?.response?.data?.message || err?.message || `Could not resolve ${ticket.displayRef}`, null, { tone: 'red' });
+    }
+  };
   const runFsSync = async () => {
     if (!fsConfirm) return;
     setFsBusy(true); setFsError(null);
@@ -1112,6 +1149,8 @@ export default function Tickets() {
     setParams({ peek: null }, { resetPage: false });
   }, [setParams]);
   const onRowClick = (id) => {
+    // A touch screen has no double-click to wait for — open at once.
+    if (window.matchMedia?.('(pointer: coarse)')?.matches) { openTicket(id); return; }
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = null;
@@ -1210,6 +1249,13 @@ export default function Tickets() {
   });
   const toggleSelectAll = () => setSelectedIds(allSelected ? new Set() : new Set(pageIds));
   const selectedTickets = tickets.filter((t) => selectedIds.has(t.id));
+  // Phone: cards show tick boxes while Select is on or anything is ticked.
+  const selecting = phoneSelect || selectedIds.size > 0;
+  // In that mode a tap on a phone card ticks it; the desktop rows keep opening.
+  const rowTap = (id) => {
+    if (selecting && window.matchMedia?.('(max-width: 767px)')?.matches) toggleSelect(id);
+    else onRowClick(id);
+  };
   // Only TP-born tickets are writable; FS-born rows are mirrors and get skipped.
   const editableSelected = selectedTickets.filter((t) => t.origin === 'ticketpulse');
   const bulkSkipCount = selectedTickets.length - editableSelected.length;
@@ -1701,8 +1747,27 @@ export default function Tickets() {
             {/* Phone (12 Oct 2026): one line you swipe sideways, not a wall of six
                 cards that pushed the list off the first screen. */}
             <div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
-              {queueCards.map((key) => {
+              {queueCards.map((key, cardIndex) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
+                // Phone: "Mine" sits second — the rail's My open view, one tap
+                // away. Second, not first, so the row does not jump sideways
+                // when it arrives with the queue meta.
+                const mineTile = cardIndex === 0 && myTechId ? (
+                  <button
+                    type="button"
+                    onClick={() => setParams({ assignee: assignee === String(myTechId) ? null : String(myTechId) })}
+                    aria-pressed={assignee === String(myTechId)}
+                    data-testid="phone-mine"
+                    className={`tp-focus-ring flex flex-shrink-0 snap-start items-center gap-2 rounded-xl border bg-card px-2.5 py-2 text-left transition-all sm:hidden ${
+                      assignee === String(myTechId) ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-inset ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle'
+                    }`}
+                  >
+                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">
+                      <UserRound className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <span className="whitespace-nowrap text-sm font-semibold text-foreground">Mine</span>
+                  </button>
+                ) : null;
                 // "All tickets" only lights up when the view really is all
                 // statuses: a deep link like ?status=Open (the daily brief's
                 // workload links) filters the list, and a lit "All" card made
@@ -1712,28 +1777,30 @@ export default function Tickets() {
                 const count = stats?.[seg.countKey];
                 const Icon = seg.Icon;
                 return (
-                  <button
-                    key={key}
+                  <Fragment key={key}>
+                    <button
                     // "All tickets" widens the status scope to match its count
                     // (every non-Deleted/Spam status, like the rail's view) —
                     // clearing to the Open+Pending default made the card lie
                     // (QA 08-04 #1). Other cards carry their own segment scope.
-                    onClick={() => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null })}
-                    aria-pressed={active}
-                    className={`tp-focus-ring flex flex-shrink-0 snap-start items-center gap-2 sm:gap-3 text-left px-2.5 py-2 sm:px-3.5 sm:py-3 rounded-xl bg-card border transition-all sm:flex-shrink ${
-                      active ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-inset sm:ring-offset-0 ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle hover:border-border hover:shadow-soft'
-                    }`}
-                  >
-                    <span className={`h-7 w-7 sm:h-10 sm:w-10 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
-                      <Icon className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className={`block text-lg sm:text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
-                        {count == null ? '–' : count.toLocaleString()}
+                      onClick={() => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null })}
+                      aria-pressed={active}
+                      className={`tp-focus-ring flex flex-shrink-0 snap-start items-center gap-2 sm:gap-3 text-left px-2.5 py-2 sm:px-3.5 sm:py-3 rounded-xl bg-card border transition-all sm:flex-shrink ${
+                        active ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-inset sm:ring-offset-0 ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle hover:border-border hover:shadow-soft'
+                      }`}
+                    >
+                      <span className={`h-7 w-7 sm:h-10 sm:w-10 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
+                        <Icon className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true" />
                       </span>
-                      <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1">{seg.label}</span>
-                    </span>
-                  </button>
+                      <span className="min-w-0">
+                        <span className={`block text-lg sm:text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
+                          {count == null ? '–' : count.toLocaleString()}
+                        </span>
+                        <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1">{seg.label}</span>
+                      </span>
+                    </button>
+                    {mineTile}
+                  </Fragment>
                 );
               })}
               {wsRole === 'admin' && (
@@ -1861,6 +1928,20 @@ export default function Tickets() {
                   >
                     <RefreshCw className={`w-4 h-4 ${manualRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
                   </button>
+                  {/* Phone: pick several tickets, then act on them from the bar
+                      that rises above the tab bar (desktop uses the row boxes). */}
+                  {!boardMode && !panelView && (
+                    <button
+                      type="button"
+                      onClick={() => { if (phoneSelect || selectedIds.size > 0) { setPhoneSelect(false); setSelectedIds(new Set()); setQueryScope(null); } else { setPhoneSelect(true); setSwipedId(null); } }}
+                      aria-pressed={phoneSelect || selectedIds.size > 0}
+                      aria-label={phoneSelect || selectedIds.size > 0 ? 'Stop selecting tickets' : 'Select tickets'}
+                      data-testid="phone-select-toggle"
+                      className={`tp-focus-ring order-2 inline-flex min-h-[44px] items-center justify-center rounded-lg border px-2.5 py-2 md:hidden ${phoneSelect || selectedIds.size > 0 ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200' : 'border-input bg-card text-muted-foreground'}`}
+                    >
+                      <ListChecks className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
                   <div ref={sortMenuRef} className="relative order-2">
                     <button
                       onClick={() => setSortMenuOpen((v) => !v)}
@@ -1933,6 +2014,12 @@ export default function Tickets() {
 
                 {/* Results — the peek is a fixed overlay drawer, so nothing here reflows */}
                 <div className="relative">
+                  {swipeHint && !panelView && !boardMode && !isLoading && tickets.length > 0 && (
+                    <p className="mb-2 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground md:hidden" data-testid="swipe-hint">
+                      <span className="min-w-0 flex-1">Slide a ticket to the left for Mine, Resolve and Select. Tap its status to change it.</span>
+                      <button type="button" onClick={dismissSwipeHint} className="tp-focus-ring flex-shrink-0 rounded-md px-2 py-1 font-semibold text-primary">Got it</button>
+                    </p>
+                  )}
                   {(pendingCount > 0 || refreshState !== 'idle') && !panelView && (
                     <LiveUpdatePill count={pendingCount} state={refreshState} onApply={applyPendingUpdates} />
                   )}
@@ -2238,6 +2325,16 @@ export default function Tickets() {
                                   onManualAssigned,
                                   onOpenFull: openTicket,
                                 };
+                                // Phone quick actions behind the card (PhoneSwipeRow).
+                                // Each has a visible twin: the Assign button, the status
+                                // control, and Select in the toolbar.
+                                const phoneActions = [
+                                  ...(myTechId && mobileAssignable && !resolvedLike && !removedLike && ticket.assignedTechId !== myTechId
+                                    ? [{ key: 'mine', label: 'Mine', Icon: Hand, tone: 'blue', onClick: () => phonePickUp(ticket, fsRowEditable) }] : []),
+                                  ...(mobileAssignable && !resolvedLike && !removedLike && !ticket.parkedUntil
+                                    ? [{ key: 'resolve', label: 'Resolve', Icon: CheckCheck, tone: 'emerald', onClick: () => phoneResolve(ticket, fsRowEditable) }] : []),
+                                  { key: 'select', label: 'Select', Icon: ListChecks, tone: 'slate', onClick: () => { setPhoneSelect(true); toggleSelect(ticket.id); } },
+                                ];
                                 const columnCells = rowColumns.map((c) => (
                                   <Fragment key={c.key}>{c.render(ticket, rowCtx)}</Fragment>
                                 ));
@@ -2260,7 +2357,7 @@ export default function Tickets() {
                                     style={fx === 'new' || fx === 'updated'
                                       ? { '--tp-fx-delay': `${Math.min(rowIndex, 12) * 55}ms` }
                                       : undefined}
-                                    onClick={() => onRowClick(ticket.id)}
+                                    onClick={() => rowTap(ticket.id)}
                                     onDoubleClick={() => onRowDoubleClick(ticket.id)}
                                     title="Click to open · double-click to preview"
                                     data-row={aiLive ? 'ai' : previewing ? 'preview' : selectedIds.has(ticket.id) ? 'selected' : 'idle'}
@@ -2346,9 +2443,28 @@ export default function Tickets() {
                                         )}
                                       </div>
 
-                                      {/* Mobile card */}
-                                      <div className="md:hidden relative px-4 py-3">
+                                      {/* Mobile card. 12 Oct 2026: slides left for quick
+                                          actions, the status is a tap-to-change control, the
+                                          due date and the marks the desktop row shows are here
+                                          too, and Select turns the card into a tick box. */}
+                                      <PhoneSwipeRow
+                                        actions={selecting ? [] : phoneActions}
+                                        open={swipedId === ticket.id}
+                                        onOpenChange={(v) => { setSwipedId(v ? ticket.id : null); if (v && swipeHint) dismissSwipeHint(); }}
+                                        className={`md:hidden px-4 py-3 ${selectedIds.has(ticket.id) ? '!bg-blue-50 dark:!bg-blue-950' : ''}`}
+                                      >
                                         <div className="flex items-center gap-2 mb-1">
+                                          {selecting && (
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedIds.has(ticket.id)}
+                                              onChange={() => toggleSelect(ticket.id)}
+                                              onClick={(e) => e.stopPropagation()}
+                                              aria-label={`Select ticket ${ticket.displayRef}`}
+                                              data-testid="phone-select-box"
+                                              className="tp-focus-ring h-5 w-5 flex-shrink-0 rounded border-input text-blue-600 dark:text-blue-300"
+                                            />
+                                          )}
                                           <PriorityDot priority={ticket.priority} />
                                           <span className="font-mono text-[11px] font-semibold text-muted-foreground">{ticket.displayRef}</span>
                                           <StateChip state={ticket.stateChip} />
@@ -2377,7 +2493,28 @@ export default function Tickets() {
                                             AI
                                             </span>
                                           ))}
-                                          <StatusPill status={ticket.parkedUntil ? 'Parked' : ticket.status} className="ml-auto" tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
+                                          <span className="ml-auto flex-shrink-0" data-testid="phone-status">
+                                            {mobileAssignable && !removedLike && !ticket.parkedUntil && !selecting ? (
+                                              <StatusPicker
+                                                ticketId={ticket.id}
+                                                value={ticket.status}
+                                                statusDefs={statusDefs}
+                                                fsChange={fsRowEditable ? ((next) => fsStatusChange(ticket, next)) : null}
+                                                onChanged={(next, prev) => {
+                                                  refreshAfterEdit();
+                                                  showToast(`${ticket.displayRef} → ${next}`, isEditable ? (async () => {
+                                                    try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
+                                                  }) : null);
+                                                }}
+                                                onError={(err, next) => {
+                                                  refreshAfterEdit();
+                                                  showToast(err?.response?.data?.message || err?.message || `Could not move ${ticket.displayRef} to ${next}`, null, { tone: 'red' });
+                                                }}
+                                              />
+                                            ) : (
+                                              <StatusPill status={ticket.parkedUntil ? 'Parked' : ticket.status} tone={ticket.parkedUntil ? 'slate' : statusToneFromDefs(statusDefs, ticket.status)} />
+                                            )}
+                                          </span>
                                         </div>
                                         {/* Anchor for long-press / new-tab on touch +
                                           right-click on small windows (QA 08-07 #7);
@@ -2385,7 +2522,7 @@ export default function Tickets() {
                                         <Link
                                           to={ticketHref}
                                           state={linkState}
-                                          onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                          onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); rowTap(ticket.id); }}
                                           className="text-sm font-medium text-foreground line-clamp-2"
                                         >
                                           {ticket.subject || '(no subject)'}
@@ -2413,7 +2550,7 @@ export default function Tickets() {
                                             <button
                                               onClick={(e) => { e.stopPropagation(); setAssignSheetTicket(ticket); }}
                                               aria-label={ticket.assignedTech ? `Assignee ${ticket.assignedTech.name} — tap to change` : 'Assign this ticket'}
-                                              className="tp-focus-ring flex items-center gap-1.5 min-w-0 max-w-[70%] min-h-[36px] pl-1 pr-2 rounded-lg border border-border bg-card active:bg-muted transition-colors"
+                                              className="tp-focus-ring flex items-center gap-1.5 min-w-0 max-w-[55%] min-h-[36px] pl-1 pr-2 rounded-lg border border-border bg-card active:bg-muted transition-colors"
                                             >
                                               {ticket.assignedTech ? (
                                                 <>
@@ -2453,9 +2590,24 @@ export default function Tickets() {
                                             </span>
                                           )}
                                           {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
-                                          <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground/75">{timeAgo(ticket.lastActivityAt || ticket.updatedAt)}</span>
+                                          <span className="ml-auto flex min-w-0 items-center gap-1.5">
+                                            {ticket.isExternal && <ExternalChip />}
+                                            {ticket.solutionVerifiedAt && <SolutionMark />}
+                                            <OccurrenceMark ticket={ticket} />
+                                            {ticket.hasProposedReply && (
+                                              <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300" title="A drafted reply is waiting for approval on this ticket">
+                                                <Sparkles className="h-2.5 w-2.5" aria-hidden="true" /> Draft
+                                              </span>
+                                            )}
+                                            {!removedLike && (ticket.parkedUntil
+                                              ? <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />
+                                              : !resolvedLike && ticket.dueBy
+                                                ? <span data-testid="phone-due"><SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={meta?.slaCalendarAware === true} compact /></span>
+                                                : null)}
+                                            <span className="whitespace-nowrap text-[11px] text-muted-foreground/75">{timeAgo(ticket.lastActivityAt || ticket.updatedAt)}</span>
+                                          </span>
                                         </div>
-                                      </div>
+                                      </PhoneSwipeRow>
                                     </div>
                                   </motion.li>
                                 );
@@ -2609,7 +2761,7 @@ export default function Tickets() {
           deleteBlockedReason={deleteBlockedReason}
           onOpenDetails={() => setBulkPanelOpen((v) => !v)}
           detailsOpen={bulkPanelOpen}
-          onClear={() => { setSelectedIds(new Set()); setQueryScope(null); setBulkPanelOpen(false); }}
+          onClear={() => { setSelectedIds(new Set()); setQueryScope(null); setBulkPanelOpen(false); setPhoneSelect(false); }}
           bulkAction={bulkAction}
           bulkBusy={bulkBusy}
           onConfirm={runBulk}

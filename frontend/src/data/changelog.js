@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.2.45-preview';
+export const APP_VERSION = '4.2.46-preview';
 
 export const changelog = [
+  {
+    version: '4.2.46-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Quick actions on the phone ticket list</strong> — slide a ticket to the left for Mine (assign it to yourself), Resolve and Select. FreshService tickets ask for the usual confirmation first; Ticket Pulse tickets save at once with an Undo.' },
+      { type: 'added', html: '<strong>Change a status from the phone list</strong> — tap the status on a ticket card to change it, the same as the desktop list.' },
+      { type: 'added', html: '<strong>Select several tickets on a phone</strong> — the new Select button beside Refresh puts a tick box on every card. The same bar as on the desktop rises above the tab bar: Assign, Status, Tags, Category, Merge, Park and Delete.' },
+      { type: 'added', html: '<strong>Mine</strong> — a one-tap tile in the count row on a phone that shows only your tickets.' },
+      { type: 'improved', html: '<strong>Phone ticket cards show more</strong> — the due time, parked date, External, verified solution, repeat count and a waiting draft reply now show on the card. A tap opens the ticket at once; it no longer waits a moment for a possible double-click.' },
+      { type: 'added', html: '<strong>Reply, Note and Details bar on the phone ticket page</strong> — three buttons stay at the bottom of the screen wherever you have scrolled. Reply and Note take you to the composer in that mode with the cursor in it.' },
+      { type: 'improved', html: '<strong>Ticket details as a sheet on a phone</strong> — status, priority, due dates, assignee, type, category, group and tags open from the Details button (or a tap on the status) instead of sitting under the whole conversation.' },
+    ],
+  },
   {
     version: '4.2.45-preview',
     date: 'October 12, 2026',
