@@ -1962,6 +1962,11 @@ export const agentAPI = {
   updateAlert: (id, data) => api.patch(`/agent/alerts/${id}`, data),
   deleteAlert: (id, params = {}) => api.delete(`/agent/alerts/${id}`, { params }),
   saveAlertQuietHours: (data) => api.put('/agent/alerts-quiet-hours', data),
+  // Notifications on this device (web push)
+  getPush: () => api.get('/agent/push'),
+  subscribePush: (data) => api.post('/agent/push/subscribe', data),
+  unsubscribePush: (data) => api.post('/agent/push/unsubscribe', data),
+  sendPushTest: () => api.post('/agent/push/test', {}),
   // Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md)
   getTeams: (params = {}) => api.get('/agent/teams', { params }),
   saveTeamsPreferences: (data) => api.put('/agent/teams/preferences', data),

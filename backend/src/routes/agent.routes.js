@@ -6,6 +6,7 @@ import notificationPreferenceService from '../services/notificationPreferenceSer
 import agentAlertService from '../services/agentAlertService.js';
 import teamsNotificationService from '../services/teamsNotificationService.js';
 import userSignatureService from '../services/userSignatureService.js';
+import webPushService from '../services/webPushService.js';
 
 const router = express.Router();
 
@@ -107,6 +108,20 @@ router.put('/alerts-quiet-hours', asyncHandler(async (req, res) => {
 // Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md): my connection, my choices, mutes.
 const me = (req) => (req.session?.user ?? req.user)?.email;
 const wsOf = (req) => req.body?.workspaceId || req.query.workspaceId;
+// Device notifications (web push): this browser or installed app, per person.
+router.get('/push', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await webPushService.status(me(req)) });
+}));
+router.post('/push/subscribe', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await webPushService.subscribe(me(req), req.body?.subscription || {}, req.get('user-agent')) });
+}));
+router.post('/push/unsubscribe', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await webPushService.unsubscribe(me(req), req.body?.endpoint) });
+}));
+router.post('/push/test', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await webPushService.sendTest(me(req)) });
+}));
+
 router.get('/teams', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await teamsNotificationService.myStatus(me(req), wsOf(req)) });
 }));
