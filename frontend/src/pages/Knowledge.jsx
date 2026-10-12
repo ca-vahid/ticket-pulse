@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { Settings2, X } from 'lucide-react';
+import { Settings2, SlidersHorizontal, X } from 'lucide-react';
 import { knowledgePictogram } from '../components/v4/KnowledgePictogram';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -14,6 +14,7 @@ import WaitingPanel from '../components/knowledge/WaitingPanel';
 import ApprovalsPanel from '../components/knowledge/ApprovalsPanel';
 import ActivityPanel from '../components/knowledge/ActivityPanel';
 import GapsPanel from '../components/knowledge/GapsPanel';
+import AnsweringPanel from '../components/knowledge/AnsweringPanel';
 import { ConfirmDialog, KnowledgeGuardContext, Loading } from '../components/knowledge/knowledgeUi';
 import { TabActionsContext } from '../components/knowledge/builderUi';
 
@@ -39,6 +40,8 @@ const TABS = [
   { id: 'articles', label: 'Articles', icon: knowledgePictogram('articles') },
   { id: 'gaps', label: 'Gaps', icon: knowledgePictogram('gaps') },
   { id: 'playbooks', label: 'Playbooks', icon: knowledgePictogram('playbooks') },
+  // The dial per category (knowledge-first, plans/KNOWLEDGE_SIMPLIFY_PLAN.md).
+  { id: 'answering', label: 'Answering', icon: SlidersHorizontal },
   { id: 'waiting', label: 'Waiting', icon: knowledgePictogram('followup') },
   // Reviewers and admins only (30 Sep 2026): every Auto-help answer waiting to be sent.
   { id: 'approvals', label: 'Approvals', icon: knowledgePictogram('approve') },
@@ -119,6 +122,7 @@ export default function Knowledge() {
                 {tab === 'articles' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canManage} />}
                 {tab === 'gaps' && <GapsPanel canManage={canManage} canRefresh={canManage || settings?.canReview === true} />}
                 {tab === 'playbooks' && <PlaybooksPanel itemId={itemId} categories={categories} canManage={canManage} tools={settings?.tools || []} defaults={settings?.defaults || null} />}
+                {tab === 'answering' && <AnsweringPanel canManage={canManage} onSettingsChange={(next) => { if (next) setSettings((prev) => ({ ...(prev || {}), ...next })); }} />}
                 {tab === 'waiting' && <WaitingPanel />}
                 {tab === 'approvals' && <ApprovalsPanel />}
                 {tab === 'activity' && <ActivityPanel runId={itemId || null} canReview={settings?.canReview === true} />}

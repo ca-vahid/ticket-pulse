@@ -4046,6 +4046,11 @@ model AutoHelpPlaybook {
   stayQuietWhen         String[] @default([]) @map("stay_quiet_when")
   priority              Int      @default(100)
   version               Int      @default(1)
+  // Knowledge-first: the workspace's "everything else" rule (one per
+  // workspace, made on demand, never a candidate in the playbook choice), and
+  // extra top categories a special-handling playbook covers.
+  isDefault             Boolean  @default(false) @map("is_default")
+  categoryIds           Int[]    @default([]) @map("category_ids")
   createdBy             String?  @map("created_by") @db.VarChar(255)
   updatedBy             String?  @map("updated_by") @db.VarChar(255)
   createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -4105,11 +4110,19 @@ model AutoHelpRun {
   followUpPlan       Json?     @map("follow_up_plan")
   requesterRepliedAt DateTime? @map("requester_replied_at") @db.Timestamptz(6)
   closeClaimedAt     DateTime? @map("close_claimed_at") @db.Timestamptz(6)
+  // Knowledge-first (plans/KNOWLEDGE_SIMPLIFY_PLAN.md): the ticket's category
+  // when the run answered, and how sure the answer was (high | medium | low)
+  // with the observable evidence behind that band.
+  categoryId         Int?      @map("category_id")
+  subcategoryId      Int?      @map("subcategory_id")
+  confidenceBand     String?   @map("confidence_band") @db.VarChar(10)
+  evidence           Json?
 
   @@index([workspaceId, createdAt], map: "idx_auto_help_runs_ws_created")
   @@index([ticketId], map: "idx_auto_help_runs_ticket")
   @@index([workspaceId, requesterId, createdAt], map: "idx_auto_help_runs_requester")
   @@index([status, createdAt], map: "idx_auto_help_runs_status_created")
+  @@index([workspaceId, categoryId, createdAt], map: "idx_auto_help_runs_ws_category")
   // Partial indexes in SQL only (Prisma cannot express WHERE) - migration
   // 20260926020000_auto_help_p1_core:
   //   idx_auto_help_runs_reply_claim (requester_replied_at) WHERE outcome IS NULL AND requester_replied_at IS NOT NULL
@@ -4214,6 +4227,9 @@ model AutoHelpSettings {
   autoAfterHours           Boolean  @default(false) @map("auto_after_hours")
   afterHoursSummaryTo      String[] @default([]) @map("after_hours_summary_to")
   afterHoursSummarySentFor String?  @map("after_hours_summary_sent_for") @db.VarChar(10)
+  // Knowledge-first order: safety rules, one triage check, article search,
+  // then the category's dial (knowledge_category_policies). Off = playbook-gated.
+  knowledgeFirst           Boolean  @default(false) @map("knowledge_first")
   updatedBy         String?  @map("updated_by") @db.VarChar(255)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -4223,6 +4239,27 @@ model AutoHelpSettings {
 // Knowledge → Settings → Prompts (30 Sep 2026): versioned guidance for
 // Auto-help's prompts. key = 'answer' | 'route' | 'check'; one published row
 // per key at most; no row = the built-in default.
+// The dial (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 5): what Auto-help may do
+// with an answer in a category, by day and by night. categoryId 0 = the
+// workspace default; a NULL field inherits (subcategory -> category -> default).
+model KnowledgeCategoryPolicy {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  categoryId    Int      @default(0) @map("category_id")
+  dayLevel      String?  @map("day_level") @db.VarChar(10) // off | draft | suggest | send
+  nightLevel    String?  @map("night_level") @db.VarChar(10)
+  bar           Float?
+  alwaysChecked Boolean? @map("always_checked")
+  notes         String?  @db.Text
+  stayQuietWhen String[] @default([]) @map("stay_quiet_when")
+  updatedBy     String?  @map("updated_by") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, categoryId], map: "uq_knowledge_category_policies_ws_category")
+  @@map("knowledge_category_policies")
+}
+
 model AutoHelpPromptVersion {
   id          Int       @id @default(autoincrement())
   workspaceId Int       @map("workspace_id")

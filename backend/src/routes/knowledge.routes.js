@@ -13,6 +13,7 @@ import { toolCatalog } from '../services/autoHelpTools.js';
 import autoHelpPreviewService from '../services/autoHelpPreviewService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
 import knowledgeGrowthRoutes from './knowledgeGrowth.routes.js';
+import knowledgeAnswerPolicy from '../services/knowledgeAnswerPolicy.js';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): articles, playbooks,
@@ -152,6 +153,29 @@ router.put('/settings', requireKnowledgeManager, asyncHandler(async (req, res) =
       modeLockedMessage: settings.approveModeEnabled ? null : APPROVE_OFF_MESSAGE,
     },
   });
+}));
+
+// ---------- answering: the dial per category (knowledge-first) ----------
+
+/**
+ * Knowledge → Answering: what Auto-help may do with an answer in each
+ * category, by day and by night, with the evidence each category has toward
+ * "Send when sure". Readable by any member; changed by Knowledge managers.
+ */
+router.get('/answering', asyncHandler(async (req, res) => {
+  const [dial, settings, afterHoursNow, canManage] = await Promise.all([
+    knowledgeAnswerPolicy.list(req.workspaceId),
+    autoHelpPlaybookService.getSettings(req.workspaceId),
+    autoHelpPlaybookService.isAfterHours(req.workspaceId).catch(() => false),
+    canManageKnowledge(sessionUser(req), req.workspaceId),
+  ]);
+  res.json({ success: true, data: { ...dial, knowledgeFirst: settings.knowledgeFirst === true, enabled: settings.enabled === true, afterHoursNow, canManage } });
+}));
+
+router.put('/answering/:categoryId', requireKnowledgeManager, asyncHandler(async (req, res) => {
+  const dial = await knowledgeAnswerPolicy.upsert(req.workspaceId, req.params.categoryId, req.body || {}, actorOf(req));
+  const settings = await autoHelpPlaybookService.getSettings(req.workspaceId);
+  res.json({ success: true, data: { ...dial, knowledgeFirst: settings.knowledgeFirst === true, enabled: settings.enabled === true, canManage: true } });
 }));
 
 /** Internal category tree for the editors' selects (lighter than /tickets/meta). */

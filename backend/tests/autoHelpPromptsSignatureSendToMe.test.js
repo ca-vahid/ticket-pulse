@@ -40,7 +40,7 @@ describe('prompt versions', () => {
     prismaMock.autoHelpPromptVersion.findMany.mockResolvedValueOnce([]);
     const { bodies, versions } = await prompts.getActive(1);
     expect(bodies).toEqual(PROMPT_DEFAULTS);
-    expect(versions).toEqual({ answer: null, route: null, check: null });
+    expect(versions).toEqual({ answer: null, route: null, check: null, triage: null });
   });
 
   test('a published version replaces its default; cached until the next publish', async () => {

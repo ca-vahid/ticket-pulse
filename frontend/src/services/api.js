@@ -1411,6 +1411,9 @@ export const knowledgeAPI = {
   runsSummary: (params = {}) => api.get('/knowledge/runs-summary', { params }),
   ticketAutoHelp: (ticketId) => api.get(`/knowledge/tickets/${ticketId}/auto-help`, { _speculative: true }),
   waiting: () => api.get('/knowledge/waiting'),
+  // Knowledge → Answering: the dial per category (knowledge-first).
+  answering: () => api.get('/knowledge/answering'),
+  updateAnswering: (categoryId, data) => api.put(`/knowledge/answering/${categoryId}`, data),
 };
 
 /**

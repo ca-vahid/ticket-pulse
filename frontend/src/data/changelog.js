@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.2.39-preview';
+export const APP_VERSION = '4.2.40-preview';
 
 export const changelog = [
+  {
+    version: '4.2.40-preview',
+    date: 'October 11, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Knowledge: answer from the articles first</strong> &mdash; a new order for Auto-help, switched on per workspace in Knowledge &rarr; Answering. Every new ticket that passes the safety rules is checked against the articles; a playbook is no longer needed for a ticket to get an answer, so publishing an article is enough to make it usable. One short check runs first: can written instructions help this requester, or does a person have to do something? Tickets that need a person are left alone and are not counted as gaps.' },
+      { type: 'added', html: '<strong>Knowledge &rarr; Answering: one dial per category</strong> &mdash; for each category, during business hours and after hours, choose what Auto-help may do with an answer: Off, Draft only, Suggest to agent, or Send when sure. A subcategory follows its category unless you set it, and a category follows &ldquo;Everything else&rdquo;. Each category can also carry notes on how to answer, its own stay-quiet rules, and &ldquo;Always checked by a person&rdquo; for passwords, access and security. Every category starts at Draft only.' },
+      { type: 'added', html: '<strong>&ldquo;Send when sure&rdquo; is earned, per category</strong> &mdash; it stays locked until that category has enough reviewed answers of its own (30 reviewed, 85 % good, none marked wrong recently, 20 sent by agents), and never opens for a category that is always checked by a person. The Answering page shows how far each category is.' },
+      { type: 'added', html: '<strong>How sure each answer is</strong> &mdash; every drafted answer is now rated Sure, Fairly sure or Doubtful from things that can be observed: whether the knowledge fully covers the request, how well the best article matched, whether that article was checked by a person and is in date, and the answer&rsquo;s own confidence against the category&rsquo;s bar. A sure answer gets the level set for its category; a less sure one drops a level; a doubtful one is only recorded. An answer never moves up a level.' },
+      { type: 'improved', html: '<strong>Gaps by category</strong> &mdash; in a workspace that answers from Knowledge first, the Gaps tab groups unanswered questions by category, so a category with no playbook shows its gaps too.' },
+      { type: 'improved', html: '<strong>Activity says &ldquo;Needs a person&rdquo;</strong> &mdash; a ticket the new check left for a person shows that, with the reason, where it used to say &ldquo;No match&rdquo;. Drafts show how sure they were and why they stayed a draft.' },
+    ],
+  },
   {
     version: '4.2.39-preview',
     date: 'October 10, 2026',

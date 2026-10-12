@@ -10,6 +10,7 @@ import {
 } from './knowledgeUi';
 import { fitReasonOf, fmtDuration, isNotThisPlaybook, readableReason } from './knowledgeFormat';
 import PlaybookMetrics from './PlaybookMetrics';
+import { BAND_LABELS, actionWords } from './answeringFormat';
 import { DECISION_WORD, DISMISS_WORD, OUTCOME_WORD, runLifeLine, usd } from './autoHelpWords';
 
 /**
@@ -72,6 +73,10 @@ const GATE_WORD = {
   budget_exhausted: 'Skipped: the workspace reached its monthly Auto-help cost cap.',
   stayed_quiet: 'A “stay quiet when” rule applied, so a person picks it up.',
   not_this_playbook: 'In the playbook’s subcategories, but the AI read its “When to help” and decided it doesn’t fit.',
+  // Knowledge-first.
+  needs_person: 'A person has to do something here; written instructions would not sort it out.',
+  category_off: 'Skipped: Auto-help is off for this category (Knowledge → Answering).',
+  no_default_rule: 'Skipped: the workspace’s answer rule could not be read.',
 };
 const HISTORY_WORD = {
   drafted: 'Drafted',
@@ -126,6 +131,10 @@ function RunResult({ run }) {
     const why = fitReasonOf(run);
     return <RunStatus status="not_this_playbook" title={why ? `Why: ${why}` : undefined} />;
   }
+  if (run?.gateDecision === 'needs_person') {
+    const why = run.checks?.triage?.reason;
+    return <RunStatus status="needs_person" title={why ? `Why: ${why}` : undefined} />;
+  }
   return <RunStatus status={run.status} />;
 }
 
@@ -134,11 +143,16 @@ function rowReason(r) {
   const sq = stayQuietOf(r);
   if (sq) return stayQuietLine(sq);
   if (isNotThisPlaybook(r)) return fitReasonOf(r) || 'The AI decided this playbook doesn’t fit';
+  if (r.gateDecision === 'needs_person') return r.checks?.triage?.reason || GATE_WORD.needs_person;
   const life = runLifeLine(r);
   if (life) return life;
   if (r.status === 'drafted') {
     const dropped = r.checks?.droppedSteps || [];
-    return dropped.length ? `Drafted without step ${dropped.join(', ')} (not in the knowledge)` : 'Drafted — not sent (shadow)';
+    if (dropped.length) return `Drafted without step ${dropped.join(', ')} (not in the knowledge)`;
+    // Knowledge-first: how sure the answer was, and why it stayed a draft.
+    const act = actionWords(r.evidence);
+    if (act) return `Drafted, not sent · ${BAND_LABELS[r.confidenceBand] || 'not rated'}${act.why ? ` · ${act.why}` : ''}`;
+    return 'Drafted — not sent (shadow)';
   }
   if (r.gateDecision === 'insufficient_context') return 'The knowledge doesn’t cover enough of this';
   if (r.gateDecision === 'no_match' && r.checks?.fit?.reason) return `No playbook fits: ${r.checks.fit.reason}`;

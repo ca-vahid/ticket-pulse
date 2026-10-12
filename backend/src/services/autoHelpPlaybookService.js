@@ -127,6 +127,8 @@ export const PREVIEW_MAX_TICKETS = 4000;
 export const PREVIEW_EXAMPLES = 5;
 /** Playbook summary: at most this many articles listed by name. */
 export const SUMMARY_ARTICLES = 10;
+/** The name of the workspace's "everything else" rule (knowledge-first). */
+export const DEFAULT_RULE_NAME = 'Knowledge answers';
 /** How long enabledState() trusts its per-workspace read. */
 export const ENABLED_CACHE_MS = 60e3;
 export const MAX_STAY_QUIET_CHARS = 300;
@@ -262,6 +264,9 @@ export function normalizePlaybookInput(input = {}, { partial = false } = {}) {
   if (!partial || input.subcategoryIds !== undefined) {
     data.subcategoryIds = [...new Set((Array.isArray(input.subcategoryIds) ? input.subcategoryIds : []).map(intOrNull).filter(Boolean))];
   }
+  if (input.categoryIds !== undefined) {
+    data.categoryIds = [...new Set((Array.isArray(input.categoryIds) ? input.categoryIds : []).map(intOrNull).filter(Boolean))].slice(0, 50);
+  }
   if (!partial || input.match !== undefined) data.match = normalizeMatch(input.match);
   if (!partial || input.instructions !== undefined) data.instructions = String(input.instructions ?? '').trim().slice(0, MAX_INSTRUCTIONS);
   if (!partial || input.instructionsAreSource !== undefined) data.instructionsAreSource = input.instructionsAreSource === true;
@@ -301,7 +306,15 @@ export function playbookView(row) {
     followUp: normalizeFollowUp(row.followUp),
     allowedTools: Array.isArray(row.allowedTools) ? row.allowedTools : [],
     subcategoryIds: Array.isArray(row.subcategoryIds) ? row.subcategoryIds : [],
+    // Knowledge-first: extra top categories, and the "everything else" rule.
+    categoryIds: Array.isArray(row.categoryIds) ? row.categoryIds : [],
+    isDefault: row.isDefault === true,
   };
+}
+
+/** Every top category a playbook covers: its own plus the extra ones. */
+export function playbookCategoryIds(pb) {
+  return [...new Set([pb?.categoryId, ...(Array.isArray(pb?.categoryIds) ? pb.categoryIds : [])].map(Number).filter((n) => Number.isInteger(n) && n > 0))];
 }
 
 // Legal footers under a signature ("If you received this in error…") are not
@@ -327,9 +340,11 @@ function haystack(ticket) {
 export function explainMatch(playbook, ticket, { ignoreEnabled = false } = {}) {
   const pb = playbookView(playbook);
   if (!ignoreEnabled && !pb.enabled) return { matches: false, reason: 'Playbook is off' };
-  if (!pb.categoryId) return { matches: false, reason: 'Playbook has no category' };
-  if (Number(ticket?.internalCategoryId) !== pb.categoryId) return { matches: false, reason: 'Different category' };
-  if (pb.subcategoryIds.length && !pb.subcategoryIds.includes(Number(ticket?.internalSubcategoryId))) {
+  const covered = playbookCategoryIds(pb);
+  if (!covered.length) return { matches: false, reason: 'Playbook has no category' };
+  if (!covered.includes(Number(ticket?.internalCategoryId))) return { matches: false, reason: 'Different category' };
+  // A subcategory list only narrows the playbook's own first category.
+  if (Number(ticket?.internalCategoryId) === pb.categoryId && pb.subcategoryIds.length && !pb.subcategoryIds.includes(Number(ticket?.internalSubcategoryId))) {
     return { matches: false, reason: 'Subcategory not covered' };
   }
   const { keywords, excludeKeywords, useWords } = pb.match;
@@ -377,7 +392,7 @@ export function routeCandidates(ticket, playbooks = []) {
   const out = [];
   for (const row of playbooks || []) {
     const pb = playbookView(row);
-    if (!pb.enabled) continue;
+    if (!pb.enabled || pb.isDefault) continue;
     if (pb.match.useWords) {
       const text = haystack(ticket);
       const tokens = wordTokens(text);
@@ -385,8 +400,9 @@ export function routeCandidates(ticket, playbooks = []) {
       if (pb.match.keywords.length && !pb.match.keywords.some(has)) continue;
       if (pb.match.excludeKeywords.some(has)) continue;
     }
-    const sameCategory = pb.categoryId && Number(ticket?.internalCategoryId) === pb.categoryId;
-    const subOk = !pb.subcategoryIds.length || pb.subcategoryIds.includes(Number(ticket?.internalSubcategoryId));
+    const sameCategory = playbookCategoryIds(pb).includes(Number(ticket?.internalCategoryId));
+    const subOk = Number(ticket?.internalCategoryId) !== pb.categoryId
+      || !pb.subcategoryIds.length || pb.subcategoryIds.includes(Number(ticket?.internalSubcategoryId));
     const scope = sameCategory && subOk ? 'exact' : sameCategory ? 'category' : 'other';
     out.push({ playbook: row, scope });
   }
@@ -700,8 +716,13 @@ class AutoHelpPlaybookService {
   async update(workspaceId, id, input, actor = null) {
     const existing = await this.get(workspaceId, id);
     const data = normalizePlaybookInput(input, { partial: true });
+    // The "everything else" rule has no scope and no mode of its own: the
+    // category dial decides what its answers may do, and it is always on.
+    if (existing.isDefault) {
+      for (const f of ['enabled', 'categoryId', 'subcategoryIds', 'categoryIds', 'mode', 'match', 'sensitive', 'priority']) delete data[f];
+    }
     const merged = { ...existing, ...data };
-    if (merged.enabled && !merged.categoryId) throw new ValidationError('Pick a category before switching the playbook on');
+    if (!existing.isDefault && merged.enabled && !merged.categoryId) throw new ValidationError('Pick a category before switching the playbook on');
     // Mode rules apply when the mode changes, or when a change makes the
     // current mode invalid (marking an auto playbook sensitive).
     if (data.mode !== undefined && data.mode !== existing.mode) {
@@ -729,6 +750,7 @@ class AutoHelpPlaybookService {
    */
   async remove(workspaceId, id) {
     const existing = await this.get(workspaceId, id);
+    if (existing.isDefault) throw lockError('This is the rule for everything that has no special handling. It cannot be deleted.', 'auto_help_default_rule');
     const openLoops = await Promise.resolve()
       .then(() => prisma.autoHelpRun.count({
         where: { workspaceId: Number(workspaceId), playbookId: existing.id, decision: { in: SENT_DECISIONS }, outcome: null },
@@ -750,7 +772,7 @@ class AutoHelpPlaybookService {
   /** Enabled playbooks of the workspace, then matchPlaybook. */
   async matchForTicket(workspaceId, ticket) {
     const rows = await Promise.resolve()
-      .then(() => prisma.autoHelpPlaybook.findMany({ where: { workspaceId: Number(workspaceId), enabled: true } }))
+      .then(() => prisma.autoHelpPlaybook.findMany({ where: { workspaceId: Number(workspaceId), enabled: true, isDefault: false } }))
       .catch((err) => { logger.warn(`Auto-help playbook match failed (ws ${workspaceId}): ${err.message}`); return []; });
     const hit = matchPlaybook(ticket, rows);
     return hit ? playbookView(hit) : null;
@@ -759,9 +781,51 @@ class AutoHelpPlaybookService {
   /** routeCandidates over this workspace's enabled playbooks, as views ({ playbook, scope }). */
   async candidatesForTicket(workspaceId, ticket) {
     const rows = await Promise.resolve()
-      .then(() => prisma.autoHelpPlaybook.findMany({ where: { workspaceId: Number(workspaceId), enabled: true } }))
+      .then(() => prisma.autoHelpPlaybook.findMany({ where: { workspaceId: Number(workspaceId), enabled: true, isDefault: false } }))
       .catch((err) => { logger.warn(`Auto-help playbook candidates failed (ws ${workspaceId}): ${err.message}`); return []; });
     return routeCandidates(ticket, rows).map((c) => ({ playbook: playbookView(c.playbook), scope: c.scope }));
+  }
+
+  /**
+   * The workspace's "everything else" rule (knowledge-first): the playbook a
+   * run carries when no special handling applies, so delivery, follow-up and
+   * the run records keep working on a real row. Made on first use, always on,
+   * never a candidate in the playbook choice. Never throws: null when the
+   * row can be neither read nor made (the run then records no match).
+   */
+  async ensureDefault(workspaceId) {
+    const ws = Number(workspaceId);
+    const find = () => prisma.autoHelpPlaybook.findFirst({ where: { workspaceId: ws, isDefault: true }, orderBy: { id: 'asc' } });
+    try {
+      const existing = await find();
+      if (existing) return playbookView(existing);
+      await prisma.autoHelpPlaybook.create({
+        data: {
+          workspaceId: ws,
+          name: DEFAULT_RULE_NAME,
+          enabled: true,
+          isDefault: true,
+          mode: DEFAULT_MODE,
+          categoryId: null,
+          subcategoryIds: [],
+          match: normalizeMatch({}),
+          instructions: '',
+          allowedTools: [...DEFAULT_ALLOWED_TOOLS],
+          kbScope: normalizeKbScope({}),
+          minConfidence: 0.85,
+          followUp: normalizeFollowUp({}),
+          priority: 0,
+          createdBy: 'system',
+          updatedBy: 'system',
+        },
+      });
+      // Two first runs at once could both create one: the oldest row wins.
+      const row = await find();
+      return row ? playbookView(row) : null;
+    } catch (err) {
+      logger.warn(`Auto-help default rule unavailable (ws ${ws}): ${err.message}`);
+      return null;
+    }
   }
 
   // ---------- settings ----------
@@ -794,6 +858,9 @@ class AutoHelpPlaybookService {
       autoAfterHours: row?.autoAfterHours === true,
       afterHoursSummaryTo: Array.isArray(row?.afterHoursSummaryTo) ? row.afterHoursSummaryTo : [],
       afterHoursSummarySentFor: row?.afterHoursSummarySentFor || null,
+      // Knowledge-first order (plans/KNOWLEDGE_SIMPLIFY_PLAN.md): the category
+      // dial replaces playbook modes and the approve / after-hours switches.
+      knowledgeFirst: row?.knowledgeFirst === true,
       // Not a setting anyone can flip: the build decides (AUTO_MODE_BUILD_ENABLED).
       autoModeAllowed: this.autoModeAllowed(),
       autoModeLockedMessage: this.autoModeAllowed() ? null : AUTO_MODE_LOCKED_MESSAGE,
@@ -812,6 +879,7 @@ class AutoHelpPlaybookService {
     const data = {};
     if (input.enabled !== undefined) data.enabled = input.enabled === true;
     if (input.approveModeEnabled !== undefined) data.approveModeEnabled = input.approveModeEnabled === true;
+    if (input.knowledgeFirst !== undefined) data.knowledgeFirst = input.knowledgeFirst === true;
     if (input.thankOnConfirm !== undefined) data.thankOnConfirm = input.thankOnConfirm === true;
     if (input.countsAsFirstResponse !== undefined) data.countsAsFirstResponse = input.countsAsFirstResponse === true;
     if (input.alwaysStayQuietWhen !== undefined) data.alwaysStayQuietWhen = cleanStayQuiet(input.alwaysStayQuietWhen);
