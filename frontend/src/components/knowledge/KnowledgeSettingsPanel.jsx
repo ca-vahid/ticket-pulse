@@ -8,6 +8,7 @@ import { KnowledgeSources } from './KnowledgeSourcesSettings';
 import { StayQuietList } from './StayQuietEditor';
 import AutoHelpSignatureSettings from './AutoHelpSignatureSettings';
 import AutoHelpPromptsSettings from './AutoHelpPromptsSettings';
+import ContributionSettings from './ContributionSettings';
 
 /**
  * Knowledge → Settings (26 Sep 2026: moved out of the strip above the tabs).
@@ -379,6 +380,7 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
 
       <AutoHelpSignatureSettings settings={settings} canManage={canManage} busy={busy} save={save} />
 
+      <ContributionSettings canManage={canManage} />
       <AutoHelpPromptsSettings canManage={canManage} />
 
       {/* Announced without reserving a blank gap between the cards. */}

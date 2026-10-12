@@ -43,6 +43,7 @@ import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
 import AutoHelpRunCard from '../components/tickets/AutoHelpRunCard';
 import TicketKnowledgeCard from '../components/tickets/TicketKnowledgeCard';
+import SaveAsKnowledgePrompt from '../components/tickets/SaveAsKnowledgePrompt';
 import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
@@ -2949,6 +2950,8 @@ export default function TicketDetail() {
               <div className="space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2">
                 {pageTab === 'conversation' && (
                   <>
+                    {/* Right after the agent resolves the ticket here, and only when the server says it is worth asking. */}
+                    <SaveAsKnowledgePrompt ticketId={ticketId} resolved={ticket ? ['Resolved', 'Closed'].includes(baseStatusOf(statusDefs, ticket.status)) : null} />
                     {(ticket.descriptionText || ticket.description) && !editingDescription && (
                       <section className="tp-card rounded-xl p-4 bg-gradient-to-br from-card via-card to-muted/80" aria-label="Ticket description">
                         <div className="flex items-center gap-2 mb-2">

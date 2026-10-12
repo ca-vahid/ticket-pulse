@@ -42,6 +42,8 @@ const api = {
   getSettings: vi.fn(() => Promise.resolve({ success: true, data: SETTINGS })),
   categories: vi.fn(() => Promise.resolve({ success: true, data: CATEGORIES })),
   listArticles: vi.fn(() => Promise.resolve({ success: true, data: { items: [], total: 0 } })),
+  home: vi.fn(() => Promise.resolve({ success: true, data: { rights: { isAdmin: true, canPropose: true, canWriteSomewhere: true }, inbox: { counts: { mine: 0, categories: 0 }, items: [] }, categories: [] } })),
+  inbox: vi.fn(() => Promise.resolve({ success: true, data: { counts: { mine: 0, categories: 0, all: 0 }, total: 0, items: [] } })),
   library: vi.fn(() => Promise.resolve({
     success: true,
     data: {
@@ -140,16 +142,22 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe('Knowledge page', () => {
-  test('renders the five tabs with no page header; /knowledge lands on the Library; settings live on their own tab', async () => {
+  test('renders the tabs with no page header; /knowledge lands on Home; settings live on their own tab', async () => {
     renderAt('/knowledge');
-    const tabs = await screen.findAllByRole('tab');
-    // Knowledge simplified (11 Oct 2026): seven tabs became five.
-    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Library', 'Gaps', 'Answering', 'Activity', 'Settings']);
+    // Knowledge simplified (11 Oct 2026): Home, Library and Inbox for everyone; the rest for the people who run Auto-help.
+    await waitFor(() => expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['Home', 'Library', 'Inbox', 'Gaps', 'Answering', 'Activity', 'Settings']));
+    const tabs = screen.getAllByRole('tab');
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByText('Nothing written here yet')).toBeInTheDocument();
+    expect(await screen.findByTestId('knowledge-home')).toBeInTheDocument();
     // 26 Sep 2026 (Vahid): no "Knowledge — Answers we can stand behind…" header, no settings above the tabs.
     expect(screen.queryByText(/Answers we can stand behind/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('knowledge-settings')).not.toBeInTheDocument();
+  });
+
+  test('someone who does not run Auto-help sees Home, Library, Inbox and Gaps; the Inbox tab carries the count', async () => {
+    api.getSettings.mockResolvedValueOnce({ success: true, data: { ...SETTINGS, canManage: false, canReview: false, canApprove: false, inboxCount: 3 } });
+    renderAt('/knowledge/library');
+    await waitFor(() => expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['Home', 'Library', 'Inbox (3)', 'Gaps']));
   });
 
   test('reviewers and admins get "Waiting for an agent" under Activity; it lists answers waiting to be sent', async () => {
@@ -376,27 +384,27 @@ describe('Knowledge page', () => {
     renderAt('/knowledge/articles');
     const tabs = await screen.findAllByRole('tab');
     expect(screen.queryByRole('heading', { level: 1, name: 'Knowledge' })).not.toBeInTheDocument();
-    expect(tabs[0]).toHaveAttribute('aria-controls', 'knowledge-panel-library');
+    expect(tabs[1]).toHaveAttribute('aria-controls', 'knowledge-panel-library');
     // 26 Sep 2026 redesign: light tabs (soft blue fill + underline), not the Assignment gradient.
-    expect(tabs[0].className).toMatch(/border-primary/);
-    expect(tabs[0].className).toMatch(/bg-primary/);
-    expect(tabs[0].closest('[data-testid="light-tab-bar"]')).not.toBeNull();
-    expect(tabs[0].closest('.bg-gradient-to-r')).toBeNull();
+    expect(tabs[1].className).toMatch(/border-primary/);
+    expect(tabs[1].className).toMatch(/bg-primary/);
+    expect(tabs[1].closest('[data-testid="light-tab-bar"]')).not.toBeNull();
+    expect(tabs[1].closest('.bg-gradient-to-r')).toBeNull();
     // The open tab's actions sit in the tab row.
     expect(within(screen.getByTestId('knowledge-tab-actions')).getByRole('button', { name: /New article/ })).toBeInTheDocument();
-    expect(tabs[0]).toHaveAttribute('tabindex', '0');
-    expect(tabs[1]).toHaveAttribute('tabindex', '-1');
+    expect(tabs[1]).toHaveAttribute('tabindex', '0');
+    expect(tabs[0]).toHaveAttribute('tabindex', '-1');
     const panel = await screen.findByRole('tabpanel');
     expect(panel).toHaveAttribute('id', 'knowledge-panel-library');
     expect(panel).toHaveAttribute('aria-labelledby', 'knowledge-tab-library');
 
-    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Gaps/ })).toHaveAttribute('aria-selected', 'true'));
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Gaps/ }));
-    fireEvent.keyDown(screen.getByRole('tab', { name: /Gaps/ }), { key: 'End' });
+    fireEvent.keyDown(tabs[1], { key: 'ArrowRight' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Inbox/ })).toHaveAttribute('aria-selected', 'true'));
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Inbox/ }));
+    fireEvent.keyDown(screen.getByRole('tab', { name: /Inbox/ }), { key: 'End' });
     await waitFor(() => expect(screen.getByRole('tab', { name: /Settings/ })).toHaveAttribute('aria-selected', 'true'));
     fireEvent.keyDown(screen.getByRole('tab', { name: /Settings/ }), { key: 'ArrowRight' });
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Library/ })).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Home/ })).toHaveAttribute('aria-selected', 'true'));
   });
 
   test('run detail shows who ran it as avatar + name, never the bare e-mail, and the draft in the white e-mail well', async () => {

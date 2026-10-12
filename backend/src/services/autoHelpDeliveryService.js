@@ -1133,6 +1133,20 @@ class AutoHelpDeliveryService {
     emitAutoHelpEvent('auto_help.answered', Number(ticketId), {
       runId: run.id, playbook: playbook?.name || null, decision, by: actorLabel(actor), ackMerged: Boolean(sent.ackMerged),
     });
+    // Reuse is review (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 3): an agent who
+    // sends the suggested answer as it is has judged it good, and that lands on
+    // every article it quoted. Never for an answer that sent by itself, never
+    // for an edited one (the edit is the review). Fails soft.
+    if (decision === DECISIONS.SENT && actor?.email) {
+      await Promise.resolve()
+        .then(async () => {
+          const full = await prisma.autoHelpRun.findFirst({ where: { id: run.id }, select: { id: true, ticketId: true, categoryId: true, sources: true } });
+          if (!full) return;
+          const { default: knowledgeSignals } = await import('./knowledgeSignals.js');
+          await knowledgeSignals.recordReview(Number(workspaceId), full, 'good', actor);
+        })
+        .catch((err) => logger.warn(`Auto-help: run ${run.id} sent, but its articles did not get the "used as it was" signal (${err.message})`));
+    }
 
     // The follow-up loop: wait for the requester until the check-in date.
     let park = null;

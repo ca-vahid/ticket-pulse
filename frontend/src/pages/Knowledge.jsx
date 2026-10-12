@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { Settings2, SlidersHorizontal, X } from 'lucide-react';
+import { Home, Inbox, Settings2, SlidersHorizontal, X } from 'lucide-react';
 import { knowledgePictogram } from '../components/v4/KnowledgePictogram';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -17,6 +17,9 @@ import GapsPanel from '../components/knowledge/GapsPanel';
 import AnsweringPanel from '../components/knowledge/AnsweringPanel';
 import LibraryPanel from '../components/knowledge/LibraryPanel';
 import ArticleReader from '../components/knowledge/ArticleReader';
+import HomePanel from '../components/knowledge/HomePanel';
+import InboxPanel from '../components/knowledge/InboxPanel';
+import NotesToArticle from '../components/knowledge/NotesToArticle';
 import { ConfirmDialog, KnowledgeGuardContext, Loading } from '../components/knowledge/knowledgeUi';
 import { PanelTabs, TabActionsContext } from '../components/knowledge/builderUi';
 
@@ -43,15 +46,18 @@ const TABS = [
   // tabs. The Library lists and shows articles; Answering holds the dial and
   // special handling (the old Playbooks); Activity holds the runs and both
   // waiting lists. The old URLs keep working under the tab they moved to.
+  { id: 'home', label: 'Home', icon: Home },
   { id: 'library', label: 'Library', icon: knowledgePictogram('articles') },
+  { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'gaps', label: 'Gaps', icon: knowledgePictogram('gaps') },
-  { id: 'answering', label: 'Answering', icon: SlidersHorizontal },
-  { id: 'activity', label: 'Activity', icon: knowledgePictogram('autohelp') },
-  { id: 'settings', label: 'Settings', icon: Settings2 },
+  // The three below are for the people who run Auto-help (admins, reviewers).
+  { id: 'answering', label: 'Answering', icon: SlidersHorizontal, manage: true },
+  { id: 'activity', label: 'Activity', icon: knowledgePictogram('autohelp'), manage: true },
+  { id: 'settings', label: 'Settings', icon: Settings2, manage: true },
 ];
 /** Every URL segment the section answers to, and the tab it belongs to. */
 const TAB_OF = {
-  library: 'library', articles: 'library', gaps: 'gaps', answering: 'answering', playbooks: 'answering',
+  home: 'home', inbox: 'inbox', library: 'library', articles: 'library', gaps: 'gaps', answering: 'answering', playbooks: 'answering',
   activity: 'activity', waiting: 'activity', approvals: 'activity', settings: 'settings',
 };
 
@@ -94,12 +100,17 @@ export default function Knowledge() {
   }, [navigate]);
   const guard = useMemo(() => ({ setDirty, leave }), [setDirty, leave]);
 
-  if (!tab || !TAB_OF[tab]) return <Navigate to="/knowledge/library" replace />;
+  if (!tab || !TAB_OF[tab]) return <Navigate to="/knowledge/home" replace />;
   // The Library is where articles are found and read. /knowledge/articles is
   // the housekeeping list (filters, drafts, the archive) and, with an id, the editor.
   const canManage = settings?.canManage === true;
   const canWrite = canManage || settings?.rights?.canWriteSomewhere === true;
   const activeTab = TAB_OF[tab];
+  // An agent sees Home, Library, Inbox and Gaps; the rest is for the people
+  // who run Auto-help (the pages still open from a link, read-only).
+  const runsAutoHelp = canManage || settings?.canReview === true || settings?.canApprove === true;
+  const tabs = TABS.filter((t) => !t.manage || runsAutoHelp || t.id === activeTab);
+  const inboxCount = Number(settings?.inboxCount) || 0;
   // A tab click also closes an open article / playbook / run on the same tab.
   const selectTab = (id) => { if (id !== tab || itemId) leave(`/knowledge/${id}`); };
   const activityViews = [
@@ -113,7 +124,7 @@ export default function Knowledge() {
       <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
         <AppHeader activePage="knowledge" />
         <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-          <LightTabBar tabs={TABS} activeId={activeTab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
+          <LightTabBar tabs={tabs.map((t) => (t.id === 'inbox' && inboxCount ? { ...t, label: `Inbox (${inboxCount})` } : t))} activeId={activeTab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
             <div ref={setActionsNode} className="flex flex-wrap items-center justify-end gap-2" data-testid="knowledge-tab-actions" />
           </LightTabBar>
 
@@ -135,7 +146,10 @@ export default function Knowledge() {
                 {tab === 'library' && (itemId
                   ? <ArticleReader articleId={itemId} categories={categories} />
                   : <LibraryPanel canWrite={canWrite} />)}
-                {tab === 'articles' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canWrite} />}
+                {tab === 'home' && <HomePanel />}
+                {tab === 'inbox' && <InboxPanel itemId={itemId || null} isAdmin={settings?.rights?.isAdmin === true} />}
+                {tab === 'articles' && itemId === 'from-notes' && <NotesToArticle categories={categories} rights={settings?.rights || null} />}
+                {tab === 'articles' && itemId !== 'from-notes' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canWrite} />}
                 {activeTab === 'activity' && !itemId && activityViews.length > 1 && (
                   <div className="mb-4 max-w-xl">
                     <PanelTabs tabs={activityViews} activeId={tab} onSelect={(id) => leave(`/knowledge/${id}`)} ariaLabel="Activity views" idPrefix="knowledge-activity" />
