@@ -1,4 +1,6 @@
 import prisma from './prisma.js';
+import { fsNoteHeader } from '../utils/fsNoteHeader.js';
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { reasonLabel } from './resolutionReasonService.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
 import logger from '../utils/logger.js';
@@ -29,6 +31,11 @@ const DRAIN_INTERVAL_MS = Number(process.env.NATIVE_TICKET_MIRROR_INTERVAL_MS ||
 // eligible to be reclaimed by the next drain.
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 const MIRROR_MARKER = '[Ticket Pulse mirror]';
+// Link to the ticket in Ticket Pulse for private notes (never on portal-visible ones). Empty when no public address is set.
+const ticketUrl = (ticket) => {
+  const base = resolvePublicBaseUrl();
+  return base && ticket?.id ? `${String(base).replace(/\/+$/, '')}/tickets/${ticket.id}` : null;
+};
 
 // How many DIFFERENT tickets a drain pushes to FreshService at once (FR 09-11).
 // Jobs for one ticket still run in order, one after another — only separate
@@ -813,8 +820,9 @@ class MirrorService {
 
     await client.addNote(
       fsTicket.id,
-      `<p><b>${MIRROR_MARKER}</b> This is the fallback copy of <b>${ref}</b>, which lives in Ticket Pulse. `
-      + 'Ticket Pulse is the source of truth — work it there unless Ticket Pulse is down.</p>',
+      `${fsNoteHeader({ who: 'Ticket Pulse', action: 'copy', ref, url: ticketUrl(ticket), marker: MIRROR_MARKER })}`
+      + `<p>This is the FreshService copy of <b>${ref}</b>. The ticket lives in Ticket Pulse: work it there unless Ticket Pulse is down. `
+      + 'Notes and replies written in Ticket Pulse appear here with the name of the person who wrote them.</p>',
       { isPrivate: true },
     ).catch((err) => logger.warn(`Mirror intro note failed for ${ref} (non-fatal): ${err.message}`));
 
@@ -953,15 +961,21 @@ class MirrorService {
 
   /** Mirror-prefixed FS body for a thread entry (create AND edit reuse this). */
   _threadEntryMirrorBody(ticket, entry) {
-    const label = entry.isPrivate ? 'internal note' : 'reply to requester';
+
     // Private notes carry the author's email too: the FS conversation is
     // authored by the service account's API key, so the body line is the only
     // machine-parseable attribution the FS side ever gets (resolution-notes
     // review, Sep 2026). Public notes stay name-only — no agent emails on
     // portal-visible content.
-    const author = `${entry.actorName || 'Ticket Pulse'}${entry.isPrivate && entry.actorEmail ? ` <${entry.actorEmail}>` : ''}`;
-    return `<p><b>${MIRROR_MARKER}</b> ${author} · ${label} · ${ticketDisplayRef(ticket)}</p>`
-      + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
+    // 12 Oct 2026: the person leads the line in bold; the marker trails it (utils/fsNoteHeader.js).
+    return fsNoteHeader({
+      who: entry.actorName || 'Ticket Pulse',
+      email: entry.isPrivate ? entry.actorEmail : null,
+      action: entry.isPrivate ? 'note' : 'reply',
+      ref: ticketDisplayRef(ticket),
+      url: entry.isPrivate ? ticketUrl(ticket) : null,
+      marker: MIRROR_MARKER,
+    }) + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
   }
 
   async _mirrorThreadEntry(job, client) {
@@ -1026,7 +1040,7 @@ class MirrorService {
         return;
       }
     }
-    const body = `<p><b>${MIRROR_MARKER}</b> attachment uploaded in Ticket Pulse · ${ticketDisplayRef(ticket)}</p><p>${String(row.fileName).replace(/</g, '&lt;')}</p>`;
+    const body = `${fsNoteHeader({ who: row.uploadedByName || 'Ticket Pulse', action: 'attachment', ref: ticketDisplayRef(ticket), url: ticketUrl(ticket), marker: MIRROR_MARKER })}<p>${String(row.fileName).replace(/</g, '&lt;')}</p>`;
     await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: files });
     logger.info(`Mirror: attachment "${row.fileName}" pushed to FS copy of ticket ${job.ticketId}`);
   }

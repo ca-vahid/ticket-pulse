@@ -179,7 +179,7 @@ function isFsQueueTimeout(err) {
 export const TP_NOTE_MARKER = '[Ticket Pulse note]';
 function tpNoteMarkerHtml(actorLabel) {
   const esc = String(actorLabel || 'Ticket Pulse').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>${TP_NOTE_MARKER}</b> ${esc}</p>`;
+  return `<p style="margin:0 0 8px"><b>${esc}</b> <span style="color:#475569">· 🔒 internal note written in Ticket Pulse</span> <span style="font-size:11px;color:#94a3b8">${TP_NOTE_MARKER}</span></p>`;
 }
 
 // Arrival-channel labels live in utils/ticketOrigin.js (TICKET_SOURCE_LABELS):
@@ -5006,7 +5006,7 @@ class TicketService {
       if (typeof client?.addNote !== 'function') throw new Error('FreshService is not configured for this workspace');
       const fsUserId = await this._fsActorUserId(ticket.workspaceId, actor);
       const who = actor?.name || actor?.email || 'Ticket Pulse';
-      const marker = `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>${TP_NOTE_MARKER}</b> ${esc(who)} · reply to requester · e-mailed by Ticket Pulse</p>`;
+      const marker = `<p style="margin:0 0 8px"><b>${esc(who)}</b> <span style="color:#475569">· ✉️ reply, already e-mailed to the requester by Ticket Pulse</span> <span style="font-size:11px;color:#94a3b8">${TP_NOTE_MARKER}</span></p>`;
       const html = entry.bodyHtml || textToReplyHtml(entry.bodyText);
       const result = await client.addNote(Number(ticket.freshserviceTicketId), `${marker}${html}`, {
         isPrivate: false,

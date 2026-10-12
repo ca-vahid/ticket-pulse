@@ -265,7 +265,7 @@ describe('mirrorService job processing', () => {
 
     expect(ok).toBe(true);
     expect(clientMock.updateConversation).toHaveBeenCalledWith(777, {
-      body: expect.stringMatching(/\[Ticket Pulse mirror\][\s\S]*internal note[\s\S]*<p>edited body<\/p>/),
+      body: expect.stringMatching(/<b>Cora<\/b>[\s\S]*internal note[\s\S]*\[Ticket Pulse mirror\][\s\S]*<p>edited body<\/p>/),
     });
   });
 
