@@ -42,6 +42,13 @@ const api = {
   getSettings: vi.fn(() => Promise.resolve({ success: true, data: SETTINGS })),
   categories: vi.fn(() => Promise.resolve({ success: true, data: CATEGORIES })),
   listArticles: vi.fn(() => Promise.resolve({ success: true, data: { items: [], total: 0 } })),
+  library: vi.fn(() => Promise.resolve({
+    success: true,
+    data: {
+      totals: { articles: 0, drafts: 0, attention: 0, notChecked: 0 }, mine: { articles: 0, drafts: 0, attention: 0, notChecked: 0 },
+      uncategorised: { articles: 0, drafts: 0, attention: 0, notChecked: 0 }, categories: [],
+    },
+  })),
   listPlaybooks: vi.fn(() => Promise.resolve({ success: true, data: [PLAYBOOK] })),
   getPlaybook: vi.fn(() => Promise.resolve({ success: true, data: PLAYBOOK })),
   updatePlaybook: vi.fn((id, data) => Promise.resolve({ success: true, data: { ...PLAYBOOK, ...data, version: 3 } })),
@@ -133,23 +140,26 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe('Knowledge page', () => {
-  test('renders the six tabs with no page header; /knowledge lands on Articles; settings live on their own tab', async () => {
+  test('renders the five tabs with no page header; /knowledge lands on the Library; settings live on their own tab', async () => {
     renderAt('/knowledge');
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Articles', 'Gaps', 'Playbooks', 'Answering', 'Waiting', 'Activity', 'Settings']);
+    // Knowledge simplified (11 Oct 2026): seven tabs became five.
+    expect(tabs.map((t) => t.textContent.trim())).toEqual(['Library', 'Gaps', 'Answering', 'Activity', 'Settings']);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByText('No articles yet')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing written here yet')).toBeInTheDocument();
     // 26 Sep 2026 (Vahid): no "Knowledge — Answers we can stand behind…" header, no settings above the tabs.
     expect(screen.queryByText(/Answers we can stand behind/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('knowledge-settings')).not.toBeInTheDocument();
   });
 
-  test('reviewers and admins get an Approvals tab (30 Sep 2026); it lists answers waiting to be sent', async () => {
+  test('reviewers and admins get "Waiting for an agent" under Activity; it lists answers waiting to be sent', async () => {
     api.getSettings.mockResolvedValueOnce({ success: true, data: { ...SETTINGS, canApprove: true } });
     renderAt('/knowledge/approvals');
-    const tabs = await screen.findAllByRole('tab');
-    await waitFor(() => expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toContain('Approvals'));
-    expect(tabs.length).toBeGreaterThan(0);
+    await screen.findAllByRole('tab');
+    // The old Approvals and Waiting tabs are views of Activity now; the old URLs still work.
+    await waitFor(() => expect(screen.getByRole('tab', { name: /^Activity$/ })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getByRole('tab', { name: 'Waiting for an agent' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Waiting on requesters' })).toBeInTheDocument();
     expect(await screen.findByText('Nothing waiting')).toBeInTheDocument();
     expect(api.approvals).toHaveBeenCalled();
   });
@@ -366,7 +376,7 @@ describe('Knowledge page', () => {
     renderAt('/knowledge/articles');
     const tabs = await screen.findAllByRole('tab');
     expect(screen.queryByRole('heading', { level: 1, name: 'Knowledge' })).not.toBeInTheDocument();
-    expect(tabs[0]).toHaveAttribute('aria-controls', 'knowledge-panel-articles');
+    expect(tabs[0]).toHaveAttribute('aria-controls', 'knowledge-panel-library');
     // 26 Sep 2026 redesign: light tabs (soft blue fill + underline), not the Assignment gradient.
     expect(tabs[0].className).toMatch(/border-primary/);
     expect(tabs[0].className).toMatch(/bg-primary/);
@@ -377,8 +387,8 @@ describe('Knowledge page', () => {
     expect(tabs[0]).toHaveAttribute('tabindex', '0');
     expect(tabs[1]).toHaveAttribute('tabindex', '-1');
     const panel = await screen.findByRole('tabpanel');
-    expect(panel).toHaveAttribute('id', 'knowledge-panel-articles');
-    expect(panel).toHaveAttribute('aria-labelledby', 'knowledge-tab-articles');
+    expect(panel).toHaveAttribute('id', 'knowledge-panel-library');
+    expect(panel).toHaveAttribute('aria-labelledby', 'knowledge-tab-library');
 
     fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
     await waitFor(() => expect(screen.getByRole('tab', { name: /Gaps/ })).toHaveAttribute('aria-selected', 'true'));
@@ -386,7 +396,7 @@ describe('Knowledge page', () => {
     fireEvent.keyDown(screen.getByRole('tab', { name: /Gaps/ }), { key: 'End' });
     await waitFor(() => expect(screen.getByRole('tab', { name: /Settings/ })).toHaveAttribute('aria-selected', 'true'));
     fireEvent.keyDown(screen.getByRole('tab', { name: /Settings/ }), { key: 'ArrowRight' });
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Articles/ })).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Library/ })).toHaveAttribute('aria-selected', 'true'));
   });
 
   test('run detail shows who ran it as avatar + name, never the bare e-mail, and the draft in the white e-mail well', async () => {
@@ -417,17 +427,18 @@ describe('Knowledge page', () => {
     fireEvent.change(title, { target: { value: 'VPN setup (new)' } });
     expect(screen.getAllByText('Unsaved changes').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('tab', { name: /Playbooks/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Gaps/ }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Leave without saving?');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Articles/ })).toHaveAttribute('aria-selected', 'true');
+    // The editor lives under the Library tab.
+    expect(screen.getByRole('tab', { name: /Library/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByLabelText('Title')).toHaveValue('VPN setup (new)');
 
-    fireEvent.click(screen.getByRole('tab', { name: /Playbooks/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Gaps/ }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard changes' }));
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Playbooks/ })).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Gaps/ })).toHaveAttribute('aria-selected', 'true'));
   });
 
   test('a clean editor leaves without asking; archive asks in-app (no window.confirm)', async () => {

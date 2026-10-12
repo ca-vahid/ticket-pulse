@@ -15,8 +15,10 @@ import ApprovalsPanel from '../components/knowledge/ApprovalsPanel';
 import ActivityPanel from '../components/knowledge/ActivityPanel';
 import GapsPanel from '../components/knowledge/GapsPanel';
 import AnsweringPanel from '../components/knowledge/AnsweringPanel';
+import LibraryPanel from '../components/knowledge/LibraryPanel';
+import ArticleReader from '../components/knowledge/ArticleReader';
 import { ConfirmDialog, KnowledgeGuardContext, Loading } from '../components/knowledge/knowledgeUi';
-import { TabActionsContext } from '../components/knowledge/builderUi';
+import { PanelTabs, TabActionsContext } from '../components/knowledge/builderUi';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): the articles we can
@@ -37,17 +39,21 @@ import { TabActionsContext } from '../components/knowledge/builderUi';
 // Ticket Pulse 4 (v4.0.01): the content tabs carry the v4 pictograms;
 // Settings keeps a plain glyph so it reads as chrome, not content.
 const TABS = [
-  { id: 'articles', label: 'Articles', icon: knowledgePictogram('articles') },
+  // Knowledge simplified (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 12): five
+  // tabs. The Library lists and shows articles; Answering holds the dial and
+  // special handling (the old Playbooks); Activity holds the runs and both
+  // waiting lists. The old URLs keep working under the tab they moved to.
+  { id: 'library', label: 'Library', icon: knowledgePictogram('articles') },
   { id: 'gaps', label: 'Gaps', icon: knowledgePictogram('gaps') },
-  { id: 'playbooks', label: 'Playbooks', icon: knowledgePictogram('playbooks') },
-  // The dial per category (knowledge-first, plans/KNOWLEDGE_SIMPLIFY_PLAN.md).
   { id: 'answering', label: 'Answering', icon: SlidersHorizontal },
-  { id: 'waiting', label: 'Waiting', icon: knowledgePictogram('followup') },
-  // Reviewers and admins only (30 Sep 2026): every Auto-help answer waiting to be sent.
-  { id: 'approvals', label: 'Approvals', icon: knowledgePictogram('approve') },
   { id: 'activity', label: 'Activity', icon: knowledgePictogram('autohelp') },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ];
+/** Every URL segment the section answers to, and the tab it belongs to. */
+const TAB_OF = {
+  library: 'library', articles: 'library', gaps: 'gaps', answering: 'answering', playbooks: 'answering',
+  activity: 'activity', waiting: 'activity', approvals: 'activity', settings: 'settings',
+};
 
 export default function Knowledge() {
   const { tab, itemId } = useParams();
@@ -88,19 +94,26 @@ export default function Knowledge() {
   }, [navigate]);
   const guard = useMemo(() => ({ setDirty, leave }), [setDirty, leave]);
 
-  if (!tab) return <Navigate to="/knowledge/articles" replace />;
-  if (!TABS.some((t) => t.id === tab)) return <Navigate to="/knowledge/articles" replace />;
+  if (!tab || !TAB_OF[tab]) return <Navigate to="/knowledge/library" replace />;
+  // The Library is where articles are found and read. /knowledge/articles is
+  // the housekeeping list (filters, drafts, the archive) and, with an id, the editor.
   const canManage = settings?.canManage === true;
-  const tabs = TABS.filter((t) => t.id !== 'approvals' || settings?.canApprove === true);
+  const canWrite = canManage || settings?.rights?.canWriteSomewhere === true;
+  const activeTab = TAB_OF[tab];
   // A tab click also closes an open article / playbook / run on the same tab.
   const selectTab = (id) => { if (id !== tab || itemId) leave(`/knowledge/${id}`); };
+  const activityViews = [
+    { id: 'activity', label: 'Answers' },
+    { id: 'waiting', label: 'Waiting on requesters' },
+    ...(settings?.canApprove === true ? [{ id: 'approvals', label: 'Waiting for an agent' }] : []),
+  ];
 
   return (
     <KnowledgeGuardContext.Provider value={guard}>
       <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
         <AppHeader activePage="knowledge" />
         <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-          <LightTabBar tabs={tabs} activeId={tab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
+          <LightTabBar tabs={TABS} activeId={activeTab} onSelect={selectTab} ariaLabel="Knowledge sections" idPrefix="knowledge">
             <div ref={setActionsNode} className="flex flex-wrap items-center justify-end gap-2" data-testid="knowledge-tab-actions" />
           </LightTabBar>
 
@@ -114,12 +127,20 @@ export default function Knowledge() {
             {!settings && !error ? <Loading label="Loading Knowledge…" /> : (
               <section
                 role="tabpanel"
-                id={`knowledge-panel-${tab}`}
-                aria-labelledby={`knowledge-tab-${tab}`}
+                id={`knowledge-panel-${activeTab}`}
+                aria-labelledby={`knowledge-tab-${activeTab}`}
                 tabIndex={-1}
                 className="animate-fadeIn focus:outline-none"
               >
-                {tab === 'articles' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canManage} />}
+                {tab === 'library' && (itemId
+                  ? <ArticleReader articleId={itemId} categories={categories} />
+                  : <LibraryPanel canWrite={canWrite} />)}
+                {tab === 'articles' && <ArticlesPanel itemId={itemId} categories={categories} canManage={canWrite} />}
+                {activeTab === 'activity' && !itemId && activityViews.length > 1 && (
+                  <div className="mb-4 max-w-xl">
+                    <PanelTabs tabs={activityViews} activeId={tab} onSelect={(id) => leave(`/knowledge/${id}`)} ariaLabel="Activity views" idPrefix="knowledge-activity" />
+                  </div>
+                )}
                 {tab === 'gaps' && <GapsPanel canManage={canManage} canRefresh={canManage || settings?.canReview === true} />}
                 {tab === 'playbooks' && <PlaybooksPanel itemId={itemId} categories={categories} canManage={canManage} tools={settings?.tools || []} defaults={settings?.defaults || null} />}
                 {tab === 'answering' && <AnsweringPanel canManage={canManage} onSettingsChange={(next) => { if (next) setSettings((prev) => ({ ...(prev || {}), ...next })); }} />}

@@ -1162,8 +1162,9 @@ class AutoHelpRunner {
         section: a.section?.heading || null,
         excerpt: a.section?.text || a.snippet,
         stale: a.stale === true,
-        // "Checked by a person" (lastVerifiedAt): one of the confidence signals.
-        checked: Boolean(a.lastVerifiedAt),
+        // "Checked by a person" (knowledge_articles.confidence): one of the
+        // confidence signals. A doubtful article ("needs a look") is not.
+        checked: a.confidence === 'checked',
         score: a.score,
       })),
       ...(solutions || []).slice(0, SOLUTION_QUOTA),

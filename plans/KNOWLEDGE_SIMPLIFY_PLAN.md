@@ -1,6 +1,6 @@
 # Knowledge, simplified: plan
 
-_Status: plan for Vahid's review, 11 Oct 2026. Nothing is built. Baseline: main 4.2.39-preview._
+_Status (12 Oct 2026): approved by Vahid on 11 Oct with all recommendations. Phase 0 (replay) done; phase 1 shipped as 4.2.40 and is on for IT at Draft only; phase 2 shipped as 4.2.42. Phases 3 to 5 in progress._
 _Sources: code review of main, a read-only look at IT's production data for the last 30 days, and vendor/standards research (links at the end)._
 
 ## 1. The short version

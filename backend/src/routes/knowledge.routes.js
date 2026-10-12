@@ -14,6 +14,8 @@ import autoHelpPreviewService from '../services/autoHelpPreviewService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
 import knowledgeGrowthRoutes from './knowledgeGrowth.routes.js';
 import knowledgeAnswerPolicy from '../services/knowledgeAnswerPolicy.js';
+import knowledgeRights from '../services/knowledgeRights.js';
+import knowledgeSignals from '../services/knowledgeSignals.js';
 
 /**
  * Knowledge (Auto-help P0, plans/AUTO_HELP_PLAN.md): articles, playbooks,
@@ -61,6 +63,31 @@ function requireKnowledgeManager(req, _res, next) {
     .catch(next);
 }
 
+/**
+ * Who may judge an Auto-help answer (Good / Partly / Wrong): admins and
+ * reviewers, the ticket's assignee, and people with the skill to write in
+ * the run's category. One click on the ticket is what earns a category its
+ * way out of "Draft only", so it must not be an admin-only chore.
+ */
+async function canReviewRun(req, runId) {
+  const user = sessionUser(req);
+  if (await knowledgeCapability(user, req.workspaceId, 'review')) return true;
+  const run = await Promise.resolve()
+    .then(() => prisma.autoHelpRun.findFirst({ where: { id: Number(runId), workspaceId: req.workspaceId }, select: { ticketId: true, categoryId: true, subcategoryId: true } }))
+    .catch(() => null);
+  if (!run) return false;
+  const profile = await knowledgeRights.profile(user, req.workspaceId);
+  if (profile.technicianId) {
+    const ticket = await Promise.resolve()
+      .then(() => prisma.ticket.findFirst({ where: { id: run.ticketId, workspaceId: req.workspaceId }, select: { assignedTechId: true, internalCategoryId: true, internalSubcategoryId: true } }))
+      .catch(() => null);
+    if (ticket?.assignedTechId && ticket.assignedTechId === profile.technicianId) return true;
+    const target = { categoryId: run.categoryId ?? ticket?.internalCategoryId ?? null, subcategoryId: run.subcategoryId ?? ticket?.internalSubcategoryId ?? null };
+    if ((await knowledgeRights.rightsFor(user, req.workspaceId, target)).write) return true;
+  }
+  return false;
+}
+
 function requireKnowledgeReviewer(req, _res, next) {
   knowledgeCapability(sessionUser(req), req.workspaceId, 'review')
     .then((ok) => (ok ? next() : next(new AuthorizationError('Only workspace admins and reviewers can review Auto-help drafts', 'knowledge_review_required'))))
@@ -90,6 +117,19 @@ const actorOf = (req) => {
   const u = sessionUser(req);
   return { email: u?.email || null, name: u?.name || null };
 };
+
+/**
+ * Rights by skill (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 7): what the
+ * signed-in person may do with an article in a category. Admins: everything.
+ */
+const rightsIn = (req, target) => knowledgeRights.rightsFor(sessionUser(req), req.workspaceId, target || {});
+const targetOf = (row) => ({ categoryId: row?.categoryId ?? null, subcategoryId: row?.subcategoryId ?? null });
+function refuseWrite() {
+  return new AuthorizationError('You can write knowledge in the categories you have the skill for. Propose it instead, or ask someone with the skill.', 'knowledge_write_required');
+}
+function refuseCheck() {
+  return new AuthorizationError('Checking an article needs a higher skill level in its category', 'knowledge_check_required');
+}
 
 // ---------- settings ----------
 
@@ -122,6 +162,8 @@ router.get('/settings', asyncHandler(async (req, res) => {
       canManage,
       canReview,
       canApprove,
+      // Rights by skill: where this person may write or check articles.
+      rights: await knowledgeRights.summary(sessionUser(req), req.workspaceId),
       // P1: approve needs the workspace switch; auto is locked by the build.
       modes: AUTO_HELP_MODES,
       modeLocked: !settings.approveModeEnabled,
@@ -198,8 +240,19 @@ router.get('/categories', asyncHandler(async (req, res) => {
 // ---------- articles ----------
 
 router.get('/articles', asyncHandler(async (req, res) => {
-  const { q, status, categoryId, review, topic, owner, source, sort, limit, offset } = req.query;
-  res.json({ success: true, data: await knowledgeArticleService.list(req.workspaceId, { q, status, categoryId, review, topic, owner, source, sort, limit, offset }) });
+  const { q, status, categoryId, review, topic, owner, source, sort, limit, offset, subcategoryId, confidence, uncategorised } = req.query;
+  res.json({
+    success: true,
+    data: await knowledgeArticleService.list(req.workspaceId, {
+      // "Mine" in the Library: owner=me is the signed-in person.
+      q, status, categoryId, review, topic, owner: owner === 'me' ? (sessionUser(req)?.email || '-') : owner, source, sort, limit, offset, subcategoryId, confidence, uncategorised,
+    }),
+  });
+}));
+
+/** The Library's category tree with counts (articles, drafts, needing attention). */
+router.get('/library', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeArticleService.library(req.workspaceId, { email: sessionUser(req)?.email || null }) });
 }));
 
 /** The Articles landing page: counts, recent quoting, coverage by category (30 Sep 2026). */
@@ -210,7 +263,12 @@ router.get('/articles-overview', asyncHandler(async (req, res) => {
 router.get('/search', asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) throw new ValidationError('Type something to search for');
-  res.json({ success: true, data: await knowledgeArticleService.search(req.workspaceId, q, { limit: req.query.limit || 10, minScore: 0.1 }) });
+  const hits = await knowledgeArticleService.search(req.workspaceId, q, { limit: req.query.limit || 10, minScore: 0.1 });
+  // A search that found nothing is a gap someone may want to fill.
+  if (!hits.length && q.length >= 4) {
+    knowledgeSignals.record(req.workspaceId, { kind: 'search_miss', actor: sessionUser(req)?.email || null, note: q.slice(0, 200), meta: { from: 'library' } }).catch(() => {});
+  }
+  res.json({ success: true, data: hits });
 }));
 
 /**
@@ -222,27 +280,91 @@ router.get('/topics', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await knowledgeArticleService.topics(req.workspaceId, { q: req.query.q }) });
 }));
 
+/** An article, with how it did in use and what the reader may do with it. */
 router.get('/articles/:id', asyncHandler(async (req, res) => {
-  res.json({ success: true, data: await knowledgeArticleService.get(req.workspaceId, req.params.id) });
+  const article = await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  const [stats, my] = await Promise.all([
+    knowledgeSignals.stats(req.workspaceId, [article.id]),
+    rightsIn(req, targetOf(article)),
+  ]);
+  res.json({ success: true, data: { ...article, use: stats.get(article.id) || null, my: { write: my.write, check: my.check, level: my.level } } });
 }));
 
-router.post('/articles', requireKnowledgeManager, asyncHandler(async (req, res) => {
-  const article = await knowledgeArticleService.create(req.workspaceId, { ...(req.body || {}), source: 'tp' }, actorOf(req));
+/**
+ * Write an article: anyone with the skill for its category (rights by skill).
+ * What a checker publishes is Checked; anyone else publishes "Not checked yet".
+ */
+router.post('/articles', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const my = await rightsIn(req, targetOf(body));
+  if (!my.write) throw refuseWrite();
+  const article = await knowledgeArticleService.create(req.workspaceId, { ...body, source: 'tp' }, actorOf(req), { canCheck: my.selfCheck, changeNote: body.changeNote || null });
   res.status(201).json({ success: true, data: article });
 }));
 
-router.put('/articles/:id', requireKnowledgeManager, asyncHandler(async (req, res) => {
-  res.json({ success: true, data: await knowledgeArticleService.update(req.workspaceId, req.params.id, req.body || {}, actorOf(req)) });
+router.put('/articles/:id', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const existing = await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  const my = await rightsIn(req, targetOf(existing));
+  if (!my.write) throw refuseWrite();
+  // Moving an article needs the skill where it lands, too.
+  const moved = { categoryId: body.categoryId !== undefined ? body.categoryId : existing.categoryId, subcategoryId: body.subcategoryId !== undefined ? body.subcategoryId : existing.subcategoryId };
+  const there = (moved.categoryId !== existing.categoryId || moved.subcategoryId !== existing.subcategoryId) ? await rightsIn(req, moved) : my;
+  if (!there.write) throw refuseWrite();
+  res.json({
+    success: true,
+    data: await knowledgeArticleService.update(req.workspaceId, req.params.id, body, actorOf(req), { canCheck: my.selfCheck && there.selfCheck, changeNote: body.changeNote || null }),
+  });
 }));
 
-/** "Mark as verified" (R1): someone checked the article is still right today. */
-router.post('/articles/:id/verify', requireKnowledgeManager, asyncHandler(async (req, res) => {
+/**
+ * "Checked": someone with the skill confirmed the article is right today.
+ * In a category that is always checked by a person, that is someone other
+ * than the person who last wrote it (admins excepted).
+ */
+router.post('/articles/:id/verify', asyncHandler(async (req, res) => {
+  const existing = await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  const my = await rightsIn(req, targetOf(existing));
+  if (!my.check) throw refuseCheck();
+  const me = String(sessionUser(req)?.email || '').toLowerCase();
+  if (!my.selfCheck && me && String(existing.updatedBy || '').toLowerCase() === me) {
+    throw new AuthorizationError('Someone else has to check this one: its category is always checked by a second person', 'knowledge_second_person');
+  }
   res.json({ success: true, data: await knowledgeArticleService.verify(req.workspaceId, req.params.id, actorOf(req)) });
 }));
 
 /** "Delete" archives: the article leaves search and the default list; past runs still link to it. */
-router.delete('/articles/:id', requireKnowledgeManager, asyncHandler(async (req, res) => {
+router.delete('/articles/:id', asyncHandler(async (req, res) => {
+  const existing = await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  if (!(await rightsIn(req, targetOf(existing))).check) throw refuseCheck();
   res.json({ success: true, data: await knowledgeArticleService.remove(req.workspaceId, req.params.id, actorOf(req)) });
+}));
+
+/** History: every saved version, and putting an older one back (as a new version). */
+router.get('/articles/:id/versions', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await knowledgeArticleService.versions(req.workspaceId, req.params.id) });
+}));
+
+router.get('/articles/:id/versions/:version', asyncHandler(async (req, res) => {
+  await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  res.json({ success: true, data: await knowledgeArticleService.getVersion(req.workspaceId, req.params.id, req.params.version) });
+}));
+
+router.post('/articles/:id/versions/:version/restore', asyncHandler(async (req, res) => {
+  const existing = await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  const my = await rightsIn(req, targetOf(existing));
+  if (!my.write) throw refuseWrite();
+  res.json({ success: true, data: await knowledgeArticleService.restore(req.workspaceId, req.params.id, req.params.version, actorOf(req), { canCheck: my.selfCheck }) });
+}));
+
+/** "Flag it": any member may say an article is wrong or unclear, in one sentence. */
+router.post('/articles/:id/flag', asyncHandler(async (req, res) => {
+  const article = await knowledgeArticleService.get(req.workspaceId, req.params.id);
+  const note = String(req.body?.note || '').trim();
+  if (note.length < 3) throw new ValidationError('Say in a few words what is wrong or unclear');
+  const result = await knowledgeSignals.flag(req.workspaceId, article.id, { note, ticketId: Number(req.body?.ticketId) || null, actor: actorOf(req) });
+  logger.info(`Knowledge article ${article.id} flagged by ${actorOf(req).email || 'unknown'}${result.demoted ? ' (now needs a look)' : ''}`);
+  res.status(201).json({ success: true, data: result });
 }));
 
 // ---------- playbooks ----------
@@ -359,9 +481,15 @@ router.get('/runs-summary', asyncHandler(async (req, res) => {
 }));
 
 /** A reviewer's verdict on a shadow draft (R6): good | partial | wrong | should_not_answer. */
-router.post('/runs/:id/review', requireKnowledgeReviewer, asyncHandler(async (req, res) => {
+router.post('/runs/:id/review', asyncHandler(async (req, res) => {
   const { verdict, note } = req.body || {};
-  res.json({ success: true, data: await autoHelpRunner.review(req.workspaceId, req.params.id, { verdict, note }, actorOf(req)) });
+  if (!(await canReviewRun(req, req.params.id))) {
+    throw new AuthorizationError('Reviewing this answer is for the ticket\'s assignee, people with the skill for its category, reviewers and admins', 'knowledge_review_required');
+  }
+  const run = await autoHelpRunner.review(req.workspaceId, req.params.id, { verdict, note }, actorOf(req));
+  // Reuse is review: the verdict lands on every article the answer quoted.
+  const demoted = await knowledgeSignals.recordReview(req.workspaceId, run, String(verdict || ''), actorOf(req)).catch(() => []);
+  res.json({ success: true, data: { ...run, demotedArticleIds: demoted } });
 }));
 
 /** Every Auto-help answer waiting for a person (Knowledge → Approvals, 30 Sep 2026). */
@@ -388,7 +516,7 @@ router.get('/prompts', asyncHandler(async (req, res) => {
 router.post('/prompts/preview', asyncHandler(async (req, res) => {
   const { promptPreview } = await import('../services/autoHelpRunner.js');
   const key = String(req.body?.key || '');
-  if (!['answer', 'route', 'check'].includes(key)) throw new ValidationError('Unknown prompt');
+  if (!['answer', 'route', 'check', 'triage'].includes(key)) throw new ValidationError('Unknown prompt');
   res.json({ success: true, data: { fullPrompt: promptPreview(key, String(req.body?.body || '')) } });
 }));
 
@@ -429,6 +557,41 @@ router.get('/runs/:id', asyncHandler(async (req, res) => {
 
 router.get('/tickets/:ticketId/auto-help', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await autoHelpRunner.latestForTicket(req.workspaceId, req.params.ticketId) });
+}));
+
+/**
+ * The ticket's Knowledge panel (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 12):
+ * the articles that fit this ticket, the latest Auto-help run, and whether
+ * the signed-in person may judge it.
+ */
+router.get('/tickets/:ticketId/knowledge', asyncHandler(async (req, res) => {
+  const ticket = await Promise.resolve()
+    .then(() => prisma.ticket.findFirst({
+      where: { id: Number(req.params.ticketId), workspaceId: req.workspaceId },
+      select: { id: true, subject: true, descriptionText: true, internalCategoryId: true, internalSubcategoryId: true, assignedTechId: true },
+    }))
+    .catch(() => null);
+  if (!ticket) throw new ValidationError('Ticket not found in this workspace');
+  const query = `${ticket.subject || ''}\n${String(ticket.descriptionText || '').slice(0, 1500)}`.trim();
+  const [articles, run, my] = await Promise.all([
+    query ? knowledgeArticleService.search(req.workspaceId, query, {
+      limit: 5, categoryId: ticket.internalCategoryId, subcategoryId: ticket.internalSubcategoryId,
+    }).catch(() => []) : [],
+    autoHelpRunner.latestForTicket(req.workspaceId, ticket.id).catch(() => null),
+    rightsIn(req, { categoryId: ticket.internalCategoryId, subcategoryId: ticket.internalSubcategoryId }),
+  ]);
+  if (query && !articles.length) {
+    knowledgeSignals.record(req.workspaceId, { kind: 'search_miss', ticketId: ticket.id, categoryId: ticket.internalCategoryId, actor: sessionUser(req)?.email || null, note: String(ticket.subject || '').slice(0, 200), meta: { from: 'ticket' } }).catch(() => {});
+  }
+  res.json({
+    success: true,
+    data: {
+      articles: articles.map((a) => ({ id: a.id, title: a.title, section: a.section?.heading || null, snippet: a.snippet, score: a.score, confidence: a.confidence, stale: a.stale })),
+      run,
+      canReview: run?.id ? await canReviewRun(req, run.id) : false,
+      my: { write: my.write, check: my.check, level: my.level },
+    },
+  });
 }));
 
 router.get('/waiting', asyncHandler(async (req, res) => {

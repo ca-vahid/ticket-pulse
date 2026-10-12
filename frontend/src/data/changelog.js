@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.2.41-preview';
+export const APP_VERSION = '4.2.42-preview';
 
 export const changelog = [
+  {
+    version: '4.2.42-preview',
+    date: 'October 11, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Knowledge &rarr; Library</strong> &mdash; articles are now found by category or by searching, not in one long list. A category tree on the left shows how many articles each category and subcategory has and where something needs attention; the right side lists the articles of the place you picked. Search on top looks through every article and shows the section that matched. &ldquo;Mine&rdquo; and &ldquo;Needs attention&rdquo; are one click. The place you are in is part of the link, so a link lands where you were.' },
+      { type: 'added', html: '<strong>An article page made for reading</strong> &mdash; opening an article shows it as a page, not a form: the text in a readable column, &ldquo;On this page&rdquo; links to its sections, and on top, in words, how far it can be trusted (Checked, Not checked yet, Needs a look, Out of date), who checked it and when, and how it did in use, always with the counts. Edit is one button away for people who may edit it.' },
+      { type: 'added', html: '<strong>Who may write is decided by skill</strong> &mdash; writing knowledge is no longer for workspace admins only. Someone at Intermediate or above in a category can write and fix articles there; what they publish is marked &ldquo;Not checked yet&rdquo;. Someone at Advanced or Expert can also confirm an article as Checked. A skill in a category covers its subcategories. In a category that is always checked by a person (Knowledge &rarr; Answering), a second person confirms. Admins can still do everything.' },
+      { type: 'added', html: '<strong>&ldquo;Something is wrong&rdquo; on every article</strong> &mdash; anyone can flag an article with one sentence. When two different people or tickets say an article is wrong or unclear, it is marked &ldquo;Needs a look&rdquo; and taken out of answers that send by themselves until someone with the skill checks it again.' },
+      { type: 'added', html: '<strong>History and &ldquo;Put back&rdquo;</strong> &mdash; every change to an article is kept as a version, with who changed it and why. An older version can be put back in one click; that makes a new version, so nothing is ever lost.' },
+      { type: 'added', html: '<strong>Knowledge on the ticket</strong> &mdash; the AI &amp; Routing tab of a ticket now has a Knowledge card: the articles that fit this ticket, each with how far it can be trusted, and, when Auto-help drafted an answer, three buttons to judge it: Good, Partly, Wrong. The ticket&rsquo;s assignee and people with the skill for its category can judge, not only reviewers. The verdict also lands on every article the draft quoted.' },
+      { type: 'improved', html: '<strong>Five tabs instead of seven</strong> &mdash; Library, Gaps, Answering, Activity, Settings. Playbooks are now &ldquo;Special handling&rdquo; at the bottom of Answering; Waiting and Approvals are views inside Activity. Old links keep working.' },
+    ],
+  },
   {
     version: '4.2.41-preview',
     date: 'October 11, 2026',

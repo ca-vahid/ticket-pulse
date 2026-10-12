@@ -42,6 +42,7 @@ import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
 import AutoHelpRunCard from '../components/tickets/AutoHelpRunCard';
+import TicketKnowledgeCard from '../components/tickets/TicketKnowledgeCard';
 import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
@@ -3525,6 +3526,8 @@ export default function TicketDetail() {
                     <AutofillRunCard ticketId={ticketId} showAdminLink={wsRole === 'admin'} />
                     {/* Auto-help (shadow): the drafted first answer, when a playbook ran (renders nothing otherwise). */}
                     <AutoHelpRunCard ticketId={ticketId} />
+                    {/* Knowledge on the ticket: judge the draft in one click, and the articles that fit (renders nothing when neither exists). */}
+                    <TicketKnowledgeCard ticketId={ticketId} />
                     <TicketAiTab
                       ticket={ticket}
                       technicians={meta?.technicians || []}
