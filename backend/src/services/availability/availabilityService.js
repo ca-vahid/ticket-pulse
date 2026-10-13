@@ -12,6 +12,7 @@
  */
 import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
+import settingsRepository from '../settingsRepository.js';
 import { ValidationError, NotFoundError, AuthorizationError } from '../../utils/errors.js';
 import {
   decide, workingDates, requestSize, holidayMatcher, toDay, dayKey, addDays, weekKey,
@@ -104,6 +105,22 @@ class AvailabilityService {
   }
 
   /**
+   * Super admins: the global list sign-in uses (the admin_emails setting, else
+   * ADMIN_EMAILS). Workspace admins are not on it.
+   */
+  async superAdminEmails() {
+    let raw = null;
+    try { raw = await settingsRepository.get('admin_emails'); } catch { /* fall through */ }
+    if (!raw || !String(raw).trim()) raw = process.env.ADMIN_EMAILS || '';
+    return [...new Set(String(raw).split(',').map(lc).filter(Boolean))];
+  }
+
+  async isSuperAdmin(user) {
+    if (!user?.email) return false;
+    return (await this.superAdminEmails()).includes(lc(user.email));
+  }
+
+  /**
    * Who the team calendar shows (5 Oct 2026, Vahid): the active agents of the
    * workspace the viewer is in, never the whole company. "Other teams" people
    * kept as assignable-only (isActive false) are not part of the team. The
@@ -160,7 +177,13 @@ class AvailabilityService {
       }
     }
     if (out.size === 0) {
-      // Nobody set up yet: fall back to Ticket Pulse admins so nothing is stuck.
+      // Nobody set up yet: fall back to the super admins so nothing is stuck.
+      // (13 Oct 2026: this used to be every admin of every workspace, and a
+      // vacation request reached eleven people.)
+      for (const a of await this.superAdminEmails()) if (a !== lc(email)) out.add(a);
+    }
+    if (out.size === 0) {
+      // Last resort (no super admin other than the person asking): workspace admins.
       const admins = await prisma.workspaceAccess.findMany({ where: { role: 'admin' }, select: { email: true }, take: 50 });
       for (const a of admins) if (lc(a.email) !== lc(email)) out.add(lc(a.email));
     }
@@ -178,7 +201,9 @@ class AvailabilityService {
   async canDecide(user, request) {
     if (!user?.email) return false;
     if (lc(user.email) === lc(request.email)) return false; // no self-approval
-    if (await this.isAdmin(user)) return true;
+    // Super admins can always step in; a workspace admin decides only when
+    // named as an approver.
+    if (await this.isSuperAdmin(user)) return true;
     return (await this.approversFor(request.email)).includes(lc(user.email));
   }
 
@@ -764,7 +789,7 @@ class AvailabilityService {
   }
 
   async listPendingFor(user) {
-    const admin = await this.isAdmin(user);
+    const admin = await this.isSuperAdmin(user);
     const rows = await prisma.avRequest.findMany({ where: { status: 'pending' }, orderBy: { startDate: 'asc' }, take: 500 });
     const out = [];
     for (const r of rows) {
@@ -996,7 +1021,11 @@ class AvailabilityService {
       lines: [range, request.note ? `Note: ${request.note}` : null, request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null],
       button: { label: 'Review in Ticket Pulse', url: `${base}/availability/approvals` },
     });
-    await sendEmail({ to: approvers, subject: `Availability: ${person.name} — ${leaveType.name}, ${range}`, html, context: 'availability' });
+    // One copy each: approvers do not see each other and Reply All goes nowhere.
+    const subject = `Availability: ${person.name} — ${leaveType.name}, ${range}`;
+    const sent = await Promise.allSettled([...new Set(approvers.map(lc).filter(Boolean))].map((to) => sendEmail({ to: [to], subject, html, context: 'availability' })));
+    const failed = sent.filter((r) => r.status === 'rejected');
+    if (failed.length) logger.warn(`Availability: ${failed.length} of ${sent.length} approver notice(s) failed for request ${request.id}: ${failed[0].reason?.message}`);
   }
 
   async _notifyRequester(request, actor) {
