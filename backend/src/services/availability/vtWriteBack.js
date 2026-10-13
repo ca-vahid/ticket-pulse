@@ -144,8 +144,20 @@ class VtWriteBack {
 
   async _linked(request, leaveId, workspaceId, extra = {}) {
     const externalId = `${VT_EXTERNAL_PREFIX}${leaveId}`;
-    const holder = await prisma.avRequest.findFirst({ where: { externalId, id: { not: request.id } }, select: { id: true } });
-    // Someone entered it in both places: the imported request keeps the link.
+    let holder = await prisma.avRequest.findFirst({ where: { externalId, id: { not: request.id } }, select: { id: true, source: true } });
+    if (holder?.source === 'vacation_tracker') {
+      // The person entered the same leave in both places, and the hourly
+      // import made a second request of it. One leave, one request: this one
+      // keeps it, the imported copy is retired, and the dashboard rows the
+      // leave sync wrote for it go (this request's own rows stay).
+      await prisma.avRequest.update({
+        where: { id: holder.id },
+        data: { status: 'cancelled', externalId: null, events: { create: { kind: 'cancelled', actor: 'vacation_tracker', details: { reason: `Same leave as request ${request.id}`, mergedInto: request.id } } } },
+      });
+      await prisma.technicianLeave.deleteMany({ where: { OR: [{ vtLeaveId: leaveId }, { vtLeaveId: { startsWith: `av:${holder.id}:` } }] } });
+      extra = { ...extra, replacedRequest: holder.id };
+      holder = null;
+    }
     await this._event(request.id, 'vt_written', { vtLeaveId: leaveId, workspaceId, ...extra, ...(holder ? { heldByRequest: holder.id } : {}) }, holder ? {} : { externalId });
     return { ok: true, vtLeaveId: leaveId, ...extra };
   }
@@ -261,6 +273,12 @@ class VtWriteBack {
       for (const r of owed.filter((x) => !settled(x, ['vt_written', 'vt_write_skipped'], 'vt_write_failed')).slice(0, limit)) {
         const res = await this.pushApproved(r.id);
         if (res.ok) out.written += 1; else if (res.failed) out.failed += 1;
+      }
+      // Requests left beside an imported copy of the same leave (before 4.2.67): take the leave over.
+      for (const r of owed) {
+        const twin = r.events.find((e) => e.kind === 'vt_written' && e.details?.heldByRequest && e.details?.vtLeaveId);
+        if (!twin) continue;
+        await this._linked(r, twin.details.vtLeaveId, twin.details.workspaceId || null, { alreadyThere: true }).catch((err) => logger.warn(`Availability: could not merge request ${r.id} with its Vacation Tracker copy: ${err.message}`));
       }
       const since = new Date(today.getTime() - 14 * 86400000);
       const undone = await prisma.avRequest.findMany({
