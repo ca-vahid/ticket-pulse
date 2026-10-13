@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.59-preview';
+export const APP_VERSION = '4.2.60-preview';
 
 export const changelog = [
+  {
+    version: '4.2.60-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Assignment is less boxed in</strong> &mdash; the large card that wrapped every Assignment section is gone, so the queue, history and the other sections sit on the page the way Knowledge and On/Offboarding do.' },
+      { type: 'improved', html: '<strong>Ticket Queue views and filters are plain</strong> &mdash; Awaiting Decision, Decided, Dismissed, Deleted and All are text buttons with their counts, and the Priority, Trigger and other filters have square corners in place of the rounded pills.' },
+      { type: 'fixed', html: '<strong>Competencies and Prompts fit a phone</strong> &mdash; the Competencies sections row, the skill legend and the prompt version list ran off the side of a phone screen. The row now scrolls sideways and the other two wrap.' },
+    ],
+  },
   {
     version: '4.2.59-preview',
     date: 'October 12, 2026',

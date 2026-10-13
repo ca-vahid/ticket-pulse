@@ -153,7 +153,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-border">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
         {loading ? (
           <div className="flex items-center justify-center p-10">
             <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-300" />

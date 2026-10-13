@@ -1214,7 +1214,7 @@ function MatrixTab({ onAnalyze }) {
 
       {/* Legend */}
       {categories.length > 0 && (
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
           <span className="font-medium">Legend:</span>
           <span className="px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200">1 = Basic</span>
           <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200">2 = Comfortable</span>
@@ -2111,7 +2111,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
 
   return (
     <div>
-      <div className="flex gap-1 mb-4 border-b">
+      <div className="tp-swipe-row flex gap-1 mb-4 border-b overflow-x-auto overflow-y-hidden [&>button]:flex-shrink-0 [&>button]:whitespace-nowrap">
         {COMPETENCY_TABS.map((tab) => {
           const Icon = tab.icon;
           return (

@@ -2647,8 +2647,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           Both rows live in the same bordered card. The FilterBar itself wraps on
           narrow widths (no horizontal scroll), so the layout breathes without
           chopping content off-screen. */}
-      <div className="border border-border rounded-lg">
-        <div className="bg-muted/50 border-b border-border px-3 sm:px-4 py-2 rounded-t-lg space-y-2">
+      <div className="rounded-xl border border-border bg-card shadow-subtle">
+        <div className="space-y-1.5 border-b border-border px-3 py-2 sm:px-4">
           {/* Row 1 — primary tabs.
               Rejected runs are intentionally NOT a top-level tab (low traffic, user
               didn't recognize the term); they still appear in the All view and remain
@@ -2656,7 +2656,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               visually separated by a divider so it reads as the catch-all rather
               than just another sibling. */}
           <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-muted p-1 ring-1 ring-border/60">
+            <div className="inline-flex shrink-0 items-center gap-1" role="group" aria-label="Queue view" data-testid="queue-views">
               {[
                 { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200 dark:ring-amber-500/30' },
                 { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200 dark:ring-emerald-500/30' },
@@ -2685,20 +2685,20 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     {tab.separated && (
                       // Vertical divider that visually breaks "All" out of the segment group.
                       // Subtle on its own but enough cue that "All" isn't just one more sibling.
-                      <span className="mx-1 h-4 w-px bg-muted-foreground/80" aria-hidden="true" />
+                      <span className="mx-1.5 h-4 w-px bg-border" aria-hidden="true" />
                     )}
                     <button
+                      type="button"
+                      aria-pressed={isActive}
                       onClick={() => setSubView(tab.id)}
-                      className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
-                        isActive
-                          ? `bg-card text-foreground shadow-sm ring-1 ${tab.activeRing}`
-                          : `${isZero ? 'text-muted-foreground/75' : tab.id === 'all' ? 'text-blue-700 dark:text-blue-200' : 'text-muted-foreground'} hover:text-foreground hover:bg-card/70`
+                      className={`tp-focus-ring flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm touch-manipulation sm:py-1 ${
+                        isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
                       <span>{tab.label}</span>
                       {tab.count != null && (
-                        <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-muted-foreground' : isZero ? 'text-muted-foreground/50' : 'text-muted-foreground/75'}`}>
+                        <span className={`tabular-nums text-xs ${isZero && !isActive ? 'text-muted-foreground/50' : 'text-muted-foreground'}`}>
                           {tab.count}
                         </span>
                       )}
@@ -2831,7 +2831,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   title={differentAgentOnly
                     ? 'Showing only runs where the AI top pick was overridden (visible page)'
                     : 'Show only runs where the AI top pick was overridden'}
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors touch-manipulation ${
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors touch-manipulation ${
                     differentAgentOnly
                       ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20'
                       : 'border-border bg-card text-muted-foreground hover:border-input hover:text-foreground'
@@ -3836,7 +3836,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
           <p className="text-muted-foreground font-medium">No pipeline runs yet</p>
         </div>
       ) : (
-        <div className="border border-border rounded-lg overflow-hidden">
+        <div className="border border-border rounded-xl overflow-hidden bg-card shadow-subtle">
           {/* Toolbar */}
           <div className="bg-muted/50 border-b border-border px-4 py-2.5 flex items-center gap-3">
             <span className="text-sm font-medium text-foreground/85">{runs.total} run{runs.total !== 1 ? 's' : ''}</span>
@@ -5110,8 +5110,8 @@ export default function AssignmentReview() {
 
       {/* Content */}
       <div role="tabpanel" id={`assignment-panel-${activeTab}`} aria-labelledby={`assignment-tab-${activeTab}`}>
-        <div className="min-h-full bg-card rounded-xl border border-border shadow-sm">
-          <div className="px-2 py-3 sm:px-6 sm:py-5">
+        <div className="min-h-full" data-testid="assignment-panel">
+          <div>
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'hand-backs' && <HandBacksTab isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}

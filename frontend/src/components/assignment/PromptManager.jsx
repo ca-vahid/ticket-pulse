@@ -1065,7 +1065,7 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
             {versions.map((v) => (
               <div
                 key={v.id}
-                className="grid min-h-[48px] grid-cols-[44px_92px_minmax(0,1fr)_156px_auto] items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm shadow-black/5 dark:shadow-black/40 transition-colors hover:border-input"
+                className="grid min-h-[48px] grid-cols-[44px_92px_minmax(0,1fr)_156px_auto] items-center gap-2 max-sm:flex max-sm:flex-wrap rounded-lg border border-border bg-card px-3 py-2 shadow-sm shadow-black/5 dark:shadow-black/40 transition-colors hover:border-input"
               >
                 <span className="font-mono text-sm font-semibold text-foreground/85">v{v.version}</span>
                 <span className={`inline-flex h-7 w-fit items-center rounded-md border px-2 text-xs font-semibold ${STATUS_BADGES[v.status] || STATUS_BADGES.archived}`}>
