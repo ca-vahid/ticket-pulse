@@ -46,14 +46,19 @@ function useServerNow(serverNow) {
     const server = serverNow ? new Date(serverNow).getTime() : NaN;
     return { server: Number.isNaN(server) ? Date.now() : server, readAt: Date.now() };
   }, [serverNow]);
-  const [now, setNow] = useState(base.server);
+  // Only the device time that has PASSED is kept in state. The value is worked out on every render,
+  // so the render in which the schedule arrives already uses the server's clock. It used to keep
+  // the device clock for that one render, and the hand-over check below then read the schedule a
+  // second time on any device whose clock was past the current holder's end (13 Oct 2026: this is
+  // also why the page's tests began to fail once the real date passed the date in their fixture).
+  const [device, setDevice] = useState(() => Date.now());
   useEffect(() => {
-    const tick = () => setNow(base.server + (Date.now() - base.readAt));
+    const tick = () => setDevice(Date.now());
     tick();
     const id = window.setInterval(tick, TICK_MS);
     return () => window.clearInterval(id);
   }, [base]);
-  return now;
+  return base.server + Math.max(0, device - base.readAt);
 }
 
 function saveFile(text, filename) {

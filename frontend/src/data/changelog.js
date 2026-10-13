@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.60-preview';
+export const APP_VERSION = '4.2.61-preview';
 
 export const changelog = [
+  {
+    version: '4.2.61-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>On-call page: one clock from the first moment</strong> &mdash; the page counts down on the server&rsquo;s clock so everyone sees the same time left, but for the instant in which the schedule arrived it still used the clock of the device. On a device whose clock ran ahead of the hand-over, that made the page read the schedule twice. Nothing looked wrong on screen; it now uses the server&rsquo;s clock throughout.' },
+    ],
+  },
   {
     version: '4.2.60-preview',
     date: 'October 12, 2026',
