@@ -4764,6 +4764,8 @@ model AvSettings {
   yearStartMonth       Int      @default(1) @map("year_start_month")
   outlookEventsEnabled Boolean  @default(false) @map("outlook_events_enabled")
   autoRepliesEnabled   Boolean  @default(false) @map("auto_replies_enabled")
+  // Approved requests are added to Vacation Tracker (and cancelled there) while it is still in use.
+  vtWriteBackEnabled   Boolean  @default(true) @map("vt_write_back_enabled")
   purposeNotice        String?  @map("purpose_notice") @db.Text
   updatedAt            DateTime @updatedAt @map("updated_at")
 

@@ -49,6 +49,22 @@ class VacationTrackerV2Client {
     return this._all('/leaves', params);
   }
 
+  /**
+   * Add a leave. With `userId` of someone else it is created already approved
+   * (needs leaves:write + leaves:approve). 201 returns { data: leave }; 202
+   * returns { operation } while Vacation Tracker is still writing it.
+   */
+  async createLeave(body, { idempotencyKey = null } = {}) {
+    const res = await this.client.post('/leaves', body, { headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {} });
+    return res.data;
+  }
+
+  /** Cancel an OPEN or APPROVED leave; `reason` is shown as its status reason. */
+  async cancelLeave(id, { reason = null, idempotencyKey = null } = {}) {
+    const res = await this.client.post(`/leaves/${encodeURIComponent(id)}/cancel`, reason ? { reason } : {}, { headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {} });
+    return res.data;
+  }
+
   async _all(path, params = {}) {
     const out = [];
     let nextToken;

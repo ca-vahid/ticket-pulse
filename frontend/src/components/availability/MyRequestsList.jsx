@@ -35,6 +35,7 @@ function RequestRow({ r, type, onCancel }) {
           <ColorSwatch color={type?.color} />
           <span className="truncate">{type?.name || 'Time away'}</span>
           {fromVt && <span className="shrink-0 text-xs text-muted-foreground" title="Booked in Vacation Tracker; change it there">· Vacation Tracker</span>}
+          {!fromVt && r.inVacationTracker && r.status === 'approved' && <span className="shrink-0 text-xs text-muted-foreground" title="Ticket Pulse added this to Vacation Tracker when it was approved">· also in Vacation Tracker</span>}
         </span>
         <span className="order-3 col-span-2 text-sm text-foreground/85 sm:order-none sm:col-span-1">{fmtRange(r)}</span>
         <span className="hidden text-sm tabular-nums text-muted-foreground sm:block">{fmtAmount(r, type?.unit)}</span>

@@ -4,12 +4,13 @@ import FancySelect from '../../common/FancySelect';
 import { availabilityAPI } from '../../../services/api';
 import { BTN_PRIMARY, Field, MONTHS, SectionTitle, TEXTAREA, Toggle } from '../availabilityUi';
 
-/** General: leave-year start, the two Outlook switches (off by default), the purpose notice. */
+/** General: leave-year start, the two Outlook switches (off by default), Vacation Tracker write-back, the purpose notice. */
 
 const pick = (s = {}) => ({
   yearStartMonth: Number(s.yearStartMonth) || 1,
   outlookEventsEnabled: Boolean(s.outlookEventsEnabled),
   autoRepliesEnabled: Boolean(s.autoRepliesEnabled),
+  vtWriteBackEnabled: s.vtWriteBackEnabled !== false,
   purposeNotice: s.purposeNotice || '',
 });
 
@@ -50,6 +51,16 @@ export default function GeneralSection({ config, reload, toast }) {
           <Toggle checked={draft.outlookEventsEnabled} onChange={(v) => set({ outlookEventsEnabled: v })} label="Offer “Add to my Outlook calendar”" hint={outlookHint} />
           <Toggle checked={draft.autoRepliesEnabled} onChange={(v) => set({ autoRepliesEnabled: v })} label="Offer “Set my automatic reply”" hint={outlookHint} />
         </div>
+      </div>
+
+      <div className="border-t border-border pt-5">
+        <SectionTitle hint="For as long as people still look at Vacation Tracker.">Vacation Tracker</SectionTitle>
+        <Toggle
+          checked={draft.vtWriteBackEnabled}
+          onChange={(v) => set({ vtWriteBackEnabled: v })}
+          label="Copy approved requests to Vacation Tracker"
+          hint="A request approved here is added to Vacation Tracker as approved leave, and cancelled there if it is cancelled here. Only for people who are Vacation Tracker users; needs an API v2 key under Settings → Vacation Tracker."
+        />
       </div>
 
       <div className="border-t border-border pt-5">

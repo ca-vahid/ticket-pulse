@@ -234,6 +234,9 @@ class ScheduledSyncService {
       try {
         const { default: availabilityService } = await import('./availability/availabilityService.js');
         await availabilityService.syncFromVacationTracker(wsId);
+        // Then the other direction: approved requests still owed to Vacation Tracker.
+        const { default: vtWriteBack } = await import('./availability/vtWriteBack.js');
+        await vtWriteBack.sweep();
       } catch (avErr) {
         logger.warn(`Availability: Vacation Tracker sync failed for workspace "${wsName}" (non-fatal): ${avErr.message}`);
       }
