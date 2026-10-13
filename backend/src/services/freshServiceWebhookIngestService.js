@@ -179,6 +179,26 @@ class FreshServiceWebhookIngestService {
       allowNotificationWorkflows: true,
     });
 
+    // A webhook about the FreshService COPY of a Ticket Pulse ticket (12 Oct 2026) means something
+    // happened to the copy: an agent replied or changed it there. Pull that change now instead of
+    // waiting for the reconcile to reach the ticket. A copy still being created has nothing to pull.
+    if (syncResult?.skippedTicketPulseOrigin === true) {
+      if (!syncResult.skippedInFlightCopy) {
+        import('./mirrorService.js')
+          .then(({ default: mirrorService }) => mirrorService.reconcileTicket(syncResult.ticket.id, workspace.id))
+          .catch((err) => logger.warn(`FreshService webhook: could not pull changes for the copy of ticket ${syncResult.ticket.id} (${err.message})`));
+      }
+      await workspaceWebhookService.recordAccepted(workspace.id);
+      logger.info('FreshService webhook accepted for the copy of a Ticket Pulse ticket', {
+        workspaceId: workspace.id, freshserviceTicketId: String(freshserviceTicketId), ticketId: syncResult.ticket.id,
+        stillBeingCreated: syncResult.skippedInFlightCopy === true,
+      });
+      return {
+        accepted: true, freshserviceTicketId: String(freshserviceTicketId), ticketId: syncResult.ticket.id,
+        synced: false, assignmentTriggered: false, skippedReason: 'ticket_pulse_copy',
+      };
+    }
+
     const polling = await syncService._pollForUnassignedTickets(workspace.id, {
       ticketIdsOverride: [syncResult.ticket.id],
       maxPerCycleOverride: 1,

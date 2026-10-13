@@ -17,6 +17,7 @@ const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 export const FS_NOTE_ACTIONS = {
   note: { icon: '🔒', text: 'internal note' },
   reply: { icon: '✉️', text: 'reply, already e-mailed to the requester by Ticket Pulse' },
+  received: { icon: '📨', text: 'reply received by e-mail in Ticket Pulse' },
   attachment: { icon: '📎', text: 'attachment added in Ticket Pulse' },
   copy: { icon: '🔁', text: 'copy of a Ticket Pulse ticket' },
 };

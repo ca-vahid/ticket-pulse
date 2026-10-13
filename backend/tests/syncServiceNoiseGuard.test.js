@@ -33,6 +33,7 @@ const ticketLifecycleNotificationServiceMock = {
 const prismaMock = {
   ticket: {
     update: jest.fn(),
+    findUnique: jest.fn(),
   },
   assignmentPipelineRun: {
     findFirst: jest.fn(),
@@ -334,5 +335,27 @@ describe('syncService isNoise durability guard (NT-10)', () => {
     expect(upsertArg.isNoise).toBe(true);
     expect(upsertArg.noiseRuleMatched).toBe('auto-spam');
     expect(result.noiseVerdictPreserved).toBe(false);
+  });
+
+  // IT intake plan (12 Oct 2026): FreshService calls back about a copy the mirror is still creating.
+  test('never becomes a second, FreshService-born ticket (#241182, #246727)', async () => {
+    const { markCreating, _resetMirrorInFlight } = await import('../src/utils/mirrorInFlight.js');
+    _resetMirrorInFlight();
+    markCreating(62000, { workspaceId: 1, subject: 'Package waiting in shipping room', email: 'rita@example.com' });
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 62000, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1900, isNoise: false });
+
+    const result = await syncService.syncFreshServiceTicketSnapshot(1, { id: 239931 }, snapshotOptions(null, { source: 'freshservice_webhook' }));
+
+    expect(result).toMatchObject({ skippedTicketPulseOrigin: true, skippedInFlightCopy: true, isNew: false, ticket: { id: 62000 } });
+    expect(ticketRepositoryMock.upsert).not.toHaveBeenCalled();
+    expect(noiseRuleServiceMock.evaluate).not.toHaveBeenCalled();
+
+    // An unrelated FreshService ticket in the same minute is ingested as always.
+    _resetMirrorInFlight();
+    markCreating(62000, { workspaceId: 1, subject: 'A different subject', email: 'rita@example.com' });
+    const other = await syncService.syncFreshServiceTicketSnapshot(1, { id: 239931 }, snapshotOptions(null));
+    expect(other.skippedInFlightCopy).toBeUndefined();
+    expect(ticketRepositoryMock.upsert).toHaveBeenCalledTimes(1);
+    _resetMirrorInFlight();
   });
 });
