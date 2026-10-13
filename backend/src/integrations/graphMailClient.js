@@ -148,6 +148,9 @@ class GraphMailClient {
           contentType: a.contentType || 'application/octet-stream',
           sizeBytes: a.size || 0,
           buffer: Buffer.from(a.contentBytes, 'base64'),
+          // A picture pasted into the mail body is an attachment the HTML points at by `cid:`.
+          contentId: a.contentId ? String(a.contentId).replace(/^<|>$/g, '') : null,
+          isInline: a.isInline === true,
         });
       }
       return { files, skipped };
@@ -226,6 +229,40 @@ class GraphMailClient {
    * @param {string[]}    [opts.references]  - RFC Message-ID chain, oldest first (may be empty)
    * @returns {{messageId, internetMessageId, conversationId, threadedVia: 'createReply'|null}}
    */
+  /**
+   * Write a copy of a message that left through ANOTHER sender (SendGrid) into the mailbox's Sent
+   * Items, stored as sent and read, not as a draft (12 Oct 2026). Replies leave through SendGrid
+   * so the agent's name survives; without this the team's mailbox had no record of them.
+   * PidTagMessageFlags = 1 is what makes it a sent message: a message created through Graph is a
+   * draft otherwise. Exchange shows the mailbox's own name as the sender of the copy.
+   * Never throws; returns the Graph id or null.
+   */
+  async saveSentCopy(mailbox, { subject, html, to = [], cc = [], replyTo = null, internetMessageId = null, sentAt = new Date() } = {}) {
+    try {
+      const client = this._getClient();
+      const addr = (a) => ({ emailAddress: { address: String(a) } });
+      const when = new Date(sentAt).toISOString();
+      const created = await client.api(`/users/${mailbox}/mailFolders/sentitems/messages`).post({
+        subject: String(subject || '(no subject)').slice(0, 255),
+        body: { contentType: 'HTML', content: String(html || '') },
+        from: addr(mailbox),
+        sender: addr(mailbox),
+        toRecipients: (Array.isArray(to) ? to : [to]).filter(Boolean).map(addr),
+        ccRecipients: (Array.isArray(cc) ? cc : [cc]).filter(Boolean).map(addr),
+        ...(replyTo ? { replyTo: [addr(replyTo)] } : {}),
+        ...(internetMessageId ? { internetMessageId } : {}),
+        sentDateTime: when,
+        receivedDateTime: when,
+        isRead: true,
+        singleValueExtendedProperties: [{ id: 'Integer 0x0E07', value: '1' }],
+      });
+      return created?.id || null;
+    } catch (error) {
+      logger.warn('Graph API: Sent Items copy not saved (non-fatal)', { mailbox, error: error.message });
+      return null;
+    }
+  }
+
   async sendMailAsMailbox(mailbox, {
     to, cc = [], subject, html, attachments = [], fromName = null,
     replyTo = null, inReplyTo = null, references = [],

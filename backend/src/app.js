@@ -17,6 +17,7 @@ import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
 import { retryBoot, isTransientDbError } from './utils/bootRetry.js';
 import graphNotificationRoutes from './routes/graphNotifications.routes.js';
+import sendgridEventRoutes from './routes/sendgridEvents.routes.js';
 import settingsRepository from './services/settingsRepository.js';
 import availabilityService from './services/availabilityService.js';
 import llmConfigService from './services/llmConfigService.js';
@@ -192,6 +193,9 @@ app.get('/health', async (req, res) => {
 // connection clientState is the credential (checked by the worker). Must sit
 // before the main router so nothing auth-gated runs in front of the 202.
 app.use('/api', graphNotificationRoutes);
+// SendGrid Event Webhook (12 Oct 2026): bounces and blocks for mail we sent. PRE-AUTH for the
+// same reason; the token in the URL is the credential.
+app.use('/api', sendgridEventRoutes);
 
 // Mount API routes
 // Auth routes are public

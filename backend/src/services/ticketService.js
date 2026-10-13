@@ -6128,6 +6128,15 @@ class TicketService {
         references: threading.references,
       });
       if (result?.messageId) await storeEntryMessageId(entry.id, result.messageId);
+      // The team's front-door mailbox keeps a record of what was sent in its name (12 Oct 2026):
+      // SendGrid leaves nothing in Sent Items. Fire and forget; a failed copy never fails the reply.
+      if (ingestMailbox?.intakeProfile === 'helpdesk') {
+        import('../integrations/graphMailClient.js').then(({ default: graphMail }) => (graphMail.isConfigured()
+          ? graphMail.saveSentCopy(ingestMailbox.address, {
+            subject, html, to: [toAddress], cc: ccForSend, replyTo: sendgridReplyTo, internetMessageId: result?.messageId || null,
+          })
+          : null)).catch(() => {});
+      }
       await prisma.notificationDelivery.create({
         data: {
           workspaceId: ticket.workspaceId,

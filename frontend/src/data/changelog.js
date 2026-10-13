@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.2.55-preview';
+export const APP_VERSION = '4.2.56-preview';
 
 export const changelog = [
+  {
+    version: '4.2.56-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'added', html: '<strong>You are told when an e-mail did not arrive</strong> &mdash; until now Ticket Pulse only knew that the mail service had accepted a message. When a reply or another e-mail from a ticket bounces, is blocked by the receiving server or is dropped, the ticket now gets an internal note saying which address it was for and what the mail service said.' },
+      { type: 'added', html: '<strong>Pictures pasted into an e-mail show on the ticket</strong> &mdash; on a helpdesk mailbox, a screenshot pasted into the body of a message is kept as an attachment and shown where it was in the text. Before, it appeared as a broken image, and a message whose only attachments were pasted pictures could lose them. Small signature logos are left out.' },
+      { type: 'added', html: '<strong>Replies appear in the team mailbox&rsquo;s Sent Items</strong> &mdash; on a helpdesk mailbox, a reply sent from Ticket Pulse is also saved in that mailbox&rsquo;s Sent Items, so the mailbox keeps a record of what went out in its name. The copy shows the mailbox&rsquo;s own name as the sender; the requester still sees the agent&rsquo;s name.' },
+      { type: 'improved', html: '<strong>One line an hour per mailbox in the log</strong> &mdash; how many messages were read, and how many became tickets, replies, held or skipped. No mailbox is marked as a helpdesk mailbox yet.' },
+    ],
+  },
   {
     version: '4.2.55-preview',
     date: 'October 12, 2026',

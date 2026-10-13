@@ -20,6 +20,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({ defaul
 const graphMock = {
   isConfigured: jest.fn(() => true),
   getInboxMessagesForIngest: jest.fn(),
+  getMessageAttachments: jest.fn(),
 };
 const ticketServiceMock = { createTicket: jest.fn() };
 const mirrorServiceMock = { enqueueThreadEntry: jest.fn(), enqueueFieldSync: jest.fn(), getInteractiveClient: jest.fn(async () => null) };
@@ -1352,5 +1353,45 @@ describe('helpdesk mailbox: the ticket behind a FreshService number', () => {
     // End to end: the new ticket carries the link.
     expect(await mailboxIngestService.processEmail(front, { ...fresh, internetMessageId: '<again@example.com>' })).toBe('created');
     expect(linkMock.link).toHaveBeenCalledWith(700, 1, { relatedTicketId: 813, kind: 'related_to' }, expect.anything());
+  });
+});
+
+describe('helpdesk mailbox: pictures pasted into the mail', () => {
+  const front = { id: 9, workspaceId: 1, address: 'helpdesk-pilot@example.com', intakeProfile: 'helpdesk' };
+  const big = Buffer.alloc(20 * 1024, 1);
+  const files = () => [
+    { name: 'image001.png', contentType: 'image/png', sizeBytes: big.length, buffer: big, contentId: 'img1@01DC', isInline: true },
+    { name: 'logo.png', contentType: 'image/png', sizeBytes: 900, buffer: Buffer.alloc(900), contentId: 'logo@01DC', isInline: true },
+    { name: 'orphan.png', contentType: 'image/png', sizeBytes: big.length, buffer: big, contentId: 'unused@01DC', isInline: true },
+    { name: 'invoice.pdf', contentType: 'application/pdf', sizeBytes: 5000, buffer: Buffer.alloc(5000), contentId: null, isInline: false },
+  ];
+  const body = '<p>See the error:</p><img width="600" src="cid:img1@01DC" alt="x"><p>Thanks</p><img src="cid:logo@01DC">';
+
+  test('a new ticket keeps the screenshot as a named picture where it was, and drops the logo', async () => {
+    graphMock.getMessageAttachments.mockResolvedValue({ files: files(), skipped: [] });
+    // hasAttachments is false on purpose: a mail whose only attachments are inline used to lose them.
+    expect(await mailboxIngestService.processEmail(front, { ...baseEmail, id: 'AAMkAD-xyz987', bodyHtml: body, hasAttachments: false })).toBe('created');
+    const description = ticketServiceMock.createTicket.mock.calls[0][1].description;
+    expect(description).toContain('<p><em>[Image: picture-1-xyz987-image001.png]</em></p>');
+    expect(description).not.toContain('cid:');
+    expect(graphMock.getMessageAttachments).toHaveBeenCalledTimes(1);
+    const uploaded = attachmentMock.upload.mock.calls.map((c) => c[0].fileName);
+    expect(uploaded).toEqual(['picture-1-xyz987-image001.png', 'invoice.pdf']);
+  });
+
+  test('a side mailbox is untouched: the body is stored as it arrived', async () => {
+    graphMock.getMessageAttachments.mockResolvedValue({ files: files(), skipped: [] });
+    await mailboxIngestService.processEmail(connection, { ...baseEmail, bodyHtml: body, hasAttachments: false });
+    expect(ticketServiceMock.createTicket.mock.calls[0][1].description).toBe(body);
+    expect(graphMock.getMessageAttachments).not.toHaveBeenCalled();
+  });
+
+  test('a reply resolves the pictures the person wrote, and the hourly line counts every outcome', async () => {
+    graphMock.getMessageAttachments.mockResolvedValue({ files: files(), skipped: [] });
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 800, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1900, status: 'Open', ccEmails: [] });
+    mailboxIngestService._hourly?.clear();
+    expect(await mailboxIngestService.processEmail(front, { ...baseEmail, id: 'AAMk-r1', subject: 'Re: thing TP-1900', bodyHtml: body, hasAttachments: true })).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyHtml).toContain('[Image: picture-1-AAMkr1-image001.png]');
+    expect(mailboxIngestService._hourly.get(9)).toMatchObject({ read: 1, reply: 1, created: 0 });
   });
 });
