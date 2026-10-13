@@ -1,4 +1,5 @@
 import { RECONCILE_MIN_GAP_MS, reconcileShouldYield, reconcileSlot } from '../utils/fsBackgroundPace.js';
+import { findInFlightCopy } from '../utils/mirrorInFlight.js';
 import { createFreshServiceClient, FORBIDDEN_TICKET } from '../integrations/freshservice.js';
 import {
   transformTickets,
@@ -1598,6 +1599,34 @@ class SyncService {
         statusChanged: false,
         skippedTicketPulseOrigin: true,
       };
+    }
+
+    // The same guard for a copy the mirror is creating RIGHT NOW (12 Oct 2026): FreshService
+    // calls back (workflow webhook) and lists the new ticket before its number is saved on our
+    // row, so the lookup above finds nothing and a second, FreshService-born ticket was created
+    // (#241182, #246727). Every FreshService-to-Ticket-Pulse path passes here.
+    if (!existingTicket) {
+      const ownId = findInFlightCopy({ workspaceId: ticketWorkspaceId, subject: ticket.subject, email: ticket.requesterEmail || ticket.email || null });
+      const own = ownId ? await prisma.ticket.findUnique({ where: { id: ownId } }).catch(() => null) : null;
+      if (own && isTicketPulseOrigin(own)) {
+        logger.info(`FS snapshot ingest skipped: FreshService #${ticket.freshserviceTicketId} is the copy of Ticket Pulse ticket ${own.id}, still being created`, {
+          source: options.source || 'freshservice_sync',
+        });
+        return {
+          ticket: own,
+          existingTicket: own,
+          workspaceId: ticketWorkspaceId,
+          isNew: false,
+          isNoise: own.isNoise === true,
+          noiseRuleMatched: null,
+          noiseRuleCategory: null,
+          assignmentClearVerification: null,
+          assignmentChanged: false,
+          statusChanged: false,
+          skippedTicketPulseOrigin: true,
+          skippedInFlightCopy: true,
+        };
+      }
     }
 
     if (ticket.assignedFreshserviceId && !ticket.assignedTechId) {

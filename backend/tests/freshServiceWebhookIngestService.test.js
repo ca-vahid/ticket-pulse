@@ -39,6 +39,9 @@ jest.unstable_mockModule('../src/services/syncService.js', () => ({
   default: syncServiceMock,
 }));
 
+const mirrorMock = { reconcileTicket: jest.fn(async () => ({ imported: 0 })) };
+jest.unstable_mockModule('../src/services/mirrorService.js', () => ({ default: mirrorMock }));
+
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({
   createFreshServiceClient: createFreshServiceClientMock,
 }));
@@ -248,5 +251,24 @@ describe('freshServiceWebhookIngestService', () => {
     const outcome = await ack.pending;
     expect(outcome.synced).toBe(false);
     expect(syncServiceMock.syncFreshServiceTicketSnapshot).toHaveBeenCalledTimes(INGEST_RETRY_DELAYS_MS.length + 1);
+  });
+
+  // IT intake plan (12 Oct 2026): the webhook step stays in the FreshService workflow.
+  test('a webhook about the copy of a Ticket Pulse ticket pulls its changes and never starts an assignment', async () => {
+    clientMock.fetchTicketSnapshot.mockResolvedValue({ id: 246800, workspace_id: 10 });
+    syncServiceMock.syncFreshServiceTicketSnapshot.mockResolvedValue({ ticket: { id: 62000 }, skippedTicketPulseOrigin: true });
+    const result = await freshServiceWebhookIngestService._ingestOnce({ id: 2, freshserviceWorkspaceId: BigInt(10) }, 246800);
+    await new Promise((r) => setImmediate(r));
+    expect(result).toMatchObject({ accepted: true, synced: false, skippedReason: 'ticket_pulse_copy', ticketId: 62000 });
+    expect(mirrorMock.reconcileTicket).toHaveBeenCalledWith(62000, 2);
+    expect(syncServiceMock._pollForUnassignedTickets).not.toHaveBeenCalled();
+    expect(workspaceWebhookServiceMock.recordAccepted).toHaveBeenCalledWith(2);
+
+    // A copy that is still being created has nothing to pull yet.
+    mirrorMock.reconcileTicket.mockClear();
+    syncServiceMock.syncFreshServiceTicketSnapshot.mockResolvedValue({ ticket: { id: 62001 }, skippedTicketPulseOrigin: true, skippedInFlightCopy: true });
+    await freshServiceWebhookIngestService._ingestOnce({ id: 2, freshserviceWorkspaceId: BigInt(10) }, 246801);
+    await new Promise((r) => setImmediate(r));
+    expect(mirrorMock.reconcileTicket).not.toHaveBeenCalled();
   });
 });

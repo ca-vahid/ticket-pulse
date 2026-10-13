@@ -124,3 +124,29 @@ describe('mirror reconcile sweep — shared pace and yielding to people', () => 
     expect(out).toMatchObject({ checked: 1, yielded: true, remaining: 4 });
   });
 });
+
+// 12 Oct 2026: open copies beyond the most recently active ones were never checked.
+describe('open copies beyond the most recently active', () => {
+  test('a rotating slice of the rest is checked each pass, so every copy is reached', async () => {
+    const mk = (id) => ({ id, workspaceId: 30, origin: 'ticketpulse', freshserviceTicketId: BigInt(900000 + id), status: 'Open', assignedTech: null });
+    const top = [mk(1), mk(2)];
+    const calls = [];
+    prismaMock.ticket.findMany.mockImplementation(async (args) => {
+      calls.push(args);
+      if (args.where?.id?.notIn) return [mk(50 + (args.skip || 0)), mk(51 + (args.skip || 0))].slice(0, args.take);
+      if (args.orderBy?.lastRealActivityAt) return top;
+      return [];
+    });
+    mirrorService._activeRotateOffset?.delete(30);
+    mirrorService._reconcileResume?.delete(30);
+    const spy = jest.spyOn(mirrorService, '_reconcileTicketAgainstFs').mockResolvedValue({ imported: 0, conflicts: 0 });
+    const out = await mirrorService.reconcile(30, { activeOnly: true, limit: 2 });
+    const rest = calls.find((c) => c.where?.id?.notIn);
+    spy.mockRestore();
+    expect(rest.where).toMatchObject({ workspaceId: 30, origin: 'ticketpulse', id: { notIn: [1, 2] } });
+    expect(rest.orderBy).toEqual({ id: 'asc' });
+    expect(rest.skip).toBe(0);
+    expect(rest.take).toBeGreaterThan(0);
+    expect(out.checked).toBeGreaterThanOrEqual(1);
+  });
+});

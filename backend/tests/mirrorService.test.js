@@ -41,6 +41,7 @@ jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js'
   emitTicketEvent: emitTicketEventMock,
 }));
 
+const mirrorInFlight = await import('../src/utils/mirrorInFlight.js');
 const { default: mirrorService } = await import('../src/services/mirrorService.js');
 
 const baseTicket = {
@@ -627,5 +628,68 @@ describe('mirrorService — "Also for" additional requesters → cc_emails (Phas
     clientMock.updateTicket.mockRejectedValue(new Error('FS is down'));
     expect(await mirrorService._processJob({ id: 15, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(false);
     expect(clientMock.updateTicket).toHaveBeenCalledTimes(1);
+  });
+});
+
+// IT intake plan (12 Oct 2026): the copy of a ticket that arrived on the team's front-door mailbox.
+describe('the FreshService copy of front-door mail', () => {
+  const { findInFlightCopy, _resetMirrorInFlight } = mirrorInFlight;
+  beforeEach(() => {
+    _resetMirrorInFlight();
+    prismaMock.ticket.update.mockResolvedValue({});
+    prismaMock.requester.update.mockResolvedValue({});
+    clientMock.updateTicket.mockResolvedValue({ id: 90001 });
+    clientMock.addNote.mockResolvedValue({ conversation: { id: 1 } });
+  });
+  afterEach(() => { delete prismaMock.mailboxConnection; });
+
+  test('every copy is tagged; only mail that came in on a helpdesk mailbox is copied as Email', async () => {
+    prismaMock.mailboxConnection = { findFirst: jest.fn().mockResolvedValue({ id: 7 }) };
+    clientMock.createTicket.mockResolvedValue({ id: 90001, requester_id: 555001 });
+    // An agent-created ticket (source 103) stays Portal even where a helpdesk mailbox exists.
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 1900, source: 103 });
+    await mirrorService._processJob({ id: 1, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket).toHaveBeenLastCalledWith(expect.objectContaining({ source: 2, tags: ['tp-copy', 'tp-1900'] }));
+    // Mail on the front door: Email, so FreshService's "source is Email" branch runs.
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 1901, source: 1 });
+    await mirrorService._processJob({ id: 2, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket).toHaveBeenLastCalledWith(expect.objectContaining({ source: 1, tags: ['tp-copy', 'tp-1901'] }));
+    expect(prismaMock.mailboxConnection.findFirst.mock.calls[0][0].where).toMatchObject({ workspaceId: 1, intakeProfile: 'helpdesk', isEnabled: true });
+    // Mail in a workspace with no helpdesk mailbox stays Portal, as before.
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
+    await mirrorService._processJob({ id: 3, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket).toHaveBeenLastCalledWith(expect.objectContaining({ source: 2 }));
+  });
+
+  test('while FreshService is creating the copy, the ingest can tell it is ours; a failed create leaves no mark', async () => {
+    let during = null;
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 1902 });
+    clientMock.createTicket.mockImplementation(async () => {
+      during = findInFlightCopy({ workspaceId: 1, subject: 'Projector flickers', email: 'RITA@example.com' });
+      return { id: 90002, requester_id: 555001 };
+    });
+    await mirrorService._processJob({ id: 4, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(during).toBe(501);
+    // Still known for late callbacks after the number is saved.
+    expect(findInFlightCopy({ workspaceId: 1, subject: ' projector  flickers ' })).toBe(501);
+    expect(findInFlightCopy({ workspaceId: 2, subject: 'Projector flickers' })).toBeNull();
+    expect(findInFlightCopy({ workspaceId: 1, subject: 'Projector flickers', email: 'someone.else@example.com' })).toBeNull();
+
+    _resetMirrorInFlight();
+    clientMock.createTicket.mockRejectedValue(new Error('FS is down'));
+    await mirrorService._processJob({ id: 5, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(findInFlightCopy({ workspaceId: 1, subject: 'Projector flickers' })).toBeNull();
+  });
+
+  test("the requester's e-mailed answer is written as an incoming message from them, not as a reply we sent", async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), requester: { id: 40, email: 'rita@example.com', freshserviceId: BigInt(555001) } });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({ id: 9003, isPrivate: false, incoming: true, actorName: 'Rita Requester', bodyHtml: '<p>still broken</p>', mirrorState: 'pending' });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await mirrorService._processJob({ id: 6, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9003, attempts: 0 });
+    const [, body, opts] = clientMock.addNote.mock.calls[0];
+    expect(opts).toEqual({ isPrivate: false, attachments: [], incoming: true, userId: 555001 });
+    expect(body).toContain('<b>Rita Requester</b>');
+    expect(body).toContain('reply received by e-mail');
+    expect(body).not.toContain('already e-mailed to the requester');
   });
 });

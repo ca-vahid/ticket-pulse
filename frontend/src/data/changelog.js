@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.2.54-preview';
+export const APP_VERSION = '4.2.55-preview';
 
 export const changelog = [
+  {
+    version: '4.2.55-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A FreshService copy can no longer come back as a second ticket</strong> &mdash; when Ticket Pulse creates the FreshService copy of one of its own tickets, FreshService calls back about it within a second or two. If that call arrived before the copy&rsquo;s number was saved, Ticket Pulse took the copy for a new FreshService ticket and created a duplicate (it happened once in production, on 8 September). Ticket Pulse now knows which copies it is creating and ignores the call-back for them, on every path FreshService tickets arrive by.' },
+      { type: 'improved', html: '<strong>FreshService copies are marked</strong> &mdash; every copy carries the tags <code>tp-copy</code> and <code>tp-&lt;number&gt;</code>, so a person or a FreshService rule can tell a copy from a ticket that was born there.' },
+      { type: 'improved', html: '<strong>A requester&rsquo;s e-mailed answer shows as their message on the copy</strong> &mdash; it used to be written as a note from Ticket Pulse that looked like a reply we had sent. It is now written as an incoming message, with the requester&rsquo;s name leading the line.' },
+      { type: 'improved', html: '<strong>Changes made on a FreshService copy reach Ticket Pulse sooner</strong> &mdash; only the 30 most recently active open copies were checked for replies and changes made in FreshService; older ones waited until somebody opened the ticket. A rotating share of the rest is now checked on every pass, and a FreshService webhook about a copy pulls that ticket&rsquo;s changes at once.' },
+      { type: 'added', html: '<strong>More groundwork for IT mail arriving in Ticket Pulse</strong> &mdash; a ticket that arrives on a helpdesk mailbox is copied to FreshService as an e-mail ticket and straight away, so FreshService&rsquo;s own &ldquo;Received&rdquo; message and its workflow run for it as they do today. No mailbox is marked as a helpdesk mailbox yet.' },
+    ],
+  },
   {
     version: '4.2.54-preview',
     date: 'October 12, 2026',

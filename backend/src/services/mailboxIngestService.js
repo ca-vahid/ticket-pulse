@@ -1367,6 +1367,12 @@ class MailboxIngestService {
         ? attachmentService.upload({ workspaceId: connection.workspaceId, ticketId: ticket.id, threadEntryId: null, fileName: 'original-message.html', contentType: 'text/html', buffer: Buffer.from(fullBody, 'utf8'), uploadedBy: email.from, source: 'email' })
         : null)).catch((err) => logger.warn(`Full message not attached for ${ticket.displayRef} (non-fatal): ${err.message}`));
     }
+    if (helpdesk && typeof mirrorService?.drainForTicket === 'function') {
+      // Do not wait for the 60-second mirror worker (half of IT's copies took 54 s, one in ten
+      // nearly five minutes): FreshService sends the 'Received' e-mail when the copy appears.
+      Promise.resolve().then(() => mirrorService.drainForTicket(ticket.id, connection.workspaceId))
+        .catch((err) => logger.warn(`Immediate copy to FreshService not started for ${ticket.displayRef} (the worker will do it): ${err.message}`));
+    }
     if (intake?.relatedTicketId) {
       await import('./ticketLinkService.js').then(({ default: links }) => links.link(ticket.id, connection.workspaceId, { relatedTicketId: intake.relatedTicketId, kind: 'related_to' }, SYSTEM_ACTOR))
         .catch((err) => logger.warn(`Link to the mentioned ticket not added for ${ticket.displayRef} (non-fatal): ${err.message}`));

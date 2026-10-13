@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { markCreating, settleCreating, clearCreating } from '../utils/mirrorInFlight.js';
 import { fsNoteHeader } from '../utils/fsNoteHeader.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { reasonLabel } from './resolutionReasonService.js';
@@ -67,6 +68,10 @@ const RECONCILE_MAX_DEFER_MS = Number(process.env.NATIVE_TICKET_RECONCILE_MAX_DE
 // too, so a reopen on the FreshService copy is seen.
 const RECENTLY_CLOSED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 const RECENTLY_CLOSED_LIMIT = 10;
+// Open copies beyond the 30 most recently active were never checked at all (12 Oct 2026): fine
+// with 60 open Ticket Pulse-born tickets, not with the few hundred IT will have once its mail
+// arrives here. A slice of the rest is checked each pass and rotates, so every copy is reached.
+const ACTIVE_ROTATE_LIMIT = Number(process.env.NATIVE_TICKET_RECONCILE_ROTATE || 20);
 // Clock skew allowance between FreshService activity times and ours.
 const LATEST_WINS_SKEW_MS = 5000;
 const LATEST_WINS_REPUSH_INTERVAL_MS = 60 * 60 * 1000;
@@ -766,7 +771,12 @@ class MirrorService {
       // fallback for labels with no resolvable base.
       status: (await this._fsStatusCode(ticket)) ?? FS_STATUS_CODES.Open,
       priority: ticket.priority || 2,
-      source: 2, // portal
+      // Mail that arrived on the team's front-door mailbox is copied as Email, so FreshService
+      // workflows that branch on "source is Email" (IT's 'Received' e-mail, priority, after-hours)
+      // run for it as they do for mail FreshService received itself. Everything else stays Portal.
+      source: (await this._isFrontDoorMail(ticket)) ? 1 : 2,
+      // Marks the copy for FreshService rules and for a person looking at it (12 Oct 2026).
+      tags: ['tp-copy', `tp-${ticket.nativeNumber || ticket.id}`],
       workspace_id: ticket.workspace?.freshserviceWorkspaceId ? Number(ticket.workspace.freshserviceWorkspaceId) : undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
@@ -787,8 +797,16 @@ class MirrorService {
     // FreshService validates strictly on CREATE ("should be of type Number") but
     // accepts on UPDATE — and they need the record ID, not the category name. So
     // create WITHOUT them, then set the resolved ids via a follow-up update.
-    const fsTicket = await client.createTicket({ ...basePayload });
-    if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
+    // Tell the ingest this copy is ours BEFORE FreshService can call back about it (utils/mirrorInFlight.js).
+    markCreating(ticket.id, { workspaceId: ticket.workspaceId, subject: basePayload.subject, email: basePayload.email });
+    let fsTicket;
+    try {
+      fsTicket = await client.createTicket({ ...basePayload });
+      if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
+    } catch (err) {
+      clearCreating(ticket.id);
+      throw err;
+    }
 
     // Persist the FS id IMMEDIATELY — before any other await. A failure between
     // createTicket and this write used to leave freshserviceTicketId null, so
@@ -803,6 +821,7 @@ class MirrorService {
         mirrorError: null,
       },
     });
+    settleCreating(ticket.id);
 
     const customFields = await this._skillCustomFields(client, ticket);
     if (customFields) {
@@ -959,6 +978,19 @@ class MirrorService {
     }
   }
 
+  /** Did this ticket arrive by mail on a mailbox marked as the team's front door? Never throws. */
+  async _isFrontDoorMail(ticket) {
+    if (Number(ticket?.source) !== 1) return false;
+    try {
+      const row = await prisma.mailboxConnection.findFirst({
+        where: { workspaceId: ticket.workspaceId, intakeProfile: 'helpdesk', isEnabled: true }, select: { id: true },
+      });
+      return Boolean(row);
+    } catch {
+      return false;
+    }
+  }
+
   /** Mirror-prefixed FS body for a thread entry (create AND edit reuse this). */
   _threadEntryMirrorBody(ticket, entry) {
 
@@ -968,10 +1000,12 @@ class MirrorService {
     // review, Sep 2026). Public notes stay name-only — no agent emails on
     // portal-visible content.
     // 12 Oct 2026: the person leads the line in bold; the marker trails it (utils/fsNoteHeader.js).
+    // A message that CAME IN (the requester's answer by e-mail) is not a reply we sent.
+    const received = entry.incoming === true && !entry.isPrivate;
     return fsNoteHeader({
       who: entry.actorName || 'Ticket Pulse',
       email: entry.isPrivate ? entry.actorEmail : null,
-      action: entry.isPrivate ? 'note' : 'reply',
+      action: entry.isPrivate ? 'note' : (received ? 'received' : 'reply'),
       ref: ticketDisplayRef(ticket),
       url: entry.isPrivate ? ticketUrl(ticket) : null,
       marker: MIRROR_MARKER,
@@ -994,9 +1028,15 @@ class MirrorService {
 
     // Public replies mirror as PUBLIC NOTES (portal-visible, no requester email —
     // Ticket Pulse already emailed them). Internal notes mirror privately.
+    // The requester's e-mailed answer is written as an INCOMING message from them, so an agent
+    // working in FreshService sees a reply and not a note (the FreshService-born lane already does this).
+    const received = entry.incoming === true && entry.isPrivate !== true;
+    const requesterFsId = received && ticket.requester?.freshserviceId ? Number(ticket.requester.freshserviceId) : null;
     const result = await client.addNote(Number(ticket.freshserviceTicketId), body, {
       isPrivate: entry.isPrivate === true,
       attachments,
+      ...(received ? { incoming: true } : {}),
+      ...(requesterFsId ? { userId: requesterFsId } : {}),
     });
 
     await prisma.ticketThreadEntry.update({
@@ -1165,6 +1205,26 @@ class MirrorService {
       }).catch(() => []);
       this._recentClosedOffset.set(workspaceId, recent.length < RECENTLY_CLOSED_LIMIT ? 0 : offset + recent.length);
       tickets.push(...recent.filter((r) => !tickets.some((t) => t.id === r.id)));
+
+      if (ACTIVE_ROTATE_LIMIT > 0 && tickets.length >= limit) {
+        if (!this._activeRotateOffset) this._activeRotateOffset = new Map();
+        const rotateAt = this._activeRotateOffset.get(workspaceId) || 0;
+        const rest = await Promise.resolve().then(() => prisma.ticket.findMany({
+          where: {
+            workspaceId,
+            origin: TICKET_ORIGIN.TICKETPULSE,
+            freshserviceTicketId: { not: null },
+            status: { in: activeNames },
+            id: { notIn: tickets.map((t) => t.id) },
+          },
+          include: { assignedTech: { select: { freshserviceId: true, name: true } } },
+          orderBy: { id: 'asc' },
+          skip: rotateAt,
+          take: ACTIVE_ROTATE_LIMIT,
+        })).then((rows) => (Array.isArray(rows) ? rows : [])).catch(() => []);
+        this._activeRotateOffset.set(workspaceId, rest.length < ACTIVE_ROTATE_LIMIT ? 0 : rotateAt + rest.length);
+        tickets.push(...rest.filter((r) => !tickets.some((t) => t.id === r.id)));
+      }
     }
 
     // 6 Oct 2026: this loop used to fire one FreshService read per ticket
