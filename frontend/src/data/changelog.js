@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.61-preview';
+export const APP_VERSION = '4.2.63-preview';
 
 export const changelog = [
+  {
+    version: '4.2.63-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Availability: a request with no approval group goes to the super admins only</strong> &mdash; when the person asking is in no approval group, the request used to be mailed to every administrator of every workspace, eleven people for one vacation day, and any of them could decide it. It now goes to the super admins. Once a person is in an approval group, only the approvers named there are mailed. Set groups up under Availability &rarr; Settings &rarr; Approval groups.' },
+      { type: 'fixed', html: '<strong>Availability: each approver gets their own copy of the request</strong> &mdash; the notice put every approver on one To line, so they saw each other and a Reply All reached all of them. Each approver now receives a separate message.' },
+      { type: 'improved', html: '<strong>Availability: who can approve</strong> &mdash; a request is decided by the approvers of the person&rsquo;s group, or by a super admin. Being an administrator of a workspace no longer lets someone approve leave for people they are not an approver for.' },
+    ],
+  },
   {
     version: '4.2.61-preview',
     date: 'October 12, 2026',
