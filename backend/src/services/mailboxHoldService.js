@@ -37,6 +37,7 @@ export const HOLD_REASONS = Object.freeze([
   'ambiguous_sender',
   'policy_replies_only',
   'ambiguous_ticket', // two or more FreshService tickets match the sender + subject (23 Sep 2026)
+  'sender_burst', // helpdesk mailbox: more new mail from one sender in a cycle than the cap; never dropped
 ]);
 
 export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'discarded']);

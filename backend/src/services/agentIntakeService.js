@@ -20,6 +20,7 @@
  * (`recencySender`) and it is NEVER the agent.
  */
 import prisma from './prisma.js';
+import { freshserviceTicketNumbers } from '../utils/freshserviceRefs.js';
 import logger from '../utils/logger.js';
 import { parseForwardedMail, stripSubjectPrefixes } from '../utils/forwardedMailParser.js';
 
@@ -124,7 +125,11 @@ export function looksLikeReply(email) {
   if (/sent (?:by|from) ticket pulse|ticket pulse mail/i.test(head)) evidence.push('body_tp_footer');
 
   const tp = [...new Set([...head.matchAll(/\bTP-(\d{3,})\b/gi)].map((m) => Number(m[1])))];
-  const fs = [...new Set([...head.matchAll(/(?<![\w-])#(\d{5,})\b/g)].map((m) => Number(m[1])))];
+  // 12 Oct 2026: also the bracketed shapes FreshService mail carries ([INC-n], [#SR-n], [#n]).
+  const fs = [...new Set([
+    ...[...head.matchAll(/(?<![\w-])#(\d{5,})\b/g)].map((m) => Number(m[1])),
+    ...freshserviceTicketNumbers(head),
+  ])];
   // A forward prefix ALONE is weak evidence: a requester forwarding a vendor
   // mail is a legitimate new ticket. Callers hold on `strongEvidence`;
   // agent rules still see the prefix (a forward of a thread is their case).

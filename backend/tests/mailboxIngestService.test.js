@@ -1151,3 +1151,83 @@ describe('requester reply copy to agents (17 Sep 2026)', () => {
     expect(replyCopyMock.copyAgentsOnRequesterReply).not.toHaveBeenCalled();
   });
 });
+
+// IT intake plan (12 Oct 2026): a 'helpdesk' mailbox is the team's front door. Six days of real it@
+// mail through the old rules: 16 no-reply notices dropped, 32 held only because [INC-n] was not read,
+// 3 fresh mails glued onto the sender's open ticket (one of them an onboarding ticket).
+describe('helpdesk mailbox profile', () => {
+  const front = { id: 9, workspaceId: 1, address: 'helpdesk-pilot@example.com', intakeProfile: 'helpdesk' };
+
+  test('a no-reply sender and an auto-generated notice are tickets; an automatic reply and a bounce are still loop mail', () => {
+    const opts = { helpdesk: true };
+    expect(looksLikeLoopMail({ from: 'azure-noreply@microsoft.com', subject: 'Budget alert' }, front.address, opts)).toBeNull();
+    expect(looksLikeLoopMail({ from: 'no-reply@cira.ca', subject: 'Domain renewal', autoSubmitted: 'auto-generated' }, front.address, opts)).toBeNull();
+    expect(looksLikeLoopMail({ from: 'news@vendor.com', subject: 'x', precedence: 'bulk' }, front.address, opts)).toBeNull();
+    expect(looksLikeLoopMail({ from: 'rita@example.com', subject: 'x', autoSubmitted: 'auto-replied' }, front.address, opts)).toBe('auto_submitted_header');
+    expect(looksLikeLoopMail({ from: 'rita@example.com', subject: 'Automatic reply: away' }, front.address, opts)).toBe('autoreply_subject');
+    expect(looksLikeLoopMail({ from: 'postmaster@mx.example.com', subject: 'x' }, front.address, opts)).toBe('automated_sender');
+    expect(looksLikeLoopMail({ from: 'helpdesk-pilot@example.com', subject: 'x' }, front.address, opts)).toBe('self_send');
+    // A side mailbox keeps the old rule.
+    expect(looksLikeLoopMail({ from: 'azure-noreply@microsoft.com', subject: 'x' }, front.address)).toBe('automated_sender');
+  });
+
+  test('a fresh mail from someone with an open ticket is a NEW ticket, never a reply on the old one', async () => {
+    // On a side mailbox this findFirst is rung 4 and the mail becomes a reply (test "4:" above).
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 503, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1050, status: 'Open' });
+    const outcome = await mailboxIngestService.processEmail(front, { ...baseEmail, subject: 'A different problem' });
+    expect(outcome).toBe('created');
+    expect(prismaMock.ticket.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['Re: [INC-243414] GIS Pro licence', 243414],
+    ['Re: [#SR-246489] new starter', 246489],
+    ['RE: Printer [#246332]', 246332],
+  ])('"%s" finds the ticket with that FreshService number, even a Ticket Pulse-born one', async (subject, number) => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValueOnce(new Set());
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (
+      where.freshserviceTicketId === BigInt(number) && where.origin === undefined
+        ? { id: 800, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1900, freshserviceTicketId: BigInt(number), status: 'Open' }
+        : null));
+    const match = await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject, to: ['helpdesk-pilot@example.com'] }, front.address, { helpdesk: true });
+    expect(match).toMatchObject({ via: 'fs_ref_subject', ticket: { id: 800 } });
+  });
+
+  test('two different tickets named in one subject are held with both, not guessed', async () => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValueOnce(new Set());
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => {
+      if (where.freshserviceTicketId === 243414n) return { id: 801, origin: 'freshservice', freshserviceTicketId: 243414n, subject: 'A' };
+      if (where.freshserviceTicketId === 246489n) return { id: 802, origin: 'freshservice', freshserviceTicketId: 246489n, subject: 'B' };
+      return null;
+    });
+    const match = await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject: 'Fw: [INC-243414] same as [#SR-246489]' }, front.address, { helpdesk: true });
+    expect(match).toMatchObject({ hold: true, reason: 'ambiguous_ticket', rule: 'fs_ref_two_tickets' });
+    expect(match.candidates.map((c) => c.id)).toEqual([801, 802]);
+  });
+
+  test('sender + subject is only tried for mail that is a reply, and then for both origins', async () => {
+    // A repeating alert: same subject as an open ticket, but not a reply: no lookup, a new ticket.
+    expect(await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject: 'Transfer has failed for FILE3' }, front.address, { helpdesk: true })).toBeNull();
+    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+    // A real reply with no number: looked up without an origin filter.
+    prismaMock.ticket.findMany.mockResolvedValueOnce([{ id: 803, origin: 'ticketpulse', nativeNumber: 1901, subject: 'Laptop will not boot', updatedAt: new Date() }]);
+    const match = await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject: 'Re: Laptop will not boot', inReplyTo: '<x@fs.mail>' }, front.address, { helpdesk: true });
+    expect(match).toMatchObject({ via: 'fs_subject_sender', ticket: { id: 803 } });
+    expect(prismaMock.ticket.findMany.mock.calls[0][0].where.origin).toBeUndefined();
+  });
+
+  test('a burst from one sender is held, not dropped', async () => {
+    const senderCreates = new Map([['rita@example.com', 3]]);
+    const outcome = await mailboxIngestService.processEmail(front, baseEmail, senderCreates);
+    expect(outcome).toBe('held');
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(front, expect.anything(), expect.objectContaining({ reason: 'sender_burst' }));
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+  });
+
+  test('a dry run can judge mail as of its arrival, ignoring tickets created afterwards', async () => {
+    const receivedAt = new Date('2026-10-09T15:00:00Z');
+    await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject: 'Re: [INC-243414] x', receivedAt }, front.address, { helpdesk: true, asOf: receivedAt });
+    expect(prismaMock.ticket.findFirst.mock.calls[0][0].where).toMatchObject({ freshserviceTicketId: 243414n, createdAt: { lt: receivedAt } });
+  });
+});
