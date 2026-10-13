@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.57-preview';
+export const APP_VERSION = '4.2.58-preview';
 
 export const changelog = [
+  {
+    version: '4.2.58-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A plain-text e-mail keeps its text</strong> &mdash; a ticket created from an e-mail that has no formatted (HTML) part was stored with an empty description: only the subject survived, so triage called it not actionable and nobody could read the request on the ticket. The text is now the description. Machine notices are often plain text, so this mattered most for alerts. Found on the first test ticket (TP-1870) minutes after IT&rsquo;s mail started arriving in Ticket Pulse; no real ticket was affected.' },
+      { type: 'changed', html: '<strong>IT&rsquo;s mail now arrives in Ticket Pulse</strong> &mdash; since 7:00 p.m. on October 12, mail to the IT helpdesk address is read by Ticket Pulse, which creates the ticket (TP-&lt;number&gt;) and a tagged copy in FreshService. FreshService still sends the &ldquo;Received&rdquo; message and runs its workflows on the copy. Replies from Ticket Pulse leave from the helpdesk address with the agent&rsquo;s name.' },
+    ],
+  },
   {
     version: '4.2.57-preview',
     date: 'October 12, 2026',
