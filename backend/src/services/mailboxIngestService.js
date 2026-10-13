@@ -23,6 +23,11 @@ const HELD_CACHE_MAX = 5000;
 const TICK_MS = Number(process.env.MAILBOX_INGEST_TICK_MS || 30 * 1000);
 const FIRST_LOOKBACK_MS = 15 * 60 * 1000; // fresh connections look back 15 minutes
 const MAX_CREATES_PER_SENDER_PER_CYCLE = 3;
+const INBOX_PAGE = 25;
+const INBOX_BACKLOG = 250;
+// A description longer than the ticket schema stores (100,000) used to fail the whole message.
+const DESCRIPTION_KEEP = 90000;
+const OLD_CLOSED_DAYS = 14;
 
 // Every skip is counted (23 Sep 2026): a week of silently dropped replies on
 // #242611 was invisible because a skip wrote nothing anywhere. In-memory,
@@ -348,7 +353,14 @@ class MailboxIngestService {
 
     let emails;
     try {
-      emails = await graphMailClient.getInboxMessagesForIngest(connection.address, since, 25);
+      emails = await graphMailClient.getInboxMessagesForIngest(connection.address, since, INBOX_PAGE);
+      // A full page means there may be more: the cursor moves to the newest message after this
+      // batch, so anything older that was not fetched would never be read (12 Oct 2026).
+      if (Array.isArray(emails) && emails.length >= INBOX_PAGE) {
+        emails = await graphMailClient.getInboxMessagesForIngest(connection.address, since, INBOX_BACKLOG);
+        if (emails.length >= INBOX_BACKLOG) logger.warn(`Mailbox ${connection.address}: ${emails.length} messages waiting since ${since.toISOString()} — more than one pass can read; the next pass continues`);
+      }
+      emails = [...(emails || [])].sort((a, b) => (a.receivedAt?.getTime?.() || 0) - (b.receivedAt?.getTime?.() || 0));
     } catch (err) {
       await this._recordPollError(connection, err);
       throw err;
@@ -425,8 +437,16 @@ class MailboxIngestService {
         else if (outcome === 'held') results.held += 1;
         else results.skipped += 1;
       } catch (err) {
-        results.skipped += 1;
         logger.warn(`Mailbox ingest failed for message ${email.id} (${connection.address}): ${err.message}`);
+        if (isHelpdeskMailbox(connection)) {
+          // The cursor moves on after this batch, so a failure here used to lose the mail for good.
+          const outcome = await this._holdOrFallback(connection, email, {
+            kind: 'ingest_error', decision: { rule: 'ingest_error', details: { error: String(err.message).slice(0, 400) } },
+          }, 'ingest_error', new Map()).catch(() => 'skipped');
+          if (outcome === 'held') results.held += 1; else results.skipped += 1;
+        } else {
+          results.skipped += 1;
+        }
       }
     }
     return { results, latest };
@@ -466,6 +486,7 @@ class MailboxIngestService {
     const loopReason = looksLikeLoopMail(email, connection.address, { helpdesk });
     if (loopReason) {
       logger.debug(`Mailbox ingest skipping message (${loopReason}): ${email.subject}`);
+      if (helpdesk) await this._recordSkipped(connection, email, loopReason);
       return 'skipped';
     }
 
@@ -506,6 +527,7 @@ class MailboxIngestService {
     if (match?.skip) {
       recordIngestSkip(connection.workspaceId, match.reason);
       logger.info(`Mailbox ingest decision: skip (${match.reason}) for "${email.subject}" from ${email.from}${match.ticketId ? ` — FreshService ticket ${match.ticketId} receives this mail itself` : ''}`);
+      if (helpdesk) await this._recordSkipped(connection, email, match.reason);
       return 'skipped';
     }
     if (match?.hold) {
@@ -523,6 +545,7 @@ class MailboxIngestService {
       await this.ingestReply(connection, match.ticket, email, match.via, { agent, ctx });
       return 'reply';
     }
+    const relatedTicketId = match?.relatedTicketId || null;
 
     // Rung 0 (RL-3): reply evidence. Last matching attempt on TP-refs found
     // in the body head (token-stripped subjects, quoted acks) before the
@@ -582,7 +605,32 @@ class MailboxIngestService {
       break;
     }
 
-    return this._createWithCap(connection, email, intake, senderCreates);
+    return this._createWithCap(connection, email, relatedTicketId ? { ...intake, relatedTicketId } : intake, senderCreates);
+  }
+
+  /** FreshService closes a merged ticket with a link to the one that survives; the reply belongs there. */
+  async _followMerge(row) {
+    try {
+      const link = await prisma.ticketLink.findFirst({
+        where: { ticketId: row.id, kind: { in: ['merged_into', 'duplicate_of'] } }, select: { relatedTicketId: true }, orderBy: { id: 'desc' },
+      });
+      if (!link?.relatedTicketId) return row;
+      const target = await prisma.ticket.findUnique({ where: { id: link.relatedTicketId } });
+      return target && target.workspaceId === row.workspaceId ? target : row;
+    } catch {
+      return row;
+    }
+  }
+
+  /** A skip on a helpdesk mailbox leaves a row a person can see (and still turn into a ticket). Never throws. */
+  async _recordSkipped(connection, email, reason) {
+    try {
+      const { default: holdService } = await import('./mailboxHoldService.js');
+      if (typeof holdService?.recordSkipped === 'function') await holdService.recordSkipped(connection, email, reason);
+      this._rememberHeld(email.internetMessageId);
+    } catch (err) {
+      logger.warn(`Mailbox ingest: skip not recorded for "${email.subject}" (${err.message})`);
+    }
   }
 
   /** Per-sender create cap (loops the header checks didn't catch), then create. */
@@ -732,8 +780,24 @@ class MailboxIngestService {
     if (fsNumbers.length) {
       const found = [];
       for (const n of fsNumbers) {
-        const row = await prisma.ticket.findFirst({ where: { workspaceId, freshserviceTicketId: BigInt(n), ...before } });
+        let row = await prisma.ticket.findFirst({ where: { workspaceId, freshserviceTicketId: BigInt(n), ...before } });
+        if (row && helpdesk) row = await this._followMerge(row);
         if (row && !found.some((f) => f.id === row.id)) found.push(row);
+      }
+      if (found.length && helpdesk) {
+        const gone = found.find((f) => ['Deleted', 'Spam'].includes(f.status));
+        if (gone) {
+          // The number names a ticket that was deleted or marked spam: a person decides.
+          return {
+            hold: true, reason: 'unknown_reference', rule: 'fs_ref_deleted_ticket', bestGuessTicketId: gone.id,
+            candidates: [{ id: gone.id, displayRef: ticketDisplayRef(gone), subject: gone.subject, updatedAt: gone.updatedAt }],
+          };
+        }
+        const ended = found.length === 1 ? (found[0].closedAt || found[0].resolvedAt) : null;
+        if (ended && Date.now() - new Date(ended).getTime() > OLD_CLOSED_DAYS * 86400000 && !agentIntake.looksLikeReply(email).strongEvidence.length) {
+          // A fresh mail that only MENTIONS a ticket closed long ago is a new request, linked to it.
+          return { relatedTicketId: found[0].id, via: 'fs_ref_old_closed' };
+        }
       }
       if (found.length) {
         if (await freshserviceWillIngest(workspaceId, email)) return { skip: true, reason: 'freshservice_ref', ticketId: found[0].id };
@@ -1263,15 +1327,50 @@ class MailboxIngestService {
     const subject = String(email.subject || '').trim() || '(no subject)';
     const forcedRequester = String(intake?.forcedRequester || '').trim().toLowerCase() || null;
     const createdVia = intake?.createdVia || 'email';
-    const ticket = await ticketService.createTicket(connection.workspaceId, {
+    const helpdesk = isHelpdeskMailbox(connection);
+    // A3: keep what the schema can store and attach the whole message, where it used to throw.
+    const fullBody = email.bodyHtml || null;
+    const oversized = Boolean(fullBody) && fullBody.length > DESCRIPTION_KEEP;
+    const description = oversized
+      ? `${fullBody.slice(0, fullBody.lastIndexOf('>', DESCRIPTION_KEEP) + 1 || DESCRIPTION_KEEP)}<p><em>This message was longer than a ticket description holds. The whole message is attached as original-message.html.</em></p>`
+      : fullBody;
+    const payload = {
       subject: this._subjectFor(subject),
-      description: email.bodyHtml || null,
+      description,
       priority: 2,
       requesterEmail: forcedRequester || email.from,
       requesterName: forcedRequester ? null : (email.fromName || null),
       runAiTriage: true,
       ...this._routingDefaults(connection),
-    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia });
+    };
+    const options = { sourceChannel: TICKET_SOURCE.EMAIL, createdVia };
+    let ticket;
+    try {
+      ticket = await ticketService.createTicket(connection.workspaceId, payload, SYSTEM_ACTOR, options);
+    } catch (err) {
+      // A2: an internal address Entra does not list as a person (a shared mailbox, a device, a
+      // distribution list) is refused as a requester, which protects against typed guesses. On
+      // the team's front door the mail itself proves the address sends mail: keep it, unverified.
+      if (!helpdesk || !/is not a mailbox in this organisation/i.test(String(err?.message || ''))) throw err;
+      const { default: requesterRepository } = await import('./requesterRepository.js');
+      const address = String(payload.requesterEmail || '').trim().toLowerCase();
+      const requester = await requesterRepository.findByEmail(address)
+        || await requesterRepository.createNative({ email: address, name: email.fromName || address.split('@')[0], entraMissing: true });
+      logger.info(`Mailbox ingest: ${address} is not a person in the directory; kept as an unverified requester for "${subject}"`);
+      const rest = { ...payload };
+      delete rest.requesterEmail;
+      delete rest.requesterName;
+      ticket = await ticketService.createTicket(connection.workspaceId, { ...rest, requesterId: requester.id }, SYSTEM_ACTOR, options);
+    }
+    if (oversized) {
+      await import('./attachmentService.js').then(({ default: attachmentService }) => (attachmentService.isConfigured()
+        ? attachmentService.upload({ workspaceId: connection.workspaceId, ticketId: ticket.id, threadEntryId: null, fileName: 'original-message.html', contentType: 'text/html', buffer: Buffer.from(fullBody, 'utf8'), uploadedBy: email.from, source: 'email' })
+        : null)).catch((err) => logger.warn(`Full message not attached for ${ticket.displayRef} (non-fatal): ${err.message}`));
+    }
+    if (intake?.relatedTicketId) {
+      await import('./ticketLinkService.js').then(({ default: links }) => links.link(ticket.id, connection.workspaceId, { relatedTicketId: intake.relatedTicketId, kind: 'related_to' }, SYSTEM_ACTOR))
+        .catch((err) => logger.warn(`Link to the mentioned ticket not added for ${ticket.displayRef} (non-fatal): ${err.message}`));
+    }
     const heldReply = intake?.heldMessageId
       ? { heldMessageId: intake.heldMessageId, resolvedBy: intake.resolvedBy || null, ...(forcedRequester ? { forcedRequester } : {}) }
       : null;
@@ -1281,9 +1380,17 @@ class MailboxIngestService {
     // sync fills) instead of discarding them. Non-fatal on failure.
     const recipients = emailRecipients(email);
     if (recipients) {
+      // A8 (helpdesk): the people copied, without the mailbox itself, the sender or the agents, ten at most.
+      // A side mailbox keeps storing the Cc line as it arrived.
+      let ccEmails = recipients.cc_emails;
+      if (helpdesk) {
+        const agents = await prisma.technician.findMany({ where: { workspaceId: connection.workspaceId, isActive: true, email: { not: null } }, select: { email: true } })
+          .then((rows) => rows.map((r) => String(r.email || '').toLowerCase())).catch(() => []);
+        ccEmails = mergeInboundCc([], { cc: recipients.cc_emails }, { mailboxAddress: connection.address, exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
+      }
       await prisma.ticket.update({
         where: { id: ticket.id },
-        data: { toEmails: recipients.to_emails, ccEmails: recipients.cc_emails },
+        data: { toEmails: recipients.to_emails, ccEmails },
       }).catch((err) => {
         logger.warn(`Email recipients not persisted for ${ticket.displayRef} (non-fatal): ${err.message}`);
       });
