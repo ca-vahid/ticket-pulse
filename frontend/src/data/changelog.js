@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.63-preview';
+export const APP_VERSION = '4.2.64-preview';
 
 export const changelog = [
+  {
+    version: '4.2.64-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The check for changes made in FreshService no longer piles up</strong> &mdash; every three minutes Ticket Pulse looks at the FreshService copies of its own tickets for replies and changes made there. It started a new round on the clock even when the last one was still running. On a busy morning a round takes longer than three minutes, so the rounds stacked up and each one got less done. A new round now waits for the one before it. Found on the first business morning after IT&rsquo;s mail moved to Ticket Pulse; nothing was lost.' },
+    ],
+  },
   {
     version: '4.2.63-preview',
     date: 'October 13, 2026',
