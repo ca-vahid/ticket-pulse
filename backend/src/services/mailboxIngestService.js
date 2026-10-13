@@ -1400,7 +1400,10 @@ class MailboxIngestService {
     const helpdesk = isHelpdeskMailbox(connection);
     // A3: keep what the schema can store and attach the whole message, where it used to throw.
     const inline = helpdesk ? await this._inlineImages(connection, email, email.bodyHtml) : null;
-    const fullBody = (inline ? inline.html : email.bodyHtml) || null;
+    // A plain-text mail has no HTML part at all (Graph returns it as text): until 12 Oct 2026 its
+    // ticket was created with an EMPTY description (TP-1870), so triage and Auto-help had nothing to read.
+    const fullBody = (inline ? inline.html : email.bodyHtml)
+      || (email.bodyText && String(email.bodyText).trim() ? textToHtml(String(email.bodyText)) : null);
     const oversized = Boolean(fullBody) && fullBody.length > DESCRIPTION_KEEP;
     const description = oversized
       ? `${fullBody.slice(0, fullBody.lastIndexOf('>', DESCRIPTION_KEEP) + 1 || DESCRIPTION_KEEP)}<p><em>This message was longer than a ticket description holds. The whole message is attached as original-message.html.</em></p>`

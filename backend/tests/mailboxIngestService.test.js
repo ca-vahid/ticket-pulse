@@ -1395,3 +1395,20 @@ describe('helpdesk mailbox: pictures pasted into the mail', () => {
     expect(mailboxIngestService._hourly.get(9)).toMatchObject({ read: 1, reply: 1, created: 0 });
   });
 });
+
+// 12 Oct 2026, minutes after IT's cut-over: TP-1870 came from a plain-text mail and had no description.
+describe('a plain-text mail', () => {
+  test('becomes a ticket whose description is the text, on any mailbox', async () => {
+    const mail = { ...baseEmail, bodyHtml: null, bodyText: 'Backup failed on FILE3.\nPlease check <the job> & retry.', bodyPreview: 'Backup failed on FILE3.' };
+    expect(await mailboxIngestService.processEmail(connection, mail)).toBe('created');
+    const description = ticketServiceMock.createTicket.mock.calls[0][1].description;
+    expect(description).toContain('Backup failed on FILE3.');
+    expect(description).toContain('&lt;the job&gt; &amp; retry');
+    expect(description).not.toContain('<the job>');
+  });
+
+  test('a mail with no body at all still creates the ticket, with no description', async () => {
+    expect(await mailboxIngestService.processEmail(connection, { ...baseEmail, bodyHtml: null, bodyText: '   ', bodyPreview: '' })).toBe('created');
+    expect(ticketServiceMock.createTicket.mock.calls[0][1].description).toBeNull();
+  });
+});
