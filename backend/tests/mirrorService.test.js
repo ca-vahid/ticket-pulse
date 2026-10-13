@@ -692,4 +692,27 @@ describe('the FreshService copy of front-door mail', () => {
     expect(body).toContain('reply received by e-mail');
     expect(body).not.toContain('already e-mailed to the requester');
   });
+
+  // The four Coreshack people work IT tickets in FreshService only; FreshService used to tell them itself.
+  test('an assignee who works in FreshService only is notified by FreshService when the requester answers', async () => {
+    prismaMock.technician = { findUnique: jest.fn().mockResolvedValue({ email: 'RLaird@example.com', assignableOnly: true }) };
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), assignedTechId: 48 });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({ id: 9004, isPrivate: false, incoming: true, actorName: 'Rita Requester', bodyHtml: '<p>any news?</p>', mirrorState: 'pending' });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await mirrorService._processJob({ id: 7, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9004, attempts: 0 });
+    expect(clientMock.addNote.mock.calls[0][2]).toMatchObject({ incoming: true, notifyEmails: ['rlaird@example.com'] });
+    // Someone who uses Ticket Pulse gets Ticket Pulse's own e-mail, not a FreshService one.
+    clientMock.addNote.mockClear();
+    prismaMock.technician.findUnique.mockResolvedValue({ email: 'cora@example.com', assignableOnly: false });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({ id: 9005, isPrivate: false, incoming: true, actorName: 'Rita Requester', bodyHtml: '<p>again</p>', mirrorState: 'pending' });
+    await mirrorService._processJob({ id: 8, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9005, attempts: 0 });
+    expect(clientMock.addNote.mock.calls[0][2].notifyEmails).toBeUndefined();
+    // A reply WE sent never notifies anyone through FreshService.
+    clientMock.addNote.mockClear();
+    prismaMock.technician.findUnique.mockResolvedValue({ email: 'rlaird@example.com', assignableOnly: true });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({ id: 9006, isPrivate: false, incoming: false, actorName: 'Cora', bodyHtml: '<p>on it</p>', mirrorState: 'pending' });
+    await mirrorService._processJob({ id: 9, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9006, attempts: 0 });
+    expect(clientMock.addNote.mock.calls[0][2].notifyEmails).toBeUndefined();
+    delete prismaMock.technician;
+  });
 });
