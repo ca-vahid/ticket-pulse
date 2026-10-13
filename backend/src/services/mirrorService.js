@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { fsOnlyAssigneeEmail } from '../utils/fsOnlyAssignee.js';
 import { markCreating, settleCreating, clearCreating } from '../utils/mirrorInFlight.js';
 import { fsNoteHeader } from '../utils/fsNoteHeader.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -1032,11 +1033,14 @@ class MirrorService {
     // working in FreshService sees a reply and not a note (the FreshService-born lane already does this).
     const received = entry.incoming === true && entry.isPrivate !== true;
     const requesterFsId = received && ticket.requester?.freshserviceId ? Number(ticket.requester.freshserviceId) : null;
+    // An assignee who works in FreshService only is told by FreshService that the requester answered.
+    const notify = received ? await fsOnlyAssigneeEmail(ticket) : null;
     const result = await client.addNote(Number(ticket.freshserviceTicketId), body, {
       isPrivate: entry.isPrivate === true,
       attachments,
       ...(received ? { incoming: true } : {}),
       ...(requesterFsId ? { userId: requesterFsId } : {}),
+      ...(notify ? { notifyEmails: [notify] } : {}),
     });
 
     await prisma.ticketThreadEntry.update({

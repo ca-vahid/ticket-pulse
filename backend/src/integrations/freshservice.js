@@ -1265,7 +1265,7 @@ class FreshServiceClient {
    * conversation WITHOUT emailing the requester — the mirror uses them for
    * TP-authored public replies (Ticket Pulse already emailed the requester).
    */
-  async addNote(ticketId, body, { isPrivate = true, attachments = [], userId = null, incoming = false } = {}) {
+  async addNote(ticketId, body, { isPrivate = true, attachments = [], userId = null, incoming = false, notifyEmails = [] } = {}) {
     try {
       // Same documented `user_id` as createReply (Phase DR4) — attributes the
       // note to the acting agent when the workspace flag resolved one.
@@ -1274,6 +1274,9 @@ class FreshServiceClient {
       // `incoming: true` renders the note as something the user SENT (a requester's
       // e-mailed answer that Ticket Pulse received, 17 Sep 2026) rather than an agent note.
       const incomingField = incoming === true ? { incoming: true } : {};
+      // Normally nobody is notified (Ticket Pulse tells its own people). `notifyEmails` is for an
+      // assignee who works in FreshService only (12 Oct 2026): FreshService e-mails them the note.
+      const notify = (Array.isArray(notifyEmails) ? notifyEmails : []).map((e) => String(e || '').trim()).filter((e) => e.includes('@')).slice(0, 5);
       const attempt = async (withActor) => {
         const actor = withActor ? actorField : {};
         if (Array.isArray(attachments) && attachments.length > 0) {
@@ -1281,13 +1284,13 @@ class FreshServiceClient {
           // express an EMPTY array (nothing is appended), so suppression there
           // relies on the FS-side marker exclusion rule; the JSON branch below
           // sends the explicit [] opt-out.
-          const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [], ...actor, ...incomingField }, attachments);
+          const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: notify, ...actor, ...incomingField }, attachments);
           return this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
         }
         return this._post(`/tickets/${ticketId}/notes`, {
           body,
           private: isPrivate === true,
-          notify_emails: [],
+          notify_emails: notify,
           ...actor,
           ...incomingField,
         });

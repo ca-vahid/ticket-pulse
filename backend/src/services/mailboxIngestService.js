@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { fsOnlyAssigneeEmail } from '../utils/fsOnlyAssignee.js';
 import { isHelpdeskMailbox } from '../utils/mailboxProfile.js';
 import { freshserviceTicketNumbers } from '../utils/freshserviceRefs.js';
 import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
@@ -1286,11 +1287,14 @@ class MailboxIngestService {
         const { default: attachmentService } = await import('./attachmentService.js');
         attachments = await attachmentService.buffersForThreadEntry(entry.id);
       } catch { attachments = []; }
+      // An assignee who works in FreshService only is told by FreshService that the requester answered.
+      const notify = isAgentReply ? null : await fsOnlyAssigneeEmail(ticket);
       const result = await client.addNote(Number(ticket.freshserviceTicketId), body, {
         isPrivate: false,
         incoming: !isAgentReply,
         attachments,
         ...(asRequester ? { userId: requesterFsId } : {}),
+        ...(notify ? { notifyEmails: [notify] } : {}),
       });
       const fsId = result?.conversation?.id || result?.id || null;
       await Promise.resolve().then(() => prisma.ticketThreadEntry.update({

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.58-preview';
+export const APP_VERSION = '4.2.59-preview';
 
 export const changelog = [
+  {
+    version: '4.2.59-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>People who work in FreshService only are still told when a requester replies</strong> &mdash; a few people are assigned IT tickets but work them in FreshService and do not use Ticket Pulse. While FreshService received IT&rsquo;s mail it told them itself when a requester answered. Now that the reply arrives in Ticket Pulse, it is written onto the FreshService ticket with a request that FreshService notify the assignee, so they get the same e-mail as before. People who use Ticket Pulse keep getting Ticket Pulse&rsquo;s own &ldquo;requester replied&rdquo; message.' },
+    ],
+  },
   {
     version: '4.2.58-preview',
     date: 'October 12, 2026',
