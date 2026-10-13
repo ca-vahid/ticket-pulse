@@ -150,3 +150,26 @@ describe('open copies beyond the most recently active', () => {
     expect(out.checked).toBeGreaterThanOrEqual(1);
   });
 });
+
+// 13 Oct 2026: on the first busy morning the 3-minute timer started new sweeps on top of running ones.
+describe('the reconcile timer', () => {
+  test('never starts a sweep while one is still running, and runs again once it has finished', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const spy = jest.spyOn(mirrorService, '_reconcileAllWorkspaces').mockImplementation(() => gate);
+    const first = mirrorService._reconcileSweepOnce();
+    expect(await mirrorService._reconcileSweepOnce()).toEqual({ skipped: true, reason: 'sweep_running' });
+    expect(await mirrorService._reconcileSweepOnce()).toEqual({ skipped: true, reason: 'sweep_running' });
+    expect(spy).toHaveBeenCalledTimes(1);
+    release();
+    expect(await first).toEqual({ skipped: false });
+    spy.mockResolvedValue(undefined);
+    expect(await mirrorService._reconcileSweepOnce()).toEqual({ skipped: false });
+    expect(spy).toHaveBeenCalledTimes(2);
+    // A sweep that throws still frees the slot.
+    spy.mockRejectedValueOnce(new Error('boom'));
+    await expect(mirrorService._reconcileSweepOnce()).rejects.toThrow('boom');
+    expect(await mirrorService._reconcileSweepOnce()).toEqual({ skipped: false });
+    spy.mockRestore();
+  });
+});

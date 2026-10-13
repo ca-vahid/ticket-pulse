@@ -1550,7 +1550,7 @@ class MirrorService {
     if (process.env.NATIVE_TICKET_RECONCILE_ENABLED === 'false') return;
     const intervalMs = Number(process.env.NATIVE_TICKET_RECONCILE_INTERVAL_MS) || 3 * 60 * 1000;
     this._reconcileTimer = setInterval(() => {
-      this._reconcileAllWorkspaces().catch((err) => logger.warn(`Mirror reconcile sweep failed (non-fatal): ${err.message}`));
+      this._reconcileSweepOnce().catch((err) => logger.warn(`Mirror reconcile sweep failed (non-fatal): ${err.message}`));
     }, intervalMs);
     this._reconcileTimer.unref?.();
     logger.info(`Mirror inbound-reconcile worker started (every ${Math.round(intervalMs / 1000)}s)`);
@@ -1579,6 +1579,24 @@ class MirrorService {
     for (const row of rows) {
       if (!(await this._workspaceActive(row.workspaceId))) continue;
       await this.reconcile(row.workspaceId, { activeOnly: true, limit: 30, deferWhenBusy: true }).catch(() => {});
+    }
+  }
+
+  /**
+   * One sweep at a time (13 Oct 2026). The timer fired every 3 minutes whether or not the last
+   * sweep had finished. A sweep is paced at one FreshService read a second and stops for people,
+   * so on a busy morning it outlasts the interval; the sweeps then piled up, each taking one
+   * ticket and yielding (workspace 4 logged 30 passes in one minute at 08:19 PT). A tick that
+   * finds a sweep still running does nothing: that sweep already resumes where it stopped.
+   */
+  async _reconcileSweepOnce() {
+    if (this._reconcileSweeping) return { skipped: true, reason: 'sweep_running' };
+    this._reconcileSweeping = true;
+    try {
+      await this._reconcileAllWorkspaces();
+      return { skipped: false };
+    } finally {
+      this._reconcileSweeping = false;
     }
   }
 }
