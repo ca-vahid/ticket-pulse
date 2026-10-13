@@ -127,9 +127,9 @@ export default function FilterDropdown({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={popoverId}
-        className={`inline-flex max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-full border px-2.5 py-1.5 sm:py-1 text-[11px] font-medium transition-colors touch-manipulation ${
+        className={`inline-flex max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-md border px-2.5 py-1.5 sm:py-1 text-[11px] font-medium transition-colors touch-manipulation ${
           isAtDefault
-            ? 'border-transparent bg-muted/70 text-muted-foreground hover:bg-secondary/70 hover:text-foreground'
+            ? 'border-border bg-card text-muted-foreground hover:border-input hover:text-foreground'
             : 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
