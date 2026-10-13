@@ -28,6 +28,10 @@ const INBOX_BACKLOG = 250;
 // A description longer than the ticket schema stores (100,000) used to fail the whole message.
 const DESCRIPTION_KEEP = 90000;
 const OLD_CLOSED_DAYS = 14;
+// Pictures pasted into a mail body. Smaller ones are signature logos and tracking dots.
+const INLINE_MIN_BYTES = 8 * 1024;
+const INLINE_MAX = 12;
+const HOUR_MS = 60 * 60 * 1000;
 
 // Every skip is counted (23 Sep 2026): a week of silently dropped replies on
 // #242611 was invisible because a skip wrote nothing anywhere. In-memory,
@@ -482,6 +486,34 @@ class MailboxIngestService {
    * table → new ticket / hold. Returns 'reply' | 'created' | 'held' | 'skipped'.
    */
   async ingestSingleMessage(connection, email, senderCreates = new Map()) {
+    let outcome = 'error';
+    try {
+      outcome = await this._ingestOne(connection, email, senderCreates);
+      return outcome;
+    } finally {
+      this._count(connection, outcome);
+    }
+  }
+
+  /** One line an hour per mailbox that saw mail, so a person (or the watch) can read the flow at a glance. */
+  _count(connection, outcome) {
+    if (!this._hourly) this._hourly = new Map();
+    const now = Date.now();
+    const row = this._hourly.get(connection.id) || { since: now, read: 0, created: 0, reply: 0, held: 0, skipped: 0, error: 0, approval_reply: 0 };
+    row.read += 1;
+    row[outcome] = (row[outcome] || 0) + 1;
+    this._hourly.set(connection.id, row);
+    if (now - row.since >= HOUR_MS) this._flushHourly(connection, now);
+  }
+
+  _flushHourly(connection, now = Date.now()) {
+    const row = this._hourly?.get(connection.id);
+    if (!row || !row.read) return;
+    logger.info(`Mailbox ${connection.address}: last hour ${row.read} read, ${row.created} new tickets, ${row.reply + (row.approval_reply || 0)} replies, ${row.held} held, ${row.skipped} skipped, ${row.error} failed`);
+    this._hourly.set(connection.id, { since: now, read: 0, created: 0, reply: 0, held: 0, skipped: 0, error: 0, approval_reply: 0 });
+  }
+
+  async _ingestOne(connection, email, senderCreates = new Map()) {
     const helpdesk = isHelpdeskMailbox(connection);
     const loopReason = looksLikeLoopMail(email, connection.address, { helpdesk });
     if (loopReason) {
@@ -947,20 +979,55 @@ class MailboxIngestService {
    * (and thread entry when given). Returns a notice string for anything that
    * could not be captured.
    */
-  async _captureAttachments(connection, email, ticket, threadEntryId = null) {
-    if (!email.hasAttachments) return '';
+  /**
+   * Pictures pasted into the mail body (helpdesk mailbox, 12 Oct 2026). The HTML points at them
+   * by `cid:`, which only the sender's mail client can resolve, so they showed as broken images;
+   * and a mail whose only attachments were inline could report "no attachments" and lose them.
+   * Each one becomes an attachment with a name of its own, and the body keeps "[Image: name]"
+   * where it was, which the ticket page turns into a picture you can open. Logos and tracking
+   * dots (under 8 KB) are dropped. Returns null when the body has none.
+   */
+  async _inlineImages(connection, email, html) {
+    if (typeof html !== 'string' || !/\bsrc\s*=\s*["']\s*cid:/i.test(html)) return null;
+    try {
+      const fetched = await graphMailClient.getMessageAttachments(connection.address, email.id);
+      const byCid = new Map((fetched.files || []).filter((f) => f.contentId).map((f) => [String(f.contentId).toLowerCase(), f]));
+      let used = 0;
+      const out = html.replace(/<img\b[^>]*?\bsrc\s*=\s*(["'])\s*cid:([^"']+)\1[^>]*>/gi, (match, _q, cid) => {
+        const file = byCid.get(String(cid).trim().toLowerCase());
+        if (!file) return '';
+        if (!file.inlineName) {
+          if ((file.sizeBytes || file.buffer?.length || 0) < INLINE_MIN_BYTES || used >= INLINE_MAX) { file.inlineDropped = true; return ''; }
+          used += 1;
+          const base = String(file.name || 'image.png').replace(/[^\w.-]+/g, '-').slice(-60);
+          file.inlineName = `picture-${used}-${String(email.id || '').replace(/[^A-Za-z0-9]/g, '').slice(-6) || 'mail'}-${base}`;
+        }
+        return `<p><em>[Image: ${file.inlineName}]</em></p>`;
+      });
+      return { html: out, fetched };
+    } catch (err) {
+      logger.warn(`Inline pictures not resolved for "${email.subject}" (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
+  async _captureAttachments(connection, email, ticket, threadEntryId = null, prefetched = null) {
+    if (!email.hasAttachments && !prefetched) return '';
     try {
       const { default: attachmentService } = await import('./attachmentService.js');
       if (!attachmentService.isConfigured()) {
         return '\n\n[This email had attachments — attachment storage is not configured, view the original in the mailbox.]';
       }
-      const { files, skipped } = await graphMailClient.getMessageAttachments(connection.address, email.id);
+      const { files: all, skipped } = prefetched || await graphMailClient.getMessageAttachments(connection.address, email.id);
+      // With the body's pictures resolved: keep real files and the pictures the body shows; an
+      // inline part the body never points at (or a dropped logo) is not an attachment anyone sent.
+      const files = prefetched ? (all || []).filter((f) => (f.isInline || f.contentId ? Boolean(f.inlineName) : true)) : all;
       for (const file of files) {
         await attachmentService.upload({
           workspaceId: ticket.workspaceId,
           ticketId: ticket.id,
           threadEntryId,
-          fileName: file.name,
+          fileName: file.inlineName || file.name,
           contentType: file.contentType,
           buffer: file.buffer,
           uploadedBy: email.from,
@@ -1027,6 +1094,9 @@ class MailboxIngestService {
     const agent = senderIsRequester ? null : resolvedAgent;
     const isAgentReply = Boolean(agent && !isForward);
     const forwardedMeta = isForward ? this._forwardedMeta(agent, email, ctx.parsed, { sliced: false }) : null;
+    // Helpdesk mailbox: pictures pasted into the reply, resolved on what the person wrote (not on the quoted thread).
+    const writtenHtml = stripQuotedHtml(email.bodyHtml);
+    const inline = isHelpdeskMailbox(connection) ? await this._inlineImages(connection, email, writtenHtml) : null;
     const rawPayload = {
       ...(recipients || {}),
       ...(isAgentReply ? { deliveryState: 'external', agentIntake: { kind: 'agent_reply_email', technicianId: agent.id, via } } : {}),
@@ -1048,7 +1118,7 @@ class MailboxIngestService {
         // Store what the person WROTE, not their client's copy of our thread
         // (FR 09-10). Outbound replies now quote the whole conversation; left
         // unstripped, each round trip would fold another copy back in.
-        bodyHtml: stripQuotedHtml(email.bodyHtml),
+        bodyHtml: inline ? inline.html : writtenHtml,
         bodyText: stripQuotedText(email.bodyText || email.bodyPreview || null),
         content: stripQuotedText(email.bodyText || email.bodyPreview || null),
         occurredAt: email.receivedAt || now,
@@ -1061,7 +1131,7 @@ class MailboxIngestService {
       },
     });
 
-    const attachmentNotice = await this._captureAttachments(connection, email, ticket, entry.id);
+    const attachmentNotice = await this._captureAttachments(connection, email, ticket, entry.id, inline?.fetched || null);
     if (attachmentNotice) {
       await prisma.ticketThreadEntry.update({
         where: { id: entry.id },
@@ -1329,7 +1399,8 @@ class MailboxIngestService {
     const createdVia = intake?.createdVia || 'email';
     const helpdesk = isHelpdeskMailbox(connection);
     // A3: keep what the schema can store and attach the whole message, where it used to throw.
-    const fullBody = email.bodyHtml || null;
+    const inline = helpdesk ? await this._inlineImages(connection, email, email.bodyHtml) : null;
+    const fullBody = (inline ? inline.html : email.bodyHtml) || null;
     const oversized = Boolean(fullBody) && fullBody.length > DESCRIPTION_KEEP;
     const description = oversized
       ? `${fullBody.slice(0, fullBody.lastIndexOf('>', DESCRIPTION_KEEP) + 1 || DESCRIPTION_KEEP)}<p><em>This message was longer than a ticket description holds. The whole message is attached as original-message.html.</em></p>`
@@ -1434,7 +1505,7 @@ class MailboxIngestService {
       await this._noteUnparsedForward(connection, ticket, email, intake);
     }
 
-    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId });
+    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId }, null, inline?.fetched || null);
     if (attachmentNotice) {
       logger.warn(`Attachment capture notice for ${ticket.displayRef}: ${attachmentNotice.trim()}`);
     }
