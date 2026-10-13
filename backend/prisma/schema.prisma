@@ -1148,6 +1148,10 @@ model MailboxConnection {
   // Phase RL (RL-3 rule 2): an agent's reply-all with this mailbox in Cc
   // creates a ticket for the external requester. Per-mailbox kill switch.
   agentCcIntake          Boolean   @default(true) @map("agent_cc_intake")
+  // IT intake plan (12 Oct 2026). 'standard' = a side mailbox (replies, the odd new ticket).
+  // 'helpdesk' = the team's front door: nothing is dropped silently, a no-reply sender is a
+  // ticket, mail with no reference is a new ticket (never glued to the sender's open one).
+  intakeProfile          String    @default("standard") @map("intake_profile") @db.VarChar(20)
   createdBy              String?   @map("created_by") @db.VarChar(255)
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")

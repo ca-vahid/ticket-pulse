@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.2.53-preview';
+export const APP_VERSION = '4.2.54-preview';
 
 export const changelog = [
+  {
+    version: '4.2.54-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Groundwork for IT mail arriving in Ticket Pulse</strong> &mdash; a mailbox can now be marked as a team&rsquo;s front door (a &ldquo;helpdesk&rdquo; mailbox). Nothing changes today: no mailbox is marked yet, and the three connected mailboxes behave exactly as before. This release only makes the rules ready for the day IT&rsquo;s it@ address is read by Ticket Pulse.' },
+      { type: 'added', html: '<strong>On a helpdesk mailbox, no mail is lost silently</strong> &mdash; a notice from a no-reply address (Azure, a domain registrar) becomes a ticket; a sender that is a shared mailbox or a device still gets a ticket; a very long message is trimmed and attached whole; a burst from one sender, or a message that fails, waits for a person; and every mail that is deliberately ignored (a bounce, an automatic reply) is recorded with the reason.' },
+      { type: 'added', html: '<strong>On a helpdesk mailbox, a reply finds its ticket by the FreshService number</strong> &mdash; in every form FreshService writes it (<code>[INC-243414]</code>, <code>[#SR-246489]</code>, <code>[#246332]</code>), whether the ticket was born in FreshService or in Ticket Pulse. A reply to a merged ticket goes to the one that survived; a number of a deleted ticket waits for a person; a new message that only mentions a ticket closed more than two weeks ago becomes a new ticket linked to it.' },
+      { type: 'changed', html: '<strong>On a helpdesk mailbox, a new message is a new ticket</strong> &mdash; it is no longer added to the sender&rsquo;s most recent open ticket. Ticket grouping then decides whether it is the same request. Side mailboxes keep the old behaviour.' },
+      { type: 'fixed', html: '<strong>A backlog of more than 25 messages is read in full</strong> &mdash; a mailbox that had more than 25 new messages between two checks read only the newest 25 and never came back for the rest. It now reads them all, oldest first. This applies to every mailbox.' },
+    ],
+  },
   {
     version: '4.2.53-preview',
     date: 'October 12, 2026',

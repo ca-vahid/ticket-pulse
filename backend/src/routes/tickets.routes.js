@@ -793,6 +793,13 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
   if (req.body?.displayName !== undefined) data.displayName = req.body.displayName?.trim() || null;
   if (req.body?.pollIntervalSec !== undefined) data.pollIntervalSec = Math.max(15, Math.min(3600, Number(req.body.pollIntervalSec) || 60));
   // Phase RL (RL-4): per-mailbox safety switch + agent Cc intake toggle.
+  if (req.body?.intakeProfile !== undefined) {
+    const { INTAKE_PROFILES } = await import('../utils/mailboxProfile.js');
+    if (!INTAKE_PROFILES.includes(req.body.intakeProfile)) {
+      throw new ValidationError(`intakeProfile must be one of ${INTAKE_PROFILES.join(', ')}`);
+    }
+    data.intakeProfile = req.body.intakeProfile;
+  }
   if (req.body?.newTicketPolicy !== undefined) {
     const { NEW_TICKET_POLICIES } = await import('../services/mailboxHoldService.js');
     if (!NEW_TICKET_POLICIES.includes(req.body.newTicketPolicy)) {

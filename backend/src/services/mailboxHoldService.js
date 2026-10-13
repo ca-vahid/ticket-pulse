@@ -37,6 +37,8 @@ export const HOLD_REASONS = Object.freeze([
   'ambiguous_sender',
   'policy_replies_only',
   'ambiguous_ticket', // two or more FreshService tickets match the sender + subject (23 Sep 2026)
+  'sender_burst', // helpdesk mailbox: more new mail from one sender in a cycle than the cap; never dropped
+  'ingest_error', // helpdesk mailbox: creating the ticket or the reply failed; a person decides, nothing is lost
 ]);
 
 export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'discarded']);
@@ -156,6 +158,44 @@ function presentHeld(row) {
 const TICKET_SUMMARY_SELECT = { id: true, nativeNumber: true, freshserviceTicketId: true, origin: true, subject: true, status: true };
 
 class MailboxHoldService {
+  /**
+   * A mail the ingest deliberately ignored (loop mail, the mailbox's own mail, "FreshService has it").
+   * Until 12 Oct 2026 a skip left only a debug log line, so nobody could see what was ignored or why.
+   * Stored beside held mail with status 'skipped': never in the hold queue, never in its digest,
+   * and it can still be turned into a ticket from the row. Idempotent; never throws.
+   */
+  async recordSkipped(connection, email, reason) {
+    if (!connection?.id || !connection?.workspaceId) return null;
+    try {
+      const key = heldMessageKey(email);
+      const existing = await prisma.mailboxHeldMessage.findFirst({ where: { connectionId: connection.id, internetMessageId: key }, select: { id: true } });
+      if (existing) return { id: existing.id, duplicate: true };
+      const row = await prisma.mailboxHeldMessage.create({
+        data: {
+          workspaceId: connection.workspaceId,
+          connectionId: connection.id,
+          internetMessageId: key,
+          fromEmail: String(email?.from || '').trim().toLowerCase().slice(0, 255) || null,
+          fromName: String(email?.fromName || '').trim().slice(0, 255) || null,
+          toEmails: normalizeAddressList(email?.to),
+          ccEmails: normalizeAddressList(email?.cc),
+          subject: String(email?.subject || '').trim() || null,
+          snippet: snippetFor(email),
+          bodyHtml: email?.bodyHtml || null,
+          emailPayload: serializeEmail(email),
+          receivedAt: email?.receivedAt ? new Date(email.receivedAt) : new Date(),
+          reason: String(reason || 'skipped').slice(0, 40),
+          status: 'skipped',
+        },
+        select: { id: true },
+      });
+      return { id: row.id, duplicate: false };
+    } catch (err) {
+      logger.warn(`mailboxHoldService: skipped mail not recorded (${err.message})`);
+      return null;
+    }
+  }
+
   /**
    * Park an inbound email. Idempotent on (connectionId, internetMessageId):
    * a second hold for the same mail (poller + webhook, retries) returns the

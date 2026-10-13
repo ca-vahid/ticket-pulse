@@ -28,6 +28,11 @@ export function fsHelpdeskSettingKey(workspaceId) {
   return `fs_helpdesk_emails_ws${Number(workspaceId) || 0}`;
 }
 
+export const FS_READS_NO_MAIL = 'none';
+export function isNoneSetting(value) {
+  return String(value ?? '').trim().toLowerCase() === FS_READS_NO_MAIL;
+}
+
 export function parseAddressList(value) {
   return [...new Set(String(value || '')
     .split(/[,;\s]+/)
@@ -65,8 +70,14 @@ export async function fsHelpdeskAddresses(workspaceId) {
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
   let value = new Set();
   try {
-    const configured = parseAddressList(await settingsRepository.get(fsHelpdeskSettingKey(id)));
-    value = new Set(configured.length ? configured : await learnedHelpdeskAddresses(id));
+    const raw = await settingsRepository.get(fsHelpdeskSettingKey(id));
+    // 'none' (12 Oct 2026): FreshService reads no mail for this workspace any more. An EMPTY
+    // setting still means "learn it from FreshService's own replies", so "none" has to be said.
+    if (isNoneSetting(raw)) value = new Set();
+    else {
+      const configured = parseAddressList(raw);
+      value = new Set(configured.length ? configured : await learnedHelpdeskAddresses(id));
+    }
   } catch (err) {
     logger.warn(`fsHelpdeskAddresses: lookup failed for workspace ${id} (treating as none — nothing is skipped): ${err.message}`);
     value = new Set();
@@ -78,6 +89,11 @@ export async function fsHelpdeskAddresses(workspaceId) {
 export async function setFsHelpdeskAddresses(workspaceId, value) {
   const id = Number(workspaceId);
   if (!Number.isFinite(id) || id <= 0) throw new Error('workspaceId is required');
+  if (isNoneSetting(value)) {
+    await settingsRepository.set(fsHelpdeskSettingKey(id), FS_READS_NO_MAIL);
+    cache.delete(id);
+    return [];
+  }
   const list = parseAddressList(value);
   await settingsRepository.set(fsHelpdeskSettingKey(id), list.join(', '));
   cache.delete(id);
@@ -86,7 +102,9 @@ export async function setFsHelpdeskAddresses(workspaceId, value) {
 
 export async function getFsHelpdeskSetting(workspaceId) {
   try {
-    return parseAddressList(await settingsRepository.get(fsHelpdeskSettingKey(workspaceId))).join(', ');
+    const raw = await settingsRepository.get(fsHelpdeskSettingKey(workspaceId));
+    if (isNoneSetting(raw)) return FS_READS_NO_MAIL;
+    return parseAddressList(raw).join(', ');
   } catch {
     return '';
   }
