@@ -2575,10 +2575,20 @@ class SyncService {
     const lookbackDays = Math.max(1, Math.min(parseInt(options.lookbackDays, 10) || 7, 30));
     const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
+    // IT intake (12 Oct 2026): where the team's front-door mailbox is read by Ticket Pulse, a machine
+    // notice that a noise rule catches is a Ticket Pulse-born ticket. It was flagged, never triaged
+    // and never closed, because this sweep only looked at FreshService-born tickets. Mail-born
+    // tickets (source 1) of such a workspace are included; every other Ticket Pulse-born ticket
+    // stays out, as before.
+    const frontDoor = await Promise.resolve().then(() => prisma.mailboxConnection.findFirst({
+      where: { workspaceId, intakeProfile: 'helpdesk', isEnabled: true }, select: { id: true },
+    })).then(Boolean).catch(() => false);
     const tickets = await prisma.ticket.findMany({
       where: {
         workspaceId,
-        origin: TICKET_ORIGIN.FRESHSERVICE, // FS-writing sweep — TP-born noise handling is app-side
+        ...(frontDoor
+          ? { OR: [{ origin: TICKET_ORIGIN.FRESHSERVICE }, { origin: TICKET_ORIGIN.TICKETPULSE, source: 1 }] }
+          : { origin: TICKET_ORIGIN.FRESHSERVICE }),
         assignedTechId: null,
         isNoise: true,
         status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
@@ -2766,11 +2776,25 @@ class SyncService {
       noiseRuleCategory,
     });
 
-    const executeSync = () => freshServiceActionService.execute(
+    // A Ticket Pulse-born ticket is closed HERE (its FreshService copy follows through the mirror);
+    // a FreshService-born one is closed in FreshService, as before. Dry-run mode closes nothing.
+    const closeOwn = async () => {
+      if (config?.dryRunMode ?? true) {
+        await prisma.assignmentPipelineRun.update({ where: { id: run.id }, data: { syncStatus: 'dry_run', syncedAt: new Date() } }).catch(() => {});
+        return { success: true, dryRun: true };
+      }
+      const { default: ticketService } = await import('./ticketService.js');
+      await ticketService.changeStatus(ticket.id, workspaceId, 'Closed', {
+        email: 'noise-rule@ticketpulse.internal', name: 'Ticket Pulse', role: 'system', technicianId: null,
+      }, { resolutionReason: 'no_action_required', resolutionNote: `Closed by the noise rule "${ticket.noiseRuleMatched || 'unknown'}": an automated notification that needs no follow-up.` });
+      await prisma.assignmentPipelineRun.update({ where: { id: run.id }, data: { syncStatus: 'synced', syncedAt: new Date(), syncError: null } });
+      return { success: true };
+    };
+    const executeSync = () => (isTicketPulseOrigin(ticket) ? closeOwn() : freshServiceActionService.execute(
       run.id,
       workspaceId,
       config?.dryRunMode ?? true,
-    ).catch((err) => {
+    )).catch((err) => {
       logger.warn('FreshService noise close failed after rule dismissal run', {
         workspaceId,
         ticketId: ticket.id,
