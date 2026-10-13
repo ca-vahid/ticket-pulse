@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.64-preview';
+export const APP_VERSION = '4.2.65-preview';
 
 export const changelog = [
+  {
+    version: '4.2.65-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Availability: approved requests are copied to Vacation Tracker</strong> &mdash; until now Ticket Pulse only read leave from Vacation Tracker, so a request approved in Availability never appeared there. An approved request is now added to Vacation Tracker as approved leave for that person, and cancelling it here cancels it there. Half days go across as 08:00&ndash;12:00 or 13:00&ndash;17:00. If the same leave is already in Vacation Tracker it is linked, not added twice. The request shows &ldquo;also in Vacation Tracker&rdquo; once it is there.' },
+      { type: 'new', html: '<strong>Availability: what is not copied</strong> &mdash; people who are not Vacation Tracker users, and leave types with no match there (Appointment, for one), stay in Ticket Pulse only. If Vacation Tracker cannot be reached the approval still goes through, and the copy is tried again every hour. The switch is Availability &rarr; Settings &rarr; General &rarr; Vacation Tracker, on by default.' },
+      { type: 'improved', html: '<strong>Availability: a copied leave is cancelled here when it is cancelled in Vacation Tracker</strong> &mdash; the hourly import follows it, and it no longer brings the copied leave back as a second request.' },
+    ],
+  },
   {
     version: '4.2.64-preview',
     date: 'October 13, 2026',

@@ -13,6 +13,7 @@
 import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
 import settingsRepository from '../settingsRepository.js';
+import vtWriteBack, { isVtExternalId } from './vtWriteBack.js';
 import { ValidationError, NotFoundError, AuthorizationError } from '../../utils/errors.js';
 import {
   decide, workingDates, requestSize, holidayMatcher, toDay, dayKey, addDays, weekKey,
@@ -64,6 +65,7 @@ class AvailabilityService {
     }
     if ((patch.outlookEventsEnabled !== null && patch.outlookEventsEnabled !== undefined)) data.outlookEventsEnabled = Boolean(patch.outlookEventsEnabled);
     if ((patch.autoRepliesEnabled !== null && patch.autoRepliesEnabled !== undefined)) data.autoRepliesEnabled = Boolean(patch.autoRepliesEnabled);
+    if ((patch.vtWriteBackEnabled !== null && patch.vtWriteBackEnabled !== undefined)) data.vtWriteBackEnabled = Boolean(patch.vtWriteBackEnabled);
     if (patch.purposeNotice !== undefined) data.purposeNotice = patch.purposeNotice ? String(patch.purposeNotice).slice(0, 2000) : null;
     await this.getSettings();
     return prisma.avSettings.update({ where: { id: 1 }, data });
@@ -710,8 +712,10 @@ class AvailabilityService {
         },
       },
     });
-    if (status === 'approved') await this.project(request).catch((err) => logger.warn(`Availability: projection failed for request ${request.id}: ${err.message}`));
-    else this._notifyApprovers(request, shaped.leaveType, person, approvers).catch((err) => logger.warn(`Availability: approver notice failed for request ${request.id}: ${err.message}`));
+    if (status === 'approved') {
+      await this.project(request).catch((err) => logger.warn(`Availability: projection failed for request ${request.id}: ${err.message}`));
+      vtWriteBack.pushApproved(request.id); // never throws; not awaited so booking stays quick
+    } else this._notifyApprovers(request, shaped.leaveType, person, approvers).catch((err) => logger.warn(`Availability: approver notice failed for request ${request.id}: ${err.message}`));
     logger.info(`Availability: request ${request.id} by ${person.email} (${shaped.leaveType.name}, ${shaped.days} day(s)) → ${status}`);
     return this.getRequest(request.id, user);
   }
@@ -742,7 +746,10 @@ class AvailabilityService {
         events: { create: { kind: status, actor: lc(user.email), details: note ? { note } : null } },
       },
     });
-    if (status === 'approved') await this.project(updated).catch((err) => logger.warn(`Availability: projection failed for request ${r.id}: ${err.message}`));
+    if (status === 'approved') {
+      await this.project(updated).catch((err) => logger.warn(`Availability: projection failed for request ${r.id}: ${err.message}`));
+      vtWriteBack.pushApproved(updated.id); // never throws
+    }
     this._notifyRequester(updated, user).catch((err) => logger.warn(`Availability: requester notice failed for request ${r.id}: ${err.message}`));
     logger.info(`Availability: request ${r.id} ${status} by ${lc(user.email)}`);
     return this.getRequest(r.id, user);
@@ -762,6 +769,7 @@ class AvailabilityService {
       data: { status: 'cancelled', events: { create: { kind: 'cancelled', actor: lc(user.email), details: reason ? { reason } : null } } },
     });
     await this.unproject(updated).catch((err) => logger.warn(`Availability: unprojection failed for request ${r.id}: ${err.message}`));
+    if (r.status === 'approved') vtWriteBack.pushCancelled(updated.id, reason); // never throws
     if (!mine) this._notifyRequester(updated, user).catch(() => {});
     return this.getRequest(r.id, user);
   }
@@ -1105,6 +1113,14 @@ class AvailabilityService {
       take: 50000,
     })).map((r) => [r.externalId, r]));
 
+    // Leaves Ticket Pulse wrote to Vacation Tracker itself (write-back, 13 Oct
+    // 2026) belong to their own request: never imported a second time.
+    const written = new Map((await prisma.avRequest.findMany({
+      where: { source: { not: 'vacation_tracker' }, externalId: { startsWith: 'vt:' } },
+      select: { id: true, externalId: true, status: true, startDate: true, updatedAt: true },
+      take: 50000,
+    })).map((r) => [r.externalId, r]));
+
     let created = 0;
     let updated = 0;
     let cancelled = 0;
@@ -1113,6 +1129,7 @@ class AvailabilityService {
     const seen = new Set();
     for (const leave of vtLeaves || []) {
       const externalId = `vt:${leave.id}`;
+      if (written.has(externalId)) { seen.add(externalId); skipped += 1; continue; }
       const approved = !leave.status || String(leave.status).toUpperCase() === 'APPROVED';
       const mine = existing.get(externalId);
       seen.add(externalId); // handled here; never cancelled again below as "gone"
@@ -1187,6 +1204,16 @@ class AvailabilityService {
     } else {
       for (const r of candidates) {
         await this._cancelSynced(r, 'No longer in Vacation Tracker', actorEmail);
+        cancelled += 1;
+      }
+      // A leave Ticket Pulse wrote that someone then cancelled in Vacation
+      // Tracker: follow it. Two hours' grace so a fresh write is never undone
+      // by a listing that has not caught up.
+      const grace = Date.now() - 2 * 3600 * 1000;
+      for (const r of written.values()) {
+        if (r.status !== 'approved' || seen.has(r.externalId) || new Date(r.updatedAt).getTime() > grace) continue;
+        if (toDay(r.startDate) < windowStart || toDay(r.startDate) > windowEnd) continue;
+        await this._cancelSynced(r, 'Cancelled in Vacation Tracker', actorEmail);
         cancelled += 1;
       }
     }
@@ -1283,6 +1310,7 @@ export function serializeRequest(r) {
     decidedAt: r.decidedAt,
     decisionNote: r.decisionNote,
     source: r.source,
+    inVacationTracker: isVtExternalId(r.externalId),
     wantsOutlookEvent: r.wantsOutlookEvent,
     wantsAutoReply: r.wantsAutoReply,
     createdAt: r.createdAt,

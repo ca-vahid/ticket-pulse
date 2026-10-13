@@ -184,6 +184,16 @@ class VacationTrackerService {
       syncState.progress = { step: 'fetching leaves', pct: 10 };
       const leaves = await client.fetchLeaves(startDate, endDate);
 
+      // Leaves Availability wrote to Vacation Tracker itself already have their
+      // dashboard rows (the request's own projection): not written twice.
+      let ownedByAvailability = new Set();
+      try {
+        const { default: vtWriteBack } = await import('./availability/vtWriteBack.js');
+        ownedByAvailability = await vtWriteBack.ownedLeaveIds();
+      } catch (err) {
+        logger.warn(`VT leave sync: could not read Availability's own leaves (${err.message})`);
+      }
+
       syncState.progress = { step: 'processing leaves', pct: 40 };
       const leaveRows = [];
       // Track every (vtLeaveId, leaveDate) tuple that should exist post-sync.
@@ -191,6 +201,7 @@ class VacationTrackerService {
       const validKeys = new Set();
 
       for (const leave of leaves) {
+        if (ownedByAvailability.has(leave.id)) continue;
         const mapping = userMap.get(leave.userId);
         if (!mapping) continue;
 
