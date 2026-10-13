@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.56-preview';
+export const APP_VERSION = '4.2.57-preview';
 
 export const changelog = [
+  {
+    version: '4.2.57-preview',
+    date: 'October 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Noise rules close machine notices that arrive in Ticket Pulse</strong> &mdash; where a workspace closes noise automatically, a notification caught by a noise rule was only closed when FreshService had created the ticket. A ticket created by Ticket Pulse from the same kind of mail was marked as noise and then left open for good. On a helpdesk mailbox these are now closed the same way, with the same check that the sender is a machine and not a person, and they appear in the morning &ldquo;closed as noise&rdquo; e-mail. Found while preparing IT&rsquo;s mail to arrive in Ticket Pulse; no mailbox is marked as a helpdesk mailbox yet.' },
+    ],
+  },
   {
     version: '4.2.56-preview',
     date: 'October 12, 2026',

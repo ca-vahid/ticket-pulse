@@ -114,7 +114,7 @@ jest.unstable_mockModule('../src/services/assignmentPipelineService.js', () => (
 }));
 
 jest.unstable_mockModule('../src/services/freshServiceActionService.js', () => ({
-  default: {},
+  default: actionMock,
 }));
 
 jest.unstable_mockModule('../src/services/ticketPriorityEventService.js', () => ({
@@ -137,6 +137,10 @@ jest.unstable_mockModule('../src/services/assignmentFlowGuards.js', () => ({
 jest.unstable_mockModule('../src/services/activitySyncFreshness.js', () => ({
   getActivityRefreshReason: jest.fn(),
 }));
+
+const ticketServiceMock = { changeStatus: jest.fn() };
+jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
+const actionMock = { execute: jest.fn() };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
@@ -357,5 +361,60 @@ describe('syncService isNoise durability guard (NT-10)', () => {
     expect(other.skippedInFlightCopy).toBeUndefined();
     expect(ticketRepositoryMock.upsert).toHaveBeenCalledTimes(1);
     _resetMirrorInFlight();
+  });
+});
+
+// IT intake (12 Oct 2026): a machine notice caught by a noise rule, on a ticket born in Ticket Pulse.
+describe('a noise ticket that was born in Ticket Pulse', () => {
+  const proto = Object.getPrototypeOf(syncService);
+  const tx = { $executeRaw: jest.fn(), assignmentPipelineRun: { findFirst: jest.fn(), create: jest.fn() } };
+  const noisy = (over = {}) => ({ id: 63000, workspaceId: 1, origin: 'ticketpulse', source: 1, isNoise: true, status: 'Open', assignedTechId: null, noiseRuleMatched: 'Azure budget alerts', ticketCategory: 'Notifications', ...over });
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const { default: statusService } = await import('../src/services/statusService.js');
+    jest.spyOn(statusService, 'baseStatusOf').mockResolvedValue('Open');
+    jest.spyOn(statusService, 'statusNamesForBase').mockResolvedValue(['Open', 'Pending']);
+    syncService._noiseAutoCloseGuard = jest.fn().mockResolvedValue({ allowed: true, reason: null, ruleName: 'Azure budget alerts' });
+    prismaMock.$transaction = jest.fn((fn) => fn(tx));
+    prismaMock.noiseRule = { findFirst: jest.fn().mockResolvedValue({ category: 'notifications' }) };
+    prismaMock.assignmentPipelineRun.update = jest.fn().mockResolvedValue({});
+    prismaMock.ticket.update.mockResolvedValue({});
+    tx.assignmentPipelineRun.findFirst.mockResolvedValue(null);
+    tx.assignmentPipelineRun.create.mockResolvedValue({ id: 30900 });
+    ticketServiceMock.changeStatus.mockResolvedValue({ changed: true });
+    actionMock.execute.mockResolvedValue({ success: true });
+  });
+
+  test('is closed in Ticket Pulse itself, with the run marked so the morning e-mail lists it', async () => {
+    const out = await proto._ensureNoiseTicketDismissed.call(syncService, noisy(), 1, { config: { isEnabled: true, autoCloseNoise: true, dryRunMode: false }, waitForSync: true });
+    expect(out).toMatchObject({ created: true, runId: 30900 });
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(63000, 1, 'Closed', expect.objectContaining({ role: 'system' }),
+      { resolutionReason: 'no_action_required', resolutionNote: expect.stringContaining('Azure budget alerts') });
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({ where: { id: 30900 }, data: expect.objectContaining({ syncStatus: 'synced' }) });
+    expect(actionMock.execute).not.toHaveBeenCalled();
+  });
+
+  test('dry-run mode closes nothing; a FreshService-born ticket still goes through FreshService', async () => {
+    await proto._ensureNoiseTicketDismissed.call(syncService, noisy(), 1, { config: { isEnabled: true, autoCloseNoise: true, dryRunMode: true }, waitForSync: true });
+    expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({ where: { id: 30900 }, data: expect.objectContaining({ syncStatus: 'dry_run' }) });
+    await proto._ensureNoiseTicketDismissed.call(syncService, noisy({ origin: 'freshservice', freshserviceTicketId: 246800n }), 1, { config: { isEnabled: true, autoCloseNoise: true, dryRunMode: false }, waitForSync: true });
+    expect(actionMock.execute).toHaveBeenCalledWith(30900, 1, false);
+    expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+  });
+
+  test('the sweep looks at mail-born Ticket Pulse tickets only where a helpdesk mailbox exists', async () => {
+    const { default: assignmentRepository } = await import('../src/services/assignmentRepository.js');
+    assignmentRepository.getConfig = jest.fn().mockResolvedValue({ isEnabled: true, autoCloseNoise: true });
+    prismaMock.ticket.findMany = jest.fn().mockResolvedValue([]);
+    prismaMock.mailboxConnection = { findFirst: jest.fn().mockResolvedValue({ id: 4 }) };
+    await proto._recoverOpenNoiseTickets.call(syncService, 1, {});
+    expect(prismaMock.ticket.findMany.mock.calls[0][0].where.OR).toEqual([{ origin: 'freshservice' }, { origin: 'ticketpulse', source: 1 }]);
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
+    await proto._recoverOpenNoiseTickets.call(syncService, 1, {});
+    expect(prismaMock.ticket.findMany.mock.calls[1][0].where.origin).toBe('freshservice');
+    expect(prismaMock.ticket.findMany.mock.calls[1][0].where.OR).toBeUndefined();
+    delete prismaMock.mailboxConnection;
   });
 });
