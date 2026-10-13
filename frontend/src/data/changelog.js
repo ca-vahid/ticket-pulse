@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.65-preview';
+export const APP_VERSION = '4.2.66-preview';
 
 export const changelog = [
+  {
+    version: '4.2.66-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Grouping no longer touches onboarding and offboarding</strong> &mdash; on 13 October, fifteen minutes after two departure notices were organised, ticket grouping read their ten child tickets (Laptop, Phone, iPad, Disable Account, Decommissioning Account) as &ldquo;follow-ups&rdquo; to the notice and closed them into it. Grouping was meant to skip any ticket that is a child in a family, but that check missed children created by Ticket Pulse itself. It now holds, and grouping also leaves alone everything in the process: HR&rsquo;s notices, their children, the account script&rsquo;s NH tickets, and any ticket listed in a family. None of them is judged, and none is offered as the ticket to combine another one into. The ten tickets were put back.' },
+      { type: 'fixed', html: '<strong>Work that is asleep stays unowned until it wakes</strong> &mdash; onboarding and offboarding tickets sleep with no owner until the lead time before the date, and the owner is chosen then. A safety net for tickets that never got an AI run saw &ldquo;unassigned, no run, fifteen minutes old&rdquo; and gave nine sleeping children an owner early. Automatic AI runs now skip a ticket the onboarding process has parked; a person can still run one by hand.' },
+    ],
+  },
   {
     version: '4.2.65-preview',
     date: 'October 13, 2026',

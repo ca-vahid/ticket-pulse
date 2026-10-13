@@ -31,13 +31,18 @@
  *
  * Never: trusted-intake tickets, tickets with an externalRef (API alerts have
  * their own occurrence path), a ticket a person already worked, a ticket
- * already linked away. A failed model call means "do nothing now"; the sweep
- * tries again.
+ * already linked away, a ticket that heads or belongs to a family, and
+ * anything in the onboarding / offboarding process (`_onboardingIds`): an HR
+ * notice, its children and the account script's NH tickets are organised by
+ * hrLifecycleService and are never a copy of one another, however alike they
+ * read. Those are neither judged nor offered as the ticket to combine into.
+ * A failed model call means "do nothing now"; the sweep tries again.
  */
 import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
 import settingsRepository from '../settingsRepository.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
+import { HR_SENDERS } from '../../utils/hrNoticeClassifier.js';
 import {
   CANDIDATE_WINDOW_DAYS, CLOSED_CANDIDATE_DAYS, CONFIDENCES, MIN_KEY_LENGTH, NEIGHBOUR_MIN_SCORE, RELATIONS, ROOT_LOOKBACK_DAYS,
   SENDER_KINDS, TERMINAL_STATUSES, bestMatch, coarseTemplate, decide, excerpt, fineKey, isTerminal, looksAutomated, normalizeSettings,
@@ -58,6 +63,8 @@ const SANDBOX_WORKSPACES = [6, 7, 8, 9];
 const ALERT_CORRELATION_ACTOR = 'alerts@ticketpulse.internal';
 const HUMAN_ACTIVITY_TYPES = ['assigned', 'reassigned', 'picked', 'self_picked', 'coordinator_assigned', 'status_changed', 'resolved', 'closed', 'fs_write_back'];
 const EVENT_KIND_OF = { same_request: 'duplicate', update: 'update', related: 'related' };
+/** The subjects hrLifecycleService (and FreshService before it) gives a family's children, and the account script's tickets. */
+const FAMILY_SUBJECT = /^\s*(child ticket\b|nh\s+(laptop|workstation)\s*-)/i;
 
 const TICKET_SELECT = {
   id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, descriptionText: true,
@@ -168,8 +175,12 @@ class TicketGroupingService {
         : null;
     }
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId }, select: TICKET_SELECT });
-    if (!ticket || isTerminal(ticket.status) || ticket.isNoise || ticket.triageMode === 'trusted' || ticket.externalRef || !ticket.requesterId) return null;
-    if (await this._linkedAway(ticket.id)) return null;
+    if (!ticket || isTerminal(ticket.status) || ticket.isNoise || !ticket.requesterId) return null;
+    // Not ours to judge. Recorded as looked at, so the sweep does not come back to it every five minutes.
+    if (ticket.triageMode === 'trusted' || ticket.externalRef || (await this._linkedAway(ticket.id)) || (await this._onboardingIds([ticket])).has(ticket.id)) {
+      await this._event({ workspaceId, ticketId: ticket.id, kind: 'checked', state: 'none' });
+      return null;
+    }
 
     const repeat = await this._tryRepeat(ticket);
     if (repeat) return repeat;
@@ -198,7 +209,8 @@ class TicketGroupingService {
       && (c.createdAt < ticket.createdAt || (c.createdAt.getTime() === ticket.createdAt.getTime() && c.id < ticket.id)));
     if (!same.length) return null;
     const away = await this._duplicateIds(same.map((c) => c.id));
-    const root = same.find((c) => !away.has(c.id));
+    const family = await this._onboardingIds(same);
+    const root = same.find((c) => !away.has(c.id) && !family.has(c.id));
     if (!root) return null;
 
     const card = await this._senderCard(ticket, root);
@@ -363,7 +375,8 @@ class TicketGroupingService {
     const list = [...out.values()];
     if (!list.length) return [];
     const away = await this._duplicateIds(list.map((c) => c.ticket.id));
-    return list.filter((c) => !away.has(c.ticket.id)).slice(0, 10);
+    const family = await this._onboardingIds(list.map((c) => c.ticket));
+    return list.filter((c) => !away.has(c.ticket.id) && !family.has(c.ticket.id)).slice(0, 10);
   }
 
   async _combine(ticket, keeper, { reason, relation, retraction }) {
@@ -476,16 +489,51 @@ class TicketGroupingService {
     return new Set(rows.map((r) => r.ticketId));
   }
 
-  /** Already closed into another ticket, or a child in somebody's family (an alert-storm parent does not count). */
+  /**
+   * Already closed into another ticket, or part of somebody's family as its child or its parent
+   * (an alert-storm family does not count: those children are the repeats this engine closes).
+   *
+   * 13 Oct 2026: the family test was `NOT: { createdBy: <alert correlation> }`. A link written by an
+   * actor with no e-mail has createdBy NULL, and in SQL "NOT (NULL = x)" is not true, so those rows
+   * never matched: every child the onboarding engine created was judged as an ordinary ticket, and
+   * the ten children of two departure notices were closed into their parents as "follow-ups".
+   */
   async _linkedAway(ticketId) {
+    const notAlertStorm = [{ createdBy: null }, { createdBy: { not: ALERT_CORRELATION_ACTOR } }];
     const row = await soft(() => prisma.ticketLink.findFirst({
       where: { OR: [
         { ticketId, kind: { in: ['duplicate_of', 'merged_into'] } },
-        { relatedTicketId: ticketId, kind: 'parent_of', NOT: { createdBy: ALERT_CORRELATION_ACTOR } },
+        { relatedTicketId: ticketId, kind: 'parent_of', OR: notAlertStorm },
+        { ticketId, kind: 'parent_of', OR: notAlertStorm },
       ] },
       select: { id: true },
     }));
     return Boolean(row);
+  }
+
+  /**
+   * Ids (of the tickets given) that belong to the onboarding / offboarding process: sent by HR's own
+   * addresses (a notice, and every child, because a child carries the notice's requester), named like
+   * a family child or an account-script ticket, or listed in a family. The first two need no database
+   * and hold from the moment the ticket exists, before its family rows and links are written.
+   */
+  async _onboardingIds(tickets) {
+    const out = new Set();
+    const rest = [];
+    for (const t of tickets || []) {
+      if (!t?.id) continue;
+      const email = String(t.requester?.email || '').trim().toLowerCase();
+      if (HR_SENDERS.includes(email) || FAMILY_SUBJECT.test(String(t.subject || ''))) out.add(t.id);
+      else rest.push(t.id);
+    }
+    if (!rest.length) return out;
+    const [members, parents] = await Promise.all([
+      soft(() => prisma.hrLifecycleFamilyMember.findMany({ where: { ticketId: { in: rest } }, select: { ticketId: true }, take: 500 }), []),
+      soft(() => prisma.hrLifecycleFamily.findMany({ where: { parentTicketId: { in: rest } }, select: { parentTicketId: true }, take: 500 }), []),
+    ]);
+    for (const m of members || []) out.add(m.ticketId);
+    for (const f of parents || []) out.add(f.parentTicketId);
+    return out;
   }
 
   /** Has a person worked this ticket (a public agent message, or a hand assignment or status change)? */

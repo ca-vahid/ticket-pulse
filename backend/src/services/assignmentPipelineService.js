@@ -118,6 +118,17 @@ class AssignmentPipelineService {
       return { skipped: true, reason: 'cancelled_before_start' };
     }
 
+    // ── Asleep until its onboarding / offboarding date (13 Oct 2026) ─────
+    // Work that is weeks away sleeps with NO owner; hrLifecycleService picks
+    // one when it wakes, from who is here then. An automatic run in between
+    // (the missed-ticket safety net, a hand-back) used to give it an owner
+    // after fifteen minutes. A person can still run it by hand.
+    if (!isManual && await this._asleepForOnboarding(ticketId)) {
+      logger.info('Pipeline skipped: asleep until its onboarding / offboarding date', { ticketId, triggerSource });
+      emit({ type: 'complete' });
+      return { skipped: true, reason: 'asleep_until_needed' };
+    }
+
     // ── priority_changed eligibility: never reassess a dead ticket ───────
     // The noise auto-close's own FS write can shift priority; the next sync
     // then records a priority event that would re-run the pipeline on the
@@ -667,6 +678,10 @@ class AssignmentPipelineService {
       if (freshserviceBlocker) return freshserviceBlocker;
     }
 
+    if (await this._asleepForOnboarding(run.ticketId)) {
+      return { valid: false, reason: 'Asleep until its onboarding / offboarding date: the owner is chosen when it wakes' };
+    }
+
     const newerRun = await prisma.assignmentPipelineRun.findFirst({
       where: {
         ticketId: run.ticketId,
@@ -682,6 +697,14 @@ class AssignmentPipelineService {
     }
 
     return { valid: true };
+  }
+
+  /** Is this ticket parked by the onboarding / offboarding engine right now? Never throws. */
+  async _asleepForOnboarding(ticketId) {
+    const park = await Promise.resolve()
+      .then(() => prisma.ticketPark.findFirst({ where: { ticketId: Number(ticketId), endedAt: null, source: 'suggested_hr' }, select: { id: true } }))
+      .catch(() => null);
+    return Boolean(park);
   }
 
   async _autoCategorizeEnabled(workspaceId) {
@@ -2330,7 +2353,11 @@ class AssignmentPipelineService {
    *  - NOT EXISTS *any* run: a ticket touched once is never re-triggered here
    *    (the stuck-run auto-retry owns that case, with its own 3-attempt cap);
    *  - max 10/tick + drain-time eligibility re-validation + the open-run
-   *    dedupe guard prevent duplicate or concurrent runs.
+   *    dedupe guard prevent duplicate or concurrent runs;
+   *  - never a ticket the onboarding / offboarding engine has put to sleep:
+   *    unassigned, Pending and without a run is exactly how it is meant to
+   *    look until its date (13 Oct 2026: nine children were given an owner
+   *    fifteen minutes after they were parked).
    */
   async _queueMissedTickets(workspaceId) {
     const config = await assignmentRepository.getConfig(workspaceId);
@@ -2346,6 +2373,7 @@ class AssignmentPipelineService {
         AND COALESCE(t.is_noise, false) = false
         AND t.created_at BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '15 minutes'
         AND NOT EXISTS (SELECT 1 FROM assignment_pipeline_runs r WHERE r.ticket_id = t.id)
+        AND NOT EXISTS (SELECT 1 FROM ticket_parks p WHERE p.ticket_id = t.id AND p.ended_at IS NULL AND p.source = 'suggested_hr')
       ORDER BY t.created_at
       LIMIT 10`;
     // Second net (QA 07-09): tickets that RE-ENTERED the queue after their
@@ -2363,6 +2391,7 @@ class AssignmentPipelineService {
         AND t.status IN (${Prisma.join(openNames)})
         AND COALESCE(t.is_noise, false) = false
         AND t.updated_at > NOW() - INTERVAL '48 hours'
+        AND NOT EXISTS (SELECT 1 FROM ticket_parks p WHERE p.ticket_id = t.id AND p.ended_at IS NULL AND p.source = 'suggested_hr')
         AND (SELECT r.decision FROM assignment_pipeline_runs r
              WHERE r.ticket_id = t.id AND r.status = 'completed'
              ORDER BY r.id DESC LIMIT 1) = 'noise_dismissed'

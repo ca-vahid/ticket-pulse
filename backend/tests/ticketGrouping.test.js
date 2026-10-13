@@ -19,6 +19,8 @@ const prismaMock = {
   assignmentPipelineRun: model('updateMany', 'create'),
   requester: model('findMany'),
   workspace: model('findMany'),
+  hrLifecycleFamilyMember: model('findMany'),
+  hrLifecycleFamily: model('findMany'),
 };
 const settingsMock = { get: jest.fn(), set: jest.fn() };
 const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
@@ -71,6 +73,8 @@ beforeEach(() => {
   prismaMock.ticketGroupingSender.update.mockResolvedValue({});
   prismaMock.assignmentPipelineRun.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.requester.findMany.mockResolvedValue([]);
+  prismaMock.hrLifecycleFamilyMember.findMany.mockResolvedValue([]);
+  prismaMock.hrLifecycleFamily.findMany.mockResolvedValue([]);
   embeddings.similarByContent.mockResolvedValue([]);
 });
 
@@ -450,5 +454,102 @@ describe('the sweep', () => {
     prismaMock.ticket.findMany.mockResolvedValueOnce([]);
     expect(await grouping._restoreMarks(1, at('2026-10-12T22:00:00Z'))).toBe(0);
     expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+});
+
+// 13 Oct 2026, 14:16 PT: the first two departure notices after grouping went on. Fifteen minutes after
+// the onboarding engine created their children, the sweep closed all ten into the notices as "follow-ups".
+describe('onboarding and offboarding are left alone', () => {
+  const HR = { id: 300, name: 'Human Resources', email: 'HumanResources@bgcengineering.ca' };
+  const NOTICE = 'Departure Notification: Anna Mohr from the Toronto office will be departing';
+  const notice = ticket({ id: 63083, origin: 'ticketpulse', nativeNumber: 1929, freshserviceTicketId: null, subject: NOTICE, descriptionText: 'Last day 30 October.', status: 'Pending', requester: HR, requesterId: HR.id, createdAt: at('2026-10-13T21:01:41Z') });
+  const child = ticket({ id: 63084, origin: 'ticketpulse', nativeNumber: 1930, freshserviceTicketId: null, subject: `Child Ticket - Laptop - ${NOTICE}`, descriptionText: 'Retrieve the laptop. From the HR notice TP-1929: Last day 30 October.', requester: HR, requesterId: HR.id, createdAt: at('2026-10-13T21:01:45Z') });
+  const sure = () => gateway.sendJson.mockResolvedValue({ parsed: { matches: [{ candidate: 1, relation: 'update', confidence: 'high', reason: 'A child ticket derived from the notice.' }], retraction: false } });
+  const untouched = () => {
+    expect(gateway.sendJson).not.toHaveBeenCalled();
+    expect(links.link).not.toHaveBeenCalled();
+    expect(tickets.changeStatus).not.toHaveBeenCalled();
+    expect(tickets.updateFsTicket).not.toHaveBeenCalled();
+    expect(tickets.addPrivateNote).not.toHaveBeenCalled();
+  };
+  const lookedAt = (id) => expect(prismaMock.ticketGroupingEvent.create).toHaveBeenCalledWith({ data: { workspaceId: 1, ticketId: id, kind: 'checked', state: 'none' } });
+
+  test('a child of a departure notice is not judged against its parent, and is not looked at again', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(child);
+    prismaMock.ticket.findMany.mockResolvedValue([notice]);
+    sure();
+    expect(await grouping.evaluateTicket(child.id, 1)).toBeNull();
+    untouched();
+    lookedAt(child.id);
+    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+  });
+
+  test('an HR notice is not judged against HR\'s other notices, at arrival or in the sweep', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(notice);
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...notice, id: 62060, nativeNumber: 1700, subject: 'Departure Notification: Matthew Linehan from the Vancouver office will be departing' }]);
+    sure();
+    expect(await grouping.evaluateTicket(notice.id, 1)).toBeNull();
+    expect(await grouping.evaluateTicket(notice.id, 1, { machineOnly: true })).toBeNull();
+    untouched();
+    lookedAt(notice.id);
+  });
+
+  test('the account script\'s NH ticket, whoever it is filed under, and a ticket listed in a family', async () => {
+    const nh = ticket({ id: 70, subject: 'NH Laptop - Vancouver - CA - jdoe - 2026-11-03', requester: TYLER, requesterId: TYLER.id });
+    prismaMock.ticket.findFirst.mockResolvedValue(nh);
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...nh, id: 69, subject: 'NH Workstation - Vancouver - CA - jdoe - 2026-11-03' }]);
+    sure();
+    expect(await grouping.evaluateTicket(70, 1)).toBeNull();
+    untouched();
+
+    // An older notice taken in by "Organise now" under another name: only the family row says so.
+    const taken = ticket({ id: 71, subject: 'Laptop for the new starter', requester: TYLER, requesterId: TYLER.id });
+    prismaMock.ticket.findFirst.mockResolvedValue(taken);
+    prismaMock.hrLifecycleFamilyMember.findMany.mockResolvedValue([{ ticketId: 71 }]);
+    expect(await grouping.evaluateTicket(71, 1)).toBeNull();
+    untouched();
+    lookedAt(71);
+    prismaMock.hrLifecycleFamilyMember.findMany.mockResolvedValue([]);
+    prismaMock.hrLifecycleFamily.findMany.mockResolvedValue([{ parentTicketId: 71 }]);
+    prismaMock.ticketGroupingEvent.create.mockClear();
+    expect(await grouping.evaluateTicket(71, 1)).toBeNull();
+    lookedAt(71);
+  });
+
+  test('a link written by an actor with no e-mail still counts as a family (the guard that failed)', async () => {
+    const plain = ticket({ id: 72, subject: 'Collect the laptop', requester: TYLER, requesterId: TYLER.id });
+    prismaMock.ticket.findFirst.mockResolvedValue(plain);
+    prismaMock.ticketLink.findFirst.mockImplementation(async ({ where }) => {
+      // What PostgreSQL does with the old filter: NOT (created_by = x) is not true for NULL.
+      const asks = (clause) => clause.kind === 'parent_of' && clause.relatedTicketId === 72 && (clause.OR || []).some((o) => o.createdBy === null);
+      return where.OR.some(asks) ? { id: 9 } : null;
+    });
+    expect(await grouping.evaluateTicket(72, 1)).toBeNull();
+    untouched();
+    lookedAt(72);
+    const where = prismaMock.ticketLink.findFirst.mock.calls[0][0].where;
+    expect(JSON.stringify(where)).not.toContain('"NOT"');
+    // The parent of a family is not somebody's duplicate either; an alert-storm parent still is fair game.
+    expect(where.OR).toContainEqual({ ticketId: 72, kind: 'parent_of', OR: [{ createdBy: null }, { createdBy: { not: 'alerts@ticketpulse.internal' } }] });
+  });
+
+  test('a person\'s own ticket is never combined into a family ticket: those are not offered to the model', async () => {
+    const mine = ticket({ id: 73, subject: 'Anna Mohr is leaving, please collect her laptop', descriptionText: 'Her last day is 30 October.', requester: TYLER, requesterId: TYLER.id, createdAt: at('2026-10-13T22:00:00Z') });
+    prismaMock.ticket.findFirst.mockResolvedValue(mine);
+    embeddings.similarByContent.mockResolvedValue([{ ticketId: child.id, score: 0.93 }, { ticketId: notice.id, score: 0.9 }]);
+    prismaMock.ticket.findMany.mockImplementation(async ({ where }) => (where.id?.in ? [child, notice] : []));
+    sure();
+    expect(await grouping.evaluateTicket(73, 1)).toBeNull();
+    untouched();
+    lookedAt(73);
+  });
+
+  test('trusted intake and API alerts are recorded as looked at too, so the sweep moves on', async () => {
+    for (const over of [{ triageMode: 'trusted' }, { externalRef: 'sentinel:x' }]) {
+      prismaMock.ticketGroupingEvent.create.mockClear();
+      prismaMock.ticket.findFirst.mockResolvedValue(ticket({ id: 74, ...over }));
+      expect(await grouping.evaluateTicket(74, 1)).toBeNull();
+      lookedAt(74);
+    }
   });
 });
