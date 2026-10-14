@@ -3415,6 +3415,11 @@ async function executeNode({
       throw error;
     }
 
+    // "Record this e-mail in the ticket's conversation" (QA 10-13 item 14):
+    // off unless the step says so; saved workflows without the field behave
+    // exactly as before. Never in Shadow - nothing was sent.
+    const recordInConversation = node.data?.recordInConversation === true;
+
     if (isMock) {
       return {
         ...output,
@@ -3422,6 +3427,7 @@ async function executeNode({
         mocked: true,
         skipped: true,
         reason: 'Mock mode - email not sent',
+        ...(recordInConversation ? { wouldRecordInConversation: true } : {}),
       };
     }
 
@@ -3429,7 +3435,33 @@ async function executeNode({
     if (!deliveryResult.success) {
       throw new Error(deliveryResult.error || 'Email delivery failed');
     }
-    return { ...output, deliveryId: delivery.id, deliveryResult };
+    let conversationRecord = null;
+    if (recordInConversation) {
+      // The mail is already out: a failure to record it must not fail the step
+      // (a failed step would be retried and the customer mailed twice).
+      try {
+        const { recordWorkflowEmailOnTicket } = await import('./notificationWorkflowActionNodes.js');
+        conversationRecord = await recordWorkflowEmailOnTicket({
+          ticketId: eventContext.ticket?.id,
+          workflowId: workflow?.id ?? null,
+          workflowName: workflow?.name ?? null,
+          runId: run?.id ?? null,
+          nodeId: node.id,
+          deliveryId: delivery.id,
+          subject,
+          htmlBody: sanitizeEmailHtml(htmlBody),
+          textBody,
+          toRecipients,
+          ccRecipients,
+          bccRecipients,
+          emailMessageId: deliveryResult.result?.messageId || deliveryResult.messageId || null,
+        });
+      } catch (error) {
+        conversationRecord = { recorded: false, reason: error.message };
+        logger.warn(`Workflow e-mail sent but not recorded in the conversation: ${error.message}`, { workflowId: workflow?.id, ticketId: eventContext.ticket?.id, deliveryId: delivery.id });
+      }
+    }
+    return { ...output, deliveryId: delivery.id, deliveryResult, ...(conversationRecord ? { conversationRecord } : {}) };
   }
 
   if (node.type === 'stop') {

@@ -864,7 +864,37 @@ class AssignmentPipelineService {
    * Returns count of processed/skipped runs.
    */
   async drainQueuedRuns(workspaceId, maxPerTick = QUEUE_DRAIN_MAX_PER_TICK, concurrency = QUEUE_DRAIN_CONCURRENCY) {
-    const queued = await assignmentRepository.listQueuedRuns(workspaceId, maxPerTick);
+    // Assignment spread, rule F (QA 10-13 item 17): with the stagger on, the
+    // queue is released a few at a time, most urgent and oldest first, ONE
+    // decision after another so each sees the one before it. Off, or on any
+    // error in the spread code, the drain runs exactly as it always did.
+    let release = null;
+    try {
+      const { default: assignmentSpreadService } = await import('./assignmentSpread/spreadService.js');
+      release = await assignmentSpreadService.beginRelease(workspaceId);
+    } catch (err) {
+      logger.warn('Queue drain: staggered release unavailable, draining as before', { workspaceId, error: err.message });
+    }
+    if (!release?.staggered) return this._drainQueued(workspaceId, maxPerTick, concurrency);
+    if (release.wait) return { processed: 0, skipped: 0, staggered: true, waiting: true };
+    const total = { processed: 0, skipped: 0, staggered: true };
+    try {
+      for (let round = 0; round < release.maxRounds && total.processed < release.allowance; round += 1) {
+        const one = await this._drainQueued(workspaceId, 1, 1, { fetchLimit: release.fetchLimit, order: release.order });
+        if (one.processed + one.skipped === 0) break;
+        if (one.processed) release.started(one.processed);
+        total.processed += one.processed;
+        total.skipped += one.skipped;
+      }
+    } finally {
+      release.done();
+    }
+    return total;
+  }
+
+  async _drainQueued(workspaceId, maxPerTick, concurrency, { fetchLimit = null, order = null } = {}) {
+    const listed = await assignmentRepository.listQueuedRuns(workspaceId, fetchLimit || maxPerTick);
+    const queued = order ? order(listed).slice(0, maxPerTick) : listed;
     if (queued.length === 0) return { processed: 0, skipped: 0 };
 
     let processed = 0;
@@ -1657,6 +1687,34 @@ class AssignmentPipelineService {
       const urgentGuardHeld = urgentGuard?.outcome === 'hold' && urgentGuard.shadow !== true;
       const urgentGuardRedirected = Boolean(urgentGuard && urgentGuard.shadow !== true && assignTechId && assignTechId !== topRec?.techId);
 
+      // Assignment spread (QA 10-13 item 17, services/assignmentSpread): no
+      // more than N automatic assignments to one person in M minutes, and a
+      // new hire's Workstation + Laptop stay with one person. Every decision
+      // is remembered before the next one is made. Never blocks: any error
+      // keeps the pick. A person the urgent guard chose is counted, not moved.
+      let spreadGuard = null;
+      if (decision === 'auto_assigned' && assignTechId) {
+        try {
+          const { default: assignmentSpreadService } = await import('./assignmentSpread/spreadService.js');
+          spreadGuard = await assignmentSpreadService.guardAutoAssignment({
+            workspaceId, ticketId, runId, techId: assignTechId, recommendation, reboundFrom,
+            techName: assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
+            locked: urgentGuardRedirected,
+            dryRun: assignmentConfig?.dryRunMode ?? true,
+          });
+          if (spreadGuard?.techId && spreadGuard.moved) assignTechId = spreadGuard.techId;
+          if (spreadGuard?.record) recommendation.spread = spreadGuard.record;
+          if (spreadGuard?.step) {
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({ ...spreadGuard.step, pipelineRunId: runId, stepNumber: stepCounter });
+            emit({ type: 'assignment_spread', rule: spreadGuard.rule, message: spreadGuard.sentence });
+          }
+        } catch (spreadError) {
+          logger.warn('Pipeline: assignment spread failed - assignment unchanged', { runId, ticketId, error: spreadError.message });
+        }
+      }
+      const assignmentDecisionNote = [urgentGuardRedirected ? urgentGuard.sentence : null, spreadGuard?.sentence || null].filter(Boolean).join(' ');
+
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
       if (closeGuard?.hold) {
@@ -1767,7 +1825,7 @@ class AssignmentPipelineService {
         // write-back, its private note, the local assignment, notifications)
         // reads the run's assignedTechId.
         ...(decision === 'auto_assigned' && assignTechId ? { assignedTechId: assignTechId } : {}),
-        ...(decision === 'auto_assigned' && urgentGuardRedirected ? { decisionNote: urgentGuard.sentence } : {}),
+        ...(decision === 'auto_assigned' && assignmentDecisionNote ? { decisionNote: assignmentDecisionNote } : {}),
         ...(pipelineDidDecide ? { decidedAt: new Date() } : {}),
         ...(willTriggerSync ? { syncStatus: 'pending' } : {}),
       });

@@ -1,5 +1,6 @@
 // eslint-disable-next-line no-unused-vars
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import RecordInConversationOption from './RecordInConversationOption';
 import FancySelect from '../common/FancySelect';
 import { Background, BaseEdge, Controls, EdgeLabelRenderer, Handle, MiniMap, Position, ReactFlow, getSmoothStepPath } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -11664,6 +11665,10 @@ export default function NotificationWorkflowsPanel({
             allowedTypes={['llm_generate', 'template_render']}
             automaticLabel="Automatic — latest generated email"
             hint="With several drafts in one flow, pin exactly which step's output this email sends. AI safety gates follow the pinned source."
+          />
+          <RecordInConversationOption
+            value={selectedNode.data?.recordInConversation}
+            onChange={(checked) => updateNodeData({ recordInConversation: checked })}
           />
           {linkOptions.map((option) => {
             const enabled = selectedNode.data?.[option.key] === true;

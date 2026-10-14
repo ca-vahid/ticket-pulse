@@ -1738,10 +1738,24 @@ export function competencyMatchScore(matchType) {
     : COMPETENCY_MATCH_SCORES.none;
 }
 
+/** Assignment spread, rule A. Adds the recent automatic assignments to candidate rows; never throws. */
+async function annotateRecentAssignments(workspaceId, rows, ticketId = null) {
+  try {
+    const { default: assignmentSpreadService } = await import('./assignmentSpread/spreadService.js');
+    return await assignmentSpreadService.annotateCandidates(workspaceId, rows, { ticketId });
+  } catch (error) {
+    logger.debug('Recent-assignment annotation failed', { workspaceId, error: error.message });
+    return null;
+  }
+}
+
 function scoreCandidate(candidate, allCandidates, weights) {
-  const openMax = Math.max(1, ...allCandidates.map((item) => item.openTickets || 0));
+  // loadForScore (assignment spread, QA 10-13 item 17) = open tickets plus what
+  // automation gave this person in the last minutes; absent when the rule is off.
+  const loadOf = (item) => item.loadForScore ?? item.openTickets ?? 0;
+  const openMax = Math.max(1, ...allCandidates.map(loadOf));
   const competencyScore = competencyMatchScore(candidate.competencyMatch?.matchType);
-  const workloadScore = clampScore(1 - ((candidate.openTickets || 0) / openMax));
+  const workloadScore = clampScore(1 - (loadOf(candidate) / openMax));
   const locationScore = candidate.locationMatch === null ? 0.55 : candidate.locationMatch ? 1 : 0.2;
   const recencyScore = clampScore(1 - (candidate.assignmentRisk?.riskPenalty || 0));
   const baseScore = clampScore(
@@ -1988,6 +2002,10 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     }
   }
 
+  // Assignment spread, rule A: what automation just gave each person counts
+  // as load, saved or not. Off, or on any failure, nothing is added.
+  const recentAssignmentsNote = await annotateRecentAssignments(workspaceId, results, ticketId);
+
   const scoringWeights = normalizeScoringWeights(assignmentConfig?.scoringWeights);
   for (const result of results) {
     Object.assign(result, scoreCandidate(result, results, scoringWeights));
@@ -2045,6 +2063,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     scoringWeights,
     matchCount: results.length,
     matches: results,
+    ...(recentAssignmentsNote ? { recentAssignmentsNote } : {}),
     excludedCount: excluded.length,
     excluded,
     note: results.length === 0
@@ -2535,18 +2554,23 @@ async function getWorkloadStats(workspaceId) {
   const todayMap = Object.fromEntries(todayTickets.map((r) => [r.assignedTechId, r._count]));
   const selfMap = Object.fromEntries(selfPicked.map((r) => [r.assignedTechId, r._count]));
 
+  const stats = techs.map((t) => ({
+    techId: t.id,
+    techName: t.name,
+    openTickets: openMap[t.id] || 0,
+    todayAssigned: todayMap[t.id] || 0,
+    todaySelfPicked: selfMap[t.id] || 0,
+    // Low counts here can be BY DESIGN — a guidance note explains it and
+    // outranks the load numbers (QA 07-14).
+    routingGuidance: t.routingGuidance || undefined,
+  }));
+  // Assignment spread, rule A (QA 10-13 item 17): what automation just gave each person.
+  const recentAssignmentsNote = await annotateRecentAssignments(workspaceId, stats);
+  for (const row of stats) delete row.loadForScore;
   return {
     date: todayStr,
-    stats: techs.map((t) => ({
-      techId: t.id,
-      techName: t.name,
-      openTickets: openMap[t.id] || 0,
-      todayAssigned: todayMap[t.id] || 0,
-      todaySelfPicked: selfMap[t.id] || 0,
-      // Low counts here can be BY DESIGN — a guidance note explains it and
-      // outranks the load numbers (QA 07-14).
-      routingGuidance: t.routingGuidance || undefined,
-    })).sort((a, b) => a.openTickets - b.openTickets),
+    stats: stats.sort((a, b) => a.openTickets - b.openTickets),
+    ...(recentAssignmentsNote ? { recentAssignmentsNote } : {}),
   };
 }
 

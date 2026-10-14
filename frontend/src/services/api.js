@@ -2141,6 +2141,12 @@ export const hrLifecycleAPI = {
  * cover requests are open to members; everything else is workspace-admin only.
  * Responses are { success, data }.
  */
+// Assignment spread (QA 10-13 item 17): Assignment Review, Spread tab.
+export const assignmentSpreadAPI = {
+  get: (days = 30) => api.get('/assignment-spread', { params: { days } }),
+  saveSettings: (patch) => api.put('/assignment-spread/settings', patch),
+};
+
 // Ticket grouping (plans/TICKET_GROUPING_PLAN.md): the Grouped view of Tickets.
 export const ticketGroupingAPI = {
   get: (days = 14) => api.get('/ticket-grouping', { params: { days } }),
