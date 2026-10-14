@@ -1343,6 +1343,11 @@ function validateGraph(definition, triggerType) {
     if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
       errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
     }
+    // QA 10-13 item 14: optional; absent = off (every workflow saved before it existed).
+    const record = node.data?.recordInConversation;
+    if (record !== undefined && record !== null && typeof record !== 'boolean') {
+      errors.push(`Send email node ${node.id}: "Record this e-mail in the ticket's conversation" must be on or off`);
+    }
   }
 
   for (const node of definition.nodes.filter((candidate) => candidate.type === 'propose_reply')) {
