@@ -181,6 +181,11 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - **Drafting from tickets** (`POST /knowledge/drafts`, `/drafts/from-ticket/:id`) is gated by `requireKnowledgeWriter` (manager, or may write somewhere).
 - **Lesson**: after the unit tests, run new read paths once against a real database copy (the scratch-DB recipe above). The mocked suites passed while a stale shared Prisma client made a fail-soft read return nothing.
 
+### Knowledge article history: the text before an edit is always kept (v4.2.68, 2026-10)
+- `knowledgeArticleService.update` calls `_keepCurrent(existing)` before a versioned change: when `knowledge_article_versions` has no row for the version the article is on (every article written before 4.2.42, or a row that failed to save), it saves one from the existing row, dated `updatedAt`. Without it the first edit left History with one row and nothing to restore (QA 10-13).
+- `versions()` always lists the version the article is on (a synthetic `current-<id>` item when its row is missing) and `getVersion()` answers for it from the article itself. No backfill is needed: articles heal at their next edit.
+- `GET /knowledge/articles/:id` adds `my.asAdmin`: true when the person may write only because they are an admin (super admin list or workspace admin), not by skill. `ArticleReader` says so, and its History has Read (the version's text, sanitized, in place) and Restore.
+
 ### Knowledge Activity: pages, filters and the run page (v4.2.49, 2026-10)
 - **List** (`GET /knowledge/runs`, `autoHelpRunner.listRuns`): besides `status`, `playbookId`, `from`/`to`, `limit` (max 200) and `offset`, it takes `q` (a number = FreshService id or TP number, otherwise words in the subject; resolved to at most 400 ticket ids first because runs have no ticket relation), `categoryId` (top or sub), `band` (high|medium|low), `review` (needs|done), `trigger` (live|test). Unknown values are ignored. The answer adds `needsReview` (live drafted/staged/sent runs with no verdict, under the time and rule filters) and each row `requesterName`, `categoryName`, `subcategoryName`.
 - **Run** (`GET /knowledge/runs/:id`) adds `request`: the ticket's text with blank lines removed (6,000 characters at most), requester (name, job title, department), priority, category and assignee.

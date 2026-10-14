@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
-import { ArrowLeft, Check, Flag, History, Pencil, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Check, Eye, Flag, History, Pencil, RotateCcw } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import { formatDayTime, timeAgo } from '../tickets/ticketUi';
 import { ConfirmDialog, EmptyState, Loading, PersonLine, textareaClass } from './knowledgeUi';
@@ -13,7 +13,7 @@ import { healthOf, sectionAnchor, usageWords } from './libraryFormat';
  * (Checked / Not checked yet / Needs a look / Out of date), who stood behind
  * it and how it did in use, always with the counts. Anyone can flag it with
  * a sentence; people with the skill can fix it or confirm it; every change
- * is in History and can be put back.
+ * is in History, where each version can be read and restored.
  */
 
 function Dot({ tone }) {
@@ -40,6 +40,15 @@ function HistoryList({ articleId, canRestore, onRestored }) {
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // One version open to read at a time: { version, html } (html null while loading).
+  const [reading, setReading] = useState(null);
+  const read = (v) => {
+    if (reading?.version === v.version) { setReading(null); return; }
+    setReading({ version: v.version, html: null });
+    knowledgeAPI.articleVersion(articleId, v.version)
+      .then((res) => setReading((cur) => (cur?.version === v.version ? { version: v.version, html: DOMPurify.sanitize(res?.data?.bodyHtml || '', { USE_PROFILES: { html: true } }) } : cur)))
+      .catch((err) => { setReading(null); setError(err?.message || 'Could not open that version'); });
+  };
   useEffect(() => {
     let cancelled = false;
     knowledgeAPI.articleVersions(articleId)
@@ -55,7 +64,7 @@ function HistoryList({ articleId, canRestore, onRestored }) {
       setPending(null);
       onRestored();
     } catch (err) {
-      setError(err?.message || 'Could not put that version back');
+      setError(err?.message || 'Could not restore that version');
     } finally {
       setBusy(false);
     }
@@ -64,20 +73,40 @@ function HistoryList({ articleId, canRestore, onRestored }) {
   return (
     <div className="mt-3 rounded-lg border border-border" data-testid="article-history">
       {error && <p className="px-3 pt-2 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
-      {data.items.length === 0 ? <p className="px-3 py-3 text-sm text-muted-foreground">No earlier versions were kept for this article.</p> : (
+      <p className="border-b border-border/70 px-3 py-2 text-xs text-muted-foreground" data-testid="article-history-help">
+        {data.items.length > 1
+          ? `Every saved version, newest first. Read shows the text of a version${canRestore ? '; Restore brings it back as a new version.' : '.'}`
+          : `This is the only version so far. When the article is edited, the earlier text stays here to read${canRestore ? ' and restore.' : '.'}`}
+      </p>
+      {data.items.length === 0 ? <p className="px-3 py-3 text-sm text-muted-foreground">No versions were kept for this article.</p> : (
         <ul className="divide-y divide-border/70">
           {data.items.map((v) => (
-            <li key={v.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px]">
-              <span className="w-16 flex-shrink-0 tabular-nums text-muted-foreground">Version {v.version}</span>
-              <span className="min-w-0 flex-1">
-                <span className="text-foreground/90">{v.changeNote || (v.version === 1 ? 'Created' : 'Edited')}</span>
-                <span className="ml-2 text-xs text-muted-foreground">{formatDayTime(v.createdAt)}</span>
-              </span>
-              {v.changedBy && <PersonLine email={v.changedBy} className="text-xs" />}
-              {v.version === data.current ? <span className="text-xs text-muted-foreground">current</span> : canRestore && (
-                <button type="button" onClick={() => setPending(v)} className="tp-focus-ring inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-muted">
-                  <RotateCcw className="h-3 w-3" aria-hidden="true" /> Put back
-                </button>
+            <li key={v.id} className="px-3 py-2 text-[13px]">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="w-16 flex-shrink-0 tabular-nums text-muted-foreground">Version {v.version}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="text-foreground/90">{v.changeNote || (v.version === 1 ? 'Created' : 'Edited')}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{formatDayTime(v.createdAt)}</span>
+                </span>
+                {v.changedBy && <PersonLine email={v.changedBy} className="text-xs" />}
+                {v.version === data.current && <span className="text-xs text-muted-foreground">current</span>}
+                {v.version !== data.current && (
+                  <button type="button" onClick={() => read(v)} aria-expanded={reading?.version === v.version} className="tp-focus-ring inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-muted">
+                    <Eye className="h-3 w-3" aria-hidden="true" /> {reading?.version === v.version ? 'Close' : 'Read'}
+                  </button>
+                )}
+                {v.version !== data.current && canRestore && (
+                  <button type="button" onClick={() => setPending(v)} className="tp-focus-ring inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-muted">
+                    <RotateCcw className="h-3 w-3" aria-hidden="true" /> Restore
+                  </button>
+                )}
+              </div>
+              {reading?.version === v.version && (
+                <div className="settings-scrollbar mt-2 max-h-96 overflow-y-auto rounded-lg border border-border bg-muted/40 px-4 py-3" data-testid="article-version-text">
+                  {reading.html === null && <Loading label="Loading that version…" className="py-4" />}
+                  {reading.html !== null && reading.html.trim() && <div className="tp-article" dangerouslySetInnerHTML={{ __html: reading.html }} />}
+                  {reading.html !== null && !reading.html.trim() && <p className="text-sm text-muted-foreground">That version had no text.</p>}
+                </div>
               )}
             </li>
           ))}
@@ -85,8 +114,8 @@ function HistoryList({ articleId, canRestore, onRestored }) {
       )}
       <ConfirmDialog
         open={Boolean(pending)}
-        title={`Put version ${pending?.version} back?`}
-        confirmLabel={busy ? 'Working…' : 'Put it back'}
+        title={`Restore version ${pending?.version}?`}
+        confirmLabel={busy ? 'Working…' : 'Restore it'}
         cancelLabel="Cancel"
         onCancel={() => setPending(null)}
         onConfirm={restore}
@@ -201,6 +230,9 @@ export default function ArticleReader({ articleId, categories = [] }) {
               <History className="h-3.5 w-3.5" aria-hidden="true" /> History
             </button>
           </div>
+          {canWrite && article.my?.asAdmin === true && (
+            <p className="mt-2 text-xs text-muted-foreground" data-testid="article-as-admin">You can edit this as an admin. Your own skill in this category would not allow it.</p>
+          )}
           {notice && <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300" role="status">{notice}</p>}
           {error && <p className="mt-2 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
           {panel === 'flag' && (

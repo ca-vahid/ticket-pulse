@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.67-preview';
+export const APP_VERSION = '4.2.68-preview';
 
 export const changelog = [
+  {
+    version: '4.2.68-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Knowledge: the first edit of an older article keeps the text it replaced</strong> &mdash; articles written before versions were kept had no saved copy of their first text, so after the first edit History showed one row and there was nothing to go back to. The text an article is on is now saved before an edit replaces it.' },
+      { type: 'improved', html: '<strong>Knowledge: History has Read and Restore</strong> &mdash; every earlier version has &ldquo;Read&rdquo;, which shows its text in place, and &ldquo;Restore&rdquo; (it was &ldquo;Put back&rdquo;), which brings it back as a new version. A line on top says what the list is, and an article with one version says where the earlier text will appear.' },
+      { type: 'improved', html: '<strong>Knowledge: an admin is told why they can edit</strong> &mdash; admins may write in every category. When your own skill in an article&rsquo;s category would not allow it, the article says &ldquo;You can edit this as an admin&rdquo;.' },
+    ],
+  },
   {
     version: '4.2.67-preview',
     date: 'October 13, 2026',

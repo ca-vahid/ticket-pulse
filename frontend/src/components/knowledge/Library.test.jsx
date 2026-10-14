@@ -11,7 +11,7 @@ import {
 // (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 12).
 const api = {
   library: vi.fn(), listArticles: vi.fn(), search: vi.fn(), getArticle: vi.fn(), verifyArticle: vi.fn(), flagArticle: vi.fn(),
-  articleVersions: vi.fn(), restoreArticleVersion: vi.fn(), ticketKnowledge: vi.fn(), reviewRun: vi.fn(),
+  articleVersions: vi.fn(), articleVersion: vi.fn(), restoreArticleVersion: vi.fn(), ticketKnowledge: vi.fn(), reviewRun: vi.fn(),
 };
 vi.mock('../../services/api', () => ({ get knowledgeAPI() { return api; } }));
 vi.mock('../common/FancySelect', () => ({
@@ -73,6 +73,7 @@ beforeEach(() => {
     { id: 2, version: 2, title: 'T', status: 'published', changedBy: 'vhaeri@example.com', changeNote: null, createdAt: '2026-10-01T00:00:00Z' },
   ] } });
   api.restoreArticleVersion.mockResolvedValue({ data: {} });
+  api.articleVersion.mockResolvedValue({ data: { version: 2, bodyHtml: '<p>The old steps</p>' } });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -215,18 +216,35 @@ describe('ArticleReader', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Marked as checked');
   });
 
-  test('history: every version with who and why; putting one back asks first and makes a new version', async () => {
+  test('history: every version with who and why; an older one can be read, and restoring asks first and makes a new version', async () => {
     renderAt('/knowledge/library/7', <ArticleReader articleId="7" categories={CATEGORIES} />);
     fireEvent.click(await screen.findByRole('button', { name: /History/ }));
     const history = await screen.findByTestId('article-history');
     expect(history).toHaveTextContent('Version 3');
     expect(history).toHaveTextContent('Fixed step 2');
-    expect(within(history).getAllByRole('button', { name: /Put back/ })).toHaveLength(1);
-    fireEvent.click(within(history).getByRole('button', { name: /Put back/ }));
+    expect(within(history).getByTestId('article-history-help')).toHaveTextContent('Restore brings it back as a new version');
+    // The current version has neither button; the older one has both.
+    expect(within(history).getAllByRole('button', { name: /Read/ })).toHaveLength(1);
+    expect(within(history).getAllByRole('button', { name: /Restore/ })).toHaveLength(1);
+    fireEvent.click(within(history).getByRole('button', { name: /Read/ }));
+    expect(await within(history).findByTestId('article-version-text')).toHaveTextContent('The old steps');
+    expect(api.articleVersion).toHaveBeenCalledWith(7, 2);
+    fireEvent.click(within(history).getByRole('button', { name: /Restore/ }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Nothing is lost');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Put it back' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restore it' }));
     await waitFor(() => expect(api.restoreArticleVersion).toHaveBeenCalledWith(7, 2));
+  });
+
+  test('history with one version says where the earlier text will be; an admin without the skill is told why they can edit (QA 10-13)', async () => {
+    api.articleVersions.mockResolvedValue({ data: { current: 1, items: [{ id: 'current-7', version: 1, title: 'T', status: 'published', changedBy: 'vhaeri@example.com', changeNote: null, createdAt: '2026-09-29T00:00:00Z' }] } });
+    api.getArticle.mockResolvedValue({ data: { ...ARTICLE, my: { ...ARTICLE.my, write: true, asAdmin: true } } });
+    renderAt('/knowledge/library/7', <ArticleReader articleId="7" categories={CATEGORIES} />);
+    expect(await screen.findByTestId('article-as-admin')).toHaveTextContent('You can edit this as an admin');
+    fireEvent.click(screen.getByRole('button', { name: /History/ }));
+    const history = await screen.findByTestId('article-history');
+    expect(within(history).getByTestId('article-history-help')).toHaveTextContent('This is the only version so far');
+    expect(within(history).queryByRole('button', { name: /Restore/ })).toBeNull();
   });
 });
 

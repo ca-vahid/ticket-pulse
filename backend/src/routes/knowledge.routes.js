@@ -14,7 +14,7 @@ import autoHelpPreviewService from '../services/autoHelpPreviewService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
 import knowledgeGrowthRoutes from './knowledgeGrowth.routes.js';
 import knowledgeAnswerPolicy from '../services/knowledgeAnswerPolicy.js';
-import knowledgeRights from '../services/knowledgeRights.js';
+import knowledgeRights, { rightsIn as skillRights } from '../services/knowledgeRights.js';
 import knowledgeSignals from '../services/knowledgeSignals.js';
 import knowledgeSuggestionService from '../services/knowledgeSuggestionService.js';
 
@@ -301,11 +301,15 @@ router.get('/topics', asyncHandler(async (req, res) => {
 /** An article, with how it did in use and what the reader may do with it. */
 router.get('/articles/:id', asyncHandler(async (req, res) => {
   const article = await knowledgeArticleService.get(req.workspaceId, req.params.id);
-  const [stats, my] = await Promise.all([
+  const [stats, my, profile] = await Promise.all([
     knowledgeSignals.stats(req.workspaceId, [article.id]),
     rightsIn(req, targetOf(article)),
+    knowledgeRights.profile(sessionUser(req), req.workspaceId),
   ]);
-  res.json({ success: true, data: { ...article, use: stats.get(article.id) || null, my: { write: my.write, check: my.check, level: my.level } } });
+  // QA 10-13: an admin may write everywhere, whatever their own skill. Say so
+  // on the article, so "I could save without the skill" explains itself.
+  const asAdmin = profile?.isAdmin === true && !skillRights({ ...profile, isAdmin: false }, targetOf(article)).write;
+  res.json({ success: true, data: { ...article, use: stats.get(article.id) || null, my: { write: my.write, check: my.check, level: my.level, asAdmin } } });
 }));
 
 /**
