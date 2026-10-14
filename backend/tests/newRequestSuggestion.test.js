@@ -9,6 +9,7 @@ const prismaMock = {
   ticketThreadEntry: { findFirst: jest.fn() },
   ticketGroupingEvent: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
   ticketAttachment: { updateMany: jest.fn() },
+  ticketActivity: { findMany: jest.fn() },
 };
 const rulesMock = { getRequesterReplyRules: jest.fn() };
 const statusServiceMock = { resolveBaseStatus: jest.fn() };
@@ -144,6 +145,26 @@ describe('afterRequesterReply: when nothing happens', () => {
     expect(MIN_RESOLVED_MS).toBe(24 * 60 * 60 * 1000);
     await nothing(await run({ before: { ...BEFORE, resolvedAt: new Date(NOW.getTime() - 23 * 60 * 60 * 1000) } }), 'resolved_recently');
     expect(gatewayMock.sendJson).not.toHaveBeenCalled();
+  });
+
+  test('no resolved/closed stamp on the ticket: the last status change in its history says when', async () => {
+    const noStamps = { ...BEFORE, status: 'Closed', statusBase: 'Closed', resolvedAt: null, closedAt: null };
+    // Nothing in the history either: unknown, so not read.
+    prismaMock.ticketActivity.findMany.mockResolvedValue([]);
+    await nothing(await run({ before: noStamps }), 'resolved_time_unknown');
+    // Closed five days ago per the history (as on #245828): read, and suggested.
+    statusServiceMock.resolveBaseStatus.mockImplementation(async (_ws, name) => (['Resolved', 'Closed'].includes(name) ? name : 'Open'));
+    prismaMock.ticketActivity.findMany.mockResolvedValue([
+      // The reopen this reply just caused is the newest row and is stepped over.
+      { performedAt: new Date(Date.now() - 2000), details: { note: 'Reopened automatically — the requester replied.', changes: { status: { from: 'Closed', to: 'Open' } } } },
+      { performedAt: new Date('2026-10-08T21:34:15Z'), details: { note: 'Status changed from Resolved to Closed', newStatus: 'Closed' } },
+      { performedAt: new Date('2026-10-08T20:46:27Z'), details: { changes: { status: { from: 'Open', to: 'Resolved' } } } },
+    ]);
+    expect((await run({ before: noStamps })).suggested).toBe(true);
+    // Closed only an hour ago per the history: too recent.
+    jest.clearAllMocks();
+    prismaMock.ticketActivity.findMany.mockResolvedValue([{ performedAt: new Date(NOW.getTime() - 3600e3), details: { newStatus: 'Closed' } }]);
+    await nothing(await run({ before: noStamps }), 'resolved_recently');
   });
 
   test('the reply did not reopen it (still resolved) → not read', async () => {

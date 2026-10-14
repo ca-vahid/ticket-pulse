@@ -94,6 +94,35 @@ class NewRequestSuggestionService {
     }));
   }
 
+  /**
+   * When the ticket's own resolved/closed stamps are empty (some synced
+   * tickets carry none): the last time its history shows it going to a
+   * Resolved or Closed status. Milliseconds, or null.
+   */
+  async _resolvedAtFromHistory(ticketId, workspaceId) {
+    const rows = await soft(() => prisma.ticketActivity.findMany({
+      where: { ticketId, activityType: { in: ['status_changed', 'fs_write_back', 'workflow_updated_ticket'] } },
+      orderBy: { id: 'desc' },
+      take: 40,
+      select: { performedAt: true, details: true },
+    }), []);
+    if (!rows?.length) return null;
+    const { default: statusService } = await import('./statusService.js');
+    for (const row of rows) {
+      const d = row.details && typeof row.details === 'object' ? row.details : {};
+      const to = d.newStatus || d.changes?.status?.to || null;
+      if (!to) continue;
+      const base = await soft(() => statusService.resolveBaseStatus(workspaceId, to));
+      const at = new Date(row.performedAt).getTime();
+      // Newest first. The reopen this very reply caused is the newest change:
+      // step over it. The first change before that says how the ticket stood;
+      // if it was not a move to Resolved/Closed, the time is simply unknown.
+      if (!TERMINAL_BASES.includes(base) && Date.now() - at < 10 * 60 * 1000) continue;
+      return TERMINAL_BASES.includes(base) ? at : null;
+    }
+    return null;
+  }
+
   /** How the ticket was resolved, in a few lines for the model. */
   async _resolution(ticket, replyAt) {
     const lastAgentReply = await soft(() => prisma.ticketThreadEntry.findFirst({
@@ -137,7 +166,8 @@ class NewRequestSuggestionService {
 
       // It had been resolved, and for more than a day.
       if (!TERMINAL_BASES.includes(before.statusBase)) return { suggested: false, reason: 'was_not_resolved' };
-      const resolvedAt = [before.resolvedAt, before.closedAt].filter(Boolean).map((d) => new Date(d).getTime()).filter((t) => Number.isFinite(t)).sort((a, b) => a - b)[0];
+      const resolvedAt = [before.resolvedAt, before.closedAt].filter(Boolean).map((d) => new Date(d).getTime()).filter((t) => Number.isFinite(t)).sort((a, b) => a - b)[0]
+        || await this._resolvedAtFromHistory(ticketId, workspaceId);
       if (!resolvedAt) return { suggested: false, reason: 'resolved_time_unknown' };
       if (new Date(now).getTime() - resolvedAt <= MIN_RESOLVED_MS) return { suggested: false, reason: 'resolved_recently' };
 
