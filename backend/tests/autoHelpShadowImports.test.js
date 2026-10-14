@@ -46,6 +46,7 @@ describe('Auto-help shadow-only imports', () => {
       './knowledgeAnswerPolicy.js',
       // Prompt guidance (30 Sep 2026): reads/writes prompt text only, never sends.
       './autoHelpPromptService.js',
+      './autoHelpTicketRefGuard.js', // QA 10-13 #12: reads ticket numbers only (imports prisma, nothing that sends)
       './autoHelpTools.js',
       './knowledgeArticleService.js',
       './notificationWorkflowOutputGuard.js',
