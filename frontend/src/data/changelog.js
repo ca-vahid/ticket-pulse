@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.66-preview';
+export const APP_VERSION = '4.2.67-preview';
 
 export const changelog = [
+  {
+    version: '4.2.67-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Availability: the same leave entered in Ticket Pulse and in Vacation Tracker is one request, not two</strong> &mdash; when a person booked a day in Availability and also put it in Vacation Tracker, the hourly import made a second request of the Vacation Tracker copy, and the day was counted twice on the dashboard. The request made in Availability now takes over the Vacation Tracker leave and the imported copy is retired. Requests already doubled this way are merged at the next hourly sync.' },
+    ],
+  },
   {
     version: '4.2.66-preview',
     date: 'October 13, 2026',

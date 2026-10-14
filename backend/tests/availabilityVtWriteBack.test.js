@@ -11,6 +11,7 @@ const prismaMock = {
   vacationTrackerConfig: { findMany: jest.fn() },
   avLeaveType: { findMany: jest.fn() },
   avRequest: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  technicianLeave: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
 };
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
@@ -132,11 +133,25 @@ describe('pushApproved', () => {
   test('entered in both places: the same leave already in Vacation Tracker is linked, not duplicated', async () => {
     client.createLeave.mockRejectedValue(apiError(422, 'LEAVE_OVERLAP'));
     client.listLeaves.mockResolvedValue([{ id: 'leaveRequest-9', userId: 'u-reza', leaveTypeId: 'lt-vac', startDate: '2026-11-25', endDate: '2026-11-25' }]);
-    prismaMock.avRequest.findFirst.mockResolvedValue({ id: 143 }); // the imported twin holds the link
-    expect(await wb.pushApproved(140)).toMatchObject({ ok: true, alreadyThere: true });
+    prismaMock.avRequest.findFirst.mockResolvedValue({ id: 143, source: 'vacation_tracker' }); // the imported copy of the same leave
+    expect(await wb.pushApproved(140)).toMatchObject({ ok: true, alreadyThere: true, replacedRequest: 143 });
+    // The imported copy is retired and its dashboard rows removed; this request keeps the leave.
+    expect(prismaMock.avRequest.update.mock.calls[0][0]).toMatchObject({ where: { id: 143 }, data: { status: 'cancelled', externalId: null } });
+    expect(prismaMock.technicianLeave.deleteMany).toHaveBeenCalledWith({ where: { OR: [{ vtLeaveId: 'leaveRequest-9' }, { vtLeaveId: { startsWith: 'av:143:' } }] } });
+    const data = lastEvent();
+    expect(data.externalId).toBe('vt:leaveRequest-9');
+    expect(data.events.create).toMatchObject({ kind: 'vt_written', details: { vtLeaveId: 'leaveRequest-9', alreadyThere: true, replacedRequest: 143 } });
+  });
+
+  test('a leave already held by another Ticket Pulse request is left with it', async () => {
+    client.createLeave.mockRejectedValue(apiError(422, 'LEAVE_OVERLAP'));
+    client.listLeaves.mockResolvedValue([{ id: 'leaveRequest-9', userId: 'u-reza', leaveTypeId: 'lt-vac', startDate: '2026-11-25', endDate: '2026-11-25' }]);
+    prismaMock.avRequest.findFirst.mockResolvedValue({ id: 77, source: 'app' });
+    expect(await wb.pushApproved(140)).toMatchObject({ ok: true });
+    expect(prismaMock.technicianLeave.deleteMany).not.toHaveBeenCalled();
     const data = lastEvent();
     expect(data.externalId).toBeUndefined();
-    expect(data.events.create).toMatchObject({ kind: 'vt_written', details: { vtLeaveId: 'leaveRequest-9', alreadyThere: true, heldByRequest: 143 } });
+    expect(data.events.create.details).toMatchObject({ heldByRequest: 77 });
   });
 
   test('an overlap with a different leave is a permanent failure', async () => {
@@ -194,6 +209,17 @@ describe('sweep', () => {
     expect(await wb.sweep({ today: day('2026-10-13') })).toEqual({ written: 2, cancelled: 0, failed: 0 });
     expect(pushed).toEqual([1, 2]);
     expect(prismaMock.avRequest.findMany.mock.calls[0][0].where).toMatchObject({ status: 'approved', source: 'app', externalId: null, endDate: { gte: day('2026-10-13') } });
+  });
+
+  test('a request left beside an imported copy of the same leave takes it over', async () => {
+    const left = request({ id: 149, events: [{ kind: 'vt_written', details: { vtLeaveId: 'leaveRequest-7', workspaceId: 1, heldByRequest: 151 } }] });
+    prismaMock.avRequest.findMany.mockResolvedValueOnce([left]).mockResolvedValueOnce([]);
+    prismaMock.avRequest.findFirst.mockResolvedValue({ id: 151, source: 'vacation_tracker' });
+    wb.pushApproved = jest.fn();
+    await wb.sweep({ today: day('2026-10-13') });
+    expect(wb.pushApproved).not.toHaveBeenCalled();
+    expect(prismaMock.avRequest.update.mock.calls[0][0]).toMatchObject({ where: { id: 151 }, data: { status: 'cancelled', externalId: null } });
+    expect(lastEvent()).toMatchObject({ externalId: 'vt:leaveRequest-7' });
   });
 
   test('does nothing with the switch off', async () => {
