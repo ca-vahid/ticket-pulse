@@ -2042,6 +2042,35 @@ describe('ticketService per-user signatures on reply sends (Mega 08-15 Phase D)'
     expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ html: '<p>Second try</p>' }));
   });
 
+  // QA 10-13 #4 (TP-1886): the mail carried the signature, the conversation stopped at "Kind regards,".
+  test('the entry remembers the signature that was mailed, beside a body that is still only the agent\'s words', async () => {
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(signatureRow);
+    const { entry } = await ticketService.addReply(501, 1, { bodyHtml: '<p>Fixed it!</p>', bodyText: 'Fixed it!' }, actor);
+    expect(entry.rawPayload.sentSignature).toEqual({
+      html: '<p style="margin: 0"><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+      text: 'Cora Coordinator\nIT Service Desk',
+    });
+    // Exactly what left: the mail ends its own part with the stored signature, once.
+    const mailed = sendgridMock.sendEmail.mock.calls[0][0].html;
+    expect(mailed).toContain(`<br>${entry.rawPayload.sentSignature.html}`);
+    expect(mailed.split('Cora Coordinator').length - 1).toBe(1);
+    expect(entry.bodyHtml).toBe('<p>Fixed it!</p>');
+    expect(entry.bodyText).toBe('Fixed it!');
+  });
+
+  test('nothing is remembered on a note, with no signature, or when the body already carries its own', async () => {
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(signatureRow);
+    const note = await ticketService.addPrivateNote(501, 1, { bodyText: 'internal context' }, actor);
+    expect(note.entry.rawPayload?.sentSignature).toBeUndefined();
+
+    const own = await ticketService.addReply(501, 1, { bodyHtml: '<p>Answer</p>', bodyText: 'Answer' }, actor, [], { signatureOverride: null });
+    expect(own.entry.rawPayload?.sentSignature).toBeUndefined();
+
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(null);
+    const unsigned = await ticketService.addReply(501, 1, { bodyHtml: '<p>Plain</p>', bodyText: 'Plain' }, actor);
+    expect(unsigned.entry.rawPayload?.sentSignature).toBeUndefined();
+  });
+
   test('a signature lookup failure never blocks the reply (sends unsigned)', async () => {
     prismaMock.userEmailSignature.findUnique.mockRejectedValue(new Error('db hiccup'));
     const { entry, email } = await ticketService.addReply(501, 1, { bodyText: 'still goes out' }, actor);

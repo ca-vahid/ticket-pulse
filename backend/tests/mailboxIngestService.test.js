@@ -1412,3 +1412,66 @@ describe('a plain-text mail', () => {
     expect(ticketServiceMock.createTicket.mock.calls[0][1].description).toBeNull();
   });
 });
+
+// QA 10-13 #1 and #3 (TP-1885, TP-1886): the opening message in the conversation, and the mail's files on the FreshService copy.
+describe('the opening e-mail as the first conversation entry', () => {
+  const front = { id: 9, workspaceId: 1, address: 'helpdesk-pilot@example.com', intakeProfile: 'helpdesk' };
+  const ack = 'We respectfully acknowledge that our Vancouver office is located on the traditional, ancestral, and unceded territories of the xʷməθkʷəy̓əm (Musqueam), Sḵwx̱wú7mesh (Squamish), and səlilwətaɬ (Tsleil-Waututh) Nations.';
+  const html = `<table><tr><td><b>Susan Xu, </b>B.A.Sc.</td></tr></table><p><i>${ack}</i></p>`;
+  // What Graph gives as bodyPreview: plain text, cut at 255 characters.
+  const preview = `Susan Xu, B.A.Sc. (she/her)\r\n\r\nIT Coordinator\r\n\r\n${ack}`.slice(0, 255);
+  const originalEntry = () => prismaMock.ticketThreadEntry.create.mock.calls.map((c) => c[0].data).find((d) => d.eventType === 'original_email');
+
+  test('carries the message as it arrived: the formatted body and the whole text, not the 255-character preview', async () => {
+    ticketServiceMock.createTicket.mockResolvedValue({ id: 700, displayRef: 'TP-1100', workspaceId: 1, descriptionText: `Susan Xu, B.A.Sc.\n${ack}` });
+    expect(await mailboxIngestService.processEmail(front, { ...baseEmail, bodyHtml: html, bodyText: null, bodyPreview: preview })).toBe('created');
+    const entry = originalEntry();
+    expect(entry.bodyHtml).toBe(html);
+    expect(entry.bodyText).toContain('səlilwətaɬ (Tsleil-Waututh) Nations.');
+    expect(preview.endsWith('Nations.')).toBe(false); // the preview is cut
+    expect(entry.bodyText).not.toBe(preview);
+    expect(entry.content).toBe(entry.bodyText);
+  });
+
+  test('a side mailbox gets the same; a plain-text mail keeps its text and gets it as paragraphs', async () => {
+    const text = `Line one.\n\n${ack}`;
+    expect(await mailboxIngestService.processEmail(connection, { ...baseEmail, bodyHtml: null, bodyText: text, bodyPreview: text.slice(0, 255) })).toBe('created');
+    const entry = originalEntry();
+    expect(entry.bodyText).toBe(text);
+    expect(entry.bodyHtml).toContain('Line one.');
+    expect(entry.bodyHtml).toContain('Tsleil-Waututh');
+  });
+
+  test('a mail with no body keeps the entry (it holds the Message-ID replies thread on) with nothing invented', async () => {
+    expect(await mailboxIngestService.processEmail(connection, { ...baseEmail, bodyHtml: null, bodyText: '  ', bodyPreview: '' })).toBe('created');
+    const entry = originalEntry();
+    expect(entry.bodyHtml).toBeUndefined();
+    expect(entry.bodyText).toBeNull();
+    expect(entry.emailMessageId).toBe(baseEmail.internetMessageId);
+  });
+
+  test('the pictures and files of the mail are queued for the FreshService copy as one job (helpdesk mailbox only)', async () => {
+    const big = Buffer.alloc(20 * 1024, 1);
+    const files = () => [
+      { name: 'image001.png', contentType: 'image/png', sizeBytes: big.length, buffer: big, contentId: 'img1@01DC', isInline: true },
+      { name: 'invoice.pdf', contentType: 'application/pdf', sizeBytes: 5000, buffer: Buffer.alloc(5000), contentId: null, isInline: false },
+    ];
+    let nextId = 70930;
+    attachmentMock.upload.mockImplementation(async () => ({ id: (nextId += 1) }));
+    mirrorServiceMock.enqueueAttachments = jest.fn().mockResolvedValue({});
+    graphMock.getMessageAttachments.mockResolvedValue({ files: files(), skipped: [] });
+    const body = '<p>See:</p><img src="cid:img1@01DC">';
+    expect(await mailboxIngestService.processEmail(front, { ...baseEmail, id: 'AAMk-q1', bodyHtml: body, hasAttachments: true })).toBe('created');
+    expect(mirrorServiceMock.enqueueAttachments).toHaveBeenCalledTimes(1);
+    expect(mirrorServiceMock.enqueueAttachments).toHaveBeenCalledWith(1, 700, [70931, 70932]);
+    // The entry shows the same marker the description does, so the page puts the picture in both.
+    expect(originalEntry().bodyHtml).toContain('[Image: picture-1-AAMkq1-image001.png]');
+
+    mirrorServiceMock.enqueueAttachments.mockClear();
+    prismaMock.ticketThreadEntry.create.mockClear();
+    graphMock.getMessageAttachments.mockResolvedValue({ files: files(), skipped: [] });
+    expect(await mailboxIngestService.processEmail(connection, { ...baseEmail, id: 'AAMk-q2', internetMessageId: '<side-1@example.com>', bodyHtml: body, hasAttachments: true })).toBe('created');
+    expect(mirrorServiceMock.enqueueAttachments).not.toHaveBeenCalled();
+    delete mirrorServiceMock.enqueueAttachments;
+  });
+});
