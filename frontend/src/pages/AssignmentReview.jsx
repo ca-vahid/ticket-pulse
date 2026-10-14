@@ -12,6 +12,7 @@ import CompetencyRequestsTab from '../components/assignment/CompetencyRequestsTa
 import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
 import HandBacksTab from '../components/assignment/HandBacksTab';
+import SpreadTab from '../components/assignment/SpreadTab';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
 import FilterDropdown from '../components/FilterDropdown';
@@ -32,6 +33,7 @@ const ALL_TABS = [
   { id: 'history', label: 'Ticket History', icon: History, minRole: 'reviewer' },
   // QA 09-25 item 3: why tickets were handed back (process signal).
   { id: 'hand-backs', label: 'Hand-backs', icon: RotateCcw, minRole: 'reviewer' },
+  { id: 'spread', label: 'Spread', icon: Users, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Improvements', icon: Sparkles, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: MessageSquare, minRole: 'admin' },
@@ -5115,6 +5117,7 @@ export default function AssignmentReview() {
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'hand-backs' && <HandBacksTab isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'spread' && <SpreadTab workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}
