@@ -22,6 +22,7 @@
  * here as data; the component only renders.
  */
 import { activityActorKind, fsActorName, isMachineActivity } from '../components/tickets/activityKind.jsx';
+import { fsSystemEntryKind, fsSystemEntryLabel } from './fsSystemEntry.js';
 
 const NEAR_MS = 3 * 60 * 1000;
 const BURST_GAP_MS = 5 * 60 * 1000;
@@ -231,6 +232,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
   }
 
   for (const e of thread) {
+    // A line FreshService wrote itself in the conversation feed ("<Name> has
+    // submitted the survey response") is one quiet History row (QA 10-13 #5).
+    const systemKind = e.source !== 'freshservice_activity' ? fsSystemEntryKind(e) : null;
+    if (systemKind) {
+      const text = String(e.bodyText || e.content || '').replace(/\s+/g, ' ').trim();
+      items.push({ ...baseItem({ event: 'system', verb: fsSystemEntryLabel(systemKind).toLowerCase(), detail: text || null, importance: 1 }), key: `fssys-${e.id}`, at: new Date(e.occurredAt).getTime(), kind: 'freshservice_sync', machine: true, actor: 'FreshService', source: 'freshservice', sig: `fssys|${systemKind}|${text}` });
+      continue;
+    }
     if (e.source !== 'freshservice_activity') continue;
     const at = new Date(e.occurredAt).getTime();
     const actor = e.actorName || 'FreshService';
