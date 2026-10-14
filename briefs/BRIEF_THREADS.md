@@ -8,7 +8,7 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 9 Oct 2026 PM (weekly Oct 5–9 sent; Hedberg #17 found (missed Thu); routing hand-backs 46 = 5-wk high; weekly cron re-armed)._
+_Last updated: 14 Oct 2026 (Wed daily — final firing of cron f25b3b15, re-armed after; AP tail >7d 62→13; Hedberg #17 SPAM-closed; EDM backups silent-unconfirmed; COL-FILE2 repeat; hand-backs 10/24h; AI-tool routing gap)._
 
 ## Probe read rules (do not remove)
 - 'No business hours configured for this day' = the WEEKEND queue reason (in use since Apr) — by design, not a regression (checked Oct 5).
@@ -41,6 +41,7 @@ _Last updated: 9 Oct 2026 PM (weekly Oct 5–9 sent; Hedberg #17 found (missed T
 - CLEARED Sep 14 (mention only on relapse): #242218 CRITICAL defense-evasion (closed same-day, Anton), #241869 Darktrace 100-score (closed, Anton), #242225 suspicious-CAPTCHA report (same-day).
 
 ### (b) Hedberg BEC campaign — NOW 17 INSTANCES
+- Oct 14: #17 SPAM-CLOSED. Watch for #18 (persona/subject check).
 - #17 = #246182 'FWD: CONFIDENTIAL: Retainer Billing – Executive Search Engagement - Steve Hedberg' Oct 8 06:00 PT, ws2, from jade@novus-online.com (NEW domain, outside tcg family; 7 domains total). Open, not noise as of Oct 9. Oct 8 daily wrongly said 'no #17' — corrected in weekly. Ask: spam-close + persona rule.
 - Oct 2: #16 SPAM-CLOSED (day 2).
 - Instance #16 = #244809 "FWD: CONFIDENTIAL: Initial Retainer Billing – Executive Search Engagement 'Steve Hedberg'" (Sep 30 12:05 PT, ws2), from christina@tcgglobal-usa.com ("Christina Graham") — NEW domain, 6th in the tcg-global lookalike family; zero-width characters between letters (same trick as #8). Open + UNASSIGNED over the holiday. Flagged Oct 1: spam-close + block domain; transport-rule argument (persona + external sender) restated. Exit when spam-closed and domain blocked.
@@ -108,17 +109,28 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 
 ### (o-tail) Vancouver hypervisors + DC follow-ups
 - VAN-HV46 hardware fault #245431 (Mehdi, since Oct 3) = 3rd VAN hypervisor alert in 2 weeks (HV40/41). FDR-DC1 'DC service not answering' #245903 Oct 6 16:31–17:01 PT, auto-resolved — likely planned DC work (stale-DC removal item 2 on #244687, still open); ask Mo one line. AD storm itself EXITED (fixed Oct 2, written up Oct 5).
-### (p) AP review backlog — RECOVERED Oct 7 (exited)
+### (p) AP review backlog — RE-OPENED Oct 13
+- Oct 14: 345 → 240; age <1d 97, 1–3d 71, 3–7d 59, >7d 13; 24 h approved 38 / modified 28. Recovery ~48 h after a gap (2nd time). Exit when >7d tail ≤5 two days running.
+- Oct 13: 345 unassigned; age <1d 57, 1–3d 55, 3–7d 171, >7d 62 (pre-holiday tail never cleared). 8 AM drain → 135 pending_review; 2 runs failed on provider error. Third post-gap backlog in two weeks → auto-assign high-acceptance categories is now the structural recommendation (agenda with AP lead).
 - Oct 9: 194 unassigned going into the Thanksgiving 4-day weekend; projection ~350 Tue AM → Tuesday review push recommended. Check the 3–7d tail on Oct 13.
 - 281 (Oct 2 AM) → 269 (Oct 5, 127 aged 3–7d) → 198 → 156 (Oct 7, only 2 aged 3–7d). Lesson for Thanksgiving Oct 12: review step absorbs ~2 days before aging; four-day weekend needs a Tuesday push or auto-assign of high-acceptance categories. Re-open only if 3–7d tail >30 again.
 ### (s) Re-routing ignores hand-back notes — PRODUCT DEFECT (Oct 8)
+- Oct 14: 10 hand-backs in 24 h. #246812 'Claude not connecting to 365' 3 hops → Alexey closed same day (also removed ChatGPT at user request). AI-tool access = unrouted category → suggest 'AI tools' skill for licence owner (Alexey). Dev-thread send STILL awaiting Vahid's go.
 - Oct 9: SYSTEMIC. Oct 8 also: #246299 modeling computer (Andrii→Alexey "This is not to Calgary team"→Mo→Reza fixed: access to BGC-VAN-MODEL2); #246305 N: drive (Soheil→Adrian→Mo→Mehdi +1 TB); #246312 N: drive dup (Mo→Andrii→Andrew→Mehdi, open — likely fixed by the 1 TB); #246331 Pembina Azure restart (Mo→Vahid→Anton rebooted). BGC1392 rebooted by Reza Oct 8. Recommended: (1) hand-back note outranks requester office on re-route, (2) 2nd hand-back → coordinator not a 3rd guess. STILL awaiting Vahid's go to send to TP Continuous Dev thread. No fix in v4.2.24–34.
 - #246097 BGC1392 restart (P4, requester Bogart Mendez, Calgary; PC in Vancouver): auto-assigned Andrii (Calgary) → note "needs someone in Vancouver" + reject → re-assigned Alexey (Calgary, "you are based there") → Alexey reject Oct 8 07:02 PT: "Not sure if anyone (or even AI) is reading the notes at all" → Soheil. 17 h for a power button. Re-route pass must weight the rejecting agent's note above requester office. Offered to send to TP Continuous Dev thread (awaiting Vahid). Trust signal: answer at standup.
+### (v) Long-weekend release train (v4.2.35–4.2.61, Oct 9–13)
+- v4.2.37 Urgent response (rules + on-call rotation with cover) = product answer to Oct 1 holiday-hold gap → ask if ON for IT + rotation set up. v4.2.41 ticket grouping (one ticket per problem; already grouped 68 EDM alerts). Knowledge phases 1–5; phone layouts + web push; v4.2.54–56 helpdesk mailbox profile → it@bgcengineering.ca connected (4th mailbox). Re-routing hand-back fix NOT included (hand-backs 5 over the holiday).
+- #241861 Teams external lockdown implemented Oct 7 14:19 PT (Vahid's own note) → close. Reid Laird (inactive) still holds #241459 + #179369 → reassign.
 ### (u) Comings & Goings live (v4.2.29–4.2.33, Oct 8–9)
 - On/offboarding child tickets park with their family, wake 21/14 days before date, route to the office's IT people. ws1 parked 30 → 44 = the flow, not hiding. Departure notices now carry "Offboarding organised by Ticket Pulse" + child list (Vahid's overdue departure notices are bookkeeping).
 ### (t) ContinuIT meeting → tasks (Oct 8)
 - 13 tasks 08:52 PT from ops meeting + 3 Brisbane via Reza 09:04 (source 105), owned + dated (mostly Nov 7; Brisbane Feb 18). Excluded from per-agent lists while fresh; expect bars +1–2 each (planned work). Review at next ops meeting.
 ### (r) SSL certificate ownership + Mehdi concentration (Oct 7)
+- Oct 12: GoDaddy 'SSL Certificate Subscription Renewal' #246689 + 'Your new SSL Certificate is ready' #246690 (unassigned, holiday-held). Now 4 cert tickets (#240981, #245983 Vahid, #246689, #246690), no confirmed install. Ask Tue standup: one owner, merge, install date.
+- Oct 14: EDM silent since Sun 20:00 PT but #246531 (Vahid) has no note — unconfirmed. COL-FILE2 #246587 failed 2nd time Oct 13 11:20, still unassigned. TP-1766 day 12. Kamloops firewall swap #244074 (Mehdi, ContinuIT plan) due Oct 24, no note. Mehdi holds 4 of 5 open infra items → priorities chat recommended.
+- Oct 13: EDM-HV02 Rapid Recovery = 53x EDM-FILE3 + 15x EDM-DC3 'Transfer has failed' Fri 17:00 → Sun 20:00 PT, grouped into #246531 (now VAHID). Silent since Sun evening — recovered or stopped running? COL-FILE2 #246587 single, unassigned. Recommended: verify last night's EDM transfers; name ONE backup owner (EDM, COL, TP-1766). Related: Alexey #195054 EDM-DC3/FILE3 licensing (pending since Oct 2025).
+- Oct 13: #246689 closed itself; #246690 → Mehdi (merge into #240981 + install date).
+- Oct 12 NEW backup thread: Rapid Recovery 'Transfer has failed' BGC-EDM-DC3 on EDM-HV02 (#246531, Fri 18:00 MT) and 'Volume transfer has failed' BGC-COL-FILE2 on COL-HV01 (#246587, Sat 12:20 MT), both unassigned/held. Check next transfers Tue; if repeat → storage owner with TP-1766.
 - Oct 8: #245983 DigiCert now assigned to VAHID. #240981 wildcard still no note. #245867 W: drive CLOSED (Andrii); #245961 BST CLOSED (Mehdi, service restart). TP-1766 day 6 no note.
 - #245983 DigiCert 'CTE API SSL certificate' notice (Oct 7) → Anton noted "not to me or to Calgary" (bounce risk). #240981 GoDaddy wildcard *.bgcengineering.ca reissue (Mehdi) ready since Sep 7, overdue since Sep 26, NO note. Ask: name one cert owner (Mehdi natural), route #245983, confirm wildcard installed, recurring expiry check. Exit when owned + noted.
 - Mehdi concentration: #245867 W: drive access (UNASSIGNED after first agent lacked security-tab rights), #245961 BST prebill/invoicing/bank recs (Accounting month-end, 2 reboots failed), TP-1766 (day 5 no note), HV46. Coaching/structural: second person with file-share security-group rights.
