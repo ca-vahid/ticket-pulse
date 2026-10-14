@@ -28,6 +28,10 @@ export const EVENT_META = {
   approval_waiting: { icon: '✅', word: 'Approval', heading: 'Approval waiting for you', banner: 'accent' },
   group_unassigned: { icon: '🆕', word: 'New', heading: 'New unassigned ticket', banner: 'accent' },
   test: { icon: '👋', word: 'Test', heading: 'Test message', banner: 'accent' },
+  av_submitted: { icon: '🗓️', word: 'Availability', heading: 'Time away', banner: 'accent' },
+  av_decided: { icon: '🗓️', word: 'Availability', heading: 'Time away decided', banner: 'accent' },
+  av_reminder: { icon: '⏰', word: 'Availability', heading: 'Time away starts', banner: 'accent' },
+  av_approval_waiting: { icon: '🙋', word: 'Availability', heading: 'Time-away approval waiting', banner: 'accent' },
 };
 
 const PRIORITY = { 1: ['Low', 'Default'], 2: ['Medium', 'Good'], 3: ['High', 'Warning'], 4: ['Urgent', 'Attention'] };

@@ -552,6 +552,14 @@ async function initialize() {
       logger.warn('Teams digest runner failed to start (non-fatal):', e.message);
     }
 
+    // Availability: Teams reminder the working day before time away (QA 10-13 #6).
+    try {
+      const { default: availabilityTeams } = await import('./services/availability/availabilityTeams.js');
+      availabilityTeams.start();
+    } catch (e) {
+      logger.warn('Availability Teams reminders failed to start (non-fatal):', e.message);
+    }
+
     // App-level backup schedules: due-snapshot runner + retention sweeps.
     try {
       const { default: backupService } = await import('./services/backupService.js');

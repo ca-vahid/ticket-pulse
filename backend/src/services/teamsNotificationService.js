@@ -35,6 +35,11 @@ export const EVENTS = [
   { key: 'sla_breach', label: 'SLA breached on my ticket', group: 'Deadlines', mode: 'teams' },
   { key: 'approval_waiting', label: 'An approval is waiting for my decision', group: 'Approvals', mode: 'teams' },
   { key: 'group_unassigned', label: 'A new unassigned ticket arrives in my groups', group: 'My team', mode: 'off' },
+  // Availability (QA 10-13 #6) — sent by services/availability/availabilityTeams.js.
+  { key: 'av_submitted', label: 'My time-away request is booked or sent for approval', group: 'Time away', mode: 'teams' },
+  { key: 'av_decided', label: 'My time-away request is approved, denied or cancelled by someone else', group: 'Time away', mode: 'teams' },
+  { key: 'av_reminder', label: 'A reminder the working day before my time away starts', group: 'Time away', mode: 'teams' },
+  { key: 'av_approval_waiting', label: 'A time-away request is waiting for my approval', group: 'Time away', mode: 'teams' },
 ];
 const EVENT_KEYS = new Set(EVENTS.map((e) => e.key));
 const MODES = new Set(['teams', 'digest', 'off']);

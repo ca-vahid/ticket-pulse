@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.2.68-preview';
+export const APP_VERSION = '4.2.69-preview';
 
 export const changelog = [
+  {
+    version: '4.2.69-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Availability: a request for more days than you have left is never approved automatically</strong> &mdash; an 8-week vacation and three weeks of sick days were approved on the spot, because the approval group was set to skip approval for every type and nothing looked at the balance. A request that needs more days than are left of a balance-tracked type (Vacation, Sick) now always goes to an approver, whatever the group or an auto-approve rule says. An admin who wants a different limit writes a Balance rule for the type, and that rule decides.' },
+      { type: 'fixed', html: '<strong>Availability settings: typing in an editor keeps the cursor</strong> &mdash; in every Availability settings drawer (approval groups, leave types, rules, offices) the cursor left the field after each letter. Fixed; the drawer opens with the cursor in the first field.' },
+      { type: 'improved', html: '<strong>Approval group editor rebuilt</strong> &mdash; three plain questions: who is in the group, who decides, and what is approved without asking. People are picked by name from a searchable list (arrow keys and Enter work), the whole workspace can be added in one click, and a warning shows when Vacation would skip approval. The &ldquo;every approver must approve&rdquo; switch is gone: it was never enforced, the first approver to answer has always settled a request.' },
+      { type: 'fixed', html: '<strong>Availability: &ldquo;View as&rdquo; a role in another workspace shows that workspace&rsquo;s people</strong> &mdash; a super admin viewing as a Reviewer in Project Accounting saw the IT team under the Project Accounting name. The view now decides which team is shown, and a role view no longer keeps super admin rights inside Availability.' },
+      { type: 'improved', html: '<strong>Approvals say whose they are</strong> &mdash; approvals follow the approver, not the workspace on screen, so a request from another team can appear there. The list now shows each person&rsquo;s team, and is split in two: <em>Waiting for your decision</em> (you are a named approver; this is what the tab counts) and, for super admins, <em>Waiting on other approvers</em> with the approvers named.' },
+      { type: 'fixed', html: '<strong>Availability: a workspace admin acts only on their own workspace&rsquo;s people</strong> &mdash; an admin of any workspace could open or cancel anyone&rsquo;s request, book time for anyone, adjust anyone&rsquo;s balance, and see waiting and private entries of another team. Each of these is now limited to the people of a workspace that admin administers; super admins are unchanged.' },
+      { type: 'added', html: '<strong>Teams messages for time away</strong> &mdash; in workspaces with Teams on, the Ticket Pulse bot tells you when your request is booked or sent for approval, when someone approves, denies or cancels it, the working day before your time away starts, and when a request is waiting for your approval. Each is a row under <em>Time away</em> in Mail &amp; alerts &rarr; Teams and can be switched to Digest or Off; all four are on by default. E-mail notices are unchanged.' },
+    ],
+  },
   {
     version: '4.2.68-preview',
     date: 'October 13, 2026',

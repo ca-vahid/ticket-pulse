@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, Plus, X } from 'lucide-react';
+import { Loader2, Plus, Search, X } from 'lucide-react';
 import { PersonAvatar } from '../../tickets/ticketUi';
-import { BTN_LINK, BTN_PRIMARY, BTN_QUIET, INPUT, nameFromEmail } from '../availabilityUi';
+import { BTN_PRIMARY, BTN_QUIET, INPUT, nameFromEmail } from '../availabilityUi';
 
 /**
  * Small building blocks for the Availability admin sections: a right-hand
@@ -10,16 +10,34 @@ import { BTN_LINK, BTN_PRIMARY, BTN_QUIET, INPUT, nameFromEmail } from '../avail
  * rows, never chips).
  */
 
+/** A titled block inside a drawer: what it is, one line on what it does, then the controls. */
+export function DrawerSection({ title, hint = null, children }) {
+  return (
+    <section className="border-t border-border pt-4 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      {hint && <p className="mb-2 text-xs text-muted-foreground">{hint}</p>}
+      <div className={`space-y-3 ${hint ? '' : 'mt-2'}`}>{children}</div>
+    </section>
+  );
+}
+
 export function Drawer({ open, title, onClose, onSave, saving = false, error = null, children, saveLabel = 'Save' }) {
   const ref = useRef(null);
   const titleId = useId();
+  // QA 10-13 #9: this effect used to depend on onClose, which every caller
+  // passes as a new function on each render. So every keystroke re-ran it and
+  // moved focus from the field to the drawer, one letter at a time. It now
+  // runs when the drawer opens, and puts the cursor in the first field once.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') closeRef.current(); };
     document.addEventListener('keydown', onKey);
-    ref.current?.focus();
+    const first = ref.current?.querySelector('input:not([type="checkbox"]):not([type="radio"]), textarea');
+    (first || ref.current)?.focus();
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-[80] flex justify-end">
@@ -75,26 +93,105 @@ export function MultiCheck({ options, value = [], onChange, label, allValue = nu
   );
 }
 
-/** Pick people by e-mail from the known list; rows show avatar + name. */
-export function PeoplePicker({ label, people = [], value = [], onChange, renderExtra = null }) {
+/**
+ * Pick people from the known list: type a name (or an e-mail), choose from the
+ * list with the mouse or the arrow keys. Chosen people are rows with avatar +
+ * name, never chips. A full address that is not on the list can still be added.
+ *
+ * QA 10-13 #9: this was a bare e-mail box backed by the browser's datalist,
+ * which only matched addresses and looked different in every browser.
+ */
+export function PeoplePicker({ label, hint = null, people = [], value = [], onChange, renderExtra = null, placeholder = 'Search by name or e-mail', quickAdd = null }) {
   const listId = useId();
+  const inputRef = useRef(null);
   const [text, setText] = useState('');
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
   const byEmail = new Map(people.map((p) => [p.email, p]));
-  const add = () => {
-    const email = text.trim().toLowerCase();
-    if (!email || !email.includes('@') || value.includes(email)) { setText(''); return; }
+  const q = text.trim().toLowerCase();
+  const chosen = new Set(value);
+  const matches = people
+    .filter((p) => !chosen.has(p.email))
+    .filter((p) => !q || String(p.name || '').toLowerCase().includes(q) || String(p.email || '').toLowerCase().includes(q))
+    .slice(0, 40);
+  const typedEmail = q.includes('@') && q.includes('.') && !q.includes(' ') && !chosen.has(q) && !byEmail.has(q) ? q : null;
+  const options = [...matches.map((p) => ({ email: p.email, name: p.name || nameFromEmail(p.email) })), ...(typedEmail ? [{ email: typedEmail, name: null, typed: true }] : [])];
+  const at = Math.min(active, Math.max(0, options.length - 1));
+
+  const add = (email) => {
+    if (!email || chosen.has(email)) return;
     onChange([...value, email]);
     setText('');
+    setActive(0);
+    inputRef.current?.focus();
   };
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive(Math.min(at + 1, options.length - 1)); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(at - 1, 0)); return; }
+    if (e.key === 'Enter') { e.preventDefault(); if (open && options[at]) add(options[at].email); return; }
+    if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); }
+  };
+  const extra = quickAdd ? quickAdd.emails.filter((e) => !chosen.has(e)) : [];
+
   return (
     <div>
-      <p className="mb-1 text-xs font-medium text-muted-foreground">{label}</p>
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3">
+        <p className="text-xs font-medium text-muted-foreground">{label}{value.length ? ` · ${value.length}` : ''}</p>
+        {extra.length > 0 && (
+          <button type="button" className="tp-focus-ring rounded text-xs text-primary hover:underline" onClick={() => onChange([...value, ...extra])}>{quickAdd.label(extra.length)}</button>
+        )}
+      </div>
+      {hint && <p className="mb-1.5 text-xs text-muted-foreground">{hint}</p>}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        <input
+          ref={inputRef}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={open && options[at] ? `${listId}-${at}` : undefined}
+          aria-label={`Add to ${label}`}
+          autoComplete="off"
+          spellCheck={false}
+          className={`${INPUT} pl-8`}
+          value={text}
+          placeholder={placeholder}
+          onChange={(e) => { setText(e.target.value); setOpen(true); setActive(0); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={onKeyDown}
+        />
+        {open && (
+          <ul id={listId} role="listbox" aria-label={label} className="settings-scrollbar absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-card py-1 shadow-soft">
+            {options.length === 0 && <li className="px-3 py-2 text-sm text-muted-foreground">{q ? 'No one matches. Type a full e-mail address to add someone who is not listed.' : 'Everyone listed is already added.'}</li>}
+            {options.map((o, i) => (
+              <li
+                key={o.email}
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={i === at}
+                className={`flex cursor-pointer items-center gap-2 px-2.5 py-1.5 ${i === at ? 'bg-muted' : ''}`}
+                onMouseDown={(e) => { e.preventDefault(); add(o.email); }}
+                onMouseEnter={() => setActive(i)}
+              >
+                {o.typed ? <Plus className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> : <PersonAvatar name={o.name} size="h-6 w-6" />}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-foreground">{o.typed ? `Add ${o.email}` : o.name}</span>
+                  {!o.typed && <span className="block truncate text-xs text-muted-foreground">{o.email}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {value.length > 0 && (
-        <ul className="mb-2 divide-y divide-border rounded-md border border-border">
+        <ul className="mt-2 divide-y divide-border border-y border-border">
           {value.map((email) => {
             const name = byEmail.get(email)?.name || nameFromEmail(email);
             return (
-              <li key={email} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
+              <li key={email} className="flex flex-wrap items-center gap-2 py-1.5">
                 <PersonAvatar name={name} size="h-6 w-6" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-foreground">{name}</span>
@@ -109,22 +206,6 @@ export function PeoplePicker({ label, people = [], value = [], onChange, renderE
           })}
         </ul>
       )}
-      <div className="flex gap-2">
-        <input
-          type="email"
-          list={listId}
-          className={INPUT}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-          placeholder="name@company.com"
-          aria-label={`Add to ${label}`}
-        />
-        <datalist id={listId}>
-          {people.filter((p) => !value.includes(p.email)).map((p) => <option key={p.email} value={p.email}>{p.name}</option>)}
-        </datalist>
-        <button type="button" className={BTN_LINK} onClick={add}><Plus className="h-4 w-4" aria-hidden="true" />Add</button>
-      </div>
     </div>
   );
 }
