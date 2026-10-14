@@ -152,10 +152,14 @@ describe('AutofillModal — compose zone', () => {
     expect(screen.getByText('0 / 6 images')).toBeInTheDocument();
   });
 
+  // QA 10-13 #2: a pasted picture also shows as a small preview inside the editor
+  // (img[data-tp-img]); the cap is about the staged screenshots under it.
+  const stagedThumbs = () => screen.getAllByRole('img').filter((img) => !img.hasAttribute('data-tp-img'));
+
   test('the seventh image is refused — cap is 6', () => {
     const { editor } = renderModal();
     for (let i = 0; i < 7; i += 1) pasteImage(editor, imageFile(`s${i}.png`));
-    expect(screen.getAllByRole('img')).toHaveLength(6);
+    expect(stagedThumbs()).toHaveLength(6);
     expect(screen.getByRole('alert')).toHaveTextContent(/Up to 6 screenshots/);
   });
 
@@ -163,7 +167,7 @@ describe('AutofillModal — compose zone', () => {
     const { editor } = renderModal();
     for (let i = 0; i < 4; i += 1) pasteImage(editor, imageFile(`s${i}.png`, 4.9 * 1024 * 1024));
     pasteImage(editor, imageFile('last.png', 4.9 * 1024 * 1024));
-    expect(screen.getAllByRole('img')).toHaveLength(4);
+    expect(stagedThumbs()).toHaveLength(4);
     expect(screen.getByRole('alert')).toHaveTextContent(/past 20.0 MB in total/);
   });
 
