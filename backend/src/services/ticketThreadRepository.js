@@ -107,9 +107,42 @@ class TicketThreadRepository {
     return keys;
   }
 
+  /**
+   * Ids (of the tickets these entries belong to) that are Ticket Pulse-born. Their FreshService
+   * record is only a copy: what is written on it is Ticket Pulse's own notes and replies, sent
+   * there by the mirror. Never throws; a failed lookup returns an empty set (behaviour as before).
+   */
+  async _ticketPulseBornIds(entries) {
+    const ids = [...new Set(entries.map((e) => Number(e?.ticketId)).filter((n) => Number.isInteger(n) && n > 0))];
+    if (ids.length === 0) return new Set();
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticket.findMany({ where: { id: { in: ids }, origin: 'ticketpulse' }, select: { id: true } }))
+      .catch(() => []);
+    return new Set((Array.isArray(rows) ? rows : []).map((r) => r.id));
+  }
+
   async bulkUpsert(entries = []) {
     if (!Array.isArray(entries) || entries.length === 0) {
       return { upserted: 0 };
+    }
+
+    // 13 Oct 2026: a Ticket Pulse-born ticket's conversation lives here; the FreshService copy
+    // only holds what the mirror wrote on it. The daily review's thread hydration read those
+    // copies back and stored the mirror's own notes as new rows; from the day IT's mail became
+    // Ticket Pulse-born that included "reply received by e-mail in Ticket Pulse", stored as a
+    // NEW requester reply: seven "Requester replied" events at 18:08 PT and three closed tickets
+    // reopened with no new mail. What is said on a copy comes back through the mirror reconcile
+    // alone (mirrorService), which knows its own notes. So: a conversation row read from the copy
+    // of a Ticket Pulse-born ticket is not stored, and no FreshService-sourced row on such a
+    // ticket ever fires "Requester replied".
+    const tpBornIds = await this._ticketPulseBornIds(entries);
+    if (tpBornIds.size) {
+      const kept = entries.filter((e) => !(tpBornIds.has(Number(e.ticketId)) && e.source === 'freshservice_conversation'));
+      if (kept.length !== entries.length) {
+        logger.debug(`Thread upsert: ${entries.length - kept.length} conversation row(s) read from the FreshService copy of a Ticket Pulse ticket were not stored`);
+      }
+      entries = kept;
+      if (entries.length === 0) return { upserted: 0 };
     }
 
     let upserted = 0;
@@ -265,6 +298,7 @@ class TicketThreadRepository {
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       const candidates = keyed.filter((entry) => {
         if (entry.eventType !== 'customer_reply') return false;
+        if (tpBornIds.has(Number(entry.ticketId))) return false; // a copy never speaks for the requester
         if (existingKeys.has(`${entry.ticketId}:${entry.externalEntryId}`)) return false;
         if (entry.isPrivate === true) return false;
         const at = entry.occurredAt ? new Date(entry.occurredAt).getTime() : 0;

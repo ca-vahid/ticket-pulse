@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.70-preview';
+export const APP_VERSION = '4.2.71-preview';
 
 export const changelog = [
+  {
+    version: '4.2.71-preview',
+    date: 'October 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The evening review no longer reopens closed tickets</strong> &mdash; at 6:08 p.m. on 13 October three closed IT tickets went back to Open with no new mail. The daily assignment review reads each ticket&rsquo;s FreshService record to have the full conversation. For a ticket that lives in Ticket Pulse, that record is only a copy, and what is written on it is Ticket Pulse&rsquo;s own notes. The review stored those notes as new messages, and the note that says &ldquo;reply received by e-mail in Ticket Pulse&rdquo; was read as a fresh reply from the requester, which set off the reopen rule. Notes read back from a copy are no longer stored, and can never count as a requester&rsquo;s reply. This had been adding duplicate notes quietly since late September; it only became harmful when IT&rsquo;s mail moved to Ticket Pulse.' },
+    ],
+  },
   {
     version: '4.2.70-preview',
     date: 'October 13, 2026',
