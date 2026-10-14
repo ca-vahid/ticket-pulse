@@ -63,6 +63,13 @@ class TicketSplitService {
    *                              under the agent's own text, if any) and COPIES of its
    *                              description-level attachments go to the child (QA 09-15 #2)
    *   notifyRequester {boolean}  default false — a public reply on the child
+   *   runAiTriage     {boolean}  default false: send the child through the normal
+   *                              AI sort + assignment (a reply that was really a new
+   *                              request, 13 Oct 2026); the default keeps the agent's
+   *                              own category choice
+   *   linkKind        {string?}  'related_to' links the two as related instead of
+   *                              parent/child: unrelated new work must not stop the
+   *                              original from being closed (open-children guard)
    * @param {object} actor
    */
   async split(parentId, workspaceId, input = {}, actor = null) {
@@ -181,7 +188,7 @@ class TicketSplitService {
       ...(input.assignedTechId ? { assignedTechId: Number(input.assignedTechId) } : {}),
       // The agent chose the category deliberately; don't spend an LLM run
       // re-deciding it, and don't email the requester unless asked.
-      runAiTriage: false,
+      runAiTriage: input.runAiTriage === true,
       notifyRequester: input.notifyRequester === true,
     }, actor);
 
@@ -261,12 +268,13 @@ class TicketSplitService {
     //    so go through it rather than writing the link directly.
     let linkKind = 'parent_of';
     try {
+      if (input.linkKind === 'related_to') throw new Error('a related link was asked for');
       const { default: ticketLinkService } = await import('./ticketLinkService.js');
       await ticketLinkService.setParent(child.id, workspaceId, { parentTicketId: parentId }, actor);
     } catch (err) {
       // A parent that is itself a child of the new ticket, or any other
       // invariant, must not lose us the split — fall back to a plain relation.
-      logger.warn(`Split parent link failed, falling back to related_to: ${err.message}`);
+      if (input.linkKind !== 'related_to') logger.warn(`Split parent link failed, falling back to related_to: ${err.message}`);
       linkKind = 'related_to';
       await prisma.ticketLink.upsert({
         where: { ticketId_relatedTicketId_kind: { ticketId: parentId, relatedTicketId: child.id, kind: 'related_to' } },

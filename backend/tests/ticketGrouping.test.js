@@ -379,6 +379,52 @@ describe('review', () => {
     expect(page.senders[0]).toMatchObject({ sender: RR.email, kind: 'repeating', enabled: true });
   });
 
+  // 13 Oct 2026: "this reply looks like a new request" rows live in the same
+  // table (kind new_request, no second ticket). The page lists them under
+  // Waiting, and never as a pair that could be undone.
+  test('a new-request suggestion has no second ticket: it waits on the page, and is never listed as combined or reversed', async () => {
+    const e = (id, over) => ({ id, workspaceId: 1, ticketId: 100 + id, targetTicketId: null, kind: 'new_request', state: 'suggested', confidence: 'high', retraction: false, reason: 'Asks for Acrobat.', details: { replyEntryId: 9 }, createdAt: at(`2026-10-1${id}T00:00:00Z`), decidedAt: null, decidedBy: null, ...over });
+    prismaMock.ticketGroupingEvent.findMany.mockResolvedValue([e(1), e(2, { state: 'dismissed' }), e(3, { state: 'applied', targetTicketId: 20 }), e(4, { kind: 'duplicate', targetTicketId: 20 })]);
+    prismaMock.ticketGroupingSender.findMany.mockResolvedValue([]);
+    prismaMock.ticket.findMany.mockResolvedValue([20, 101, 102, 103, 104].map((id) => ticket({ id, freshserviceTicketId: BigInt(id) })));
+    const page = await grouping.overview(1, { days: 14 });
+    expect(page.waiting.map((x) => [x.id, x.kind, x.target])).toEqual([[1, 'new_request', null], [4, 'duplicate', expect.objectContaining({ ref: '#20' })]]);
+    expect(page.combined).toEqual([]);
+    expect(page.reversed).toEqual([]);
+  });
+
+  test('agreeing with a new-request suggestion splits it (its own service); undo leaves a split alone', async () => {
+    const newRequest = { default: { accept: jest.fn(async () => ({ event: { id: 55, state: 'applied' }, changed: true, child: { id: 900 } })) } };
+    jest.unstable_mockModule('../src/services/newRequestSuggestionService.js', () => newRequest);
+    prismaMock.ticketGroupingEvent.findFirst.mockResolvedValue({ id: 55, workspaceId: 1, ticketId: 11, targetTicketId: null, kind: 'new_request', state: 'suggested', details: { replyEntryId: 9 } });
+    const out = await grouping.accept(55, 1, actor);
+    expect(newRequest.default.accept).toHaveBeenCalledWith(55, 1, actor);
+    expect(out).toMatchObject({ changed: true, event: { state: 'applied' } });
+    expect(links.link).not.toHaveBeenCalled();
+
+    prismaMock.ticketGroupingEvent.findFirst.mockResolvedValue({ id: 55, workspaceId: 1, ticketId: 11, targetTicketId: 900, kind: 'new_request', state: 'applied' });
+    expect((await grouping.undo(55, 1, actor)).changed).toBe(false);
+    expect(prismaMock.ticketGroupingEvent.update).not.toHaveBeenCalled();
+  });
+
+  test('a ticket whose reply was split is not "already grouped": its own AI run still happens', async () => {
+    settingsMock.get.mockResolvedValue(JSON.stringify({ mode: 'on' }));
+    prismaMock.ticketGroupingEvent.findFirst.mockResolvedValue({ id: 55, state: 'applied', kind: 'new_request', targetTicketId: 900 });
+    expect(await grouping.evaluateTicket(11, 1)).toBeNull();
+  });
+
+  test('the morning mail lists new-request suggestions on their own, not as pairs', async () => {
+    const win = { since: at('2026-10-12T15:00:00Z'), until: at('2026-10-13T15:00:00Z') };
+    prismaMock.ticketGroupingEvent.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: 9, ticketId: 101, targetTicketId: null, kind: 'new_request', state: 'suggested', reason: 'Asks for Acrobat.', retraction: false },
+    ]);
+    prismaMock.ticket.findMany.mockResolvedValue([ticket({ id: 101, freshserviceTicketId: BigInt(245828) })]);
+    const d = await grouping.digest(1, win);
+    expect(d.waiting).toEqual([]);
+    expect(d.combined).toEqual([]);
+    expect(d.newRequests).toEqual([expect.objectContaining({ id: 9, kind: 'new_request', reason: 'Asks for Acrobat.', ticket: expect.objectContaining({ ref: '#245828' }), target: null })]);
+  });
+
   test('an admin changes what a sender is; the change is signed', async () => {
     prismaMock.ticketGroupingSender.findFirst.mockResolvedValue(CARD);
     prismaMock.ticketGroupingSender.update.mockImplementation(async ({ data }) => ({ ...CARD, ...data }));

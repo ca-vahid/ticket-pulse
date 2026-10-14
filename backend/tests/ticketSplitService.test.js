@@ -193,6 +193,26 @@ describe('ticketSplitService.split', () => {
     expect(prismaMock.ticketLink.upsert).toHaveBeenCalled();
   });
 
+  // 13 Oct 2026: a reply that was really a new request is split with the AI
+  // sort + assignment on, and as a RELATED ticket (a child would stop the old
+  // ticket from going back to Resolved: open-children guard).
+  test('runAiTriage and linkKind related_to are honoured when asked for; the defaults are unchanged', async () => {
+    const out = await ticketSplitService.split(500, 1, {
+      subject: 'Adobe Acrobat', description: '<p>I need Acrobat.</p>', entryIds: [], includeDescription: false,
+      internalCategoryId: null, internalSubcategoryId: null, runAiTriage: true, linkKind: 'related_to',
+    }, actor);
+    const [, input] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.runAiTriage).toBe(true);
+    expect(input.internalCategoryId).toBeNull();
+    expect(input.description).toBe('<p>I need Acrobat.</p>');
+    expect(input.requesterId).toBe(77);
+    expect(linkServiceMock.setParent).not.toHaveBeenCalled();
+    expect(prismaMock.ticketLink.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ ticketId: 500, relatedTicketId: 900, kind: 'related_to' }),
+    }));
+    expect(out.linkKind).toBe('related_to');
+  });
+
   test('both tickets get a note, and a failed note never fails the split', async () => {
     ticketServiceMock.addPrivateNote.mockRejectedValue(new Error('FreshService queue timeout'));
     const out = await ticketSplitService.split(500, 1, { subject: 'VPN', entryIds: [9001] }, actor);

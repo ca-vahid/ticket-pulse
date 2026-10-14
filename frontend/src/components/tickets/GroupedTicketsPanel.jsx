@@ -4,7 +4,7 @@ import { Activity, AlertCircle, ArrowRight, ChevronDown, ChevronRight, Layers, L
 import { ticketGroupingAPI } from '../../services/api';
 import { formatDayTime, timeAgo } from './ticketUi';
 
-const KIND_WORDS = { duplicate: 'Same request', update: 'Follow-up', related: 'Related', repeat: 'Repeat' };
+const KIND_WORDS = { duplicate: 'Same request', update: 'Follow-up', related: 'Related', repeat: 'Repeat', new_request: 'A reply that looks like a new request' };
 const SENDER_KINDS = [
   { value: 'repeating', label: 'Repeats itself' },
   { value: 'distinct', label: 'Every mail is its own item' },
@@ -47,11 +47,14 @@ function Pair({ event, backState, children }) {
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <TicketLine ticket={event.ticket} backState={backState} strong />
         </div>
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 translate-y-0.5 text-muted-foreground/75" aria-hidden="true" />
-          <TicketLine ticket={event.target} backState={backState} />
-          {event.target?.status && <span className="text-xs text-muted-foreground/75">{event.target.status}{event.target.assignee ? `, with ${event.target.assignee}` : ''}</span>}
-        </div>
+        {/* A reply that looks like a new request is about one ticket: there is no second one yet. */}
+        {event.target && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 translate-y-0.5 text-muted-foreground/75" aria-hidden="true" />
+            <TicketLine ticket={event.target} backState={backState} />
+            {event.target?.status && <span className="text-xs text-muted-foreground/75">{event.target.status}{event.target.assignee ? `, with ${event.target.assignee}` : ''}</span>}
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
           <span className="font-semibold text-foreground/85">{KIND_WORDS[event.kind] || event.kind}</span>
           {event.reason ? `: ${event.reason}` : ''}
@@ -160,10 +163,10 @@ export default function GroupedTicketsPanel() {
             {waiting.map((e) => (
               <Pair key={e.id} event={e} backState={backState}>
                 <button type="button" className={primary} disabled={busy === `accept:${e.id}`} onClick={() => act(`accept:${e.id}`, () => ticketGroupingAPI.accept(e.id))}>
-                  {spin(`accept:${e.id}`)}{e.kind === 'related' ? 'Link' : 'Combine'}
+                  {spin(`accept:${e.id}`)}{e.kind === 'new_request' ? 'Split into its own ticket' : e.kind === 'related' ? 'Link' : 'Combine'}
                 </button>
                 <button type="button" className={button} disabled={busy === `dismiss:${e.id}`} onClick={() => act(`dismiss:${e.id}`, () => ticketGroupingAPI.dismiss(e.id))}>
-                  {spin(`dismiss:${e.id}`)}Not related
+                  {spin(`dismiss:${e.id}`)}{e.kind === 'new_request' ? 'It belongs here' : 'Not related'}
                 </button>
               </Pair>
             ))}
