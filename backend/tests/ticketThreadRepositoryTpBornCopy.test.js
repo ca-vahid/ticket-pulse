@@ -30,7 +30,7 @@ jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js'
   emitTicketEvent: emitTicketEventMock,
 }));
 
-const { default: repo } = await import('../src/services/ticketThreadRepository.js');
+const { default: repo, isMirrorEcho } = await import('../src/services/ticketThreadRepository.js');
 const flush = () => new Promise((r) => setTimeout(r, 15));
 
 const TP_BORN = 62973; // TP-1888
@@ -90,5 +90,19 @@ describe('conversation rows read from the FreshService copy of a Ticket Pulse-bo
     await flush();
     expect(prismaMock.ticketThreadEntry.upsert).toHaveBeenCalledTimes(1);
     expect(emitTicketEventMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('isMirrorEcho (14 Oct 2026, TP-1888 shown twice)', () => {
+  test('a FreshService conversation row carrying the mirror line is an echo', () => {
+    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: 'Jeremy Dumais · reply received by e-mail in Ticket Pulse · TP-1888 [Ticket Pulse mirror] When I click…' })).toBe(true);
+    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: '', bodyHtml: '<p>[Ticket Pulse mirror]</p>' })).toBe(true);
+  });
+
+  test('work typed on the copy and Ticket Pulse rows are kept', () => {
+    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: 'Hi Jennifer, as we discussed today…' })).toBe(false);
+    expect(isMirrorEcho({ source: 'freshservice_reconciliation', bodyText: 'x [Ticket Pulse mirror]' })).toBe(false);
+    expect(isMirrorEcho({ source: 'ticketpulse_user', bodyText: 'Hi Jeremy' })).toBe(false);
+    expect(isMirrorEcho(null)).toBe(false);
   });
 });

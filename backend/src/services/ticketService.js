@@ -13,6 +13,7 @@ import ticketTypeService from './ticketTypeService.js';
 import statusService, { heuristicBaseStatus } from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
+import { isMirrorEcho } from '../utils/mirrorEcho.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import ticketRollUpService from './ticketRollUpService.js';
 import requesterRepository from './requesterRepository.js';
@@ -2604,7 +2605,9 @@ class TicketService {
     ]);
 
     const incomingByTicket = await this._lastPublicEntryIncoming([ticket.id]);
-    const resolvedThread = await this._resolveThreadActors(thread, workspaceId, ticket.requester);
+    // The FreshService copy of a Ticket Pulse-born ticket only echoes what was said here.
+    const shownThread = ticket.origin === TICKET_ORIGIN.TICKETPULSE ? (thread || []).filter((e) => !isMirrorEcho(e)) : thread;
+    const resolvedThread = await this._resolveThreadActors(shownThread, workspaceId, ticket.requester);
     // Merged-away tickets carry a pointer to their target for the banner.
     const mergedInto = await import('./ticketMergeService.js')
       .then(({ default: svc }) => svc.mergedInto(ticket.id, workspaceId))
