@@ -24,6 +24,12 @@
  *
  * Order: refuse > needs_approval > auto_approve > group auto-approve > the
  * leave type's own "needs approval" default. warn rules never decide.
+ *
+ * Built in (QA 10-13 #10): a request for more days than the person has left of
+ * a balance-tracked type is never approved automatically; it goes to an
+ * approver. An admin who wants something else writes a `balance` rule for the
+ * type (refuse, or warn / allowNegativeDays to let it through), and then that
+ * rule decides.
  */
 
 export const RULE_KINDS = ['always', 'advance_notice', 'capacity', 'duration', 'blackout', 'balance', 'past_dated', 'booking_window', 'per_person'];
@@ -242,11 +248,33 @@ export function decide({ rules = [], leaveType, person, groupIds = [], groupAuto
   if (refuse) return { outcome: 'refused', fired, warnings, reason: refuse.message || `Not allowed by "${refuse.name}".` };
   const needs = fired.find((f) => f.outcome === 'needs_approval');
   if (needs) return { outcome: 'pending', fired, warnings, reason: needs.message || `Needs approval: "${needs.name}".` };
+  const approved = (reason) => {
+    const short = overBalance({ rules: sorted, leaveType, person, groupIds, ctx });
+    if (short) return { outcome: 'pending', fired, warnings, reason: short, guard: 'balance' };
+    return { outcome: 'approved', fired, warnings, reason };
+  };
   const auto = fired.find((f) => f.outcome === 'auto_approve');
-  if (auto) return { outcome: 'approved', fired, warnings, reason: auto.message || `Auto-approved by "${auto.name}".` };
-  if (groupAutoApprove) return { outcome: 'approved', fired, warnings, reason: 'Auto-approved: your approval group auto-approves this type.' };
+  if (auto) return approved(auto.message || `Auto-approved by "${auto.name}".`);
+  if (groupAutoApprove) return approved('Auto-approved: your approval group auto-approves this type.');
   if (leaveType.requiresApproval) return { outcome: 'pending', fired, warnings, reason: `${leaveType.name} needs approval.` };
-  return { outcome: 'approved', fired, warnings, reason: `${leaveType.name} doesn't need approval.` };
+  return approved(`${leaveType.name} doesn't need approval.`);
+}
+
+/**
+ * The built-in balance guard: the sentence to show when this request needs
+ * more days than are left and no `balance` rule covers the type, else null.
+ */
+export function overBalance({ rules = [], leaveType, person, groupIds = [], ctx }) {
+  if (!leaveType?.tracksBalance) return null;
+  if (ctx?.remaining === null || ctx?.remaining === undefined) return null;
+  const left = Number(ctx.remaining);
+  const needs = Number(ctx.days || 0);
+  if (!Number.isFinite(left) || !(needs > 0) || left - needs >= 0) return null;
+  const ruled = rules.some((r) => r.condition?.kind === 'balance' && ruleApplies(r, { person, leaveTypeId: leaveType.id, groupIds }));
+  if (ruled) return null;
+  const name = String(leaveType.name || 'this type').toLowerCase();
+  const have = left > 0 ? `You have ${left} ${name} day${left === 1 ? '' : 's'} left` : `You have no ${name} days left`;
+  return `${have} and this needs ${needs}, so an approver has to confirm it.`;
 }
 
 /**

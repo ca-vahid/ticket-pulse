@@ -7,9 +7,15 @@ import {
 } from './availabilityUi';
 
 /**
- * Approvals: pending requests the caller may decide. Each row says who, what,
- * when, how much, their note, and why it needs a person (the decision reason
- * plus the rule messages that fired). Deny needs a note — the requester sees it.
+ * Approvals: pending requests the caller may decide. Each row says who (and
+ * their team), what, when, how much, their note, and why it needs a person
+ * (the decision reason plus the rule messages that fired). Deny needs a note —
+ * the requester sees it.
+ *
+ * QA 10-13 #8: approvals follow the approver, not the workspace on screen, so
+ * a request from another team can show here. Two lists now: what is waiting
+ * for YOU, and (super admins only) what is waiting on other approvers, with
+ * the team and the approvers named.
  */
 
 function ApprovalRow({ r, type, nameOf, onDecided }) {
@@ -19,6 +25,7 @@ function ApprovalRow({ r, type, nameOf, onDecided }) {
   const [error, setError] = useState(null);
   const name = nameOf(r.email);
   const fired = (r.decision?.fired || []).filter((f) => f.message);
+  const waitingOn = (r.waitingOn || []).map((a) => a.name || nameFromEmail(a.email)).join(' or ');
 
   const decide = async (action) => {
     if (action === 'deny' && !note.trim()) { setError('Add a note so they know why'); return; }
@@ -40,7 +47,7 @@ function ApprovalRow({ r, type, nameOf, onDecided }) {
           <PersonAvatar name={name} size="h-7 w-7" />
           <span className="min-w-0">
             <span className="block truncate text-sm font-medium text-foreground">{name}</span>
-            <span className="block truncate text-xs text-muted-foreground">{r.email}</span>
+            <span className="block truncate text-xs text-muted-foreground">{[r.email, (r.teams || []).join(', ')].filter(Boolean).join(' · ')}</span>
           </span>
         </span>
         <span className="min-w-[14rem] flex-[2] text-sm">
@@ -61,6 +68,7 @@ function ApprovalRow({ r, type, nameOf, onDecided }) {
         </span>
       </div>
       <div className="mt-1.5 space-y-0.5 pl-9 text-xs text-muted-foreground">
+        {waitingOn && <p><span className="text-foreground/85">Waiting on:</span> {waitingOn}</p>}
         {r.note && <p><span className="text-foreground/85">Note:</span> {r.note}</p>}
         {r.decision?.reason && <p><span className="text-foreground/85">Needs approval:</span> {r.decision.reason}</p>}
         {fired.map((f) => <p key={`${f.ruleId}-${f.name}`}>{f.message}</p>)}
@@ -114,17 +122,29 @@ export default function ApprovalsPanel({ me, nameByEmail = null, toast, onChange
   };
 
   if (rows === null) return <Loading label="Loading approvals…" />;
+  const mine = rows.filter((r) => r.mine !== false);
+  const others = rows.filter((r) => r.mine === false);
   return (
-    <section aria-label="Waiting for your decision">
-      <SectionTitle hint="Requests that need a person. Denying needs a note — the requester sees it.">Waiting for your decision</SectionTitle>
-      <ErrorNote>{error}</ErrorNote>
-      {!rows.length ? (
-        <p className="py-6 text-sm text-muted-foreground">Nothing waiting for you.</p>
-      ) : (
-        <ul className="divide-y divide-border">
-          {rows.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} />)}
-        </ul>
+    <div className="space-y-8">
+      <section aria-label="Waiting for your decision">
+        <SectionTitle hint="Requests you are an approver for, from any team. Denying needs a note — the requester sees it.">Waiting for your decision</SectionTitle>
+        <ErrorNote>{error}</ErrorNote>
+        {!mine.length ? (
+          <p className="py-6 text-sm text-muted-foreground">Nothing waiting for you.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {mine.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} />)}
+          </ul>
+        )}
+      </section>
+      {others.length > 0 && (
+        <section aria-label="Waiting on other approvers">
+          <SectionTitle hint="Not yours to decide. As a Ticket Pulse admin you can step in when an approver is away.">Waiting on other approvers</SectionTitle>
+          <ul className="divide-y divide-border">
+            {others.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} />)}
+          </ul>
+        </section>
       )}
-    </section>
+    </div>
   );
 }

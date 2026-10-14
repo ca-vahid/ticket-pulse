@@ -67,7 +67,7 @@ export default function Availability() {
       { id: 'month', label: 'Calendar', icon: CalendarRange },
       { id: 'my-time', label: 'My time', icon: CalendarDays },
     ];
-    if (me && (pending > 0 || me.isAdmin)) list.push({ id: 'approvals', label: 'Approvals', icon: Inbox, badge: pending, badgeLabel: 'waiting' });
+    if (me && (pending > 0 || Number(me.otherApprovals) > 0 || me.isAdmin)) list.push({ id: 'approvals', label: 'Approvals', icon: Inbox, badge: pending, badgeLabel: 'waiting' });
     if (me?.isAdmin) list.push({ id: 'settings', label: 'Settings', icon: Settings2 });
     return list;
   }, [me, pending]);

@@ -14,6 +14,8 @@ import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
 import settingsRepository from '../settingsRepository.js';
 import vtWriteBack, { isVtExternalId } from './vtWriteBack.js';
+import availabilityTeams from './availabilityTeams.js';
+import { currentViewAs } from '../viewAsContext.js';
 import { ValidationError, NotFoundError, AuthorizationError } from '../../utils/errors.js';
 import {
   decide, workingDates, requestSize, holidayMatcher, toDay, dayKey, addDays, weekKey,
@@ -24,6 +26,12 @@ const lc = (s) => String(s || '').trim().toLowerCase();
 const num = (d) => ((d === null || d === undefined) ? 0 : Number(d));
 const ACTIVE = ['approved', 'pending'];
 const SERVICE_ACCOUNT_RE = /^ticket ?pulse$|\bdomain admin\b|^adm[_-]/i;
+// "View as a role" (a super admin trying a workspace role on): the person keeps
+// their e-mail, so every check here has to answer from the role being tried.
+const roleView = (user) => {
+  const v = currentViewAs() || user?.viewAs || null;
+  return v?.mode === 'role' ? v : null;
+};
 const AVAILABILITY_TO_CATEGORY = { OFF: 'OFF', WFH: 'WFH', ONSITE: 'OTHER', PARTIAL: 'OTHER' };
 
 // Defaults seeded on first use. Numbers are placeholders an admin edits under
@@ -101,6 +109,8 @@ class AvailabilityService {
 
   async isAdmin(user) {
     if (!user?.email) return false;
+    const view = roleView(user);
+    if (view) return view.role === 'admin';
     if (user.role === 'admin') return true;
     const row = await prisma.workspaceAccess.findFirst({ where: { email: lc(user.email), role: 'admin' }, select: { id: true } });
     return Boolean(row);
@@ -119,7 +129,40 @@ class AvailabilityService {
 
   async isSuperAdmin(user) {
     if (!user?.email) return false;
+    if (roleView(user)) return false;
     return (await this.superAdminEmails()).includes(lc(user.email));
+  }
+
+  /** Workspaces this person administers: null = every one (super admin), else their ids. */
+  async _adminWorkspaceIds(user) {
+    if (!user?.email) return [];
+    const view = roleView(user);
+    if (view) return view.role === 'admin' ? [Number(view.workspaceId)] : [];
+    if (user.role === 'admin' || await this.isSuperAdmin(user)) return null;
+    const rows = await prisma.workspaceAccess.findMany({ where: { email: lc(user.email), role: 'admin' }, select: { workspaceId: true }, take: 50 });
+    return rows.map((r) => r.workspaceId).filter((id) => Number.isInteger(id));
+  }
+
+  /** Sees waiting and private entries of this workspace's people: its admins and the super admins. */
+  async _privilegedIn(user, workspaceId) {
+    const ids = await this._adminWorkspaceIds(user);
+    return ids === null || ids.includes(Number(workspaceId));
+  }
+
+  /**
+   * May this person open, cancel, book for or adjust `email`? Super admins for
+   * anyone; a workspace admin only for the people of a workspace they
+   * administer (QA 10-13 #8: it used to be any admin of any workspace).
+   */
+  async canManagePerson(user, email) {
+    const ids = await this._adminWorkspaceIds(user);
+    if (ids === null) return true;
+    if (!ids.length || !lc(email)) return false;
+    const [tech, access] = await Promise.all([
+      prisma.technician.findFirst({ where: { workspaceId: { in: ids }, email: { equals: lc(email), mode: 'insensitive' } }, select: { id: true } }),
+      prisma.workspaceAccess.findFirst({ where: { workspaceId: { in: ids }, email: lc(email) }, select: { id: true } }),
+    ]);
+    return Boolean(tech || access);
   }
 
   /**
@@ -134,9 +177,13 @@ class AvailabilityService {
     const email = lc(user?.email);
     const ws = Number(workspaceId);
     let workspaceIds = [];
+    // QA 10-13 #7: a super admin viewing as a role in another workspace was
+    // looked up as themselves, not found there, and shown their own team (IT)
+    // under that workspace's name. The view decides which workspace they are in.
+    const view = roleView(user);
     if (Number.isInteger(ws) && ws > 0) {
-      let allowed = user?.role === 'admin';
-      if (!allowed) {
+      let allowed = view ? Number(view.workspaceId) === ws : user?.role === 'admin';
+      if (!allowed && !view) {
         const [access, tech] = await Promise.all([
           prisma.workspaceAccess.findFirst({ where: { workspaceId: ws, email: { equals: email, mode: 'insensitive' } }, select: { id: true } }),
           prisma.technician.findFirst({ where: { workspaceId: ws, isActive: true, email: { equals: email, mode: 'insensitive' } }, select: { id: true } }),
@@ -145,7 +192,7 @@ class AvailabilityService {
       }
       if (allowed) workspaceIds = [ws];
     }
-    if (!workspaceIds.length) {
+    if (!workspaceIds.length && !view) {
       const mine = await prisma.technician.findMany({ where: { isActive: true, email: { equals: email, mode: 'insensitive' } }, select: { workspaceId: true }, take: 20 });
       workspaceIds = [...new Set(mine.map((t) => t.workspaceId))];
     }
@@ -275,6 +322,9 @@ class AvailabilityService {
 
   async updatePerson(id, patch, actor) {
     await this.assertAdmin(actor);
+    const target = await prisma.avPerson.findUnique({ where: { id: Number(id) }, select: { email: true } });
+    if (!target) throw new NotFoundError('Person not found');
+    if (!(await this.canManagePerson(actor, target.email))) throw new AuthorizationError('You can change people in the workspaces you administer', 'availability_not_your_team');
     const data = {};
     if (patch.officeId !== undefined) data.officeId = patch.officeId ? Number(patch.officeId) : null;
     if (patch.startDate !== undefined) data.startDate = patch.startDate ? toDay(patch.startDate) : null;
@@ -667,6 +717,7 @@ class AvailabilityService {
     let person = await this.ensurePerson(user);
     if (onBehalfOf && lc(onBehalfOf) !== lc(user.email)) {
       await this.assertAdmin(user);
+      if (!(await this.canManagePerson(user, onBehalfOf))) throw new AuthorizationError('You can book for people in the workspaces you administer', 'availability_not_your_team');
       person = await this.ensurePerson({ email: onBehalfOf });
     }
     const shaped = await this._shape(person, input);
@@ -716,6 +767,7 @@ class AvailabilityService {
       await this.project(request).catch((err) => logger.warn(`Availability: projection failed for request ${request.id}: ${err.message}`));
       vtWriteBack.pushApproved(request.id); // never throws; not awaited so booking stays quick
     } else this._notifyApprovers(request, shaped.leaveType, person, approvers).catch((err) => logger.warn(`Availability: approver notice failed for request ${request.id}: ${err.message}`));
+    this._teamsSubmitted(request, shaped.leaveType, person, user, approvers).catch(() => {});
     logger.info(`Availability: request ${request.id} by ${person.email} (${shaped.leaveType.name}, ${shaped.days} day(s)) → ${status}`);
     return this.getRequest(request.id, user);
   }
@@ -724,7 +776,7 @@ class AvailabilityService {
     const r = await prisma.avRequest.findUnique({ where: { id: Number(id) }, include: { events: { orderBy: { createdAt: 'asc' } } } });
     if (!r) throw new NotFoundError('Request not found');
     const mine = lc(r.email) === lc(user?.email);
-    if (!mine && !(await this.canDecide(user, r)) && !(await this.isAdmin(user))) throw new NotFoundError('Request not found');
+    if (!mine && !(await this.canDecide(user, r)) && !(await this.canManagePerson(user, r.email))) throw new NotFoundError('Request not found');
     return serializeRequest(r);
   }
 
@@ -751,6 +803,7 @@ class AvailabilityService {
       vtWriteBack.pushApproved(updated.id); // never throws
     }
     this._notifyRequester(updated, user).catch((err) => logger.warn(`Availability: requester notice failed for request ${r.id}: ${err.message}`));
+    this._teamsDecided(updated, user).catch(() => {});
     logger.info(`Availability: request ${r.id} ${status} by ${lc(user.email)}`);
     return this.getRequest(r.id, user);
   }
@@ -759,7 +812,7 @@ class AvailabilityService {
     const r = await prisma.avRequest.findUnique({ where: { id: Number(id) } });
     if (!r) throw new NotFoundError('Request not found');
     const mine = lc(r.email) === lc(user.email);
-    if (!mine && !(await this.isAdmin(user)) && !(await this.canDecide(user, r))) throw new AuthorizationError('You can only cancel your own requests', 'availability_not_owner');
+    if (!mine && !(await this.canDecide(user, r)) && !(await this.canManagePerson(user, r.email))) throw new AuthorizationError('You can only cancel your own requests', 'availability_not_owner');
     if (!ACTIVE.includes(r.status)) throw new ValidationError(`This request is already ${r.status}`);
     if (r.source === 'vacation_tracker' && await this._vtSyncOnFor(r.email)) {
       throw new ValidationError('This came from Vacation Tracker. Change or cancel it there; Ticket Pulse follows within the hour.');
@@ -770,7 +823,10 @@ class AvailabilityService {
     });
     await this.unproject(updated).catch((err) => logger.warn(`Availability: unprojection failed for request ${r.id}: ${err.message}`));
     if (r.status === 'approved') vtWriteBack.pushCancelled(updated.id, reason); // never throws
-    if (!mine) this._notifyRequester(updated, user).catch(() => {});
+    if (!mine) {
+      this._notifyRequester(updated, user).catch(() => {});
+      this._teamsDecided(updated, user).catch(() => {});
+    }
     return this.getRequest(r.id, user);
   }
 
@@ -796,19 +852,46 @@ class AvailabilityService {
     return rows.map(serializeRequest);
   }
 
+  /**
+   * Pending requests this person may decide. `mine` marks the ones they are a
+   * named approver for; a super admin also gets the rest (they can step in),
+   * each with who it is waiting on and the person's team, so a request from
+   * another team never looks like it belongs to the workspace on screen
+   * (QA 10-13 #8).
+   */
   async listPendingFor(user) {
-    const admin = await this.isSuperAdmin(user);
+    const stepIn = await this.isSuperAdmin(user);
     const rows = await prisma.avRequest.findMany({ where: { status: 'pending' }, orderBy: { startDate: 'asc' }, take: 500 });
     const out = [];
     for (const r of rows) {
       if (lc(r.email) === lc(user.email)) continue;
-      if (admin || (await this.approversFor(r.email)).includes(lc(user.email))) out.push(serializeRequest(r));
+      const approvers = await this.approversFor(r.email);
+      const mine = approvers.includes(lc(user.email));
+      if (!mine && !stepIn) continue;
+      out.push({ ...serializeRequest(r), mine, waitingOn: mine ? [] : approvers });
     }
-    // Approvers see the person's name, not just an e-mail.
     if (out.length) {
-      const people = await prisma.avPerson.findMany({ where: { email: { in: [...new Set(out.map((r) => r.email))] } }, select: { email: true, name: true } });
+      const requesters = [...new Set(out.map((r) => r.email))];
+      const everyone = [...new Set([...requesters, ...out.flatMap((r) => r.waitingOn)])];
+      const [people, techs] = await Promise.all([
+        prisma.avPerson.findMany({ where: { email: { in: everyone } }, select: { email: true, name: true } }),
+        // The team is a label; a failed lookup must not hide the approvals.
+        Promise.resolve().then(() => prisma.technician.findMany({ where: { isActive: true, email: { in: requesters, mode: 'insensitive' } }, select: { email: true, workspace: { select: { name: true } } }, take: 2000 })).catch(() => []),
+      ]);
       const nameOf = new Map(people.map((p) => [p.email, p.name]));
-      for (const r of out) r.name = nameOf.get(r.email) || null;
+      const teamsOf = new Map();
+      for (const t of techs || []) {
+        const e = lc(t.email);
+        const name = t.workspace?.name;
+        if (!name) continue;
+        if (!teamsOf.has(e)) teamsOf.set(e, []);
+        if (!teamsOf.get(e).includes(name)) teamsOf.get(e).push(name);
+      }
+      for (const r of out) {
+        r.name = nameOf.get(r.email) || null; // approvers see a name, not just an e-mail
+        r.teams = teamsOf.get(lc(r.email)) || [];
+        r.waitingOn = r.waitingOn.map((e) => ({ email: e, name: nameOf.get(e) || null }));
+      }
     }
     return out;
   }
@@ -864,6 +947,8 @@ class AvailabilityService {
   async balanceReport(user, { year = null, workspaceId = null } = {}) {
     await this.assertAdmin(user);
     // QA 10-05 #2: the workspace's own people, not the whole company.
+    // QA 10-13 #8: and only for a workspace this person administers.
+    if (!(await this._privilegedIn(user, workspaceId))) return [];
     const roster = await this.rosterFor(user, workspaceId);
     const people = (await this.listPeople()).filter((p) => roster.has(lc(p.email)));
     const out = [];
@@ -873,6 +958,7 @@ class AvailabilityService {
 
   async adjustBalance(input, actor) {
     await this.assertAdmin(actor);
+    if (!(await this.canManagePerson(actor, input.email))) throw new AuthorizationError('You can adjust balances for people in the workspaces you administer', 'availability_not_your_team');
     const days = Number(input.days);
     if (!Number.isFinite(days) || days === 0) throw new ValidationError('Enter the number of days to add (or subtract)');
     if (!String(input.note || '').trim()) throw new ValidationError('Add a reason for the adjustment');
@@ -890,7 +976,9 @@ class AvailabilityService {
     const end = toDay(to);
     if (!start || !end || end < start) throw new ValidationError('Pick a date range');
     if (daysSpan(start, end) > 93) throw new ValidationError('Show at most three months at a time');
-    const admin = await this.isAdmin(user);
+    // QA 10-13 #8: waiting requests and private types show to the admins of
+    // THIS workspace (and super admins), not to an admin of some other one.
+    const admin = await this._privilegedIn(user, workspaceId);
     const roster = await this.rosterFor(user, workspaceId);
     let people = await prisma.avPerson.findMany({ where: { isActive: true, email: { in: [...roster] }, ...(officeId ? { officeId: Number(officeId) } : {}) }, orderBy: { name: 'asc' }, select: { email: true, name: true, officeId: true }, take: 2000 });
     if (groupId) {
@@ -1034,6 +1122,56 @@ class AvailabilityService {
     const sent = await Promise.allSettled([...new Set(approvers.map(lc).filter(Boolean))].map((to) => sendEmail({ to: [to], subject, html, context: 'availability' })));
     const failed = sent.filter((r) => r.status === 'rejected');
     if (failed.length) logger.warn(`Availability: ${failed.length} of ${sent.length} approver notice(s) failed for request ${request.id}: ${failed[0].reason?.message}`);
+  }
+
+  // Teams (QA 10-13 #6): the same moments, in the person's chat with the bot.
+  // Each is a choice in their own Teams settings; none of these ever throws.
+
+  async _teamsSubmitted(request, leaveType, person, actor, approvers = []) {
+    const range = `${describeRange(request)} · ${describeAmount(request, leaveType)}`;
+    const byOther = lc(actor?.email) !== lc(person.email);
+    const approved = request.status === 'approved';
+    let waiting = null;
+    if (!approved && approvers.length) {
+      const people = await prisma.avPerson.findMany({ where: { email: { in: approvers } }, select: { email: true, name: true } }).catch(() => []);
+      const nameOf = new Map(people.map((p) => [p.email, p.name]));
+      waiting = `Waiting for ${approvers.map((e) => nameOf.get(e) || e).join(' or ')}.`;
+    }
+    await availabilityTeams.notify(person.email, 'av_submitted', {
+      title: `${approved ? 'Booked' : 'Sent for approval'}: ${leaveType.name}`,
+      lines: [range, byOther ? `Booked for you by ${actor?.name || actor?.email}.` : null, waiting, request.decision?.reason || null],
+      refKey: `av:${request.id}:submitted`,
+      path: '/availability/my-time',
+      icon: approved ? '✅' : '🕓',
+    });
+    if (!approved) {
+      for (const to of [...new Set(approvers.map(lc).filter(Boolean))]) {
+        await availabilityTeams.notify(to, 'av_approval_waiting', {
+          title: `${person.name} asked for ${leaveType.name.toLowerCase()}`,
+          lines: [range, request.note ? `Note: ${request.note}` : null, request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null],
+          refKey: `av:${request.id}:approval`,
+          path: '/availability/approvals',
+          button: 'Review the request',
+          icon: '🙋',
+        });
+      }
+    }
+  }
+
+  async _teamsDecided(request, actor) {
+    const type = await prisma.avLeaveType.findUnique({ where: { id: request.leaveTypeId } });
+    const word = request.status === 'approved' ? 'Approved' : request.status === 'denied' ? 'Denied' : 'Cancelled';
+    await availabilityTeams.notify(request.email, 'av_decided', {
+      title: `${word}: ${type?.name || 'time away'}`,
+      lines: [
+        `${describeRange(request)} · ${describeAmount(request, type)}`,
+        `By ${actor?.name || actor?.email || 'an approver'}.`,
+        request.decisionNote ? `Note: ${request.decisionNote}` : null,
+      ],
+      refKey: `av:${request.id}:${request.status}`,
+      path: '/availability/my-time',
+      icon: request.status === 'approved' ? '✅' : '🚫',
+    });
   }
 
   async _notifyRequester(request, actor) {
@@ -1325,6 +1463,15 @@ export function describeRange(r) {
   const part = r.dayPart === 'am' ? ' (morning)' : r.dayPart === 'pm' ? ' (afternoon)' : r.dayPart === 'hours' && (r.startMinute !== null && r.startMinute !== undefined)
     ? ` (${hhmm(r.startMinute)}–${hhmm(r.endMinute)})` : '';
   return s === e ? `${fmt(s)}${part}` : `${fmt(s)} – ${fmt(e)}${part}`;
+}
+
+export function describeAmount(r, type = null) {
+  if (type?.unit === 'hour' || r.dayPart === 'hours') {
+    const h = num(r.hours);
+    return `${h} hour${h === 1 ? '' : 's'}`;
+  }
+  const d = num(r.days);
+  return `${d} day${d === 1 ? '' : 's'}`;
 }
 
 function hhmm(m) {

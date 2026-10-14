@@ -70,7 +70,10 @@ router.get('/me', asyncHandler(async (req, res) => {
     offices,
     balances,
     isAdmin,
-    pendingApprovals: pending.length,
+    // The badge counts what is waiting for THIS person; a super admin's
+    // step-in list (other people's approvals) is not their to-do.
+    pendingApprovals: pending.filter((r) => r.mine !== false).length,
+    otherApprovals: pending.filter((r) => r.mine === false).length,
   });
 }));
 
