@@ -622,7 +622,7 @@ class KnowledgeArticleService {
   }
 
   /** One row per saved version. Never throws: history must not block a save. */
-  async _saveVersion(row, { by = null, changeNote = null, suggestionId = null } = {}) {
+  async _saveVersion(row, { by = null, changeNote = null, suggestionId = null, at = null } = {}) {
     await Promise.resolve()
       .then(() => prisma.knowledgeArticleVersion.create({
         data: {
@@ -638,9 +638,27 @@ class KnowledgeArticleService {
           changedBy: by,
           changeNote: changeNote ? String(changeNote).slice(0, 500) : null,
           suggestionId: suggestionId ? Number(suggestionId) : null,
+          ...(at ? { createdAt: new Date(at) } : {}),
         },
       }))
       .catch((err) => logger.warn(`Knowledge article ${row?.id}: version ${row?.version} not recorded (${err.message})`));
+  }
+
+  /**
+   * Keep the text an article is on before an edit replaces it (QA 10-13).
+   * Articles written before versions existed have no saved copy of their
+   * first text, so the first edit left History with one row and nothing to
+   * restore. A failed lookup keeps nothing (never a duplicate row). Never throws.
+   */
+  async _keepCurrent(existing) {
+    const found = await Promise.resolve()
+      .then(() => prisma.knowledgeArticleVersion.findFirst({
+        where: { articleId: existing.id, version: Number(existing.version) || 1 },
+        select: { id: true },
+      }))
+      .catch(() => 'unknown');
+    if (found) return;
+    await this._saveVersion(existing, { by: existing.updatedBy || existing.createdBy || null, at: existing.updatedAt || existing.createdAt || null });
   }
 
   /** The saved versions of an article, newest first, without bodies. */
@@ -654,15 +672,35 @@ class KnowledgeArticleService {
         select: { id: true, version: true, title: true, status: true, changedBy: true, changeNote: true, suggestionId: true, createdAt: true },
       }))
       .catch(() => []);
-    return { current: article.version, items: rows || [] };
+    const items = rows || [];
+    // The version the article is on always shows, saved yet or not: an
+    // article written before versions existed gets its row at the next edit.
+    if (!items.some((v) => Number(v.version) === Number(article.version))) {
+      items.unshift({
+        id: `current-${article.id}`, version: article.version, title: article.title, status: article.status,
+        changedBy: article.updatedBy || article.createdBy || null, changeNote: null, suggestionId: null, createdAt: article.updatedAt || article.createdAt || null,
+      });
+    }
+    return { current: article.version, items };
   }
 
   async getVersion(workspaceId, id, version) {
     const row = await Promise.resolve()
       .then(() => prisma.knowledgeArticleVersion.findFirst({ where: { workspaceId: Number(workspaceId), articleId: Number(id), version: Number(version) } }))
       .catch(() => null);
-    if (!row) throw new NotFoundError('That version was not found');
-    return row;
+    if (row) return row;
+    // The version the article is on, when its row was never saved: the article itself.
+    const article = await Promise.resolve()
+      .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) } }))
+      .catch(() => null);
+    if (article && Number(article.version) === Number(version)) {
+      return {
+        version: article.version, title: article.title, bodyHtml: article.bodyHtml || '', status: article.status,
+        categoryId: article.categoryId ?? null, subcategoryId: article.subcategoryId ?? null, tags: article.tags || [],
+        changedBy: article.updatedBy || null, changeNote: null, createdAt: article.updatedAt || null,
+      };
+    }
+    throw new NotFoundError('That version was not found');
   }
 
   /** Put an older version back: a NEW version with that one's content (nothing is ever lost). */
@@ -710,6 +748,7 @@ class KnowledgeArticleService {
     const trust = !touchesTrust ? {} : canCheck
       ? { confidence: 'checked', checkedBy: by, checkedAt: new Date() }
       : { confidence: 'not_checked' };
+    if (versioned) await this._keepCurrent(existing);
     const row = await prisma.knowledgeArticle.update({
       where: { id: existing.id },
       data: {

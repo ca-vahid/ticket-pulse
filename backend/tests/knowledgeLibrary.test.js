@@ -101,6 +101,8 @@ beforeEach(() => {
   prismaMock.knowledgeArticle.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.knowledgeArticleVersion.create.mockResolvedValue({});
   prismaMock.knowledgeArticleVersion.findMany.mockResolvedValue([]);
+  // The version an article is on has its row, unless a test says otherwise.
+  prismaMock.knowledgeArticleVersion.findFirst.mockResolvedValue({ id: 1 });
   prismaMock.knowledgeSignal.create.mockImplementation(async ({ data }) => ({ id: Math.floor(Math.random() * 1e6), ...data }));
   prismaMock.knowledgeSignal.findMany.mockResolvedValue([]);
   prismaMock.autoHelpPlaybook.findMany.mockResolvedValue([]);
@@ -218,6 +220,30 @@ describe('trust and versions', () => {
   test('a version that cannot be recorded never blocks the save', async () => {
     prismaMock.knowledgeArticleVersion.create.mockRejectedValue(new Error('table missing'));
     await expect(articles.update(1, 7, { title: 'Renamed' }, { email: 'expert@example.com' })).resolves.toMatchObject({ title: 'Renamed' });
+  });
+
+  test('QA 10-13: the first edit of an article with no saved version keeps the old text first, so it can be restored', async () => {
+    stored = { ...ART, version: 1, bodyHtml: '<p>First text</p>', updatedBy: 'vhaeri@example.com', updatedAt: new Date('2026-09-29T02:04:08Z') };
+    prismaMock.knowledgeArticleVersion.findFirst.mockResolvedValue(null);
+    await articles.update(1, 7, { bodyHtml: '<p>Second text</p>' }, { email: 'sxu@example.com' }, { canCheck: true });
+    const rows = prismaMock.knowledgeArticleVersion.create.mock.calls.map((c) => c[0].data);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ articleId: 7, version: 1, bodyHtml: '<p>First text</p>', changedBy: 'vhaeri@example.com', createdAt: new Date('2026-09-29T02:04:08Z') });
+    expect(rows[1]).toMatchObject({ version: 2, bodyHtml: '<p>Second text</p>', changedBy: 'sxu@example.com' });
+    // The lookup failing keeps nothing (never a duplicate row), and never blocks the save.
+    prismaMock.knowledgeArticleVersion.create.mockClear();
+    prismaMock.knowledgeArticleVersion.findFirst.mockRejectedValue(new Error('down'));
+    await expect(articles.update(1, 7, { title: 'Renamed' }, { email: 'sxu@example.com' })).resolves.toMatchObject({ title: 'Renamed' });
+    expect(prismaMock.knowledgeArticleVersion.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('QA 10-13: History always lists the version the article is on, and that version can be read even when its row was never saved', async () => {
+    prismaMock.knowledgeArticleVersion.findMany.mockResolvedValue([]);
+    const list = await articles.versions(1, 7);
+    expect(list).toMatchObject({ current: 3, items: [{ id: 'current-7', version: 3, title: ART.title }] });
+    prismaMock.knowledgeArticleVersion.findFirst.mockResolvedValue(null);
+    await expect(articles.getVersion(1, 7, 3)).resolves.toMatchObject({ version: 3, bodyHtml: ART.bodyHtml });
+    await expect(articles.getVersion(1, 7, 2)).rejects.toThrow('That version was not found');
   });
 
   test('the Library tree counts articles, drafts and what needs attention, per category and for me', async () => {
@@ -340,6 +366,9 @@ describe('routes', () => {
     const read = await request(app(user('mid@example.com'))).get('/api/knowledge/articles/7');
     expect(read.body.data).toMatchObject({ health: 'checked', version: 3, my: { write: true, check: false, level: 2 } });
     expect(read.body.data.use).toMatchObject({ good: 0, flagged: 0 });
+    // QA 10-13: an admin with no skill here is told that is why they can write; a skilled writer is not.
+    expect(read.body.data.my.asAdmin).toBe(false);
+    expect((await request(app(user('admin@example.com'))).get('/api/knowledge/articles/7')).body.data.my).toMatchObject({ write: true, asAdmin: true });
   });
 
   test('judging an answer: the assignee, people with the skill, reviewers and admins; the verdict reaches the quoted articles', async () => {
