@@ -992,9 +992,27 @@ class AssignmentDailyReviewService {
     };
   }
 
+  /** Ids among these tickets that are Ticket Pulse-born. Never throws (empty set). */
+  async _ticketPulseBornIds(tickets = []) {
+    const known = tickets.filter((t) => t?.origin === 'ticketpulse').map((t) => t.id);
+    const unknown = tickets.filter((t) => t && t.origin === undefined && Number.isInteger(t.id)).map((t) => t.id);
+    if (!unknown.length) return new Set(known);
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticket.findMany({ where: { id: { in: unknown }, origin: 'ticketpulse' }, select: { id: true } }))
+      .catch(() => []);
+    return new Set([...known, ...(Array.isArray(rows) ? rows : []).map((r) => r.id)]);
+  }
+
   async _hydrateMissingThreads(workspaceId, tickets = [], options = {}) {
     this._throwIfCancelled(options.signal);
     const forceRefresh = options.forceRefresh === true;
+
+    // A Ticket Pulse-born ticket's conversation lives here; its FreshService record
+    // is a copy holding the mirror's own notes, and work typed on the copy comes
+    // back through the mirror reconcile. Reading the copy here stored those notes
+    // as new rows every evening (TP-1888, 13 Oct 2026), so it is not read at all.
+    const tpBornIds = await this._ticketPulseBornIds(tickets);
+    if (tpBornIds.size) tickets = tickets.filter((t) => !tpBornIds.has(t?.id));
 
     // We now hydrate two FreshService endpoints per ticket:
     //   - /tickets/:id/activities  → state-change events (assignments, status, workflow runs)

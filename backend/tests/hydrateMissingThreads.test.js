@@ -209,4 +209,28 @@ describe('_hydrateMissingThreads', () => {
     expect(mockFetchActivities).not.toHaveBeenCalled();
     expect(result.warnings[0]).toMatch(/FreshService is not configured/);
   });
+
+  // 14 Oct 2026 (TP-1888): the FreshService record of a Ticket Pulse-born ticket is
+  // a copy of the mirror's own notes; reading it stored every note a second time.
+  test('never reads the FreshService copy of a Ticket Pulse-born ticket', async () => {
+    const tpBorn = { ...ticket(62973, 246800), origin: 'ticketpulse' };
+    const fsBorn = { ...ticket(2, 1002), origin: 'freshservice' };
+
+    const result = await assignmentDailyReviewService._hydrateMissingThreads(1, [tpBorn, fsBorn], {});
+
+    expect(mockFetchConversations).toHaveBeenCalledTimes(1);
+    expect(mockFetchConversations).toHaveBeenCalledWith(1002, expect.anything());
+    expect(mockFetchActivities).toHaveBeenCalledTimes(1);
+    expect(mockFetchActivities).toHaveBeenCalledWith(1002);
+    expect(result.failed).toBe(0);
+  });
+
+  test('a Ticket Pulse-born ticket alone means no FreshService calls, even on a forced refresh', async () => {
+    const tpBorn = { ...ticket(62973, 246800), origin: 'ticketpulse' };
+
+    await assignmentDailyReviewService._hydrateMissingThreads(1, [tpBorn], { forceRefresh: true });
+
+    expect(mockFetchConversations).not.toHaveBeenCalled();
+    expect(mockFetchActivities).not.toHaveBeenCalled();
+  });
 });

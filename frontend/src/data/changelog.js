@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.71-preview';
+export const APP_VERSION = '4.2.72-preview';
 
 export const changelog = [
+  {
+    version: '4.2.72-preview',
+    date: 'October 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Each message shows once in the conversation</strong> &mdash; on tickets that live in Ticket Pulse, every reply and note appeared a second time, signed &ldquo;Ticket Pulse&rdquo; and starting &ldquo;&hellip; &middot; TP-1888 [Ticket Pulse mirror]&rdquo;. That second card was Ticket Pulse&rsquo;s own note on the ticket&rsquo;s FreshService copy, read back every evening by the daily assignment review. The 694 copies stored since July have been removed from 361 tickets. The review no longer reads the FreshService copy of a Ticket Pulse ticket at all, and the conversation hides any such copy that turns up another way. Replies an agent types directly in the FreshService copy are kept and still show.' },
+    ],
+  },
   {
     version: '4.2.71-preview',
     date: 'October 13, 2026',

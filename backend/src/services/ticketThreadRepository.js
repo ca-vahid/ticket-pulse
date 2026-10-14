@@ -2,9 +2,12 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError } from '../utils/errors.js';
 import { isFsSystemConversation } from '../utils/fsSystemConversation.js';
+import { isMirrorEcho } from '../utils/mirrorEcho.js';
 
 /** Rows Ticket Pulse authored itself (live reply/note write). */
 export const TP_AUTHORED_SOURCE = 'ticketpulse_user';
+
+export { isMirrorEcho };
 
 function plainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
