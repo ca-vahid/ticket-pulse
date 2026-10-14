@@ -1098,8 +1098,9 @@ export async function emitTicketEvent(eventType, ticketId, {
     }
   }
 
+  let result;
   try {
-    return await notificationWorkflowEngine.executeForEvent(eventContext, {
+    result = await notificationWorkflowEngine.executeForEvent(eventContext, {
       triggerSource: source,
       ...(onlyWorkflowId ? { onlyWorkflowId } : {}),
     });
@@ -1107,8 +1108,18 @@ export async function emitTicketEvent(eventType, ticketId, {
     logger.warn('Ticket event workflow dispatch failed', {
       workspaceId: ticket.workspaceId, ticketId: ticket.id, eventType, error: error.message,
     });
-    return { status: 'failed', eventType, error: error.message };
+    result = { status: 'failed', eventType, error: error.message };
   }
+  // After the workflows (the reopen one first of all): is the owner away, and
+  // is this reply to a long-resolved ticket really a new request (13 Oct
+  // 2026)? `ticket` is the row as it was BEFORE they ran. Not awaited: one of
+  // the two makes a model call, and the reply is already recorded.
+  if (eventType === 'ticket.reply_received' && !onlyWorkflowId) {
+    import('./requesterReplyFollowUp.js')
+      .then(({ afterRequesterReplyEvent }) => afterRequesterReplyEvent({ before: ticket, statusBaseBefore: statusBase, stamp, extra }))
+      .catch((err) => logger.warn(`Requester-reply follow-up skipped for ticket ${ticket.id}: ${err.message}`));
+  }
+  return result;
 }
 
 export default {

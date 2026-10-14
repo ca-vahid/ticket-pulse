@@ -32,6 +32,8 @@ const OLD_CLOSED_DAYS = 14;
 // Pictures pasted into a mail body. Smaller ones are signature logos and tracking dots.
 const INLINE_MIN_BYTES = 8 * 1024;
 const INLINE_MAX = 12;
+// The opening message's plain text on its conversation entry (the HTML is what people read).
+const ORIGINAL_TEXT_KEEP = 20000;
 const HOUR_MS = 60 * 60 * 1000;
 
 // Every skip is counted (23 Sep 2026): a week of silently dropped replies on
@@ -985,8 +987,10 @@ class MailboxIngestService {
    * by `cid:`, which only the sender's mail client can resolve, so they showed as broken images;
    * and a mail whose only attachments were inline could report "no attachments" and lose them.
    * Each one becomes an attachment with a name of its own, and the body keeps "[Image: name]"
-   * where it was, which the ticket page turns into a picture you can open. Logos and tracking
-   * dots (under 8 KB) are dropped. Returns null when the body has none.
+   * where it was. The ticket page shows the picture there, small, and opens it on a click
+   * (components/tickets/InlineImageBody.jsx; until 13 Oct 2026 only replies did, as a link, and
+   * the description showed the bare text). Logos and tracking dots (under 8 KB) are dropped.
+   * Returns null when the body has none.
    */
   async _inlineImages(connection, email, html) {
     if (typeof html !== 'string' || !/\bsrc\s*=\s*["']\s*cid:/i.test(html)) return null;
@@ -1012,7 +1016,7 @@ class MailboxIngestService {
     }
   }
 
-  async _captureAttachments(connection, email, ticket, threadEntryId = null, prefetched = null) {
+  async _captureAttachments(connection, email, ticket, threadEntryId = null, prefetched = null, stored = null) {
     if (!email.hasAttachments && !prefetched) return '';
     try {
       const { default: attachmentService } = await import('./attachmentService.js');
@@ -1033,7 +1037,7 @@ class MailboxIngestService {
           buffer: file.buffer,
           uploadedBy: email.from,
           source: 'email',
-        }).catch((err) => {
+        }).then((row) => { if (row?.id && Array.isArray(stored)) stored.push(row.id); }).catch((err) => {
           skipped.push({ name: file.name, reason: err.message });
         });
       }
@@ -1481,6 +1485,11 @@ class MailboxIngestService {
     }
 
     // Remember the originating message id so follow-ups thread to this ticket.
+    // QA 10-13 #3: this entry is the first thing in the conversation, and until now it held only
+    // Graph's bodyPreview, which is plain text cut at 255 characters ("...our Vancouver office is").
+    // It now carries the message as it arrived: the same HTML as the description, and its whole text.
+    const openingText = String(ticket?.descriptionText || email.bodyText || '').trim().slice(0, ORIGINAL_TEXT_KEEP)
+      || email.bodyPreview || null;
     if (email.internetMessageId) {
       await prisma.ticketThreadEntry.create({
         data: {
@@ -1495,8 +1504,9 @@ class MailboxIngestService {
           incoming: true,
           isPrivate: false,
           visibility: 'public',
-          bodyText: email.bodyPreview || null,
-          content: email.bodyPreview || null,
+          ...(description ? { bodyHtml: description } : {}),
+          bodyText: openingText,
+          content: openingText,
           occurredAt: email.receivedAt || new Date(),
           emailMessageId: email.internetMessageId,
           title: 'Original email',
@@ -1512,9 +1522,17 @@ class MailboxIngestService {
       await this._noteUnparsedForward(connection, ticket, email, intake);
     }
 
-    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId }, null, inline?.fetched || null);
+    const storedFiles = [];
+    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId }, null, inline?.fetched || null, storedFiles);
     if (attachmentNotice) {
       logger.warn(`Attachment capture notice for ${ticket.displayRef}: ${attachmentNotice.trim()}`);
+    }
+    // QA 10-13 #1: the files that came with the mail never reached the FreshService copy (they
+    // belong to the ticket, not to a reply, and only reply files were copied). FreshService cannot
+    // show a picture inside the description from our storage, so the copy gets them in one note.
+    if (helpdesk && storedFiles.length > 0 && typeof mirrorService?.enqueueAttachments === 'function') {
+      await mirrorService.enqueueAttachments(connection.workspaceId, ticket.id, storedFiles)
+        .catch((err) => logger.warn(`Files not queued for the FreshService copy of ${ticket.displayRef} (non-fatal): ${err.message}`));
     }
 
     logger.info(`Inbound email created ${ticket.displayRef} (from ${email.from}: "${subject}"${intake?.decision?.rule ? `, rule ${intake.decision.rule}` : ''}${heldReply ? `, from held #${heldReply.heldMessageId} by ${heldReply.resolvedBy || '?'}${forcedRequester ? ` for ${forcedRequester}` : ''}` : ''})`);

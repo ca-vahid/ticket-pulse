@@ -99,6 +99,7 @@ import {
 } from './ticketEmbeddingService.js';
 import { requiresResolutionReason } from './resolutionReasonService.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { otherTicketRefs, resolveOtherTicketNumbers, ticketLikeNumbers } from './autoHelpTicketRefGuard.js';
 
 export const AUTO_HELP_OPERATION = 'auto_help';
 export const RUN_BUDGET = Object.freeze({
@@ -1564,18 +1565,25 @@ class AutoHelpRunner {
     };
   }
 
-  _leakCheck(subject, html, text, ticket = null) {
+  /**
+   * @param {object} [refContext] what the other-ticket rule needs (QA 10-13
+   *   #12): `requesterText` (the requester's own words) and
+   *   `otherTicketNumbers` (numbers looked up as real tickets in this
+   *   workspace; absent = not looked up, every number is a ticket).
+   */
+  _leakCheck(subject, html, text, ticket = null, refContext = {}) {
     const all = `${subject}\n${html}\n${text}`;
     if (TOOL_NAME_LEAK.test(all) || SOURCE_ID_LEAK.test(all)) {
       throw gateError('Guard blocked the answer: it mentions internal tool names or source ids', GATE.GUARD_BLOCKED);
     }
-    // Another ticket's reference (TP-1234 / #241406) never goes to a requester (R5).
-    const own = ticket ? String(ticketDisplayRef(ticket) || '').toUpperCase() : '';
-    const plain = `${subject}\n${text}`;
-    const refs = [
-      ...[...plain.matchAll(/\bTP-(\d{1,7})\b/gi)].map((m) => `TP-${m[1]}`),
-      ...[...plain.matchAll(/(?:^|[^\w&])#(\d{4,12})\b/g)].map((m) => `#${m[1]}`),
-    ].filter((r) => r.toUpperCase() !== own);
+    // Another ticket's reference (TP-1234 / #241406) never goes to a requester
+    // (R5). A project or invoice number the requester gave us is not one.
+    const refs = otherTicketRefs({
+      text: `${subject}\n${text}`,
+      ticket,
+      requesterText: refContext?.requesterText || '',
+      otherTicketNumbers: refContext?.otherTicketNumbers || null,
+    });
     if (refs.length) {
       throw gateError(`Guard blocked the answer: it mentions another ticket (${refs[0]})`, GATE.GUARD_BLOCKED);
     }
@@ -1904,6 +1912,15 @@ class AutoHelpRunner {
     const allowedUrls = await this._allowedLinkUrls(ctx, cited, playbookIsSource);
     const part = (t) => sanitizeDraftHtml(String(t || '').trim(), allowedUrls);
     const contextBundle = await this._guardContext(ctx);
+    // Other-ticket rule (QA 10-13 #12): look the draft's numbers up once, so a
+    // project number is not mistaken for a ticket. A failed lookup returns
+    // null and the rule falls back to "every number is a ticket".
+    const draftWords = [sub.subject, ticket.subject, sub.intro, ...(sub.steps || []).map((st) => st?.text), sub.outro]
+      .map((t) => htmlToText(String(t || ''))).join('\n');
+    const refContext = {
+      requesterText: ctx.publicText || [ticket.subject, ticket.descriptionText].filter(Boolean).join('\n\n'),
+      otherTicketNumbers: await resolveOtherTicketNumbers(ticket.workspaceId, ticketLikeNumbers(draftWords), ticket.id),
+    };
     const finalizeBody = (steps) => {
       const builtHtml = [
         sub.intro ? `<p>${part(sub.intro)}</p>` : '',
@@ -1914,7 +1931,7 @@ class AutoHelpRunner {
       const bodyText = htmlToText(bodyHtml);
       if (!bodyHtml || !bodyText) throw new Error('The model submitted an empty answer');
       const subject = clip(String(sub.subject || '').trim() || `Re: ${ticket.subject || 'your request'}`, 200);
-      this._leakCheck(subject, bodyHtml, bodyText, ticket);
+      this._leakCheck(subject, bodyHtml, bodyText, ticket, refContext);
 
       let guarded;
       try {
@@ -1934,7 +1951,7 @@ class AutoHelpRunner {
       const text = htmlToText(html);
       const finalSubjectLine = clip(String(payload.subject || subject), 200);
       if (!html || !text) throw gateError('Guard removed the whole answer', GATE.GUARD_BLOCKED);
-      this._leakCheck(finalSubjectLine, html, text, ticket);
+      this._leakCheck(finalSubjectLine, html, text, ticket, refContext);
       return {
         html,
         text,

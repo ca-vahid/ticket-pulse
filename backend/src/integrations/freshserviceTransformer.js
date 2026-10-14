@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId } from '../utils/fsEntryId.js';
+import { fsSystemConversationKind } from '../utils/fsSystemConversation.js';
 import {
   FALLBACK_STATUS_LABELS,
   boundNameForFsStatus,
@@ -609,13 +610,19 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
 
   try {
     const isPrivate = conversation.private === true;
-    const isIncoming = conversation.incoming === true;
+    // A line FreshService wrote itself ("<Name> has submitted the survey
+    // response") arrives flagged incoming. It is a system event, not the
+    // requester writing in (QA 10-13 #5).
+    const systemKind = fsSystemConversationKind(conversation);
+    const isIncoming = conversation.incoming === true && !systemKind;
     const visibility = isPrivate ? 'private' : (isIncoming ? 'customer' : 'public');
-    const eventType = isPrivate
-      ? 'private_note'
-      : isIncoming
-        ? 'customer_reply'
-        : 'public_reply';
+    const eventType = systemKind
+      ? 'activity'
+      : isPrivate
+        ? 'private_note'
+        : isIncoming
+          ? 'customer_reply'
+          : 'public_reply';
 
     // Canonical stamp shared with the live write + reconcile (Phase DR1) —
     // the SAME conversation must always land on the SAME row.
@@ -637,13 +644,14 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
       // from_email can be a raw '"Name" <addr>' header — parse it; the FS user
       // object (when present) is the most authoritative identity.
       ...(() => {
+        if (systemKind) return { actorName: 'FreshService', actorEmail: null, authorType: 'system' };
         const parsed = parseRfc822Address(conversation.from_email || conversation.support_email);
         return {
           actorName: cleanDisplayName(conversation.user?.name) || parsed.name || parsed.email || null,
           actorEmail: (conversation.user?.email || parsed.email || null),
         };
       })(),
-      actorFreshserviceId: conversation.user_id ? BigInt(conversation.user_id) : null,
+      actorFreshserviceId: conversation.user_id && !systemKind ? BigInt(conversation.user_id) : null,
       incoming: isIncoming,
       isPrivate,
       visibility,
@@ -652,7 +660,7 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
       bodyHtml: conversation.body || null,
       bodyText: conversation.body_text || null,
       occurredAt: conversation.created_at ? new Date(conversation.created_at) : new Date(),
-      rawPayload: conversation,
+      rawPayload: systemKind ? { ...conversation, tpSystemKind: systemKind } : conversation,
     };
   } catch (error) {
     logger.error('Error transforming ticket conversation entry:', error);

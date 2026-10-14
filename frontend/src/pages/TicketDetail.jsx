@@ -20,7 +20,7 @@ import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { rememberTicket } from '../utils/recentSearches';
-import { plainTextToHtml } from '../utils/plainTextToHtml';
+import { RichBody, SentSignature, IMG_REF_RE, openingMessageHtml, picturesShownInBody } from '../components/tickets/InlineImageBody';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
 import { buildHistoryItems, countMachine } from '../utils/ticketHistory';
 import TicketHistoryTimeline from '../components/tickets/TicketHistoryTimeline';
@@ -55,6 +55,7 @@ import {
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
 import UrgentClockLine from '../components/tickets/UrgentClockLine';
+import NewRequestSuggestionLine from '../components/tickets/NewRequestSuggestionLine';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { readHideMachinePreference, writeHideMachinePreference } from '../components/tickets/activityKind';
 
@@ -138,17 +139,6 @@ function Body({ html, text, className = '' }) {
   return <p className={`text-sm text-foreground/85 whitespace-pre-wrap break-words ${className}`}>{value}</p>;
 }
 
-const escapeHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const IMG_REF_RE = /\[Image:\s*([^\]]+?)\]/g;
-// Bodies may use non-breaking-space entities inside the ref (e.g. from a paste),
-// so normalize those to real spaces before trimming the file name.
-const cleanRefName = (s) => String(s || '').replace(new RegExp('&nbsp;|&#160;|&#xa0;|\\u00a0', 'gi'), ' ').trim();
-
-/**
- * Renders a thread body and turns inline "[Image: name]" references into
- * clickable chips (click → onImageRef(name) opens a preview). Uses SafeHtml so
- * rich formatting is preserved; delegates the click via the wrapping div.
- */
 // QA 10-06 #4: a visible one-click copy beside the requester's e-mail and
 // phone numbers (the e-mail was click-to-copy with nothing saying so).
 function CopyValueButton({ value, label, onCopy }) {
@@ -169,38 +159,6 @@ function CopyValueButton({ value, label, onCopy }) {
     >
       {copied ? <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
     </button>
-  );
-}
-
-function RichBody({ html, text, onImageRef, className = '', shownImages = null }) {
-  // A picture that is shown as a thumbnail under the message keeps a short
-  // "🖼 picture" marker in the text instead of its file name again (2 Oct 2026).
-  const injectRefs = (s) => String(s).replace(IMG_REF_RE, (_m, name) => {
-    const plain = cleanRefName(name);
-    const clean = escapeHtml(plain);
-    const shown = shownImages && shownImages.has(plain.toLowerCase());
-    return `<span class="tp-img-ref" data-img="${clean}" title="${clean}" role="button" tabindex="0">🖼 ${shown ? 'picture' : clean}</span>`;
-  });
-  // FR 09-11 #3: a text-only body used to become one <br> per newline, so mail
-  // that separates every line with a blank line (Outlook's text down-conversion
-  // of an HTML message) rendered with an empty line between every single line.
-  // Paragraphs carry that structure instead, at a normal paragraph margin.
-  const source = (html && looksLikeHtml(html))
-    ? injectRefs(html)
-    : injectRefs(plainTextToHtml(text || html || ''));
-  const handleClick = (e) => {
-    const el = e.target.closest?.('.tp-img-ref');
-    if (el) { e.preventDefault(); onImageRef?.(el.getAttribute('data-img')); }
-  };
-  const handleKey = (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('tp-img-ref')) {
-      e.preventDefault(); onImageRef?.(e.target.getAttribute('data-img'));
-    }
-  };
-  return (
-    <div onClick={handleClick} onKeyDown={handleKey} role="presentation">
-      <SafeHtml html={source} className={className} />
-    </div>
   );
 }
 
@@ -247,7 +205,10 @@ export function approvalEventMeta(entry) {
 const BODY_CLAMP_AT_PX = 1200; // collapse only when taller than this
 const BODY_PREVIEW_PX = 800; // collapsed preview height
 
-function CollapsibleBody({ html, text }) {
+function CollapsibleBody({ html, text, ticketId = null, inlineImages = null, onImageRef = null }) {
+  // QA 10-13 #1: a description that names pictures ("[Image: file]") shows them where they were.
+  // Any other description renders exactly as before.
+  const hasPictureRefs = Boolean(ticketId) && (inlineImages || []).length > 0 && new RegExp(IMG_REF_RE.source).test(`${html || ''}${text || ''}`);
   const bodyRef = useRef(null);
   const userToggled = useRef(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -275,7 +236,9 @@ function CollapsibleBody({ html, text }) {
         className={collapsed ? 'overflow-hidden relative' : ''}
         style={collapsed ? { maxHeight: `${BODY_PREVIEW_PX}px` } : undefined}
       >
-        <Body html={html} text={text} />
+        {hasPictureRefs
+          ? <RichBody html={html} text={text} ticketId={ticketId} inlineImages={inlineImages} onImageRef={onImageRef} />
+          : <Body html={html} text={text} />}
         {collapsed && <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent" aria-hidden="true" />}
       </div>
       {isLong && (
@@ -399,10 +362,25 @@ export function forwardedMetaOf(entry) {
   return null;
 }
 
-export function ThreadEntry({ entry, attachments = [], ticketId = null, onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null }) {
+export function ThreadEntry({ entry, attachments = [], ticketId = null, onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null, openingHtml = null, openingImages = null }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // QA 10-13 #3: the opening e-mail's entry held only a 255-character plain-text preview;
+  // `openingHtml` is the description's formatted body for those older entries (display only).
+  const shownHtml = entry.bodyHtml || openingHtml || null;
   // Stable lists: the thumbnail strip loads pictures per list identity.
-  const imageAttachments = useMemo(() => (ticketId ? attachments.filter(isImageAttachment) : []), [attachments, ticketId]);
+  const allImageAttachments = useMemo(() => (ticketId ? attachments.filter(isImageAttachment) : []), [attachments, ticketId]);
+  // QA 10-13 #2: a picture the message names ("[Image: file]") is shown where it was, small and
+  // clickable, and is not repeated in the strip under the message. The opening e-mail's pictures
+  // belong to the ticket, not to the entry, so they are handed in as `openingImages`.
+  const inlineImages = useMemo(() => {
+    if (!ticketId) return [];
+    const candidates = entry.eventType === 'original_email' ? [...allImageAttachments, ...(openingImages || [])] : allImageAttachments;
+    return picturesShownInBody(candidates, shownHtml, entry.bodyText || entry.content);
+  }, [ticketId, allImageAttachments, openingImages, shownHtml, entry.eventType, entry.bodyText, entry.content]);
+  const imageAttachments = useMemo(() => {
+    const inBody = new Set(inlineImages.map((a) => a.id));
+    return inBody.size ? allImageAttachments.filter((a) => !inBody.has(a.id)) : allImageAttachments;
+  }, [allImageAttachments, inlineImages]);
   const fileAttachments = useMemo(() => (ticketId ? attachments.filter((a) => !isImageAttachment(a)) : attachments), [attachments, ticketId]);
   const shownImageNames = useMemo(() => (ticketId ? new Set(imageAttachments.map((a) => String(a.fileName || '').trim().toLowerCase())) : null), [imageAttachments, ticketId]);
   // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
@@ -668,7 +646,11 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             </div>
           </div>
         ) : (
-          <RichBody html={entry.bodyHtml} text={body} onImageRef={onImageRef} shownImages={shownImageNames} />
+          <>
+            <RichBody html={shownHtml} text={body} onImageRef={onImageRef} shownImages={shownImageNames} ticketId={ticketId} inlineImages={inlineImages} />
+            {/* QA 10-13 #4: the signature that was added when this reply was mailed. */}
+            {!isNote && <SentSignature entry={entry} />}
+          </>
         )}
         {/* Pictures as thumbnails (name on hover); other files as chips. */}
         {imageAttachments.length > 0 && (
@@ -1502,6 +1484,11 @@ export default function TicketDetail() {
     () => ticketAttachments.filter((a) => !a.threadEntryId && isImageAttachment(a)),
     [ticketAttachments],
   );
+  // Pictures the description already shows in place are not repeated in the strip under it.
+  const descriptionStripImages = useMemo(() => {
+    const inBody = new Set(picturesShownInBody(descriptionImages, ticket?.description, ticket?.descriptionText).map((a) => a.id));
+    return inBody.size ? descriptionImages.filter((a) => !inBody.has(a.id)) : descriptionImages;
+  }, [descriptionImages, ticket?.description, ticket?.descriptionText]);
   // Non-image ticket-level files (invoices, docs) — a chip row under the
   // description so the original message's files live with the message, not
   // only in the sidebar (QA 07-08).
@@ -3034,8 +3021,8 @@ export default function TicketDetail() {
                         </div>
                         {/* Who else received the original email (QA 08-05 #3) */}
                         <RecipientsLine to={ticket.toEmails} cc={ticket.ccEmails} className="-mt-0.5 mb-2" />
-                        <CollapsibleBody html={ticket.description} text={ticket.descriptionText} />
-                        <DescriptionImageStrip ticketId={ticketId} images={descriptionImages} onPreview={previewImage} />
+                        <CollapsibleBody html={ticket.description} text={ticket.descriptionText} ticketId={ticketId} inlineImages={descriptionImages} onImageRef={previewImageRef} />
+                        <DescriptionImageStrip ticketId={ticketId} images={descriptionStripImages} onPreview={previewImage} />
                         {descriptionFiles.length > 0 && (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {descriptionFiles.map((a) => (
@@ -3110,6 +3097,21 @@ export default function TicketDetail() {
                           ))}
                         </div>
                       </div>
+                      {/* A reply to a long-resolved ticket that reads like new
+                          work: one quiet line, a person decides (13 Oct 2026). */}
+                      <NewRequestSuggestionLine
+                        ticketId={ticketId}
+                        refreshKey={`${conversationEntries.length}:${ticket.status}`}
+                        canSplit={canConverse && meta?.actor?.kind !== 'agent'}
+                        onSplit={(result) => {
+                          lastLocalMutationRef.current = Date.now();
+                          const back = result?.parentStatus?.applied ? `; this ticket is ${result.parentStatus.requested} again` : '; this ticket stays open';
+                          showToast('emerald', `Split into ${result?.child?.ref || 'a new ticket'}${back}`);
+                          fetchTicket({ silent: true });
+                        }}
+                        onDismissed={() => showToast('emerald', 'Kept on this ticket')}
+                        onError={(message) => showToast('red', message)}
+                      />
                       {timeline.length === 0 ? (
                         <div className="tp-surface rounded-xl p-6 text-center text-sm text-muted-foreground/75">
                           Nothing here yet{canConverse && conversationTab === 'all' ? ' — start the conversation below.' : '.'}
@@ -3137,6 +3139,8 @@ export default function TicketDetail() {
                                     entry={item.e}
                                     attachments={attachmentsByEntry.get(item.e.id) || []}
                                     ticketId={ticketId}
+                                    openingHtml={item.e.eventType === 'original_email' ? openingMessageHtml(item.e, ticket) : null}
+                                    openingImages={item.e.eventType === 'original_email' ? descriptionImages : null}
                                     onPreview={previewImage}
                                     onImageRef={previewImageRef}
                                     photoFor={photoFor}

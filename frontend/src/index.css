@@ -743,6 +743,49 @@ code {
     outline: none;
     box-shadow: 0 0 0 2px rgb(59 130 246 / 0.55);
   }
+  /* QA 10-13 #1/#2: the picture itself where "[Image: name]" was. Small (never
+     wider than its place in the message: a signature logo keeps its cell), and
+     a click opens the full picture in the attachment preview. */
+  .tp-img-ref.tp-img-ref--shown {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0;
+    margin: 0.25rem 0;
+    border: 0;
+    border-radius: 0.5rem;
+    background: none;
+    cursor: zoom-in;
+  }
+  .tp-rich-body .tp-inline-img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: min(100%, 360px);
+    max-height: 220px;
+    border-radius: 0.5rem;
+    border: 1px solid hsl(var(--border));
+    /* Pictures in mail are drawn for a white page (a logo with a clear
+       background would vanish on the dark theme). */
+    background: #fff;
+  }
+  .dark .tp-rich-body .tp-img-ref.tp-img-ref--shown {
+    background: none;
+  }
+  .tp-img-ref.tp-img-ref--shown:hover .tp-inline-img {
+    border-color: hsl(var(--primary) / 0.6);
+  }
+  /* The same in the reply editor: a pasted picture shows as a small preview. */
+  .tp-rich-editor img.tp-editor-thumb {
+    display: inline-block;
+    vertical-align: middle;
+    max-width: 220px;
+    max-height: 140px;
+    margin: 0.125rem;
+    border-radius: 0.375rem;
+    border: 1px solid hsl(var(--border));
+  }
+
   /* Inside a PAPER email body (light panel) the light chip stays; everywhere
      else — themed bodies included (Phase DW) — it takes the dark accent tint. */
   .dark :not(.tp-rich-body--paper) > .tp-img-ref {

@@ -316,8 +316,56 @@ describe('pasting HTML that carries embedded pictures', () => {
     expect(onImagePaste.mock.calls[0][0]).toBeInstanceOf(File);
     expect(html).toContain('See the damage below.');
     expect(html).toContain('[Image:');
-    expect(html).not.toContain('data:image');
+    // QA 10-13 #2: the editor shows the picture as a small preview at that spot...
+    expect(html).toContain('data-tp-img="pasted-image-1.png"');
+    expect(html).toContain('class="tp-editor-thumb"');
     expect(html).not.toContain('TPIMG');
+  });
+
+  test('the preview never leaves the editor: what is handed on is the marker, with no picture data', () => {
+    // ...and what the editor hands on (stored, mailed) is still the marker text only.
+    const onChange = vi.fn();
+    const onImagePaste = vi.fn(() => 'pasted-image-1.png');
+    render(<RichTextEditor value="" onChange={onChange} ariaLabel="Reply body" onImagePaste={onImagePaste} />);
+    const editor = screen.getByLabelText('Reply body');
+    document.execCommand = vi.fn((cmd, _ui, value) => { if (cmd === 'insertHTML') editor.innerHTML += value; return true; });
+    fireEvent.paste(editor, {
+      clipboardData: { items: [], getData: (t) => (t === 'text/html' ? OUTLOOK_HTML : 'See the damage below.') },
+    });
+    expect(editor.querySelector('img.tp-editor-thumb')).not.toBeNull();
+    const emitted = onChange.mock.calls.at(-1)[0];
+    expect(emitted.html).toContain('<i>[Image: pasted-image-1.png]</i>');
+    expect(emitted.html).not.toContain('<img');
+    expect(emitted.html).not.toContain('data:image');
+    expect(emitted.text).toContain('[Image: pasted-image-1.png]');
+  });
+
+  test('a screenshot pasted as a file shows as a preview and is handed on as the marker', () => {
+    const onChange = vi.fn();
+    const onImagePaste = vi.fn(() => 'pasted-image-1.png');
+    const createObjectURL = vi.fn(() => 'blob:preview-1');
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const { unmount } = render(<RichTextEditor value="" onChange={onChange} ariaLabel="Reply body" onImagePaste={onImagePaste} />);
+      const editor = screen.getByLabelText('Reply body');
+      document.execCommand = vi.fn((cmd, _ui, value) => { if (cmd === 'insertHTML') editor.innerHTML += value; return true; });
+      const file = new File(['x'], 'image.png', { type: 'image/png' });
+      fireEvent.paste(editor, {
+        clipboardData: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], getData: () => '' },
+      });
+      expect(onImagePaste).toHaveBeenCalledWith(file);
+      expect(editor.querySelector('img.tp-editor-thumb').getAttribute('src')).toBe('blob:preview-1');
+      const emitted = onChange.mock.calls.at(-1)[0];
+      expect(emitted.html).toContain('[Image: pasted-image-1.png]');
+      expect(emitted.html).not.toContain('blob:');
+      unmount();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+    } finally {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+    }
   });
 
   test('with no host, a small picture may stay inline rather than vanish', () => {

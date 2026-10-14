@@ -807,6 +807,14 @@ export const ticketsAPI = {
   getAlsoForSettings: async () => await api.get('/tickets/also-for-settings'),
   updateAlsoForSettings: async (notifyAdditionalRequesters) => await api.put('/tickets/also-for-settings', { notifyAdditionalRequesters }),
 
+  // "When a requester replies" workspace switches (13 Oct 2026): owner away → back to assignment; reply that is a new request → suggest a split.
+  getRequesterReplySettings: async () => await api.get('/tickets/requester-reply-settings'),
+  updateRequesterReplySettings: async (patch) => await api.put('/tickets/requester-reply-settings', patch),
+  // "This reply looks like a new request" on one ticket.
+  getNewRequestSuggestion: async (id) => await api.get(`/tickets/${id}/new-request-suggestion`),
+  splitNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/split`),
+  dismissNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/dismiss`),
+
   stats: async () => {
     return await api.get('/tickets/stats');
   },
@@ -1994,6 +2002,9 @@ export const analyticsAPI = {
   getTeamBalance: (params = {}) => apiAnalytics.get('/analytics/team-balance', { params }),
   getQuality: (params = {}) => apiAnalytics.get('/analytics/quality', { params }),
   getAutomationOps: (params = {}) => apiAnalytics.get('/analytics/automation-ops', { params }),
+  // Automation Ops, first section (QA 10-13 #16): the AI's pick against who did the ticket.
+  getAiPickAccuracy: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy', { params }),
+  getAiPickAccuracyExport: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy/export', { params }),
   getInsights: (params = {}) => apiAnalytics.get('/analytics/insights', { params }),
   // Reports (feedback 07-14): saved snapshots; generation runs the LLM (10-20s)
   listReports: () => apiAnalytics.get('/analytics/reports'),
@@ -2141,6 +2152,12 @@ export const hrLifecycleAPI = {
  * cover requests are open to members; everything else is workspace-admin only.
  * Responses are { success, data }.
  */
+// Assignment spread (QA 10-13 item 17): Assignment Review, Spread tab.
+export const assignmentSpreadAPI = {
+  get: (days = 30) => api.get('/assignment-spread', { params: { days } }),
+  saveSettings: (patch) => api.put('/assignment-spread/settings', patch),
+};
+
 // Ticket grouping (plans/TICKET_GROUPING_PLAN.md): the Grouped view of Tickets.
 export const ticketGroupingAPI = {
   get: (days = 14) => api.get('/ticket-grouping', { params: { days } }),

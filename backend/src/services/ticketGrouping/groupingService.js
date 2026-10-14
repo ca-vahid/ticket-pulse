@@ -43,6 +43,9 @@ import logger from '../../utils/logger.js';
 import settingsRepository from '../settingsRepository.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
 import { HR_SENDERS } from '../../utils/hrNoticeClassifier.js';
+
+/** Kind of the "this reply looks like a new request" rows newRequestSuggestionService keeps in the same table. */
+const NEW_REQUEST_KIND = 'new_request';
 import {
   CANDIDATE_WINDOW_DAYS, CLOSED_CANDIDATE_DAYS, CONFIDENCES, MIN_KEY_LENGTH, NEIGHBOUR_MIN_SCORE, RELATIONS, ROOT_LOOKBACK_DAYS,
   SENDER_KINDS, TERMINAL_STATUSES, bestMatch, coarseTemplate, decide, excerpt, fineKey, isTerminal, looksAutomated, normalizeSettings,
@@ -170,7 +173,9 @@ class TicketGroupingService {
     const prior = await prisma.ticketGroupingEvent.findFirst({ where: { ticketId }, orderBy: { id: 'desc' }, select: { id: true, state: true, kind: true, targetTicketId: true } });
     if (prior) {
       // Already closed into another ticket (the sweep got here first): the caller must not start an AI run.
-      return prior.state === 'applied' && prior.kind !== 'related'
+      // A "this reply is a new request" row (newRequestSuggestionService) is
+      // about a reply, not about this ticket being a copy of another.
+      return prior.state === 'applied' && prior.kind !== 'related' && prior.kind !== NEW_REQUEST_KIND
         ? { handled: true, skipAi: true, already: true, kind: prior.kind, eventId: prior.id, targetId: prior.targetTicketId }
         : null;
     }
@@ -580,7 +585,8 @@ class TicketGroupingService {
   /** Put a ticket back as its own piece of work. */
   async undo(eventId, workspaceId, actor) {
     const event = await this._eventFor(eventId, workspaceId);
-    if (event.state !== 'applied') return { event, changed: false };
+    // A reply split into its own ticket is undone by hand (merge it back): nothing here to reverse.
+    if (event.state !== 'applied' || event.kind === NEW_REQUEST_KIND) return { event, changed: false };
     const ticket = await prisma.ticket.findFirst({ where: { id: event.ticketId, workspaceId: event.workspaceId }, select: TICKET_SELECT });
     if (ticket && event.kind === 'related') {
       const link = await soft(() => prisma.ticketLink.findFirst({ where: { ticketId: event.ticketId, relatedTicketId: event.targetTicketId, kind: 'related_to' }, select: { id: true } }));
@@ -606,6 +612,11 @@ class TicketGroupingService {
   async accept(eventId, workspaceId, actor) {
     const event = await this._eventFor(eventId, workspaceId);
     if (event.state !== 'suggested') return { event, changed: false };
+    // "This reply looks like a new request": agreeing splits it into its own ticket.
+    if (event.kind === NEW_REQUEST_KIND) {
+      const { default: newRequestSuggestionService } = await import('../newRequestSuggestionService.js');
+      return newRequestSuggestionService.accept(event.id, event.workspaceId, actor);
+    }
     const [ticket, keeper] = await Promise.all([
       prisma.ticket.findFirst({ where: { id: event.ticketId, workspaceId: event.workspaceId }, select: TICKET_SELECT }),
       prisma.ticket.findFirst({ where: { id: event.targetTicketId, workspaceId: event.workspaceId }, select: TICKET_SELECT }),
@@ -669,7 +680,9 @@ class TicketGroupingService {
       id: e.id, kind: e.kind, state: e.state, confidence: e.confidence, retraction: e.retraction, reason: e.reason, createdAt: e.createdAt,
       decidedAt: e.decidedAt, decidedBy: e.decidedBy, via: e.details?.via || null, ticket: byId.get(e.ticketId) || null, target: byId.get(e.targetTicketId) || null,
     });
-    const shaped = events.map(shape).filter((e) => e.ticket && e.target);
+    // A "new request" suggestion is about one ticket: it has no second ticket until it is split.
+    const isNewRequest = (e) => e.kind === NEW_REQUEST_KIND;
+    const shaped = events.map(shape).filter((e) => e.ticket && (e.target || isNewRequest(e)));
     const groups = new Map();
     for (const e of shaped.filter((x) => x.kind === 'repeat' && x.state === 'applied')) {
       const g = groups.get(e.target.id) || { target: e.target, count: 0, latestAt: e.createdAt, events: [] };
@@ -681,9 +694,9 @@ class TicketGroupingService {
     return {
       settings, days: Math.round((Date.now() - since.getTime()) / DAY),
       waiting: shaped.filter((e) => e.state === 'suggested'),
-      combined: shaped.filter((e) => e.kind !== 'repeat' && e.state === 'applied'),
+      combined: shaped.filter((e) => e.kind !== 'repeat' && !isNewRequest(e) && e.state === 'applied'),
       repeats: [...groups.values()].sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt)),
-      reversed: shaped.filter((e) => e.state === 'undone' || e.state === 'dismissed').slice(0, 50),
+      reversed: shaped.filter((e) => (e.state === 'undone' || e.state === 'dismissed') && e.target && !isNewRequest(e)).slice(0, 50),
       senders: senders.map((s) => ({ id: s.id, sender: s.sender, template: s.template, kind: s.kind, enabled: s.enabled, decidedBy: s.decidedBy, reason: s.reason, sampleSubject: s.sampleSubject, repeatCount: s.repeatCount, lastRepeatAt: s.lastRepeatAt })),
     };
   }
@@ -712,8 +725,10 @@ class TicketGroupingService {
     return {
       repeats: [...repeats.values()].sort((a, b) => b.count - a.count),
       repeatTotal: applied.filter((x) => x.kind === 'repeat').length,
-      combined: applied.filter((x) => x.kind !== 'repeat').map(pair).filter((p) => p.ticket && p.target),
-      waiting: waiting.map(pair).filter((p) => p.ticket && p.target),
+      combined: applied.filter((x) => x.kind !== 'repeat' && x.kind !== NEW_REQUEST_KIND).map(pair).filter((p) => p.ticket && p.target),
+      waiting: waiting.filter((x) => x.kind !== NEW_REQUEST_KIND).map(pair).filter((p) => p.ticket && p.target),
+      // Replies that look like a new request: one ticket each, a person decides.
+      newRequests: waiting.filter((x) => x.kind === NEW_REQUEST_KIND).map(pair).filter((p) => p.ticket),
     };
   }
 

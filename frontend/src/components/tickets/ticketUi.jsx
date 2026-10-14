@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { linkifyHtml } from '../../utils/linkify';
+import { fsSystemEntryKind } from '../../utils/fsSystemEntry';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, RotateCcw, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
@@ -16,6 +17,9 @@ export { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS };
  */
 export function isConversationEntry(e) {
   if (!e || e.source === 'freshservice_activity') return false;
+  // A line FreshService wrote itself (survey response submitted) is a History
+  // event, not a message from the requester (QA 10-13 #5).
+  if (fsSystemEntryKind(e)) return false;
   return Boolean(e.bodyText || e.content || e.bodyHtml);
 }
 

@@ -64,6 +64,28 @@ describe('Grouped tickets', () => {
     await waitFor(() => expect(api.undo).toHaveBeenCalledWith(4));
   });
 
+  // 13 Oct 2026: a reply to a resolved ticket that reads like new work waits
+  // here too. It is one ticket (no second ticket, no arrow), with its own two answers.
+  test('a reply that looks like a new request is listed alone, with Split and It belongs here', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        ...PAGE,
+        waiting: [{ id: 12, kind: 'new_request', state: 'suggested', reason: 'Asks for Adobe Acrobat, not the slow Wi-Fi.', via: null, retraction: false, createdAt: '2026-10-13T16:55:00Z', ticket: t(700, '#245828', 'Slow laptop connection', { requester: 'Karen Wong' }), target: null }],
+      },
+    });
+    show();
+    const row = await screen.findByTestId('grouping-event-12');
+    expect(within(row).getByRole('link', { name: '#245828' })).toHaveAttribute('href', '/tickets/700');
+    expect(within(row).getByText('A reply that looks like a new request')).toBeInTheDocument();
+    expect(within(row).getByText(/Asks for Adobe Acrobat/)).toBeInTheDocument();
+    expect(within(row).getAllByRole('link')).toHaveLength(1);
+    expect(within(row).queryByRole('button', { name: 'Combine' })).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Split into its own ticket' }));
+    await waitFor(() => expect(api.accept).toHaveBeenCalledWith(12));
+    fireEvent.click(within(await screen.findByTestId('grouping-event-12')).getByRole('button', { name: 'It belongs here' }));
+    await waitFor(() => expect(api.dismiss).toHaveBeenCalledWith(12));
+  });
+
   test('an admin can turn it off, switch people to suggest-only, and correct a sender', async () => {
     show();
     fireEvent.click(await screen.findByRole('button', { name: 'Turn off' }));

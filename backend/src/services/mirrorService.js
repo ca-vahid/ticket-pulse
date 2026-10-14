@@ -13,6 +13,7 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId, fsConversationEntryIdCandidates } from '../utils/fsEntryId.js';
+import { fsSystemConversationKind } from '../utils/fsSystemConversation.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { boundFsStatusForName } from '../utils/fsStatusBindings.js';
@@ -279,6 +280,16 @@ class MirrorService {
    */
   async enqueueAttachment(workspaceId, ticketId, attachmentId) {
     return this._enqueue(workspaceId, ticketId, 'attachment', null, { attachmentId });
+  }
+
+  /**
+   * The files that arrived with the e-mail that opened a ticket (QA 10-13 #1): ONE note on the
+   * FreshService copy carrying all of them, where one job per file would write a note each.
+   */
+  async enqueueAttachments(workspaceId, ticketId, attachmentIds) {
+    const ids = [...new Set((Array.isArray(attachmentIds) ? attachmentIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (ids.length === 0) return null;
+    return this._enqueue(workspaceId, ticketId, 'attachment', null, { attachmentIds: ids });
   }
 
   async _enqueue(workspaceId, ticketId, kind, threadEntryId = null, payload = null) {
@@ -1064,6 +1075,10 @@ class MirrorService {
     if (!ticket.freshserviceTicketId) {
       throw new Error('Awaiting FreshService copy (create_ticket has not completed)');
     }
+    if (Array.isArray(job.payload?.attachmentIds)) {
+      await this._mirrorMailFiles(job, client, ticket, FS_ATTACHMENT_CAP_BYTES);
+      return;
+    }
     const row = await prisma.ticketAttachment.findFirst({
       where: { id: Number(job.payload?.attachmentId), ticketId: job.ticketId },
     });
@@ -1087,6 +1102,57 @@ class MirrorService {
     const body = `${fsNoteHeader({ who: row.uploadedByName || 'Ticket Pulse', action: 'attachment', ref: ticketDisplayRef(ticket), url: ticketUrl(ticket), marker: MIRROR_MARKER })}<p>${String(row.fileName).replace(/</g, '&lt;')}</p>`;
     await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: files });
     logger.info(`Mirror: attachment "${row.fileName}" pushed to FS copy of ticket ${job.ticketId}`);
+  }
+
+  /**
+   * The files of the e-mail that opened the ticket, as one private note on the FreshService copy
+   * (QA 10-13 #1). FreshService has no way to show a picture inside the description from a file we
+   * hold (it needs an address anyone can open, and ours are private), so the description keeps the
+   * "[Image: name]" text and the note names the same files. Over the request cap, the files go in
+   * as many notes as it takes; a file too large on its own, or one whose bytes are gone, is named
+   * as left out instead of failing the job.
+   */
+  async _mirrorMailFiles(job, client, ticket, capBytes) {
+    const rows = await Promise.resolve().then(() => prisma.ticketAttachment.findMany({
+      where: { id: { in: job.payload.attachmentIds.map(Number) }, ticketId: job.ticketId },
+      orderBy: { id: 'asc' },
+    })).then((r) => (Array.isArray(r) ? r : []));
+    if (rows.length === 0) return; // deleted before the mirror ran
+    const esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const batches = [];
+    const leftOut = [];
+    let current = { files: [], bytes: 0 };
+    for (const row of rows) {
+      if (row.sizeBytes > capBytes) { leftOut.push(row.fileName); continue; }
+      let buffer;
+      try {
+        buffer = await attachmentService._container().getBlockBlobClient(row.blobName).downloadToBuffer();
+      } catch (err) {
+        logger.warn(`Mirror: attachment blob fetch failed for "${row.fileName}": ${err.message} (skipped)`);
+        leftOut.push(row.fileName);
+        continue;
+      }
+      if (current.files.length > 0 && current.bytes + buffer.length > capBytes) {
+        batches.push(current);
+        current = { files: [], bytes: 0 };
+      }
+      current.files.push({ filename: row.fileName, buffer, contentType: row.contentType });
+      current.bytes += buffer.length;
+    }
+    if (current.files.length > 0) batches.push(current);
+    if (batches.length === 0) {
+      logger.warn(`Mirror: none of the e-mail's ${rows.length} file(s) could be copied to the FS copy of ticket ${job.ticketId}`);
+      return;
+    }
+    const header = fsNoteHeader({ who: 'Ticket Pulse', action: 'attachment', ref: ticketDisplayRef(ticket), url: ticketUrl(ticket), marker: MIRROR_MARKER });
+    for (const [index, batch] of batches.entries()) {
+      const names = batch.files.map((f) => esc(f.filename)).join(', ');
+      const body = `${header}<p>Pictures and files that came with the e-mail${batches.length > 1 ? ` (${index + 1} of ${batches.length})` : ''}: ${names}.</p>`
+        + '<p>Where the description says [Image: name], the picture with that name is here. FreshService cannot show it inside the description; Ticket Pulse does.</p>'
+        + (index === 0 && leftOut.length ? `<p>Not copied (too large for FreshService, or no longer stored): ${leftOut.map(esc).join(', ')}. Open them in Ticket Pulse.</p>` : '');
+      await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: batch.files });
+    }
+    logger.info(`Mirror: ${rows.length - leftOut.length} file(s) from the e-mail pushed to FS copy of ticket ${job.ticketId}`);
   }
 
   /**
@@ -1365,8 +1431,12 @@ class MirrorService {
       // Who wrote it: FS gives us `user_id`; look up the technician so the
       // thread shows a person instead of "FreshService user" (FR 09-10).
       // Non-fatal — an unknown id just falls back to the old label.
+      // A line FreshService wrote itself on the copy ("<Name> has submitted
+      // the survey response", flagged incoming): a system event, never a
+      // requester reply. TP-1882 was reopened by one (QA 10-13 #5).
+      const systemKind = fsSystemConversationKind(conv);
       let authorTech = null;
-      if (conv.user_id) {
+      if (conv.user_id && !systemKind) {
         authorTech = await prisma.technician.findFirst({
           where: { freshserviceId: BigInt(conv.user_id) },
           select: { name: true, email: true },
@@ -1378,7 +1448,7 @@ class MirrorService {
           workspaceId,
           externalEntryId,
           source: 'freshservice_reconciliation',
-          eventType: conv.private ? 'note' : 'reply',
+          eventType: systemKind ? 'activity' : (conv.private ? 'note' : 'reply'),
           // Author (FR 09-10): FreshService's conversation payload carries
           // `user_id`, NOT `user_name`, and `from_email` is null for a note an
           // agent typed in the FS UI — so both sides of the old
@@ -1389,11 +1459,11 @@ class MirrorService {
           //
           // The FS-BORN path (freshserviceTransformer) already did this
           // correctly — only this TP-born reconciliation lane was blind.
-          actorName: cleanDisplayName(conv.user_name || authorTech?.name || conv.from_email) || 'FreshService user',
-          actorEmail: conv.from_email || authorTech?.email || null,
-          actorFreshserviceId: conv.user_id ? BigInt(conv.user_id) : null,
-          authorType: conv.incoming ? 'requester' : 'agent',
-          incoming: conv.incoming === true,
+          actorName: systemKind ? 'FreshService' : (cleanDisplayName(conv.user_name || authorTech?.name || conv.from_email) || 'FreshService user'),
+          actorEmail: systemKind ? null : (conv.from_email || authorTech?.email || null),
+          actorFreshserviceId: conv.user_id && !systemKind ? BigInt(conv.user_id) : null,
+          authorType: systemKind ? 'system' : (conv.incoming ? 'requester' : 'agent'),
+          incoming: conv.incoming === true && !systemKind,
           isPrivate: conv.private === true,
           visibility: conv.private ? 'private' : 'public',
           bodyHtml: conv.body || null,
@@ -1402,8 +1472,8 @@ class MirrorService {
           occurredAt: conv.created_at ? new Date(conv.created_at) : new Date(),
           // fsUpdatedAt lets the edit check above compare timestamps instead
           // of bodies on the next pass.
-          ...((Object.keys(recipients).length || conv.updated_at)
-            ? { rawPayload: { ...recipients, ...(conv.updated_at ? { fsUpdatedAt: conv.updated_at } : {}) } }
+          ...((Object.keys(recipients).length || conv.updated_at || systemKind)
+            ? { rawPayload: { ...recipients, ...(conv.updated_at ? { fsUpdatedAt: conv.updated_at } : {}), ...(systemKind ? { tpSystemKind: systemKind } : {}) } }
             : {}),
         },
       });
@@ -1411,7 +1481,7 @@ class MirrorService {
 
       // Requester replies that arrived via FS behave like any other reply:
       // fire the workflow event (stable per-conversation stamp) + live update.
-      if (conv.incoming === true && conv.private !== true) {
+      if (conv.incoming === true && conv.private !== true && !systemKind) {
         import('./ticketLifecycleNotificationService.js')
           .then(({ emitTicketEvent }) => emitTicketEvent('ticket.reply_received', ticket.id, {
             source: 'freshservice_reconciliation',

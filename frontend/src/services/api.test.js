@@ -38,6 +38,8 @@ describe('api auth/workspace helpers', () => {
     expect(Object.keys(analyticsAPI).sort()).toEqual([
       'deleteReport',
       'generateReport',
+      'getAiPickAccuracy',
+      'getAiPickAccuracyExport',
       'getAutomationOps',
       'getCategories',
       'getCategoryIntelligence',

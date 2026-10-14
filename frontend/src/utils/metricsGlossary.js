@@ -287,6 +287,39 @@ export const METRICS_GLOSSARY = {
     label: 'Routing accuracy',
     definition: 'Percentage of auto-assigned tickets still with the AI’s pick after 7 days. A ticket counts against accuracy when a human reassigned it away within 7 days of the AI’s decision.',
   },
+  aiPickFirstChoiceKept: {
+    label: 'First choice kept',
+    definition: 'Of the tickets the AI assigned, how many were done by the person it chose first. "Done by" is the assignee when the ticket was resolved or closed, or the current owner of an open ticket after 24 hours.',
+    formula: 'tickets done by the first choice / tickets counted',
+    caveats: 'Each ticket counts once, by its first AI run. No percentage under 20 tickets.',
+  },
+  aiPickInListAuto: {
+    label: "Done by someone on the AI's list",
+    definition: 'How many tickets were done by anyone on the AI’s ranked list for that ticket, the first choice included. The gap to "first choice kept" is tickets that went to the AI’s second or third name.',
+    formula: 'tickets done by a listed person / tickets counted',
+  },
+  aiPickChangedByPerson: {
+    label: 'Changed by a person',
+    definition: 'How many of the AI’s assignments a person ended: the assignee handed the ticket back, or someone else moved or cleared it. A move made by Ticket Pulse itself is not counted.',
+    formula: 'tickets a person changed / tickets counted',
+    caveats: 'A ticket can be changed and still end with the first choice, so this and "first choice kept" do not add up to 100%.',
+  },
+  aiPickFirstChoiceTook: {
+    label: "Done by the AI's first choice",
+    definition: 'Of the tickets where the AI only suggested, how many were done by the person at the top of its list. "Done by" is the assignee when the ticket was resolved or closed, or the current owner of an open ticket after 24 hours.',
+    formula: 'tickets done by the first choice / tickets counted',
+    caveats: 'People here take tickets themselves, so this measures agreement with the AI, not whether the person who took it was a wrong choice. No percentage under 20 tickets.',
+  },
+  aiPickInListSuggest: {
+    label: "Done by someone on the AI's list",
+    definition: 'How many tickets were done by anyone on the AI’s ranked list for that ticket (usually two or three names), the first choice included.',
+    formula: 'tickets done by a listed person / tickets counted',
+  },
+  aiPickOffList: {
+    label: 'Done by someone not on the list',
+    definition: 'How many tickets were done by a person the AI did not name at all for that ticket. This is where the AI and the team disagree most; the by-category table shows where.',
+    formula: 'tickets done by an unlisted person / tickets counted',
+  },
   parks: {
     label: 'Parked',
     definition: 'Tickets parked in this range — waiting on purpose until a date (a transfer, a return from leave, a colleague, an ETA). "Woke" = reached their date; "ended early" = the requester replied, someone changed the status, or it was unparked by hand. "Parked 3+ times" counts tickets whose date keeps moving — a coaching prompt to look at, never a ranking of people.',

@@ -670,6 +670,39 @@ describe('R5 prompt injection', () => {
     expect(run.error).toMatch(/another ticket \(TP-1234\)/);
   });
 
+  // QA 10-13 #12 (TP-1888): the requester named project "#2791 ..."; the
+  // answer repeating that number is not a cross-ticket leak.
+  const PROJECT_TICKET = {
+    ...TICKET,
+    subject: 'OpenGround request',
+    descriptionText: 'I tried to install OpenGround. My computer is BGC4618 and I would need to have access to #2791 Wesdome Gold Mines - Kiena Mine as soon as possible.',
+  };
+  const PROJECT_STEP = 'For access, open an IT ticket and include the project name and BGC project number (#2791 Wesdome Gold Mines - Kiena Mine).';
+
+  test('a project number the requester gave is echoed back without tripping the other-ticket guard', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...PROJECT_TICKET });
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(oneStep(PROJECT_STEP, 'playbook:3')));
+    const run = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(run.status).toBe('drafted');
+    expect(run.draftText).toMatch(/#2791 Wesdome Gold Mines/);
+  });
+
+  test('a number the requester never wrote is blocked when it is a real ticket in the workspace, allowed when it is not', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TICKET });
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(oneStep('The same fix worked in #241406: open Company Portal.', 'playbook:3')));
+    prismaMock.ticket.findMany.mockImplementation(({ where }) => Promise.resolve(
+      where?.OR?.some((c) => c.freshserviceTicketId) ? [{ nativeNumber: null, freshserviceTicketId: BigInt(241406) }] : [],
+    ));
+    const blocked = await runner.runForTicket(55, { trigger: 'categorized' });
+    expect(blocked.status).toBe('failed');
+    expect(blocked.error).toMatch(/another ticket \(#241406\)/);
+
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    gatewayMock.runToolTurn.mockResolvedValueOnce(submitTurn(oneStep('Quote purchase order #241406 when you call the vendor, then open Company Portal.', 'playbook:3')));
+    const allowed = await runner.runForTicket(55, { trigger: 'manual' });
+    expect(allowed.status).toBe('drafted');
+  });
+
   test('a model that reveals an internal note is blocked by the guard', async () => {
     const note = 'vpn break glass account is helpdesk-admin and the password rotates every friday afternoon';
     prismaMock.ticket.findFirst.mockResolvedValue({ ...INJECTED });

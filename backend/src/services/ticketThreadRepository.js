@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError } from '../utils/errors.js';
+import { isFsSystemConversation } from '../utils/fsSystemConversation.js';
 
 /** Rows Ticket Pulse authored itself (live reply/note write). */
 export const TP_AUTHORED_SOURCE = 'ticketpulse_user';
@@ -49,6 +50,7 @@ export function looksLikeSurveyResponse(entry) {
   if (!entry) return false;
   const raw = entry.rawPayload && typeof entry.rawPayload === 'object' ? entry.rawPayload : {};
   if (raw.survey_result !== undefined || raw.survey_response !== undefined || raw.csat !== undefined) return true;
+  if (raw.tpSystemKind || isFsSystemConversation(entry)) return true;
   const text = [entry.title, entry.bodyText, entry.content]
     .map((v) => String(v || '')).join('\n').trim();
   return /\b(customer satisfaction survey|survey response|survey_result|rate (?:your|the) (?:experience|support)|how would you rate)\b/i.test(text.slice(0, 600));
@@ -62,6 +64,9 @@ export function looksLikeSurveyResponse(entry) {
 const AUTOMATION_ACTORS = new Set(['ticket workflow', 'supervisor', 'workflow automator', 'system', 'freshservice', 'orchestration', 'ticket pulse']);
 
 export function countsAsRealActivity(entry) {
+  // A line FreshService wrote itself in the conversation feed (survey
+  // response submitted) is not work on the ticket either (QA 10-13 #5).
+  if (entry?.rawPayload?.tpSystemKind) return false;
   if (!entry || entry.source !== 'freshservice_activity') return true;
   const actor = String(entry.actorName || '').trim().toLowerCase();
   if (AUTOMATION_ACTORS.has(actor)) return false;
@@ -178,6 +183,9 @@ class TicketThreadRepository {
               occurredAt: entry.occurredAt,
               syncedAt: new Date(),
               rawPayload: entry.rawPayload,
+              // Only a system line states its author type here; ordinary FS
+              // rows leave the stored value alone.
+              ...(entry.authorType ? { authorType: entry.authorType } : {}),
             },
           });
         }

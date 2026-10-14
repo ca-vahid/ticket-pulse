@@ -569,6 +569,110 @@ async function writeSystemNote(ticket, { bodyHtml, bodyText, rawPayload }) {
   });
 }
 
+const lowerEmails = (list) => [...new Set((Array.isArray(list) ? list : []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))];
+
+/**
+ * "Record this e-mail in the ticket's conversation" (QA 10-13 item 14) - the
+ * option on a workflow's Send e-mail step. Called AFTER a successful live
+ * send, never in Shadow / mock / preview (nothing was sent).
+ *
+ *  - the requester is among To/Cc/Bcc -> a public reply entry, "sent by workflow";
+ *  - otherwise                        -> an internal note "E-mail sent to ... by workflow ...".
+ *
+ * Written like every other workflow note (see writeSystemNote): straight to
+ * the thread table as authorType 'system', so
+ *  - no reply_sent / note_added event fires (only ticketService emits those),
+ *    which means it can never start another workflow or this one again;
+ *  - no mirror job is queued and mirrorState stays null: the FreshService copy
+ *    gets nothing, so FreshService can never e-mail the customer a second time;
+ *  - "an agent replied" checks (authorType 'agent') do not count it.
+ * One entry per delivery (externalEntryId), so a retried step cannot double it.
+ *
+ * `htmlBody` must already be sanitised by the caller (the engine's e-mail sanitiser).
+ */
+export async function recordWorkflowEmailOnTicket({
+  ticketId, workflowId = null, workflowName = null, runId = null, nodeId = null, deliveryId = null,
+  subject = '', htmlBody = null, textBody = null, toRecipients = [], ccRecipients = [], bccRecipients = [],
+  attachmentNames = [], emailMessageId = null, sentAt = new Date(),
+} = {}) {
+  const id = Number(ticketId);
+  if (!Number.isFinite(id) || id <= 0) return { recorded: false, reason: 'No ticket in event context' };
+  const ticket = await prisma.ticket.findUnique({
+    where: { id },
+    select: { id: true, workspaceId: true, requester: { select: { email: true } } },
+  });
+  if (!ticket) return { recorded: false, reason: 'Ticket not found' };
+
+  const to = lowerEmails(toRecipients);
+  const cc = lowerEmails(ccRecipients);
+  const bcc = lowerEmails(bccRecipients);
+  const requesterEmail = String(ticket.requester?.email || '').trim().toLowerCase();
+  const toRequester = Boolean(requesterEmail) && [...to, ...cc, ...bcc].includes(requesterEmail);
+  const name = String(workflowName || '').trim() || (workflowId ? `#${workflowId}` : 'a workflow');
+  const files = (Array.isArray(attachmentNames) ? attachmentNames : []).map((f) => String(f || '').trim()).filter(Boolean).slice(0, 50);
+
+  const title = toRequester
+    ? `Sent by workflow ${name}`
+    : `E-mail sent to ${[...to, ...cc].join(', ') || 'nobody'} by workflow ${name}`;
+  const lines = [
+    `Subject: ${subject || '(no subject)'}`,
+    `To: ${to.join(', ') || '(none)'}`,
+    ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []),
+    // Hidden recipients stay hidden in a public entry (the status page shows those).
+    ...(bcc.length ? [toRequester ? `Bcc: ${bcc.length} hidden` : `Bcc: ${bcc.join(', ')}`] : []),
+    ...(files.length ? [`Attachments: ${files.join(', ')}`] : []),
+  ];
+  const text = String(textBody || '').trim()
+    || sanitizeHtml(String(htmlBody || ''), { allowedTags: [], allowedAttributes: {} }).trim();
+  const bodyText = `${title}\n${lines.join('\n')}\n\n${text}`.slice(0, 200000);
+  const header = `<p><strong>${escapeHtml(title)}</strong><br>${lines.map(escapeHtml).join('<br>')}</p><hr>`;
+  const bodyHtml = `${header}${htmlBody || `<pre>${escapeHtml(text)}</pre>`}`;
+
+  const data = {
+    ticketId: ticket.id,
+    workspaceId: ticket.workspaceId,
+    externalEntryId: deliveryId ? `wfmail-${deliveryId}` : null,
+    source: 'ticketpulse_user',
+    eventType: toRequester ? 'reply' : 'note',
+    actorName: `Workflow: ${name}`.slice(0, 255),
+    actorEmail: null,
+    authorType: 'system',
+    incoming: false,
+    isPrivate: !toRequester,
+    visibility: toRequester ? 'public' : 'private',
+    title: title.slice(0, 255),
+    bodyText,
+    bodyHtml,
+    content: bodyText,
+    occurredAt: sentAt,
+    mirrorState: null, // never mirrored: FreshService must not e-mail this again
+    ...(emailMessageId ? { emailMessageId: String(emailMessageId).slice(0, 998) } : {}),
+    rawPayload: {
+      kind: 'workflow_email',
+      v: 1,
+      workflowId,
+      workflowName: workflowName || null,
+      runId,
+      nodeId,
+      deliveryId,
+      subject: subject || null,
+      toRequester,
+      to_emails: to,
+      cc_emails: cc,
+      bcc_count: bcc.length,
+      attachments: files,
+    },
+  };
+  try {
+    const entry = await prisma.ticketThreadEntry.create({ data });
+    return { recorded: true, entryId: entry.id, as: toRequester ? 'public_reply' : 'internal_note' };
+  } catch (error) {
+    // The same delivery was recorded already (a retried step).
+    if (error?.code === 'P2002') return { recorded: false, duplicate: true, reason: 'Already recorded' };
+    throw error;
+  }
+}
+
 export default {
   resolveAssignmentTarget,
   applyWorkflowAssignment,

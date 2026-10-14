@@ -39,6 +39,19 @@ router.get('/automation-ops', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+// How often the AI's pick stands (QA 10-13 item 16): the first section of
+// Automation Ops. Its own endpoint so the section loads on its own and the
+// per-ticket rows travel only when the CSV is asked for.
+router.get('/ai-pick-accuracy', asyncHandler(async (req, res) => {
+  const data = await analyticsService.getAiPickAccuracy(req.workspaceId, req.query);
+  res.json({ success: true, data });
+}));
+
+router.get('/ai-pick-accuracy/export', asyncHandler(async (req, res) => {
+  const data = await analyticsService.getAiPickAccuracyExport(req.workspaceId, req.query);
+  res.json({ success: true, data });
+}));
+
 router.get('/insights', asyncHandler(async (req, res) => {
   const data = await analyticsService.getInsights(req.workspaceId, req.query);
   res.json({ success: true, data });

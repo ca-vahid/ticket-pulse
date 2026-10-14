@@ -6,6 +6,7 @@ import statusService from './statusService.js';
 import { getTodayRange } from '../utils/timezone.js';
 import { ticketSourceLabel, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
+import { computePickAccuracy, fetchPickInputs, pickAccuracyExportRows } from './aiPickAccuracy.js';
 
 const DEFAULT_TIMEZONE = 'America/Los_Angeles';
 // Canonical fallbacks. Since Phase 8b every per-workspace site resolves the
@@ -2362,6 +2363,88 @@ export async function getAutomationOps(workspaceId, query = {}) {
   });
 }
 
+/**
+ * Automation Ops, first section: how often the AI's pick stands (QA 10-13
+ * item 16). The counting rules are in aiPickAccuracy.js; this adds the
+ * workspace's own names (statuses, service accounts, categories) and the
+ * page's range + category filter, behind the shared SWR cache. Noise is
+ * always left out here, whatever the page's noise switch says.
+ */
+async function aiPickAccuracyFull(workspaceId, query = {}) {
+  return withCache(workspaceId, 'ai-pick-accuracy', query, async () => {
+    const rangeInfo = parseAnalyticsRange(query);
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
+    const [inputs, terminalStatuses, serviceAccountNames, config] = await Promise.all([
+      fetchPickInputs(prisma, {
+        workspaceId,
+        start: rangeInfo.start,
+        end: rangeInfo.end,
+        ticketWhere: categoryFilter.where,
+        ticketSelect: {
+          ticketCategory: true,
+          tpSkill: true,
+          tpSubskill: true,
+          taxonomyReviewNeeded: true,
+          internalCategoryId: true,
+          internalCategory: { select: { id: true, name: true } },
+          internalSubcategoryId: true,
+          internalSubcategory: { select: { id: true, name: true, parentId: true, parent: { select: { name: true } } } },
+        },
+      }),
+      Promise.resolve().then(() => closedStatusesFor(workspaceId)).catch(() => ['Resolved', 'Closed']),
+      Promise.resolve().then(() => getServiceAccountNames()).catch(() => []),
+      Promise.resolve().then(() => prisma.assignmentConfig.findUnique({
+        where: { workspaceId },
+        select: { isEnabled: true, autoAssign: true, excludedGroupIds: true, observeOnlyGroupIds: true },
+      })).catch(() => null),
+    ]);
+    const result = computePickAccuracy({
+      ...inputs,
+      tickets: inputs.tickets.map((ticket) => ({
+        ...ticket,
+        displayRef: ticketDisplayRef(ticket),
+        // Top level only. A workspace still on legacy categories falls back
+        // to the Ticket Pulse category when the ticket has one.
+        category: normalizeTicketCategory(ticket, workspaceId).categoryName
+          || ticket.internalCategory?.name
+          || ticket.internalSubcategory?.parent?.name
+          || null,
+      })),
+      terminalStatuses: terminalStatuses?.length ? terminalStatuses : ['Resolved', 'Closed'],
+      serviceAccountNames,
+      start: rangeInfo.start,
+      end: rangeInfo.end,
+      now: new Date(),
+      weekKeyOf: (date) => groupKey(date, { groupBy: 'week', timezone: rangeInfo.timezone }),
+    });
+    return {
+      metadata: metadata(rangeInfo, { categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
+      // How this workspace is set up today, so the page can say which of the
+      // two readings applies. Counts only: no group ids, no names.
+      setup: config ? {
+        enabled: Boolean(config.isEnabled),
+        autoAssign: Boolean(config.autoAssign),
+        suggestOnlyGroups: (config.excludedGroupIds || []).length,
+        shadowGroups: (config.observeOnlyGroupIds || []).length,
+      } : null,
+      ...result,
+    };
+  });
+}
+
+export async function getAiPickAccuracy(workspaceId, query = {}) {
+  // The per-ticket rows stay server-side; the page asks for them only when
+  // someone downloads the CSV.
+  const summary = { ...(await aiPickAccuracyFull(workspaceId, query)) };
+  delete summary.rows;
+  return summary;
+}
+
+export async function getAiPickAccuracyExport(workspaceId, query = {}) {
+  const full = await aiPickAccuracyFull(workspaceId, query);
+  return { metadata: full.metadata, rows: pickAccuracyExportRows(full) };
+}
+
 const URGENT_RESPONSE_COUNT_KEYS = ['redirected', 'held', 'moved', 'raiseMoved', 'clockMoved', 'toldOwnerAway', 'teamTold', 'coordinator', 'onCallAssigned', 'undone'];
 const URGENT_RESPONSE_ACTION_KEYS = {
   held: 'held', told_owner_away: 'toldOwnerAway', team_told: 'teamTold', coordinator: 'coordinator', on_call_assigned: 'onCallAssigned', undone: 'undone',
@@ -2662,6 +2745,8 @@ export default {
   getTeamBalance,
   getQuality,
   getAutomationOps,
+  getAiPickAccuracy,
+  getAiPickAccuracyExport,
   getCategoryIntelligence,
   getInsights,
   getCategoryMetadata,

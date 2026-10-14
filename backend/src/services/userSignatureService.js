@@ -347,6 +347,25 @@ export function appendSignatureToEmail(email = {}, signature = null) {
   return { ...email, html, text };
 }
 
+/**
+ * The signature exactly as appendSignatureToEmail adds it to the outgoing mail, kept on the
+ * reply's conversation entry (rawPayload.sentSignature) so the ticket shows what the requester
+ * received (QA 10-13 #4). The entry's own body stays the agent's words: the mail builder, the
+ * FreshService copy, quotes in later replies and the AI readers all take the body, and a body
+ * with the signature folded in would be signed twice or read as part of the answer.
+ * A signature larger than the cap (a picture pasted into it as data) keeps its text only.
+ */
+export const SENT_SIGNATURE_HTML_CAP = 64 * 1024;
+export function signatureAsSent(signature = null) {
+  const html = applySignatureSpacing(String(signature?.html || '').trim(), signature?.spacing);
+  const text = String(signature?.text || stripHtml(html)).trim();
+  if (!html && !text) return null;
+  return {
+    ...(html && html.length <= SENT_SIGNATURE_HTML_CAP ? { html } : {}),
+    ...(text ? { text: text.slice(0, 4000) } : {}),
+  };
+}
+
 // ------------------------------------------------------------ admin surface
 
 /**

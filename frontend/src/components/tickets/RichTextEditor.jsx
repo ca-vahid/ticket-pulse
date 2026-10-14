@@ -319,13 +319,48 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     setIsEmpty(!el.textContent.trim());
   }, [value]);
 
+  // QA 10-13 #2: a pasted picture shows in the editor as a small preview. What the editor
+  // hands on (and what is stored and mailed) is unchanged: the marker "[Image: name]" at that
+  // spot, with the picture itself as an attached file.
+  const thumbUrlsRef = useRef([]);
+  useEffect(() => () => {
+    thumbUrlsRef.current.forEach((url) => { try { URL.revokeObjectURL(url); } catch { /* nothing to release */ } });
+    thumbUrlsRef.current = [];
+  }, []);
+  const pastedPictureHtml = (label, src) => {
+    const esc = document.createElement('div');
+    esc.textContent = label;
+    const name = esc.innerHTML.replace(/"/g, '&quot;');
+    if (!src) return `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`;
+    return `&nbsp;<img class="tp-editor-thumb" data-tp-img="${name}" alt="[Image: ${name}]" title="${name}" src="${src}">&nbsp;`;
+  };
+  const previewUrlFor = (file) => {
+    try {
+      const url = URL.createObjectURL(file);
+      thumbUrlsRef.current.push(url);
+      return url;
+    } catch {
+      return null; // no preview: the marker text is used, as before
+    }
+  };
+  const editorHtml = (el) => {
+    if (!el.querySelector('img[data-tp-img]')) return el.innerHTML;
+    const copy = el.cloneNode(true);
+    copy.querySelectorAll('img[data-tp-img]').forEach((img) => {
+      const marker = document.createElement('i');
+      marker.textContent = `[Image: ${img.getAttribute('data-tp-img')}]`;
+      img.replaceWith(marker);
+    });
+    return copy.innerHTML;
+  };
+
   const emit = () => {
     const el = editorRef.current;
     if (!el) return;
-    const html = sanitize(el.innerHTML);
+    const html = sanitize(editorHtml(el));
     const text = htmlToPlainText(html);
     lastEmittedRef.current = html;
-    setIsEmpty(!el.textContent.trim());
+    setIsEmpty(!el.textContent.trim() && !el.querySelector('img[data-tp-img]'));
     onChange?.({ html, text });
   };
 
@@ -478,11 +513,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
                 // onImagePaste returns the staged filename (or nothing for older hosts).
                 images.forEach((f) => {
                   const label = onImagePaste(f);
-                  if (label) {
-                    const esc = document.createElement('div');
-                    esc.textContent = label;
-                    document.execCommand('insertHTML', false, `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`);
-                  }
+                  if (label) document.execCommand('insertHTML', false, pastedPictureHtml(label, previewUrlFor(f)));
                 });
                 emit();
                 return;
@@ -498,9 +529,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
                   let replacement;
                   const label = onImagePaste ? onImagePaste(inlineImageToFile(image, i)) : null;
                   if (label) {
-                    const esc = document.createElement('div');
-                    esc.textContent = label;
-                    replacement = `&nbsp;<i>[Image:&nbsp;${esc.innerHTML}]</i>&nbsp;`;
+                    replacement = pastedPictureHtml(label, image.dataUri);
                   } else if (!onImagePaste && image.base64.length * 0.75 <= INLINE_IMAGE_KEEP_BYTES) {
                     replacement = `<img src="${image.dataUri}" alt="">`;
                   } else {

@@ -42,7 +42,8 @@ describe('A5 — stage as data on a note', () => {
     expect(api).toMatch(/stage: req\.body\?\.stage \?\? null,\s*agent: req\.body\?\.agent \?\? null,/);
     expect(api).toMatch(/stage: e\.rawPayload\?\.stage \|\| null,\s*agent: e\.rawPayload\?\.agent \|\| null,/);
     expect(svc).toMatch(/actorName: stageMeta \? stagedActorName\(baseActorName, stageMeta\) : baseActorName/);
-    expect(svc).toMatch(/rawPayload: \{ \.\.\.\(recipients \|\| \{\}\), \.\.\.\(stageMeta \|\| \{\}\) \}/);
+    // QA 10-13 #4 added the signature as sent to the same payload; the stage fields are still spread in.
+    expect(svc).toMatch(/rawPayload: \{ \.\.\.\(recipients \|\| \{\}\), \.\.\.\(stageMeta \|\| \{\}\)[,\s]/);
   });
 });
 
