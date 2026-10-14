@@ -9,6 +9,7 @@ import { statusDefsFromMeta } from '../tickets/statusDefs';
 import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
 import TicketStatusesSection from './TicketStatusesSection';
 import TeamForwardsSection from './TeamForwardsSection';
+import RequesterRepliesSection from './RequesterRepliesSection';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
@@ -2330,6 +2331,7 @@ export default function TicketOpsPanel() {
       <TicketStatusesSection />
       <QueueCardsSection />
       <DefaultStatusesSection />
+      <RequesterRepliesSection />
       <SlaSection />
       <TrustedDomainsSection />
       <TeamForwardsSection />

@@ -208,6 +208,10 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         const fields = Object.keys(c).map(humanize).join(', ');
         item = baseItem({ event: 'system', verb: fields ? `updated ${fields} in FreshService` : 'updated the ticket in FreshService', machine: true });
       }
+    } else if (t === 'owner_away_reroute') {
+      // The owner was away when the requester replied (13 Oct 2026): the ticket
+      // went back for assignment. Worth seeing, so it is not folded as machine chatter.
+      item = baseItem({ event: 'assignment', verb: 'sent the ticket back for assignment', from: d.technicianName || null, detail: d.note || null, importance: 3, machine: false });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

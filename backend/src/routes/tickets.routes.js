@@ -1159,6 +1159,62 @@ router.put('/also-for-settings', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { notifyAdditionalRequesters: enabled } });
 }));
 
+// ----------------------------- When a requester replies (13 Oct 2026)
+// Two per-workspace switches: send the ticket back for assignment when its
+// owner is away for more than a day, and suggest splitting a reply to a
+// long-resolved ticket that is really a new request. Stored in app_settings
+// (workspace-scoped key); on for IT, off elsewhere until an admin saves.
+
+router.get('/requester-reply-settings', asyncHandler(async (req, res) => {
+  const { getRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
+  res.json({ success: true, data: await getRequesterReplyRules(req.workspaceId) });
+}));
+
+router.put('/requester-reply-settings', asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  if (!(actor?.role === 'admin' || actor?.workspaceRole === 'admin')) {
+    return res.status(403).json({ success: false, message: 'Changing what happens when a requester replies requires admin access.' });
+  }
+  const patch = {};
+  for (const key of ['rerouteWhenOwnerAway', 'suggestNewRequest']) {
+    if (req.body?.[key] === undefined) continue;
+    if (typeof req.body[key] !== 'boolean') throw new ValidationError(`${key} must be true or false`);
+    patch[key] = req.body[key];
+  }
+  if (!Object.keys(patch).length) throw new ValidationError('Nothing to change');
+  const { setRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
+  const rules = await setRequesterReplyRules(req.workspaceId, patch);
+  logger.info(`Requester-reply rules for workspace ${req.workspaceId} set to ${JSON.stringify(rules)} by ${actor?.email || 'unknown'}`);
+  res.json({ success: true, data: rules });
+}));
+
+// "This reply looks like a new request": the suggestion waiting on a ticket,
+// and the two answers. Anyone on the ticket can keep the reply where it is;
+// splitting needs the same access as the Split action.
+router.get('/:id/new-request-suggestion', asyncHandler(async (req, res) => {
+  const { default: newRequestSuggestionService } = await import('../services/newRequestSuggestionService.js');
+  res.json({ success: true, data: await newRequestSuggestionService.forTicket(parseTicketId(req), req.workspaceId) });
+}));
+
+router.post('/:id/new-request-suggestion/:eventId/split', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Splitting a ticket requires coordinator or admin access');
+  }
+  const eventId = Number(req.params.eventId);
+  if (!Number.isInteger(eventId) || eventId <= 0) throw new ValidationError('That suggestion id is not valid.');
+  const { default: newRequestSuggestionService } = await import('../services/newRequestSuggestionService.js');
+  const out = await newRequestSuggestionService.accept(eventId, req.workspaceId, req.ticketActor, { ticketId: parseTicketId(req) });
+  res.status(out.changed ? 201 : 200).json({ success: true, data: { changed: out.changed, state: out.event.state, child: out.child || null, parentStatus: out.parentStatus || null } });
+}));
+
+router.post('/:id/new-request-suggestion/:eventId/dismiss', asyncHandler(async (req, res) => {
+  const eventId = Number(req.params.eventId);
+  if (!Number.isInteger(eventId) || eventId <= 0) throw new ValidationError('That suggestion id is not valid.');
+  const { default: newRequestSuggestionService } = await import('../services/newRequestSuggestionService.js');
+  const out = await newRequestSuggestionService.dismiss(eventId, req.workspaceId, req.ticketActor, { ticketId: parseTicketId(req) });
+  res.json({ success: true, data: { changed: out.changed, state: out.event.state } });
+}));
+
 // ------------------------- FS replies posted as the acting agent (Phase DR4)
 // Per-workspace flag, DEFAULT OFF: when ON, replies/notes Ticket Pulse posts
 // to FS-born tickets carry `user_id: technicians.freshservice_id` so

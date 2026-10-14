@@ -807,6 +807,14 @@ export const ticketsAPI = {
   getAlsoForSettings: async () => await api.get('/tickets/also-for-settings'),
   updateAlsoForSettings: async (notifyAdditionalRequesters) => await api.put('/tickets/also-for-settings', { notifyAdditionalRequesters }),
 
+  // "When a requester replies" workspace switches (13 Oct 2026): owner away → back to assignment; reply that is a new request → suggest a split.
+  getRequesterReplySettings: async () => await api.get('/tickets/requester-reply-settings'),
+  updateRequesterReplySettings: async (patch) => await api.put('/tickets/requester-reply-settings', patch),
+  // "This reply looks like a new request" on one ticket.
+  getNewRequestSuggestion: async (id) => await api.get(`/tickets/${id}/new-request-suggestion`),
+  splitNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/split`),
+  dismissNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/dismiss`),
+
   stats: async () => {
     return await api.get('/tickets/stats');
   },
