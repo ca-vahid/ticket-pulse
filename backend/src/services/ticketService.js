@@ -38,7 +38,7 @@ import { zonedStartOfMonth, zonedStartOfWeek, zonedStartOfYear } from '../utils/
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { decodeBasicEntities, looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
-import { appendSignatureToEmail, getEnabledSignatureForSend } from './userSignatureService.js';
+import { appendSignatureToEmail, getEnabledSignatureForSend, signatureAsSent } from './userSignatureService.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
@@ -5248,6 +5248,10 @@ class TicketService {
     // attribution without a second licence or a second key.
     const stageMeta = noteStageMeta(input);
     const baseActorName = actor?.name || actor?.email || 'Ticket Pulse';
+    // QA 10-13 #4: the signature is added to the mail at send time and the entry kept only the
+    // agent's words, so the conversation looked as if the reply had gone out unsigned. The entry
+    // now remembers the signature that was added; the body is unchanged (nothing is signed twice).
+    const sentSignature = !isPrivate && signature ? signatureAsSent(signature) : null;
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -5269,7 +5273,7 @@ class TicketService {
         // unless Ticket Pulse mailed the reply itself and records it on FS below.
         mirrorState: isNative || viaTicketPulse ? 'pending' : 'mirrored',
         mirroredAt: isNative || viaTicketPulse ? null : now,
-        ...((recipients || stageMeta) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}) } } : {}),
+        ...((recipients || stageMeta || sentSignature) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}), ...(sentSignature ? { sentSignature } : {}) } } : {}),
       },
     });
 

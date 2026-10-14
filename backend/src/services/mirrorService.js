@@ -281,6 +281,16 @@ class MirrorService {
     return this._enqueue(workspaceId, ticketId, 'attachment', null, { attachmentId });
   }
 
+  /**
+   * The files that arrived with the e-mail that opened a ticket (QA 10-13 #1): ONE note on the
+   * FreshService copy carrying all of them, where one job per file would write a note each.
+   */
+  async enqueueAttachments(workspaceId, ticketId, attachmentIds) {
+    const ids = [...new Set((Array.isArray(attachmentIds) ? attachmentIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (ids.length === 0) return null;
+    return this._enqueue(workspaceId, ticketId, 'attachment', null, { attachmentIds: ids });
+  }
+
   async _enqueue(workspaceId, ticketId, kind, threadEntryId = null, payload = null) {
     if (!(await this._workspaceActive(workspaceId))) {
       logger.debug(`Mirror skipped for ticket ${ticketId} (${kind}): workspace ${workspaceId} is inactive (sandbox)`);
@@ -1064,6 +1074,10 @@ class MirrorService {
     if (!ticket.freshserviceTicketId) {
       throw new Error('Awaiting FreshService copy (create_ticket has not completed)');
     }
+    if (Array.isArray(job.payload?.attachmentIds)) {
+      await this._mirrorMailFiles(job, client, ticket, FS_ATTACHMENT_CAP_BYTES);
+      return;
+    }
     const row = await prisma.ticketAttachment.findFirst({
       where: { id: Number(job.payload?.attachmentId), ticketId: job.ticketId },
     });
@@ -1087,6 +1101,57 @@ class MirrorService {
     const body = `${fsNoteHeader({ who: row.uploadedByName || 'Ticket Pulse', action: 'attachment', ref: ticketDisplayRef(ticket), url: ticketUrl(ticket), marker: MIRROR_MARKER })}<p>${String(row.fileName).replace(/</g, '&lt;')}</p>`;
     await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: files });
     logger.info(`Mirror: attachment "${row.fileName}" pushed to FS copy of ticket ${job.ticketId}`);
+  }
+
+  /**
+   * The files of the e-mail that opened the ticket, as one private note on the FreshService copy
+   * (QA 10-13 #1). FreshService has no way to show a picture inside the description from a file we
+   * hold (it needs an address anyone can open, and ours are private), so the description keeps the
+   * "[Image: name]" text and the note names the same files. Over the request cap, the files go in
+   * as many notes as it takes; a file too large on its own, or one whose bytes are gone, is named
+   * as left out instead of failing the job.
+   */
+  async _mirrorMailFiles(job, client, ticket, capBytes) {
+    const rows = await Promise.resolve().then(() => prisma.ticketAttachment.findMany({
+      where: { id: { in: job.payload.attachmentIds.map(Number) }, ticketId: job.ticketId },
+      orderBy: { id: 'asc' },
+    })).then((r) => (Array.isArray(r) ? r : []));
+    if (rows.length === 0) return; // deleted before the mirror ran
+    const esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const batches = [];
+    const leftOut = [];
+    let current = { files: [], bytes: 0 };
+    for (const row of rows) {
+      if (row.sizeBytes > capBytes) { leftOut.push(row.fileName); continue; }
+      let buffer;
+      try {
+        buffer = await attachmentService._container().getBlockBlobClient(row.blobName).downloadToBuffer();
+      } catch (err) {
+        logger.warn(`Mirror: attachment blob fetch failed for "${row.fileName}": ${err.message} (skipped)`);
+        leftOut.push(row.fileName);
+        continue;
+      }
+      if (current.files.length > 0 && current.bytes + buffer.length > capBytes) {
+        batches.push(current);
+        current = { files: [], bytes: 0 };
+      }
+      current.files.push({ filename: row.fileName, buffer, contentType: row.contentType });
+      current.bytes += buffer.length;
+    }
+    if (current.files.length > 0) batches.push(current);
+    if (batches.length === 0) {
+      logger.warn(`Mirror: none of the e-mail's ${rows.length} file(s) could be copied to the FS copy of ticket ${job.ticketId}`);
+      return;
+    }
+    const header = fsNoteHeader({ who: 'Ticket Pulse', action: 'attachment', ref: ticketDisplayRef(ticket), url: ticketUrl(ticket), marker: MIRROR_MARKER });
+    for (const [index, batch] of batches.entries()) {
+      const names = batch.files.map((f) => esc(f.filename)).join(', ');
+      const body = `${header}<p>Pictures and files that came with the e-mail${batches.length > 1 ? ` (${index + 1} of ${batches.length})` : ''}: ${names}.</p>`
+        + '<p>Where the description says [Image: name], the picture with that name is here. FreshService cannot show it inside the description; Ticket Pulse does.</p>'
+        + (index === 0 && leftOut.length ? `<p>Not copied (too large for FreshService, or no longer stored): ${leftOut.map(esc).join(', ')}. Open them in Ticket Pulse.</p>` : '');
+      await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: batch.files });
+    }
+    logger.info(`Mirror: ${rows.length - leftOut.length} file(s) from the e-mail pushed to FS copy of ticket ${job.ticketId}`);
   }
 
   /**

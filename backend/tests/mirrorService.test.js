@@ -716,3 +716,80 @@ describe('the FreshService copy of front-door mail', () => {
     delete prismaMock.technician;
   });
 });
+
+// QA 10-13 #1 (TP-1885 -> FreshService #246790): the files of the e-mail that opened a ticket never reached the copy.
+describe('the files of the opening e-mail on the FreshService copy', () => {
+  const mirrored = { ...baseTicket, freshserviceTicketId: 246790n };
+  let attachmentService;
+  const blobs = new Map();
+  beforeEach(async () => {
+    ({ default: attachmentService } = await import('../src/services/attachmentService.js'));
+    blobs.clear();
+    attachmentService._container = () => ({
+      getBlockBlobClient: (name) => ({
+        downloadToBuffer: async () => { if (!blobs.has(name)) throw new Error('BlobNotFound'); return blobs.get(name); },
+      }),
+    });
+    prismaMock.ticketAttachment = { findMany: jest.fn(), findFirst: jest.fn() };
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...mirrored });
+    prismaMock.mirrorJob.create.mockImplementation(({ data }) => Promise.resolve({ id: 1, ...data }));
+  });
+  afterEach(() => { delete prismaMock.ticketAttachment; });
+
+  test('enqueueAttachments writes ONE job for all the files, and none for an empty list', async () => {
+    await mirrorService.enqueueAttachments(1, 501, [70933, 70934, 70933, 'x']);
+    expect(prismaMock.mirrorJob.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.mirrorJob.create.mock.calls[0][0].data).toMatchObject({ kind: 'attachment', ticketId: 501, payload: { attachmentIds: [70933, 70934] } });
+    prismaMock.mirrorJob.create.mockClear();
+    expect(await mirrorService.enqueueAttachments(1, 501, [])).toBeNull();
+    expect(prismaMock.mirrorJob.create).not.toHaveBeenCalled();
+  });
+
+  test('one private note carries every file and says where the description refers to them', async () => {
+    blobs.set('b/logo', Buffer.alloc(39593, 1));
+    blobs.set('b/shot', Buffer.alloc(2941575, 2));
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([
+      { id: 70933, ticketId: 501, fileName: 'picture-2-9jDAAA-image.png', contentType: 'image/png', sizeBytes: 39593, blobName: 'b/logo' },
+      { id: 70934, ticketId: 501, fileName: 'picture-1-9jDAAA-image.png', contentType: 'image/png', sizeBytes: 2941575, blobName: 'b/shot' },
+    ]);
+    const ok = await mirrorService._processJob({ id: 7, ticketId: 501, workspaceId: 1, kind: 'attachment', attempts: 0, payload: { attachmentIds: [70933, 70934] } });
+    expect(ok).toBe(true);
+    expect(clientMock.addNote).toHaveBeenCalledTimes(1);
+    const [fsId, body, opts] = clientMock.addNote.mock.calls[0];
+    expect(fsId).toBe(246790);
+    expect(body).toContain('picture-2-9jDAAA-image.png, picture-1-9jDAAA-image.png');
+    expect(body).toContain('FreshService cannot show it inside the description');
+    expect(opts.isPrivate).toBe(true);
+    expect(opts.attachments.map((f) => f.filename)).toEqual(['picture-2-9jDAAA-image.png', 'picture-1-9jDAAA-image.png']);
+    expect(prismaMock.ticketAttachment.findMany.mock.calls[0][0].where).toMatchObject({ ticketId: 501 });
+  });
+
+  test('more than FreshService takes in one request goes in several notes; a file too large or missing is named, not fatal', async () => {
+    const eight = Buffer.alloc(8 * 1024 * 1024, 1);
+    blobs.set('b/a', eight);
+    blobs.set('b/b', eight);
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([
+      { id: 1, ticketId: 501, fileName: 'a.png', contentType: 'image/png', sizeBytes: eight.length, blobName: 'b/a' },
+      { id: 2, ticketId: 501, fileName: 'b.png', contentType: 'image/png', sizeBytes: eight.length, blobName: 'b/b' },
+      { id: 3, ticketId: 501, fileName: 'huge.mov', contentType: 'video/quicktime', sizeBytes: 40 * 1024 * 1024, blobName: 'b/huge' },
+      { id: 4, ticketId: 501, fileName: 'gone.png', contentType: 'image/png', sizeBytes: 10, blobName: 'b/gone' },
+    ]);
+    expect(await mirrorService._processJob({ id: 8, ticketId: 501, workspaceId: 1, kind: 'attachment', attempts: 0, payload: { attachmentIds: [1, 2, 3, 4] } })).toBe(true);
+    expect(clientMock.addNote).toHaveBeenCalledTimes(2);
+    expect(clientMock.addNote.mock.calls[0][2].attachments.map((f) => f.filename)).toEqual(['a.png']);
+    expect(clientMock.addNote.mock.calls[1][2].attachments.map((f) => f.filename)).toEqual(['b.png']);
+    expect(clientMock.addNote.mock.calls[0][1]).toContain('(1 of 2)');
+    expect(clientMock.addNote.mock.calls[0][1]).toContain('Not copied');
+    expect(clientMock.addNote.mock.calls[0][1]).toContain('huge.mov, gone.png');
+  });
+
+  test('before the copy exists the job waits; with every file deleted it finishes quietly', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: null });
+    expect(await mirrorService._processJob({ id: 9, ticketId: 501, workspaceId: 1, kind: 'attachment', attempts: 0, payload: { attachmentIds: [1] } })).toBe(false);
+    expect(clientMock.addNote).not.toHaveBeenCalled();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...mirrored });
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([]);
+    expect(await mirrorService._processJob({ id: 10, ticketId: 501, workspaceId: 1, kind: 'attachment', attempts: 0, payload: { attachmentIds: [1] } })).toBe(true);
+    expect(clientMock.addNote).not.toHaveBeenCalled();
+  });
+});

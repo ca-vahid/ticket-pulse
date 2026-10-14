@@ -238,3 +238,24 @@ describe('workspace joins + resolution', () => {
     await expect(resolveSignatureWorkspaceId('a@b.co')).rejects.toThrow(/workspaceId is required/);
   });
 });
+
+// QA 10-13 #4: the conversation shows the signature that was mailed with a reply.
+describe('signatureAsSent', () => {
+  test('is the very HTML appendSignatureToEmail adds (spacing applied), with its text', async () => {
+    const { signatureAsSent, appendSignatureToEmail } = await import('../src/services/userSignatureService.js');
+    const signature = { html: '<p><strong>Cora Coordinator</strong></p><p>IT Service Desk</p>', text: 'Cora Coordinator\nIT Service Desk', spacing: 'tight' };
+    const sent = signatureAsSent(signature);
+    expect(sent.html).toBe('<p style="margin: 0"><strong>Cora Coordinator</strong></p><p style="margin: 0">IT Service Desk</p>');
+    expect(sent.text).toBe('Cora Coordinator\nIT Service Desk');
+    expect(appendSignatureToEmail({ html: '<p>Hi</p>', text: 'Hi' }, signature).html.endsWith(sent.html)).toBe(true);
+  });
+
+  test('nothing for no signature; text only when the HTML is too large to keep on every reply', async () => {
+    const { signatureAsSent, SENT_SIGNATURE_HTML_CAP } = await import('../src/services/userSignatureService.js');
+    expect(signatureAsSent(null)).toBeNull();
+    expect(signatureAsSent({ html: '  ', text: '' })).toBeNull();
+    const huge = signatureAsSent({ html: `<p>Cora</p><img src="data:image/png;base64,${'A'.repeat(SENT_SIGNATURE_HTML_CAP)}">`, text: 'Cora' });
+    expect(huge.html).toBeUndefined();
+    expect(huge.text).toBe('Cora');
+  });
+});
