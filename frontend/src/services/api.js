@@ -1994,6 +1994,9 @@ export const analyticsAPI = {
   getTeamBalance: (params = {}) => apiAnalytics.get('/analytics/team-balance', { params }),
   getQuality: (params = {}) => apiAnalytics.get('/analytics/quality', { params }),
   getAutomationOps: (params = {}) => apiAnalytics.get('/analytics/automation-ops', { params }),
+  // Automation Ops, first section (QA 10-13 #16): the AI's pick against who did the ticket.
+  getAiPickAccuracy: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy', { params }),
+  getAiPickAccuracyExport: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy/export', { params }),
   getInsights: (params = {}) => apiAnalytics.get('/analytics/insights', { params }),
   // Reports (feedback 07-14): saved snapshots; generation runs the LLM (10-20s)
   listReports: () => apiAnalytics.get('/analytics/reports'),

@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import AnalyticsReports from '../components/analytics/AnalyticsReports';
 import UrgentResponseOps from '../components/analytics/UrgentResponseOps';
+import AiPickAccuracy from '../components/analytics/AiPickAccuracy';
 import MetricHint from '../components/analytics/MetricHint';
 import { metricHintText } from '../utils/metricsGlossary';
 import { Link, useLocation } from 'react-router-dom';
@@ -2481,28 +2482,6 @@ export default function Analytics({ view = 'standard' }) {
     };
   }, [ops?.pipeline?.trend, ops?.sync?.trend, palette]);
 
-  const opsRoutingAccuracyOptions = useMemo(() => {
-    const rows = ops?.routingAccuracy?.weeklyTrend || [];
-    return {
-      ...chartBase('column'),
-      xAxis: {
-        categories: rows.map((row) => row.week),
-        labels: { style: { fontSize: '11px' } },
-      },
-      yAxis: {
-        min: 0,
-        max: 100,
-        title: { text: null },
-        labels: { format: '{value}%', style: { fontSize: '11px' } },
-        gridLineDashStyle: 'Dash',
-      },
-      legend: { enabled: false },
-      tooltip: { pointFormat: '<b>{point.y}%</b> of auto-assignments held' },
-      plotOptions: { column: { borderRadius: 4 } },
-      series: [{ name: 'Held', data: rows.map((row) => row.heldPct ?? 0), color: palette.blue }],
-    };
-  }, [ops?.routingAccuracy?.weeklyTrend, palette]);
-
   const insightRows = useMemo(() => insights?.insights || [], [insights?.insights]);
   const selectedInsight = useMemo(() => (
     insightRows.find((item) => item.id === selectedInsightId) || insightRows[0] || null
@@ -3988,6 +3967,11 @@ export default function Analytics({ view = 'standard' }) {
 
   const renderOps = () => (
     <div className="space-y-4">
+      {/* QA 10-13 #16: the question people open this tab with comes first.
+          It loads on its own (own endpoint); pipeline and sync health follow. */}
+      <AiPickAccuracy params={params} ChartBlock={HighchartsBlock} isMobile={isMobile} palette={palette} />
+
+      <h2 className="pt-2 text-sm font-semibold text-muted-foreground">Pipeline and sync health</h2>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatCard
           title="Pipeline Runs"
@@ -3995,14 +3979,6 @@ export default function Analytics({ view = 'standard' }) {
           icon={Sparkles}
           tone="purple"
           metric="pipelineRuns"
-        />
-        <StatCard
-          title="Routing accuracy"
-          value={ops?.routingAccuracy?.heldPct != null ? `${ops.routingAccuracy.heldPct}%` : '—'}
-          subtitle="auto-assignments that stuck ≥7 days"
-          icon={Gauge}
-          tone={ops?.routingAccuracy?.heldPct != null && ops.routingAccuracy.heldPct < 80 ? 'amber' : 'green'}
-          metric="routingAccuracy"
         />
         {ops?.parks && (
           <StatCard
@@ -4060,14 +4036,6 @@ export default function Analytics({ view = 'standard' }) {
       )}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel
-          title="Routing Accuracy Trend"
-          subtitle={`Weekly share of auto-assignments whose pick held at least 7 days (${formatNumber(ops?.routingAccuracy?.reassignedWithin7d)} of ${formatNumber(ops?.routingAccuracy?.autoAssignedTotal)} were reassigned within 7 days).`}
-        >
-          {(ops?.routingAccuracy?.weeklyTrend || []).length
-            ? <HighchartsBlock options={opsRoutingAccuracyOptions} height={isMobile ? '18rem' : '22rem'} />
-            : <EmptyState text="No auto-assigned pipeline runs in this range." />}
-        </Panel>
         <Panel title="Step Health" subtitle="Completed, failed, and skipped step counts by pipeline stage.">
           {(ops?.steps || []).length ? <HighchartsBlock options={opsStepHealthOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState />}
         </Panel>
