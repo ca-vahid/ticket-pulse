@@ -22,6 +22,7 @@
  * here as data; the component only renders.
  */
 import { activityActorKind, fsActorName, isMachineActivity } from '../components/tickets/activityKind.jsx';
+import { fsSystemEntryKind, fsSystemEntryLabel } from './fsSystemEntry.js';
 
 const NEAR_MS = 3 * 60 * 1000;
 const BURST_GAP_MS = 5 * 60 * 1000;
@@ -207,6 +208,10 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         const fields = Object.keys(c).map(humanize).join(', ');
         item = baseItem({ event: 'system', verb: fields ? `updated ${fields} in FreshService` : 'updated the ticket in FreshService', machine: true });
       }
+    } else if (t === 'owner_away_reroute') {
+      // The owner was away when the requester replied (13 Oct 2026): the ticket
+      // went back for assignment. Worth seeing, so it is not folded as machine chatter.
+      item = baseItem({ event: 'assignment', verb: 'sent the ticket back for assignment', from: d.technicianName || null, detail: d.note || null, importance: 3, machine: false });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {
@@ -231,6 +236,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
   }
 
   for (const e of thread) {
+    // A line FreshService wrote itself in the conversation feed ("<Name> has
+    // submitted the survey response") is one quiet History row (QA 10-13 #5).
+    const systemKind = e.source !== 'freshservice_activity' ? fsSystemEntryKind(e) : null;
+    if (systemKind) {
+      const text = String(e.bodyText || e.content || '').replace(/\s+/g, ' ').trim();
+      items.push({ ...baseItem({ event: 'system', verb: fsSystemEntryLabel(systemKind).toLowerCase(), detail: text || null, importance: 1 }), key: `fssys-${e.id}`, at: new Date(e.occurredAt).getTime(), kind: 'freshservice_sync', machine: true, actor: 'FreshService', source: 'freshservice', sig: `fssys|${systemKind}|${text}` });
+      continue;
+    }
     if (e.source !== 'freshservice_activity') continue;
     const at = new Date(e.occurredAt).getTime();
     const actor = e.actorName || 'FreshService';

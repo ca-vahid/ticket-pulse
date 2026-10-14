@@ -190,6 +190,16 @@ ${this.renderGrouping(digest.grouping, { baseUrl })}
       parts.push(p(`<strong>Waiting for you (${grouping.waiting.length})</strong>`));
       parts.push(table(grouping.waiting.slice(0, MAX_LISTED).map(pairRow).join('')));
     }
+    // A reply to a resolved ticket that reads like new work (13 Oct 2026): one ticket, no second one yet.
+    const newRequests = Array.isArray(grouping.newRequests) ? grouping.newRequests : [];
+    if (newRequests.length) {
+      parts.push(p(`<strong>Replies that look like a new request (${newRequests.length})</strong>`));
+      parts.push(table(newRequests.slice(0, MAX_LISTED).map((e) => `
+      <tr>
+        <td style="${cell}white-space:nowrap;font-weight:600;">${esc(e.ticket.ref)}</td>
+        <td style="${cell}">${esc(e.ticket.subject)}${e.reason ? `<br><span style="${muted}">${esc(e.reason)}</span>` : ''}<br><span style="${muted}">Nothing was changed. Split it into its own ticket, or keep it, on the ticket or under Tickets, Grouped.</span></td>
+      </tr>`).join('')));
+    }
     parts.push(p(`<a href="${esc(page)}" style="color:#1d4ed8;">Review, undo or change what is grouped</a>`));
     return parts.join('\n');
   }
@@ -235,7 +245,8 @@ ${this.renderGrouping(digest.grouping, { baseUrl })}
           const workspaceName = cfg.workspace?.name || `Workspace ${workspaceId}`;
           const html = this.renderHtml(digest, { workspaceName, baseUrl });
           const grouped = digest.grouping ? digest.grouping.repeatTotal + digest.grouping.combined.length : 0;
-          const groupingBit = digest.grouping ? `, ${grouped} grouped${digest.grouping.waiting.length ? `, ${digest.grouping.waiting.length} to review` : ''}` : '';
+          const toReview = digest.grouping ? digest.grouping.waiting.length + (digest.grouping.newRequests?.length || 0) : 0;
+          const groupingBit = digest.grouping ? `, ${grouped} grouped${toReview ? `, ${toReview} to review` : ''}` : '';
           const subject = `Ticket Pulse: ${digest.aiClosed.length} closed as noise${digest.held.length ? `, ${digest.held.length} held` : ''}${groupingBit} - ${workspaceName}`;
           if (dryRun) { out.push({ workspaceId, dryRun: true, to, subject, html, digest }); continue; }
           const { sendTransactionalEmail } = await import('./transactionalEmailService.js');

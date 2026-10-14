@@ -110,6 +110,23 @@ describe('renderHtml', () => {
   });
 });
 
+describe('renderGrouping', () => {
+  // 13 Oct 2026: a reply that reads like a new request is one ticket with no
+  // second ticket; it gets its own short list instead of a broken pair row.
+  test('new-request suggestions are listed on their own; a digest without the field renders as before', () => {
+    const base = { repeats: [], repeatTotal: 0, combined: [], waiting: [] };
+    const html = service.renderGrouping({
+      ...base,
+      newRequests: [{ id: 9, kind: 'new_request', reason: 'Asks for Adobe <Acrobat>.', ticket: { id: 700, ref: '#245828', subject: 'Slow laptop connection' }, target: null }],
+    }, { baseUrl: 'https://tp.example' });
+    expect(html).toContain('Replies that look like a new request (1)');
+    expect(html).toContain('#245828');
+    expect(html).toContain('Asks for Adobe &lt;Acrobat&gt;.');
+    expect(html).toContain('Nothing was changed.');
+    expect(service.renderGrouping(base, { baseUrl: 'https://tp.example' })).not.toContain('new request');
+  });
+});
+
 describe('sendDigests', () => {
   test('sends to the workspace admins and records the send', async () => {
     prismaMock.assignmentPipelineRun.findMany.mockResolvedValueOnce([aiRun(1)]).mockResolvedValueOnce([]);

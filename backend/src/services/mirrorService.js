@@ -13,6 +13,7 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId, fsConversationEntryIdCandidates } from '../utils/fsEntryId.js';
+import { fsSystemConversationKind } from '../utils/fsSystemConversation.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { boundFsStatusForName } from '../utils/fsStatusBindings.js';
@@ -1430,8 +1431,12 @@ class MirrorService {
       // Who wrote it: FS gives us `user_id`; look up the technician so the
       // thread shows a person instead of "FreshService user" (FR 09-10).
       // Non-fatal — an unknown id just falls back to the old label.
+      // A line FreshService wrote itself on the copy ("<Name> has submitted
+      // the survey response", flagged incoming): a system event, never a
+      // requester reply. TP-1882 was reopened by one (QA 10-13 #5).
+      const systemKind = fsSystemConversationKind(conv);
       let authorTech = null;
-      if (conv.user_id) {
+      if (conv.user_id && !systemKind) {
         authorTech = await prisma.technician.findFirst({
           where: { freshserviceId: BigInt(conv.user_id) },
           select: { name: true, email: true },
@@ -1443,7 +1448,7 @@ class MirrorService {
           workspaceId,
           externalEntryId,
           source: 'freshservice_reconciliation',
-          eventType: conv.private ? 'note' : 'reply',
+          eventType: systemKind ? 'activity' : (conv.private ? 'note' : 'reply'),
           // Author (FR 09-10): FreshService's conversation payload carries
           // `user_id`, NOT `user_name`, and `from_email` is null for a note an
           // agent typed in the FS UI — so both sides of the old
@@ -1454,11 +1459,11 @@ class MirrorService {
           //
           // The FS-BORN path (freshserviceTransformer) already did this
           // correctly — only this TP-born reconciliation lane was blind.
-          actorName: cleanDisplayName(conv.user_name || authorTech?.name || conv.from_email) || 'FreshService user',
-          actorEmail: conv.from_email || authorTech?.email || null,
-          actorFreshserviceId: conv.user_id ? BigInt(conv.user_id) : null,
-          authorType: conv.incoming ? 'requester' : 'agent',
-          incoming: conv.incoming === true,
+          actorName: systemKind ? 'FreshService' : (cleanDisplayName(conv.user_name || authorTech?.name || conv.from_email) || 'FreshService user'),
+          actorEmail: systemKind ? null : (conv.from_email || authorTech?.email || null),
+          actorFreshserviceId: conv.user_id && !systemKind ? BigInt(conv.user_id) : null,
+          authorType: systemKind ? 'system' : (conv.incoming ? 'requester' : 'agent'),
+          incoming: conv.incoming === true && !systemKind,
           isPrivate: conv.private === true,
           visibility: conv.private ? 'private' : 'public',
           bodyHtml: conv.body || null,
@@ -1467,8 +1472,8 @@ class MirrorService {
           occurredAt: conv.created_at ? new Date(conv.created_at) : new Date(),
           // fsUpdatedAt lets the edit check above compare timestamps instead
           // of bodies on the next pass.
-          ...((Object.keys(recipients).length || conv.updated_at)
-            ? { rawPayload: { ...recipients, ...(conv.updated_at ? { fsUpdatedAt: conv.updated_at } : {}) } }
+          ...((Object.keys(recipients).length || conv.updated_at || systemKind)
+            ? { rawPayload: { ...recipients, ...(conv.updated_at ? { fsUpdatedAt: conv.updated_at } : {}), ...(systemKind ? { tpSystemKind: systemKind } : {}) } }
             : {}),
         },
       });
@@ -1476,7 +1481,7 @@ class MirrorService {
 
       // Requester replies that arrived via FS behave like any other reply:
       // fire the workflow event (stable per-conversation stamp) + live update.
-      if (conv.incoming === true && conv.private !== true) {
+      if (conv.incoming === true && conv.private !== true && !systemKind) {
         import('./ticketLifecycleNotificationService.js')
           .then(({ emitTicketEvent }) => emitTicketEvent('ticket.reply_received', ticket.id, {
             source: 'freshservice_reconciliation',

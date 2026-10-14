@@ -55,6 +55,7 @@ import {
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
 import UrgentClockLine from '../components/tickets/UrgentClockLine';
+import NewRequestSuggestionLine from '../components/tickets/NewRequestSuggestionLine';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { readHideMachinePreference, writeHideMachinePreference } from '../components/tickets/activityKind';
 
@@ -3096,6 +3097,21 @@ export default function TicketDetail() {
                           ))}
                         </div>
                       </div>
+                      {/* A reply to a long-resolved ticket that reads like new
+                          work: one quiet line, a person decides (13 Oct 2026). */}
+                      <NewRequestSuggestionLine
+                        ticketId={ticketId}
+                        refreshKey={`${conversationEntries.length}:${ticket.status}`}
+                        canSplit={canConverse && meta?.actor?.kind !== 'agent'}
+                        onSplit={(result) => {
+                          lastLocalMutationRef.current = Date.now();
+                          const back = result?.parentStatus?.applied ? `; this ticket is ${result.parentStatus.requested} again` : '; this ticket stays open';
+                          showToast('emerald', `Split into ${result?.child?.ref || 'a new ticket'}${back}`);
+                          fetchTicket({ silent: true });
+                        }}
+                        onDismissed={() => showToast('emerald', 'Kept on this ticket')}
+                        onError={(message) => showToast('red', message)}
+                      />
                       {timeline.length === 0 ? (
                         <div className="tp-surface rounded-xl p-6 text-center text-sm text-muted-foreground/75">
                           Nothing here yet{canConverse && conversationTab === 'all' ? ' — start the conversation below.' : '.'}
