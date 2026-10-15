@@ -2,7 +2,9 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import AssigneePicker from './AssigneePicker';
+import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
 
 // The picker's trigger render never touches the API; stub the module so the
 // import doesn't drag in a live axios client during the test.
@@ -160,5 +162,55 @@ describe('AssigneePicker override-reason prompt', () => {
 
     await waitFor(() => expect(fsAssign).toHaveBeenCalledWith(49));
     expect(screen.queryByText('Why the override?')).not.toBeInTheDocument();
+  });
+
+  // 14 Oct 2026: on the Tickets queue the prompt slid in and vanished. A ticket
+  // handed to someone else leaves "Mine" on the refresh after the save, and the
+  // row (with the prompt inside it) unmounted. The queue now owns the prompt.
+  test('with onOverride the parent asks, so the prompt outlives the row', async () => {
+    const res = { success: true, data: { aiOverride: true } };
+    assign.mockResolvedValue(res);
+    const onOverride = vi.fn();
+    const { unmount } = render(<AssigneePicker ticketId={321} value={null} technicians={team} onOverride={onOverride} />);
+    await pick();
+
+    await waitFor(() => expect(onOverride).toHaveBeenCalledWith(res, 321, 49));
+    unmount();
+    expect(screen.queryByText('Why the override?')).not.toBeInTheDocument();
+  });
+});
+
+describe('Tickets queue: the override prompt survives the row leaving the list', () => {
+  test('a page-level prompt fed by the picker stays after the picker unmounts', async () => {
+    const team = [{ id: 49, name: 'Reza Zaim', origin: 'freshservice' }];
+    assign.mockResolvedValue({ success: true, data: { aiOverride: true } });
+    function Page() {
+      const prompt = useOverridePrompt();
+      const [rowShown, setRowShown] = useState(true);
+      return (
+        <>
+          {rowShown && (
+            <AssigneePicker
+              ticketId={321}
+              value={null}
+              technicians={team}
+              onOverride={prompt.maybePrompt}
+              onAssigned={() => setRowShown(false)}
+            />
+          )}
+          <OverridePromptToast prompt={prompt.prompt} state={prompt.state} onReason={prompt.sendReason} onDismiss={prompt.dismiss} />
+        </>
+      );
+    }
+    render(<Page />);
+    fireEvent.click(screen.getByRole('button', { name: /assign a member/i }));
+    fireEvent.click(await screen.findByRole('option', { name: /Reza Zaim/ }));
+
+    expect(await screen.findByText('Why the override?')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Reza Zaim/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Load balancing' }));
+    await waitFor(() => expect(recordOverrideReason).toHaveBeenCalledWith(
+      321, { toTechnicianId: 49, reasonCode: 'load_balancing' },
+    ));
   });
 });
