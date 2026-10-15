@@ -15,6 +15,7 @@
  */
 
 import { BUILTIN_CHANGE_FIELDS, EVENT_ACTOR_KINDS } from './ticketChangeRenderer.js';
+import { OPERATOR_WORDS } from './conditionRuleShared.js';
 
 const MAX_TOTAL_ROWS = 20;
 const MAX_DEPTH = 2; // root group + one nested level
@@ -52,9 +53,9 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.subject': { label: 'Subject', type: 'string', path: 'ticket.subject' },
   'ticket.descriptionText': { label: 'Description', type: 'string', path: 'ticket.descriptionText' },
   'ticket.category': { label: 'Category (FS)', type: 'string', path: 'ticket.category' },
-  'ticket.internalCategory': { label: 'Category', type: 'string', path: 'ticket.internalCategory.name' },
-  'ticket.internalSubcategory': { label: 'Subcategory', type: 'string', path: 'ticket.internalSubcategory.name' },
-  'ticket.tags': { label: 'Tags', type: 'list', path: 'ticket.tags' },
+  'ticket.internalCategory': { label: 'Category', type: 'string', path: 'ticket.internalCategory.name', dynamicOptions: 'categories' },
+  'ticket.internalSubcategory': { label: 'Subcategory', type: 'string', path: 'ticket.internalSubcategory.name', dynamicOptions: 'subcategories' },
+  'ticket.tags': { label: 'Tags', type: 'list', path: 'ticket.tags', dynamicOptions: 'tags' },
   'ticket.impact': { label: 'Impact (1-3)', type: 'number', path: 'ticket.impact' },
   'ticket.urgency': { label: 'Urgency (1-3)', type: 'number', path: 'ticket.urgency' },
   // Requester sentiment (gap plan 2 P5.1) — the requester's state, team-safe.
@@ -78,8 +79,8 @@ export const CONDITION_FIELDS = Object.freeze({
   // asks for them (the requester's original request counts as their first word).
   'ticket.lastRequesterReplyMinutes': { label: 'Time since the requester last wrote', type: 'duration', path: 'ticket.lastRequesterReplyMinutes' },
   'ticket.lastAgentReplyMinutes': { label: 'Time since an agent last replied', type: 'duration', path: 'ticket.lastAgentReplyMinutes' },
-  'assignedAgent.email': { label: 'Assigned agent email', type: 'string', path: 'assignedAgent.email' },
-  'assignedAgent.name': { label: 'Assigned agent name', type: 'string', path: 'assignedAgent.name' },
+  'assignedAgent.email': { label: 'Assigned agent email', type: 'string', path: 'assignedAgent.email', dynamicOptions: 'agent-emails' },
+  'assignedAgent.name': { label: 'Assigned agent name', type: 'string', path: 'assignedAgent.name', dynamicOptions: 'agent-names' },
   'requester.email': { label: 'Requester email', type: 'string', path: 'requester.email' },
   'requester.department': { label: 'Requester department', type: 'string', path: 'requester.department' },
   'requester.officeLocation': { label: 'Requester office', type: 'string', path: 'requester.officeLocation' },
@@ -116,11 +117,19 @@ export const CONDITION_FIELDS = Object.freeze({
   'event.autoHelpAnswered': { label: 'Auto-help answered the requester', type: 'boolean', path: 'event.extra.autoHelpAnswered' },
   // Reopen-on-reply guard (W3): how a reply after an Auto-help close read.
   'event.autoHelpReplyVerdict': { label: 'Reply after an Auto-help close reads as', type: 'enum', path: 'event.extra.autoHelpReplyVerdict', options: ['confirmed', 'help', 'auto_reply'] },
+  // "When a requester replies" (14 Oct 2026): a reply to a closed ticket, read
+  // where that page's thank-you switch is on.
+  'event.replyVerdict': { label: 'Reply to a closed ticket reads as', type: 'enum', path: 'event.extra.replyVerdict', options: ['thanks', 'auto_reply', 'reply'] },
   'availability.isBusinessHours': { label: 'During business hours', type: 'boolean', path: 'availability.isBusinessHours' },
   'availability.isAfterHours': { label: 'After hours', type: 'boolean', path: 'availability.isAfterHours' },
   'availability.isHoliday': { label: 'On a holiday', type: 'boolean', path: 'availability.isHoliday' },
   'workspace.name': { label: 'Workspace', type: 'string', path: 'workspace.name' },
 });
+
+// Free-text fields that also carry `dynamicOptions` (categories, subcategories,
+// tags, agent names / e-mails): the /condition-fields route serves this
+// workspace's real values as `options` so the builder can offer a tick list.
+// They stay type 'string' / 'list', so any typed value still evaluates.
 
 /** Operators per field type. `value: false` = operator takes no value input. */
 export const CONDITION_OPERATORS = Object.freeze({
@@ -173,6 +182,35 @@ export function registerCustomFieldConditionOps(jsonLogicInstance) {
   });
   // Mirrors customFieldService.coerceValue's boolean coercion.
   jsonLogicInstance.add_operation('cf_bool', (v) => v === true || String(v).toLowerCase() === 'true');
+}
+
+/**
+ * Every custom json-logic operation a compiled condition group can use
+ * (regex_match, list_has_any / list_has_all, the cf_* coercions). The engine
+ * and the rule-conversion script register them on their json-logic instance
+ * through this one function, so both evaluate a rule the same way.
+ */
+export function registerWorkflowConditionOps(jsonLogicInstance) {
+  // json-logic has no regex support. Bad patterns fail closed.
+  jsonLogicInstance.add_operation('regex_match', (value, pattern) => {
+    try {
+      return new RegExp(String(pattern), 'i').test(String(value ?? ''));
+    } catch {
+      return false;
+    }
+  });
+  // List membership for array fields (ticket.tags), case-insensitive.
+  const asLowerList = (v) => (Array.isArray(v) ? v : v === null || v === undefined ? [] : [v]).map((x) => String(x).toLowerCase());
+  jsonLogicInstance.add_operation('list_has_any', (haystack, wanted) => {
+    const have = new Set(asLowerList(haystack));
+    return asLowerList(wanted).some((w) => have.has(w));
+  });
+  jsonLogicInstance.add_operation('list_has_all', (haystack, wanted) => {
+    const have = new Set(asLowerList(haystack));
+    const want = asLowerList(wanted);
+    return want.length > 0 && want.every((w) => have.has(w));
+  });
+  registerCustomFieldConditionOps(jsonLogicInstance);
 }
 
 function isGroup(entry) {
@@ -297,12 +335,9 @@ export function compileConditionGroup(group, { customFieldTypes = null } = {}) {
   return compileGroup(group, 1, customFieldTypes);
 }
 
-const OPERATOR_WORDS = Object.freeze({
-  is: 'is', is_not: 'is not', contains: 'contains', not_contains: 'does not contain', in: 'is one of', not_in: 'is not one of',
-  is_empty: 'is empty', is_not_empty: 'is not empty', is_true: 'is true', is_false: 'is not true',
-  gt: 'is more than', lt: 'is less than', gte: 'is at least', lte: 'is at most', before: 'is before', after: 'is after',
-  matches_regex: 'matches', has_any: 'has any of', has_all: 'has all of', has_none: 'has none of',
-});
+// Operator words are shared with the builder's step sentences
+// (conditionRuleShared.js, mirrored in the frontend).
+export { OPERATOR_WORDS };
 
 function valueAtPath(scope, path) {
   return String(path || '').split('.').reduce((acc, key) => (acc === null || acc === undefined ? undefined : acc[key]), scope);
@@ -420,4 +455,5 @@ export default {
   validateConditionGroup,
   groupReferencesCustomFields,
   registerCustomFieldConditionOps,
+  registerWorkflowConditionOps,
 };

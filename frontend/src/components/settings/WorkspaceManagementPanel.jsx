@@ -28,6 +28,10 @@ export default function WorkspaceManagementPanel() {
   const [togglingTicketing, setTogglingTicketing] = useState(null);
   // v3.8.91: per-workspace sync cadence (full sync + assignment fast sync).
   const [cadenceFor, setCadenceFor] = useState(null); // dbWorkspace id being edited
+  // Short ticket links (14 Oct 2026): the link name being edited (/it/TP-10000).
+  const [linkFor, setLinkFor] = useState(null);
+  const [linkDraft, setLinkDraft] = useState('');
+  const [savingLink, setSavingLink] = useState(false);
   const [cadence, setCadence] = useState({ syncIntervalMinutes: 5, fastSyncIntervalMinutes: 1 });
   const [savingCadence, setSavingCadence] = useState(false);
   const [error, setError] = useState(null);
@@ -109,6 +113,26 @@ export default function WorkspaceManagementPanel() {
       setSavingCadence(false);
     }
   }, [cadence, discover, refreshWorkspaces]);
+
+  const saveLinkName = useCallback(async (ws) => {
+    const dbWs = ws.dbWorkspace;
+    if (!dbWs) return;
+    setSavingLink(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const res = await workspaceAPI.setLinkName(dbWs.id, linkDraft);
+      const name = res?.data?.linkName || linkDraft.trim().toLowerCase();
+      setSuccessMsg(`"${ws.name}" ticket links now look like ${window.location.host}/${name}/TP-10000. Older links keep working.`);
+      setLinkFor(null);
+      await refreshWorkspaces();
+      await discover();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Could not save the link name');
+    } finally {
+      setSavingLink(false);
+    }
+  }, [linkDraft, discover, refreshWorkspaces]);
 
   const deactivate = useCallback(async (ws) => {
     const dbWs = ws.dbWorkspace;
@@ -229,11 +253,46 @@ export default function WorkspaceManagementPanel() {
                           <Timer className="w-3 h-3" />
                           fast sync every {ws.dbWorkspace.fastSyncIntervalMinutes || 1}m
                         </button>
-                        <span>Slug: {ws.dbWorkspace.slug}</span>
+                        <button
+                          type="button"
+                          onClick={() => { setLinkFor(ws.dbWorkspace.id); setLinkDraft(ws.dbWorkspace.linkName || ws.dbWorkspace.slug || ''); }}
+                          title="Change the short name used in this workspace's ticket links"
+                          className="tp-focus-ring rounded hover:text-foreground"
+                        >
+                          Ticket links: /{ws.dbWorkspace.linkName || ws.dbWorkspace.slug}/TP-…
+                        </button>
                       </>
                     )}
                     {ws.description && <span className="truncate max-w-[200px]">{ws.description}</span>}
                   </div>
+                  {ws.dbWorkspace && linkFor === ws.dbWorkspace.id && (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); saveLinkName(ws); }}
+                      className="mt-2 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5"
+                    >
+                      <label className="text-[11px] font-semibold text-muted-foreground">
+                        Link name
+                        <input
+                          value={linkDraft}
+                          onChange={(e) => setLinkDraft(e.target.value)}
+                          maxLength={30}
+                          aria-label="Link name"
+                          className="tp-focus-ring mt-1 block w-32 rounded-lg border border-input bg-card px-2 py-1.5 text-sm font-normal text-foreground"
+                        />
+                      </label>
+                      <span className="pb-2 text-xs text-muted-foreground">
+                        Links look like {window.location.host}/{(linkDraft || '…').trim().toLowerCase()}/TP-10000
+                      </span>
+                      <div className="flex gap-2">
+                        <button type="submit" disabled={savingLink} className="tp-focus-ring rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">
+                          {savingLink ? 'Saving…' : 'Save'}
+                        </button>
+                        <button type="button" onClick={() => setLinkFor(null)} className="tp-focus-ring rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
                   {ws.dbWorkspace && cadenceFor === ws.dbWorkspace.id && (
                     <form
                       onSubmit={(e) => { e.preventDefault(); saveCadence(ws); }}

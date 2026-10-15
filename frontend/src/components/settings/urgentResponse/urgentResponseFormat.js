@@ -234,7 +234,7 @@ const FIELD_LABEL = {
   notifyChannels: 'Who is told: how',
   nobodyMode: 'Nobody at work',
   nobodyContactTechnicianId: 'Nobody at work: person told',
-  coordinatorTechnicianId: 'Coordinator',
+  coordinatorTechnicianId: 'Workspace coordinator',
   maxMoves: 'Most moves',
   onCallOrder: 'On-call order',
   onCallHandoverDay: 'On-call handover day',

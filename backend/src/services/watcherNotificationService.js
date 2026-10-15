@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { pickOutboundMailbox } from './mailboxPicker.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 /**
  * Watcher notifications (T3.6). Watchers subscribe to a CATEGORY (top or sub)
@@ -55,7 +56,7 @@ class WatcherNotificationService {
         `<p><b>${esc(ticket.subject || '(no subject)')}</b> (${ref})</p>`,
         ticket.requester?.name ? `<p>Requester: ${esc(ticket.requester.name)}</p>` : '',
         entryPreview ? `<blockquote>${esc(String(entryPreview).slice(0, 800))}</blockquote>` : '',
-        appUrl ? `<p><a href="${appUrl}/tickets/${ticket.id}">Open in Ticket Pulse</a></p>` : '',
+        appUrl ? `<p><a href="${ticketLinkUrl(appUrl, ticket)}">Open in Ticket Pulse</a></p>` : '',
         '<p style="color:#64748b;font-size:12px">You get this because you watch this category or group in Ticket Pulse.</p>',
       ].join('');
 

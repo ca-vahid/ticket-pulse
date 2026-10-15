@@ -51,6 +51,8 @@ describe('resolvePage', () => {
     expect(paths.length).toBeGreaterThan(30);
     const untracked = new Set([
       '/', '*', '/login', '/auth/callback', '/notifications',
+      // Short ticket links only hand over to /tickets/:id (14 Oct 2026).
+      '/:ref', '/:wsSlug/:ref',
       '/summit/vote/:token', '/summit/report/:token', '/ticket-status/:token', '/ticket-escalation/:token',
       '/ticket-urgency/:token', '/feedback/:token', '/approval/:token', '/approval-reply/:token',
     ]);

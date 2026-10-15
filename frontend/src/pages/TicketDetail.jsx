@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ticketShortLink } from '../utils/ticketShortLink';
 import {
   Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
@@ -20,7 +21,7 @@ import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { rememberTicket } from '../utils/recentSearches';
-import { RichBody, SentSignature, IMG_REF_RE, openingMessageHtml, picturesShownInBody } from '../components/tickets/InlineImageBody';
+import { RichBody, SentSignature, IMG_REF_RE, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from '../components/tickets/InlineImageBody';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
 import { buildHistoryItems, countMachine } from '../utils/ticketHistory';
 import TicketHistoryTimeline from '../components/tickets/TicketHistoryTimeline';
@@ -749,7 +750,7 @@ export default function TicketDetail() {
   // `const { workspaceId } = useWorkspace()` destructure was always undefined,
   // which silently disabled the switch-bounce below AND left the SSE stream
   // un-keyed on workspace (realtime plan Phase 1).
-  const { currentWorkspace, switchWorkspace } = useWorkspace();
+  const { currentWorkspace, switchWorkspace, availableWorkspaces } = useWorkspace();
   const { width: layoutWidth } = useLayoutWidth();
   const workspaceId = currentWorkspace?.id;
   const openedWsRef = useRef(null);
@@ -1371,6 +1372,8 @@ export default function TicketDetail() {
   // Long threads: keep the original request + the newest messages in view;
   // everything between folds behind a divider until asked for.
   const [showFolded, setShowFolded] = useState(false);
+  // QA 10-14 #5: the opening e-mail folded to one line when it repeats the Description.
+  const [openedOpening, setOpenedOpening] = useState(() => new Set());
   // Attachments tab → "Show in conversation": open Conversation (All, unfolded)
   // and bring the message into view with a short highlight.
   const jumpToEntry = useCallback((entryId) => {
@@ -1715,7 +1718,10 @@ export default function TicketDetail() {
     );
   }, [showToast]);
 
-  const copyLink = () => copyText(window.location.href);
+  // The short form (ticketpulse.bgcsaas.com/it/TP-1876) when the ticket and workspace allow it.
+  const copyLink = () => copyText(ticketShortLink(
+    (availableWorkspaces || []).find((w) => w.id === (ticket?.workspaceId ?? currentWorkspace?.id)) || currentWorkspace, ticket,
+  ) || window.location.href);
 
   // Field-card pencils jump to the right-rail custom-fields editor: scroll it
   // into view and flash a short-lived ring so the eye lands on the right card.
@@ -3134,30 +3140,48 @@ export default function TicketDetail() {
                                     </button>
                                   </div>
                                 )}
-                                <ul>
-                                  <ThreadEntry
-                                    entry={item.e}
-                                    attachments={attachmentsByEntry.get(item.e.id) || []}
-                                    ticketId={ticketId}
-                                    openingHtml={item.e.eventType === 'original_email' ? openingMessageHtml(item.e, ticket) : null}
-                                    openingImages={item.e.eventType === 'original_email' ? descriptionImages : null}
-                                    onPreview={previewImage}
-                                    onImageRef={previewImageRef}
-                                    photoFor={photoFor}
-                                    nameForEmail={nameForEmail}
-                                    onCopy={copyText}
-                                    canDelete={canDeleteEntry(item.e)}
-                                    onDelete={deleteNote}
-                                    deleting={deletingNoteId === item.e.id}
-                                    canEdit={canEditEntry(item.e)}
-                                    onEdit={editNote}
-                                    customFields={ticket?.customFields || {}}
-                                    onEditField={focusCustomFields}
-                                    onCopied={notifyCopied}
-                                    onFilterNavigate={navigate}
-                                    onSplitFrom={canConverse && meta?.actor?.kind !== 'agent' ? (id) => { setSplitFromId(id); setSplitOpen(true); } : null}
-                                  />
-                                </ul>
+                                {item.e.eventType === 'original_email' && !openedOpening.has(item.e.id) && !editingDescription && openingRepeatsDescription(item.e, ticket) ? (
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-sm text-muted-foreground" data-testid="opening-mail-folded">
+                                    <Mail className="h-4 w-4 shrink-0 text-muted-foreground/75" aria-hidden="true" />
+                                    <span className="min-w-0">
+                                      <span className="font-semibold text-foreground">{item.e.actorName || 'The requester'}</span>
+                                      {"'s e-mail opened this ticket. It is the Description above."}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOpenedOpening((prev) => new Set(prev).add(item.e.id))}
+                                      className="tp-focus-ring ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold text-primary hover:underline"
+                                    >
+                                      <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                                      Show the e-mail
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <ul>
+                                    <ThreadEntry
+                                      entry={item.e}
+                                      attachments={attachmentsByEntry.get(item.e.id) || []}
+                                      ticketId={ticketId}
+                                      openingHtml={item.e.eventType === 'original_email' ? openingMessageHtml(item.e, ticket) : null}
+                                      openingImages={item.e.eventType === 'original_email' ? descriptionImages : null}
+                                      onPreview={previewImage}
+                                      onImageRef={previewImageRef}
+                                      photoFor={photoFor}
+                                      nameForEmail={nameForEmail}
+                                      onCopy={copyText}
+                                      canDelete={canDeleteEntry(item.e)}
+                                      onDelete={deleteNote}
+                                      deleting={deletingNoteId === item.e.id}
+                                      canEdit={canEditEntry(item.e)}
+                                      onEdit={editNote}
+                                      customFields={ticket?.customFields || {}}
+                                      onEditField={focusCustomFields}
+                                      onCopied={notifyCopied}
+                                      onFilterNavigate={navigate}
+                                      onSplitFrom={canConverse && meta?.actor?.kind !== 'agent' ? (id) => { setSplitFromId(id); setSplitOpen(true); } : null}
+                                    />
+                                  </ul>
+                                )}
                               </li>
                             ))}
                           </ul>

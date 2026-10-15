@@ -118,27 +118,32 @@ describe('afterRequesterReplyEvent', () => {
 });
 
 describe('the switches', () => {
-  test('never saved: ON for IT (workspace 1), OFF everywhere else', async () => {
-    expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: true, suggestNewRequest: true });
-    expect(await rules.getRequesterReplyRules(2)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false });
-    expect(await rules.getRequesterReplyRules(5)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false });
+  // 14 Oct 2026: the page also holds the reopen (statuses), the thank-you
+  // switch and the reply-reading limit — all off until an admin saves.
+  const pageDefaults = { reopenOnReply: false, reopenStatuses: [], ignoreThanks: false, replyCheckMonthlyCapUsd: 10, retiredWorkflows: [] };
+
+  test('never saved: owner-away + new-request ON for IT (workspace 1), OFF elsewhere; reopen and thank-you OFF everywhere', async () => {
+    expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: true, suggestNewRequest: true, ...pageDefaults });
+    expect(await rules.getRequesterReplyRules(2)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false, ...pageDefaults });
+    expect(await rules.getRequesterReplyRules(5)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false, ...pageDefaults });
     expect(settingsMock.get).toHaveBeenCalledWith('requester_reply_rules_ws1');
   });
 
   test('a saved choice wins over the default, one switch at a time', async () => {
     settingsMock.get.mockResolvedValue(JSON.stringify({ rerouteWhenOwnerAway: false }));
-    expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: true });
+    expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: true, ...pageDefaults });
 
     rules.invalidateRequesterReplyRulesCache();
     settingsMock.get.mockResolvedValue(null);
     const saved = await rules.setRequesterReplyRules(5, { suggestNewRequest: true, nonsense: 1, rerouteWhenOwnerAway: 'yes' });
-    expect(saved).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: true });
-    expect(settingsMock.set).toHaveBeenCalledWith('requester_reply_rules_ws5', JSON.stringify({ rerouteWhenOwnerAway: false, suggestNewRequest: true }));
+    expect(saved).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: true, ...pageDefaults });
+    expect(JSON.parse(settingsMock.set.mock.calls[0][1])).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: true, ...pageDefaults });
+    expect(settingsMock.set.mock.calls[0][0]).toBe('requester_reply_rules_ws5');
     expect(await rules.getRequesterReplyRules(5)).toEqual(saved); // from the cache
   });
 
   test('a settings store that cannot be read means OFF, even for IT', async () => {
     settingsMock.get.mockRejectedValue(new Error('pool timeout'));
-    expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false });
+    expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false, ...pageDefaults });
   });
 });

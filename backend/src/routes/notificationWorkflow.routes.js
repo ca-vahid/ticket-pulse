@@ -1331,6 +1331,39 @@ router.get(
   }),
 );
 
+// Real values for free-text condition fields (14 Oct 2026). Each is one small
+// indexed read over this workspace's active rows; a failure (or a partial
+// test mock) leaves the field as plain free text.
+const CONDITION_VALUE_LIMIT = 300;
+const uniqueNames = (rows, key) => [...new Set((rows || []).map((r) => String(r?.[key] || '').trim()).filter(Boolean))].slice(0, CONDITION_VALUE_LIMIT);
+const DYNAMIC_VALUE_LOOKUPS = {
+  categories: (workspaceId) => prisma.competencyCategory.findMany({
+    where: { workspaceId, isActive: true, parentId: null }, select: { name: true }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], take: CONDITION_VALUE_LIMIT,
+  }).then((rows) => uniqueNames(rows, 'name')),
+  subcategories: (workspaceId) => prisma.competencyCategory.findMany({
+    where: { workspaceId, isActive: true, parentId: { not: null } }, select: { name: true }, orderBy: { name: 'asc' }, take: CONDITION_VALUE_LIMIT,
+  }).then((rows) => uniqueNames(rows, 'name').sort((a, b) => a.localeCompare(b))),
+  tags: (workspaceId) => prisma.ticketTag.findMany({
+    where: { workspaceId, isActive: true }, select: { name: true }, orderBy: { name: 'asc' }, take: CONDITION_VALUE_LIMIT,
+  }).then((rows) => uniqueNames(rows, 'name')),
+  'agent-names': (workspaceId) => prisma.technician.findMany({
+    where: { workspaceId, isActive: true }, select: { name: true }, orderBy: { name: 'asc' }, take: CONDITION_VALUE_LIMIT,
+  }).then((rows) => uniqueNames(rows, 'name')),
+  'agent-emails': (workspaceId) => prisma.technician.findMany({
+    where: { workspaceId, isActive: true }, select: { email: true }, orderBy: { email: 'asc' }, take: CONDITION_VALUE_LIMIT,
+  }).then((rows) => uniqueNames(rows, 'email')),
+};
+
+function conditionValueLookup(kind, workspaceId, cache) {
+  if (!cache.has(kind)) {
+    cache.set(kind, Promise.resolve()
+      .then(() => DYNAMIC_VALUE_LOOKUPS[kind](workspaceId))
+      .then((values) => (Array.isArray(values) ? values : []))
+      .catch(() => []));
+  }
+  return cache.get(kind);
+}
+
 // Condition-field catalog for the AND/OR builder, with `dynamicOptions`
 // resolved per workspace (Phase 8c): `ticket.status` serves the workspace's
 // status registry instead of the canonical 4, so custom statuses are pickable.
@@ -1342,6 +1375,7 @@ router.get(
     const { CONDITION_FIELDS, CUSTOM_FIELD_CONDITION_TYPES } = await import('../services/notificationConditionModel.js');
     const { default: statusService } = await import('../services/statusService.js');
     const fields = [];
+    const lookupCache = new Map();
     for (const [value, spec] of Object.entries(CONDITION_FIELDS)) {
       const field = { value, label: spec.label, type: spec.type };
       if (spec.options) field.options = spec.options;
@@ -1356,6 +1390,12 @@ router.get(
           const definitions = await customFieldService.listDefinitions(req.workspaceId);
           field.options = [...(spec.options || []), ...definitions.map((d) => `customFields.${d.key}`)];
         } catch { /* static built-ins stand alone */ }
+      }
+      // 14 Oct 2026: real values for free-text fields, so "is any of" is a
+      // tick list. Suggestions only — the field stays free text.
+      if (DYNAMIC_VALUE_LOOKUPS[spec.dynamicOptions]) {
+        const values = await conditionValueLookup(spec.dynamicOptions, req.workspaceId, lookupCache);
+        if (values.length > 0) field.options = values;
       }
       fields.push(field);
     }

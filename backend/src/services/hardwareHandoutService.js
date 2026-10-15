@@ -5,6 +5,7 @@ import { fsApprovalState, combineStates } from './approvalVerdictService.js';
 import { refreshFsApprovalStatuses } from './fsApprovalRefreshService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 /**
  * "Request for Cristian Orellana : Laptop" — an IT agent filing on behalf of
  * someone. Returns the named person (lower-cased) or null. Only a capitalised
@@ -161,7 +162,7 @@ function shapeTicket(t) {
     category: t.internalCategory?.name || null,
     subcategory: t.internalSubcategory?.name || null,
     createdAt: t.createdAt,
-    url: `${publicBaseUrl()}/tickets/${t.id}`,
+    url: `${ticketLinkUrl(publicBaseUrl(), t)}`,
   };
 }
 

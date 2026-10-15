@@ -15,6 +15,7 @@ import statusService from './statusService.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { readHrNoticeDate, hrWakeDate } from '../utils/hrNoticeDates.js';
 import settingsRepository from './settingsRepository.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 export const PARK_KINDS = Object.freeze(['until_date', 'waiting_on', 'eta']);
 // System kinds (Auto-help, plans/AUTO_HELP_PLAN.md): only the owning service
@@ -377,7 +378,7 @@ class TicketParkService {
 <p style="margin:0 0 10px">A ticket you parked is back: <b>${esc(ref)} ${esc(ticket.subject)}</b>.</p>
 <p style="margin:0 0 10px">${what}</p>
 <p style="margin:0 0 14px;color:#475569">Parked by ${esc(park.parkedBy)} — “${esc(park.reason)}”.</p>
-<p style="margin:0"><a href="${base}/tickets/${ticket.id}" style="color:#1d4ed8">Open ${esc(ref)} in Ticket Pulse</a></p></div>`;
+<p style="margin:0"><a href="${ticketLinkUrl(base, ticket)}" style="color:#1d4ed8">Open ${esc(ref)} in Ticket Pulse</a></p></div>`;
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject: `Back in your queue: ${ref} ${ticket.subject}`.slice(0, 180), html, label: 'park wake' });
   }

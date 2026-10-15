@@ -212,6 +212,10 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       // The owner was away when the requester replied (13 Oct 2026): the ticket
       // went back for assignment. Worth seeing, so it is not folded as machine chatter.
       item = baseItem({ event: 'assignment', verb: 'sent the ticket back for assignment', from: d.technicianName || null, detail: d.note || null, importance: 3, machine: false });
+    } else if (t === 'requester_reply_stays_closed') {
+      // When a requester replies (14 Oct 2026): a thank-you / out-of-office
+      // left the ticket closed. The conversation has the quiet line too.
+      item = baseItem({ event: 'reply', verb: 'left the ticket closed', detail: d.note || null, importance: 2, machine: false });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

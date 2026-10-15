@@ -468,6 +468,17 @@ const OMITTED_MARKER_TEXT = '[… earlier messages omitted — the full history 
 
 const THREAD_DEDUPE_WINDOW_MS = 60 * 1000;
 
+/**
+ * The plain text a composer sent. An editor body with no tags reached us as
+ * raw HTML text, so a trailing space arrived as "&nbsp;" and showed on the
+ * note (QA 10-14 #4). Only that code is read back here; anything else the
+ * person typed is kept as typed.
+ */
+function composerText(text) {
+  if (typeof text !== 'string') return null;
+  return text.replace(/&nbsp;/gi, ' ').trim() || null;
+}
+
 function stripHtml(html) {
   if (!html) return null;
   return String(html)
@@ -3199,6 +3210,8 @@ class TicketService {
       queueCards,
       // QA 09-23 #4: the workspace's default status filter for the list ([] = every status).
       defaultStatuses: await import('./ticketDefaultStatusService.js').then(({ default: svc }) => svc.get(workspaceId)).catch(() => []),
+      // QA 10-14 #1: canned views an admin hid in this workspace ([] = all show).
+      hiddenViews: await import('./ticketHiddenViewsService.js').then(({ default: svc }) => svc.get(workspaceId)).catch(() => []),
       // Resolved new-ticket form (Phase TF): built-in field visibility/
       // required/defaults + workspace default source/group for the composer.
       // TP composer only — FreshService-owned forms are untouched.
@@ -5118,7 +5131,7 @@ class TicketService {
     }
 
     const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
-    const bodyText = parsed.data.bodyText?.trim() || stripHtml(bodyHtml);
+    const bodyText = composerText(parsed.data.bodyText) || stripHtml(bodyHtml);
     // A body that was ALL disallowed markup (e.g. a lone <script>) sanitizes
     // to nothing — reject it like an empty submit instead of storing a blank.
     if (!bodyHtml && !bodyText) throw new ValidationError('Reply body is required');
@@ -5498,7 +5511,7 @@ class TicketService {
     const parsed = threadBodySchema.safeParse({ bodyHtml: input?.bodyHtml, bodyText: input?.bodyText });
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
-    const bodyText = parsed.data.bodyText?.trim() || stripHtml(bodyHtml);
+    const bodyText = composerText(parsed.data.bodyText) || stripHtml(bodyHtml);
     if (!bodyHtml && !bodyText) throw new ValidationError('Note body is required');
 
     const now = new Date();

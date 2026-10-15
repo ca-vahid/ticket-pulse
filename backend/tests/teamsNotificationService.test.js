@@ -252,6 +252,50 @@ describe('disconnect (QA 10-01 #4)', () => {
   });
 });
 
+describe("Reinstall: an admin's Connect checks the app is still there (14 Oct 2026)", () => {
+  beforeEach(() => {
+    botMock.installForUser.mockClear();
+    botMock.createPersonalConversation.mockClear();
+    prismaMock.teamsConversation.upsert.mockReset().mockImplementation(({ update }) => Promise.resolve({ email: 'adrian@x.io', ...update }));
+    prismaMock.teamsConversation.update.mockReset().mockImplementation(({ data }) => Promise.resolve({ email: 'adrian@x.io', aadObjectId: 'aad-7', ...data }));
+    prismaMock.technician.findMany.mockResolvedValue([{ id: 7, email: 'adrian@x.io' }]);
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'adrian@x.io', conversationId: 'conv-old', serviceUrl: 'https://smba/', aadObjectId: 'aad-7', disconnectedAt: null });
+  });
+
+  test('the app was removed: it is put back and a new chat is stored', async () => {
+    botMock.isInstalledForUser = jest.fn().mockResolvedValue(false);
+    const out = await svc.installForAgents(1, [7]);
+    expect(botMock.isInstalledForUser).toHaveBeenCalledWith('aad-7');
+    expect(prismaMock.teamsConversation.update).toHaveBeenCalledWith({ where: { email: 'adrian@x.io' }, data: { conversationId: null } });
+    expect(botMock.installForUser).toHaveBeenCalledWith('aad-7');
+    expect(prismaMock.teamsConversation.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ conversationId: 'conv-1' }) }));
+    expect(out).toMatchObject({ connected: 1, reinstalled: 1, failed: [] });
+  });
+
+  test('the app is there: nothing is installed or changed', async () => {
+    botMock.isInstalledForUser = jest.fn().mockResolvedValue(true);
+    const out = await svc.installForAgents(1, [7]);
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+    expect(prismaMock.teamsConversation.update).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ connected: 1, reinstalled: 0 });
+  });
+
+  test('"Connect all" and ordinary sends never ask Microsoft (no Graph call per message)', async () => {
+    botMock.isInstalledForUser = jest.fn().mockResolvedValue(false);
+    await svc.installForAgents(1);
+    await svc.ensureConversation('adrian@x.io');
+    expect(botMock.isInstalledForUser).not.toHaveBeenCalled();
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+  });
+
+  test('a failed check leaves the chat as it is', async () => {
+    botMock.isInstalledForUser = jest.fn().mockRejectedValue(new Error('Graph 503'));
+    const out = await svc.installForAgents(1, [7]);
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ connected: 1, reinstalled: 0, failed: [] });
+  });
+});
+
 // 5 Oct 2026 (Vahid): an approval card in Teams follows the approval.
 describe('approval cards follow the approval', () => {
   const AP = {

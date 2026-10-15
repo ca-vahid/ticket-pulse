@@ -4368,6 +4368,8 @@ const AI_OPERATION_OPTIONS = [
   { value: 'ticket_intake_extract', label: 'Autofill Intake' },
   // Auto-help (Knowledge → Playbooks): shadow-mode first answers.
   { value: 'auto_help', label: 'Auto-help' },
+  // Ticket Ops → When a requester replies: is a reply to a closed ticket only a thank-you?
+  { value: 'requester_reply_check', label: 'Reply Reading' },
 ];
 
 export function AiProviderSettingsPanel({ onAssignmentModelChange }) {

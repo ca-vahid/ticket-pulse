@@ -12,6 +12,7 @@ import { clientIp } from '../middleware/apiKeyAuth.js';
 import logger from '../utils/logger.js';
 import { recordSignIn } from '../services/usageStatsService.js';
 import { VIEW_AS_ROLES, VIEW_AS_ROLE_LABELS, cleanViewAs, currentViewAs } from '../services/viewAsContext.js';
+import { workspaceLinkName } from '../utils/ticketLink.js';
 
 const router = express.Router();
 
@@ -86,6 +87,8 @@ function sanitizeWorkspace(workspace) {
     id: workspace.id,
     name: workspace.name,
     slug: workspace.slug,
+    // Short ticket links (/it/TP-10000): loaded in memory at boot; the slug until then.
+    linkName: workspaceLinkName(workspace.id) || workspace.slug,
     defaultTimezone: workspace.defaultTimezone,
   };
 }

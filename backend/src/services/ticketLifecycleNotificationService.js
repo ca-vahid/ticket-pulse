@@ -6,6 +6,7 @@ import statusService, { TERMINAL_BASE_STATUSES } from './statusService.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
 import { resolvePublicBaseUrl, PRODUCTION_PUBLIC_URL } from '../utils/publicBaseUrl.js';
 import hrLifecycleService from './hrLifecycleService.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 const TERMINAL_STATUS_VALUES = new Set(['resolved', 'closed', '4', '5']);
 
@@ -85,11 +86,15 @@ async function workspaceTerminalResolver(workspaceId) {
 
 const PRIORITY_WORDS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
-/** Agent-facing ticket page in Ticket Pulse (QA 10-01 #10: `{{ ticket.url }}`). */
-export function ticketAppUrl(ticketId) {
-  if (!ticketId) return null;
+/**
+ * Agent-facing ticket page in Ticket Pulse (QA 10-01 #10: `{{ ticket.url }}`). Given the
+ * ticket itself, the short form (/it/TP-10000, 14 Oct 2026); given only an id, /tickets/<id>.
+ */
+export function ticketAppUrl(ticketOrId) {
+  const ticket = ticketOrId && typeof ticketOrId === 'object' ? ticketOrId : { id: ticketOrId };
+  if (!ticket.id) return null;
   const base = resolvePublicBaseUrl({ fallback: PRODUCTION_PUBLIC_URL }) || PRODUCTION_PUBLIC_URL;
-  return `${String(base).replace(/\/+$/, '')}/tickets/${ticketId}`;
+  return ticketLinkUrl(base, ticket);
 }
 
 /**
@@ -645,7 +650,7 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
       displayRef: ticketDisplayRef(ticket),
       // QA 10-01 #10: the agent-facing link to the ticket in Ticket Pulse
       // (webhooks, Teams posts, agent mail). Requesters get publicStatusUrl.
-      url: ticketAppUrl(ticket.id),
+      url: ticketAppUrl(ticket),
       nativeNumber: ticket.nativeNumber ?? null,
       subject: ticket.subject,
       descriptionText: ticket.descriptionText,
@@ -1097,6 +1102,26 @@ export async function emitTicketEvent(eventType, ticketId, {
       logger.warn(`Auto-help post-close reply check skipped for ticket ${ticket.id}: ${err.message}`);
     }
   }
+  // "When a requester replies" (Settings → Ticket Ops, 14 Oct 2026): where the
+  // page is on, a reply to a closed ticket is read (thank-you / out-of-office
+  // → event.extra.replyVerdict) and a reply to a ticket in a ticked status is
+  // reopened here, before the workflows. Off (the default) → null, nothing
+  // changes. autoHelpReplyVerdict above is kept as it is.
+  let replyHandling = null;
+  let replyReopen = null;
+  if (eventType === 'ticket.reply_received' && !onlyWorkflowId) {
+    try {
+      ({ default: replyReopen } = await import('./requesterReplyReopenService.js'));
+      replyHandling = await replyReopen.beforeWorkflows({
+        ticket, statusBase, extra: extra || {}, autoHelpVerdict: eventContext.event.extra?.autoHelpReplyVerdict || null,
+      });
+      if (replyHandling?.replyVerdict) {
+        eventContext.event.extra = { ...(eventContext.event.extra || {}), replyVerdict: replyHandling.replyVerdict };
+      }
+    } catch (err) {
+      logger.warn(`Requester-reply settings skipped for ticket ${ticket.id}: ${err.message}`);
+    }
+  }
 
   let result;
   try {
@@ -1110,13 +1135,22 @@ export async function emitTicketEvent(eventType, ticketId, {
     });
     result = { status: 'failed', eventType, error: error.message };
   }
+  // A thank-you / out-of-office that left the ticket closed: the quiet line
+  // in the conversation (only when the ticket really is still closed).
+  let staysClosed = false;
+  if (replyReopen && replyHandling?.staysClosed) {
+    staysClosed = (await replyReopen.afterWorkflows({ ticket, handling: replyHandling, stamp }).catch(() => null))?.staysClosed === true;
+  }
   // After the workflows (the reopen one first of all): is the owner away, and
   // is this reply to a long-resolved ticket really a new request (13 Oct
   // 2026)? `ticket` is the row as it was BEFORE they ran. Not awaited: one of
-  // the two makes a model call, and the reply is already recorded.
+  // the two makes a model call, and the reply is already recorded. A reply
+  // that stayed closed as a thank-you / out-of-office starts neither.
   if (eventType === 'ticket.reply_received' && !onlyWorkflowId) {
     import('./requesterReplyFollowUp.js')
-      .then(({ afterRequesterReplyEvent }) => afterRequesterReplyEvent({ before: ticket, statusBaseBefore: statusBase, stamp, extra }))
+      .then(({ afterRequesterReplyEvent }) => afterRequesterReplyEvent({
+        before: ticket, statusBaseBefore: statusBase, stamp, extra, ...(staysClosed ? { staysClosed: replyHandling.replyVerdict } : {}),
+      }))
       .catch((err) => logger.warn(`Requester-reply follow-up skipped for ticket ${ticket.id}: ${err.message}`));
   }
   return result;

@@ -65,6 +65,23 @@ export function openingMessageHtml(entry, ticket) {
   return whole.startsWith(preview.slice(0, 200)) ? description : null;
 }
 
+/**
+ * QA 10-14 #5: the opening e-mail's entry repeats the Description card word for
+ * word (since 4.2.70 it is stored whole). True when the entry says the same as
+ * the description, so the conversation can fold it to one line. A description
+ * someone has rewritten no longer matches and the entry shows in full again.
+ */
+export function openingRepeatsDescription(entry, ticket) {
+  if (!entry || entry.eventType !== 'original_email') return false;
+  const squash = (s) => String(s || '').replace(IMG_REF_RE, '').replace(new RegExp(`[\\s${String.fromCharCode(160)}]+`, 'g'), '');
+  const fromHtml = (html) => String(html || '').replace(/<(style|script)[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"');
+  const said = squash(entry.bodyText || entry.content || fromHtml(entry.bodyHtml));
+  const whole = squash(ticket?.descriptionText || fromHtml(ticket?.description));
+  if (said.length < 20 || !whole) return false;
+  const head = Math.min(200, said.length, whole.length);
+  return whole.slice(0, head) === said.slice(0, head);
+}
+
 // attachment key -> Promise<object URL>. Shared by every body on the page so a
 // picture shown in both the description and the conversation is fetched once.
 const URL_CACHE_MAX = 60;

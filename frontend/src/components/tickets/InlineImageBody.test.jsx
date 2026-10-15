@@ -10,7 +10,7 @@ vi.mock('../../services/api', () => ({
   ticketsAPI: { attachmentObjectUrl: (...args) => attachmentObjectUrl(...args) },
 }));
 
-import { RichBody, SentSignature, _resetPictureCache, imageRefNames, openingMessageHtml, picturesShownInBody } from './InlineImageBody';
+import { RichBody, SentSignature, _resetPictureCache, imageRefNames, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from './InlineImageBody';
 
 // The description of TP-1885 as stored (shortened): the logo cell of the signature.
 const SIGNATURE_HTML = '<div>Testing out ticket creation speed in ticket pulse</div>'
@@ -133,6 +133,26 @@ describe('openingMessageHtml: the opening e-mail entry written before 13 Oct 202
   test('the land acknowledgement and its letters reach the page whole', () => {
     render(<RichBody html={openingMessageHtml(entry, ticket)} text={entry.bodyText} />);
     expect(screen.getByText(/xʷməθkʷəy̓əm \(Musqueam\), Sḵwx̱wú7mesh \(Squamish\), and səlilwətaɬ \(Tsleil-Waututh\) Nations\./)).toBeInTheDocument();
+  });
+});
+
+describe('openingRepeatsDescription: the opening e-mail folds when it says what the Description says (QA 10-14 #5)', () => {
+  // An e-mail ticket as stored since 4.2.70: the entry is the whole mail, the description the same mail.
+  const html = '<div><p>Hello,</p><p>I received an encrypted message from a supplier on the bridge project.&nbsp;I am trying to open it.</p><p>Thank you!<br>Robin</p></div>';
+  const ticket = { description: html, descriptionText: 'Hello,\n\nI received an encrypted message from a supplier on the bridge project. I am trying to open it.\n\nThank you!\nRobin' };
+
+  test('a whole stored mail, and an older cut preview, both fold', () => {
+    expect(openingRepeatsDescription({ eventType: 'original_email', bodyHtml: html, bodyText: ticket.descriptionText }, ticket)).toBe(true);
+    expect(openingRepeatsDescription({ eventType: 'original_email', bodyHtml: null, bodyText: 'Hello,\r\n\r\nI received an encrypted message from a supplier' }, ticket)).toBe(true);
+    expect(openingRepeatsDescription({ eventType: 'original_email', bodyHtml: html }, { description: html })).toBe(true);
+  });
+
+  test('a rewritten description, a reply, or too little text stays in full', () => {
+    const entry = { eventType: 'original_email', bodyHtml: html, bodyText: ticket.descriptionText };
+    expect(openingRepeatsDescription(entry, { ...ticket, descriptionText: 'Rewritten by the agent after triage: user cannot open an encrypted mail.' })).toBe(false);
+    expect(openingRepeatsDescription({ ...entry, eventType: 'reply' }, ticket)).toBe(false);
+    expect(openingRepeatsDescription({ eventType: 'original_email', bodyText: 'Hi' }, ticket)).toBe(false);
+    expect(openingRepeatsDescription(entry, { description: null, descriptionText: null })).toBe(false);
   });
 });
 

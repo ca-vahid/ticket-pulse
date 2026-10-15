@@ -62,8 +62,9 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const {
-  applyFsBornStatusWriteback, executeDefinition, FS_WRITEBACK_MAX_ATTEMPTS, FS_WRITEBACK_RETRY_MINUTES,
+  applyFsBornStatusWriteback, executeDefinition, executeUpdateTicketNode, FS_WRITEBACK_MAX_ATTEMPTS, FS_WRITEBACK_RETRY_MINUTES,
 } = await import('../src/services/notificationWorkflowEngine.js');
+const { default: lifecycleMock } = await import('../src/services/ticketLifecycleNotificationService.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 
 const flush = () => new Promise((r) => setTimeout(r, 10));
@@ -141,6 +142,55 @@ describe('applyFsBornStatusWriteback (RO-4)', () => {
 
     await expect(applyFsBornStatusWriteback({ node: NODE, ticket: FS_TICKET, setStatus: 'Open', state }))
       .rejects.toThrow('Failed to write reopen to FreshService: FreshService 401 — bad key');
+  });
+});
+
+describe('the same write as Ticket Pulse (When a requester replies, 14 Oct 2026)', () => {
+  const ACTOR = { name: 'Ticket Pulse', kind: 'system', source: 'requester_reply' };
+  const ctx = (ticket) => ({ ticket: { id: ticket.id, workspaceId: ticket.workspaceId }, workspace: { id: ticket.workspaceId }, event: { type: 'ticket.reply_received' } });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    getInteractiveClientMock.mockResolvedValue({ fetchTicketSafe: fetchTicketSafeMock });
+    prismaMock.ticket.update.mockResolvedValue({});
+  });
+
+  test('FS-born: written through FreshService as Ticket Pulse; no extra "workflow updated" row', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue(FS_TICKET);
+    fetchTicketSafeMock.mockResolvedValue({ id: 237051, status: 5 });
+    updateFsTicketMock.mockResolvedValue({ id: 39618, status: 'Open' });
+    const out = await executeUpdateTicketNode(NODE, ctx(FS_TICKET), { actor: ACTOR });
+    expect(out).toEqual(expect.objectContaining({ via: 'freshservice_writeback', status: expect.objectContaining({ applied: true }) }));
+    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.objectContaining({ name: 'Ticket Pulse', role: 'automation' }));
+    expect(activityCreateMock).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'workflow_updated_ticket' }));
+  });
+
+  test('TP-born: a status change by Ticket Pulse in the history, and ticket.reopened says who', async () => {
+    const tp = { ...FS_TICKET, id: 500, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Resolved', resolvedAt: new Date(), resolvedByKind: 'agent' };
+    prismaMock.ticket.findUnique.mockResolvedValue(tp);
+    const out = await executeUpdateTicketNode(NODE, ctx(tp), { actor: ACTOR });
+    expect(out.updated).toEqual({ status: { from: 'Resolved', to: 'Open' } });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 500 },
+      data: expect.objectContaining({ status: 'Open', resolvedAt: null, resolvedByKind: null, mirrorState: 'pending' }),
+    }));
+    expect(activityCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'status_changed',
+      performedBy: 'Ticket Pulse',
+      details: expect.objectContaining({ oldStatus: 'Resolved', newStatus: 'Open', actorKind: 'system', source: 'requester_reply' }),
+    }));
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith('ticket.reopened', 500, expect.objectContaining({
+      source: 'requester_reply',
+      extra: expect.objectContaining({ actorKind: 'system', workflowId: null, from: 'Resolved', to: 'Open' }),
+    }));
+  });
+
+  test('without an actor nothing changes: still the workflow\'s row and source', async () => {
+    const tp = { ...FS_TICKET, id: 501, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Closed' };
+    prismaMock.ticket.findUnique.mockResolvedValue(tp);
+    await executeUpdateTicketNode(NODE, ctx(tp), { workflowId: 9764 });
+    expect(activityCreateMock).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'workflow_updated_ticket', performedBy: 'Notification workflow' }));
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith('ticket.reopened', 501, expect.objectContaining({ source: 'workflow:9764', extra: expect.objectContaining({ actorKind: 'workflow' }) }));
   });
 });
 

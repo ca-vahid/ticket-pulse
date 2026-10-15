@@ -396,6 +396,14 @@ async function initialize() {
     } catch (e) {
       logger.warn('FreshService status bindings not loaded (non-fatal):', e.message);
     }
+
+    // Workspace link names for short ticket links in e-mails (/it/TP-10000), 14 Oct 2026.
+    try {
+      const { default: workspaceLinkNameService } = await import('./services/workspaceLinkNameService.js');
+      workspaceLinkNameService.startRefresh();
+    } catch (e) {
+      logger.warn('Workspace link names not started (non-fatal):', e.message);
+    }
 
     // Native-ticketing fallback mirror: pushes TP-born ticket copies to FreshService.
     try {

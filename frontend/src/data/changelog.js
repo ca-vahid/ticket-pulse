@@ -1,6 +1,24 @@
-export const APP_VERSION = '4.2.72-preview';
+export const APP_VERSION = '4.2.73-preview';
 
 export const changelog = [
+  {
+    version: '4.2.73-preview',
+    date: 'October 14, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Short ticket links</strong> &mdash; type <code>ticketpulse.bgcsaas.com/it/TP-10000</code>, <code>/TP-10000</code> or a FreshService number such as <code>/it/246762</code> and the ticket opens, in its own workspace. When a plain number belongs to both a Ticket Pulse and a FreshService ticket, you choose which one. <em>Copy link</em> on a ticket now copies the short form, and the ticket links in e-mails, approval mails and Teams cards use it too. Older links keep working.' },
+      { type: 'added', html: '<strong>Link names for workspaces</strong> &mdash; each workspace has a short name for its ticket links (IT is <code>it</code>), set in Settings &rarr; Workspaces. Changing it never affects FreshService.' },
+      { type: 'improved', html: '<strong>Ticket numbers now have five digits</strong> &mdash; new tickets continue from TP-10000. Earlier numbers keep working everywhere.' },
+      { type: 'improved', html: '<strong>Workflow conditions without code</strong> &mdash; in Mail Workflows every condition step now says in one sentence what it checks, and values such as statuses, categories and tags are ticked from a list instead of typed. The hidden &ldquo;Advanced JSONLogic Rule&rdquo; box is gone: a rule written as code now opens as ordinary rows, and the few that cannot are shown plainly as code. &ldquo;Ignore a thank-you or out-of-office reply after an Auto-help close&rdquo; is now a switch on the step.' },
+      { type: 'fixed', html: '<strong>A reply on a Pending Response ticket reopens it</strong> &mdash; since IT&rsquo;s mail moved to Ticket Pulse, a requester&rsquo;s answer left the ticket in Pending Response, because FreshService had been doing this and no longer sees the reply. IT&rsquo;s &ldquo;Reopen on requester reply&rdquo; workflow was changed on 14 October; new workspaces now get Pending Response in that workflow too.' },
+      { type: 'added', html: '<strong>When a requester replies: one page</strong> &mdash; Settings &rarr; Ticket Ops &rarr; When a requester replies now holds everything that happens to a ticket when its requester writes back. Tick which statuses reopen (Resolved, Closed and Pending Response are suggested), and switch on &ldquo;a thank-you or out-of-office reply does not reopen&rdquo; for every closed ticket, not only after Auto-help. When a reply stays closed, the conversation gets one quiet line and nobody is notified. Saving the reopen archives the &ldquo;Reopen on requester reply&rdquo; workflow it replaces, so there is one place to look. Off in every workspace until an admin saves it; anything unclear always reopens.' },
+      { type: 'added', html: '<strong>A coordinator for each group</strong> &mdash; Settings &rarr; Groups lets each group name a coordinator and a backup. An urgent ticket nobody touches goes to its group&rsquo;s coordinator if they are at work, else the backup, else the workspace coordinator in Urgent response &rarr; Rules, and the log says who got it and why.' },
+      { type: 'added', html: '<strong>Hide ticket views a workspace does not use</strong> &mdash; Settings &rarr; Ticket Ops &rarr; Ticket views lets an admin untick Verified solutions, Scheduled, Grouped, Parked and Auto-help waiting for one workspace. Everyone in that workspace sees the shorter list; the views still work from a link.' },
+      { type: 'fixed', html: '<strong>The opening e-mail shows once</strong> &mdash; on a ticket that arrived by e-mail, the first message in the conversation repeated the Description word for word. It now folds to one line (&ldquo;Robin Lee&rsquo;s e-mail opened this ticket. It is the Description above.&rdquo;) with <em>Show the e-mail</em> to open it. Nothing was deleted, so every ticket is fixed at once. If someone rewrites the Description, the e-mail shows in full again.' },
+      { type: 'fixed', html: '<strong>No more &ldquo;&amp;nbsp;&rdquo; in notes</strong> &mdash; a short note with no formatting and a space at the end was saved with the code &ldquo;&amp;nbsp;&rdquo; instead of the space, and showed it. Notes are saved as written now, and the 66 notes that had it (63 in IT, 3 in Project Accounting) were corrected.' },
+      { type: 'fixed', html: '<strong>The &ldquo;Why the override?&rdquo; question stays until you answer it</strong> &mdash; on Tickets, handing a ticket from yourself to someone else slid the question in and it vanished at once, because the ticket left your view after the reassignment.' },
+      { type: 'improved', html: '<strong>Reinstall the Teams app for one agent</strong> &mdash; Settings &rarr; Teams has <em>Reinstall</em> next to each connected agent. It asks Teams whether the app is still there and puts it back if the agent removed it. Before, Connect trusted the chat on file and did nothing.' },
+    ],
+  },
   {
     version: '4.2.72-preview',
     date: 'October 14, 2026',

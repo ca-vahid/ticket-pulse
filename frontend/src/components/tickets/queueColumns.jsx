@@ -221,6 +221,7 @@ function renderAssignee(ticket, ctx) {
             ticketOrigin={ticket.origin}
             assignFn={fsRowEditable ? ((techId, extra) => ctx.fsAssign(ticket, techId, extra)) : undefined}
             onAssigned={(techId) => ctx.onManualAssigned(ticket.id, techId)}
+            onOverride={ctx.onOverride}
             size="sm"
             align="right"
             showAi={canReview}

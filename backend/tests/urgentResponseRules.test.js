@@ -387,6 +387,29 @@ describe('sentenceFor', () => {
     expect(sentenceFor('coordinator', { priority: 4, moves: 1, from: 'Maria Lee' })).toBe('Urgent and still untouched after 1 move. No coordinator is set, so it stays with Maria Lee.');
   });
 
+  test("the end of the chain: which coordinator — the group's, its backup, or the workspace's — and why", () => {
+    const base = { priority: 4, moves: 2, from: 'Maria Lee', group: 'Service Desk' };
+    expect(sentenceFor('coordinator', { ...base, to: 'Priya Nair', role: 'group' }))
+      .toBe("Urgent and still untouched after 2 moves. Assigned to the Service Desk group's coordinator, Priya Nair, who was told.");
+    expect(sentenceFor('coordinator', { ...base, to: 'Susan Xu', role: 'group_backup', awayNote: 'Priya is on leave' }))
+      .toBe("Urgent and still untouched after 2 moves. Assigned to the Service Desk group's backup, Susan Xu (Priya is on leave), who was told.");
+    expect(sentenceFor('coordinator', { ...base, to: 'Vahid Haeri', role: 'workspace', awayNote: 'Priya and Susan are away' }))
+      .toBe('Urgent and still untouched after 2 moves. Assigned to the workspace coordinator, Vahid Haeri (Priya and Susan are away), who was told.');
+    // The workspace coordinator of a group that named nobody: worded as before.
+    expect(sentenceFor('coordinator', { ...base, to: 'Vahid Haeri', role: 'workspace' }))
+      .toBe('Urgent and still untouched after 2 moves. Assigned to the coordinator, Vahid Haeri, who was told.');
+    expect(sentenceFor('coordinator', { ...base, to: 'Priya Nair', role: 'group', shadow: true }))
+      .toBe("Shadow: would have assigned to the Service Desk group's coordinator, Priya Nair. Urgent and still untouched after 2 moves.");
+    expect(sentenceFor('coordinator', { ...base, from: 'Priya Nair', role: 'group', alreadyOwner: true }))
+      .toBe("Urgent and still untouched after 2 moves. It is already with the Service Desk group's coordinator, Priya Nair, who was told.");
+    expect(sentenceFor('coordinator', { ...base, awayNote: 'Priya and Susan are away' }))
+      .toBe('Urgent and still untouched after 2 moves. No coordinator is at work (Priya and Susan are away) and no workspace coordinator is set, so it stays with Maria Lee.');
+    expect(sentenceFor('coordinator', { ...base, awayNote: 'Priya and Susan are away', shadow: true }))
+      .toBe('Shadow: would have left it with Maria Lee: no coordinator is at work (Priya and Susan are away) and no workspace coordinator is set. Urgent and still untouched after 2 moves.');
+    // A group whose name already ends in "group" is not doubled.
+    expect(sentenceFor('coordinator', { ...base, group: 'IT Group', to: 'Priya Nair', role: 'group' })).toContain("the IT Group's coordinator, Priya Nair");
+  });
+
   test('undo', () => {
     expect(sentenceFor('undone', { to: 'David Zapata', actor: 'Vahid Haeri' })).toBe('Moved back to David Zapata by Vahid Haeri (undo).');
   });

@@ -67,8 +67,9 @@ import {
   explainConditionGroup,
   ruleVarPaths,
   groupReferencesCustomFields,
-  registerCustomFieldConditionOps,
+  registerWorkflowConditionOps,
 } from './notificationConditionModel.js';
+import { AUTO_HELP_THANKS_VERDICTS, conditionSwitchStop } from './conditionRuleShared.js';
 import { bulletproofButtons } from '../utils/emailHtmlHardening.js';
 
 const liquid = new Liquid({
@@ -76,32 +77,12 @@ const liquid = new Liquid({
   strictVariables: false,
 });
 
-// json-logic has no regex support — register the op the structured condition
-// model's `matches_regex` operator compiles to. Bad patterns fail closed.
-jsonLogic.add_operation('regex_match', (value, pattern) => {
-  try {
-    return new RegExp(String(pattern), 'i').test(String(value ?? ''));
-  } catch {
-    return false;
-  }
-});
-
-// List-membership ops for array fields (ticket.tags) — the condition model's
-// has_any / has_all / has_none compile to these. Case-insensitive.
-const asLowerList = (v) => (Array.isArray(v) ? v : v === null || v === undefined ? [] : [v]).map((x) => String(x).toLowerCase());
-jsonLogic.add_operation('list_has_any', (haystack, wanted) => {
-  const have = new Set(asLowerList(haystack));
-  return asLowerList(wanted).some((w) => have.has(w));
-});
-jsonLogic.add_operation('list_has_all', (haystack, wanted) => {
-  const have = new Set(asLowerList(haystack));
-  const want = asLowerList(wanted);
-  return want.length > 0 && want.every((w) => have.has(w));
-});
-
-// Typed custom-field conditions (FR 08-05 Phase 1b): cf_number / cf_epoch /
-// cf_bool coerce both sides of a comparison consistently.
-registerCustomFieldConditionOps(jsonLogic);
+// The custom json-logic ops compiled conditions use: regex_match (json-logic
+// has no regex), list_has_any / list_has_all for array fields (ticket.tags,
+// case-insensitive), and the typed custom-field coercions cf_number /
+// cf_epoch / cf_bool (FR 08-05 Phase 1b). One registration, shared with the
+// rule-conversion script (scripts/convert-workflow-rules.mjs).
+registerWorkflowConditionOps(jsonLogic);
 
 /**
  * Custom-field definition types per workspace, for typed `custom:<key>`
@@ -2408,6 +2389,27 @@ export function explainConditionStep(node, { passed, compileError = null, evalSc
   return { source: 'rule', reads, summary };
 }
 
+/** Why a step switch stopped the run, in plain words. */
+export function explainSwitchStop(kind, evalScope = {}) {
+  if (kind === 'skip_noise') {
+    return { source: 'skip_noise', noiseSkipped: true, summary: 'Skip noise tickets is on and this ticket is marked as noise' };
+  }
+  const extra = evalScope?.event?.extra || {};
+  const autoHelp = AUTO_HELP_THANKS_VERDICTS.includes(extra.autoHelpReplyVerdict);
+  // 14 Oct 2026: the "When a requester replies" page reads replies to any
+  // closed ticket (event.extra.replyVerdict) and the same switch honours it.
+  const verdict = autoHelp ? extra.autoHelpReplyVerdict : extra.replyVerdict;
+  const reads = verdict === 'auto_reply' ? 'an out-of-office or automatic reply' : 'a thank-you';
+  return {
+    source: 'auto_help_thanks',
+    autoHelpThanksIgnored: true,
+    verdict,
+    summary: autoHelp
+      ? `the reply reads as ${reads} after an Auto-help close, and this step is set to ignore those`
+      : `the reply reads as ${reads} (When a requester replies), and this step is set to ignore those`,
+  };
+}
+
 async function executeNode({
   workflow,
   run,
@@ -2462,13 +2464,16 @@ async function executeNode({
       }
     }
     // QA 10-06 #2: "Skip noise tickets" is the step's own switch now, not a
-    // condition row that could be dropped without anyone seeing it.
-    const noiseSkipped = node.data?.skipNoise === true && evalScope?.ticket?.isNoise === true;
-    const passed = noiseSkipped || compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
+    // condition row that could be dropped without anyone seeing it. 14 Oct
+    // 2026: so is "Ignore a thank-you or out-of-office reply after an
+    // Auto-help close" (ignoreAutoHelpThanks) — both checked before the
+    // conditions (conditionRuleShared.conditionSwitchStop).
+    const switchStop = conditionSwitchStop(node.data, evalScope);
+    const passed = switchStop || compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
     // QA 10-05 #5: say what was checked and what the ticket had, so a stop is
     // never explained by the Stop step's fixed note alone.
-    const explain = noiseSkipped
-      ? { source: 'skip_noise', noiseSkipped: true, summary: 'Skip noise tickets is on and this ticket is marked as noise' }
+    const explain = switchStop
+      ? explainSwitchStop(switchStop, evalScope)
       : explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
     if (state && typeof state === 'object') {
       state.lastCondition = { nodeId: node.id, label: node.data?.label || node.id, passed, summary: explain.summary };
@@ -3864,6 +3869,16 @@ function routingResultForWorkflow({ workflow, timing, variantSelection }) {
 export const FS_WRITEBACK_MAX_ATTEMPTS = 3;
 export const FS_WRITEBACK_RETRY_MINUTES = 2;
 const FS_WRITEBACK_ACTOR = Object.freeze({ name: 'Notification workflow', email: null, role: 'workflow' });
+/**
+ * Who an update_ticket write is recorded as. A workflow by default; Ticket
+ * Pulse itself when the "When a requester replies" page reopens a ticket
+ * (14 Oct 2026) through this same path instead of the workflow it replaced.
+ */
+const WORKFLOW_UPDATE_ACTOR = Object.freeze({ name: 'Notification workflow', kind: 'workflow', source: null });
+function updateActor(actor) {
+  if (!actor || !actor.name) return WORKFLOW_UPDATE_ACTOR;
+  return { name: String(actor.name), kind: actor.kind || 'system', source: actor.source || null };
+}
 
 /**
  * Write a status to an FS-born ticket THROUGH FreshService (RO-4). FS is
@@ -3874,7 +3889,8 @@ const FS_WRITEBACK_ACTOR = Object.freeze({ name: 'Notification workflow', email:
  * 1..N-1 park the run for a retry (delay-resume, resumed AT this node), the
  * last one throws so the step shows `failed` in the run detail.
  */
-export async function applyFsBornStatusWriteback({ node, ticket, setStatus, state = null, eventContext = null }) {
+export async function applyFsBornStatusWriteback({ node, ticket, setStatus, state = null, eventContext = null, actor = null }) {
+  const who = updateActor(actor);
   const label = String(setStatus).toLowerCase();
   const what = label === 'open' ? 'reopen' : `status "${setStatus}"`;
   const attemptsSoFar = Number(state?.__fsWritebackAttempts?.[node.id]) || 0;
@@ -3898,23 +3914,29 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
       }
     }
     const { default: ticketService } = await import('./ticketService.js');
-    await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { status: setStatus }, FS_WRITEBACK_ACTOR);
-    try {
-      const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
-      await ticketActivityRepository.create({
-        ticketId: ticket.id,
-        activityType: 'workflow_updated_ticket',
-        performedBy: 'Notification workflow',
-        performedAt: new Date(),
-        details: {
-          changes: { status: { from: ticket.status, to: setStatus } },
-          note: node.data?.note || null,
-          eventType: eventContext?.event?.type || null,
-          via: 'freshservice_writeback',
-          actorKind: 'workflow',
-        },
-      });
-    } catch { /* non-fatal */ }
+    await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { status: setStatus }, actor?.name
+      ? { name: who.name, email: null, role: 'automation' }
+      : FS_WRITEBACK_ACTOR);
+    // A workflow's write gets its own history row; Ticket Pulse's own write
+    // is already told by the fs_write_back row updateFsTicket audits.
+    if (who.kind === 'workflow') {
+      try {
+        const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
+        await ticketActivityRepository.create({
+          ticketId: ticket.id,
+          activityType: 'workflow_updated_ticket',
+          performedBy: 'Notification workflow',
+          performedAt: new Date(),
+          details: {
+            changes: { status: { from: ticket.status, to: setStatus } },
+            note: node.data?.note || null,
+            eventType: eventContext?.event?.type || null,
+            via: 'freshservice_writeback',
+            actorKind: 'workflow',
+          },
+        });
+      } catch { /* non-fatal */ }
+    }
     import('./emailHealthService.js')
       .then(({ default: health }) => health.recordSuccess({
         workspaceId: ticket.workspaceId, channel: 'freshservice_writeback', context: `workflow:${what}`, provider: 'freshservice',
@@ -3981,7 +4003,8 @@ export function isWorkflowReopen(fromBase, toBase, terminal = ['Resolved', 'Clos
   return Boolean(fromBase && toBase) && set.has(fromBase) && !set.has(toBase);
 }
 
-async function emitWorkflowReopened({ ticket, patch, workflowId }) {
+async function emitWorkflowReopened({ ticket, patch, workflowId, actor = null }) {
+  const who = updateActor(actor);
   const from = String(ticket?.status || '').trim();
   const to = String(patch?.status || '').trim();
   if (!from || !to || from === to) return null;
@@ -3994,11 +4017,11 @@ async function emitWorkflowReopened({ ticket, patch, workflowId }) {
     if (!isWorkflowReopen(fromBase, toBase, TERMINAL_BASE_STATUSES)) return null;
     const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
     return await lifecycle.emitTicketEvent('ticket.reopened', ticket.id, {
-      source: workflowId ? `workflow:${workflowId}` : 'workflow',
+      source: workflowId ? `workflow:${workflowId}` : (who.source || 'workflow'),
       dedupeStamp: `reopened:${ticket.id}:${from}->${to}:${new Date().toISOString()}`,
       extra: {
         from, to, fromBase, toBase, reopened: true,
-        actorKind: 'workflow', workflowId: workflowId || null,
+        actorKind: who.kind, workflowId: workflowId || null,
       },
     });
   } catch (error) {
@@ -4038,7 +4061,14 @@ async function emitWorkflowFieldsUpdated({ ticket, changes, customFieldResult, w
   }
 }
 
-async function executeUpdateTicketNode(node, eventContext, { dryRun = false, scope = null, state = null, workflowId = null } = {}) {
+/**
+ * Exported for the "When a requester replies" page (14 Oct 2026): its reopen
+ * runs through this exact path (origin-aware, ticket.reopened, the reopen
+ * counter, mirror, live update) with `actor` naming Ticket Pulse instead of
+ * a workflow.
+ */
+export async function executeUpdateTicketNode(node, eventContext, { dryRun = false, scope = null, state = null, workflowId = null, actor = null } = {}) {
+  const who = updateActor(actor);
   const ticketId = Number(eventContext.ticket?.id);
   let setStatus = node.data?.setStatus || null;
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
@@ -4192,7 +4222,7 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   // lets "Reopen on requester reply" work for FreshService-routed workspaces.
   let fsStatusResult = null;
   if (setStatus && ticket.origin !== 'ticketpulse') {
-    fsStatusResult = await applyFsBornStatusWriteback({ node, ticket, setStatus, state, eventContext });
+    fsStatusResult = await applyFsBornStatusWriteback({ node, ticket, setStatus, state, eventContext, actor });
     if (fsStatusResult?.__waitMinutes) return fsStatusResult; // retry park
   }
 
@@ -4427,7 +4457,7 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   // here, loop-guarded by workflowId like fields_updated. status_changed is
   // deliberately still NOT emitted from workflow writes: that is a standing
   // decision to keep status-setting workflows from cascading into each other.
-  await emitWorkflowReopened({ ticket, patch, workflowId });
+  await emitWorkflowReopened({ ticket, patch, workflowId, actor });
   // Re-opened counter (QA 09-25 #1): same bypass — this write never reaches
   // the lifecycle service, so feed the counter here. Never throws.
   if (patch.status && patch.status !== ticket.status) {
@@ -4440,13 +4470,28 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
 
   try {
     const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
-    await ticketActivityRepository.create({
-      ticketId: ticket.id,
-      activityType: 'workflow_updated_ticket',
-      performedBy: 'Notification workflow',
-      performedAt: now,
-      details: { changes, note: node.data?.note || null, eventType: eventContext.event?.type || null, actorKind: 'workflow' },
-    });
+    // Ticket Pulse's own status-only write reads as a status change in the
+    // history ("reopened"), the way a person's would; a workflow's stays a
+    // workflow row.
+    const ownStatusWrite = who.kind !== 'workflow' && Object.keys(changes).length === 1 && changes.status;
+    await ticketActivityRepository.create(ownStatusWrite
+      ? {
+        ticketId: ticket.id,
+        activityType: 'status_changed',
+        performedBy: who.name,
+        performedAt: now,
+        details: {
+          oldStatus: changes.status.from, newStatus: changes.status.to, note: node.data?.note || null,
+          eventType: eventContext.event?.type || null, actorKind: who.kind, ...(who.source ? { source: who.source } : {}),
+        },
+      }
+      : {
+        ticketId: ticket.id,
+        activityType: 'workflow_updated_ticket',
+        performedBy: 'Notification workflow',
+        performedAt: now,
+        details: { changes, note: node.data?.note || null, eventType: eventContext.event?.type || null, actorKind: 'workflow' },
+      });
   } catch { /* non-fatal */ }
   try {
     const { default: mirrorService } = await import('./mirrorService.js');

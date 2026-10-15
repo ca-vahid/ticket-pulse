@@ -21,6 +21,7 @@ import { emailShell, escapeHtml, textExcerpt } from './approvalEmailTemplate.js'
 import { brandImg } from './emailBrandAssets.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 const CACHE_TTL_MS = 30 * 1000;
 const cache = new Map(); // workspaceId -> { at, value }
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -141,7 +142,7 @@ export async function copyAgentsOnRequesterReply(ticket, entry, { fromEmail = nu
     const workspace = await prisma.workspace.findUnique({ where: { id: ticket.workspaceId }, select: { name: true } }).catch(() => null);
     const html = renderRequesterReplyCopyEmail({
       workspaceName: workspace?.name || null, ticket, ref,
-      appUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
+      appUrl: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
       fromName, fromEmail, bodyHtml: entry.bodyHtml || null, bodyText: entry.bodyText || entry.content || '', primary,
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');

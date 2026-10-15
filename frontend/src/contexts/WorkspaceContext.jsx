@@ -127,7 +127,7 @@ export function WorkspaceProvider({ children }) {
       if (workspaces.length === 0) {
         workspaceAPI.getAll().then(res => {
           const fetched = (res?.data || res || []).map(ws => ({
-            id: ws.id, name: ws.name, slug: ws.slug, role: ws.role || 'viewer',
+            id: ws.id, name: ws.name, slug: ws.slug, linkName: ws.linkName || ws.slug, role: ws.role || 'viewer',
             nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
           }));
           if (fetched.length > 0) {
@@ -315,7 +315,7 @@ export function WorkspaceProvider({ children }) {
     try {
       const res = await workspaceAPI.getAll();
       const list = (res.data || []).map(ws => ({
-        id: ws.id, name: ws.name, slug: ws.slug, role: ws.role,
+        id: ws.id, name: ws.name, slug: ws.slug, linkName: ws.linkName || ws.slug, role: ws.role,
         nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
       }));
       setAvailableWorkspaces(list);

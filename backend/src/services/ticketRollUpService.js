@@ -6,6 +6,7 @@ import statusService, { TERMINAL_BASE_STATUSES } from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { sendTransactionalEmail } from './transactionalEmailService.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 /**
  * Parent / child roll-up (Simorgh SOC relations, B8 — Vahid, 19 Sep 2026):
@@ -163,7 +164,7 @@ async function notifyOwnerReady(parent, children) {
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;max-width:640px;border:1px solid #e2e8f0;border-radius:10px;">',
     rows,
     '</table>',
-    `<p style="margin:16px 0 0;"><a href="${publicBase}/tickets/${parent.id}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open ${esc(ref)}</a></p>`,
+    `<p style="margin:16px 0 0;"><a href="${ticketLinkUrl(publicBase, parent)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open ${esc(ref)}</a></p>`,
     '<p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:18px;">Sent by Ticket Pulse.</p>',
     '</div>',
   ].join('');

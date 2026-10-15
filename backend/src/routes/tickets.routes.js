@@ -312,6 +312,13 @@ router.get('/stats', readCache(2000), asyncHandler(async (req, res) => {
 // requireTicketingAdmin the sibling ticket-ops routes use (declared below —
 // function declarations hoist).
 // QA 09-23 #4: default status filter for the list, per workspace ([] = every status).
+// QA 10-14 #1: ticket views hidden in this workspace (presentation only).
+router.put('/hidden-views', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: ticketHiddenViewsService } = await import('../services/ticketHiddenViewsService.js');
+  const views = await ticketHiddenViewsService.set(req.workspaceId, req.body?.views);
+  res.json({ success: true, data: { views } });
+}));
+
 router.put('/default-statuses', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: ticketDefaultStatusService } = await import('../services/ticketDefaultStatusService.js');
   const statuses = await ticketDefaultStatusService.set(req.workspaceId, req.body?.statuses);
@@ -1160,32 +1167,92 @@ router.put('/also-for-settings', asyncHandler(async (req, res) => {
 }));
 
 // ----------------------------- When a requester replies (13 Oct 2026)
-// Two per-workspace switches: send the ticket back for assignment when its
-// owner is away for more than a day, and suggest splitting a reply to a
-// long-resolved ticket that is really a new request. Stored in app_settings
-// (workspace-scoped key); on for IT, off elsewhere until an admin saves.
+// One page since 14 Oct 2026 (plans/REQUESTER_REPLY_SETTINGS_PLAN.md): which
+// statuses a requester reply reopens, whether a thank-you / out-of-office
+// leaves a closed ticket closed, the monthly limit for reading replies, the
+// owner-away and new-request switches. Stored in app_settings (one
+// workspace-scoped key). Saving the reopen ON archives the Mail Workflows
+// "Reopen on requester reply" copy it replaces (requesterReplyReopenService).
+
+const requireReplySettingsAdmin = (req, res) => {
+  const actor = req.ticketActor;
+  if (actor?.role === 'admin' || actor?.workspaceRole === 'admin') return actor;
+  res.status(403).json({ success: false, message: 'Changing what happens when a requester replies requires admin access.' });
+  return null;
+};
 
 router.get('/requester-reply-settings', asyncHandler(async (req, res) => {
-  const { getRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
-  res.json({ success: true, data: await getRequesterReplyRules(req.workspaceId) });
+  const { default: replyReopen } = await import('../services/requesterReplyReopenService.js');
+  res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId) });
 }));
 
 router.put('/requester-reply-settings', asyncHandler(async (req, res) => {
-  const actor = req.ticketActor;
-  if (!(actor?.role === 'admin' || actor?.workspaceRole === 'admin')) {
-    return res.status(403).json({ success: false, message: 'Changing what happens when a requester replies requires admin access.' });
-  }
+  const actor = requireReplySettingsAdmin(req, res);
+  if (!actor) return;
+  const { RULE_KEYS, REPLY_CHECK_CAP_CHOICES, setRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
   const patch = {};
-  for (const key of ['rerouteWhenOwnerAway', 'suggestNewRequest']) {
+  for (const key of RULE_KEYS) {
     if (req.body?.[key] === undefined) continue;
     if (typeof req.body[key] !== 'boolean') throw new ValidationError(`${key} must be true or false`);
     patch[key] = req.body[key];
   }
+  if (req.body?.reopenStatuses !== undefined) {
+    const list = req.body.reopenStatuses;
+    if (!Array.isArray(list) || list.some((s) => typeof s !== 'string')) throw new ValidationError('reopenStatuses must be a list of status names');
+    // Only statuses this workspace has, in their registry spelling.
+    const { default: statusService } = await import('../services/statusService.js');
+    const names = [];
+    for (const raw of list) {
+      const name = await statusService.normalizeStatusName(req.workspaceId, raw);
+      if (!name) throw new ValidationError(`"${String(raw).slice(0, 60)}" is not a status in this workspace`);
+      names.push(name);
+    }
+    patch.reopenStatuses = names;
+  }
+  if (req.body?.replyCheckMonthlyCapUsd !== undefined) {
+    if (!REPLY_CHECK_CAP_CHOICES.includes(Number(req.body.replyCheckMonthlyCapUsd))) {
+      throw new ValidationError(`The monthly limit must be one of ${REPLY_CHECK_CAP_CHOICES.map((n) => `$${n}`).join(', ')}`);
+    }
+    patch.replyCheckMonthlyCapUsd = Number(req.body.replyCheckMonthlyCapUsd);
+  }
   if (!Object.keys(patch).length) throw new ValidationError('Nothing to change');
-  const { setRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
-  const rules = await setRequesterReplyRules(req.workspaceId, patch);
-  logger.info(`Requester-reply rules for workspace ${req.workspaceId} set to ${JSON.stringify(rules)} by ${actor?.email || 'unknown'}`);
-  res.json({ success: true, data: rules });
+  let rules;
+  try {
+    rules = await setRequesterReplyRules(req.workspaceId, patch);
+  } catch (err) {
+    if (/^Tick at least one status/.test(err.message)) throw new ValidationError(err.message);
+    throw err;
+  }
+  logger.info(`Requester-reply rules for workspace ${req.workspaceId} set to ${JSON.stringify({ ...rules, retiredWorkflows: undefined })} by ${actor?.email || 'unknown'}`);
+  // Saved with the reopen on: the workflow it replaces is archived now (and
+  // only now — never on deploy, never on a read).
+  const { default: replyReopen } = await import('../services/requesterReplyReopenService.js');
+  let retirement = null;
+  if (rules.reopenOnReply && (patch.reopenOnReply === true || patch.reopenStatuses)) {
+    retirement = await replyReopen.retireReopenWorkflows(req.workspaceId, actor);
+  }
+  res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId), ...(retirement ? { retirement } : {}) });
+}));
+
+// Bring back a workflow this page archived — only while the page itself is
+// not reopening (two reopens would race). Never done automatically.
+router.post('/requester-reply-settings/restore-workflow', asyncHandler(async (req, res) => {
+  const actor = requireReplySettingsAdmin(req, res);
+  if (!actor) return;
+  const workflowId = Number(req.body?.workflowId);
+  if (!Number.isInteger(workflowId) || workflowId <= 0) throw new ValidationError('workflowId is required');
+  const { getRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
+  if ((await getRequesterReplyRules(req.workspaceId)).reopenOnReply) {
+    throw new ValidationError('Turn off "Reopen the ticket" on this page first — otherwise both would reopen tickets.');
+  }
+  const { default: replyReopen } = await import('../services/requesterReplyReopenService.js');
+  try {
+    await replyReopen.restoreRetiredWorkflow(req.workspaceId, workflowId, actor);
+  } catch (err) {
+    if (err.statusCode === 404) return res.status(404).json({ success: false, message: err.message });
+    throw err;
+  }
+  res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId) });
 }));
 
 // "This reply looks like a new request": the suggestion waiting on a ticket,

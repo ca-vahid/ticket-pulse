@@ -43,6 +43,11 @@ describe('otherTicketRefs', () => {
     expect(otherTicketRefs({ text, ticket: TP_1888, requesterText: REQUESTER_TEXT })).toEqual(['#5512']);
   });
 
+  test('five-digit TP numbers (from TP-10000, 14 Oct 2026) are still caught', () => {
+    expect(otherTicketRefs({ text: 'Same fix as TP-10000 and TP-123456.', ticket: TP_1888, requesterText: REQUESTER_TEXT, otherTicketNumbers: new Set() }))
+      .toEqual(['TP-10000', 'TP-123456']);
+  });
+
   test('a real cross-ticket leak is still blocked', () => {
     const others = new Set(['241406', '1234']);
     expect(otherTicketRefs({ text: 'As in TP-1234, open Company Portal.', ticket: TP_1888, requesterText: REQUESTER_TEXT, otherTicketNumbers: others })).toEqual(['TP-1234']);

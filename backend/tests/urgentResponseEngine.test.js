@@ -161,6 +161,8 @@ const updateFsTicket = jest.fn();
 const tellPeople = jest.fn();
 const textOnCall = jest.fn();
 const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+/** app_settings rows by key (group coordinators live in `group_coordinators_ws<id>`). */
+let appSettings = {};
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock }));
@@ -173,7 +175,9 @@ jest.unstable_mockModule('../src/services/businessCalendarService.js', () => ({ 
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: { create: activityCreate } }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { assignTicket, updateFsTicket } }));
 jest.unstable_mockModule('../src/services/assignmentTools.js', () => ({ openWorkloadStatuses: jest.fn(async () => ['Open', 'Pending']) }));
-jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: { getServiceAccountNames: jest.fn(async () => ['Service Account']) } }));
+jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
+  default: { getServiceAccountNames: jest.fn(async () => ['Service Account']), get: jest.fn(async (key) => appSettings[key] ?? null), set: jest.fn() },
+}));
 jest.unstable_mockModule('../src/services/ticketThreadRepository.js', () => ({
   countsAsRealActivity: (entry) => !['ticket workflow', 'supervisor', 'system'].includes(String(entry.actorName || '').toLowerCase()),
 }));
@@ -210,6 +214,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   Object.keys(db).forEach((k) => { db[k] = []; });
   nextActionId = 1;
+  appSettings = {};
   engine._running = false;
   engine._coverCheckedAt.clear();
   engine._notifier = async () => ({ tellPeople, textOnCall });
@@ -682,6 +687,103 @@ describe('layer 3: the clock', () => {
     await engine.sweep({ now: minutes(WED_10, 30) });
     expect(clockOf(1)).toMatchObject({ state: 'stopped', stopReason: 'mode_off' });
     expect(db.actions).toHaveLength(0);
+  });
+});
+
+describe('group coordinators', () => {
+  // Service Desk (group 8): coordinator Maria (22), backup Susan (44). The workspace coordinator is David (33).
+  const running = (extra = {}) => ({
+    ticketId: 1, workspaceId: 1, ownerTechnicianId: 11, state: 'running', startedAt: WED_10, notifyAt: minutes(WED_10, 15), moveAt: minutes(WED_10, 30), notifiedAt: minutes(WED_10, 15), moveCount: 2, chainTechnicianIds: [33, 22], stoppedAt: null, stopReason: null, shadow: false, ...extra,
+  });
+  const onLeave = (...ids) => ids.map((id) => ({ technicianId: id, leaveDate: new Date('2026-10-14T00:00:00Z'), category: 'OFF', status: 'APPROVED', isFullDay: true }));
+  const setGroup = (entry) => { appSettings.group_coordinators_ws1 = JSON.stringify({ 8: entry }); };
+  beforeEach(() => {
+    use({ coordinatorTechnicianId: 33 });
+    db.groups = [{ id: 8, workspaceId: 1, name: 'Service Desk', freshserviceId: 777n, origin: 'freshservice' }];
+    db.tickets = [ticketRow(1, { assignedTechId: 11, internalGroupId: 8 })];
+    db.clocks = [running()];
+    setGroup({ coordinatorTechnicianId: 22, backupTechnicianId: 44 });
+  });
+
+  test("after the moves: the group's coordinator at work gets it and is told", async () => {
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(assignTicket).toHaveBeenCalledWith(1, 1, 22, expect.anything(), expect.anything());
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ fromTechnicianId: 11, toTechnicianId: 22, details: expect.objectContaining({ coordinatorSource: 'group', groupId: 8 }) });
+    expect(row.sentence).toBe("Urgent and still untouched after 2 moves. Assigned to the Service Desk group's coordinator, Maria Lee, who was told.");
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([22, 11]);
+  });
+
+  test('the group is found by its FreshService id too', async () => {
+    ticketOf(1).internalGroupId = null;
+    ticketOf(1).groupId = 777n;
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(actionsOf('coordinator')[0]).toMatchObject({ toTechnicianId: 22 });
+  });
+
+  test("the coordinator is away: the group's backup, and the sentence says why", async () => {
+    db.leaves = onLeave(22);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ toTechnicianId: 44, details: expect.objectContaining({ coordinatorSource: 'group_backup' }) });
+    expect(row.sentence).toBe("Urgent and still untouched after 2 moves. Assigned to the Service Desk group's backup, Susan Xu (Maria is on leave), who was told.");
+  });
+
+  test('both away: the workspace coordinator', async () => {
+    db.leaves = onLeave(22, 44);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ toTechnicianId: 33, details: expect.objectContaining({ coordinatorSource: 'workspace' }) });
+    expect(row.sentence).toBe('Urgent and still untouched after 2 moves. Assigned to the workspace coordinator, David Zapata (Maria and Susan are away), who was told.');
+  });
+
+  test('both away and no workspace coordinator: it stays, and the sentence says why', async () => {
+    use({ coordinatorTechnicianId: null });
+    db.leaves = onLeave(22, 44);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(assignTicket).not.toHaveBeenCalled();
+    expect(actionsOf('coordinator')[0].sentence).toBe('Urgent and still untouched after 2 moves. No coordinator is at work (Maria and Susan are away) and no workspace coordinator is set, so it stays with Andrew Fong.');
+  });
+
+  test('an unreadable setting: the workspace coordinator, as before', async () => {
+    appSettings.group_coordinators_ws1 = '{not json';
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(actionsOf('coordinator')[0].sentence).toBe('Urgent and still untouched after 2 moves. Assigned to the coordinator, David Zapata, who was told.');
+  });
+
+  test("Shadow: would have assigned to the group's coordinator; nothing moves, nobody is told", async () => {
+    use({ mode: 'observe', coordinatorTechnicianId: 33 });
+    db.clocks = [running({ shadow: true })];
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ shadow: true, toTechnicianId: 22 });
+    expect(row.sentence).toBe("Shadow: would have assigned to the Service Desk group's coordinator, Maria Lee. Urgent and still untouched after 2 moves.");
+    expect(assignTicket).not.toHaveBeenCalled();
+    expect(tellPeople).not.toHaveBeenCalled();
+  });
+
+  test('a live move to the group coordinator can be undone', async () => {
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    const [row] = actionsOf('coordinator');
+    const item = await engine.undo(row.id, { email: 'vhaeri@example.com', name: 'Vahid Haeri' }, { now: minutes(WED_10, 35) });
+    expect(item.undoneAt).toEqual(minutes(WED_10, 35));
+    expect(ticketOf(1).assignedTechId).toBe(11);
+  });
+
+  test("nobody could take it: the group's coordinator is told", async () => {
+    db.clocks = [];
+    db.tickets = [ticketRow(1, { origin: 'freshservice', freshserviceTicketId: 242611n, nativeNumber: null, internalGroupId: 8 })];
+    updateFsTicket.mockRejectedValue(new Error('FreshService is busy'));
+    await engine.sweep({ now: WED_10 });
+    expect(actionsOf('failed')).toHaveLength(1);
+    expect(tellPeople.mock.calls.at(-1)[0].technicianIds).toEqual([22]);
+  });
+
+  test('nobody at work and no contact: the group people are away too, so the workspace coordinator is told', async () => {
+    db.clocks = [];
+    await engine.sweep({ now: WED_NIGHT });
+    expect(actionsOf('held')[0].sentence).toBe('Nobody is at work. Left with Andrew Fong; David Zapata was told.');
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([33]);
   });
 });
 

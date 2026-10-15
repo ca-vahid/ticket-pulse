@@ -217,10 +217,19 @@ const BLOCK_TAGS = /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE|TR|SECTION|ARTICLE)$/;
  * requester's mail (QA 09-22 #1). Runs of three or more newlines collapse to a
  * blank line; list items get a dash.
  */
+function decodeEntities(value) {
+  if (!value.includes('&')) return value;
+  const box = document.createElement('textarea');
+  box.innerHTML = value;
+  return box.value;
+}
+
 export function htmlToPlainText(html) {
   const source = String(html || '');
   if (!source) return '';
-  if (!/<[a-z][\s\S]*>/i.test(source)) return source.replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trimEnd();
+  // A body with no tags is still the editor's HTML: "quote&nbsp;" must
+  // leave as "quote " (QA 10-14 #4, an internal note showed the code).
+  if (!/<[a-z][\s\S]*>/i.test(source)) return decodeEntities(source).replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trimEnd();
   const rootEl = document.createElement('div');
   rootEl.innerHTML = source;
   const out = [];

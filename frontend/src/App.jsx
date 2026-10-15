@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
@@ -30,6 +30,8 @@ import ProfilePage from './pages/ProfilePage';
 import Tickets from './pages/Tickets';
 import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
+import TicketShortLink from './pages/TicketShortLink';
+import { looksLikeTicketRef, RESERVED_FIRST_SEGMENTS } from './utils/ticketShortLink';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import Knowledge from './pages/Knowledge';
 import Onboarding from './pages/Onboarding';
@@ -119,6 +121,23 @@ function HomeRedirect() {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <Navigate to={homePathFor(user, wsRole)} replace />;
+}
+
+/**
+ * Short ticket links (14 Oct 2026): /TP-1876, /1876, /it/1876, /it/TP-1876. Every
+ * page has a fixed first segment, and React Router ranks those above these
+ * patterns, so no existing address changes. Anything that is not a ticket number
+ * goes home, as the catch-all always did.
+ */
+function ShortLinkOrHome() {
+  const { ref, wsSlug } = useParams();
+  if (!looksLikeTicketRef(ref)) return <HomeRedirect />;
+  if (wsSlug && RESERVED_FIRST_SEGMENTS.has(String(wsSlug).toLowerCase())) return <HomeRedirect />;
+  return (
+    <TicketsRoute>
+      <TicketShortLink />
+    </TicketsRoute>
+  );
 }
 
 function AuthCallback() {
@@ -503,6 +522,9 @@ function App() {
 
                       {/* Default Route */}
                       <Route path="/" element={<HomeRedirect />} />
+
+                      <Route path="/:ref" element={<ShortLinkOrHome />} />
+                      <Route path="/:wsSlug/:ref" element={<ShortLinkOrHome />} />
 
                       {/* 404 Catch-all */}
                       <Route path="*" element={<HomeRedirect />} />

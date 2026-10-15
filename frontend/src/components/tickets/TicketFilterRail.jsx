@@ -607,7 +607,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     // Auto-help (plans/AUTO_HELP_PLAN.md): tickets an automatic answer is
     // waiting on (active park of kind auto_help). Empty while P0 is shadow-only.
     { key: 'auto_help_waiting', label: 'Auto-help waiting', params: { parkKind: 'auto_help', status: 'any' }, icon: Hourglass },
-  ];
+  // QA 10-14 #1: an admin can hide the feature views a workspace does not use.
+  ].filter((v) => !(Array.isArray(meta?.hiddenViews) && meta.hiddenViews.includes(v.key)));
   const applyView = (v) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams();

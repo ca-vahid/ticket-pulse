@@ -2,6 +2,7 @@ import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
 import { resolvePublicBaseUrl } from '../../utils/publicBaseUrl.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
+import { ticketLinkUrl } from '../../utils/ticketLink.js';
 
 /**
  * Urgent response — notices (plans/URGENT_RESPONSE_PLAN.md).
@@ -41,7 +42,7 @@ class UrgentResponseNotifier {
   /** A path ('/on-call?request=12') or the ticket → an absolute link on the public address. */
   _link({ ticket, link }) {
     const base = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
-    if (ticket?.id) return { url: `${base}/tickets/${ticket.id}`, label: `Open ${ticketDisplayRef(ticket)}` };
+    if (ticket?.id) return { url: `${ticketLinkUrl(base, ticket)}`, label: `Open ${ticketDisplayRef(ticket)}` };
     const path = clean(link);
     if (!path) return null;
     return { url: /^https?:\/\//i.test(path) ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`, label: 'Open Ticket Pulse' };

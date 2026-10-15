@@ -252,6 +252,26 @@ export function classifyReplyFast(text) {
   return CONFIRM_ONLY.test(own) ? 'confirmed' : null;
 }
 
+// A bare thank-you ("Thanks!", "Thank you so much", "Ok, thanks"):
+// after a PERSON's answer that is the whole message (14 Oct 2026, "When a
+// requester replies"). Auto-help never uses this — after an automated answer
+// a bare thanks may still mean "will try".
+const THANKS_ONLY = new RegExp(String.raw`^(?:(?:ok(?:ay)?|great|perfect|awesome|brilliant|excellent|lovely|super|wonderful|amazing|hi|hey)[,!.]?\s+)?${THANKS}(?:\s+(?:both|all|everyone|team))?[\s!.:)]*$`, 'i');
+
+/**
+ * Keyword fast path for a reply to a ticket a person closed: a short
+ * confirmation (classifyReplyFast) or a bare thank-you. Same veto words and
+ * length cap; anything else returns null and the model reads it.
+ * @returns {'confirmed' | null}
+ */
+export function classifyThanksFast(text) {
+  if (classifyReplyFast(text)) return 'confirmed';
+  const own = ownWords(text).replace(/[‘’]/g, "'").trim();
+  if (!own || own.length > FAST_MAX_CHARS) return null;
+  if (TROUBLE_TOKENS.test(own)) return null;
+  return THANKS_ONLY.test(own) ? 'confirmed' : null;
+}
+
 // ---------- per-playbook metrics (team-safe: per playbook, never per person) ----------
 
 /**
@@ -381,6 +401,39 @@ const OOO_BOILERPLATE = [
   /^[a-z]+(?: [a-z]+){0,2}$/i, // a signature name, validated below against intent words
 ];
 const OOO_INTENT = /\b(?:can|could|please|someone|try|trying|tried|test|tested|testing|works?|worked|working|fixed|fix|broken|still|not|no|issues?|problems?|help|error|crash\w*|fail\w*|sorted|thanks?|cheers|so|but|then)\b/i;
+
+// "…out of the office and will return on Monday", "…and will be back on
+// 20 October": the same date tail as "until". A sentence of its own ("I will
+// return on Monday") reads as the "I will be back on <day>" boilerplate.
+const OOO_RETURN_TAIL = /(out of (?:the )?office|on (?:annual |parental |sick |vacation |holiday )?leave|on (?:vacation|holiday)|away(?: from (?:the|my) (?:office|desk))?)\s*,?\s*(?:and\s+)?(?:i\s+)?(?:will|shall)\s+(?:be\s+)?(?:return(?:ing)?|back)(?:\s+(?:to|in)\s+the\s+office)?\s+(?:on\s+)?/gi;
+const OOO_RETURN_SENTENCE = /(^|[.!;]\s*)i\s+(?:will|shall)\s+(?:be\s+)?(?:return(?:ing)?|back)(?:\s+(?:to|in)\s+the\s+office)?\s+(?:on\s+)?/gi;
+const OOO_LEAD = /^\s*(?:automatic reply|auto[- ]?reply|out of (?:the )?office)\s*[:-]\s*/i;
+
+/**
+ * Out-of-office test for a reply to a closed ticket (14 Oct 2026, "When a
+ * requester replies"). isAutoReplyEntry first (mail headers, then text). A
+ * FreshService-synced entry has neither the mail headers nor a subject (its
+ * rawPayload is the FreshService conversation, `title` is empty), so it is
+ * judged on its text alone; this adds the common "… and will return on <day>"
+ * wording and a leading "Automatic reply:" line to that text test. The text
+ * must still be nothing but out-of-office wording — any other sentence, a
+ * question, or an intent word means a real reply (and the ticket reopens).
+ * Auto-help keeps isAutoReplyEntry as it is.
+ */
+export function isOutOfOfficeReply(entry) {
+  if (!entry) return false;
+  if (isAutoReplyEntry(entry)) return true;
+  const own = ownWords(entry.bodyText || entry.content || '').replace(/[‘’]/g, "'").trim();
+  if (!own || own.length > 600) return false;
+  const reworded = own
+    .replace(OOO_LEAD, '')
+    .replace(OOO_RETURN_TAIL, '$1 until ')
+    .replace(OOO_RETURN_SENTENCE, '$1I will be back on ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (reworded === own) return false;
+  return oooOnlyText(reworded);
+}
 
 function oooOnlyText(own) {
   if (own.includes('?')) return false;

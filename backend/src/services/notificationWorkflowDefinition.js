@@ -823,8 +823,11 @@ export const DEFAULT_WORKFLOW_SPECS = [
   { key: defaultWorkflowKey('ticket.assigned'), triggerType: 'ticket.assigned', scheduleMode: 'standard' },
   { key: defaultWorkflowKey('ticket.reassigned'), triggerType: 'ticket.reassigned', scheduleMode: 'standard' },
   { key: defaultWorkflowKey('ticket.resolved_closed'), triggerType: 'ticket.resolved_closed', scheduleMode: 'standard' },
-  // Seeded "reopen on requester reply" — customizable per workspace (decision #11)
-  { key: 'ticket_reply_received_reopen', triggerType: 'ticket.reply_received', scheduleMode: 'standard' },
+  // Seeded "reopen on requester reply" — customizable per workspace (decision #11).
+  // Retirable (14 Oct 2026): once Settings → Ticket Ops → When a requester
+  // replies reopens tickets itself, this copy is archived and the seeding
+  // must not bring it back.
+  { key: 'ticket_reply_received_reopen', triggerType: 'ticket.reply_received', scheduleMode: 'standard', retirable: true },
   // FR 09-11 #4 — seeded DISABLED: it appears in the workflow list so an admin
   // can read it and switch it on, and sends nothing until they do.
   { key: defaultWorkflowKey('ticket.reopened'), triggerType: 'ticket.reopened', scheduleMode: 'standard' },
@@ -1673,10 +1676,17 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
           type: 'condition',
           position: { x: 260, y: 60 },
           data: {
-            label: 'Ticket already resolved or closed (and not a "thanks" to an Auto-help close)?',
+            label: 'Ticket resolved, closed or waiting on the requester?',
+            // 14 Oct 2026: builder rows + a step switch instead of a raw rule
+            // (the rule that mattered was invisible behind an empty builder).
+            // Pending Response joins Resolved/Closed — the requester answered.
+            conditionGroup: {
+              logic: 'all',
+              conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] }],
+            },
             // Auto-help integration W3: within 7 days of an Auto-help close the
-            // reply is read first — thanks / an out-of-office leaves it closed.
-            rule: { and: [{ in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] }, JSON.parse(JSON.stringify(AUTO_HELP_REOPEN_GUARD_RULE))] },
+            // reply is read first — a thank-you / an out-of-office leaves it closed.
+            ignoreAutoHelpThanks: true,
           },
         },
         {
@@ -1724,11 +1734,13 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
         type: 'condition',
         position: { x: 260, y: 0 },
         // QA 10-06 #2: the step is "Conditions"; noise is its own switch
-        // (skipNoise, applied by the engine) instead of a hidden rule.
+        // (skipNoise, applied by the engine) instead of a hidden rule. An
+        // empty condition list (every ticket passes) replaces `rule: true`
+        // so the step never opens on code (14 Oct 2026).
         data: {
           label: 'Conditions',
           skipNoise: true,
-          rule: true,
+          conditionGroup: { logic: 'all', conditions: [] },
         },
       },
       {

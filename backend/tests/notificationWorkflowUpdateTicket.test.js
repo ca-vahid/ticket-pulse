@@ -38,14 +38,15 @@ describe('Phase 5: generalized workflow events + update_ticket action', () => {
     const updateNode = definition.nodes.find((n) => n.type === 'update_ticket');
     expect(updateNode.data.setStatus).toBe('Open');
     const condition = definition.nodes.find((n) => n.type === 'condition');
-    // Auto-help integration W3: a reply that reads as thanks (or an
-    // out-of-office) within 7 days of an Auto-help close does not reopen.
-    expect(condition.data.rule).toEqual({
-      and: [
-        { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] },
-        { '!': { in: [{ var: 'event.extra.autoHelpReplyVerdict' }, ['confirmed', 'auto_reply']] } },
-      ],
+    // 14 Oct 2026: builder rows, no raw rule. Pending Response reopens too (FreshService
+    // used to do that before IT mail moved to Ticket Pulse). Auto-help integration W3 is
+    // now a switch: a thank-you or out-of-office after an Auto-help close does not reopen.
+    expect(condition.data.rule).toBeUndefined();
+    expect(condition.data.conditionGroup).toEqual({
+      logic: 'all',
+      conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] }],
     });
+    expect(condition.data.ignoreAutoHelpThanks).toBe(true);
   });
 
   test('action-only workflows (update_ticket, no send_email) are valid now', () => {

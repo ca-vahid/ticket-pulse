@@ -64,8 +64,9 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
-import SkipNoiseSwitch from './SkipNoiseSwitch';
-import { conditionGroupPatch, visibleConditionGroup } from '../../utils/conditionNoise';
+import ConditionStepEditor, { RuleAsCodeNotice } from './ConditionStepEditor';
+import { stepRuleConversionPatch } from '../../utils/conditionStepView';
+import { describeConditionStep, ruleToConditionGroup } from '../../utils/conditionRuleShared';
 import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
@@ -634,6 +635,7 @@ export const CONDITION_FIELD_OPTIONS = [
   { value: 'event.readyReason', label: 'Ticket ready because (auto_help_answering / auto_help_done / auto_help_off / timeout)', example: 'auto_help_done' },
   { value: 'event.autoHelpAnswered', label: 'Auto-help answered the requester', example: 'false' },
   { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', example: 'confirmed' },
+  { value: 'event.replyVerdict', label: 'Reply to a closed ticket reads as (thanks / auto_reply / reply)', example: 'thanks' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
   { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', example: 'false' },
@@ -1660,7 +1662,7 @@ function WorkflowGraphNode({ id, data }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-semibold leading-4 text-foreground">{data.label || id}</div>
-        <div className="truncate text-[10.5px] font-medium leading-4 text-muted-foreground" title={data.sourceCaption || undefined}>
+        <div className="truncate text-[10.5px] font-medium leading-4 text-muted-foreground" title={data.captionTitle || data.sourceCaption || undefined}>
           {data.sourceCaption || registry.label || data.nodeType}
         </div>
         {isUnknown && (
@@ -1850,9 +1852,21 @@ function flowNodesFromDefinition(definition, selectedNodeId) {
       selected: selectedNodeId === node.id,
       // Pinned content source (content addressing) — shown as a caption so
       // "this send uses draft #2" is visible on the canvas, not just the inspector.
-      sourceCaption: captionFor(node.data?.contentFrom || node.data?.llmFrom),
+      // Condition steps say what they check instead (14 Oct 2026); the full
+      // sentence is the hover title.
+      ...(node.type === 'condition'
+        ? conditionCaption(node.data)
+        : { sourceCaption: captionFor(node.data?.contentFrom || node.data?.llmFrom) }),
     },
   }));
+}
+
+/** Canvas subtitle for a condition step: the short sentence, the long one on hover. */
+export function conditionCaption(data = {}) {
+  // describeConditionStep reads a raw rule through the same converter.
+  const short = describeConditionStep(data || {}, { short: true });
+  if (!short) return { sourceCaption: 'Rule written as code', captionTitle: 'This step uses a rule written as code. Open it to see the rule.' };
+  return { sourceCaption: short, captionTitle: describeConditionStep(data || {}) };
 }
 
 function flowEdgesFromDefinition(definition, onInsert = null) {
@@ -2012,9 +2026,10 @@ function nodeOutputKey(node) {
 
 function defaultNodeData(type, triggerType = 'ticket.created') {
   if (type === 'condition') {
+    // Builder rows from the start (14 Oct 2026) — never a raw rule.
     return {
       label: 'New condition',
-      rule: { '==': [{ var: 'ticket.status' }, 'Open'] },
+      conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'is', value: 'Open' }] },
     };
   }
   if (type === 'llm_generate') {
@@ -7900,7 +7915,6 @@ export default function NotificationWorkflowsPanel({
   const [forcePreviewActionLinks, setForcePreviewActionLinks] = useState(true);
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
-  const [conditionText, setConditionText] = useState('');
   // Ticket metadata (technicians / categories / groups / approval categories /
   // custom fields) for the action-node pickers — fetched lazily on first need.
   const [ticketMeta, setTicketMeta] = useState(null);
@@ -8168,14 +8182,20 @@ export default function NotificationWorkflowsPanel({
     }
   }, [editor, selectedNode]);
 
+  // 14 Oct 2026: a step that still holds a raw json-logic rule opens as
+  // builder rows — the conversion goes into the draft once per step (it is
+  // saved when the admin publishes). Rules that can not convert stay code
+  // and the inspector says so. Once per workflow+step, so Undo is not undone.
+  const convertedStepsRef = useRef(new Set());
   useEffect(() => {
-    if (selectedNode?.type === 'condition') {
-      const rule = selectedNode.data?.rule || true;
-      setConditionText(JSON.stringify(rule, null, 2));
-    } else {
-      setConditionText('');
-    }
-  }, [selectedNode]);
+    if (!selected?.id || !selectedNode) return;
+    const key = `${selected.id}:${selectedNode.id}`;
+    if (convertedStepsRef.current.has(key)) return;
+    convertedStepsRef.current.add(key);
+    const patch = stepRuleConversionPatch(selectedNode);
+    if (patch) updateNodeData(patch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selectedNode?.id]);
 
   useEffect(() => {
     if (!selectedNode || ticketMeta) return;
@@ -9454,16 +9474,6 @@ export default function NotificationWorkflowsPanel({
     setMessage({ type: 'success', text: 'Step removed - use Undo to restore it' });
   }
 
-  function applyConditionRule() {
-    try {
-      const parsed = JSON.parse(conditionText);
-      updateNodeData({ rule: parsed });
-      setMessage({ type: 'success', text: 'Condition updated' });
-    } catch {
-      setMessage({ type: 'error', text: 'Condition must be valid JSONLogic JSON' });
-    }
-  }
-
   function updateConditionBranch(handle, targetId) {
     if (!selectedNode || !['condition', 'branch'].includes(selectedNode.type) || !targetId) return;
     updateDraft((next) => {
@@ -9561,14 +9571,6 @@ export default function NotificationWorkflowsPanel({
     const activeNode = selectedNode
       ? next.nodes.find((candidate) => candidate.id === selectedNode.id)
       : null;
-
-    if (activeNode?.type === 'condition' && conditionText.trim()) {
-      try {
-        activeNode.data = { ...(activeNode.data || {}), rule: JSON.parse(conditionText) };
-      } catch {
-        throw new Error('Condition must be valid JSONLogic JSON before preview can run');
-      }
-    }
 
     if (activeNode?.type === 'llm_generate' && llmSchemaText.trim()) {
       let parsedSchema;
@@ -10390,18 +10392,14 @@ export default function NotificationWorkflowsPanel({
       ))?.target || '';
       return (
         <div className="space-y-4">
-          {/* QA 10-06 #2: noise is the step's own switch, checked first. */}
-          <SkipNoiseSwitch data={selectedNode.data || {}} onPatch={updateNodeData} />
-          <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-200">Conditions</div>
-            {/* Structured AND/OR builder — compiled to json-logic by the engine
-                at run time; takes precedence over the raw rule below. */}
-            <ConditionGroupBuilder
-              value={visibleConditionGroup(selectedNode.data || {})}
-              onChange={(group) => updateNodeData(conditionGroupPatch(selectedNode.data || {}, group))}
-              onClear={() => updateNodeData({ conditionGroup: null })}
-            />
-          </div>
+          {/* 14 Oct 2026: the sentence, the step switches (noise, Auto-help
+              thank-you on reply workflows) and the conditions as rows; a rule
+              that can not be rows is shown read-only with "Edit as code". */}
+          <ConditionStepEditor
+            data={selectedNode.data || {}}
+            triggerType={draft?.nodes?.find((node) => node.type === 'trigger')?.data?.triggerType || selected?.triggerType || null}
+            onPatch={updateNodeData}
+          />
 
           <div className="rounded-md border border-border bg-card p-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Branch routes</div>
@@ -10428,26 +10426,6 @@ export default function NotificationWorkflowsPanel({
               ))}
             </div>
           </div>
-
-          <label className="text-xs font-medium uppercase text-muted-foreground">
-            Advanced JSONLogic Rule
-            {selectedNode.data?.conditionGroup && (
-              <span className="ml-2 normal-case font-normal text-amber-700 dark:text-amber-300" data-testid="raw-rule-ignored">not used while the conditions above are set</span>
-            )}
-          </label>
-          <textarea
-            value={conditionText}
-            onChange={(event) => setConditionText(event.target.value)}
-            className="h-52 w-full rounded-md border border-border px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
-          />
-          <button
-            type="button"
-            onClick={applyConditionRule}
-            className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background hover:bg-foreground/90"
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            Apply condition
-          </button>
         </div>
       );
     }
@@ -10699,19 +10677,43 @@ export default function NotificationWorkflowsPanel({
                   <XCircle className="h-4 w-4" />
                 </button>
               </div>
-              <ConditionGroupBuilder
-                value={branch.conditionGroup}
-                onChange={(group) => {
+              {(() => {
+                // 14 Oct 2026: a branch's raw rule shows as rows when it can
+                // (the conversion is also written into the draft on open);
+                // otherwise read-only code with "Edit as code".
+                const rawRule = !branch.conditionGroup && branch.rule !== undefined && branch.rule !== null ? branch.rule : null;
+                const converted = rawRule !== null ? ruleToConditionGroup(rawRule, { switches: false }) : null;
+                const writeBranch = (patch) => {
                   const next = branches.slice();
-                  next[index] = { ...branch, conditionGroup: group };
+                  const updated = { ...branch, ...patch };
+                  if (patch.conditionGroup) delete updated.rule;
+                  next[index] = updated;
                   setBranches(next);
-                }}
-                onClear={() => {
-                  const next = branches.slice();
-                  next[index] = { ...branch, conditionGroup: null };
-                  setBranches(next);
-                }}
-              />
+                };
+                if (rawRule !== null && !converted) {
+                  return (
+                    <RuleAsCodeNotice
+                      rule={rawRule}
+                      what="branch"
+                      onApply={(rule) => {
+                        const asRows = ruleToConditionGroup(rule, { switches: false });
+                        writeBranch(asRows ? { conditionGroup: asRows.group } : { rule, conditionGroup: null });
+                      }}
+                    />
+                  );
+                }
+                const group = branch.conditionGroup || converted?.group || null;
+                return (
+                  <>
+                    {group && (
+                      <p className="text-xs text-foreground/85" data-testid="branch-sentence">
+                        {describeConditionStep({ conditionGroup: group }).replace(/^Continues when /, 'Takes this branch when ').replace(/^Every ticket continues\./, 'Every ticket takes this branch.')}
+                      </p>
+                    )}
+                    <ConditionGroupBuilder value={group} onChange={(next) => writeBranch({ conditionGroup: next })} />
+                  </>
+                );
+              })()}
               <label className="block text-xs font-medium uppercase text-muted-foreground">
                 Route to
                 <select
@@ -11941,7 +11943,7 @@ export default function NotificationWorkflowsPanel({
                       <div role="menu" aria-label="More workflow actions" className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-border bg-card p-1 shadow-xl">
                         {[
                           { key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving || !selected, onClick: () => setVariantDialogOpen(true), title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' },
-                          { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || selected?.isDefaultVariant, onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
+                          { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || (selected?.isDefaultVariant && !selected?.archivedAt), onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant && !selected?.archivedAt ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
                           ...(selected?.archivedAt && !selected?.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', Icon: Trash2, danger: true, disabled: saving || !selected, onClick: () => setDeleteConfirm({ workflow: selected }), title: 'Permanently delete this archived variant and its workflow audit history.' }] : []),
                           { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => loadWorkflows(selected?.id) },
                         ].map((item) => (

@@ -10,6 +10,7 @@ import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
 import groupRepository from '../services/groupRepository.js';
+import groupCoordinatorService from '../services/groupCoordinatorService.js';
 import approvalCategoryService from '../services/approvalCategoryService.js';
 import azureAdService from '../services/azureAdService.js';
 import syncService from '../services/syncService.js';
@@ -1910,18 +1911,49 @@ router.get(
   requireWorkspaceAccess,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [groups, workspace] = await Promise.all([
+    const [groups, workspace, coordinators] = await Promise.all([
       groupRepository.listForWorkspace(req.workspaceId),
       prisma.workspace.findUnique({
         where: { id: req.workspaceId },
         select: { defaultInternalGroupId: true },
       }),
+      // Never fails the list: unreadable = none set.
+      groupCoordinatorService.getAll(req.workspaceId),
     ]);
     const defaultId = workspace?.defaultInternalGroupId ?? null;
     res.json({
       success: true,
-      data: groups.map((group) => ({ ...group, isDefault: group.id === defaultId })),
+      data: groups.map((group) => ({
+        ...group,
+        isDefault: group.id === defaultId,
+        coordinatorTechnicianId: coordinators[String(group.id)]?.coordinatorTechnicianId ?? null,
+        backupTechnicianId: coordinators[String(group.id)]?.backupTechnicianId ?? null,
+      })),
     });
+  }),
+);
+
+/**
+ * PUT /api/settings/groups/:id/coordinator
+ * A group's coordinator and backup ({ coordinatorTechnicianId, backupTechnicianId },
+ * null clears). Any group — FreshService groups too: who coordinates is
+ * Ticket Pulse's own setting, used by Urgent response. Admins only, like the
+ * rest of group editing.
+ */
+router.put(
+  '/groups/:id/coordinator',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const result = await groupCoordinatorService.setForGroup(
+      req.workspaceId,
+      id,
+      { coordinatorTechnicianId: req.body?.coordinatorTechnicianId ?? null, backupTechnicianId: req.body?.backupTechnicianId ?? null },
+      requestActor(req),
+    );
+    res.json({ success: true, data: result });
   }),
 );
 

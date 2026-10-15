@@ -221,6 +221,15 @@ async function userInstallationId(aadObjectId) {
 }
 
 /**
+ * Is the Ticket Pulse app installed for this user right now? Asks Microsoft,
+ * never the cache (an agent may have removed the app since we last looked).
+ */
+export async function isInstalledForUser(aadObjectId) {
+  installationCache.delete(aadObjectId);
+  return Boolean(await userInstallationId(aadObjectId));
+}
+
+/**
  * A line in the user's Teams bell list; the app must be installed for them.
  * The topic is the app installation (source 'entityUrl') — clicking the bell
  * opens the Ticket Pulse chat, where the card with the ticket link sits.
@@ -314,7 +323,7 @@ export async function downloadAttachment(url, { serviceUrl = null, maxBytes = 5 
 export default {
   teamsConfig, isTeamsConfigured, verifyInbound, createPersonalConversation, cardActivity,
   sendToConversation, updateActivity, replyToActivity, findUser, catalogAppId, installForUser,
-  uninstallForUser, sendActivityFeed, postToWorkflowWebhook, probe, describeError, DEFAULT_SERVICE_URL,
+  isInstalledForUser, uninstallForUser, sendActivityFeed, postToWorkflowWebhook, probe, describeError, DEFAULT_SERVICE_URL,
   attachmentAuthFor, downloadAttachment,
 };
 

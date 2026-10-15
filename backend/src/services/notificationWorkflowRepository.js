@@ -175,8 +175,10 @@ export async function ensureDefaultWorkflows(workspaceId, actor = null) {
         routingMode: 'exclusive',
         routingPriority: defaultRoutingPriorityForSpec(spec),
         isDefaultVariant: true,
-        archivedAt: null,
-        archivedBy: null,
+        // A retirable default (the seeded reopen workflow) stays archived once
+        // the "When a requester replies" page retired it; the others are
+        // never archived and are put right here.
+        ...(spec.retirable ? {} : { archivedAt: null, archivedBy: null }),
       },
     });
     results.push(workflow);
@@ -482,10 +484,16 @@ export async function updateWorkflowRouting(workspaceId, id, data = {}, actor = 
   });
 }
 
-export async function setWorkflowArchived(workspaceId, id, archived, actor = null) {
+/**
+ * `allowDefaultVariant`: only the "When a requester replies" page passes it,
+ * to retire the seeded "Reopen on requester reply" default when it takes the
+ * reopen over (14 Oct 2026). Every other caller keeps the rule that a default
+ * variant is disabled, never archived. Restoring is always allowed.
+ */
+export async function setWorkflowArchived(workspaceId, id, archived, actor = null, { allowDefaultVariant = false } = {}) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
   const nextArchived = archived === true || archived === 'true';
-  if (workflow.isDefaultVariant && nextArchived) {
+  if (workflow.isDefaultVariant && nextArchived && !allowDefaultVariant) {
     throw new ValidationError('Default workflow variants cannot be archived');
   }
 

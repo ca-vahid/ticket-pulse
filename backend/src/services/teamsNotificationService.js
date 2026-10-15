@@ -205,7 +205,7 @@ class TeamsNotificationService {
   // ------------------------------------------------------------ conversations
 
   /** The person's chat with the bot; installs the app for them first when needed. */
-  async ensureConversation(email, { install = true, reconnect = false } = {}) {
+  async ensureConversation(email, { install = true, reconnect = false, verifyInstall = false, outcome = null } = {}) {
     const key = lc(email);
     if (!key) throw new Error('No e-mail address');
     let row = await prisma.teamsConversation.findUnique({ where: { email: key } });
@@ -215,7 +215,23 @@ class TeamsNotificationService {
       if (!reconnect) throw new TeamsDisconnectedError(key);
       row = await prisma.teamsConversation.update({ where: { email: key }, data: { disconnectedAt: null, disconnectedBy: null } });
     }
-    if (row?.conversationId) return row;
+    if (row?.conversationId) {
+      // An admin's Connect (14 Oct 2026): a chat on file does not prove the app
+      // is still there - ask Microsoft, and put it back if the agent removed it.
+      if (!verifyInstall || !install || !row.aadObjectId) return row;
+      let present = true;
+      try {
+        present = await bot.isInstalledForUser(row.aadObjectId);
+      } catch (err) {
+        logger.warn(`Teams: could not check the app for ${key}: ${bot.describeError(err)}`);
+      }
+      if (present) {
+        if (outcome) outcome.already = true;
+        return row;
+      }
+      row = await prisma.teamsConversation.update({ where: { email: key }, data: { conversationId: null } });
+      if (outcome) outcome.reinstalled = true;
+    }
     let aad = row?.aadObjectId;
     try {
       if (!aad) {
@@ -1020,11 +1036,13 @@ class TeamsNotificationService {
     // "Connect all agents" leaves people an admin disconnected alone; naming
     // someone (the row's Connect) is the explicit reconnect.
     const explicit = Array.isArray(technicianIds) && technicianIds.length > 0;
-    const out = { connected: 0, failed: [], skippedDisconnected: 0 };
+    const out = { connected: 0, failed: [], skippedDisconnected: 0, reinstalled: 0 };
     for (const t of techs) {
       try {
-        await this.ensureConversation(t.email, { reconnect: explicit });
+        const outcome = {};
+        await this.ensureConversation(t.email, { reconnect: explicit, verifyInstall: explicit, outcome });
         out.connected++;
+        if (outcome.reinstalled) out.reinstalled++;
       } catch (err) {
         if (err instanceof TeamsDisconnectedError) out.skippedDisconnected++;
         else out.failed.push({ email: t.email, error: err.message });

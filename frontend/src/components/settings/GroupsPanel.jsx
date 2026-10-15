@@ -1,12 +1,28 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import FancySelect from '../common/FancySelect';
+import { techOptions } from './urgentResponse/urgentResponseUi';
 import {
   Users2, Plus, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
   AlertCircle, CheckCircle2, UsersRound, Search, Star,
 } from 'lucide-react';
 
 const EMPTY = { name: '', description: '' };
+
+/** "Priya Nair, backup Sam Okafor" / "No coordinator" — the quiet line under a group's name. */
+function coordinatorLine(g, techById) {
+  const name = (id) => {
+    if (!id) return null;
+    const t = techById.get(id);
+    if (!t) return `Technician ${id}`;
+    return t.isActive === false ? `${t.name} (inactive)` : t.name;
+  };
+  const coordinator = name(g.coordinatorTechnicianId);
+  const backup = name(g.backupTechnicianId);
+  if (!coordinator && !backup) return null;
+  return `Coordinator ${coordinator || 'not set'}${backup ? `, backup ${backup}` : ''}`;
+}
 
 export default function GroupsPanel() {
   const { currentWorkspace } = useWorkspace();
@@ -30,12 +46,18 @@ export default function GroupsPanel() {
   const [memberQuery, setMemberQuery] = useState('');
   const [savingMembers, setSavingMembers] = useState(false);
 
+  // coordinator editor state (QA 10-14): one group at a time
+  const [allTechnicians, setAllTechnicians] = useState([]);
+  const [coordinatorFor, setCoordinatorFor] = useState(null); // groupId
+  const [savingCoordinator, setSavingCoordinator] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [g, t] = await Promise.all([settingsAPI.getGroups(), settingsAPI.getTechnicians()]);
       setGroups(g.data || []);
+      setAllTechnicians(t.data || []);
       setTechnicians((t.data || []).filter((x) => x.isActive));
     } catch (err) {
       setError(err.message || 'Failed to load groups');
@@ -133,6 +155,40 @@ export default function GroupsPanel() {
     const q = memberQuery.trim().toLowerCase();
     return q ? technicians.filter((t) => t.name.toLowerCase().includes(q)) : technicians;
   }, [technicians, memberQuery]);
+
+  const techById = useMemo(() => new Map(allTechnicians.map((t) => [t.id, t])), [allTechnicians]);
+
+  const toggleCoordinator = useCallback((g) => {
+    setError(null);
+    setCoordinatorFor((current) => (current === g.id ? null : g.id));
+  }, []);
+
+  const saveCoordinator = useCallback(async (g, value) => {
+    setSavingCoordinator(true); setError(null);
+    try {
+      await settingsAPI.setGroupCoordinator(g.id, value);
+      flash(value.coordinatorTechnicianId ? `Coordinator saved for ${g.name}.` : `${g.name} has no coordinator now: the workspace coordinator is used.`);
+      setCoordinatorFor(null);
+      await load();
+    } catch (err) { setError(err.message || 'Failed to save the coordinator'); }
+    finally { setSavingCoordinator(false); }
+  }, [load]);
+
+  /** The coordinator line, button and editor shared by both sections. */
+  const coordinatorProps = (g) => ({
+    coordinatorText: coordinatorLine(g, techById),
+    onEditCoordinator: () => toggleCoordinator(g),
+    coordinatorOpen: coordinatorFor === g.id,
+  });
+  const coordinatorEditor = (g) => coordinatorFor === g.id && (
+    <CoordinatorEditor
+      group={g}
+      technicians={allTechnicians}
+      saving={savingCoordinator}
+      onSave={(value) => saveCoordinator(g, value)}
+      onClose={() => setCoordinatorFor(null)}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -246,7 +302,9 @@ export default function GroupsPanel() {
                       membersOpen={membersFor === g.id}
                       saving={saving}
                       toggling={togglingId === g.id}
+                      {...coordinatorProps(g)}
                     />
+                    {coordinatorEditor(g)}
                     {membersFor === g.id && (
                       <div className="mt-1 tp-card p-3 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30 space-y-2">
                         <div className="flex items-center justify-between">
@@ -292,10 +350,15 @@ export default function GroupsPanel() {
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground/85">
               <Cloud className="w-4 h-4 text-muted-foreground" /> FreshService groups
               <span className="text-xs font-normal text-muted-foreground/75">({fs.length})</span>
-              <span className="text-xs font-normal text-muted-foreground/75">· synced, read-only</span>
+              <span className="text-xs font-normal text-muted-foreground/75">· synced; only the coordinator is set here</span>
             </div>
             <div className="space-y-2">
-              {fs.map((g) => <GroupRow key={g.id} g={g} readOnly />)}
+              {fs.map((g) => (
+                <div key={g.id}>
+                  <GroupRow g={g} readOnly {...coordinatorProps(g)} />
+                  {coordinatorEditor(g)}
+                </div>
+              ))}
             </div>
           </section>
         </>
@@ -319,10 +382,94 @@ function OriginBadge({ origin }) {
   );
 }
 
+/**
+ * A group's coordinator and backup (QA 10-14). Urgent response gives the
+ * group's untouched urgent tickets to the coordinator when they are at work,
+ * else to the backup, else to the workspace coordinator.
+ */
+function CoordinatorEditor({ group, technicians, saving, onSave, onClose }) {
+  const [coordinatorId, setCoordinatorId] = useState(group.coordinatorTechnicianId ?? null);
+  const [backupId, setBackupId] = useState(group.backupTechnicianId ?? null);
+  // Active people only, but somebody already chosen stays listed after being made inactive.
+  const people = (keepId) => technicians.filter((t) => t.isActive !== false || t.id === keepId);
+  const coordinatorOptions = [{ value: '', label: 'Nobody (the workspace coordinator is used)' }, ...techOptions(people(coordinatorId))];
+  const backupOptions = [
+    { value: '', label: 'No backup' },
+    ...techOptions(people(backupId)).map((o) => (Number(o.value) === coordinatorId ? { ...o, disabled: true, hint: 'Coordinator' } : o)),
+  ];
+  const same = coordinatorId === (group.coordinatorTechnicianId ?? null) && backupId === (group.backupTechnicianId ?? null);
+  const problem = coordinatorId && backupId && coordinatorId === backupId ? 'The backup must be a different person from the coordinator.' : null;
+
+  return (
+    <div className="mt-1 tp-card p-3 space-y-3 animate-scaleIn" data-testid={`coordinator-editor-${group.id}`}>
+      <div>
+        <h4 className="text-sm font-semibold text-foreground">Coordinator for {group.name}</h4>
+        <p className="text-xs text-muted-foreground max-w-2xl">
+          An urgent ticket in this group that nobody touches goes to the coordinator if they are at work, else to the backup
+          if they are at work, else to the workspace coordinator (Settings → Urgent Response → Rules).
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:max-w-2xl">
+        <label className="grid gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Coordinator</span>
+          <FancySelect
+            value={coordinatorId ? String(coordinatorId) : ''}
+            onChange={(v) => {
+              const next = v ? Number(v) : null;
+              setCoordinatorId(next);
+              // No backup without a coordinator, and never the same person twice.
+              if (!next || next === backupId) setBackupId(null);
+            }}
+            options={coordinatorOptions}
+            aria-label={`Coordinator for ${group.name}`}
+          />
+        </label>
+        <label className="grid gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Backup</span>
+          <FancySelect
+            value={backupId ? String(backupId) : ''}
+            onChange={(v) => setBackupId(v ? Number(v) : null)}
+            options={backupOptions}
+            disabled={!coordinatorId}
+            title={coordinatorId ? undefined : 'Pick a coordinator first'}
+            aria-label={`Backup for ${group.name}`}
+          />
+        </label>
+      </div>
+      {problem && <p role="alert" className="text-xs text-red-700 dark:text-red-300">{problem}</p>}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onSave({ coordinatorTechnicianId: coordinatorId, backupTechnicianId: coordinatorId ? backupId : null })}
+          disabled={saving || same || Boolean(problem)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 disabled:opacity-60 tp-focus-ring"
+        >
+          {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
+        </button>
+        <button type="button" onClick={onClose} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">Close</button>
+      </div>
+    </div>
+  );
+}
+
 function GroupRow({
   g, readOnly, editing, editForm, setEditForm,
   onStartEdit, onCancelEdit, onSaveEdit, onToggle, onToggleDefault, onManageMembers, membersOpen, saving, toggling,
+  coordinatorText = null, onEditCoordinator = null, coordinatorOpen = false,
 }) {
+  const coordinatorButton = onEditCoordinator && (
+    <button
+      type="button"
+      onClick={onEditCoordinator}
+      title="Coordinator and backup for urgent tickets"
+      aria-expanded={coordinatorOpen}
+      aria-label={`Edit coordinator for ${g.name}`}
+      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium tp-focus-ring ${coordinatorOpen ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}
+    >
+      Coordinator
+    </button>
+  );
+
   if (editing) {
     return (
       <div className="tp-card p-3 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30">
@@ -365,11 +512,13 @@ function GroupRow({
           )}
           {!g.isActive && <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Inactive</span>}
         </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
           <span className="inline-flex items-center gap-1"><UsersRound className="w-3 h-3" />{g.memberCount} member{g.memberCount === 1 ? '' : 's'}</span>
+          {coordinatorText && <span className="truncate" data-testid={`coordinator-line-${g.id}`}>· {coordinatorText}</span>}
           {g.description && <span className="truncate">· {g.description}</span>}
         </div>
       </div>
+      {readOnly && coordinatorButton && <div className="flex items-center gap-1 shrink-0">{coordinatorButton}</div>}
       {!readOnly && (
         <div className="flex items-center gap-1 shrink-0">
           {g.isActive && (
@@ -387,6 +536,7 @@ function GroupRow({
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium tp-focus-ring ${membersOpen ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
             Members
           </button>
+          {coordinatorButton}
           <button onClick={onStartEdit} title="Edit" className="p-2 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring">
             <Pencil className="w-4 h-4" />
           </button>
