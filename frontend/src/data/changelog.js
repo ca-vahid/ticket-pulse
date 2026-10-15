@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.73-preview';
+export const APP_VERSION = '4.2.74-preview';
 
 export const changelog = [
+  {
+    version: '4.2.74-preview',
+    date: 'October 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Your Tickets filters stay put</strong> &mdash; coming back to Tickets sometimes landed on the plain list, so the filters had to be set again. Back from a ticket only kept them when the ticket had been opened straight from the list; stepping to the next ticket, opening a related one or clicking Tickets in the side bar came back empty. Tickets now remembers your last view in each workspace (filters, sort and page) and returns to it however you come back. &ldquo;Clear all&rdquo; is remembered too, and a view you have not used for a week is not brought back.' },
+      { type: 'fixed', html: '<strong>Related shows what is really related</strong> &mdash; a departure notice with five child tickets said Related 10 and listed another person&rsquo;s departure tasks. The number counted each child twice (as a child and again as a &ldquo;parent of&rdquo; link); it now counts each ticket once, and Linked tickets no longer repeats the parent and children shown above it. Other tickets from a sender that files many tickets, such as the Human Resources mailbox, are no longer listed one by one (a line says how many there are, with a link to all of them), and that sender&rsquo;s other mail is no longer offered as &ldquo;similar&rdquo;. Another ticket&rsquo;s child tickets are never offered, and a wording match under 70% is left out.' },
+    ],
+  },
   {
     version: '4.2.73-preview',
     date: 'October 14, 2026',

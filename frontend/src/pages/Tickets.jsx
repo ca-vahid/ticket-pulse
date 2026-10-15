@@ -18,6 +18,7 @@ import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
+import { queueSearchToKeep, recallQueueView, rememberQueueView } from '../utils/queueMemory';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
 import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
@@ -375,6 +376,24 @@ export default function Tickets() {
   }, [urlSearch]);
 
   const workspaceId = currentWorkspace?.id;
+
+  // Sticky filters (14 Oct 2026): arriving on a bare /tickets (Back from a ticket
+  // reached by stepping or a related link, the nav rail) restores this
+  // workspace's last view; every change after that is remembered, "Clear all"
+  // included. Only the first look at a workspace's queue restores.
+  const restoredForWsRef = useRef(null);
+  useEffect(() => {
+    if (!workspaceId) return;
+    if (restoredForWsRef.current !== workspaceId) {
+      restoredForWsRef.current = workspaceId;
+      const saved = !queueSearchToKeep(location.search) ? recallQueueView(workspaceId) : '';
+      if (saved) {
+        navigate({ pathname: location.pathname, search: saved }, { replace: true });
+        return;
+      }
+    }
+    rememberQueueView(workspaceId, location.search);
+  }, [workspaceId, location.pathname, location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false;
