@@ -50,7 +50,7 @@ import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
 import {
-  BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
+  BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, LinkedText, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
   ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
@@ -137,7 +137,7 @@ function looksLikeHtml(s) {
 function Body({ html, text, className = '' }) {
   if (html && looksLikeHtml(html)) return <SafeHtml html={html} className={className} />;
   const value = text || html || '';
-  return <p className={`text-sm text-foreground/85 whitespace-pre-wrap break-words ${className}`}>{value}</p>;
+  return <LinkedText text={value} className={`text-sm text-foreground/85 ${className}`} />;
 }
 
 // QA 10-06 #4: a visible one-click copy beside the requester's e-mail and

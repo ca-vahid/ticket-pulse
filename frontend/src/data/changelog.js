@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.74-preview';
+export const APP_VERSION = '4.2.75-preview';
 
 export const changelog = [
+  {
+    version: '4.2.75-preview',
+    date: 'October 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Links in tickets open in a new tab</strong> &mdash; a link inside an e-mail, a note or a description (a SharePoint file, a form, a shop page) opened in the same tab and took you out of Ticket Pulse. Every web link in a ticket now opens in a new tab, so the ticket stays where it was. Web addresses typed as plain text are now clickable too, and links in Knowledge articles behave the same way. E-mail addresses and phone numbers still open your mail or phone app.' },
+    ],
+  },
   {
     version: '4.2.74-preview',
     date: 'October 14, 2026',
