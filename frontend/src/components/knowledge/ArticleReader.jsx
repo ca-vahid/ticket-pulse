@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import { ArrowLeft, Check, Eye, Flag, History, Pencil, RotateCcw } from 'lucide-react';
 import { knowledgeAPI } from '../../services/api';
 import { formatDayTime, timeAgo } from '../tickets/ticketUi';
+import { linkifyHtml } from '../../utils/linkify';
 import { ConfirmDialog, EmptyState, Loading, PersonLine, textareaClass } from './knowledgeUi';
 import { healthOf, sectionAnchor, usageWords } from './libraryFormat';
 
@@ -46,7 +47,7 @@ function HistoryList({ articleId, canRestore, onRestored }) {
     if (reading?.version === v.version) { setReading(null); return; }
     setReading({ version: v.version, html: null });
     knowledgeAPI.articleVersion(articleId, v.version)
-      .then((res) => setReading((cur) => (cur?.version === v.version ? { version: v.version, html: DOMPurify.sanitize(res?.data?.bodyHtml || '', { USE_PROFILES: { html: true } }) } : cur)))
+      .then((res) => setReading((cur) => (cur?.version === v.version ? { version: v.version, html: linkifyHtml(DOMPurify.sanitize(res?.data?.bodyHtml || '', { USE_PROFILES: { html: true } })) } : cur)))
       .catch((err) => { setReading(null); setError(err?.message || 'Could not open that version'); });
   };
   useEffect(() => {
@@ -140,7 +141,7 @@ export default function ArticleReader({ articleId, categories = [] }) {
     .catch((err) => setError(err?.message || 'Could not load the article')), [articleId]);
   useEffect(() => { setArticle(null); setPanel(null); setNotice(null); load(); }, [load]);
 
-  const html = useMemo(() => DOMPurify.sanitize(article?.bodyHtml || '', { USE_PROFILES: { html: true } }), [article?.bodyHtml]);
+  const html = useMemo(() => linkifyHtml(DOMPurify.sanitize(article?.bodyHtml || '', { USE_PROFILES: { html: true } })), [article?.bodyHtml]);
   // Headings get anchors so "On this page" can jump to them.
   const [headings, setHeadings] = useState([]);
   useEffect(() => {

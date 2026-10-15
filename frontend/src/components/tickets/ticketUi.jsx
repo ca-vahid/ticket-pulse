@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { linkifyHtml } from '../../utils/linkify';
+import { linkifyHtml, linkifyText } from '../../utils/linkify';
 import { fsSystemEntryKind } from '../../utils/fsSystemEntry';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, RotateCcw, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
@@ -435,6 +435,17 @@ export function SafeHtml({ html, className = '', isDark: isDarkOverride = null, 
       className={`tp-rich-body ${variantClass} text-sm text-foreground/85 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
       // Sanitized above with DOMPurify — the only way to render email HTML faithfully.
       dangerouslySetInnerHTML={{ __html: clean }}
+    />
+  );
+}
+
+/** Plain-text body with its web addresses as new-tab links (text is escaped first). */
+export function LinkedText({ text, className = '' }) {
+  const html = useMemo(() => linkifyText(text), [text]);
+  return (
+    <p
+      className={`whitespace-pre-wrap break-words [&_a]:text-primary [&_a]:underline ${className}`}
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }

@@ -11,7 +11,7 @@ import {
   Loader2, Lock, Mail, MapPin, Pencil, Phone, Sparkles, Trash2, VolumeX, X,
 } from 'lucide-react';
 import {
-  ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, SlaTargetChip, StateChip, StatusPill,
+  ExternalChip, MirrorChip, OriginChip, LinkedText, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, SlaTargetChip, StateChip, StatusPill,
   TagChip, TypePill, PRIORITY_LABELS, formatDayTime, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
   ticketCategoryLabels, timeAgo,
 } from './ticketUi';
@@ -619,9 +619,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   {looksLikeHtml(ticket.description) ? (
                     <SafeHtml html={ticket.description} className="!text-xs" />
                   ) : (
-                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">
-                      {(ticket.descriptionText || ticket.description || '').replace(/\n{3,}/g, '\n\n').trim()}
-                    </p>
+                    <LinkedText className="text-xs text-muted-foreground" text={(ticket.descriptionText || ticket.description || '').replace(/\n{3,}/g, '\n\n').trim()} />
                   )}
                 </div>
               </div>
@@ -795,9 +793,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       <SafeHtml html={e.bodyHtml} className="!text-xs" />
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words max-h-44 overflow-y-auto settings-scrollbar">
-                      {String(e.bodyText || e.content || '').replace(/\n{2,}/g, '\n').trim()}
-                    </p>
+                    <LinkedText className="text-xs text-muted-foreground max-h-44 overflow-y-auto settings-scrollbar" text={String(e.bodyText || e.content || '').replace(/\n{2,}/g, '\n').trim()} />
                   )}
                 </li>
               ))}

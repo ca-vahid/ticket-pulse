@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, test } from 'vitest';
-import { linkifyHtml, shortLinkLabel } from './linkify';
+import { linkifyHtml, linkifyText, shortLinkLabel } from './linkify';
 
 // QA 10-06 #8: a pasted link in a description was plain text (TP-1790).
 const AMAZON = 'https://www.amazon.ca/Dell-Power-Adapter-7-4mm-Factor/dp/B0F493DZTG/ref=sr_1_1?crid=33DREZT7MEK44&dib=eyJ2IjoiMSJ9&keywords=Dell+240W&qid=1791311101&sr=1-1';
@@ -38,6 +38,28 @@ describe('linkifyHtml', () => {
     const html = '<a href="https://a.com">https://a.com</a> <code>https://b.com</code> no links here';
     expect(anchors(linkifyHtml(html))).toHaveLength(1);
     expect(linkifyHtml('nothing to see')).toBe('nothing to see');
+  });
+
+  test('links the sender wrote open in a new tab; mail, phone and page anchors do not', () => {
+    const out = linkifyHtml('<p><a href="https://contoso.sharepoint.com/sites/IT/Shared%20Documents/vpn.pdf">VPN guide</a> '
+      + '<a href="http://intranet.example.org/hr" target="_self">HR</a> '
+      + '<a href="mailto:priya.nair@example.com">Priya</a> <a href="tel:+16045550100">call</a> <a href="#step-2">Step 2</a></p>');
+    const [doc, hr, mail, tel, anchor] = anchors(out);
+    expect(doc.getAttribute('target')).toBe('_blank');
+    expect(doc.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(doc.textContent).toBe('VPN guide');
+    expect(hr.getAttribute('target')).toBe('_blank');
+    [mail, tel, anchor].forEach((a) => expect(a.hasAttribute('target')).toBe(false));
+  });
+
+  test('plain text: escaped, with its addresses as new-tab links', () => {
+    const out = linkifyText('Hi <team>, the form is at https://forms.example.com/new-hire & due Friday');
+    expect(out).toContain('Hi &lt;team&gt;,');
+    expect(out).toContain('&amp; due Friday');
+    const [a] = anchors(out);
+    expect(a.getAttribute('href')).toBe('https://forms.example.com/new-hire');
+    expect(a.getAttribute('target')).toBe('_blank');
+    expect(linkifyText('<img src=x onerror=alert(1)>')).not.toContain('<img');
   });
 
   test('labels', () => {

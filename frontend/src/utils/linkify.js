@@ -4,6 +4,7 @@
  * already-sanitised HTML and wraps web addresses in links that open in a new
  * tab. Long addresses show as host + path, cut with "…"; the full address is
  * the link's tooltip. Text already inside a link, code or pre is left alone.
+ * Links already in the HTML get the same new-tab treatment.
  */
 
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
@@ -87,5 +88,22 @@ export function linkifyHtml(html) {
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
   nodes.forEach((n) => linkifyTextNode(n, doc));
+  // 14 Oct 2026 (Vahid): links the sender wrote as links (every Outlook mail,
+  // composer links) opened in the same tab and took you out of Ticket Pulse.
+  // Web links always open in a new tab; mailto:, tel: and #anchors are left alone.
+  tpl.content.querySelectorAll('a[href]').forEach((a) => {
+    if (!WEB_HREF_RE.test(a.getAttribute('href') || '')) return;
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+  });
   return tpl.innerHTML;
+}
+
+const WEB_HREF_RE = /^\s*(?:https?:)?\/\//i;
+
+const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Plain text → escaped HTML with its web addresses as new-tab links. */
+export function linkifyText(text) {
+  return linkifyHtml(escapeHtml(text || ''));
 }
