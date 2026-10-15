@@ -8,6 +8,7 @@ async function assetronVerdictAssets(ticketId, workspaceId) {
 }
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 /**
  * The single approval verdict for one ticket — the shape an external system
  * gates on. Built for Assetron (BGC IT), which blocks the first assignment of
@@ -225,7 +226,7 @@ class ApprovalVerdictService {
         type: ticket.ticketType || null,
         subject: ticket.subject || null,
         status: ticket.status,
-        url: `${publicBaseUrl()}/tickets/${ticket.id}`,
+        url: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
         createdAt: ticket.createdAt,
         updatedAt: ticket.updatedAt,
         // TP-born tickets are mirrored into FreshService, so one request

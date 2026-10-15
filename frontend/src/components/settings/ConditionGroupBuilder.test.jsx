@@ -24,7 +24,7 @@ vi.mock('../../contexts/WorkspaceContext', () => ({
   useWorkspaceOptional: () => ({ currentWorkspace: { id: 1 } }),
 }));
 
-import ConditionGroupBuilder, { CG_FIELDS, emptyGroup, invalidateConditionFieldsCache } from './ConditionGroupBuilder';
+import ConditionGroupBuilder, { CG_FIELDS, emptyGroup, invalidateConditionFieldsCache, withOperator } from './ConditionGroupBuilder';
 import { ticketsAPI } from '../../services/api';
 
 conditionFieldsMock.mockResolvedValue({
@@ -43,7 +43,7 @@ describe('ConditionGroupBuilder', () => {
   test('starts as an offer button and creates a default group when clicked', () => {
     const onChange = vi.fn();
     render(<ConditionGroupBuilder value={null} onChange={onChange} onClear={() => {}} />);
-    fireEvent.click(screen.getByText(/build conditions visually/i));
+    fireEvent.click(screen.getByText(/add a condition/i));
     expect(onChange).toHaveBeenCalledWith(emptyGroup());
   });
 
@@ -97,11 +97,45 @@ describe('ConditionGroupBuilder', () => {
     expect(screen.getByDisplayValue('Open')).toBeInTheDocument();
   });
 
-  test('clear hands control back to the raw rule', () => {
-    const onClear = vi.fn();
-    render(<ConditionGroupBuilder value={emptyGroup()} onChange={() => {}} onClear={onClear} />);
-    fireEvent.click(screen.getByText(/remove & use raw rule/i));
-    expect(onClear).toHaveBeenCalled();
+  // 14 Oct 2026: no hidden raw rule behind the builder any more.
+  test('there is no "use raw rule" escape hatch', () => {
+    render(<ConditionGroupBuilder value={emptyGroup()} onChange={() => {}} />);
+    expect(screen.queryByText(/raw rule/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/advanced rule/i)).not.toBeInTheDocument();
+  });
+
+  test('"is any of" on a field with values is a tick list; the pick reads as plain text', async () => {
+    invalidateConditionFieldsCache();
+    const onChange = vi.fn();
+    const group = { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed'] }] };
+    render(<ConditionGroupBuilder value={group} onChange={onChange} />);
+    const button = await screen.findByRole('button', { name: 'Values: Resolved, Closed' });
+    expect(screen.queryByLabelText('Values (comma-separated)')).not.toBeInTheDocument();
+    fireEvent.click(button);
+    // The custom status arrives with the server catalog.
+    await screen.findByRole('checkbox', { name: 'Needs Rework' });
+    expect(screen.getByRole('checkbox', { name: 'Resolved' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Open' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Needs Rework' }));
+    expect(onChange).toHaveBeenLastCalledWith({ logic: 'all', conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Needs Rework'] }] });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Resolved' }));
+    expect(onChange.mock.calls.at(-1)[0].conditions[0].value).toEqual(['Closed']);
+  });
+
+  test('a picked value the workspace no longer offers stays listed and ticked', async () => {
+    invalidateConditionFieldsCache();
+    const group = { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'not_in', value: ['Pending Response'] }] };
+    render(<ConditionGroupBuilder value={group} onChange={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Values: Pending Response' }));
+    expect(screen.getByRole('checkbox', { name: /Pending Response/ })).toBeChecked();
+    expect(screen.getByText('not offered here now')).toBeInTheDocument();
+  });
+
+  test('switching between "is" and "is any of" keeps the value in the right shape', () => {
+    expect(withOperator({ field: 'ticket.status', operator: 'is', value: 'Open' }, 'in')).toEqual({ field: 'ticket.status', operator: 'in', value: ['Open'] });
+    expect(withOperator({ field: 'ticket.status', operator: 'in', value: ['Closed', 'Open'] }, 'is')).toEqual({ field: 'ticket.status', operator: 'is', value: 'Closed' });
+    expect(withOperator({ field: 'ticket.status', operator: 'in', value: [] }, 'is', { type: 'enum', options: ['Open'] }).value).toBe('Open');
+    expect(withOperator({ field: 'ticket.status', operator: 'in', value: ['x'] }, 'is_empty').value).toBeUndefined();
   });
 
   test('ticket.status options come from the workspace registry served by the API (Phase 8c)', async () => {
@@ -215,14 +249,22 @@ describe('fields_updated condition fields (TU-7)', () => {
     expect(byValue['event.reopened'].type).toBe('boolean');
   });
 
-  test('a changedFields row renders the list operators and a comma-separated value input', async () => {
+  test('a changedFields row renders the list operators and a tick list of the known fields', async () => {
     invalidateConditionFieldsCache();
     conditionFieldsMock.mockResolvedValueOnce({ data: [] }); // fall back to the static catalog
     const group = { logic: 'all', conditions: [{ field: 'event.changedFields', operator: 'has_any', value: ['priority'] }] };
     render(<ConditionGroupBuilder value={group} onChange={vi.fn()} onClear={() => {}} />);
     expect(await screen.findByRole('option', { name: 'has any of' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'has none of' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Values (comma-separated)')).toHaveValue('priority');
+    expect(screen.getByRole('button', { name: 'Values: priority' })).toBeInTheDocument();
+  });
+
+  test('a list field without known values (tags, offline) keeps the comma input', async () => {
+    invalidateConditionFieldsCache();
+    conditionFieldsMock.mockResolvedValueOnce({ data: [] });
+    const group = { logic: 'all', conditions: [{ field: 'ticket.tags', operator: 'has_any', value: ['vip', 'exec'] }] };
+    render(<ConditionGroupBuilder value={group} onChange={vi.fn()} />);
+    expect(await screen.findByLabelText('Values (comma-separated)')).toHaveValue('vip, exec');
   });
 });
 

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Plus, Trash2, X } from 'lucide-react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import { useWorkspaceOptional } from '../../contexts/WorkspaceContext';
@@ -8,8 +8,9 @@ import { useWorkspaceOptional } from '../../contexts/WorkspaceContext';
  * AND/OR condition-group builder for workflow condition nodes. Edits the
  * structured `conditionGroup` the engine compiles to json-logic at run time —
  * so coordinators build compound rules like "(urgent AND unassigned) OR
- * Halifax" without hand-writing JSONLogic (the raw-rule textarea remains the
- * advanced escape hatch below this in the panel).
+ * Halifax" without hand-writing JSONLogic. 14 Oct 2026: "is any of" and
+ * friends pick real values from a tick list (no typing), and there is no raw
+ * rule behind the builder any more (ConditionStepEditor converts old rules).
  *
  * Field/operator catalog mirrors backend notificationConditionModel.js —
  * KEEP IN SYNC when adding fields there.
@@ -71,6 +72,7 @@ export const CG_FIELDS = [
   { value: 'event.intakeNonActionable', label: 'Intake judged not actionable', type: 'boolean' },
   { value: 'event.intakeSource', label: 'Intake settled by', type: 'enum', options: ['pipeline', 'manual'] },
   { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', type: 'enum', options: ['confirmed', 'help', 'auto_reply'] },
+  { value: 'event.replyVerdict', label: 'Reply to a closed ticket reads as', type: 'enum', options: ['thanks', 'auto_reply', 'reply'] },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', type: 'boolean' },
   { value: 'event.isSurveyResponse', label: 'Reply is a survey response', type: 'boolean' },
   // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7). The server
@@ -136,7 +138,7 @@ export function invalidateConditionFieldsCache() {
   try { window.dispatchEvent(new CustomEvent(CONDITION_FIELDS_CHANGED)); } catch { /* no window (tests) */ }
 }
 
-function useConditionFields() {
+export function useConditionFields() {
   const { activeTypes } = useTicketTypes();
   // Tolerant workspace read: the builder also renders in unit tests without a
   // WorkspaceProvider — no workspace just means no server catalog fetch.
@@ -242,11 +244,117 @@ function LogicToggle({ logic, onChange }) {
   );
 }
 
+const asList = (value) => (Array.isArray(value) ? value : value === undefined || value === null || value === '' ? [] : [value]);
+
+/**
+ * "is any of" / "has any of" on a field with real values: a tick list in a
+ * small popover. The picked values read as plain comma text (no pills). A
+ * stored value this workspace no longer offers stays listed, ticked, so it
+ * can be seen and unticked.
+ */
+export function ValueChecklist({ value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef(null);
+  const picked = asList(value);
+  const pickedKeys = new Set(picked.map(String));
+  const optionKeys = new Set(options.map(String));
+  const all = [...options, ...picked.filter((v) => !optionKeys.has(String(v)))];
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? all.filter((opt) => String(opt).toLowerCase().includes(needle)) : all;
+  const summary = picked.length ? picked.join(', ') : 'Pick values…';
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (event) => { if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false); };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const toggle = (opt) => {
+    const key = String(opt);
+    const nextKeys = new Set(pickedKeys);
+    if (nextKeys.has(key)) nextKeys.delete(key); else nextKeys.add(key);
+    // Keep the workspace's own order, not the click order.
+    onChange(all.filter((o) => nextKeys.has(String(o))));
+  };
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={`Values: ${summary}`}
+        onClick={() => setOpen((v) => !v)}
+        className="tp-focus-ring flex w-full items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-left text-sm text-foreground"
+      >
+        <span className={`min-w-0 flex-1 truncate ${picked.length ? '' : 'text-muted-foreground'}`} title={picked.length ? summary : undefined}>{summary}</span>
+        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          role="group"
+          aria-label="Pick values"
+          className="animate-popIn absolute right-0 z-30 mt-1 w-64 max-w-[80vw] rounded-lg border border-border bg-card p-1.5 shadow-soft"
+        >
+          {all.length > 8 && (
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find…"
+              aria-label="Find a value"
+              className="mb-1 w-full rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground"
+            />
+          )}
+          <div className="settings-scrollbar max-h-56 overflow-y-auto">
+            {shown.map((opt) => {
+              const key = String(opt);
+              return (
+                <label key={key} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted">
+                  <input
+                    type="checkbox"
+                    checked={pickedKeys.has(key)}
+                    onChange={() => toggle(opt)}
+                    className="h-3.5 w-3.5 flex-shrink-0 accent-[hsl(var(--primary))]"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{key}</span>
+                  {!optionKeys.has(key) && <span className="text-[11px] text-muted-foreground">not offered here now</span>}
+                </label>
+              );
+            })}
+            {shown.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">Nothing matches.</p>}
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-border px-1 pt-1.5">
+            <span className="text-[11px] text-muted-foreground">{picked.length} picked</span>
+            <button type="button" onClick={() => setOpen(false)} className="rounded-md px-2 py-0.5 text-xs font-medium text-primary hover:bg-muted">Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ValueInput({ row, onChange, fields }) {
   const spec = fieldSpecIn(fields, row.field);
   if (VALUELESS.has(row.operator)) return null;
+  const options = Array.isArray(spec.options) ? spec.options : [];
 
   if (LIST_OPERATORS.has(row.operator)) {
+    if (options.length > 0) {
+      return <ValueChecklist value={row.value} options={options} onChange={onChange} />;
+    }
+    // No known values (subject, tags without a list…): type them.
     const listValue = Array.isArray(row.value) ? row.value.join(', ') : String(row.value ?? '');
     return (
       <input
@@ -258,16 +366,38 @@ function ValueInput({ row, onChange, fields }) {
       />
     );
   }
-  if (spec.type === 'enum' && spec.options) {
+  if (spec.type === 'enum' && options.length > 0) {
+    const current = String(row.value ?? options[0]);
+    // A stored value this workspace no longer offers is still shown as itself.
+    const choices = options.map(String).includes(current) ? options : [...options, current];
     return (
       <select
-        value={String(row.value ?? spec.options[0])}
+        value={current}
         onChange={(e) => onChange(e.target.value)}
         aria-label="Value"
         className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
-        {spec.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+        {choices.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
       </select>
+    );
+  }
+  if (spec.type === 'string' && options.length > 0 && (row.operator === 'is' || row.operator === 'is_not')) {
+    // Free text with this workspace's real values offered as suggestions.
+    const listId = `cg-values-${String(row.field).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    return (
+      <>
+        <input
+          value={String(row.value ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+          list={listId}
+          placeholder="value"
+          aria-label="Value"
+          className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
+        />
+        <datalist id={listId}>
+          {options.map((opt) => <option key={opt} value={opt} />)}
+        </datalist>
+      </>
     );
   }
   if (spec.type === 'duration') {
@@ -316,6 +446,17 @@ function ValueInput({ row, onChange, fields }) {
   );
 }
 
+/** Change the operator, keeping the value in the shape the new operator takes. */
+export function withOperator(row, operator, spec = {}) {
+  if (VALUELESS.has(operator)) return { ...row, operator, value: undefined };
+  if (LIST_OPERATORS.has(operator)) return { ...row, operator, value: asList(row.value) };
+  if (Array.isArray(row.value)) {
+    const first = row.value[0];
+    return { ...row, operator, value: first !== undefined ? first : (spec.type === 'enum' ? spec.options?.[0] : '') };
+  }
+  return { ...row, operator };
+}
+
 function ConditionRow({ row, onChange, onRemove, fields }) {
   const spec = fieldSpecIn(fields, row.field);
   const operators = OPERATORS_BY_TYPE[spec.type];
@@ -334,7 +475,7 @@ function ConditionRow({ row, onChange, onRemove, fields }) {
       </select>
       <select
         value={row.operator}
-        onChange={(e) => onChange({ ...row, operator: e.target.value, ...(VALUELESS.has(e.target.value) ? { value: undefined } : {}) })}
+        onChange={(e) => onChange(withOperator(row, e.target.value, spec))}
         aria-label="Operator"
         className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
@@ -426,10 +567,11 @@ function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
   );
 }
 
-export default function ConditionGroupBuilder({ value, onChange, onClear }) {
+export default function ConditionGroupBuilder({ value, onChange, fields: fieldsProp = null }) {
   // QA 10-06 #2: the step's noise check is its own switch now
   // (conditionNoise.jsx) — this builder only edits conditions.
-  const fields = useConditionFields();
+  const loadedFields = useConditionFields();
+  const fields = fieldsProp || loadedFields;
   const group = isGroup(value) ? value : null;
 
   if (!group) {
@@ -439,24 +581,10 @@ export default function ConditionGroupBuilder({ value, onChange, onClear }) {
         onClick={() => onChange(emptyGroup())}
         className="w-full rounded-lg border border-dashed border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/50 dark:bg-indigo-500/10 px-3 py-2.5 text-left text-sm font-medium text-indigo-700 dark:text-indigo-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
       >
-        + Build conditions visually (AND/OR groups)
+        + Add a condition
       </button>
     );
   }
 
-  return (
-    <div className="space-y-2">
-      <GroupEditor group={group} onChange={onChange} fields={fields} />
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-muted-foreground/75">Only these conditions are checked. The advanced rule below is not used while they are set.</p>
-        <button
-          type="button"
-          onClick={onClear}
-          className="text-[11px] font-medium text-muted-foreground hover:text-red-600 dark:hover:text-red-300"
-        >
-          Remove &amp; use raw rule
-        </button>
-      </div>
-    </div>
-  );
+  return <GroupEditor group={group} onChange={onChange} fields={fields} />;
 }

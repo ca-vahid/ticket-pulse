@@ -147,7 +147,7 @@ describe('Urgent response: Rules', () => {
 
   test('people are picked with the in-app select; the on-call choice names who is on call', async () => {
     setup();
-    fireEvent.click(screen.getByRole('combobox', { name: 'Coordinator' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Workspace coordinator' }));
     // Inactive people are not offered.
     expect(screen.queryByRole('option', { name: /Gone Person/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: 'Maria Lee' }));
@@ -165,5 +165,26 @@ describe('Urgent response: Rules', () => {
     // 18:00Z is 11:00 in the workspace time zone.
     expect(list).toHaveTextContent('Oct 9, 11:00 AM');
     expect(api.getChanges).toHaveBeenCalledWith(50);
+  });
+
+  test('the workspace coordinator is the fallback, and the groups with their own coordinator are listed, linking to Groups', () => {
+    setup({
+      groupCoordinators: [
+        { groupId: 3, groupName: 'Service Desk', groupActive: true, coordinator: { id: 3, name: 'Maria Lee', isActive: true }, backup: { id: 1, name: 'Andrew Fong', isActive: true } },
+        { groupId: 4, groupName: 'Network', groupActive: true, coordinator: { id: 9, name: 'Gone Person', isActive: false }, backup: null },
+      ],
+    });
+    const box = screen.getByRole('region', { name: 'If it keeps moving' });
+    expect(within(box).getByText('Workspace coordinator (when a group has none)')).toBeInTheDocument();
+    expect(within(box).getByRole('combobox', { name: 'Workspace coordinator' })).toBeInTheDocument();
+    const list = screen.getByTestId('group-coordinators');
+    expect(list).toHaveTextContent('Service Desk — Maria Lee (backup Andrew Fong)');
+    expect(list).toHaveTextContent('Network — Gone Person (inactive)');
+    expect(within(list).getByRole('link', { name: 'Set them in Groups' })).toHaveAttribute('href', '/settings#groups');
+  });
+
+  test('no group has its own coordinator: says the workspace coordinator is used for every ticket', () => {
+    setup();
+    expect(screen.getByTestId('group-coordinators')).toHaveTextContent('No group has its own coordinator yet, so the workspace coordinator is used for every ticket.');
   });
 });

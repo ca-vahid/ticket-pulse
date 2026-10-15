@@ -13,6 +13,7 @@ import { sseManager } from '../routes/sse.routes.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import assetronReservationService from './assetronReservationService.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 const APPROVAL_EXPIRY_DAYS = 30;
 
 function newToken() {
@@ -695,7 +696,7 @@ class TicketApprovalService {
           photoUrl: requester.email ? photoUrl('requester') : null,
         } : null,
         workspace: { name: ticket.workspace?.name || null, slug: ticket.workspace?.slug || null },
-        appTicketUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
+        appTicketUrl: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
         attachments,
       },
       approvers,
@@ -1728,7 +1729,7 @@ class TicketApprovalService {
       categoryPath: topCat ? (subCat ? `${topCat} › ${subCat}` : topCat) : null,
       statusLabel: ticket.status || null,
       description: ticket.description || ticket.descriptionText || null,
-      appUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
+      appUrl: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
     };
   }
 
@@ -1870,7 +1871,7 @@ class TicketApprovalService {
     const approved = decision === 'approved';
     const verdictLabel = approved ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved';
     const ref = ticketDisplayRef(ticket);
-    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     // Subject prefix stays identical for the self variant — inbox filters and
     // threading keep working; only the body wording changes.
     const subject = `${verdictLabel}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
@@ -1932,7 +1933,7 @@ class TicketApprovalService {
     }
     if (recipients.length === 0) return { sent: false, reason: 'nobody_else' };
     const ref = ticketDisplayRef(ticket);
-    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     const workspaceName = await this._workspaceName(ticket);
     const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
@@ -1999,7 +2000,7 @@ class TicketApprovalService {
     const to = String(approval.requestedBy || '').trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
     const ref = ticketDisplayRef(ticket);
-    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     const toNames = [];
     for (const em of targets) toNames.push((await this._resolvePersonName(em)) || prettifyLocalPart(em) || em);
     const subject = `${kind === 'forwarded' ? 'Forwarded' : 'Escalated'}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
@@ -2023,7 +2024,7 @@ class TicketApprovalService {
     const to = String(approval.requestedBy || '').trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
     const ref = ticketDisplayRef(ticket);
-    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     const subject = `More info needed on your approval request [${ref}]`;
     const html = renderRequesterClarificationEmail({
       workspaceName: await this._workspaceName(ticket),

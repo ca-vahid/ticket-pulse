@@ -554,6 +554,8 @@ export const settingsAPI = {
   updateGroup: (id, data) => api.patch(`/settings/groups/${id}`, data),
   getGroupMembers: (id) => api.get(`/settings/groups/${id}/members`),
   setGroupMembers: (id, technicianIds) => api.put(`/settings/groups/${id}/members`, { technicianIds }),
+  // Group coordinator + backup (QA 10-14), used by Urgent response; null clears.
+  setGroupCoordinator: (id, { coordinatorTechnicianId = null, backupTechnicianId = null } = {}) => api.put(`/settings/groups/${id}/coordinator`, { coordinatorTechnicianId, backupTechnicianId }),
   // Ticket tags — workspace palette admin (gap plan P1)
   getTicketTags: () => api.get('/settings/ticket-tags'),
   createTicketTag: (data) => api.post('/settings/ticket-tags', data),
@@ -810,6 +812,8 @@ export const ticketsAPI = {
   // "When a requester replies" workspace switches (13 Oct 2026): owner away → back to assignment; reply that is a new request → suggest a split.
   getRequesterReplySettings: async () => await api.get('/tickets/requester-reply-settings'),
   updateRequesterReplySettings: async (patch) => await api.put('/tickets/requester-reply-settings', patch),
+  // Bring back a mail workflow the page archived (14 Oct 2026).
+  restoreRequesterReplyWorkflow: async (workflowId) => await api.post('/tickets/requester-reply-settings/restore-workflow', { workflowId }),
   // "This reply looks like a new request" on one ticket.
   getNewRequestSuggestion: async (id) => await api.get(`/tickets/${id}/new-request-suggestion`),
   splitNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/split`),
@@ -836,6 +840,8 @@ export const ticketsAPI = {
   updateQueueCards: (cards) => api.put('/tickets/queue-cards', { cards }),
   // QA 09-23 #4: default status filter for the list ([] = every status).
   updateDefaultStatuses: (statuses) => api.put('/tickets/default-statuses', { statuses }),
+  // QA 10-14 #1: views hidden from the Tickets rail in this workspace.
+  updateHiddenViews: (views) => api.put('/tickets/hidden-views', { views }),
 
   // Saved filter views (per-user, workspace-scoped)
   listSavedViews: () => api.get('/tickets/saved-views'),
@@ -1665,6 +1671,18 @@ export const workspaceAPI = {
 
   getById: async (id) => {
     return await api.get(`/workspaces/${id}`);
+  },
+
+  // The short first part of this workspace's ticket links (/it/TP-10000). Admin only.
+  setLinkName: async (id, linkName) => {
+    return await api.put(`/workspaces/${id}/link-name`, { linkName });
+  },
+
+  // Short ticket links (/it/1876, /TP-1876): every ticket the reference opens for this user.
+  resolveTicket: async (ref, workspace = null) => {
+    const params = new URLSearchParams({ ref: String(ref) });
+    if (workspace) params.set('workspace', String(workspace));
+    return await api.get(`/workspaces/resolve-ticket?${params.toString()}`);
   },
 
   select: async (workspaceId) => {

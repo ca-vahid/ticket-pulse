@@ -9,14 +9,15 @@
  *                        and ticket.resolvedByKind is_not auto_help
  *   resolution_summary   a 'not-auto-help-close' condition after the trigger:
  *                        resolvedByKind is_not auto_help → carry on, else stop
- *   reopen_on_reply      the seeded 'is-resolved' rule also requires the reply
- *                        after an Auto-help close NOT to read as thanks / an
- *                        out-of-office (event.extra.autoHelpReplyVerdict)
+ *   reopen_on_reply      the seeded 'is-resolved' step turns on its
+ *                        ignoreAutoHelpThanks switch: a reply after an
+ *                        Auto-help close that reads as thanks / an
+ *                        out-of-office does not reopen (event.extra.autoHelpReplyVerdict)
  *
  * Every transform is idempotent and returns { changed, definition, why }.
  */
 import {
-  AUTO_HELP_CLOSE_GUARD_NODE, AUTO_HELP_NUDGE_CLOSED_GUARD_ROW, AUTO_HELP_NUDGE_GUARD_ROW, AUTO_HELP_REOPEN_GUARD_RULE,
+  AUTO_HELP_CLOSE_GUARD_NODE, AUTO_HELP_NUDGE_CLOSED_GUARD_ROW, AUTO_HELP_NUDGE_GUARD_ROW,
 } from './notificationWorkflowDefinition.js';
 
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
@@ -172,16 +173,13 @@ export function addReopenGuard(definition) {
   const node = (def?.nodes || []).find((n) => n?.id === 'is-resolved' && n?.type === 'condition');
   if (!node) return { changed: false, definition, why: 'no is-resolved condition' };
   const text = JSON.stringify(node.data || {});
-  if (text.includes('autoHelpReplyVerdict')) return { changed: false, definition, why: 'already guarded' };
-  if (node.data?.conditionGroup) {
-    const g = node.data.conditionGroup;
-    if (g.logic !== 'all' || !Array.isArray(g.conditions)) return { changed: false, definition, why: 'condition group is not ALL — left for a person' };
-    g.conditions.push({ field: 'event.autoHelpReplyVerdict', operator: 'not_in', value: ['confirmed', 'auto_reply'] });
-    return { changed: true, definition: def, why: 'added the reply-verdict row' };
-  }
-  if (!node.data?.rule) return { changed: false, definition, why: 'no rule to extend' };
-  node.data.rule = { and: [node.data.rule, clone(AUTO_HELP_REOPEN_GUARD_RULE)] };
-  return { changed: true, definition: def, why: 'wrapped the rule with the reply-verdict guard' };
+  if (node.data?.ignoreAutoHelpThanks === true || text.includes('autoHelpReplyVerdict')) return { changed: false, definition, why: 'already guarded' };
+  if (!node.data?.conditionGroup && !node.data?.rule) return { changed: false, definition, why: 'no rule to extend' };
+  // 14 Oct 2026: the guard is the step's switch ("Ignore a thank-you or
+  // out-of-office reply after an Auto-help close"), applied by the engine
+  // before the conditions — same effect as AND-ing AUTO_HELP_REOPEN_GUARD_RULE.
+  node.data.ignoreAutoHelpThanks = true;
+  return { changed: true, definition: def, why: 'turned on the Auto-help thank-you switch' };
 }
 
 export function applyGuard(kind, definition) {

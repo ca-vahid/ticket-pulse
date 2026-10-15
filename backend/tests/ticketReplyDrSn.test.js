@@ -288,6 +288,12 @@ describe('POST idempotency (DR3/DR5)', () => {
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledTimes(2);
   });
 
+  test('a note sent as raw editor text is stored without "&nbsp;" (QA 10-14 #4)', async () => {
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'waiting on the vendor quote&nbsp;' }, agent);
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls.at(-1)[0];
+    expect(data.bodyText).toBe('waiting on the vendor quote');
+  });
+
   test('a failed dedupe lookup never blocks the send (fail-open)', async () => {
     prismaMock.ticketThreadEntry.findMany.mockRejectedValue(new Error('db hiccup'));
     const result = await ticketService.addReply(501, 1, { bodyText: 'still goes' }, agent);

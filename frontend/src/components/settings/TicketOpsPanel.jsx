@@ -1690,6 +1690,79 @@ export function DefaultStatusesSection() {
   );
 }
 
+// QA 10-14 #1: the feature views a workspace can hide from the Tickets rail.
+export const HIDEABLE_TICKET_VIEWS = [
+  { key: 'solutions', label: 'Verified solutions' },
+  { key: 'scheduled', label: 'Scheduled' },
+  { key: 'grouped', label: 'Grouped' },
+  { key: 'parked', label: 'Parked' },
+  { key: 'auto_help_waiting', label: 'Auto-help waiting' },
+];
+
+/**
+ * QA 10-14 #1: which of those views show in this workspace. Hiding only takes
+ * the view off the list; a link with its filters still opens it.
+ */
+export function TicketViewsSection() {
+  const [hidden, setHidden] = useState(null); // null = loading
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    ticketsAPI.meta()
+      .then((res) => setHidden(Array.isArray(res.data?.hiddenViews) ? res.data.hiddenViews : []))
+      .catch(() => setHidden([]));
+  }, []);
+
+  const toggle = async (key) => {
+    const next = hidden.includes(key) ? hidden.filter((k) => k !== key) : [...hidden, key];
+    setHidden(next); setBusy(true); setError(null); setSaved(false);
+    try {
+      const res = await ticketsAPI.updateHiddenViews(next);
+      setHidden(Array.isArray(res.data?.views) ? res.data.views : next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <SectionCard
+      icon={Eye}
+      title="Ticket views"
+      hint="Which of these views show in the Tickets list for this workspace. Untick the ones nobody here uses. Everyone in the workspace sees the same list; the views themselves keep working."
+    >
+      {hidden === null ? (
+        <p className="text-xs text-muted-foreground/75 italic">Loading…</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-2" role="group" aria-label="Ticket views shown">
+            {HIDEABLE_TICKET_VIEWS.map((v) => (
+              <label key={v.key} className="inline-flex items-center gap-1.5 text-sm text-foreground/85">
+                <input
+                  type="checkbox"
+                  checked={!hidden.includes(v.key)}
+                  disabled={busy}
+                  onChange={() => toggle(v.key)}
+                  className="tp-focus-ring h-4 w-4 rounded border-input"
+                />
+                {v.label}
+              </label>
+            ))}
+          </div>
+          <div className="mt-2.5 flex items-center gap-3 text-xs">
+            <span className="text-muted-foreground">{hidden.length ? `Hidden: ${HIDEABLE_TICKET_VIEWS.filter((v) => hidden.includes(v.key)).map((v) => v.label).join(', ')}` : 'Every view shows'}</span>
+            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/75" aria-hidden="true" />}
+            {saved && <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-300"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
+            {error && <span className="text-red-500">{error}</span>}
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
 export function QueueCardsSection() {
   const [cards, setCards] = useState(null); // null = loading
   const [busy, setBusy] = useState(false);
@@ -2331,6 +2404,7 @@ export default function TicketOpsPanel() {
       <TicketStatusesSection />
       <QueueCardsSection />
       <DefaultStatusesSection />
+      <TicketViewsSection />
       <RequesterRepliesSection />
       <SlaSection />
       <TrustedDomainsSection />

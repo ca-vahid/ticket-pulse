@@ -89,7 +89,7 @@ describe('B1 — dueBy', () => {
   });
 
   test('createTicket stores a caller date as MANUAL and lets it beat the SLA clock', () => {
-    const src = readFileSync(new URL('../src/services/ticketService.js', import.meta.url), 'utf8');
+    const src = readFileSync(new URL('../src/services/ticketService.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n'); // CRLF on Windows checkouts
     expect(src).toContain("dueBy: z.string().datetime({ offset: true }).optional().nullable(),\n  impact:");
     expect(src).toContain("...(data.dueBy\n          ? { dueBy: new Date(data.dueBy), dueBySetBy: 'manual' }\n          : (slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy, dueBySetBy: 'sla' } : {})),");
   });

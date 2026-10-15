@@ -125,7 +125,9 @@ function RowMenu({ workflow, displayName, onRowAction, onClose }) {
   const isArchived = Boolean(workflow.archivedAt);
   const items = [
     { key: 'variant', label: 'New variant…' },
-    ...(workflow.isDefaultVariant ? [] : [{ key: isArchived ? 'restore' : 'archive', label: isArchived ? 'Restore' : 'Archive' }]),
+    // A default is never archived here; one retired by Ticket Ops → When a
+    // requester replies can still be restored.
+    ...(workflow.isDefaultVariant && !isArchived ? [] : [{ key: isArchived ? 'restore' : 'archive', label: isArchived ? 'Restore' : 'Archive' }]),
     ...(isArchived && !workflow.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', danger: true }] : []),
   ];
   return (

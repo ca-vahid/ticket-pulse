@@ -51,6 +51,16 @@ describe('Teams settings: disconnect an agent', () => {
     expect(screen.getByTestId('teams-disconnect-7')).toBeInTheDocument();
   });
 
+  test('"Reinstall" on a connected agent asks for that one person and says when the app was put back', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: STATUS });
+    teamsAdminAPI.install.mockResolvedValue({ data: { connected: 1, reinstalled: 1, failed: [], skippedDisconnected: 0 } });
+    render(<TeamsSettingsPanel />);
+    fireEvent.click(await screen.findByTestId('teams-reinstall-7'));
+    await waitFor(() => expect(teamsAdminAPI.install).toHaveBeenCalledWith({ technicianIds: [7] }));
+    expect(await screen.findByText(/the app was put back for 1/)).toBeInTheDocument();
+    expect(screen.queryByTestId('teams-reinstall-8')).toBeNull();
+  });
+
   test('a disconnected agent says so and offers "Connect again"', async () => {
     teamsAdminAPI.status.mockResolvedValue({ data: STATUS });
     render(<TeamsSettingsPanel />);

@@ -129,6 +129,18 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     expect(props.onRowAction).toHaveBeenCalledWith(WORKFLOWS[1], 'archive');
   });
 
+  test('a default is never archived from the menu, but one retired by "When a requester replies" can be restored', () => {
+    const retired = { id: 9764, name: 'Reopen on requester reply', triggerType: 'ticket.assigned', isDefaultVariant: true, isEnabled: false, publishedVersion: 2, archivedAt: '2026-10-14T18:00:00Z', runs: [] };
+    const props = renderIndex({ onRowAction: vi.fn(), workflows: [WORKFLOWS[0], retired] });
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for Assignment notice' }));
+    expect(screen.queryByRole('menuitem', { name: 'Archive' })).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for Reopen on requester reply' }));
+    expect(screen.queryByRole('menuitem', { name: 'Delete permanently' })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
+    expect(props.onRowAction).toHaveBeenCalledWith(retired, 'restore');
+  });
+
   test('filters are text: Enabled narrows, Failing shows a count only when something fails, Archived is a toggle', () => {
     const props = renderIndex({ onShowArchivedChange: vi.fn(), archivedCount: 4 });
     expect(screen.getByRole('button', { name: 'Failing' })).toBeInTheDocument();

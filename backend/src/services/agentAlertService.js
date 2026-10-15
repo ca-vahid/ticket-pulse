@@ -5,6 +5,7 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolveAgentTechnician } from './agentCompetencyService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 const TRIGGERS = ['created', 'priority_raised', 'recategorized'];
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
@@ -345,7 +346,7 @@ class AgentAlertService {
     // Email
     if (sub.channelEmail && sub.technician.email) {
       const esc = (s) => String(s || '').replace(/</g, '&lt;');
-      const rows = tickets.map((t) => `<li><a href="${publicBase}/tickets/${t.id}">${ticketDisplayRef(t)}</a> — ${esc(t.subject) || '(no subject)'} <span style="color:#64748b">(${PRIORITY_LABELS[t.priority] || 'P?'}, ${esc(t.status)})</span></li>`).join('');
+      const rows = tickets.map((t) => `<li><a href="${ticketLinkUrl(publicBase, t)}">${ticketDisplayRef(t)}</a> — ${esc(t.subject) || '(no subject)'} <span style="color:#64748b">(${PRIORITY_LABELS[t.priority] || 'P?'}, ${esc(t.status)})</span></li>`).join('');
       const html = [
         `<p>Your alert <b>${esc(scope)}</b> matched ${headline}.</p>`,
         `<ul>${rows}</ul>`,

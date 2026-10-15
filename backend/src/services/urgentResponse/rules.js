@@ -495,6 +495,28 @@ function dayWord(value) {
   return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]} ${d.getUTCDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]}`;
 }
 
+/** "the Service Desk group's" (a name that already ends in "group" is not doubled). */
+export function groupPossessive(name) {
+  const group = String(name || '').trim();
+  if (!group) return "the group's";
+  return /\bgroup$/i.test(group) ? `the ${group}'s` : `the ${group} group's`;
+}
+
+/**
+ * Which coordinator, in words: "the Service Desk group's coordinator, Priya
+ * Nair", "the Service Desk group's backup, Sam Okafor (Priya is on leave)",
+ * "the workspace coordinator, Dana Whitfield (Priya and Sam are away)", or
+ * plainly "the coordinator, …" when no group named anybody.
+ */
+function coordinatorRole(ctx, name) {
+  const whose = groupPossessive(ctx.group);
+  const note = ctx.awayNote ? ` (${ctx.awayNote})` : '';
+  if (ctx.role === 'group') return `${whose} coordinator, ${name}`;
+  if (ctx.role === 'group_backup') return `${whose} backup, ${name}${note}`;
+  if (ctx.role === 'workspace' && ctx.awayNote) return `the workspace coordinator, ${name}${note}`;
+  return `the coordinator, ${name}`;
+}
+
 /** ['a', 'b', 'c'] → 'a, b and c'. */
 function listWords(items) {
   if (items.length <= 1) return items.join('');
@@ -514,6 +536,9 @@ function listWords(items) {
  *   why           e.g. "at work, fewest open tickets" (rankResponders().why)
  *   minutes       business minutes untouched
  *   moves         moves already made (coordinator)
+ *   role          coordinator: 'group' | 'group_backup' | 'workspace' — which one was used
+ *   group         coordinator: the ticket's group name
+ *   awayNote      coordinator: why the group's people were passed over, e.g. "Priya is on leave"
  *   contact       the person told when nobody is at work
  *   texted        on-call: the SMS went out
  *   actor         who pressed Undo
@@ -572,14 +597,24 @@ export function sentenceFor(action, ctx = {}) {
     const after = ctx.moves !== undefined && ctx.moves !== null ? `${word} and still untouched after ${movesText(ctx.moves)}` : `${word} and still untouched`;
     // `alreadyOwner`: the coordinator is the person who has it.
     if (ctx.alreadyOwner) {
+      const role = coordinatorRole(ctx, from);
       return shadow
-        ? join(`Shadow: would have told the coordinator, ${from}, who already has it`, after)
-        : join(after, `It is already with the coordinator, ${from}, who was told`);
+        ? join(`Shadow: would have told ${role}, who already has it`, after)
+        : join(after, `It is already with ${role}, who was told`);
     }
-    if (!ctx.to) return shadow ? join(`Shadow: would have left it with ${from}: no coordinator is set`, after) : join(after, `No coordinator is set, so it stays with ${from}`);
+    if (!ctx.to) {
+      // The group named people, but none of them is at work and there is no workspace coordinator.
+      if (ctx.awayNote) {
+        return shadow
+          ? join(`Shadow: would have left it with ${from}: no coordinator is at work (${ctx.awayNote}) and no workspace coordinator is set`, after)
+          : join(after, `No coordinator is at work (${ctx.awayNote}) and no workspace coordinator is set, so it stays with ${from}`);
+      }
+      return shadow ? join(`Shadow: would have left it with ${from}: no coordinator is set`, after) : join(after, `No coordinator is set, so it stays with ${from}`);
+    }
+    const role = coordinatorRole(ctx, to);
     return shadow
-      ? join(`Shadow: would have assigned to the coordinator, ${to}`, after)
-      : join(after, `Assigned to the coordinator, ${to}, who was told`);
+      ? join(`Shadow: would have assigned to ${role}`, after)
+      : join(after, `Assigned to ${role}, who was told`);
   }
   case 'undone':
     return endStop(`Moved back to ${to} by ${person(ctx.actor)} (undo)`);

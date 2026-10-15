@@ -13,8 +13,17 @@ import scheduledSyncService from '../services/scheduledSyncService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import azureAdService from '../services/azureAdService.js';
 import logger from '../utils/logger.js';
+import { resolveTicketShortLink, RESERVED_WORKSPACE_SLUGS } from '../services/ticketShortLinkService.js';
+import workspaceLinkNameService from '../services/workspaceLinkNameService.js';
 
 const router = express.Router();
+
+/** A workspace slug is the first part of its short ticket links, so it may not be a page name. */
+function reservedSlugError(slug) {
+  return RESERVED_WORKSPACE_SLUGS.includes(String(slug || '').trim().toLowerCase())
+    ? `"${slug}" is the name of a page in Ticket Pulse; choose another short name for the workspace`
+    : null;
+}
 
 router.use(requireAuth);
 
@@ -43,6 +52,9 @@ router.get(
       // the label; technician-only rows carry role 'agent'.
       workspaces = await workspaceRepository.getMergedWorkspaces(email);
     }
+    // Short ticket links: each workspace's link name (/it/TP-10000).
+    const linkNames = await workspaceLinkNameService.getLinkNames(workspaces).catch(() => ({}));
+    workspaces = workspaces.map((ws) => ({ ...ws, linkName: linkNames[ws.id] || ws.slug }));
 
     res.json({ success: true, data: workspaces });
   }),
@@ -97,6 +109,7 @@ router.get(
       dbMap.set(String(ws.freshserviceWorkspaceId), ws);
     }
 
+    const linkNames = await workspaceLinkNameService.getLinkNames([...dbWorkspaces, ...dbInactive]).catch(() => ({}));
     const merged = fsWorkspaces.map(fsWs => {
       const fsId = String(fsWs.id);
       const dbWs = dbMap.get(fsId);
@@ -112,7 +125,7 @@ router.get(
         description: fsWs.description || null,
         primary: fsWs.primary || false,
         status,
-        dbWorkspace: dbWs || null,
+        dbWorkspace: dbWs ? { ...dbWs, linkName: linkNames[dbWs.id] || dbWs.slug } : null,
       };
     });
 
@@ -139,6 +152,8 @@ router.post(
     }
 
     const wsSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const slugError = reservedSlugError(wsSlug);
+    if (slugError) return res.status(400).json({ success: false, message: slugError });
 
     let ws;
     const existing = await workspaceRepository.getByFreshserviceId(freshserviceWorkspaceId);
@@ -185,6 +200,43 @@ router.get(
 );
 
 /**
+ * GET /api/workspaces/resolve-ticket?ref=TP-1876[&workspace=it]
+ * Short ticket links (ticketpulse.bgcsaas.com/it/1876): every ticket matching the
+ * reference in a workspace this user can open. Declared before /:id.
+ */
+router.get(
+  '/resolve-ticket',
+  asyncHandler(async (req, res) => {
+    const result = await resolveTicketShortLink({
+      ref: req.query.ref,
+      workspace: req.query.workspace || null,
+      user: sessionUser(req),
+    });
+    if (result.status === 'bad_ref') {
+      return res.status(400).json({ success: false, message: 'Not a ticket number' });
+    }
+    if (result.status === 'unknown_workspace') {
+      return res.json({ success: true, data: { matches: [], unknownWorkspace: true } });
+    }
+    res.json({ success: true, data: { matches: result.matches } });
+  }),
+);
+
+/**
+ * PUT /api/workspaces/:id/link-name { linkName } (admin): the short first part of
+ * this workspace's ticket links. The slug (used by FreshService webhooks) is untouched.
+ */
+router.put(
+  '/:id/link-name',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const result = await workspaceLinkNameService.setLinkName(Number(req.params.id), req.body?.linkName);
+    if (!result.ok) return res.status(400).json({ success: false, message: result.error });
+    res.json({ success: true, data: { linkName: result.linkName } });
+  }),
+);
+
+/**
  * GET /api/workspaces/:id
  */
 router.get(
@@ -211,6 +263,8 @@ router.post(
         message: 'name, slug, and freshserviceWorkspaceId are required',
       });
     }
+    const slugError = reservedSlugError(slug);
+    if (slugError) return res.status(400).json({ success: false, message: slugError });
 
     const ws = await workspaceRepository.create({
       name,
@@ -238,6 +292,10 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const before = await workspaceRepository.getById(id).catch(() => null);
+    if (req.body?.slug !== undefined) {
+      const slugError = reservedSlugError(req.body.slug);
+      if (slugError) return res.status(400).json({ success: false, message: slugError });
+    }
     const ws = await workspaceRepository.update(id, req.body);
     // v3.8.91: a cadence change takes effect now, not at the next restart.
     const cadenceChanged = before && ws && (

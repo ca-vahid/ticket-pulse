@@ -31,7 +31,9 @@ jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js'
 }));
 
 const { default: repo, isMirrorEcho } = await import('../src/services/ticketThreadRepository.js');
-const flush = () => new Promise((r) => setTimeout(r, 15));
+// The reply event fires after bulkUpsert returns; under full-suite load 15 ms was not always enough.
+const flush = async () => { for (let i = 0; i < 10; i += 1) await new Promise((r) => setTimeout(r, 10)); };
+const until = async (check, ms = 3000) => { const end = Date.now() + ms; while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 10)); };
 
 const TP_BORN = 62973; // TP-1888
 const FS_BORN = 62003; // #245828
@@ -70,6 +72,7 @@ describe('conversation rows read from the FreshService copy of a Ticket Pulse-bo
       row(),
       row({ ticketId: FS_BORN, externalEntryId: 'fs-conversation:1043276686', bodyText: 'Hi Soheil, I realized that I need access to adobe acrobat.' }),
     ]);
+    await until(() => emitTicketEventMock.mock.calls.length > 0);
     await flush();
     const stored = prismaMock.ticketThreadEntry.upsert.mock.calls.map((c) => c[0].create.ticketId);
     expect(stored).toEqual([FS_BORN]);
@@ -87,7 +90,7 @@ describe('conversation rows read from the FreshService copy of a Ticket Pulse-bo
   test('when the origin cannot be read, nothing changes from before (stored, and a reply fires)', async () => {
     prismaMock.ticket.findMany.mockRejectedValue(new Error('pool timeout'));
     await repo.bulkUpsert([row({ ticketId: FS_BORN })]);
-    await flush();
+    await until(() => emitTicketEventMock.mock.calls.length > 0);
     expect(prismaMock.ticketThreadEntry.upsert).toHaveBeenCalledTimes(1);
     expect(emitTicketEventMock).toHaveBeenCalledTimes(1);
   });

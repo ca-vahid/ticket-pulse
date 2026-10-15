@@ -28,6 +28,10 @@ export const AI_OPERATIONS = [
   // Auto-help (plans/AUTO_HELP_PLAN.md): playbook-grounded first answers,
   // tool loop over knowledge articles / resolved tickets. Shadow-only in P0.
   'auto_help',
+  // "When a requester replies" (14 Oct 2026): does a reply to a closed ticket
+  // only say thanks? One short classification per reply the keyword fast path
+  // misses — cheap tier, its own monthly limit (requesterReplyReopenService).
+  'requester_reply_check',
 ];
 
 // Sonnet 5.5 (released 28 Sep 2026: same $2/$10 price as Sonnet 5, >30%
@@ -134,7 +138,7 @@ export const MODEL_METADATA = [
     label: 'Claude Haiku 4.5',
     // Explicit allow-list: the cheap tier never sees image-bearing ops
     // (ticket_intake_extract stays out on purpose).
-    operations: ['ticket_reclassification', 'calendar_leave', 'requester_sentiment', 'ticket_grouping'],
+    operations: ['ticket_reclassification', 'calendar_leave', 'requester_sentiment', 'ticket_grouping', 'requester_reply_check'],
     supportsStreaming: false,
     supportsTools: false,
     supportsJson: true,
@@ -270,7 +274,7 @@ export function anthropicRequestRules(model) {
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);
   if (normalizedProvider === AI_PROVIDER_OPENAI) return DEFAULT_OPENAI_MODEL;
-  if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment' || operation === 'ticket_grouping') {
+  if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment' || operation === 'ticket_grouping' || operation === 'requester_reply_check') {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }
   if (operation === 'daily_review_consolidation') {

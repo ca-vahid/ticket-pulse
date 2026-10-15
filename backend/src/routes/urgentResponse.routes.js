@@ -19,6 +19,9 @@ import { URGENT_RESPONSE_MODES } from '../services/urgentResponse/rules.js';
  *   POST /on-call/requests/:id/respond    accept | decline (first accept wins)
  *   everything else                       workspace admins (requireAdmin)
  *
+ * GET /settings also carries `groupCoordinators`: the groups with their own
+ * coordinator / backup (edited in Settings → Groups, groupCoordinatorService).
+ *
  * "Me" is the signed-in person's ACTIVE technician row in this workspace,
  * matched by e-mail — the same rule as the ticket routes (resolveTicketActor).
  * The engine (urgentResponseService) is imported lazily: it reaches into the
@@ -128,7 +131,16 @@ router.get('/settings', asyncHandler(async (req, res) => {
   const technicians = await settingsService.listTechnicians(req.workspaceId);
   const teamsEnabled = await settingsService.teamsEnabled(req.workspaceId);
   const timezone = await settingsService.timezone(req.workspaceId);
-  res.json({ success: true, data: { settings, technicians, teamsEnabled, onCallOrderSuggested: settings.onCallOrderSuggested === true, timezone } });
+  // The Rules tab lists the groups that have their own coordinator (set in Settings → Groups).
+  const groupCoordinators = await import('../services/groupCoordinatorService.js')
+    .then(({ default: groups }) => groups.listWithNames(req.workspaceId))
+    .catch(() => []);
+  res.json({
+    success: true,
+    data: {
+      settings, technicians, teamsEnabled, onCallOrderSuggested: settings.onCallOrderSuggested === true, timezone, groupCoordinators,
+    },
+  });
 }));
 
 router.put('/settings', asyncHandler(async (req, res) => {

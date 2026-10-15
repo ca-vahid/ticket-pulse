@@ -69,9 +69,43 @@ function Connector() {
   );
 }
 
+/** A person in the group list: their name, marked when they are no longer active. */
+const personName = (p) => (p ? `${p.name}${p.isActive === false ? ' (inactive)' : ''}` : null);
+
+/**
+ * Read-only: the groups that have their own coordinator, set in Settings →
+ * Groups. "Service Desk — Priya Nair (backup Sam Okafor)".
+ */
+function GroupCoordinatorList({ items = [] }) {
+  const list = Array.isArray(items) ? items.filter((g) => g?.coordinator || g?.backup) : [];
+  return (
+    <div className="mt-3 border-t border-border pt-3" data-testid="group-coordinators">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-medium text-foreground">Group coordinators</span>
+        <a href="/settings#groups" className="tp-focus-ring rounded text-xs font-medium text-primary hover:underline">Set them in Groups</a>
+      </div>
+      {list.length ? (
+        <ul className="mt-1 space-y-0.5 text-sm text-foreground/85">
+          {list.map((g) => (
+            <li key={g.groupId} className="min-w-0">
+              <span className="text-foreground">{g.groupName}</span>
+              {g.groupActive === false && <span className="text-muted-foreground"> (inactive group)</span>}
+              <span className="text-muted-foreground"> — </span>
+              {personName(g.coordinator) || 'no coordinator'}
+              {g.backup && <span className="text-muted-foreground"> (backup {personName(g.backup)})</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">No group has its own coordinator yet, so the workspace coordinator is used for every ticket.</p>
+      )}
+    </div>
+  );
+}
+
 export default function RulesTab({
   settings, technicians, techById, teamsEnabled, onCall = null, timezone = null,
-  changesKey = 0, previewDelayMs = 600, onSaved, onOpenOnCall = null,
+  changesKey = 0, previewDelayMs = 600, onSaved, onOpenOnCall = null, groupCoordinators = [],
 }) {
   const saved = useMemo(() => pickRules(settings), [settings]);
   const [draft, setDraft] = useState(saved);
@@ -274,16 +308,19 @@ export default function RulesTab({
             After
             <InlineNumber value={draft.maxMoves} onChange={(v) => set({ maxMoves: v })} max={10} label="Most moves before the coordinator" />
             {draft.maxMoves === 1 ? 'move' : 'moves'}, it goes to the coordinator, who is told. Then the clock stops.
+            <p className="text-xs leading-normal text-muted-foreground">The coordinator is the ticket’s group coordinator if they are at work, else the group’s backup if they are at work, else the person below.</p>
           </div>
           <div className="mt-2 grid gap-1.5 sm:max-w-sm">
-            <span className="text-sm font-medium text-foreground">Coordinator</span>
+            <span className="text-sm font-medium text-foreground">Workspace coordinator (when a group has none)</span>
+            <span className="text-xs text-muted-foreground">Also used when a group’s coordinator and backup are both away.</span>
             <FancySelect
               value={draft.coordinatorTechnicianId ? String(draft.coordinatorTechnicianId) : ''}
               onChange={(v) => set({ coordinatorTechnicianId: v ? Number(v) : null })}
               options={personOptions(draft.coordinatorTechnicianId, 'Nobody (it stays with its last owner)')}
-              aria-label="Coordinator"
+              aria-label="Workspace coordinator"
             />
           </div>
+          <GroupCoordinatorList items={groupCoordinators} />
         </section>
 
         <section className={CARD_CLASS} aria-label="How the next owner is picked">

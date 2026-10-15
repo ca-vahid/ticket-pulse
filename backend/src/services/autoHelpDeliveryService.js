@@ -38,6 +38,7 @@ import { htmlToText } from './knowledgeArticleService.js';
 import { DECISIONS, DISMISS_REASON_VALUES, PRE_SEND_OUTCOMES, editDistance } from './autoHelpOutcomes.js';
 import { emitAutoHelpEvent } from './autoHelpEvents.js';
 import autoHelpAckMergeService, { mergeAckIntoMail } from './autoHelpAckMergeService.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 /** "Ticket ready" gets this long to hold acknowledgements before an auto answer goes. */
 const READY_BEFORE_SEND_MAX_MS = 45 * 1000;
@@ -685,7 +686,7 @@ class AutoHelpDeliveryService {
       const when = r.outcomeDetail?.scheduledAuto?.at ? formatInTimeZone(new Date(r.outcomeDetail.scheduledAuto.at), tz, 'EEE h:mm a') : '';
       return {
         ref: ticketDisplayRef(t), subject: t.subject || '', requester: t.requester?.name || '', status: t.status || '',
-        playbook: byPlaybook.get(r.playbookId) || '', when, outcome: r.outcome || null, link: `${base}/tickets/${t.id}`,
+        playbook: byPlaybook.get(r.playbookId) || '', when, outcome: r.outcome || null, link: `${ticketLinkUrl(base, t)}`,
       };
     });
     const n = lines.length;

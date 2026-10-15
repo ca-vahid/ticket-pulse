@@ -60,7 +60,7 @@ export default function TeamsSettingsPanel() {
     try {
       const res = await teamsAdminAPI.install(technicianIds ? { technicianIds } : {});
       const r = res.data || res;
-      setNotice(`Connected ${r.connected}${r.skippedDisconnected ? ` · ${r.skippedDisconnected} disconnected by an admin left alone` : ''}${r.failed?.length ? ` · ${r.failed.length} could not be connected` : ''}`);
+      setNotice(`Connected ${r.connected}${r.reinstalled ? ` · the app was put back for ${r.reinstalled}` : ''}${r.skippedDisconnected ? ` · ${r.skippedDisconnected} disconnected by an admin left alone` : ''}${r.failed?.length ? ` · ${r.failed.length} could not be connected` : ''}`);
       if (r.failed?.length) setError(r.failed.slice(0, 3).map((f) => `${f.email}: ${f.error}`).join(' · '));
       await load();
     } catch (err) {
@@ -156,6 +156,11 @@ export default function TeamsSettingsPanel() {
                   {!a.connected && (
                     <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-50">
                       {busy === `install-${a.id}` ? 'Connecting…' : a.disconnected ? 'Connect again' : 'Connect'}
+                    </button>
+                  )}
+                  {a.connected && confirmDisconnect !== a.id && (
+                    <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} title="Checks with Teams and puts the app back if it was removed" className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" data-testid={`teams-reinstall-${a.id}`}>
+                      {busy === `install-${a.id}` ? 'Checking…' : 'Reinstall'}
                     </button>
                   )}
                   {a.connected && confirmDisconnect !== a.id && (

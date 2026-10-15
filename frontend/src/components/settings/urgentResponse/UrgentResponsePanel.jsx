@@ -177,6 +177,7 @@ export default function UrgentResponsePanel({ initialTab = 'rules', previewDelay
                   previewDelayMs={previewDelayMs}
                   onSaved={onSaved}
                   onOpenOnCall={() => selectTab('oncall')}
+                  groupCoordinators={data.groupCoordinators || []}
                 />
               )}
               {data && t.id === 'oncall' && (

@@ -1404,6 +1404,38 @@ describe('GET /condition-fields', () => {
     }
   });
 
+  // 14 Oct 2026: free-text fields get this workspace's real values so "is any
+  // of" can be a tick list; the field stays free text.
+  test('categories, subcategories, tags and agents are served as options', async () => {
+    prismaMock.competencyCategory = {
+      findMany: jest.fn(({ where }) => Promise.resolve(where.parentId === null
+        ? [{ name: 'Hardware' }, { name: 'Accounts' }]
+        : [{ name: 'Laptop' }, { name: 'Laptop' }, { name: 'MFA' }])),
+    };
+    prismaMock.ticketTag = { findMany: jest.fn().mockResolvedValue([{ name: 'vip' }]) };
+    prismaMock.technician = { findMany: jest.fn().mockResolvedValue([{ name: 'Dana', email: 'dana@example.com' }]) };
+    try {
+      const response = await request(buildApp(1)).get('/api/notification-workflows/condition-fields').expect(200);
+      const byValue = Object.fromEntries(response.body.data.map((f) => [f.value, f]));
+      expect(byValue['ticket.internalCategory']).toEqual(expect.objectContaining({ type: 'string', options: ['Hardware', 'Accounts'] }));
+      expect(byValue['ticket.internalSubcategory'].options).toEqual(['Laptop', 'MFA']);
+      expect(byValue['ticket.tags']).toEqual(expect.objectContaining({ type: 'list', options: ['vip'] }));
+      expect(byValue['assignedAgent.name'].options).toEqual(['Dana']);
+      expect(byValue['assignedAgent.email'].options).toEqual(['dana@example.com']);
+      expect(prismaMock.technician.findMany.mock.calls[0][0].where).toEqual({ workspaceId: 1, isActive: true });
+    } finally {
+      delete prismaMock.competencyCategory;
+      delete prismaMock.ticketTag;
+      delete prismaMock.technician;
+    }
+  });
+
+  test('without those tables (or on a failure) the fields stay plain free text', async () => {
+    const response = await request(buildApp(1)).get('/api/notification-workflows/condition-fields').expect(200);
+    const category = response.body.data.find((f) => f.value === 'ticket.internalCategory');
+    expect(category).toEqual({ value: 'ticket.internalCategory', label: 'Category', type: 'string' });
+  });
+
   test('a failing custom-field lookup never breaks the static catalog', async () => {
     prismaMock.customFieldDefinition = { findMany: jest.fn().mockRejectedValue(new Error('db down')) };
     try {

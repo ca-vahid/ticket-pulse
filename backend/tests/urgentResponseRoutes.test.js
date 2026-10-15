@@ -36,6 +36,7 @@ const prismaMock = {
   ticket: { findMany: jest.fn() },
 };
 const wsRepo = { getAccessRole: jest.fn() };
+const groupCoordSvc = { listWithNames: jest.fn() };
 
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -45,6 +46,7 @@ jest.unstable_mockModule('../src/services/urgentResponse/settingsService.js', ()
   soft: (fn, fallback = null) => Promise.resolve().then(fn).catch(() => fallback),
 }));
 jest.unstable_mockModule('../src/services/urgentResponse/onCallService.js', () => ({ default: onCallSvc }));
+jest.unstable_mockModule('../src/services/groupCoordinatorService.js', () => ({ default: groupCoordSvc }));
 // The engine reads "open" from the AI's workload helper; the preview only needs it to answer.
 jest.unstable_mockModule('../src/services/assignmentTools.js', () => ({ openWorkloadStatuses: jest.fn(async () => ['Open', 'Pending']) }));
 
@@ -112,6 +114,7 @@ beforeEach(() => {
   prismaMock.urgentResponseAction.findFirst.mockResolvedValue(null);
   prismaMock.urgentResponseAction.groupBy.mockResolvedValue([]);
   prismaMock.ticket.findMany.mockResolvedValue([]);
+  groupCoordSvc.listWithNames.mockResolvedValue([]);
 });
 
 describe('any member, agents included', () => {
@@ -269,7 +272,19 @@ describe('workspace admins only', () => {
       teamsEnabled: true,
       onCallOrderSuggested: true,
       timezone: 'America/Vancouver',
+      groupCoordinators: [],
     });
+  });
+
+  test('GET /settings lists the groups with their own coordinator; an unreadable list is empty, never a failure', async () => {
+    const SD = { groupId: 3, groupName: 'Service Desk', groupActive: true, coordinator: { id: 11, name: 'Andrew Fong', isActive: true }, backup: null };
+    groupCoordSvc.listWithNames.mockResolvedValue([SD]);
+    expect((await request(app(ADMIN)).get('/api/urgent-response/settings')).body.data.groupCoordinators).toEqual([SD]);
+    expect(groupCoordSvc.listWithNames).toHaveBeenCalledWith(1);
+    groupCoordSvc.listWithNames.mockRejectedValue(new Error('db down'));
+    const r = await request(app(ADMIN)).get('/api/urgent-response/settings');
+    expect(r.status).toBe(200);
+    expect(r.body.data.groupCoordinators).toEqual([]);
   });
 
   test('PUT /settings carries the session user to the audit; a refused save is a 400', async () => {

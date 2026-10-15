@@ -28,6 +28,7 @@ import { autofillCard, textCard, textToCardMarkdown } from './teamsCards.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketDisplayRef, TICKET_SOURCE } from '../utils/ticketOrigin.js';
 import { AppError, NotFoundError } from '../utils/errors.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 export const DRAFT_TTL_MS = 30 * 60 * 1000;
 export const TEAMS_INTAKE_LIMITS = Object.freeze({
@@ -600,7 +601,7 @@ class TeamsIntakeService {
 
   async _createdCard(draft, message = null) {
     const t = draft.ticketId ? await prisma.ticket.findFirst({ where: { id: draft.ticketId }, select: { id: true, subject: true, nativeNumber: true, origin: true, freshserviceTicketId: true } }).catch(() => null) : null;
-    return autofillCard({ ticketRef: t ? ticketDisplayRef(t) : null, subject: t?.subject || null, ticketUrl: t ? `${baseUrl()}/tickets/${t.id}` : null, ...(message ? { message } : {}) }, 'created');
+    return autofillCard({ ticketRef: t ? ticketDisplayRef(t) : null, subject: t?.subject || null, ticketUrl: t ? `${ticketLinkUrl(baseUrl(), t)}` : null, ...(message ? { message } : {}) }, 'created');
   }
 
   async _rerun(draft, token, data, activity) {
@@ -725,7 +726,7 @@ class TeamsIntakeService {
       ticketRef: ref,
       subject,
       workspaceName: ws.name,
-      ticketUrl: `${baseUrl()}/tickets/${ticket.id}`,
+      ticketUrl: `${ticketLinkUrl(baseUrl(), ticket)}`,
       message: `${PRIORITY_WORD[body.priority] || 'Medium'} priority, ${who}${pics}.${lost}`,
     }, 'created');
   }

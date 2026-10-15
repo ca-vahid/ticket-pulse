@@ -58,15 +58,19 @@ describe('the update_ticket node is wired to it', () => {
     // Order matters: the ticket row must already say Open when the trigger
     // hydrates it, otherwise conditions on ticket.status see the OLD value.
     const write = src.indexOf('await prisma.ticket.update({ where: { id: ticket.id }, data: patch });');
-    const emit = src.indexOf('await emitWorkflowReopened({ ticket, patch, workflowId });');
+    const emit = src.indexOf('await emitWorkflowReopened({ ticket, patch, workflowId, actor });');
     expect(write).toBeGreaterThan(-1);
     expect(emit).toBeGreaterThan(write);
     expect(emit - write).toBeLessThan(1200); // same function, not somewhere else by coincidence
   });
 
   test('it emits ticket.reopened, loop-guarded by the originating workflow', () => {
-    expect(src).toMatch(/emitTicketEvent\('ticket\.reopened', ticket\.id, \{[\s\S]{0,300}source: workflowId \? `workflow:\$\{workflowId\}` : 'workflow'/);
-    expect(src).toMatch(/reopened: true,[\s\S]{0,80}actorKind: 'workflow'/);
+    // 14 Oct 2026: the write can also be Ticket Pulse's own (When a requester
+    // replies) — then the source / actorKind name it; a workflow's write is
+    // unchanged (behaviour in notificationWorkflowFsStatusWriteback.test.js).
+    expect(src).toMatch(/emitTicketEvent\('ticket\.reopened', ticket\.id, \{[\s\S]{0,300}source: workflowId \? `workflow:\$\{workflowId\}` : \(who\.source \|\| 'workflow'\)/);
+    expect(src).toMatch(/reopened: true,[\s\S]{0,80}actorKind: who\.kind/);
+    expect(src).toMatch(/const WORKFLOW_UPDATE_ACTOR = Object\.freeze\(\{ name: 'Notification workflow', kind: 'workflow', source: null \}\);/);
   });
 
   test('status_changed is still NOT emitted from workflow writes (standing decision)', () => {

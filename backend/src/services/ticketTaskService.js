@@ -6,6 +6,7 @@ import { sendTransactionalEmail } from './transactionalEmailService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { taskEventPayload } from './relationWebhookPayload.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 // Simorgh Phase C (27 Sep 2026): a task carries the "why" and the steps —
 // plain text, line breaks kept. A longer text is refused, never cut short.
@@ -441,7 +442,7 @@ class TicketTaskService {
       row.description ? `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:4px;white-space:pre-line;">${esc(row.description)}</div>` : '',
       dueLine,
       '</td></tr></table>',
-      `<p style="margin:16px 0 0;"><a href="${publicBase}/tickets/${ticket.id}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,
+      `<p style="margin:16px 0 0;"><a href="${ticketLinkUrl(publicBase, ticket)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,
       '<p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:18px;">Sent by Ticket Pulse — you can review the full task list on the ticket.</p>',
       '</div>',
     ].join('');
@@ -532,7 +533,7 @@ class TicketTaskService {
         '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;color:#1f2937;max-width:640px;">',
         `<p style="margin:0 0 12px;">Ticket <b>${esc(ref)}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''} is now yours, and it has ${open.length === 1 ? 'an open task' : `${open.length} open tasks`} with nobody named — ${open.length === 1 ? 'it is' : 'they are'} yours as the ticket owner:</p>`,
         `<ul style="margin:0 0 12px;padding-left:20px;">${items}</ul>`,
-        `<p style="margin:16px 0 0;"><a href="${publicBase}/tickets/${ticket.id}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,
+        `<p style="margin:16px 0 0;"><a href="${ticketLinkUrl(publicBase, ticket)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,
         '<p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:18px;">Sent by Ticket Pulse.</p>',
         '</div>',
       ].join('');

@@ -25,6 +25,7 @@ import assetronClient, { AssetronError, assetronConfig } from '../integrations/a
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
 
 const SWEEP_MS = 2 * 60 * 1000;
 const MAX_ITEMS = 5;
@@ -176,7 +177,7 @@ class AssetronReservationService {
     const body = {
       assetId: hardware.assetId,
       requestedFor: { email: hardware.recipient.email, ...(entraObjectId ? { entraObjectId } : {}) },
-      ticket: { ref: ticketDisplayRef(ticket), url: `${base}/tickets/${ticket.id}` },
+      ticket: { ref: ticketDisplayRef(ticket), url: `${ticketLinkUrl(base, ticket)}` },
       approvalId: requestGroupId,
       requestedBy: { email: actor?.email || null, displayName: actor?.name || actor?.email || null },
     };

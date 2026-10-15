@@ -33,6 +33,7 @@ export default function AssigneePicker({
   ticketOrigin = null, // 'ticketpulse' | 'freshservice' — hides local agents on FS-born tickets
   currentTech = null, // the ticket's own assignee object {id,name,photoUrl,isActive,origin} — used when the assignee isn't in the active team list (deactivated / FS-only agents)
   askHandBack = true, // false = clearing the assignee never asks why (forms that aren't a real ticket yet)
+  onOverride = null, // (res, ticketId, techId) => void: the parent asks "why?" (a queue row can unmount right after the save)
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -166,7 +167,8 @@ export default function AssigneePicker({
       // The interceptor unwraps to the {success, data} envelope; the assign
       // payload flags manual picks that override a completed AI decision.
       // (Both write paths carry it: native assign AND the FS write-back.)
-      overridePrompt.maybePrompt(res, ticketId, techId);
+      if (onOverride) onOverride(res, ticketId, techId);
+      else overridePrompt.maybePrompt(res, ticketId, techId);
       onAssigned?.(techId);
     } catch { /* cancelled or failed — the silent refresh shows the true state */ }
     setBusy(false);

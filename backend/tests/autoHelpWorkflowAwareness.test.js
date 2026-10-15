@@ -146,15 +146,17 @@ describe('seeded-template guards', () => {
     expect(built.edges.find((e) => e.source === 'trigger').target).toBe('not-auto-help-close');
   });
 
-  test('Reopen on reply: thanks / an out-of-office after an Auto-help close does not reopen; anything else does', () => {
+  test('Reopen on reply: thanks / an out-of-office after an Auto-help close does not reopen; anything else does', async () => {
+    // 14 Oct 2026: builder rows + the step's Auto-help switch (no raw rule).
+    const { conditionStepPasses } = await import('../src/services/workflowRuleConversion.js');
     const built = def.buildDefaultWorkflowDefinition('ticket.reply_received');
-    const rule = built.nodes.find((n) => n.id === 'is-resolved').data.rule;
+    const data = built.nodes.find((n) => n.id === 'is-resolved').data;
     const scope = (verdict, status = 'Resolved') => ({ ticket: { status }, event: { extra: verdict ? { autoHelpReplyVerdict: verdict } : {} } });
-    expect(jsonLogic.apply(rule, scope('confirmed'))).toBe(false);
-    expect(jsonLogic.apply(rule, scope('auto_reply'))).toBe(false);
-    expect(jsonLogic.apply(rule, scope('help'))).toBe(true);
-    expect(jsonLogic.apply(rule, scope(null))).toBe(true);
-    expect(jsonLogic.apply(rule, scope(null, 'Open'))).toBe(false);
+    expect(conditionStepPasses(data, scope('confirmed'))).toBe(false);
+    expect(conditionStepPasses(data, scope('auto_reply'))).toBe(false);
+    expect(conditionStepPasses(data, scope('help'))).toBe(true);
+    expect(conditionStepPasses(data, scope(null))).toBe(true);
+    expect(conditionStepPasses(data, scope(null, 'Open'))).toBe(false);
   });
 
   test('the retired AI first-reply template is out of the gallery but its definition still loads', () => {
@@ -183,7 +185,8 @@ describe('one-off guard transforms (installed copies)', () => {
   };
   const legacyReopen = () => {
     const d = def.buildDefaultWorkflowDefinition('ticket.reply_received');
-    d.nodes.find((n) => n.id === 'is-resolved').data.rule = { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] };
+    // As seeded before W3: a raw status rule, no conditions, no switch.
+    d.nodes.find((n) => n.id === 'is-resolved').data = { label: 'Ticket already resolved or closed?', rule: { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] } };
     return d;
   };
 

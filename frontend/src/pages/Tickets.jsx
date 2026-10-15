@@ -1218,6 +1218,9 @@ export default function Tickets() {
   // Aggregated correction loop for bulk assign: if any of the assigned tickets
   // overrode a completed AI decision, ONE toast asks why and records the chosen
   // reason for every overridden ticket (QA 08-04 #9).
+  // A row's own assignee picker asks through this one too (14 Oct 2026): the
+  // prompt used to live in the row, and a ticket you hand to someone else
+  // leaves "Mine" on the refresh after the save, taking the prompt with it.
   const bulkOverride = useOverridePrompt();
   const [bulkResult, setBulkResult] = useState(null); // { ok, failed: [{ref, message}], skipped }
   // Query scope (gap plan P2.2): the action applies to EVERYTHING matching the
@@ -2325,6 +2328,7 @@ export default function Tickets() {
                                   fsAssign,
                                   fsStatusChange,
                                   onManualAssigned,
+                                  onOverride: bulkOverride.maybePrompt,
                                   onOpenFull: openTicket,
                                 };
                                 // Phone quick actions behind the card (PhoneSwipeRow).

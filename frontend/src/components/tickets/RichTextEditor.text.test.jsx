@@ -26,4 +26,9 @@ describe('htmlToPlainText', () => {
     expect(htmlToPlainText('')).toBe('');
     expect(htmlToPlainText(null)).toBe('');
   });
+
+  test('a one-line note with no tags leaves without its HTML codes (QA 10-14 #4)', () => {
+    expect(htmlToPlainText('waiting on the vendor quote&nbsp;')).toBe('waiting on the vendor quote');
+    expect(htmlToPlainText('Tom &amp; Jerry &lt;3')).toBe('Tom & Jerry <3');
+  });
 });

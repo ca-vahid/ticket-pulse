@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 
 /** Where the relation webhooks and the workflow roll-up skip are wired (Phase B-2). */
-const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+// Line endings normalised: a Windows checkout (core.autocrlf) has CRLF files and multi-line expectations broke there.
+const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 describe('relation webhooks', () => {
   test('links, parent changes, merge and split each emit exactly where the history row is written', () => {
