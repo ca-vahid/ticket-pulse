@@ -50,7 +50,9 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
   const load = useCallback(async () => {
     try {
       const res = await ticketsAPI.links(ticketId);
-      setLinks(res?.data || []);
+      // Parent / child is the family card's job (14 Oct 2026: every child was
+      // listed twice, once there and again here as "parent of").
+      setLinks((res?.data || []).filter((l) => l.kind !== 'parent_of'));
     } catch { setLinks([]); }
   }, [ticketId]);
   useEffect(() => { load(); }, [load, refreshToken]);

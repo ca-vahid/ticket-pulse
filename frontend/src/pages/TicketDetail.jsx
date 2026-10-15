@@ -1822,7 +1822,7 @@ export default function TicketDetail() {
   // ---- Related tickets (accuracy-first): facts + clearly-labeled suggestions ----
   const [related, setRelated] = useState(null);
   const [dupeDismissed, setDupeDismissed] = useState(false);
-  const relatedHasAny = Boolean(related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed) || related.similarByContent?.length > 0));
+  const relatedHasAny = Boolean(related && (related.sameRequester.length > 0 || related.requesterVolume || (related.nearDuplicates.length > 0 && !dupeDismissed) || related.similarByContent?.length > 0));
   // Related tab badge (30 Sep 2026): explicit relations only — parent, children,
   // links — facts, not suggestions. Fetched here so the tab shows it while closed.
   const [linkCount, setLinkCount] = useState(0);
@@ -1834,7 +1834,14 @@ export default function TicketDetail() {
         if (cancelled) return;
         const fam = f?.data?.data || f?.data || {};
         const links = Array.isArray(l?.data) ? l.data : [];
-        setLinkCount((fam.parent ? 1 : 0) + (fam.children?.length || 0) + links.length);
+        // Each related ticket once (14 Oct 2026): a FreshService child is also a
+        // "parent of" link, and five children read as 10.
+        const ids = new Set([
+          ...(fam.parent ? [fam.parent.id] : []),
+          ...(fam.children || []).map((c) => c.id),
+          ...links.map((x) => x.other?.id).filter(Boolean),
+        ]);
+        setLinkCount(ids.size);
         // Open tasks for the Tasks badge before the tab is ever opened (the tab keeps it live after).
         const tasks = t?.data?.data || t?.data;
         if (Array.isArray(tasks)) setTaskOpenCount(tasks.filter((x) => x.status !== 'done').length);
@@ -3663,6 +3670,18 @@ export default function TicketDetail() {
                             <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
                             <h2 className="text-sm font-bold text-foreground">Related</h2>
                           </div>
+                          {/* A team mailbox or an alert sender (14 Oct 2026): its
+                              other tickets are other people's requests. */}
+                          {related.requesterVolume && (
+                            <p className="mb-2.5 text-xs text-muted-foreground" data-testid="related-bulk-sender">
+                              {ticket?.requester?.name || 'This requester'} sends a lot of tickets ({related.requesterVolume.last30Days} in the last 30 days), so they are not listed here.{' '}
+                              {ticket?.requesterId && (
+                                <Link to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester?.name || '')}&status=any`} className="tp-focus-ring text-primary hover:underline">
+                                  See all {related.sameRequesterCount}
+                                </Link>
+                              )}
+                            </p>
+                          )}
                           {related.sameRequester.length > 0 && (
                             <>
                               <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">
@@ -3753,7 +3772,7 @@ export default function TicketDetail() {
                             <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
                             <h2 className="text-sm font-bold text-foreground">Related</h2>
                           </div>
-                          <p className="text-sm italic text-muted-foreground">{related ? 'No other tickets from this requester and no similar tickets found.' : 'Looking for related tickets…'}</p>
+                          <p className="text-sm italic text-muted-foreground">{related ? 'No other related tickets found. Parent and child tickets are listed on the left.' : 'Looking for related tickets…'}</p>
                         </div>
                       )}
                     </div>

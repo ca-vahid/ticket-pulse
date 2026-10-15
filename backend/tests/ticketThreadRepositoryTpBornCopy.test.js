@@ -39,9 +39,9 @@ const TP_BORN = 62973; // TP-1888
 const FS_BORN = 62003; // #245828
 const row = (over = {}) => ({
   ticketId: TP_BORN, workspaceId: 1, externalEntryId: 'fs-conversation:1043274913', source: 'freshservice_conversation',
-  eventType: 'customer_reply', actorName: 'Jeremy Dumais', actorEmail: 'jdumais@example.com', actorFreshserviceId: null,
+  eventType: 'customer_reply', actorName: 'Sam Okafor', actorEmail: 'sokafor@example.com', actorFreshserviceId: null,
   incoming: true, isPrivate: false, visibility: 'customer',
-  bodyText: 'Jeremy Dumais · reply received by e-mail in Ticket Pulse · TP-1888 [Ticket Pulse mirror] Thanks, it works now.',
+  bodyText: 'Sam Okafor · reply received by e-mail in Ticket Pulse · TP-1888 [Ticket Pulse mirror] Thanks, it works now.',
   occurredAt: new Date(), ...over,
 });
 
@@ -58,7 +58,7 @@ describe('conversation rows read from the FreshService copy of a Ticket Pulse-bo
     const out = await repo.bulkUpsert([
       row(),
       row({ externalEntryId: 'fs-conversation:2', eventType: 'private_note', incoming: false, isPrivate: true, bodyText: 'Ticket Pulse · copy of a Ticket Pulse ticket · TP-1888 [Ticket Pulse mirror]' }),
-      row({ externalEntryId: 'fs-conversation:3', eventType: 'public_reply', incoming: false, bodyText: 'Seifeddine Reguige · reply, already e-mailed to the requester by Ticket Pulse' }),
+      row({ externalEntryId: 'fs-conversation:3', eventType: 'public_reply', incoming: false, bodyText: 'Dana Whitfield · reply, already e-mailed to the requester by Ticket Pulse' }),
     ]);
     await flush();
     expect(out).toEqual({ upserted: 0 });
@@ -98,14 +98,14 @@ describe('conversation rows read from the FreshService copy of a Ticket Pulse-bo
 
 describe('isMirrorEcho (14 Oct 2026, TP-1888 shown twice)', () => {
   test('a FreshService conversation row carrying the mirror line is an echo', () => {
-    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: 'Jeremy Dumais · reply received by e-mail in Ticket Pulse · TP-1888 [Ticket Pulse mirror] When I click…' })).toBe(true);
+    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: 'Sam Okafor · reply received by e-mail in Ticket Pulse · TP-1888 [Ticket Pulse mirror] When I click…' })).toBe(true);
     expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: '', bodyHtml: '<p>[Ticket Pulse mirror]</p>' })).toBe(true);
   });
 
   test('work typed on the copy and Ticket Pulse rows are kept', () => {
-    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: 'Hi Jennifer, as we discussed today…' })).toBe(false);
+    expect(isMirrorEcho({ source: 'freshservice_conversation', bodyText: 'Hi Priya, as we discussed today…' })).toBe(false);
     expect(isMirrorEcho({ source: 'freshservice_reconciliation', bodyText: 'x [Ticket Pulse mirror]' })).toBe(false);
-    expect(isMirrorEcho({ source: 'ticketpulse_user', bodyText: 'Hi Jeremy' })).toBe(false);
+    expect(isMirrorEcho({ source: 'ticketpulse_user', bodyText: 'Hi Sam' })).toBe(false);
     expect(isMirrorEcho(null)).toBe(false);
   });
 });

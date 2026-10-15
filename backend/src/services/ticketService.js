@@ -737,6 +737,11 @@ export function markQueueStatsDirty(workspaceId) {
   queueStatsCache.delete(key);
 }
 
+/** A requester with this many tickets in 30 days is a sender (a team mailbox, an alert), not one person's history. */
+export const BULK_REQUESTER_30D = 20;
+/** Below this, "similar by content" is shared vocabulary, not the same problem (the link picker's bar too). */
+export const SIMILAR_MIN_SCORE = 0.7;
+
 class TicketService {
   // ---------------------------------------------------------------- helpers
 
@@ -3256,6 +3261,14 @@ class TicketService {
    * Related tickets, accuracy-first (T3.5): only provably-true relations are
    * asserted ("other tickets from this requester"); same-normalized-subject
    * matches within ±7 days come back separately as clearly-labeled suggestions.
+   *
+   * 14 Oct 2026 (Vahid: a departure notice for one person listed another
+   * person's departure children): the ticket's own parent and children are
+   * shown in the family card, so they are left out here; another ticket's
+   * child is never offered (it belongs to that request, and the generated
+   * children of a template all look alike); and a high-volume sender such as
+   * the HR mailbox (BULK_REQUESTER_30D tickets in 30 days) is not listed
+   * ticket by ticket, nor matched "by content" against its own other mail.
    */
   async relatedTickets(ticketId, workspaceId) {
     const ticket = await prisma.ticket.findFirst({
@@ -3266,10 +3279,38 @@ class TicketService {
 
     const select = {
       id: true, nativeNumber: true, freshserviceTicketId: true, origin: true,
-      subject: true, status: true, createdAt: true,
+      subject: true, status: true, createdAt: true, requesterId: true,
       assignedTech: { select: { id: true, name: true } },
     };
-    const toItem = (t) => ({ ...t, displayRef: ticketDisplayRef(t) });
+    const toItem = ({ requesterId: _requesterId, ...t }) => ({ ...t, displayRef: ticketDisplayRef(t) });
+
+    // This ticket's own family (shown in the family card) and its parent.
+    const familyLinks = await Promise.resolve()
+      .then(() => prisma.ticketLink.findMany({
+        where: { workspaceId, kind: 'parent_of', OR: [{ ticketId: ticket.id }, { relatedTicketId: ticket.id }] },
+        select: { ticketId: true, relatedTicketId: true },
+      }))
+      .catch(() => []);
+    const links = Array.isArray(familyLinks) ? familyLinks : [];
+    const ownParentId = links.find((l) => l.relatedTicketId === ticket.id)?.ticketId ?? null;
+    const familyIds = new Set(links.flatMap((l) => [l.ticketId, l.relatedTicketId]));
+    familyIds.delete(ticket.id);
+    // Ids among candidates that are a child of some OTHER ticket (not this one,
+    // not this ticket's parent: a sibling stays a fair suggestion).
+    const childrenOfOthers = async (ids) => {
+      const want = [...new Set(ids)].filter((id) => !familyIds.has(id));
+      if (!want.length) return new Set();
+      const rows = await Promise.resolve()
+        .then(() => prisma.ticketLink.findMany({
+          where: { workspaceId, kind: 'parent_of', relatedTicketId: { in: want } },
+          select: { ticketId: true, relatedTicketId: true },
+        }))
+        .catch(() => []);
+      return new Set((Array.isArray(rows) ? rows : [])
+        .filter((r) => r.ticketId !== ticket.id && r.ticketId !== ownParentId)
+        .map((r) => r.relatedTicketId));
+    };
+    const keep = (rows, others) => rows.filter((r) => !familyIds.has(r.id) && !others.has(r.id));
 
     // Match the tickets list's base scope (no Deleted/Spam, no noise) so the
     // header "N other tickets" count lines up with what the filtered list shows.
@@ -3277,18 +3318,28 @@ class TicketService {
       workspaceId, requesterId: ticket.requesterId, id: { not: ticket.id },
       isNoise: false, status: { notIn: ['Deleted', 'Spam'] },
     };
-    const sameRequester = ticket.requesterId
-      ? (await prisma.ticket.findMany({
-        where: sameRequesterWhere,
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        select,
-      })).map(toItem)
-      : [];
-    // Accurate total (the list above is capped at 5 for display).
+    // Accurate total (the list below is capped at 5 for display).
     const sameRequesterCount = ticket.requesterId
       ? await prisma.ticket.count({ where: sameRequesterWhere })
       : 0;
+    let requesterVolume = null;
+    if (ticket.requesterId && sameRequesterCount >= BULK_REQUESTER_30D) {
+      const last30Days = await Promise.resolve()
+        .then(() => prisma.ticket.count({ where: { ...sameRequesterWhere, createdAt: { gte: new Date(Date.now() - 30 * 864e5) } } }))
+        .catch(() => 0);
+      if (last30Days >= BULK_REQUESTER_30D) requesterVolume = { last30Days };
+    }
+    let sameRequester = [];
+    if (ticket.requesterId && !requesterVolume) {
+      const rows = await prisma.ticket.findMany({
+        where: sameRequesterWhere,
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        select,
+      });
+      const others = await childrenOfOthers(rows.map((r) => r.id));
+      sameRequester = keep(rows, others).slice(0, 5).map(toItem);
+    }
 
     // Suggestion tier: identical normalized subject in a ±7 day window.
     const normalize = (s) => String(s || '')
@@ -3314,8 +3365,9 @@ class TicketService {
         take: 25,
         select,
       });
-      nearDuplicates = candidates
-        .filter((c) => normalize(c.subject) === core)
+      const same = candidates.filter((c) => normalize(c.subject) === core);
+      const others = await childrenOfOthers(same.map((c) => c.id));
+      nearDuplicates = keep(same, others)
         .filter((c) => !sameRequester.some((s) => s.id === c.id))
         .slice(0, 3)
         .map(toItem);
@@ -3326,7 +3378,7 @@ class TicketService {
     let similarByContent = [];
     try {
       const { default: ticketEmbeddingService } = await import('./ticketEmbeddingService.js');
-      const scored = await ticketEmbeddingService.similarByContent(ticketId, workspaceId, { limit: 6 });
+      const scored = await ticketEmbeddingService.similarByContent(ticketId, workspaceId, { limit: 12 });
       if (scored.length) {
         const rows = await prisma.ticket.findMany({
           where: {
@@ -3336,15 +3388,20 @@ class TicketService {
           },
           select,
         });
-        const byId = new Map(rows.map((r) => [r.id, r]));
+        const others = await childrenOfOthers(rows.map((r) => r.id));
+        // A high-volume sender's mail is one template: its other tickets always
+        // read alike, so wording says nothing about them.
+        const byId = new Map(keep(rows, others)
+          .filter((r) => !(requesterVolume && r.requesterId === ticket.requesterId))
+          .map((r) => [r.id, r]));
         similarByContent = scored
-          .filter((s) => byId.has(s.ticketId))
+          .filter((s) => byId.has(s.ticketId) && s.score >= SIMILAR_MIN_SCORE)
           .slice(0, 4)
           .map((s) => ({ ...toItem(byId.get(s.ticketId)), similarity: Math.round(s.score * 100) / 100 }));
       }
     } catch { /* embeddings unavailable — related tickets still work */ }
 
-    return { sameRequester, sameRequesterCount, nearDuplicates, similarByContent };
+    return { sameRequester, sameRequesterCount, requesterVolume, nearDuplicates, similarByContent };
   }
 
   /**
