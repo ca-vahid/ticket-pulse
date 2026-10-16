@@ -452,4 +452,42 @@ describe('notification context enrichment service', () => {
     expect(bundle.outageSignals.confidence).toBe('low');
     expect(bundle.outageSignals.allowedPublicPhrases).toEqual([]);
   });
+
+  // QA 10-15 #6: the closed e-mail's "What was done" read the newest rows, mostly activity lines on a
+  // FreshService ticket, so the replies between the agent and the requester never reached the model.
+  test('the conversation comes before activity lines; mirror echoes and the Auto-help signature are left out', async () => {
+    const at = (m) => new Date(Date.parse('2026-10-15T16:00:00.000Z') - m * 60 * 1000);
+    const activity = Array.from({ length: 14 }, (_, i) => ({
+      id: 100 + i, source: 'freshservice_activity', eventType: 'activity', title: 'Status changed', actorName: 'Sam Okafor',
+      incoming: false, isPrivate: false, visibility: 'public', bodyText: 'changed the status', occurredAt: at(i),
+    }));
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([
+      ...activity,
+      { id: 50, source: 'freshservice_conversation', eventType: 'reply', incoming: false, isPrivate: false, visibility: 'public',
+        bodyText: '[Ticket Pulse mirror] copy of our own reply', occurredAt: at(20) },
+      { id: 51, source: 'ticketpulse_user', eventType: 'reply', actorName: 'Sam Okafor', incoming: false, isPrivate: false, visibility: 'public',
+        bodyHtml: '<p>I switched the licence to Full and it opens now.</p><div style="margin:16px 0 0" data-tp-signature="auto-help"><p>IT Helpdesk Team</p></div>',
+        occurredAt: at(30) },
+      { id: 52, source: 'email_inbound', eventType: 'reply', actorName: 'Priya Nair', incoming: true, isPrivate: false, visibility: 'public',
+        bodyText: 'Still says Student Mode on my side.', occurredAt: at(40) },
+    ]);
+    const bundle = await buildNotificationLlmContext({
+      workspaceId: 1,
+      workflow: { id: 5, key: 'ticket_resolved_closed', name: 'Ticket resolved or closed', triggerType: 'ticket.resolved_closed', publishedVersion: 1 },
+      eventContext,
+      state: eventContext.state,
+    });
+    const ids = bundle.threadSummary.entries.map((e) => e.evidenceId);
+    expect(ids).toContain('thread:51');
+    expect(ids).toContain('thread:52');
+    expect(ids).not.toContain('thread:50');
+    // Oldest first, the requester's reply before the agent's answer.
+    expect(ids.indexOf('thread:52')).toBeLessThan(ids.indexOf('thread:51'));
+    const agent = bundle.threadSummary.entries.find((e) => e.evidenceId === 'thread:51');
+    expect(agent.role).toBe('agent');
+    expect(agent.content).toContain('switched the licence');
+    expect(agent.content).not.toContain('IT Helpdesk Team');
+    expect(bundle.threadSummary.entries.find((e) => e.evidenceId === 'thread:52').role).toBe('requester');
+    expect(bundle.threadSummary.entries).toHaveLength(10);
+  });
 });

@@ -7,11 +7,13 @@ import { awayPhrase, groupPossessive } from './urgentResponse/rules.js';
 /**
  * Group coordinators (QA 10-14, "Who is the coordinator?").
  *
- * Every group (FreshService or internal) can name a coordinator and a backup.
- * Urgent response asks resolveCoordinator() who "the coordinator" is for a
- * ticket: the group's coordinator when they are at work, else the group's
- * backup when they are at work, else the workspace coordinator (Settings →
- * Urgent response → Rules), else nobody.
+ * Every group (FreshService or internal) can name a coordinator and a backup —
+ * optional since QA 10-15: most workspaces only set the workspace
+ * coordinators. Urgent response asks resolveCoordinator() who "the
+ * coordinator" is for a ticket: the group's coordinator when they are at work,
+ * else the group's backup when they are at work, else the workspace
+ * coordinators (up to three, Settings → Urgent response → Rules;
+ * workspaceCoordinatorService), else nobody.
  *
  * Storage: one app_settings row per workspace, no table —
  *   key   group_coordinators_ws<id>
@@ -88,21 +90,53 @@ export function validateEntry(input, { activeIds = null } = {}) {
 }
 
 /**
+ * The workspace coordinators step, with nothing read (QA 10-15): the first on
+ * the list who is at work owns it; nobody at work → the first active one owns
+ * it anyway, marked away. Mode 'all' tells every active person on the list.
+ * `list`: [{ person, state }] in order; a null state counts as at work (a
+ * caller that never checked). Returns null when nobody on the list is active.
+ */
+export function pickWorkspaceCoordinator(list = [], mode = 'first_available') {
+  const active = (Array.isArray(list) ? list : []).filter((e) => e?.person && e.person.isActive !== false);
+  if (!active.length) return null;
+  const working = active.find((e) => !e.state || e.state.atWork);
+  const chosen = working || active[0];
+  const passed = working ? active.slice(0, active.indexOf(working)) : [];
+  const notify = mode === 'all'
+    ? [chosen.person.id, ...active.filter((e) => e !== chosen).map((e) => e.person.id)]
+    : [chosen.person.id];
+  return {
+    person: chosen.person,
+    ownerAway: !working,
+    ownerAwayNote: working ? null : awayPhrase(chosen.person.name, chosen.state),
+    passedNote: passed.length ? passed.map((e) => awayPhrase(e.person.name, e.state)).join('; ') : null,
+    notify: [...new Set(notify)],
+  };
+}
+
+/**
  * The order, with nothing read: group coordinator at work → group backup at
- * work → workspace coordinator (active) → nobody.
+ * work → the workspace coordinators (pickWorkspaceCoordinator) → nobody.
  *
- * @param {{ entry, group, coordinator, coordinatorState, backup, backupState, workspaceCoordinator }} input
+ * @param {{ entry, group, coordinator, coordinatorState, backup, backupState, workspaceCoordinators, mode, workspaceCoordinator }} input
  *   people are technician rows ({ id, name, isActive }) or null; states are rules.atWork() results.
+ *   `workspaceCoordinators`: [{ person, state }] in order; `mode`: 'first_available' | 'all'.
+ *   `workspaceCoordinator` (one person, no state) is the older single form and still works.
  * @returns {{ technicianId: number|null, name: string|null, source: 'group'|'group_backup'|'workspace'|null,
- *   reason: string, awayNote: string|null, groupId: number|null, groupName: string|null }}
- *   `awayNote`: why the people before the one used were passed over ("Priya is on leave"), for the sentence.
+ *   reason: string, awayNote: string|null, groupId: number|null, groupName: string|null,
+ *   notify: number[], ownerAway: boolean, mode: string|null }}
+ *   `awayNote`: why the group's people were passed over ("Priya is on leave"), for the sentence.
+ *   `notify`: who is told (the owner first); `ownerAway`: the owner is not at work (nobody on the list was).
  */
 export function pickCoordinator({
-  entry = null, group = null, coordinator = null, coordinatorState = null, backup = null, backupState = null, workspaceCoordinator = null,
+  entry = null, group = null, coordinator = null, coordinatorState = null, backup = null, backupState = null,
+  workspaceCoordinators = null, mode = 'first_available', workspaceCoordinator = null,
 } = {}) {
   const groupId = group?.id ?? null;
   const groupName = group?.name ?? null;
-  const base = { groupId, groupName };
+  const base = {
+    groupId, groupName, notify: [], ownerAway: false, mode: null,
+  };
   const usable = (person, state) => Boolean(person && person.isActive !== false && state?.atWork);
   // Somebody passed over is never "at work" in the sentence, whatever their state says.
   const awayState = (person, state) => (person && person.isActive !== false && state && !state.atWork ? state : { atWork: false, reason: 'inactive' });
@@ -113,7 +147,7 @@ export function pickCoordinator({
   if (entry?.coordinatorTechnicianId) {
     if (usable(coordinator, coordinatorState)) {
       return {
-        ...base, technicianId: coordinator.id, name: coordinator.name || null, source: 'group', awayNote: null,
+        ...base, technicianId: coordinator.id, name: coordinator.name || null, source: 'group', awayNote: null, notify: [coordinator.id],
         reason: `${coordinator.name} is ${where} coordinator and is at work`,
       };
     }
@@ -125,7 +159,7 @@ export function pickCoordinator({
     if (usable(backup, backupState)) {
       const awayNote = passed.length ? awayPhrase(passed[0].name, passed[0].state) : null;
       return {
-        ...base, technicianId: backup.id, name: backup.name || null, source: 'group_backup', awayNote,
+        ...base, technicianId: backup.id, name: backup.name || null, source: 'group_backup', awayNote, notify: [backup.id],
         reason: `${[...reasons, `${backup.name} is ${where} backup and is at work`].join('; ')}`,
       };
     }
@@ -140,15 +174,27 @@ export function pickCoordinator({
   if (!passed.length && groupId) reasons.push(`${where} coordinator is not set`);
   if (!groupId) reasons.push('the ticket has no group');
 
-  if (workspaceCoordinator && workspaceCoordinator.isActive !== false) {
+  const list = Array.isArray(workspaceCoordinators)
+    ? workspaceCoordinators.filter((e) => e?.person)
+    : (workspaceCoordinator ? [{ person: workspaceCoordinator, state: null }] : []);
+  const picked = pickWorkspaceCoordinator(list, mode);
+  if (picked) {
+    const { person } = picked;
+    const tail = [];
+    if (picked.passedNote) tail.push(`${picked.passedNote} (passed over)`);
+    if (picked.ownerAway) tail.push(`nobody on the list is at work, so the first one still owns it: ${picked.ownerAwayNote}`);
+    if (mode === 'all' && picked.notify.length > 1) tail.push(`all ${picked.notify.length} workspace coordinators are told`);
     return {
-      ...base, technicianId: workspaceCoordinator.id, name: workspaceCoordinator.name || null, source: 'workspace', awayNote,
-      reason: `${reasons.join('; ')}; the workspace coordinator ${workspaceCoordinator.name} is used`,
+      ...base, technicianId: person.id, name: person.name || null, source: 'workspace', awayNote,
+      notify: picked.notify, ownerAway: picked.ownerAway, mode: mode === 'all' ? 'all' : 'first_available',
+      reason: [`${reasons.join('; ')}; the workspace coordinator ${person.name} is used`, ...tail].join('; '),
     };
   }
+  let none = 'no workspace coordinator is set';
+  if (list.length) none = list.length === 1 ? 'the workspace coordinator is not active' : 'no workspace coordinator is active';
   return {
     ...base, technicianId: null, name: null, source: null, awayNote,
-    reason: `${reasons.join('; ')}; ${workspaceCoordinator ? 'the workspace coordinator is not active' : 'no workspace coordinator is set'}`,
+    reason: `${reasons.join('; ')}; ${none}`,
   };
 }
 
@@ -249,25 +295,32 @@ class GroupCoordinatorService {
    * leave — rules.atWork() through the engine). The engine passes its pass
    * context; any other caller gets one built for `at`.
    *
+   * The workspace step uses `workspaceCoordinators` ({ technicianIds, mode },
+   * from workspaceCoordinatorService.getEffective) when given, else the older
+   * single `workspaceCoordinatorId`, else reads the saved list.
+   *
    * @param {{ workspaceId: number, groupId: number|null, at?: Date,
    *   personOf?: (id) => Promise<object|null>, stateOf?: (person) => object, workspaceCoordinatorId?: number|null,
-   *   group?: { id, name }|null, entries?: object }} input
+   *   workspaceCoordinators?: { technicianIds: number[], mode: string }, group?: { id, name }|null, entries?: object }} input
    * @returns the pickCoordinator() result. Never throws (an error reads as "nobody").
    */
   async resolveCoordinator({
-    workspaceId, groupId = null, at = new Date(), personOf = null, stateOf = null, workspaceCoordinatorId, group = undefined, entries = null,
+    workspaceId, groupId = null, at = new Date(), personOf = null, stateOf = null, workspaceCoordinatorId, workspaceCoordinators = null, group = undefined, entries = null,
   } = {}) {
     const ws = Number(workspaceId);
     try {
       let person = personOf;
       let state = stateOf;
-      let wsCoordinatorId = workspaceCoordinatorId;
-      if (!person || !state || wsCoordinatorId === undefined) {
+      let config = workspaceCoordinators;
+      if (!config && workspaceCoordinatorId !== undefined) {
+        config = { technicianIds: isId(Number(workspaceCoordinatorId)) ? [Number(workspaceCoordinatorId)] : [], mode: 'first_available' };
+      }
+      if (!person || !state || !config) {
         const { default: engine } = await import('./urgentResponse/urgentResponseService.js');
         const ctx = await engine._context(ws, at);
         person = person || ((id) => engine._person(ctx, id));
         state = state || ((p) => engine._state(ctx, p, at));
-        if (wsCoordinatorId === undefined) wsCoordinatorId = ctx.settings?.coordinatorTechnicianId ?? null;
+        if (!config) config = await engine._workspaceCoordinators(ctx);
       }
       const gid = isId(Number(groupId)) ? Number(groupId) : null;
       let theGroup = group;
@@ -278,7 +331,12 @@ class GroupCoordinatorService {
       const entry = gid ? all[String(gid)] || null : null;
       const coordinator = entry?.coordinatorTechnicianId ? await person(entry.coordinatorTechnicianId) : null;
       const backup = entry?.backupTechnicianId ? await person(entry.backupTechnicianId) : null;
-      const workspaceCoordinator = wsCoordinatorId ? await person(wsCoordinatorId) : null;
+      const listed = [];
+      const ids = [...new Set((Array.isArray(config?.technicianIds) ? config.technicianIds : []).map(Number).filter(isId))];
+      for (const id of ids) {
+        const p = await person(id);
+        if (p) listed.push({ person: p, state: state(p) });
+      }
       return pickCoordinator({
         entry,
         group: theGroup ? { id: theGroup.id, name: theGroup.name } : (gid ? { id: gid, name: null } : null),
@@ -286,11 +344,14 @@ class GroupCoordinatorService {
         coordinatorState: coordinator ? state(coordinator) : null,
         backup,
         backupState: backup ? state(backup) : null,
-        workspaceCoordinator,
+        workspaceCoordinators: listed,
+        mode: config?.mode === 'all' ? 'all' : 'first_available',
       });
     } catch (err) {
       logger.warn(`Group coordinators: resolving failed for workspace ${ws}, group ${groupId}: ${err.message}`);
-      return { technicianId: null, name: null, source: null, reason: 'could not be worked out', awayNote: null, groupId: groupId ?? null, groupName: null };
+      return {
+        technicianId: null, name: null, source: null, reason: 'could not be worked out', awayNote: null, groupId: groupId ?? null, groupName: null, notify: [], ownerAway: false, mode: null,
+      };
     }
   }
 }

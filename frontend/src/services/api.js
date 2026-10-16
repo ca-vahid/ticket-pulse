@@ -2077,6 +2077,7 @@ export const publicTicketEscalationAPI = {
 export const publicTicketUrgencyAPI = {
   get: (token) => api.get(`/ticket-status/public/${encodeURIComponent(token)}/urgency`),
   submit: (token) => api.post(`/ticket-status/public/${encodeURIComponent(token)}/urgency`),
+  startTeamsChat: (token) => api.post(`/ticket-status/public/${encodeURIComponent(token)}/urgency/teams-chat`),
 };
 
 export const publicTicketFeedbackAPI = {
@@ -2191,6 +2192,9 @@ export const urgentResponseAPI = {
   getSettings: () => api.get('/urgent-response/settings'),
   updateSettings: (patch) => api.put('/urgent-response/settings', patch),
   getChanges: (limit = 50) => api.get('/urgent-response/settings/changes', { params: { limit } }),
+  // Workspace coordinators (QA 10-15): { technicianIds (up to three, in order), mode: 'first_available' | 'all' }.
+  getCoordinators: () => api.get('/urgent-response/coordinators'),
+  updateCoordinators: (body) => api.put('/urgent-response/coordinators', body),
   preview: (draft) => api.post('/urgent-response/preview', draft),
   getActions: (params = {}) => api.get('/urgent-response/actions', { params }),
   getStats: (days = 30) => api.get('/urgent-response/stats', { params: { days } }),

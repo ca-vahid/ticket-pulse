@@ -202,3 +202,16 @@ describe('a reassignment made in Ticket Pulse reads as one line (2 Oct 2026, #24
     expect(flat.some((i) => /fs write back/i.test(i.verb || ''))).toBe(false);
   });
 });
+
+describe('requester Teams chat from the urgency page (QA 10-15 #5)', () => {
+  test('reads as the requester opening a chat with the agent, never folded as machine chatter', () => {
+    const items = buildHistoryItems({
+      activities: [
+        { id: 1, activityType: 'requester_teams_chat', performedBy: 'Priya Nair', performedAt: '2026-10-15T17:00:00.000Z', details: { via: 'urgency_page', actorKind: 'human', agentName: 'Sam Okafor' } },
+      ],
+    });
+    const flat = items.flatMap((i) => (i.items ? i.items : [i]));
+    expect(flat).toHaveLength(1);
+    expect(flat[0]).toMatchObject({ verb: 'opened a Teams chat from the urgency page', detail: 'With Sam Okafor', actor: 'Priya Nair', machine: false });
+  });
+});

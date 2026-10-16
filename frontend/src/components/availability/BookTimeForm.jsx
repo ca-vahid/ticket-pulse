@@ -160,7 +160,9 @@ export default function BookTimeForm({ me, onBooked, toast }) {
         <Field label="Type" className="sm:col-span-2">
           <FancySelect value={form.leaveTypeId} onChange={(v) => set({ leaveTypeId: v })} options={options} aria-label="Leave type" />
         </Field>
-        <Field label={isHours ? 'Date' : 'From'}>
+        {/* QA 10-15 #8: in the narrow drawer the two time boxes could not shrink and "To" sat on top of
+            "From". For an hours booking the date and the From/To pair now each get the full row. */}
+        <Field label={isHours ? 'Date' : 'From'} className={isHours ? 'sm:col-span-2' : ''}>
           <input
             type="date"
             className={INPUT}
@@ -174,7 +176,7 @@ export default function BookTimeForm({ me, onBooked, toast }) {
             <input type="date" className={INPUT} min={form.startDate} value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} aria-label="End date" />
           </Field>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:col-span-2">
             <Field label="From">
               <input type="time" className={INPUT} value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} aria-label="Start time" />
             </Field>

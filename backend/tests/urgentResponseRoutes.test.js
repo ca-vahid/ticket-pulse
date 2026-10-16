@@ -37,6 +37,7 @@ const prismaMock = {
 };
 const wsRepo = { getAccessRole: jest.fn() };
 const groupCoordSvc = { listWithNames: jest.fn() };
+const wsCoordSvc = { getEffective: jest.fn(), set: jest.fn() };
 
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -47,6 +48,7 @@ jest.unstable_mockModule('../src/services/urgentResponse/settingsService.js', ()
 }));
 jest.unstable_mockModule('../src/services/urgentResponse/onCallService.js', () => ({ default: onCallSvc }));
 jest.unstable_mockModule('../src/services/groupCoordinatorService.js', () => ({ default: groupCoordSvc }));
+jest.unstable_mockModule('../src/services/workspaceCoordinatorService.js', () => ({ default: wsCoordSvc }));
 // The engine reads "open" from the AI's workload helper; the preview only needs it to answer.
 jest.unstable_mockModule('../src/services/assignmentTools.js', () => ({ openWorkloadStatuses: jest.fn(async () => ['Open', 'Pending']) }));
 
@@ -115,6 +117,8 @@ beforeEach(() => {
   prismaMock.urgentResponseAction.groupBy.mockResolvedValue([]);
   prismaMock.ticket.findMany.mockResolvedValue([]);
   groupCoordSvc.listWithNames.mockResolvedValue([]);
+  wsCoordSvc.getEffective.mockResolvedValue({ technicianIds: [], mode: 'first_available', fromLegacy: false, saved: false });
+  wsCoordSvc.set.mockImplementation(async (_ws, body) => ({ ...body, fromLegacy: false, saved: true, changed: true }));
 });
 
 describe('any member, agents included', () => {
@@ -241,6 +245,8 @@ describe('workspace admins only', () => {
     ['delete', '/on-call/covers/70'],
     ['post', '/on-call/requests'],
     ['post', '/on-call/requests/40/cancel'],
+    ['get', '/coordinators'],
+    ['put', '/coordinators'],
   ];
 
   test.each(ADMIN_ROUTES)('%s %s is refused for a member, an agent and a read-only observer', async (method, path) => {
@@ -250,7 +256,7 @@ describe('workspace admins only', () => {
       expect(r.status).toBe(403);
       expect(r.body.code).toBe('admin_required');
     }
-    for (const fn of [settingsSvc.getSettings, settingsSvc.updateSettings, onCallSvc.createCover, onCallSvc.cancelCover, onCallSvc.createRequest, onCallSvc.cancelRequest]) expect(fn).not.toHaveBeenCalled();
+    for (const fn of [settingsSvc.getSettings, settingsSvc.updateSettings, wsCoordSvc.getEffective, wsCoordSvc.set, onCallSvc.createCover, onCallSvc.cancelCover, onCallSvc.createRequest, onCallSvc.cancelRequest]) expect(fn).not.toHaveBeenCalled();
     expect(prismaMock.urgentResponseAction.findMany).not.toHaveBeenCalled();
     expect(prismaMock.urgentResponseAction.groupBy).not.toHaveBeenCalled();
     expect(prismaMock.urgentResponseAction.findFirst).not.toHaveBeenCalled();
@@ -273,7 +279,36 @@ describe('workspace admins only', () => {
       onCallOrderSuggested: true,
       timezone: 'America/Vancouver',
       groupCoordinators: [],
+      workspaceCoordinators: { technicianIds: [], mode: 'first_available', fromLegacy: false, saved: false },
     });
+  });
+
+  test('GET /settings: the workspace coordinators come with the old single one as the fallback; a failing read is null', async () => {
+    settingsSvc.getSettings.mockResolvedValue({ mode: 'observe', onCallOrder: [], coordinatorTechnicianId: 11 });
+    wsCoordSvc.getEffective.mockResolvedValue({ technicianIds: [11], mode: 'first_available', fromLegacy: true, saved: false });
+    const r = await request(app(ADMIN)).get('/api/urgent-response/settings');
+    expect(r.body.data.workspaceCoordinators).toEqual({ technicianIds: [11], mode: 'first_available', fromLegacy: true, saved: false });
+    expect(wsCoordSvc.getEffective).toHaveBeenCalledWith(1, { legacyId: 11 });
+    wsCoordSvc.getEffective.mockRejectedValue(new Error('db down'));
+    const again = await request(app(ADMIN)).get('/api/urgent-response/settings');
+    expect(again.status).toBe(200);
+    expect(again.body.data.workspaceCoordinators).toBeNull();
+  });
+
+  test('GET /coordinators reads the list in force; PUT /coordinators saves only the list and the mode, with the session user', async () => {
+    wsCoordSvc.getEffective.mockResolvedValue({ technicianIds: [11, 22], mode: 'all', fromLegacy: false, saved: true });
+    const got = await request(app(ADMIN)).get('/api/urgent-response/coordinators');
+    expect(got.body).toEqual({ success: true, data: { technicianIds: [11, 22], mode: 'all', fromLegacy: false, saved: true } });
+    expect(wsCoordSvc.getEffective).toHaveBeenCalledWith(1);
+    const put = await request(app(ADMIN)).put('/api/urgent-response/coordinators').send({ technicianIds: [22, 11], mode: 'all', extra: 'ignored' });
+    expect(put.status).toBe(200);
+    expect(put.body.data).toMatchObject({ technicianIds: [22, 11], mode: 'all', changed: true });
+    expect(wsCoordSvc.set).toHaveBeenCalledWith(1, { technicianIds: [22, 11], mode: 'all' }, ADMIN);
+    const { ValidationError } = await import('../src/utils/errors.js');
+    wsCoordSvc.set.mockRejectedValue(new ValidationError('Pick at most three coordinators'));
+    const bad = await request(app(ADMIN)).put('/api/urgent-response/coordinators').send({ technicianIds: [1, 2, 3, 4] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.message).toBe('Pick at most three coordinators');
   });
 
   test('GET /settings lists the groups with their own coordinator; an unreadable list is empty, never a failure', async () => {

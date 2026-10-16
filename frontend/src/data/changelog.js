@@ -1,6 +1,25 @@
-export const APP_VERSION = '4.2.75-preview';
+export const APP_VERSION = '4.2.76-preview';
 
 export const changelog = [
+  {
+    version: '4.2.76-preview',
+    date: 'October 15, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Chat with your agent in Teams from the urgency page</strong> &mdash; when someone raises the urgency of a ticket, the page can offer &ldquo;Chat with Sam in Teams&rdquo;, which opens Teams with a message to the person working on it. Each agent turns it on for themselves under Mail &amp; alerts &rarr; Microsoft Teams; it is off for everyone until they do. It is only offered to people inside the company, and the ticket history notes the chat.' },
+      { type: 'improved', html: '<strong>A simpler ticket status page</strong> &mdash; the page a requester opens from their e-mail now shows the status in one word with a short progress line, the ticket number once (TP-10018 for a Ticket Pulse ticket, no longer the FreshService copy&rsquo;s number twice), who is helping, what happens next and what they can do. The estimate&rsquo;s numbers sit behind &ldquo;How we estimate this&rdquo;.' },
+      { type: 'added', html: '<strong>Up to three coordinators per workspace</strong> &mdash; Urgent response &rarr; Rules names one to three coordinators in order, with a choice: give the ticket to the first one who is working, or alert all of them at once and let the first one working own it. Group coordinators become optional; most workspaces only need the workspace list.' },
+      { type: 'fixed', html: '<strong>Closed e-mails for FreshService tickets closed in Ticket Pulse</strong> &mdash; closing (or reopening, or reassigning) a FreshService ticket from Ticket Pulse never told the workflows, so the closed e-mail never ran: 84 of 153 such closes in IT last week. They now fire like a Ticket Pulse ticket&rsquo;s do. Workflows that set a status themselves still do not set each other off.' },
+      { type: 'improved', html: '<strong>&ldquo;What was done&rdquo; reads the conversation</strong> &mdash; the summary in the ticket-closed e-mail now reads the replies between the agent and the requester first, instead of the newest lines of the history, which on a FreshService ticket were mostly &ldquo;status changed&rdquo;. Our own copied notes and the Auto-help signature are left out, and e-mails print the ticket&rsquo;s own number (TP-10018), not its FreshService copy&rsquo;s.' },
+      { type: 'fixed', html: '<strong>Workflow Audit: search, speed and small screens</strong> &mdash; searching 10029, TP-10029 or the FreshService number now finds the ticket&rsquo;s runs. The list loads only what it shows and the details when a run is opened. On a laptop at 125% the filters sit in two rows (the rarer ones behind &ldquo;More filters&rdquo;) and the list stays next to the details. An after-hours variant is labelled after-hours, and a run that sent nothing because it had no recipient says so in amber.' },
+      { type: 'fixed', html: '<strong>The Urgent filter in the preview picker</strong> &mdash; choosing Urgent when picking a ticket to preview a workflow showed Medium and High tickets, because it also matched FreshService&rsquo;s own priority while the card shows the assessed one. It now matches what the card shows.' },
+      { type: 'improved', html: '<strong>&ldquo;Has no value&rdquo; in workflow conditions</strong> &mdash; the condition step&rsquo;s &ldquo;is empty&rdquo; now reads &ldquo;has no value&rdquo;, so &ldquo;if Project Accountant has no value, end this path&rdquo; reads as it works.' },
+      { type: 'improved', html: '<strong>&ldquo;Do I need to turn this on?&rdquo;</strong> &mdash; Settings &rarr; Ticket Ops &rarr; When a requester replies now says first that the reopen switch is not needed while the mail workflow reopens tickets, and what turning it on changes.' },
+      { type: 'fixed', html: '<strong>The profile menu scrolls on a short screen</strong> &mdash; the last items could not be reached on a small laptop screen.' },
+      { type: 'fixed', html: '<strong>Book time away: From and To no longer overlap</strong> &mdash; for an hours booking the date and the two times each get their own row.' },
+      { type: 'fixed', html: '<strong>A reopened grouped ticket stays in the queue</strong> &mdash; a repeat that someone reopened was marked as grouped again every ten minutes, so it kept disappearing from the open list.' },
+      { type: 'fixed', html: '<strong>Clearing a department no longer fails in FreshService</strong> &mdash; FreshService refuses an empty department, so it is left as it is there.' },
+    ],
+  },
   {
     version: '4.2.75-preview',
     date: 'October 14, 2026',

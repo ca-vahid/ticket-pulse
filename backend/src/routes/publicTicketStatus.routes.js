@@ -55,6 +55,18 @@ publicTicketStatusPublicRouter.post(
   }),
 );
 
+// QA 10-15 #5: open a Teams chat with the assigned agent (agent opt-in only).
+publicTicketStatusPublicRouter.post(
+  '/:token/urgency/teams-chat',
+  asyncHandler(async (req, res) => {
+    const data = await urgentEscalationService.startRequesterTeamsChat(req.params.token, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+    res.json({ success: true, data });
+  }),
+);
+
 publicTicketStatusPublicRouter.get(
   '/:token/feedback',
   asyncHandler(async (req, res) => {

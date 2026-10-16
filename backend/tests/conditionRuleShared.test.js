@@ -163,6 +163,13 @@ describe('sentences', () => {
       { field: 'ticket.isParked', operator: 'is_true' },
       { field: 'ticket.lastRequesterReplyMinutes', operator: 'gte', value: 2880 },
     ] } })).toBe('Continues when the ticket is parked or the time since the requester last wrote is at least 2 days.');
+    // QA 10-15 #2: empty / set read as "has no value" / "has a value".
+    expect(describeConditionStep({ conditionGroup: { logic: 'all', conditions: [
+      { field: 'assignedAgent.email', operator: 'is_empty' },
+    ] } }, { short: true })).toMatch(/has no value$/);
+    expect(describeConditionStep({ conditionGroup: { logic: 'all', conditions: [
+      { field: 'assignedAgent.email', operator: 'is_not_empty' },
+    ] } }, { short: true })).toMatch(/has a value$/);
     expect(describeConditionStep({ rule: { '===': [v('a'), 1] } })).toBeNull();
     expect(describeConditionStep({ conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'is', value: 'Open' }] } }, { short: true })).toBe('The ticket status is Open');
   });

@@ -20,9 +20,12 @@ const prismaMock = {
 const settingsMock = { getSettings: jest.fn(), timezone: jest.fn(), technicianForEmail: jest.fn() };
 const tellPeople = jest.fn();
 const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+// The coordinators for a "needs cover" notice come from the resolver (it reaches into the engine).
+const resolveCoordinator = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock }));
+jest.unstable_mockModule('../src/services/groupCoordinatorService.js', () => ({ default: { resolveCoordinator } }));
 jest.unstable_mockModule('../src/services/urgentResponse/settingsService.js', () => ({
   default: settingsMock,
   soft: (fn, fallback = null) => Promise.resolve().then(fn).catch(() => fallback),
@@ -60,6 +63,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   onCall._notifier = async () => ({ tellPeople });
   settingsMock.getSettings.mockResolvedValue({ workspaceId: 1, ...SETTINGS });
+  resolveCoordinator.mockResolvedValue({ technicianId: 33, source: 'workspace', notify: [33] });
   settingsMock.timezone.mockResolvedValue(TZ);
   settingsMock.technicianForEmail.mockResolvedValue(null);
   prismaMock.technician.findMany.mockImplementation(async ({ where }) => PEOPLE.filter((p) => where.id.in.includes(p.id)));
@@ -515,6 +519,7 @@ describe('dailyCoverCheck', () => {
     expect(actions()[0].sentence).toBe('Andrew Fong is on call 12–19 Oct and has leave on Thu 15 Oct. The week needs cover.');
     expect(tellPeople).toHaveBeenCalledTimes(2);
     expect(tellPeople.mock.calls[0][0]).toMatchObject({ technicianIds: [33], refKey: 'urgent-cover-needed:1:0:2026-10-13', ticket: null });
+    expect(resolveCoordinator).toHaveBeenCalledWith({ workspaceId: 1, groupId: null, group: null, at: NOW });
     // Requests whose window has passed are closed.
     expect(prismaMock.urgentResponseCoverRequest.updateMany).toHaveBeenCalledWith({ where: { workspaceId: 1, status: 'open', endsAt: { lt: NOW } }, data: { status: 'expired' } });
   });
@@ -538,8 +543,31 @@ describe('dailyCoverCheck', () => {
     expect(tellPeople).not.toHaveBeenCalled();
   });
 
+  test('workspace coordinators in mode "all": every one of them is told, the owner first', async () => {
+    prismaMock.technicianLeave.findMany.mockResolvedValue([leave(11, '2026-10-15')]);
+    resolveCoordinator.mockResolvedValue({ technicianId: 22, source: 'workspace', notify: [22, 33], mode: 'all' });
+    await onCall.dailyCoverCheck(1, NOW);
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([22, 33]);
+    expect(actions()[0].details).toMatchObject({ toldTechnicianId: 22, toldTechnicianIds: [22, 33] });
+  });
+
+  test('no coordinator: the "nobody at work" contact is told instead; a failing resolver is "nobody"', async () => {
+    prismaMock.technicianLeave.findMany.mockResolvedValue([leave(11, '2026-10-15')]);
+    resolveCoordinator.mockResolvedValue({ technicianId: null, source: null, notify: [] });
+    settingsMock.getSettings.mockResolvedValue({ workspaceId: 1, ...SETTINGS, coordinatorTechnicianId: null, nobodyContactTechnicianId: 11 });
+    await onCall.dailyCoverCheck(1, NOW);
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([11]);
+
+    jest.clearAllMocks();
+    resolveCoordinator.mockRejectedValue(new Error('engine away'));
+    await onCall.dailyCoverCheck(1, NOW);
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([11]);
+    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('engine away'));
+  });
+
   test('no coordinator: still logged, nobody to tell; no order: nothing at all; never throws', async () => {
     prismaMock.technicianLeave.findMany.mockResolvedValue([leave(11, '2026-10-15')]);
+    resolveCoordinator.mockResolvedValue({ technicianId: null, source: null, notify: [] });
     settingsMock.getSettings.mockResolvedValue({ workspaceId: 1, ...SETTINGS, coordinatorTechnicianId: null });
     expect((await onCall.dailyCoverCheck(1, NOW)).flagged).toHaveLength(1);
     expect(tellPeople).not.toHaveBeenCalled();

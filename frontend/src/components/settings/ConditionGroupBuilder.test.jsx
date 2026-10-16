@@ -95,6 +95,10 @@ describe('ConditionGroupBuilder', () => {
     // Row 1: no value input (dash placeholder); row 2: enum select with Open.
     expect(screen.getByText('—')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Open')).toBeInTheDocument();
+    // QA 10-15 #2: the empty checks read "has no value" / "has a value".
+    expect(screen.getByDisplayValue('has no value')).toBeInTheDocument();
+    expect(screen.getAllByRole('option', { name: 'has a value' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('option', { name: 'is empty' })).not.toBeInTheDocument();
   });
 
   // 14 Oct 2026: no hidden raw rule behind the builder any more.

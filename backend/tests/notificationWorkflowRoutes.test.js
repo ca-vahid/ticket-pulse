@@ -40,6 +40,7 @@ const repositoryMock = {
   setWorkflowArchived: jest.fn(),
   deleteArchivedWorkflowVariant: jest.fn(),
   listAuditRuns: jest.fn(),
+  attachWorkflowScheduleModes: jest.fn(async (runs) => runs),
   listRuns: jest.fn(),
   saveDraft: jest.fn(),
   publishWorkflow: jest.fn(),
@@ -950,6 +951,253 @@ describe('notification workflow routes', () => {
     expect(response.body.data[0].warnings).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'llm_failed' }),
     ]));
+  });
+
+  test('preview-tickets priority filter matches the priority the card shows (QA 10-15 #1)', async () => {
+    await request(buildApp())
+      .get('/api/notification-workflows/preview-tickets')
+      .query({ priority: 'urgent' })
+      .expect(200);
+
+    const { where } = prismaMock.ticket.findMany.mock.calls[0][0];
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { assessedPriority: { equals: 'Urgent', mode: 'insensitive' } },
+          {
+            AND: [
+              { OR: [{ assessedPriority: null }, { assessedPriority: '' }] },
+              { priority: 4 },
+            ],
+          },
+        ],
+      },
+    ]);
+    // An assessed-Medium ticket whose FreshService number is 4 must not match.
+    const matches = (ticket) => where.AND[0].OR.some((clause) => {
+      if (clause.assessedPriority) {
+        return String(ticket.assessedPriority || '').toLowerCase() === clause.assessedPriority.equals.toLowerCase();
+      }
+      return !ticket.assessedPriority && ticket.priority === 4;
+    });
+    expect(matches({ assessedPriority: 'Medium', priority: 4 })).toBe(false);
+    expect(matches({ assessedPriority: 'Urgent', priority: 2 })).toBe(true);
+    expect(matches({ assessedPriority: null, priority: 4 })).toBe(true);
+    expect(matches({ assessedPriority: null, priority: 3 })).toBe(false);
+  });
+
+  test('audit run list returns slim rows: no event context, step payloads or e-mail bodies (QA 10-15)', async () => {
+    repositoryMock.listAuditRuns.mockResolvedValueOnce([
+      {
+        id: 91,
+        workspaceId: 1,
+        workflowId: 12,
+        workflowVersionId: 4,
+        ticketId: 601,
+        eventType: 'ticket.created',
+        status: 'completed',
+        triggerSource: 'freshservice_webhook',
+        executionMode: 'live',
+        startedAt: new Date('2026-10-14T20:10:00.000Z'),
+        completedAt: new Date('2026-10-14T20:10:03.000Z'),
+        workflow: {
+          id: 12,
+          name: 'Brisbane after-hours',
+          key: 'ticket_created_brisbane_copy',
+          triggerType: 'ticket.created',
+          scheduleMode: 'after_hours',
+        },
+        ticket: {
+          id: 601,
+          origin: 'ticketpulse',
+          nativeNumber: 10029,
+          freshserviceTicketId: BigInt(247279),
+          subject: 'Laptop will not start',
+          requester: { department: 'Brisbane' },
+        },
+        steps: [
+          {
+            id: 1,
+            nodeId: 'send',
+            nodeType: 'send_email',
+            status: 'completed',
+            output: { skipped: true, reason: 'No recipient email address resolved', email: { html: '<p>big</p>' } },
+          },
+        ],
+        deliveries: [
+          {
+            id: 5,
+            status: 'mocked',
+            notificationType: 'notification_workflow',
+            toRecipients: ['priya.nair@example.com'],
+            ccRecipients: [],
+            bccRecipients: [],
+            payload: { branding: { header: true } },
+          },
+        ],
+        aiProviderAttempts: [],
+      },
+    ]);
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/runs')
+      .query({ search: '10029', eventType: 'ticket.created', triggerSource: 'freshservice_webhook' })
+      .expect(200);
+
+    // Search, event and source filters go to the database; nothing is dropped afterwards.
+    expect(repositoryMock.listAuditRuns).toHaveBeenCalledWith(1, expect.objectContaining({
+      search: '10029',
+      eventType: 'ticket.created',
+      triggerSource: 'freshservice_webhook',
+      limit: 50,
+      offset: 0,
+    }));
+    expect(response.body.data).toHaveLength(1);
+    const row = response.body.data[0];
+    expect(row).toEqual(expect.objectContaining({
+      summary: true,
+      auditId: 'TP-NWF-91',
+      workflow: expect.objectContaining({ scheduleMode: 'after_hours', key: 'ticket_created_brisbane_copy' }),
+      ticket: expect.objectContaining({
+        displayRef: 'TP-10029',
+        nativeNumber: 10029,
+        freshserviceTicketId: '247279',
+        department: 'Brisbane',
+      }),
+    }));
+    expect(row.eventContext).toBeUndefined();
+    expect(row.steps).toEqual([{ id: 1, nodeId: 'send', nodeType: 'send_email', status: 'completed' }]);
+    expect(row.deliveries[0]).not.toHaveProperty('payload');
+    expect(row.deliveries[0]).not.toHaveProperty('htmlBody');
+    expect(row.deliveries[0].toRecipients).toEqual(['priya.nair@example.com']);
+    // QA 10-15 #2: a send that found no recipient shows as a warning.
+    expect(row.health).toEqual(expect.objectContaining({
+      state: 'completed_with_warning',
+      notSent: true,
+      summary: 'Not sent: no recipient',
+    }));
+    expect(row.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'no_recipient', message: 'Not sent: no recipient' }),
+    ]));
+  });
+
+  test('audit rendered e-mail uses the workflow version that ran, not the current definition (QA 10-15 #12)', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 92,
+      workspaceId: 1,
+      workflowId: 12,
+      workflowVersionId: 4,
+      eventType: 'ticket.created',
+      eventContext: { event: { type: 'ticket.created' } },
+      workflow: {
+        id: 12,
+        workspaceId: 1,
+        name: 'Ticket arrived',
+        key: 'ticket_created_copy',
+        triggerType: 'ticket.created',
+        publishedVersion: 5,
+        publishedDefinition: {
+          metadata: { scheduleMode: 'standard' },
+          nodes: [{ id: 'send', type: 'send_email', data: { includeHeader: true, headerBlockId: 99 } }],
+        },
+      },
+      workflowVersion: {
+        id: 4,
+        version: 4,
+        definition: {
+          metadata: { scheduleMode: 'after_hours' },
+          nodes: [{ id: 'send', type: 'send_email', data: { includeHeader: true, headerBlockId: 31 } }],
+        },
+      },
+      ticket: { id: 601, assessedPriority: 'High', priority: 3 },
+      steps: [
+        {
+          id: 1,
+          nodeType: 'template_render',
+          output: { email: { subject: 'We have your request', html: '<p>Thanks.</p>', text: 'Thanks.' } },
+        },
+        { id: 2, nodeId: 'send', nodeType: 'send_email', output: { skipped: true, reason: 'Mock delivery' } },
+      ],
+      deliveries: [],
+    });
+
+    await request(buildApp())
+      .get('/api/notification-workflows/audits/TP-NWF-92/rendered-email')
+      .expect(200);
+
+    expect(prismaMock.notificationWorkflowRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        workflowVersion: { select: { id: true, version: true, definition: true } },
+      }),
+    }));
+    expect(finalizeWorkflowSendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
+      nodeData: { includeHeader: true, headerBlockId: 31 },
+      workflowScheduleMode: 'after_hours',
+    }));
+  });
+
+  test('audit rendered e-mail falls back to the current definition when no version is pinned', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 93,
+      workspaceId: 1,
+      workflowId: 12,
+      workflowVersionId: null,
+      workflowVersion: null,
+      eventType: 'ticket.created',
+      eventContext: { event: { type: 'ticket.created' } },
+      workflow: {
+        id: 12,
+        workspaceId: 1,
+        publishedDefinition: {
+          metadata: { scheduleMode: 'standard' },
+          nodes: [{ id: 'send', type: 'send_email', data: { headerBlockId: 99 } }],
+        },
+      },
+      steps: [
+        { id: 1, nodeType: 'template_render', output: { email: { subject: 'Hi', html: '<p>Hi</p>', text: 'Hi' } } },
+        { id: 2, nodeId: 'send', nodeType: 'send_email', output: {} },
+      ],
+      deliveries: [],
+    });
+
+    await request(buildApp())
+      .get('/api/notification-workflows/audits/TP-NWF-93/rendered-email')
+      .expect(200);
+
+    expect(finalizeWorkflowSendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
+      nodeData: { headerBlockId: 99 },
+      workflowScheduleMode: 'standard',
+    }));
+  });
+
+  test('audit detail loads the full run with ticket ref and schedule mode (QA 10-15)', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 94,
+      workspaceId: 1,
+      workflowId: 12,
+      eventType: 'ticket.created',
+      status: 'completed',
+      eventContext: { ticket: { subject: 'Laptop will not start' } },
+      workflow: { id: 12, name: 'Brisbane variant', key: 'ticket_created_brisbane_copy', triggerType: 'ticket.created' },
+      ticket: { id: 601, origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: BigInt(250001), subject: 'Laptop will not start' },
+      steps: [],
+      deliveries: [],
+      aiProviderAttempts: [],
+    });
+    repositoryMock.attachWorkflowScheduleModes.mockImplementationOnce(async (runs) => runs.map((run) => ({
+      ...run,
+      workflow: { ...run.workflow, scheduleMode: 'after_hours' },
+    })));
+
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/audits/TP-NWF-94')
+      .expect(200);
+
+    const args = prismaMock.notificationWorkflowRun.findFirst.mock.calls[0][0];
+    expect(args.include.aiProviderAttempts).toEqual({ orderBy: { startedAt: 'asc' } });
+    expect(args.include.ticket.select).toEqual(expect.objectContaining({ nativeNumber: true, origin: true }));
+    expect(response.body.data.workflow.scheduleMode).toBe('after_hours');
+    expect(response.body.data.ticket.displayRef).toBe('TP-1042');
   });
 
   test('context-preview accepts an internal Ticket Pulse ticket ID', async () => {

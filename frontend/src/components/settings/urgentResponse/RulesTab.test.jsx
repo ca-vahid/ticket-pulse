@@ -42,6 +42,7 @@ beforeEach(() => {
     preview: vi.fn(async () => ok(PREVIEW)),
     getChanges: vi.fn(async () => ok([CHANGE])),
     updateSettings: vi.fn(async (patch) => ok({ settings: { ...SETTINGS, ...patch }, changes: Object.keys(patch).map((field, i) => ({ id: 100 + i, field })) })),
+    updateCoordinators: vi.fn(async (body) => ok({ ...body, fromLegacy: false, saved: true, changed: true })),
   });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -147,14 +148,15 @@ describe('Urgent response: Rules', () => {
 
   test('people are picked with the in-app select; the on-call choice names who is on call', async () => {
     setup();
-    fireEvent.click(screen.getByRole('combobox', { name: 'Workspace coordinator' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Person told when nobody is at work' }));
     // Inactive people are not offered.
     expect(screen.queryByRole('option', { name: /Gone Person/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: 'Maria Lee' }));
     fireEvent.click(screen.getByRole('radio', { name: /Give it to the on-call person/ }));
     expect(screen.getByText(/On call now:/)).toHaveTextContent('David Zapata');
     fireEvent.click(saveButton());
-    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ nobodyMode: 'on_call', coordinatorTechnicianId: 3 }));
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ nobodyMode: 'on_call', nobodyContactTechnicianId: 3 }));
+    expect(api.updateCoordinators).not.toHaveBeenCalled();
   });
 
   test('lists the changes: who, when, before → after', async () => {
@@ -167,7 +169,7 @@ describe('Urgent response: Rules', () => {
     expect(api.getChanges).toHaveBeenCalledWith(50);
   });
 
-  test('the workspace coordinator is the fallback, and the groups with their own coordinator are listed, linking to Groups', () => {
+  test('the workspace coordinators are the fallback, and the groups with their own coordinator are listed, linking to Groups', () => {
     setup({
       groupCoordinators: [
         { groupId: 3, groupName: 'Service Desk', groupActive: true, coordinator: { id: 3, name: 'Maria Lee', isActive: true }, backup: { id: 1, name: 'Andrew Fong', isActive: true } },
@@ -175,16 +177,110 @@ describe('Urgent response: Rules', () => {
       ],
     });
     const box = screen.getByRole('region', { name: 'If it keeps moving' });
-    expect(within(box).getByText('Workspace coordinator (when a group has none)')).toBeInTheDocument();
-    expect(within(box).getByRole('combobox', { name: 'Workspace coordinator' })).toBeInTheDocument();
+    expect(within(box).getByText('Coordinators')).toBeInTheDocument();
+    expect(within(box).getByText('Used when the ticket’s group has no coordinator of its own. Most workspaces only need this.')).toBeInTheDocument();
+    expect(within(box).queryByRole('combobox', { name: 'Workspace coordinator' })).not.toBeInTheDocument();
+    expect(within(box).getByText('Group coordinators (optional)')).toBeInTheDocument();
     const list = screen.getByTestId('group-coordinators');
     expect(list).toHaveTextContent('Service Desk — Maria Lee (backup Andrew Fong)');
     expect(list).toHaveTextContent('Network — Gone Person (inactive)');
     expect(within(list).getByRole('link', { name: 'Set them in Groups' })).toHaveAttribute('href', '/settings#groups');
   });
 
-  test('no group has its own coordinator: says the workspace coordinator is used for every ticket', () => {
+  test('no group has its own coordinator: says the coordinators are used for every ticket', () => {
     setup();
-    expect(screen.getByTestId('group-coordinators')).toHaveTextContent('No group has its own coordinator yet, so the workspace coordinator is used for every ticket.');
+    expect(screen.getByTestId('group-coordinators')).toHaveTextContent('No group has its own coordinator, so the coordinators above are used for every ticket.');
+  });
+});
+
+// QA 10-15 item 9: one to three workspace coordinators instead of one per group.
+describe('Urgent response: workspace coordinators', () => {
+  const CREW = [
+    { id: 11, name: 'Priya Nair', isActive: true },
+    { id: 12, name: 'Sam Okafor', isActive: true },
+    { id: 13, name: 'Dana Whitfield', isActive: true },
+    { id: 14, name: 'Lena Brooks', isActive: true },
+    { id: 15, name: 'Old Hand', isActive: false },
+  ];
+  const crew = (props = {}) => setup({ technicians: CREW, techById: new Map(CREW.map((t) => [t.id, t])), ...props });
+  const editor = () => screen.getByTestId('workspace-coordinators');
+  const add = (name) => {
+    fireEvent.click(within(editor()).getByRole('combobox', { name: 'Add a coordinator' }));
+    fireEvent.click(screen.getByRole('option', { name }));
+  };
+  // The names in list order, read from each row's Remove button.
+  const listed = () => within(editor()).queryAllByRole('button', { name: /^Remove / }).map((b) => b.getAttribute('aria-label').slice('Remove '.length));
+
+  test('nothing saved yet: the old single coordinator is the first entry, and nothing is unsaved', () => {
+    crew({ settings: { ...SETTINGS, coordinatorTechnicianId: 13 } });
+    expect(listed()).toEqual(['Dana Whitfield']);
+    expect(screen.getByRole('radio', { name: 'Give it to the first one who is working (by the order above)' })).toBeChecked();
+    expect(saveButton()).toBeDisabled();
+  });
+
+  test('add up to three in order, remove, reorder, pick "all at once", and Save sends the list', async () => {
+    const { onSaved } = crew({ workspaceCoordinators: { technicianIds: [], mode: 'first_available', fromLegacy: false, saved: false } });
+    expect(within(editor()).getByText('Nobody yet: the ticket stays with its last owner.')).toBeInTheDocument();
+
+    fireEvent.click(within(editor()).getByRole('combobox', { name: 'Add a coordinator' }));
+    // Inactive people are not offered.
+    expect(screen.queryByRole('option', { name: /Old Hand/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Priya Nair' }));
+    add('Sam Okafor');
+    // Somebody already on the list is not offered again.
+    fireEvent.click(within(editor()).getByRole('combobox', { name: 'Add a coordinator' }));
+    expect(screen.queryByRole('option', { name: 'Priya Nair' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Dana Whitfield' }));
+    expect(listed()).toEqual(['Priya Nair', 'Sam Okafor', 'Dana Whitfield']);
+    // Three is the most.
+    expect(within(editor()).queryByRole('combobox', { name: 'Add a coordinator' })).not.toBeInTheDocument();
+    expect(within(editor()).getByText('Three is the most. Remove one to add someone else.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Sam Okafor' }));
+    expect(within(editor()).getByRole('combobox', { name: 'Add a coordinator' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Move Dana Whitfield up' }));
+    expect(listed()).toEqual(['Dana Whitfield', 'Priya Nair']);
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Alert all of them at once; the first one who is working owns it' }));
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(api.updateCoordinators).toHaveBeenCalledWith({ technicianIds: [13, 11], mode: 'all' }));
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(await screen.findByText('Saved. 1 change recorded below.')).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledWith({}, { coordinators: { technicianIds: [13, 11], mode: 'all' } });
+    expect(saveButton()).toBeDisabled();
+  });
+
+  test('a rule change and a coordinator change go out with one Save; Discard puts the list back', async () => {
+    crew({ workspaceCoordinators: { technicianIds: [11], mode: 'first_available' } });
+    fireEvent.change(num('Minutes before the people at work are told'), { target: { value: '10' } });
+    add('Lena Brooks');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(listed()).toEqual(['Priya Nair']);
+    expect(saveButton()).toBeDisabled();
+
+    fireEvent.change(num('Minutes before the people at work are told'), { target: { value: '10' } });
+    add('Lena Brooks');
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(api.updateCoordinators).toHaveBeenCalledWith({ technicianIds: [11, 14], mode: 'first_available' }));
+    expect(api.updateSettings).toHaveBeenCalledWith({ clockNotifyMinutes: 10 });
+    expect(await screen.findByText('Saved. 2 changes recorded below.')).toBeInTheDocument();
+  });
+
+  test('a refused save says why and keeps the draft', async () => {
+    api.updateCoordinators = vi.fn(async () => { throw new Error('Coordinators: pick active technicians of this workspace'); });
+    crew({ workspaceCoordinators: { technicianIds: [], mode: 'first_available' } });
+    add('Priya Nair');
+    fireEvent.click(saveButton());
+    expect(await screen.findByText('Coordinators: pick active technicians of this workspace')).toBeInTheDocument();
+    expect(listed()).toEqual(['Priya Nair']);
+  });
+
+  test('the change history reads the list in words', async () => {
+    api.getChanges = vi.fn(async () => ok([{
+      id: 9, changedByName: 'Dana Whitfield', field: 'coordinators', before: { technicianIds: [], mode: 'first_available' }, after: { technicianIds: [11, 12], mode: 'all' }, createdAt: '2026-10-15T18:00:00Z',
+    }]));
+    crew();
+    expect(await screen.findByTestId('urgent-changes')).toHaveTextContent('Coordinators: nobody → Priya Nair, Sam Okafor (all at once)');
   });
 });

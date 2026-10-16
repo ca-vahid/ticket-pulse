@@ -22,7 +22,7 @@ jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ defau
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock }));
 
 const {
-  default: service, parseStored, validateEntry, pickCoordinator, settingsKey,
+  default: service, parseStored, validateEntry, pickCoordinator, pickWorkspaceCoordinator, settingsKey,
 } = await import('../src/services/groupCoordinatorService.js');
 
 const KEY = settingsKey(1);
@@ -177,6 +177,71 @@ describe('who is the coordinator', () => {
     });
     expect(out).toMatchObject({ technicianId: null, source: null });
     expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('boom'));
+  });
+
+  describe('workspace coordinators (QA 10-15): up to three, in order', () => {
+    const list = (states, technicianIds, { mode = 'first_available', entry = null, groupId = 8 } = {}) => {
+      stored[KEY] = JSON.stringify(entry ? { 8: entry } : {});
+      return service.resolveCoordinator({
+        workspaceId: 1,
+        groupId,
+        at: new Date('2026-10-15T17:00:00Z'),
+        personOf: async (id) => (TEAM[id] ? { ...TEAM[id] } : null),
+        stateOf: (person) => states[person.id] || AT_WORK,
+        workspaceCoordinators: { technicianIds, mode },
+      });
+    };
+
+    test('first available: the first one in list order who is at work owns it, and only they are told', async () => {
+      const out = await list({ 11: ON_LEAVE }, [11, 22, 33]);
+      expect(out).toMatchObject({ technicianId: 22, source: 'workspace', notify: [22], ownerAway: false, mode: 'first_available' });
+      expect(out.reason).toContain('the workspace coordinator Sam Okafor is used');
+      expect(out.reason).toContain('Priya is on leave (passed over)');
+      expect((await list({}, [33, 11])).technicianId).toBe(33);
+    });
+
+    test('nobody on the list is at work: the first active one still owns it, marked away', async () => {
+      const out = await list({ 11: ON_LEAVE, 22: LATER, 33: ON_LEAVE }, [44, 11, 22]);
+      expect(out).toMatchObject({ technicianId: 11, source: 'workspace', notify: [11], ownerAway: true });
+      expect(out.reason).toContain('nobody on the list is at work, so the first one still owns it: Priya is on leave');
+    });
+
+    test('all: everyone active on the list is told; the first one at work owns it', async () => {
+      const out = await list({ 11: LATER }, [11, 44, 22, 33], { mode: 'all' });
+      expect(out).toMatchObject({ technicianId: 22, notify: [22, 11, 33], ownerAway: false, mode: 'all' });
+      expect(out.reason).toContain('all 3 workspace coordinators are told');
+      // Nobody at work: the first active one owns it, everyone is still told.
+      expect(await list({ 11: ON_LEAVE, 22: ON_LEAVE }, [11, 22], { mode: 'all' })).toMatchObject({ technicianId: 11, notify: [11, 22], ownerAway: true });
+    });
+
+    test("the group's own coordinator or backup at work still wins, and only they are told", async () => {
+      expect(await list({}, [33], { mode: 'all', entry: { coordinatorTechnicianId: 11, backupTechnicianId: 22 } }))
+        .toMatchObject({ technicianId: 11, source: 'group', notify: [11], ownerAway: false });
+      expect(await list({ 11: ON_LEAVE }, [33], { mode: 'all', entry: { coordinatorTechnicianId: 11, backupTechnicianId: 22 } }))
+        .toMatchObject({ technicianId: 22, source: 'group_backup', notify: [22] });
+      expect(await list({ 11: ON_LEAVE, 22: ON_LEAVE }, [33, 11], { mode: 'all', entry: { coordinatorTechnicianId: 11, backupTechnicianId: 22 } }))
+        .toMatchObject({ technicianId: 33, source: 'workspace', awayNote: 'Priya and Sam are away', notify: [33, 11] });
+    });
+
+    test('an empty or all-inactive list is nobody', async () => {
+      expect(await list({}, [])).toMatchObject({ technicianId: null, source: null, notify: [] });
+      expect(await list({}, [44])).toMatchObject({ technicianId: null, reason: expect.stringContaining('the workspace coordinator is not active') });
+      expect(await list({}, [99])).toMatchObject({ technicianId: null, reason: expect.stringContaining('no workspace coordinator is set') });
+    });
+
+    test('the old single coordinator id still works as a one-person list', async () => {
+      stored[KEY] = JSON.stringify({});
+      const out = await service.resolveCoordinator({
+        workspaceId: 1, groupId: null, personOf: async (id) => ({ ...TEAM[id] }), stateOf: () => LATER, workspaceCoordinatorId: 33,
+      });
+      expect(out).toMatchObject({ technicianId: 33, source: 'workspace', notify: [33], ownerAway: true });
+    });
+
+    test('pickWorkspaceCoordinator is pure; a person with no state counts as at work', () => {
+      expect(pickWorkspaceCoordinator([{ person: TEAM[22], state: null }, { person: TEAM[11], state: AT_WORK }], 'all'))
+        .toMatchObject({ person: TEAM[22], notify: [22, 11], ownerAway: false });
+      expect(pickWorkspaceCoordinator([], 'all')).toBeNull();
+    });
   });
 
   test('pickCoordinator is pure: the same answer from the same facts', () => {

@@ -649,7 +649,7 @@ export default function AppHeader({
         {userMenuOpen && (
           <div
             role="menu"
-            className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
+            className="settings-scrollbar absolute right-0 top-full z-50 mt-2 max-h-[calc(100dvh-4.5rem)] w-60 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
           >
             {/* QA 09-22 #7: the name opens the profile page (photo, contact, links). */}
             <button

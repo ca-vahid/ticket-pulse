@@ -38,6 +38,16 @@ function llmOutputForStep(step = {}) {
   return step.nodeType === 'llm_generate' ? output : null;
 }
 
+export const NO_RECIPIENT_MESSAGE = 'Not sent: no recipient';
+
+// The engine's send_email node returns { skipped: true, reason: 'No recipient
+// email address resolved' } when the To list came out empty.
+export function isNoRecipientSkip(step = {}) {
+  if (step?.nodeType !== 'send_email') return false;
+  const output = step.output || {};
+  return output.skipped === true && /no recipient/i.test(String(output.reason || ''));
+}
+
 function addReason(reasons, reason = {}) {
   const type = String(reason.type || '').trim();
   if (!type) return;
@@ -118,6 +128,19 @@ export function classifyNotificationWorkflowRun(run = {}) {
         action: 'suppressed',
         nodeId: step.nodeId,
         message: output.reason || 'A duplicate workflow delivery was suppressed.',
+      });
+    }
+
+    // QA 10-15 #2: a send step that found nobody to mail still "completed",
+    // so a workflow that silently sent nothing looked Clean in the audit.
+    if (isNoRecipientSkip(step)) {
+      hasWarning = true;
+      addReason(reasons, {
+        type: 'no_recipient',
+        tier: 'warning',
+        action: 'not_sent',
+        nodeId: step.nodeId,
+        message: NO_RECIPIENT_MESSAGE,
       });
     }
 
@@ -242,10 +265,15 @@ export function classifyNotificationWorkflowRun(run = {}) {
     || reason.type === 'guard_rejected'
   )) || null;
 
+  const notSent = reasons.some((reason) => reason.type === 'no_recipient');
+
   return {
     state,
     label: HEALTH_LABELS[state],
     tone: HEALTH_TONES[state],
+    // Short line the audit list shows next to the health label.
+    notSent,
+    summary: notSent ? NO_RECIPIENT_MESSAGE : null,
     degraded: state !== NOTIFICATION_WORKFLOW_RUN_HEALTH.COMPLETED_CLEAN,
     fallbackUsed: state === NOTIFICATION_WORKFLOW_RUN_HEALTH.COMPLETED_WITH_FALLBACK,
     fallbackSummary: fallbackReason ? {

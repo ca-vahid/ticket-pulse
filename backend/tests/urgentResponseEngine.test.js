@@ -787,6 +787,92 @@ describe('group coordinators', () => {
   });
 });
 
+describe('workspace coordinators (QA 10-15): up to three, first available or all at once', () => {
+  // No group coordinators. At 10:30 Andrew, Maria and Susan are at work; David starts at 13:00.
+  const running = (extra = {}) => ({
+    ticketId: 1, workspaceId: 1, ownerTechnicianId: 11, state: 'running', startedAt: WED_10, notifyAt: minutes(WED_10, 15), moveAt: minutes(WED_10, 30), notifiedAt: minutes(WED_10, 15), moveCount: 2, chainTechnicianIds: [33, 44], stoppedAt: null, stopReason: null, shadow: false, ...extra,
+  });
+  const onLeave = (...ids) => ids.map((id) => ({ technicianId: id, leaveDate: new Date('2026-10-14T00:00:00Z'), category: 'OFF', status: 'APPROVED', isFullDay: true }));
+  const setList = (technicianIds, mode = 'first_available') => { appSettings.workspace_coordinators_ws1 = JSON.stringify({ technicianIds, mode }); };
+  beforeEach(() => {
+    use({ coordinatorTechnicianId: 44 });
+    db.tickets = [ticketRow(1, { assignedTechId: 11 })];
+    db.clocks = [running()];
+  });
+
+  test('first available: David is not at work yet, so Maria (next on the list) gets it; only she and the owner are told', async () => {
+    setList([33, 22]);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(assignTicket).toHaveBeenCalledWith(1, 1, 22, expect.anything(), expect.anything());
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ toTechnicianId: 22, details: expect.objectContaining({ coordinatorSource: 'workspace', coordinatorMode: 'first_available', ownerAway: false }) });
+    expect(row.details.reason).toContain('David starts at 13:00 (passed over)');
+    expect(row.sentence).toBe('Urgent and still untouched after 2 moves. Assigned to the coordinator, Maria Lee, who was told.');
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([22, 11]);
+  });
+
+  test('all at once: the first at work owns it and every coordinator is told', async () => {
+    setList([33, 22, 44], 'all');
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(assignTicket).toHaveBeenCalledWith(1, 1, 22, expect.anything(), expect.anything());
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ toTechnicianId: 22, details: expect.objectContaining({ coordinatorMode: 'all', alsoToldTechnicianIds: [33, 44] }) });
+    expect(row.sentence).toBe('Urgent and still untouched after 2 moves. Assigned to the coordinator, Maria Lee, who was told. David Zapata and Susan Xu were told too.');
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([22, 33, 44, 11]);
+  });
+
+  test('nobody on the list is at work: the first one still owns it, and the log says they are away', async () => {
+    setList([22, 44]);
+    db.leaves = onLeave(22, 44);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    const [row] = actionsOf('coordinator');
+    expect(row).toMatchObject({ toTechnicianId: 22, details: expect.objectContaining({ ownerAway: true }) });
+    expect(row.details.reason).toContain('nobody on the list is at work, so the first one still owns it: Maria is on leave');
+  });
+
+  test('Shadow, all at once: would have assigned and told; nothing moves, nobody is told', async () => {
+    use({ mode: 'observe', coordinatorTechnicianId: 44 });
+    setList([22, 33], 'all');
+    db.clocks = [running({ shadow: true })];
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(actionsOf('coordinator')[0].sentence).toBe('Shadow: would have assigned to the coordinator, Maria Lee and told David Zapata too. Urgent and still untouched after 2 moves.');
+    expect(assignTicket).not.toHaveBeenCalled();
+    expect(tellPeople).not.toHaveBeenCalled();
+  });
+
+  test('a saved list wins over the old single coordinator; an empty saved list falls back to it', async () => {
+    setList([22]);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(actionsOf('coordinator')[0]).toMatchObject({ toTechnicianId: 22 });
+
+    db.actions = [];
+    db.clocks = [running()];
+    ticketOf(1).assignedTechId = 11;
+    setList([]);
+    await engine.sweep({ now: minutes(WED_10, 30) });
+    expect(actionsOf('coordinator')[0]).toMatchObject({ toTechnicianId: 44 });
+  });
+
+  test('nobody at work and no contact, all at once: every coordinator is told about the hold', async () => {
+    setList([33, 22], 'all');
+    db.clocks = [];
+    await engine.sweep({ now: WED_NIGHT });
+    expect(actionsOf('held')[0].sentence).toBe('Nobody is at work. Left with Andrew Fong; David Zapata and Maria Lee were told.');
+    expect(actionsOf('held')[0].details).toMatchObject({ contactTechnicianId: 33, contactTechnicianIds: [33, 22] });
+    expect(tellPeople.mock.calls[0][0].technicianIds).toEqual([33, 22]);
+  });
+
+  test('nobody could take it, all at once: every coordinator is told', async () => {
+    setList([22, 33], 'all');
+    db.clocks = [];
+    db.tickets = [ticketRow(1, { origin: 'freshservice', freshserviceTicketId: 242611n, nativeNumber: null })];
+    updateFsTicket.mockRejectedValue(new Error('FreshService is busy'));
+    await engine.sweep({ now: WED_10 });
+    expect(actionsOf('failed')).toHaveLength(1);
+    expect(tellPeople.mock.calls.at(-1)[0].technicianIds).toEqual([22, 33]);
+  });
+});
+
 describe('moving a FreshService ticket', () => {
   beforeEach(() => {
     db.tickets = [ticketRow(1, { origin: 'freshservice', freshserviceTicketId: 242611n, nativeNumber: null })];

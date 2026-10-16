@@ -26,6 +26,7 @@ import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import config from '../config/index.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 const ESCALATION_CHANNELS = Object.freeze(['email', 'sms', 'whatsapp', 'phone_call']);
 const PHONE_CHANNELS = new Set(['sms', 'whatsapp', 'phone_call']);
@@ -356,6 +357,7 @@ async function getPublicLinkByToken(token) {
               name: true,
               slug: true,
               defaultTimezone: true,
+              internalDomains: true,
             },
           },
           requester: {
@@ -385,6 +387,76 @@ function publicBranding(settings, workspace) {
     trademarkText: settings?.trademarkText || null,
     accentColor: settings?.accentColor || '#2563eb',
   };
+}
+
+// QA 10-15 #5: requesters may open a Teams chat with the assigned agent from
+// the urgency page. Off until the agent opts in (Mail & alerts → Teams).
+const TEAMS_CHAT_ACTIVITY = 'requester_teams_chat';
+const TEAMS_CHAT_REPEAT_MS = 10 * 60 * 1000;
+
+function emailDomain(email) {
+  const at = String(email || '').trim().toLowerCase().split('@');
+  return at.length === 2 && at[0] && at[1] ? at[1] : '';
+}
+
+function domainMatches(domain, list) {
+  return list.some((d) => {
+    const dd = String(d || '').trim().toLowerCase().replace(/^@/, '');
+    return dd && (domain === dd || domain.endsWith(`.${dd}`));
+  });
+}
+
+/**
+ * Outside requesters cannot chat in the company's Teams: the requester must be
+ * on one of the workspace's internal domains, or (none configured) share the
+ * agent's domain.
+ */
+function requesterIsInternal(requesterEmail, agentEmail, internalDomains) {
+  const requesterDomain = emailDomain(requesterEmail);
+  if (!requesterDomain) return false;
+  const list = Array.isArray(internalDomains) ? internalDomains.filter(Boolean) : [];
+  if (list.length > 0) return domainMatches(requesterDomain, list);
+  const agentDomain = emailDomain(agentEmail);
+  return Boolean(agentDomain) && agentDomain === requesterDomain;
+}
+
+async function agentAllowsRequesterTeamsChat(workspaceId, technicianId) {
+  try {
+    const row = await prisma.notificationPreference.findUnique({
+      where: { workspaceId_technicianId: { workspaceId: Number(workspaceId), technicianId: Number(technicianId) } },
+      select: { options: true },
+    });
+    return row?.options?.requesterTeamsChat === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Everything the page and the POST need; the agent's e-mail never leaves the server. */
+async function requesterTeamsChatState(ticket, workspaceId) {
+  const agent = ticket?.assignedTech || null;
+  const firstName = agent?.name ? String(agent.name).trim().split(/\s+/)[0] : null;
+  const no = (reason) => ({ available: false, reason, agentName: null, agentFirstName: null, agentEmail: null });
+  if (isTerminalTicket(ticket)) return no('ticket_closed_or_resolved');
+  if (!agent?.id || !agent?.email) return no('no_assigned_agent');
+  if (!ticket?.requester?.email) return no('requester_not_internal');
+  if (!requesterIsInternal(ticket.requester.email, agent.email, ticket.workspace?.internalDomains)) {
+    return no('requester_not_internal');
+  }
+  if (!(await agentAllowsRequesterTeamsChat(workspaceId, agent.id))) return no('agent_not_opted_in');
+  return {
+    available: true,
+    reason: null,
+    agentName: agent.name || null,
+    agentFirstName: firstName,
+    agentEmail: String(agent.email).trim(),
+  };
+}
+
+function buildTeamsChatUrl(agentEmail, ticket) {
+  const subject = String(ticket?.subject || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const message = `About ${ticketDisplayRef(ticket)}${subject ? ` – ${subject}` : ''}: `;
+  return `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(agentEmail)}&message=${encodeURIComponent(message)}`;
 }
 
 class AfterHoursUrgentEscalationService {
@@ -1158,6 +1230,7 @@ class AfterHoursUrgentEscalationService {
     if (terminal) reasons.push('ticket_closed_or_resolved');
     if (cooldownActive) reasons.push('cooldown_active');
     if (alreadyUrgent) reasons.push('already_urgent');
+    const teamsChat = await requesterTeamsChatState(ticket, workspaceId);
 
     return {
       token: trimmedToken,
@@ -1174,6 +1247,7 @@ class AfterHoursUrgentEscalationService {
       terminal,
       reasons,
       available: reasons.length === 0,
+      teamsChat,
     };
   }
 
@@ -1204,6 +1278,8 @@ class AfterHoursUrgentEscalationService {
       ticket: {
         id: ticket.id,
         freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
+        // TP-born tickets show their TP number, FS-born keep "#12345".
+        displayRef: ticketDisplayRef(ticket),
         subject: ticket.subject || 'Ticket',
         status: ticket.status,
         priority: ticket.assessedPriority || PRIORITY_ID_TO_LABEL[Number(ticket.priority)] || String(ticket.priority || ''),
@@ -1214,6 +1290,13 @@ class AfterHoursUrgentEscalationService {
         requesterName: ticket.requester?.name || null,
         publicStatusUrl: buildPublicTicketStatusUrl(state.token),
         afterHoursEscalationUrl: state.policy.selfServiceEnabled ? buildTicketEscalationUrl(state.token) : null,
+      },
+      // No e-mail address here: the Teams link is built by the POST.
+      teamsChat: {
+        available: state.teamsChat?.available === true,
+        agentName: state.teamsChat?.agentName || null,
+        agentFirstName: state.teamsChat?.agentFirstName || null,
+        // Why it is not offered stays on the server: it would tell an outsider whether the agent opted in.
       },
       workspace: {
         id: workspace?.id || state.link.workspaceId,
@@ -1229,6 +1312,53 @@ class AfterHoursUrgentEscalationService {
   async getPublicBusinessUrgency(token, requestMeta = {}) {
     const state = await this._businessUrgencyState(token, requestMeta);
     return this._publicBusinessUrgencyResponse(state);
+  }
+
+  /**
+   * QA 10-15 #5: the requester asks to chat with the assigned agent in Teams.
+   * Re-checks the rules, notes it in the ticket history (once per 10 minutes)
+   * and hands back the Teams deep link. Independent of raising urgency.
+   */
+  async startRequesterTeamsChat(token, requestMeta = {}) {
+    const { link } = await getPublicLinkByToken(token);
+    const ticket = link.ticket;
+    const chat = await requesterTeamsChatState(ticket, link.workspaceId);
+    if (!chat.available) {
+      return { available: false, url: null };
+    }
+
+    const url = buildTeamsChatUrl(chat.agentEmail, ticket);
+    try {
+      const since = new Date(Date.now() - TEAMS_CHAT_REPEAT_MS);
+      const recent = await prisma.ticketActivity.findFirst({
+        where: { ticketId: ticket.id, activityType: TEAMS_CHAT_ACTIVITY, performedAt: { gte: since } },
+        select: { id: true },
+      });
+      if (!recent) {
+        await prisma.ticketActivity.create({
+          data: {
+            ticketId: ticket.id,
+            activityType: TEAMS_CHAT_ACTIVITY,
+            performedBy: String(ticket.requester?.name || ticket.requester?.email || 'Requester').slice(0, 255),
+            performedAt: new Date(),
+            details: safeJson({
+              via: 'urgency_page',
+              actorKind: 'human',
+              requesterEmail: ticket.requester?.email || null,
+              technicianId: ticket.assignedTech?.id || null,
+              agentName: chat.agentName,
+              note: `Opened a Teams chat with ${chat.agentName || 'the assigned agent'} from the urgency page.`,
+              ipHash: hashText(requestMeta.ip || ''),
+            }),
+          },
+        });
+      }
+    } catch (error) {
+      // The chat still opens; the history line is best effort.
+      logger.warn(`Requester Teams chat: could not record activity on ticket ${ticket.id}: ${error.message}`);
+    }
+
+    return { available: true, agentName: chat.agentName, agentFirstName: chat.agentFirstName, url };
   }
 
   async _queueAssignedAgentForBusinessUrgency({ event, ticket, fromPriorityId }) {

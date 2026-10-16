@@ -7,6 +7,7 @@ import ticketActivityRepository from '../ticketActivityRepository.js';
 import settingsService, { soft } from './settingsService.js';
 import onCallService from './onCallService.js';
 import groupCoordinatorService from '../groupCoordinatorService.js';
+import workspaceCoordinatorService from '../workspaceCoordinatorService.js';
 import {
   LAYERS, PRIORITY_LABELS, UNDOABLE_ACTIONS,
   atWork, awayPhrase, localParts, minutesToTime, normalizeSettings, rankResponders, responderPhrase, sentenceFor, validateSettings,
@@ -571,10 +572,27 @@ class UrgentResponseService {
   }
 
   /**
+   * The workspace coordinators in force for this pass ({ technicianIds, mode }):
+   * the saved list, else the single coordinator of the settings row. Read once.
+   */
+  async _workspaceCoordinators(ctx) {
+    if (!ctx.workspaceCoordinators) {
+      ctx.workspaceCoordinators = await soft(
+        () => workspaceCoordinatorService.getEffective(ctx.workspaceId, { legacyId: ctx.settings.coordinatorTechnicianId ?? null }),
+        null,
+      ) || { technicianIds: ctx.settings.coordinatorTechnicianId ? [ctx.settings.coordinatorTechnicianId] : [], mode: 'first_available' };
+    }
+    return ctx.workspaceCoordinators;
+  }
+
+  /**
    * "The coordinator" for this ticket (groupCoordinatorService): its group's
    * coordinator if at work, else the group's backup if at work, else the
-   * workspace coordinator, else nobody. "At work" is this engine's own rule.
-   * @returns {{ person: object|null, technicianId, name, source, reason, awayNote, groupId, groupName }}
+   * workspace coordinators (the first at work owns it; mode 'all' tells every
+   * one of them), else nobody. "At work" is this engine's own rule.
+   * @returns {{ person: object|null, notify: number[], notifyPeople: object[], technicianId, name, source, reason,
+   *   awayNote, ownerAway, mode, groupId, groupName }}
+   *   `person` is the owner; `notify` who is told (the owner first), `notifyPeople` their rows.
    */
   async _coordinatorFor(ctx, ticket) {
     const group = await this._ticketGroup(ctx, ticket);
@@ -587,16 +605,36 @@ class UrgentResponseService {
       at: ctx.now,
       personOf: (id) => this._person(ctx, id),
       stateOf: (person) => this._state(ctx, person),
-      workspaceCoordinatorId: ctx.settings.coordinatorTechnicianId ?? null,
+      workspaceCoordinators: await this._workspaceCoordinators(ctx),
     });
     const person = result.technicianId ? await this._person(ctx, result.technicianId) : null;
-    return { ...result, person };
+    const ids = person ? uniq([person.id, ...(Array.isArray(result.notify) ? result.notify : [])].filter(isPositiveId)) : [];
+    const notifyPeople = [];
+    for (const id of ids) {
+      const row = id === person.id ? person : await this._person(ctx, id);
+      if (row && row.isActive !== false) notifyPeople.push(row);
+    }
+    return { ...result, person, notify: notifyPeople.map((p) => p.id), notifyPeople };
   }
 
-  /** The person told when nobody is at work: the named contact, else the ticket's coordinator, else nobody. */
+  /**
+   * Who is told when nobody is at work: the named contact, else the ticket's
+   * coordinator (every workspace coordinator in mode 'all'), else nobody.
+   * @returns {{ person: object|null, people: object[] }} `person` the first one told.
+   */
+  async _nobodyContacts(ctx, ticket = null) {
+    if (ctx.settings.nobodyContactTechnicianId) {
+      const person = await this._person(ctx, ctx.settings.nobodyContactTechnicianId);
+      return { person, people: person ? [person] : [] };
+    }
+    const coordinator = await this._coordinatorFor(ctx, ticket);
+    if (!coordinator.person) return { person: null, people: [] };
+    return { person: coordinator.person, people: coordinator.notifyPeople.length ? coordinator.notifyPeople : [coordinator.person] };
+  }
+
+  /** The first person told when nobody is at work (see _nobodyContacts). */
   async _nobodyContact(ctx, ticket = null) {
-    if (ctx.settings.nobodyContactTechnicianId) return this._person(ctx, ctx.settings.nobodyContactTechnicianId);
-    return (await this._coordinatorFor(ctx, ticket)).person;
+    return (await this._nobodyContacts(ctx, ticket)).person;
   }
 
   // ---- who assigned it, and has anybody touched it ---------------------------
@@ -833,7 +871,7 @@ class UrgentResponseService {
       if (!coordinator.person) return;
       logger.info(`Urgent response: telling the coordinator about a failed move: ${coordinator.reason}`, { ticketId: ticket.id, workspaceId: ctx.workspaceId, source: coordinator.source });
       await this._tell(ctx, {
-        technicianIds: [coordinator.person.id],
+        technicianIds: coordinator.notify.length ? coordinator.notify : [coordinator.person.id],
         title: `${priorityWord(ticket.priority)} ticket ${ticketDisplayRef(ticket)} could not be moved`,
         lines: [this._subjectLine(ticket), sentence, 'It stays where it is until somebody moves it by hand.'],
         ticket,
@@ -916,18 +954,24 @@ class UrgentResponseService {
 
     // Hold: claim the clock first, so a restart finds it waiting and the dedupe key keeps the notice to one.
     await waiting();
-    const contact = await this._nobodyContact(ctx, ticket);
+    const { person: contact, people: contacts } = await this._nobodyContacts(ctx, ticket);
     const sentence = sentenceFor('held', {
-      shadow: ctx.shadow, layer, priority: ticket.priority, from: from.name, contact: contact?.name || null, nobodyTold: !contact,
+      shadow: ctx.shadow, layer, priority: ticket.priority, from: from.name, contact: contacts.length ? contacts.map((p) => p.name) : null, nobodyTold: !contact,
     });
     const row = await this._record(ctx, {
-      ticket, layer, action: 'held', from, sentence, details: { contactTechnicianId: contact?.id ?? null }, dedupeKey: `clock:${ticket.id}:${iso}:held`,
+      ticket,
+      layer,
+      action: 'held',
+      from,
+      sentence,
+      details: { contactTechnicianId: contact?.id ?? null, ...(contacts.length > 1 ? { contactTechnicianIds: contacts.map((p) => p.id) } : {}) },
+      dedupeKey: `clock:${ticket.id}:${iso}:held`,
     });
     if (row && row !== 'duplicate') {
       out.held += 1;
       if (contact) {
         await this._tell(ctx, {
-          technicianIds: [contact.id],
+          technicianIds: contacts.map((p) => p.id),
           title: `${priorityWord(ticket.priority)} ticket ${ticketDisplayRef(ticket)}: nobody is at work`,
           lines: [this._subjectLine(ticket), sentence, 'It moves as soon as somebody is at work.'],
           ticket,
@@ -1007,7 +1051,7 @@ class UrgentResponseService {
         out.told += 1;
         let audience = (await this._audience(ctx, ticket)).filter((id) => id !== ownerId);
         // Nobody else to tell (the night, a holiday): the contact for "nobody at work".
-        if (!audience.length) audience = [(await this._nobodyContact(ctx, ticket))?.id].filter(Boolean);
+        if (!audience.length) audience = (await this._nobodyContacts(ctx, ticket)).people.map((p) => p.id);
         await this._tell(ctx, {
           technicianIds: audience,
           title: `${priorityWord(ticket.priority)} ticket ${ticketDisplayRef(ticket)}: ${from.name} is away`,
@@ -1171,8 +1215,9 @@ class UrgentResponseService {
 
   /**
    * The chain is used up: the ticket's coordinator gets it — its group's
-   * coordinator or backup when at work, else the workspace coordinator (when
-   * set and active) — is told, and the clock ends.
+   * coordinator or backup when at work, else the first workspace coordinator
+   * at work (the first active one when nobody is) — is told, and the clock
+   * ends. In mode 'all' every workspace coordinator is told too.
    */
   async _toCoordinator(ctx, clock, ticket, owner, out) {
     const { now } = ctx;
@@ -1183,9 +1228,11 @@ class UrgentResponseService {
     const usable = resolved.person?.isActive ? resolved.person : null;
     const alreadyOwner = Boolean(usable && usable.id === ticket.assignedTechId);
     const key = `clock:${ticket.id}:${new Date(clock.startedAt).toISOString()}:coordinator`;
+    // Mode 'all': the other workspace coordinators are told as well.
+    const others = usable ? resolved.notifyPeople.filter((p) => p.id !== usable.id) : [];
     const base = {
       shadow: ctx.shadow, priority: ticket.priority, from: from.name, moves: clock.moveCount,
-      role: usable ? resolved.source : null, group: resolved.groupName, awayNote: resolved.awayNote,
+      role: usable ? resolved.source : null, group: resolved.groupName, awayNote: resolved.awayNote, alsoTold: others.map((p) => p.name),
     };
 
     let to = usable && !alreadyOwner ? who(usable.id, usable.name) : null;
@@ -1212,13 +1259,19 @@ class UrgentResponseService {
       to,
       sentence,
       details: {
-        moves: clock.moveCount, coordinatorTechnicianId: usable?.id ?? null, coordinatorSource: usable ? resolved.source : null, groupId: resolved.groupId ?? null, reason: resolved.reason,
+        moves: clock.moveCount,
+        coordinatorTechnicianId: usable?.id ?? null,
+        coordinatorSource: usable ? resolved.source : null,
+        groupId: resolved.groupId ?? null,
+        reason: resolved.reason,
+        ...(usable && resolved.source === 'workspace' ? { coordinatorMode: resolved.mode || 'first_available', ownerAway: resolved.ownerAway === true } : {}),
+        ...(others.length ? { alsoToldTechnicianIds: others.map((p) => p.id) } : {}),
       },
       dedupeKey: key,
     });
     if (row && row !== 'duplicate' && usable) {
       await this._tell(ctx, {
-        technicianIds: uniq([usable.id, from.id]),
+        technicianIds: uniq([usable.id, ...others.map((p) => p.id), from.id]),
         title: `${priorityWord(ticket.priority)} ticket ${ticketDisplayRef(ticket)} is still untouched`,
         lines: [this._subjectLine(ticket), sentence],
         ticket,
@@ -1310,14 +1363,21 @@ class UrgentResponseService {
         return { outcome: 'on_call', techId: to.id, techName: to.name, sentence, shadow };
       }
 
-      const contact = await this._nobodyContact(ctx, guarded);
+      const { person: contact, people: contacts } = await this._nobodyContacts(ctx, guarded);
       const sentence = sentenceFor('held', { shadow, layer: 'assign', priority, from: from.name });
       const logged = await this._record(ctx, {
-        ticket: guarded, layer: 'assign', action: 'held', from, sentence, priority, dedupeKey: key, details: { runId, reason, contactTechnicianId: contact?.id ?? null },
+        ticket: guarded,
+        layer: 'assign',
+        action: 'held',
+        from,
+        sentence,
+        priority,
+        dedupeKey: key,
+        details: { runId, reason, contactTechnicianId: contact?.id ?? null, ...(contacts.length > 1 ? { contactTechnicianIds: contacts.map((p) => p.id) } : {}) },
       });
       if (contact) {
         await this._tell(ctx, {
-          technicianIds: [contact.id],
+          technicianIds: contacts.map((p) => p.id),
           title: `${priorityWord(priority)} ticket ${ticketDisplayRef(guarded)}: nobody is at work`,
           lines: [this._subjectLine(guarded), sentence, 'It waits in Assignment Review.'],
           ticket: guarded,

@@ -85,6 +85,29 @@ describe('preferences', () => {
     expect(cleanPrefs({ events: { assigned: 'teams', bogus: 'teams', reopened: 'loud' }, options: { digestTime: '25:00', groupMinPriority: 9, dailyDigest: true } }))
       .toEqual({ events: { assigned: 'teams' }, options: { groupMinPriority: 4, dailyDigest: true } });
   });
+  // QA 10-15 #5: requester Teams chat from the urgency page is a personal opt-in.
+  test('requesterTeamsChat is off by default and only the agent can turn it on', () => {
+    expect(effectivePrefs(null, null).options.requesterTeamsChat).toBe(false);
+    expect(effectivePrefs({ options: { requesterTeamsChat: true } }, null).options.requesterTeamsChat).toBe(false);
+    expect(effectivePrefs({ options: {} }, { options: { requesterTeamsChat: true } }).options.requesterTeamsChat).toBe(true);
+    expect(cleanPrefs({ options: { requesterTeamsChat: true } }, { personal: true }).options).toEqual({ requesterTeamsChat: true });
+    expect(cleanPrefs({ options: { requesterTeamsChat: 'yes' } }, { personal: true }).options).toEqual({});
+    expect(cleanPrefs({ options: { requesterTeamsChat: true } }).options).toEqual({});
+  });
+  test('saving my own choices keeps requesterTeamsChat; workspace defaults never store it', async () => {
+    const techSpy = jest.spyOn(svc, '_tech').mockResolvedValue({ ...ADRIAN, workspaceId: 1 });
+    const statusSpy = jest.spyOn(svc, 'myStatus').mockResolvedValue({ ok: true });
+    prismaMock.notificationPreference.upsert.mockClear();
+    await svc.saveMyPrefs('adrian@x.io', 1, { events: {}, options: { requesterTeamsChat: true, respectAway: true } });
+    expect(prismaMock.notificationPreference.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ options: { requesterTeamsChat: true, respectAway: true } }),
+    }));
+    prismaMock.notificationWorkspaceSetting.upsert.mockClear();
+    await svc.saveWorkspaceSettings(1, { defaults: { options: { requesterTeamsChat: true, dailyDigest: true } } });
+    expect(prismaMock.notificationWorkspaceSetting.upsert.mock.calls[0][0].update.defaults.options).toEqual({ dailyDigest: true });
+    techSpy.mockRestore();
+    statusSpy.mockRestore();
+  });
   test('every event has a label and a group', () => {
     for (const e of EVENTS) expect(e.label && e.group && ['teams', 'digest', 'off'].includes(e.mode)).toBeTruthy();
   });

@@ -1,26 +1,38 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Activity,
   AlertCircle,
+  ArrowUpRight,
+  BellRing,
   CheckCircle2,
-  CircleDot,
+  ChevronDown,
   Clock3,
-  Info,
+  Inbox,
   Loader2,
+  Mail,
   PauseCircle,
+  PhoneCall,
   RefreshCw,
-  ShieldAlert,
-  ShieldCheck,
-  ArrowUpCircle,
+  Siren,
   UserRound,
 } from 'lucide-react';
 import { publicTicketStatusAPI } from '../services/api';
+import { LinkedText } from '../components/tickets/ticketUi';
+
+// Requester-facing status page (/ticket-status/:token). QA 10-15 #7 redesign:
+// the common helpdesk / parcel-tracker pattern — one clear status with a short
+// progress stepper, who is handling it, one human sentence about what happens
+// next, and the few actions a requester can take. Everything else (stats,
+// percentiles, link expiry, category) is either folded into a disclosure or
+// a footer line. Light-only like every public token page (.tp-light).
+
+const DEFAULT_ACCENT = '#2563eb';
+const HEX_RE = /^#[0-9a-f]{6}$/i;
 
 function formatDate(value, options = {}) {
-  if (!value) return 'Not available';
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Not available';
+  if (Number.isNaN(date.getTime())) return null;
   return date.toLocaleString([], {
     weekday: 'short',
     month: 'short',
@@ -31,170 +43,426 @@ function formatDate(value, options = {}) {
   });
 }
 
-function compactDate(value) {
-  if (!value) return 'No expiry';
+function formatDay(value) {
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'No expiry';
+  if (Number.isNaN(date.getTime())) return null;
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 function initials(name) {
-  return String(name || 'TP')
+  return String(name || '')
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase())
-    .join('') || 'TP';
+    .join('');
 }
 
-function statusStyle(tone) {
-  if (tone === 'resolved') {
-    return {
-      wrap: 'border-emerald-200 bg-emerald-50 text-emerald-950',
-      label: 'text-emerald-700',
-      icon: 'bg-emerald-600 text-white',
-      glow: 'from-emerald-500 via-teal-400 to-cyan-400',
-      Icon: CheckCircle2,
-    };
+/** "about a day", "about 3 hours" — a typical duration said the way a person would. */
+function humanDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const hours = value / 3600;
+  if (hours < 1.5) return 'an hour';
+  if (hours < 20) return `${Math.round(hours)} hours`;
+  if (hours < 36) return 'a day';
+  const days = hours / 24;
+  if (days < 6.5) return `${Math.round(days)} days`;
+  if (days < 10.5) return 'a week';
+  return `${Math.round(days / 7)} weeks`;
+}
+
+/** A Pending-type status that is waiting on the requester (vs. a vendor, approval, …). */
+function waitsOnRequester(status) {
+  return /customer|requester|user|you|response|reply|information|info/i.test(String(status || ''));
+}
+
+/**
+ * The page's single source of truth for "where is my request": headline word,
+ * tone, and the four-step progress (Received → Assigned → In progress/Waiting
+ * → Resolved). `current` is the index of the active step; 4 = all done.
+ */
+function deriveProgress(data) {
+  const ticket = data?.ticket || {};
+  const timeline = Array.isArray(data?.timeline) ? data.timeline : [];
+  const tone = ticket.statusTone || 'neutral';
+  const assigned = Boolean(
+    ticket.assignedAgent?.name || ticket.assignedAt || timeline.some(item => item?.key === 'assigned'),
+  );
+  const closed = timeline.some(item => item?.key === 'closed') || /closed/i.test(String(ticket.status || ''));
+  const resolved = tone === 'resolved';
+  const waiting = tone === 'waiting';
+  const waitingOnYou = waiting && waitsOnRequester(ticket.status);
+
+  let headline;
+  let current;
+  if (resolved) {
+    headline = closed ? 'Closed' : 'Resolved';
+    current = 4;
+  } else if (waiting) {
+    headline = waitingOnYou ? 'Waiting on you' : 'On hold';
+    current = 2;
+  } else if (assigned) {
+    headline = 'In progress';
+    current = 2;
+  } else {
+    headline = tone === 'neutral' && ticket.status ? ticket.status : 'Received';
+    current = 1;
   }
-  if (tone === 'waiting') {
-    return {
-      wrap: 'border-amber-200 bg-amber-50 text-amber-950',
-      label: 'text-amber-700',
-      icon: 'bg-amber-500 text-white',
-      glow: 'from-amber-400 via-orange-400 to-rose-400',
-      Icon: PauseCircle,
-    };
-  }
-  if (tone === 'open') {
-    return {
-      wrap: 'border-blue-200 bg-blue-50 text-blue-950',
-      label: 'text-blue-700',
-      icon: 'bg-blue-600 text-white',
-      glow: 'from-blue-500 via-sky-400 to-cyan-300',
-      Icon: Activity,
-    };
-  }
-  return {
-    wrap: 'border-slate-200 bg-slate-50 text-slate-950',
-    label: 'text-slate-600',
-    icon: 'bg-slate-700 text-white',
-    glow: 'from-slate-500 via-blue-400 to-emerald-300',
-    Icon: CircleDot,
-  };
+
+  const steps = [
+    'Received',
+    'Assigned',
+    waiting ? (waitingOnYou ? 'Waiting on you' : 'On hold') : 'In progress',
+    closed ? 'Closed' : 'Resolved',
+  ].map((label, index) => ({
+    label,
+    state: index < current ? 'complete' : index === current ? 'current' : 'upcoming',
+  }));
+
+  return { tone, assigned, closed, resolved, waiting, waitingOnYou, headline, current, steps };
 }
 
-function timelineStyle(tone) {
-  if (tone === 'emerald') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (tone === 'amber') return 'border-amber-200 bg-amber-50 text-amber-700';
-  if (tone === 'indigo') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
-  if (tone === 'cyan') return 'border-cyan-200 bg-cyan-50 text-cyan-700';
-  return 'border-blue-200 bg-blue-50 text-blue-700';
+function toneStyle(tone, accent) {
+  if (tone === 'resolved') return { Icon: CheckCircle2, className: 'bg-emerald-50 text-emerald-700' };
+  if (tone === 'waiting') return { Icon: PauseCircle, className: 'bg-amber-50 text-amber-700' };
+  if (tone === 'open') return { Icon: Clock3, className: '', style: { backgroundColor: `${accent}1a`, color: accent } };
+  return { Icon: Inbox, className: 'bg-slate-100 text-slate-600' };
 }
 
-function confidenceClass(confidence) {
-  if (confidence === 'high') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
-  if (confidence === 'medium') return 'border-blue-200 bg-blue-50 text-blue-800';
-  if (confidence === 'low') return 'border-amber-200 bg-amber-50 text-amber-800';
-  return 'border-slate-200 bg-slate-50 text-slate-700';
-}
-
-function Metric({ label, value, tone = 'blue' }) {
-  const color = {
-    blue: 'border-blue-200 bg-blue-50 text-blue-950',
-    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-950',
-    amber: 'border-amber-200 bg-amber-50 text-amber-950',
-    indigo: 'border-indigo-200 bg-indigo-50 text-indigo-950',
-  }[tone] || 'border-slate-200 bg-slate-50 text-slate-950';
-
+function Card({ title, children, className = '', titleId }) {
   return (
-    <div className={`rounded-lg border p-4 ${color}`}>
-      <div className="text-xs font-bold uppercase tracking-normal opacity-70">{label}</div>
-      <div className="mt-1 text-3xl font-black tracking-normal">{value ?? 'N/A'}</div>
-    </div>
+    <section
+      aria-labelledby={title ? titleId : undefined}
+      className={`rounded-xl border border-slate-200 bg-white p-5 shadow-subtle sm:p-6 ${className}`}
+    >
+      {title && (
+        <h2 id={titleId} className="text-sm font-medium text-slate-500">{title}</h2>
+      )}
+      {children}
+    </section>
   );
 }
 
-function DetailTile({ label, value, tone = 'slate' }) {
-  const color = {
-    blue: 'border-blue-200 bg-blue-50 text-blue-950',
-    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-950',
-    amber: 'border-amber-200 bg-amber-50 text-amber-950',
-    indigo: 'border-indigo-200 bg-indigo-50 text-indigo-950',
-    cyan: 'border-cyan-200 bg-cyan-50 text-cyan-950',
-    slate: 'border-slate-200 bg-white text-slate-950',
-  }[tone] || 'border-slate-200 bg-white text-slate-950';
-
+function Stepper({ steps, accent, waiting }) {
   return (
-    <div className={`rounded-lg border p-4 shadow-sm ${color}`}>
-      <div className="text-xs font-black uppercase tracking-normal opacity-70">{label}</div>
-      <div className="mt-1 break-words text-base font-black tracking-normal">{value || 'Not available'}</div>
-    </div>
+    <ol aria-label="Progress" className="mt-6 grid grid-cols-4 gap-2 sm:gap-3">
+      {steps.map((step, index) => {
+        const isCurrent = step.state === 'current';
+        const isComplete = step.state === 'complete';
+        const barStyle = isComplete
+          ? { backgroundColor: accent }
+          : isCurrent
+            ? { backgroundColor: waiting ? '#f59e0b' : `${accent}80` }
+            : undefined;
+        return (
+          <li
+            key={step.label}
+            aria-current={isCurrent ? 'step' : undefined}
+            data-state={step.state}
+            className="min-w-0"
+          >
+            <span
+              aria-hidden="true"
+              className={`block h-1.5 rounded-full ${isComplete || isCurrent ? '' : 'bg-slate-200'}`}
+              style={barStyle}
+            />
+            <span
+              className={`mt-2 block text-xs leading-snug sm:text-sm ${
+                isCurrent ? 'font-semibold text-slate-900' : isComplete ? 'text-slate-700' : 'text-slate-500'
+              }`}
+            >
+              {step.label}
+              <span className="sr-only">
+                {isComplete ? ' (done)' : isCurrent ? ' (current step)' : ` (step ${index + 1}, not yet)`}
+              </span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
-function MiniFact({ label, value, tone = 'slate' }) {
-  const color = {
-    blue: 'border-blue-100 bg-blue-50/80 text-blue-950',
-    emerald: 'border-emerald-100 bg-emerald-50/80 text-emerald-950',
-    amber: 'border-amber-100 bg-amber-50/80 text-amber-950',
-    rose: 'border-rose-100 bg-rose-50/80 text-rose-950',
-    slate: 'border-slate-100 bg-slate-50 text-slate-950',
-  }[tone] || 'border-slate-100 bg-slate-50 text-slate-950';
-
-  return (
-    <div className={`rounded-lg border px-3 py-2 ${color}`}>
-      <div className="text-[11px] font-black uppercase tracking-normal opacity-65">{label}</div>
-      <div className="mt-0.5 text-base font-black">{value || 'Not available'}</div>
-    </div>
-  );
-}
-
-function AgentAvatar({ agent, enabled = true }) {
+function AgentAvatar({ agent }) {
   const [failed, setFailed] = useState(false);
-  const name = agent?.name || 'Assigned agent';
-  if (enabled && agent?.photoUrl && !failed) {
+  if (agent?.photoUrl && !failed) {
     return (
       <img
         src={agent.photoUrl}
         alt=""
-        className="h-14 w-14 rounded-full border-2 border-white bg-slate-100 object-cover shadow-sm ring-2 ring-indigo-100"
+        className="h-12 w-12 shrink-0 rounded-full bg-slate-100 object-cover"
         onError={() => setFailed(true)}
       />
     );
   }
+  const letters = initials(agent?.name);
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-semibold text-slate-600"
+    >
+      {letters || <UserRound className="h-6 w-6" />}
+    </span>
+  );
+}
+
+function HelperCard({ ticket, progress }) {
+  const agent = ticket.assignedAgent;
+  const name = agent?.name || null;
+  const since = formatDate(ticket.assignedAt);
+
+  let title;
+  let detail;
+  if (name) {
+    title = name;
+    detail = since && !progress.resolved ? `Since ${since}` : null;
+  } else if (progress.resolved || (progress.assigned && agent === null)) {
+    // Settings can hide the name; never call a handled ticket "unassigned".
+    title = 'Our support team';
+    detail = progress.resolved ? null : 'Your request is with a member of the team.';
+  } else {
+    title = 'Not assigned yet';
+    detail = 'We will pick someone shortly.';
+  }
 
   return (
-    <span className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-lg font-black text-indigo-700 ring-2 ring-indigo-100">
-      {agent?.name ? initials(name) : <UserRound className="h-7 w-7" />}
-    </span>
+    <Card title={progress.resolved ? 'Who helped you' : 'Who is helping you'} titleId="tp-status-helper">
+      <div className="mt-4 flex items-center gap-4">
+        {name ? <AgentAvatar agent={agent} /> : (
+          <span aria-hidden="true" className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+            <UserRound className="h-6 w-6" />
+          </span>
+        )}
+        <div className="min-w-0">
+          <p className="truncate text-base font-semibold text-slate-900">{title}</p>
+          {detail && <p className="mt-0.5 text-sm text-slate-600">{detail}</p>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function nextStep(eta, progress, ticket) {
+  if (progress.resolved) {
+    const word = progress.closed ? 'Closed' : 'Resolved';
+    const when = formatDate(ticket.closedAt || ticket.resolvedAt || ticket.completedAt);
+    return {
+      sentence: eta.actualResolutionLabel ? `${word} in ${eta.actualResolutionLabel}.` : `This request is ${word.toLowerCase()}.`,
+      detail: when ? `${word} ${when}.` : null,
+    };
+  }
+  if (progress.waiting) {
+    return progress.waitingOnYou
+      ? {
+        sentence: 'We need something from you before we can continue.',
+        detail: 'Please reply to our last e-mail about this request.',
+      }
+      : {
+        sentence: 'The work is paused while we wait on another step, such as a vendor or an approval.',
+        detail: 'We will pick it up again as soon as that clears.',
+      };
+  }
+  if (eta.state === 'overdue' || eta.overdue) {
+    return {
+      sentence: 'This one is taking longer than usual.',
+      detail: 'It is still being worked on, and we will e-mail you with any news.',
+    };
+  }
+  const about = humanDuration(eta.estimatedSeconds);
+  if (about) {
+    return {
+      sentence: `Most requests like this are done within about ${about}.`,
+      detail: 'We will e-mail you when there is news.',
+    };
+  }
+  return {
+    sentence: 'We will e-mail you as soon as there is an update.',
+    detail: null,
+  };
+}
+
+function NextCard({ eta, progress, ticket }) {
+  const { sentence, detail } = nextStep(eta, progress, ticket);
+  // The method only explains an estimate that is still in play.
+  const showMethod = !progress.resolved && !progress.waiting && Number(eta.sampleSize) > 0 && eta.estimatedResolutionLabel;
+  const expected = !progress.resolved && !progress.waiting && eta.state === 'on_track' ? formatDate(eta.expectedAt) : null;
+  return (
+    <Card title="What happens next" titleId="tp-status-next">
+      <p className="mt-4 text-base font-semibold text-slate-900">{sentence}</p>
+      {detail && <p className="mt-1 text-sm text-slate-600">{detail}</p>}
+      {showMethod && (
+        <details className="group mt-4">
+          <summary className="tp-focus-ring inline-flex cursor-pointer list-none items-center gap-1 rounded-md text-sm text-slate-600 hover:text-slate-900 [&::-webkit-details-marker]:hidden">
+            How we estimate this
+            <ChevronDown aria-hidden="true" className="h-4 w-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            We looked at {eta.sampleSize} similar requests resolved
+            {eta.lookbackDays ? ` in the last ${eta.lookbackDays} days` : ' recently'}.
+            {' '}{eta.percentile ? `${eta.percentile} in 100` : 'Most'} of them were done within {eta.estimatedResolutionLabel}.
+            {expected ? ` For this request that points to around ${expected}.` : ''}
+          </p>
+        </details>
+      )}
+    </Card>
+  );
+}
+
+function ActionRow({ href, Icon, title, detail }) {
+  return (
+    <li>
+      <a
+        href={href}
+        className="tp-focus-ring group flex items-center gap-4 rounded-lg px-1 py-3 hover:bg-slate-50"
+      >
+        <span aria-hidden="true" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+          <Icon className="h-5 w-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-slate-900">{title}</span>
+          <span className="block text-sm text-slate-600">{detail}</span>
+        </span>
+        <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-slate-700" />
+      </a>
+    </li>
+  );
+}
+
+function ActionsCard({ data, progress }) {
+  const link = data?.link || {};
+  const actions = data?.publicActions || {};
+  const notices = [];
+  if (actions.urgencyRaised) {
+    const at = formatDate(actions.urgencyRaisedAt);
+    notices.push(`You marked this request as urgent${at ? ` on ${at}` : ''}. The team has been told.`);
+  }
+  if (actions.immediateSupportRequested) {
+    const at = formatDate(actions.immediateSupportRequestedAt);
+    notices.push(`You asked for immediate help${at ? ` on ${at}` : ''}. The on-call person has been told.`);
+  }
+
+  const open = !progress.resolved;
+  const canRaise = open && link.raiseUrgencyUrl && actions.raiseUrgencyAvailable !== false && !actions.urgencyRaised;
+  const canGetHelp = open && link.immediateSupportUrl && actions.immediateSupportAvailable === true && !actions.immediateSupportRequested;
+
+  return (
+    <Card title="Need something?" titleId="tp-status-actions">
+      {notices.length > 0 && (
+        <div role="status" className="mt-4 flex items-start gap-3 rounded-lg bg-slate-50 p-4">
+          <BellRing aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" />
+          <div className="space-y-1 text-sm text-slate-700">
+            {notices.map(text => <p key={text}>{text}</p>)}
+          </div>
+        </div>
+      )}
+      <ul className="mt-3 divide-y divide-slate-100">
+        <li className="flex items-center gap-4 px-1 py-3">
+          <span aria-hidden="true" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+            <Mail className="h-5 w-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-slate-900">
+              {open ? 'Add information' : 'Still not right?'}
+            </span>
+            <span className="block text-sm text-slate-600">
+              {open
+                ? 'Reply to any e-mail we sent you about this request.'
+                : 'Reply to our last e-mail about this request and we will take another look.'}
+            </span>
+          </span>
+        </li>
+        {canRaise && (
+          <ActionRow
+            href={link.raiseUrgencyUrl}
+            Icon={Siren}
+            title="Mark as urgent"
+            detail="Only if this is stopping your work."
+          />
+        )}
+        {canGetHelp && (
+          <ActionRow
+            href={link.immediateSupportUrl}
+            Icon={PhoneCall}
+            title="Get after-hours help"
+            detail="Reaches the on-call person outside business hours."
+          />
+        )}
+      </ul>
+    </Card>
+  );
+}
+
+function RequestCard({ ticket }) {
+  const category = ticket.category || {};
+  const categoryLine = [category.ticketPulseCategory, category.ticketPulseSubcategory].filter(Boolean).join(' › ');
+  const facts = [
+    ticket.priority ? ['Priority', ticket.priority] : null,
+    categoryLine ? ['Category', categoryLine] : null,
+  ].filter(Boolean);
+  if (!ticket.summary && facts.length === 0) return null;
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white shadow-subtle">
+      <details className="group">
+        <summary className="tp-focus-ring flex cursor-pointer list-none items-center justify-between gap-4 rounded-xl p-5 sm:px-6 [&::-webkit-details-marker]:hidden">
+          <h2 className="text-sm font-medium text-slate-500">Your request</h2>
+          <ChevronDown aria-hidden="true" className="h-4 w-4 text-slate-500 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="border-t border-slate-100 px-5 pb-5 pt-4 sm:px-6">
+          {ticket.summary && <LinkedText text={ticket.summary} className="text-sm leading-6 text-slate-700" />}
+          {facts.length > 0 && (
+            <dl className={`grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr] ${ticket.summary ? 'mt-4' : ''}`}>
+              {facts.map(([label, value]) => (
+                <div key={label} className="contents">
+                  <dt className="text-slate-500">{label}</dt>
+                  <dd className="text-slate-800">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function Shell({ children }) {
+  return (
+    <main className="tp-light min-h-screen bg-slate-50 text-slate-900">
+      {children}
+    </main>
   );
 }
 
 function ErrorPage({ title, message, onRefresh }) {
   return (
-    <main className="tp-light min-h-screen bg-gradient-to-br from-rose-50 via-white to-amber-50 px-4 py-10 text-slate-900">
-      <div className="mx-auto max-w-2xl rounded-lg border border-red-200 bg-white p-8 shadow-sm">
-        <div className="flex items-start gap-4">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-red-50 text-red-600">
+    <Shell>
+      <div className="mx-auto max-w-xl px-4 py-16">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-subtle sm:p-8">
+          <span aria-hidden="true" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-rose-50 text-rose-700">
             <AlertCircle className="h-6 w-6" />
           </span>
-          <div>
-            <p className="text-xs font-semibold uppercase text-red-600">Ticket status unavailable</p>
-            <h1 className="mt-1 text-2xl font-bold text-slate-950">{title}</h1>
-            <p className="mt-2 text-slate-600">{message}</p>
-            <button
-              type="button"
-              onClick={onRefresh}
-              className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Try again
-            </button>
-          </div>
+          <h1 className="mt-4 text-xl font-semibold text-slate-900">{title}</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{message}</p>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="tp-focus-ring mt-5 inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            <RefreshCw aria-hidden="true" className="h-4 w-4" />
+            Try again
+          </button>
         </div>
       </div>
-    </main>
+    </Shell>
   );
 }
 
@@ -224,54 +492,14 @@ export default function PublicTicketStatus() {
     load();
   }, [load]);
 
-  const ticket = data?.ticket || {};
-  const eta = data?.eta || {};
-  const stats = data?.stats || null;
-  const branding = data?.branding || {};
-  const pageSettings = data?.settings || {};
-  const publicActions = data?.publicActions || {};
-  const status = statusStyle(ticket.statusTone);
-  const StatusIcon = status.Icon;
-  const timeline = data?.timeline || [];
-  const brandName = branding.brandName || data?.workspace?.name || 'Ticket Pulse';
-  const workspaceName = data?.workspace?.name || brandName;
-  const accentColor = branding.accentColor || '#2563eb';
-  const categoryDetails = useMemo(() => {
-    const category = ticket.category || {};
-    return {
-      category: category.ticketPulseCategory || null,
-      subcategory: category.ticketPulseSubcategory || null,
-      source: category.source || 'not_classified',
-    };
-  }, [ticket.category]);
-  const etaState = eta.state || (eta.paused ? 'paused' : eta.overdue ? 'overdue' : ticket.statusTone === 'resolved' ? 'resolved' : 'on_track');
-  const etaIconTone = {
-    resolved: 'bg-emerald-50 text-emerald-700',
-    paused: 'bg-amber-50 text-amber-700',
-    overdue: 'bg-rose-50 text-rose-700',
-    on_track: 'bg-blue-50 text-blue-700',
-  }[etaState] || 'bg-slate-50 text-slate-700';
-  const etaHeading = eta.statusLabel || (eta.paused ? 'Estimate paused' : eta.overdue ? 'Past estimate' : 'Expected resolution');
-  const etaValue = eta.displayLabel || eta.actualResolutionLabel || eta.remainingLabel || eta.estimatedResolutionLabel || eta.label || 'Pending';
-  const etaDescription = eta.summary || (eta.paused
-    ? 'Pending tickets are waiting on something outside the normal resolution timer, so historical ETA is not treated as overdue.'
-    : eta.actualResolutionLabel
-      ? `Actual resolution time: ${eta.actualResolutionLabel}`
-      : eta.overdue
-        ? 'This active ticket is past the historical estimate.'
-        : eta.expectedAt
-          ? `Historical estimate points to ${formatDate(eta.expectedAt)}.`
-          : eta.matchLabel || 'Not enough history yet.');
-  const etaEstimateLabel = eta.estimatedResolutionLabel || eta.label || null;
-
   if (loading && !data) {
     return (
-      <main className="tp-light flex min-h-screen items-center justify-center bg-gradient-to-br from-cyan-50 via-white to-amber-50 text-slate-700">
-        <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
-          <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-          Loading ticket status
+      <Shell>
+        <div className="flex min-h-screen items-center justify-center gap-3 text-sm text-slate-600" role="status">
+          <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-slate-500" />
+          Loading your request
         </div>
-      </main>
+      </Shell>
     );
   }
 
@@ -279,277 +507,118 @@ export default function PublicTicketStatus() {
     const expired = error.status === 403;
     return (
       <ErrorPage
-        title={expired ? 'This link is no longer active' : 'We could not find this ticket status link'}
+        title={expired ? 'This link is no longer active' : 'We could not find this request'}
         message={error.message}
         onRefresh={load}
       />
     );
   }
 
+  return <StatusView data={data} loading={loading} onRefresh={load} />;
+}
+
+export function StatusView({ data, loading = false, onRefresh }) {
+  const ticket = data?.ticket || {};
+  const eta = data?.eta || {};
+  const branding = data?.branding || {};
+  const settings = data?.settings || {};
+  const accent = HEX_RE.test(branding.accentColor || '') ? branding.accentColor : DEFAULT_ACCENT;
+  const brandName = branding.brandName || data?.workspace?.name || 'Ticket Pulse';
+  const progress = deriveProgress(data);
+  const tone = toneStyle(progress.resolved ? 'resolved' : progress.waiting ? 'waiting' : progress.tone, accent);
+  const StatusIcon = tone.Icon;
+  const received = formatDate(ticket.createdAt);
+  const requesterName = settings.showRequesterName ? ticket.requester?.name : null;
+  const checkedAt = formatTime(data?.refreshedAt);
+  const expires = formatDay(data?.link?.expiresAt);
+
   return (
-    <main className="tp-light min-h-screen bg-gradient-to-br from-cyan-50 via-white to-orange-50 text-slate-900">
-      <header className="border-b border-white/70 bg-white/85 shadow-sm backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-5">
+    <Shell>
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
             {branding.logoDataUrl ? (
               <img
                 src={branding.logoDataUrl}
                 alt={branding.logoAltText || brandName}
-                className="h-28 max-w-72 rounded-lg border border-slate-200 bg-white object-contain p-3 shadow-sm"
+                className="h-9 max-w-[10rem] object-contain"
               />
             ) : (
               <span
-                className="inline-flex h-24 w-24 items-center justify-center rounded-lg text-2xl font-black text-white shadow-sm"
-                style={{ backgroundColor: accentColor }}
+                aria-hidden="true"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white"
+                style={{ backgroundColor: accent }}
               >
-                {initials(brandName)}
+                {initials(brandName) || 'TP'}
               </span>
             )}
-            <div>
-              <div className="text-3xl font-black tracking-normal text-slate-950">{workspaceName}</div>
-              {brandName !== workspaceName && (
-                <div className="mt-1 text-lg font-bold text-slate-700">{brandName}</div>
-              )}
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                <span>Ticket status snapshot</span>
-                <span className="hidden text-slate-300 sm:inline">|</span>
-                <span>Updated from Ticket Pulse daily data</span>
-              </div>
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-semibold text-slate-900">{brandName}</p>
+              <p className="text-xs text-slate-500">Request status</p>
             </div>
           </div>
           <button
             type="button"
-            onClick={load}
+            onClick={onRefresh}
             disabled={loading}
-            className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg border border-slate-200 bg-white/80 px-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-white disabled:cursor-wait disabled:opacity-60 lg:self-auto"
+            className="tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-600 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Check latest
+            {loading
+              ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+              : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
+            Refresh
           </button>
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-        {(publicActions.immediateSupportRequested || publicActions.urgencyRaised) && (
-          <section className="mb-4 grid gap-3 lg:grid-cols-2">
-            {publicActions.immediateSupportRequested && (
-              <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-950 shadow-sm">
-                <ShieldAlert className="mt-1 h-6 w-6 text-red-700" />
-                <div>
-                  <div className="text-sm font-black uppercase text-red-700">Immediate response requested</div>
-                  <div className="mt-1 text-sm leading-6">
-                    The requester used the after-hours immediate support link
-                    {publicActions.immediateSupportRequestedAt ? ` on ${formatDate(publicActions.immediateSupportRequestedAt)}` : ''}.
-                  </div>
-                </div>
-              </div>
-            )}
-            {publicActions.urgencyRaised && (
-              <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 text-orange-950 shadow-sm">
-                <ArrowUpCircle className="mt-1 h-6 w-6 text-orange-700" />
-                <div>
-                  <div className="text-sm font-black uppercase text-orange-700">Urgency raised by requester</div>
-                  <div className="mt-1 text-sm leading-6">
-                    The requester raised this ticket to Urgent
-                    {publicActions.urgencyRaisedAt ? ` on ${formatDate(publicActions.urgencyRaisedAt)}` : ''}.
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        <section className="overflow-hidden rounded-lg border border-white bg-white shadow-sm">
-          <div className={`h-2 bg-gradient-to-r ${status.glow}`} />
-          <div className="grid gap-0 lg:grid-cols-[1.4fr_0.9fr]">
-            <div className={`border-b p-6 lg:border-b-0 lg:border-r ${status.wrap}`}>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className={`text-sm font-black uppercase tracking-normal ${status.label}`}>Current ticket status</p>
-                  <div className="mt-3 flex items-center gap-4">
-                    <span className={`inline-flex h-16 w-16 items-center justify-center rounded-lg ${status.icon}`}>
-                      <StatusIcon className="h-9 w-9" />
-                    </span>
-                    <div>
-                      <div className="text-5xl font-black tracking-normal">{ticket.status || 'Unknown'}</div>
-                      <div className="mt-1 text-sm font-semibold opacity-80">Ticket #{ticket.freshserviceTicketId}</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-                  Last checked {formatDate(data?.refreshedAt)}
-                </div>
-              </div>
-              <h1 className="mt-6 max-w-4xl break-words text-2xl font-black tracking-normal text-slate-950 sm:text-3xl">
-                {ticket.subject}
-              </h1>
-            </div>
-
-            <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-1">
-              <div className="border-b border-slate-100 p-6">
-                <div className="flex items-center gap-4">
-                  <AgentAvatar agent={ticket.assignedAgent} enabled={pageSettings.showAssignedAgentAvatar} />
-                  <div>
-                    <p className="text-xs font-bold uppercase text-slate-500">Assigned to</p>
-                    <div className="text-xl font-black text-slate-950">
-                      {ticket.assignedAgent?.name || 'Not assigned yet'}
-                    </div>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm text-slate-500">
-                  {ticket.assignedAt ? `Assigned ${formatDate(ticket.assignedAt)}` : 'Assignment details will appear here when available.'}
-                </p>
-              </div>
-
-              <div className="p-6">
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex h-11 w-11 items-center justify-center rounded-lg ${etaIconTone}`}>
-                    {etaState === 'paused' ? <PauseCircle className="h-6 w-6" /> : etaState === 'resolved' ? <CheckCircle2 className="h-6 w-6" /> : <Clock3 className="h-6 w-6" />}
-                  </span>
-                  <div>
-                    <p className="text-xs font-bold uppercase text-slate-500">{etaHeading}</p>
-                    <div className="text-xl font-black text-slate-950">
-                      {etaValue}
-                    </div>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm text-slate-500">
-                  {etaDescription}
-                </p>
-              </div>
+      <div className="mx-auto max-w-3xl space-y-4 px-4 py-6 sm:space-y-5 sm:px-6 sm:py-10">
+        <section aria-labelledby="tp-status-subject" className="rounded-xl border border-slate-200 bg-white p-5 shadow-subtle sm:p-8">
+          <div className="flex items-center gap-4">
+            <span
+              aria-hidden="true"
+              className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${tone.className}`}
+              style={tone.style}
+            >
+              <StatusIcon className="h-6 w-6" />
+            </span>
+            <div className="min-w-0">
+              {ticket.displayRef && (
+                <p className="text-sm font-medium tabular-nums text-slate-500" data-testid="ticket-ref">{ticket.displayRef}</p>
+              )}
+              <p className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl" data-testid="status-headline">
+                {progress.headline}
+              </p>
             </div>
           </div>
+          <h1 id="tp-status-subject" className="mt-5 break-words text-lg font-medium text-slate-800 sm:text-xl">
+            {ticket.subject}
+          </h1>
+          {(received || requesterName) && (
+            <p className="mt-1 text-sm text-slate-500">
+              {received ? `Received ${received}` : 'Received'}
+              {requesterName ? ` from ${requesterName}` : ''}
+            </p>
+          )}
+          <Stepper steps={progress.steps} accent={accent} waiting={progress.waiting} />
         </section>
 
-        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <DetailTile label="Ticket / case number" value={`#${ticket.freshserviceTicketId || 'N/A'}`} tone="emerald" />
-          <DetailTile label="Received" value={formatDate(ticket.createdAt)} tone="cyan" />
-          <DetailTile label="Priority" value={ticket.priority} tone="blue" />
-          <DetailTile
-            label="Ticket Pulse category"
-            value={categoryDetails.category || 'Not classified yet'}
-            tone={categoryDetails.category ? 'indigo' : 'slate'}
-          />
-          <DetailTile
-            label="Ticket Pulse subcategory"
-            value={categoryDetails.subcategory || 'Not classified yet'}
-            tone={categoryDetails.subcategory ? 'amber' : 'slate'}
-          />
-          <DetailTile label="Public link" value={`Expires ${compactDate(data?.link?.expiresAt)}`} tone="emerald" />
-        </section>
-
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-          <section className="space-y-6">
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-black uppercase text-blue-700">Ticket Timeline</p>
-                  <h2 className="mt-1 text-2xl font-black tracking-normal text-slate-950">Where things stand</h2>
-                </div>
-                <Activity className="h-6 w-6 text-cyan-600" />
-              </div>
-              <div className="mt-6 space-y-0">
-                {timeline.map((item, index) => (
-                  <div key={`${item.key}-${index}`} className="relative flex gap-4 pb-6 last:pb-0">
-                    {index < timeline.length - 1 && (
-                      <span className="absolute left-[1.35rem] top-12 h-[calc(100%-2.5rem)] w-0.5 bg-slate-200" />
-                    )}
-                    <span className={`relative z-10 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border-2 ${timelineStyle(item.tone)}`}>
-                      <CircleDot className="h-5 w-5" />
-                    </span>
-                    <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50/70 p-4">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <h3 className="text-lg font-black text-slate-950">{item.label}</h3>
-                        <time className="text-sm font-semibold text-slate-500">{formatDate(item.at)}</time>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{item.detail}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {stats && (
-              <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-black uppercase text-emerald-700">Recent service activity</p>
-                    <h2 className="mt-1 text-2xl font-black tracking-normal text-slate-950">Today and last 7 days</h2>
-                  </div>
-                  <ShieldCheck className="h-6 w-6 text-emerald-600" />
-                </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-4">
-                  <Metric label="New today" value={stats.todayCreated} tone="blue" />
-                  <Metric label="Resolved today" value={stats.todayResolvedOrClosed} tone="emerald" />
-                  <Metric label="New 7 days" value={stats.weekCreated} tone="indigo" />
-                  <Metric label="Resolved 7 days" value={stats.weekResolvedOrClosed} tone="amber" />
-                </div>
-              </div>
-            )}
-
-            {ticket.summary && (
-              <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="text-sm font-black uppercase text-slate-500">Request Summary</p>
-                <p className="mt-3 whitespace-pre-wrap text-base leading-7 text-slate-700">{ticket.summary}</p>
-              </div>
-            )}
-          </section>
-
-          <aside className="space-y-6">
-            <div className={`rounded-lg border p-5 shadow-sm ${eta.paused ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-slate-200 bg-white text-slate-900'}`}>
-              <div className="flex items-start gap-3">
-                {etaState === 'paused' ? <PauseCircle className="mt-1 h-6 w-6 text-amber-600" /> : <Info className="mt-1 h-6 w-6 text-blue-600" />}
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-lg font-black">{etaState === 'paused' ? 'ETA paused while pending' : etaState === 'resolved' ? 'ETA and actual resolution' : 'How the ETA is calculated'}</h3>
-                  <p className="mt-2 text-sm leading-6 opacity-80">
-                    {etaState === 'paused'
-                      ? 'The ticket is pending, so the page avoids showing it as late. When FreshService moves it back to active work, the estimate will apply again.'
-                      : `Based on ${eta.sampleSize || 0} similar resolved tickets using ${eta.matchLabel || 'workspace history'}. Typical time for this match is ${etaEstimateLabel || 'not available yet'}.`}
-                  </p>
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                    <MiniFact label={`${eta.percentileLabel || 'Historical'} estimate`} value={etaEstimateLabel} tone={etaState === 'overdue' ? 'rose' : 'blue'} />
-                    <MiniFact label="Sample size" value={eta.sampleSize ? `${eta.sampleSize} tickets` : 'No samples'} tone="slate" />
-                    {eta.actualResolutionLabel && (
-                      <MiniFact label="Actual time" value={eta.actualResolutionLabel} tone="emerald" />
-                    )}
-                    {eta.expectedAt && etaState !== 'resolved' && (
-                      <MiniFact label="Estimated by" value={formatDate(eta.expectedAt)} tone={etaState === 'overdue' ? 'rose' : 'emerald'} />
-                    )}
-                  </div>
-                  {etaState !== 'paused' && (
-                    <div className={`mt-3 inline-flex rounded-lg border px-3 py-2 text-sm font-bold ${confidenceClass(eta.confidence)}`}>
-                      Confidence: {eta.confidence || 'none'}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {ticket.statusTone === 'resolved' && (
-              <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-5 text-emerald-900 shadow-sm">
-                <CheckCircle2 className="mt-0.5 h-6 w-6" />
-                <div>
-                  <div className="font-black">This ticket is resolved or closed.</div>
-                  <div className="mt-1 text-sm">
-                    {ticket.closedAt
-                      ? `Closed ${formatDate(ticket.closedAt)}.`
-                      : ticket.resolvedAt
-                        ? `Resolved ${formatDate(ticket.resolvedAt)}.`
-                        : ticket.completedAt
-                          ? `Completed ${formatDate(ticket.completedAt)}.`
-                          : 'The helpdesk status marks it as complete.'}
-                  </div>
-                </div>
-              </div>
-            )}
-          </aside>
+        <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
+          <HelperCard ticket={ticket} progress={progress} />
+          <NextCard eta={eta} progress={progress} ticket={ticket} />
         </div>
 
-        <footer className="mt-8 flex flex-col gap-2 border-t border-slate-200 py-5 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <span>{branding.trademarkText || `${brandName} service status powered by Ticket Pulse.`}</span>
-          <span>Manual status snapshot. No login is required for this link.</span>
+        <ActionsCard data={data} progress={progress} />
+
+        <RequestCard ticket={ticket} />
+
+        <footer className="space-y-1 px-1 pt-4 text-xs leading-5 text-slate-500">
+          <p>{branding.trademarkText || `${brandName} · powered by Ticket Pulse`}</p>
+          <p>
+            No sign-in needed for this link{expires ? `; it works until ${expires}` : ''}.
+            {checkedAt ? ` Checked at ${checkedAt}.` : ''}
+          </p>
         </footer>
       </div>
-    </main>
+    </Shell>
   );
 }

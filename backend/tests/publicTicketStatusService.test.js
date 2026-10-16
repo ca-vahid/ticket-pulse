@@ -17,6 +17,12 @@ const prismaMock = {
     findMany: jest.fn(),
     count: jest.fn(),
   },
+  urgentEscalationEvent: {
+    findFirst: jest.fn(),
+  },
+  urgentEscalationPolicy: {
+    findUnique: jest.fn(),
+  },
   $transaction: jest.fn((operations) => Promise.all(operations)),
 };
 
@@ -38,6 +44,7 @@ const {
   computeTicketEta,
   ensurePublicTicketStatusLink,
   normalizePublicTicketStatusSettings,
+  previewPublicTicketStatus,
 } = await import('../src/services/publicTicketStatusService.js');
 
 describe('public ticket status service', () => {
@@ -265,5 +272,104 @@ describe('base-aware public status (Phase 8c)', () => {
     expect(eta.state).toBe('resolved');
     expect(eta.isComplete).toBe(true);
     expect(eta.statusLabel).toBe('Resolved'); // Resolved base, not Closed
+  });
+});
+
+// QA 10-15 #7: the requester page shows ONE number — TP-<n> for a Ticket
+// Pulse ticket (even with a FreshService fallback copy), #<fs id> otherwise —
+// and only the action buttons the workspace actually offers.
+describe('public status payload: display number and actions (QA 10-15 #7)', () => {
+  const baseTicket = {
+    id: 501,
+    workspaceId: 1,
+    subject: 'Laptop dock does not wake the screens',
+    status: 'Open',
+    priority: 2,
+    createdAt: new Date('2026-10-14T16:00:00Z'),
+    workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Los_Angeles' },
+    requester: { name: 'Priya Nair', email: 'priya.nair@example.com' },
+    assignedTech: { id: 7, name: 'Sam Okafor', email: 'sam.okafor@example.com', photoUrl: null },
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.publicTicketStatusSettings.upsert.mockResolvedValue({
+      enabled: true,
+      expiryDays: 60,
+      showAssignedAgent: true,
+      showAssignedAgentAvatar: true,
+      showSummary: true,
+      showPriority: true,
+      showCategory: true,
+      showWorkspaceStats: false,
+      etaLookbackDays: 180,
+      etaMinSampleSize: 8,
+      etaPercentile: 75,
+    });
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.urgentEscalationEvent.findFirst.mockResolvedValue(null);
+    prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue(null);
+  });
+
+  test('a Ticket Pulse ticket with a FreshService copy shows its TP number', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...baseTicket,
+      origin: 'ticketpulse',
+      nativeNumber: 10018,
+      freshserviceTicketId: 245001n,
+    });
+
+    const payload = await previewPublicTicketStatus(1, 501);
+
+    expect(payload.ticket.displayRef).toBe('TP-10018');
+    expect(payload.ticket.origin).toBe('ticketpulse');
+    // Older consumers keep the FreshService id.
+    expect(payload.ticket.freshserviceTicketId).toBe('245001');
+  });
+
+  test('a FreshService ticket shows #<fs id>', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...baseTicket,
+      origin: 'freshservice',
+      nativeNumber: null,
+      freshserviceTicketId: 244990n,
+    });
+
+    const payload = await previewPublicTicketStatus(1, 501);
+
+    expect(payload.ticket.displayRef).toBe('#244990');
+    expect(payload.ticket.origin).toBe('freshservice');
+  });
+
+  test('action availability follows the workspace escalation policy', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...baseTicket, origin: 'freshservice', freshserviceTicketId: 1n });
+
+    let payload = await previewPublicTicketStatus(1, 501);
+    // No policy row: urgency on by default, after-hours help off by default.
+    expect(payload.publicActions.raiseUrgencyAvailable).toBe(true);
+    expect(payload.publicActions.immediateSupportAvailable).toBe(false);
+
+    prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue({
+      selfServiceEnabled: true,
+      businessUrgencyEnabled: false,
+    });
+    payload = await previewPublicTicketStatus(1, 501);
+    expect(payload.publicActions.raiseUrgencyAvailable).toBe(false);
+    expect(payload.publicActions.immediateSupportAvailable).toBe(true);
+  });
+
+  test('reports an urgency the requester already raised', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...baseTicket, origin: 'freshservice', freshserviceTicketId: 2n });
+    prismaMock.urgentEscalationEvent.findFirst.mockImplementation(({ where }) => Promise.resolve(
+      where.source === 'business_urgency'
+        ? { id: 3, status: 'sent', createdAt: new Date('2026-10-14T18:30:00Z'), priorityWritebackStatus: null }
+        : null,
+    ));
+
+    const payload = await previewPublicTicketStatus(1, 501);
+
+    expect(payload.publicActions.urgencyRaised).toBe(true);
+    expect(payload.publicActions.urgencyRaisedAt).toBe('2026-10-14T18:30:00.000Z');
+    expect(payload.publicActions.immediateSupportRequested).toBe(false);
   });
 });

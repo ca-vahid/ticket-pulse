@@ -247,6 +247,45 @@ describe('updateFsTicket → fields_updated for FIELD keys only', () => {
   });
 });
 
+// QA 10-15 #12: closing a FreshService ticket in Ticket Pulse never fired the closed e-mail, because the
+// row was already Closed by the time the sync looked.
+describe('updateFsTicket tells the lifecycle about status changes', () => {
+  const fsBorn = {
+    ...nativeTicket,
+    id: 602, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: BigInt(231310), priority: 3, status: 'Open',
+    assignedTechId: 3, firstAssignedAt: new Date('2026-08-01T11:00:00Z'), resolvedAt: null, closedAt: null,
+    tpSkill: null, tpSubskill: null, assignedTech: { id: 3, name: 'Sam Okafor' }, customFields: {},
+  };
+  beforeEach(() => {
+    lifecycleMock.emitTicketLifecycleNotifications.mockClear();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill' });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBorn });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...fsBorn, ...data }));
+  });
+
+  test('a status write-back fires the lifecycle once, with the before and after rows', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 5, updated_at: '2026-08-04T10:00:00Z' });
+    await ticketService.updateFsTicket(602, 1, { status: 'Closed' }, human);
+    expect(lifecycleMock.emitTicketLifecycleNotifications).toHaveBeenCalledTimes(1);
+    const [args] = lifecycleMock.emitTicketLifecycleNotifications.mock.calls[0];
+    expect(args.allowNotificationWorkflows).toBe(true);
+    expect(args.existingTicket.status).toBe('Open');
+    expect(args.upsertedTicket.status).toBe('Closed');
+  });
+
+  test('a workflow status write (notifyLifecycle:false) does not fire it, so workflows cannot chain', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 5, updated_at: '2026-08-04T10:00:00Z' });
+    await ticketService.updateFsTicket(602, 1, { status: 'Closed' }, human, { notifyLifecycle: false });
+    expect(lifecycleMock.emitTicketLifecycleNotifications).not.toHaveBeenCalled();
+  });
+
+  test('a field-only write-back does not fire the lifecycle', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ priority: 2, updated_at: '2026-08-04T10:00:00Z' });
+    await ticketService.updateFsTicket(602, 1, { priority: 2 }, human);
+    expect(lifecycleMock.emitTicketLifecycleNotifications).not.toHaveBeenCalled();
+  });
+});
+
 describe('createTicket suppressRequesterAck (mail-in agent-Cc intake)', () => {
   test('ticket.created still fires, with the ack-suppression flag plumbed to the lifecycle emit', async () => {
     prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, nativeTicketingEnabled: true });

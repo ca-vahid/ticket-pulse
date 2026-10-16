@@ -6,6 +6,7 @@ import {
   Clock3,
   ExternalLink,
   Loader2,
+  MessageSquare,
   ShieldAlert,
 } from 'lucide-react';
 import { publicTicketUrgencyAPI } from '../services/api';
@@ -45,6 +46,9 @@ export default function PublicTicketUrgency() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatUrl, setChatUrl] = useState(null);
+  const [chatError, setChatError] = useState(null);
 
   const accent = data?.branding?.accentColor || '#ea580c';
   const submitted = data?.status === 'submitted';
@@ -76,6 +80,36 @@ export default function PublicTicketUrgency() {
       setError(err.message || 'The ticket priority could not be raised.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // QA 10-15 #5: Teams chat with the assigned agent (only when they opted in).
+  // The tab is opened before the request so pop-up blockers allow it.
+  const startTeamsChat = async () => {
+    setChatBusy(true);
+    setChatError(null);
+    let win = null;
+    try {
+      win = window.open('', '_blank');
+      if (win) win.opener = null;
+    } catch {
+      win = null;
+    }
+    try {
+      const result = unwrap(await publicTicketUrgencyAPI.startTeamsChat(token));
+      if (!result?.url) {
+        win?.close();
+        setChatError('A Teams chat is not available for this ticket right now.');
+        return;
+      }
+      setChatUrl(result.url);
+      if (win) win.location.href = result.url;
+      else window.open(result.url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      win?.close();
+      setChatError(err.message || 'Teams could not be opened.');
+    } finally {
+      setChatBusy(false);
     }
   };
 
@@ -195,12 +229,40 @@ export default function PublicTicketUrgency() {
                 Request immediate after-hours support
               </a>
             )}
+
+            {data?.teamsChat?.available && (
+              <div className="mt-6 border-t border-black/10 pt-5" data-testid="teams-chat">
+                <button
+                  type="button"
+                  onClick={startTeamsChat}
+                  disabled={chatBusy}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {chatBusy
+                    ? <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden="true" />
+                    : <MessageSquare className="h-4 w-4 text-indigo-600" aria-hidden="true" />}
+                  Chat with {data.teamsChat.agentFirstName || data.teamsChat.agentName || 'your agent'} in Teams
+                </button>
+                <p className="mt-2 text-sm text-slate-600">
+                  Opens Microsoft Teams with a message to the person working on your ticket.
+                </p>
+                {chatUrl && (
+                  <p className="mt-2 text-sm text-slate-700" role="status">
+                    Teams is opening in a new tab. If nothing happens,{' '}
+                    <a href={chatUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-indigo-700 underline">
+                      open the chat here
+                    </a>.
+                  </p>
+                )}
+                {chatError && <p className="mt-2 text-sm font-semibold text-red-700" role="alert">{chatError}</p>}
+              </div>
+            )}
           </section>
 
           <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold uppercase tracking-wide text-orange-700">Ticket details</div>
             <h3 className="mt-2 text-xl font-bold text-slate-950">
-              #{data?.ticket?.freshserviceTicketId || ''} {data?.ticket?.subject || 'Ticket'}
+              {data?.ticket?.displayRef || (data?.ticket?.freshserviceTicketId ? `#${data.ticket.freshserviceTicketId}` : '')} {data?.ticket?.subject || 'Ticket'}
             </h3>
             <dl className="mt-5 space-y-4">
               <div>

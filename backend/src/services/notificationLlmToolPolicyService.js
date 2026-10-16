@@ -56,7 +56,7 @@ export const DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS = {
     includeThreadHistory: true,
     includeSimilarTickets: true,
     includeOutageSignals: true,
-    maxThreadEntries: 6,
+    maxThreadEntries: 10,
     maxSimilarTickets: 5,
     lookbackHours: [1, 4, 24],
   },

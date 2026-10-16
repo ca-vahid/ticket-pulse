@@ -91,11 +91,16 @@ export default function UrgentResponsePanel({ initialTab = 'rules', previewDelay
   useEffect(() => { loadSettings(); loadOnCall(); }, [loadSettings, loadOnCall]);
 
   /** A tab saved: keep its answer, and let the Changes list reload. */
-  const onSaved = useCallback((settings, { orderSaved = false } = {}) => {
+  const onSaved = useCallback((settings, { orderSaved = false, coordinators = null } = {}) => {
     const d = dataRef.current;
     if (d) {
       const suggested = orderSaved ? false : isSuggested({ ...d, settings: { ...d.settings, onCallOrderSuggested: settings?.onCallOrderSuggested ?? d.settings?.onCallOrderSuggested } });
-      const next = { ...d, settings: { ...d.settings, ...settings, onCallOrderSuggested: suggested }, onCallOrderSuggested: suggested };
+      const next = {
+        ...d,
+        settings: { ...d.settings, ...settings, onCallOrderSuggested: suggested },
+        onCallOrderSuggested: suggested,
+        ...(coordinators ? { workspaceCoordinators: { ...(d.workspaceCoordinators || {}), ...coordinators, fromLegacy: false, saved: true } } : {}),
+      };
       dataRef.current = next;
       setData(next);
       // The "On-call" nav entry follows the mode and the saved order without a reload.
@@ -178,6 +183,7 @@ export default function UrgentResponsePanel({ initialTab = 'rules', previewDelay
                   onSaved={onSaved}
                   onOpenOnCall={() => selectTab('oncall')}
                   groupCoordinators={data.groupCoordinators || []}
+                  workspaceCoordinators={data.workspaceCoordinators || null}
                 />
               )}
               {data && t.id === 'oncall' && (

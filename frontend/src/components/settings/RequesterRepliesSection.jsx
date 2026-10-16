@@ -232,7 +232,11 @@ export default function RequesterRepliesSection() {
           )}
           {!draft && !reopenSaved && !loading && (
             workflowReopens ? (
-              <Notice>Tickets are reopened by the mail workflow {quoted(liveWorkflows.filter((w) => w.isEnabled).map((w) => w.name))} for now.</Notice>
+              // QA 10-15 #11: "Do I need to turn this on?" — no; say so first, then what turning it on changes.
+              <Notice testId="workflow-reopens">
+                You do not need to turn this on: the mail workflow {quoted(liveWorkflows.filter((w) => w.isEnabled).map((w) => w.name))} already reopens tickets.
+                Turn it on only if you want Ticket Pulse to do it instead; saving archives that workflow (it can be brought back), and the statuses ticked here decide what reopens.
+              </Notice>
             ) : (
               <div data-testid="nothing-reopens">
                 <Notice tone="warn">Nothing reopens tickets when a requester replies in this workspace.</Notice>

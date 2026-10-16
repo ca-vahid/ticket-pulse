@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import prisma from './prisma.js';
+import { isMirrorEcho } from '../utils/mirrorEcho.js';
+import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import {
   getNotificationLlmToolPolicy,
   normalizeNotificationLlmToolPolicy,
@@ -227,6 +229,9 @@ function ticketFromSource(ticket, eventContext, redactionEnabled, redactionState
   const source = ticket || eventContext.ticket || {};
   return {
     id: source.id || null,
+    // The number people know the ticket by: TP-10018 for a Ticket Pulse ticket, #247249 for a FreshService one
+    // (QA 10-15: a closed e-mail for TP-10018 was titled "Ticket #247249 closed", the FreshService copy's number).
+    ticketNumber: source.displayRef || ((source.id || source.freshserviceTicketId) ? ticketDisplayRef(source) : null),
     freshserviceTicketId: source.freshserviceTicketId?.toString?.() || source.freshserviceTicketId || null,
     subject: redactText(source.subject, redactionEnabled, redactionState),
     descriptionText: redactText(source.descriptionText || source.description, redactionEnabled, redactionState),
@@ -290,29 +295,63 @@ function recipientsFromSource(ticket, eventContext, state) {
   };
 }
 
+// QA 10-15 #6: the ticket-closed summary ("What was done") read the newest few rows of the thread, and on
+// a FreshService ticket those are mostly activity lines ("closed the ticket", "changed the group") with no
+// words in them, so the replies between the agent and the requester never reached the model. The
+// conversation now comes first and activity lines only fill what is left.
+const CONVERSATION_EVENT_TYPES = new Set([
+  'original_email', 'reply', 'customer_reply', 'requester_reply', 'agent_reply', 'forward',
+  'note', 'private_note', 'public_note', 'email', 'email_inbound', 'email_outbound',
+]);
+
+function isConversationEntry(row) {
+  const type = String(row?.eventType || '').toLowerCase();
+  if (CONVERSATION_EVENT_TYPES.has(type)) return true;
+  return row?.source === 'email_inbound' || row?.source === 'ticketpulse_user' || row?.source === 'freshservice_conversation';
+}
+
+/** An Auto-help reply carries its signature block at the end; the model should read the answer, not the signature. */
+function withoutSignatureBlock(row) {
+  const html = typeof row?.bodyHtml === 'string' ? row.bodyHtml : '';
+  const mark = html.indexOf('data-tp-signature');
+  if (mark < 0) return row?.bodyText || row?.content || row?.bodyHtml;
+  const cut = html.lastIndexOf('<div', mark);
+  return cut >= 0 ? html.slice(0, cut) : html.slice(0, mark);
+}
+
+function entryRole(row, isPrivate) {
+  if (isPrivate) return 'internal note';
+  return row?.incoming === true ? 'requester' : 'agent';
+}
+
 async function loadThreadSummary({ workspaceId, ticketId, policy, settings, redactionState }) {
   if (!ticketId || settings.context.includeThreadHistory === false || settings.context.maxThreadEntries <= 0) {
     return { enabled: false, entries: [], omittedPrivateEntries: 0 };
   }
 
+  const max = settings.context.maxThreadEntries;
   const rows = await prisma.ticketThreadEntry.findMany({
     where: { workspaceId, ticketId },
     orderBy: { occurredAt: 'desc' },
-    take: Math.min(settings.context.maxThreadEntries + 10, 40),
+    take: Math.min(max * 4 + 10, 80),
   });
 
   let omittedPrivateEntries = 0;
-  const entries = [];
+  const conversation = [];
+  const activity = [];
   for (const row of rows) {
+    // The mirror's own notes read back from the FreshService copy of a Ticket Pulse ticket (4.2.72).
+    if (isMirrorEcho(row)) continue;
     const isPrivate = row.isPrivate === true || row.visibility === 'private' || row.visibility === 'internal';
     if (isPrivate && !policy.includePrivateNotes) {
       omittedPrivateEntries += 1;
       continue;
     }
-    entries.push({
+    const entry = {
       evidenceId: `thread:${row.id}`,
       source: row.source,
       eventType: row.eventType,
+      role: entryRole(row, isPrivate),
       title: row.title || null,
       actorName: row.actorName || null,
       actorEmail: row.actorEmail || null,
@@ -320,16 +359,20 @@ async function loadThreadSummary({ workspaceId, ticketId, policy, settings, reda
       isPrivate,
       quoteAllowed: !isPrivate,
       occurredAt: dateIso(row.occurredAt),
-      content: redactText(row.bodyText || row.content || row.bodyHtml, policy.redactionEnabled, redactionState),
-    });
-    if (entries.length >= settings.context.maxThreadEntries) break;
+      content: redactText(withoutSignatureBlock(row), policy.redactionEnabled, redactionState),
+    };
+    (isConversationEntry(row) ? conversation : activity).push(entry);
   }
+
+  const picked = conversation.slice(0, max);
+  if (picked.length < max) picked.push(...activity.slice(0, max - picked.length));
+  picked.sort((a, b) => String(a.occurredAt || '').localeCompare(String(b.occurredAt || '')));
 
   return {
     enabled: true,
     includePrivateNotes: policy.includePrivateNotes,
     omittedPrivateEntries,
-    entries: entries.reverse(),
+    entries: picked,
   };
 }
 
