@@ -98,6 +98,17 @@ describe('GroupsPanel group coordinators (QA 10-14)', () => {
     }
   });
 
+  // QA 10-15 item 9: per-group coordinators are optional; the workspace coordinators are the usual answer.
+  test('the group coordinator is marked optional and empty means the workspace coordinators', async () => {
+    render(<GroupsPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit coordinator for Service Desk' }));
+    const box = screen.getByTestId('coordinator-editor-3');
+    expect(box).toHaveTextContent('Group coordinator (optional) — leave empty to use the workspace coordinators');
+    expect(box).toHaveTextContent('Group backup (optional)');
+    expect(box).toHaveTextContent('Most workspaces leave this empty and set their coordinators once in Settings → Urgent Response → Rules.');
+    expect(screen.getByRole('combobox', { name: 'Coordinator for Service Desk' })).toHaveTextContent('Nobody (the workspace coordinators are used)');
+  });
+
   test('pick a coordinator and a backup for a FreshService group and save', async () => {
     render(<GroupsPanel />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit coordinator for Service Desk' }));

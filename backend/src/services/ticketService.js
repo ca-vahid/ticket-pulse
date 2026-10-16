@@ -4081,7 +4081,7 @@ class TicketService {
    * our row — an FS failure (or silent non-acceptance) changes NOTHING
    * locally, so the two systems can never diverge through this path.
    */
-  async updateFsTicket(ticketId, workspaceId, input, actor, { allowAssignableOnly = false } = {}) {
+  async updateFsTicket(ticketId, workspaceId, input, actor, { allowAssignableOnly = false, notifyLifecycle = true } = {}) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -4521,6 +4521,15 @@ class TicketService {
           fsUpdatedAt: fsTicket.updated_at || null,
         }))
         .catch(() => {});
+    }
+    // QA 10-15 #12: a status or owner changed here never told the workflows. The row is written above, so
+    // when the 5-minute sync reads the FreshService copy it finds nothing new: no ticket.resolved_closed
+    // (the closed e-mail), no status_changed, no assigned. Agents closing FreshService tickets in Ticket
+    // Pulse missed 84 closed-e-mail runs in IT in one week. The event goes out here, once, like changeStatus.
+    // The workflow engine's writes pass notifyLifecycle:false — its standing rule that
+    // workflow status writes never fire status_changed, so workflows cannot set each other off.
+    if (notifyLifecycle && (changes.status || 'assignee' in changes || 'assignedTechId' in changes)) {
+      await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
     }
     this._broadcast(workspaceId, 'fs_update', updated, { changes: Object.keys(changes) });
     // Subject/description changed → the content embedding is stale (P5.2).

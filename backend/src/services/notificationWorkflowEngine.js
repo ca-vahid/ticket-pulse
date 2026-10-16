@@ -3,6 +3,7 @@ import jsonLogic from 'json-logic-js';
 import sanitizeHtml from 'sanitize-html';
 import { createHash, randomUUID } from 'node:crypto';
 import prisma from './prisma.js';
+import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import logger from '../utils/logger.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import { processDelivery } from './notificationDeliveryService.js';
@@ -1106,7 +1107,7 @@ function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null
 // Per-action styling for the minimalist business-hours rows (badge + colour + copy).
 const ROW_STYLE = {
   publicStatus: { badge: EMAIL_BADGE_STATUS, title: 'Check status', subtitle: 'Live SLA timer, assignee & latest note', color: '#143f9c', tint: '#f4f7fe' },
-  raiseUrgency: { badge: EMAIL_BADGE_URGENCY, title: 'Raise urgency', subtitle: 'Bumps priority and notifies the team lead', color: '#d8392c', tint: '#fdf4f3' },
+  raiseUrgency: { badge: EMAIL_BADGE_URGENCY, title: 'Raise urgency', subtitle: 'Bumps priority and tells your agent', color: '#d8392c', tint: '#fdf4f3' },
   afterHoursSupport: { badge: EMAIL_BADGE_REQUEST, title: 'Request support', subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fdf0ef' },
   feedback: { badge: EMAIL_BADGE_FEEDBACK, title: 'Rate your support', subtitle: 'Takes ten seconds — it helps the team', color: '#0f766e', tint: '#f0fdfa' },
 };
@@ -3529,6 +3530,12 @@ export async function executeDefinition({
     triggerType: workflow.triggerType,
   });
   let normalizedContext = safeJson(eventContext || sampleEventContext(workflow.triggerType));
+  // {{ ticket.displayRef }} is the number people know (TP-10018 / #247249); the built-in templates
+  // print it since QA 10-15, so a context that arrives without it gets it here.
+  if (normalizedContext?.ticket && !normalizedContext.ticket.displayRef
+    && (normalizedContext.ticket.id || normalizedContext.ticket.freshserviceTicketId)) {
+    normalizedContext.ticket.displayRef = ticketDisplayRef(normalizedContext.ticket);
+  }
   normalizedContext = await enrichEventContextWithRequesterProfile(normalizedContext);
   normalizedContext = await enrichEventContextWithPublicStatusUrl(normalizedContext);
   normalizedContext = await enrichEventContextWithAgentNotes(normalizedContext);
@@ -3916,7 +3923,7 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
     const { default: ticketService } = await import('./ticketService.js');
     await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { status: setStatus }, actor?.name
       ? { name: who.name, email: null, role: 'automation' }
-      : FS_WRITEBACK_ACTOR);
+      : FS_WRITEBACK_ACTOR, { notifyLifecycle: false });
     // A workflow's write gets its own history row; Ticket Pulse's own write
     // is already told by the fs_write_back row updateFsTicket audits.
     if (who.kind === 'workflow') {

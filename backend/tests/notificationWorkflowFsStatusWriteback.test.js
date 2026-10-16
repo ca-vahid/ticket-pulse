@@ -95,7 +95,7 @@ describe('applyFsBornStatusWriteback (RO-4)', () => {
     const out = await applyFsBornStatusWriteback({ node: NODE, ticket: FS_TICKET, setStatus: 'Open', state, eventContext: { event: { type: 'ticket.reply_received' } } });
     await flush();
 
-    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.objectContaining({ name: 'Notification workflow', role: 'workflow' }));
+    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.objectContaining({ name: 'Notification workflow', role: 'workflow' }), { notifyLifecycle: false });
     expect(out).toEqual(expect.objectContaining({ applied: true, via: 'freshservice_writeback', status: { from: 'Closed', to: 'Open' } }));
     expect(activityCreateMock).toHaveBeenCalledWith(expect.objectContaining({
       activityType: 'workflow_updated_ticket',
@@ -161,7 +161,7 @@ describe('the same write as Ticket Pulse (When a requester replies, 14 Oct 2026)
     updateFsTicketMock.mockResolvedValue({ id: 39618, status: 'Open' });
     const out = await executeUpdateTicketNode(NODE, ctx(FS_TICKET), { actor: ACTOR });
     expect(out).toEqual(expect.objectContaining({ via: 'freshservice_writeback', status: expect.objectContaining({ applied: true }) }));
-    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.objectContaining({ name: 'Ticket Pulse', role: 'automation' }));
+    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.objectContaining({ name: 'Ticket Pulse', role: 'automation' }), { notifyLifecycle: false });
     expect(activityCreateMock).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'workflow_updated_ticket' }));
   });
 
@@ -235,7 +235,7 @@ describe('seeded "Reopen on requester reply" end-to-end on an FS-born ticket', (
     });
     const step = result.steps.find((s) => s.nodeId === 'reopen');
     expect(step.output).toEqual(expect.objectContaining({ via: 'freshservice_writeback', status: expect.objectContaining({ applied: true }) }));
-    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.anything());
+    expect(updateFsTicketMock).toHaveBeenCalledWith(39618, 2, { status: 'Open' }, expect.anything(), { notifyLifecycle: false });
     expect(result.status).toBe('completed');
   });
 

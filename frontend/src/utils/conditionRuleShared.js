@@ -103,7 +103,9 @@ export const RULE_OPERATORS = Object.freeze({
 /** One set of operator words for run explanations and step sentences. */
 export const OPERATOR_WORDS = Object.freeze({
   is: 'is', is_not: 'is not', contains: 'contains', not_contains: 'does not contain', in: 'is one of', not_in: 'is not one of',
-  is_empty: 'is empty', is_not_empty: 'is not empty', is_true: 'is true', is_false: 'is not true',
+  // QA 10-15 #2: "has no value" reads naturally for a person field
+  // ("the Project Accountant has no value"); operator ids stay the same.
+  is_empty: 'has no value', is_not_empty: 'has a value', is_true: 'is true', is_false: 'is not true',
   gt: 'is more than', lt: 'is less than', gte: 'is at least', lte: 'is at most', before: 'is before', after: 'is after',
   matches_regex: 'matches', has_any: 'has any of', has_all: 'has all of', has_none: 'has none of',
 });
@@ -424,8 +426,8 @@ export function describeConditionRow(row, { fields = null } = {}) {
   case 'not_in': return `${noun} is not ${joinWords(asList(value), 'or') || 'one of (nothing picked)'}`;
   case 'contains': return `${noun} contains "${value}"`;
   case 'not_contains': return `${noun} does not contain "${value}"`;
-  case 'is_empty': return `${noun} is empty`;
-  case 'is_not_empty': return `${noun} is set`;
+  case 'is_empty': return `${noun} has no value`;
+  case 'is_not_empty': return `${noun} has a value`;
   case 'matches_regex': return `${noun} matches the pattern "${value}"`;
   case 'has_any': return `${noun} include ${joinWords(asList(value), 'or') || '(nothing picked)'}`;
   case 'has_all': return `${noun} include ${joinWords(asList(value), 'and') || '(nothing picked)'}`;

@@ -88,7 +88,73 @@ function routingDataFromInput(data = {}, fallback = {}) {
   };
 }
 
-function runSearchFilter(search) {
+// Event labels the audit list shows, so "ticket assigned" or "requester
+// replied" finds runs by their event, not only by the raw "ticket.assigned".
+const AUDIT_EVENT_SEARCH_LABELS = Object.freeze({
+  // The list says "during business hours" or "after-hours / holiday".
+  'ticket.created': 'Ticket arrived during business hours / after-hours / holiday',
+  'ticket.assigned': 'Ticket assigned',
+  'ticket.reassigned': 'Ticket reassigned',
+  'ticket.resolved_closed': 'Resolved or closed',
+  'ticket.reply_received': 'Requester replied',
+  'ticket.note_added': 'Internal note added',
+  'ticket.status_changed': 'Status changed',
+  'ticket.reopened': 'Ticket reopened',
+  'ticket.priority_changed': 'Priority changed',
+  'ticket.parked': 'Ticket parked',
+  'ticket.woke': 'Parked ticket woke',
+  'ticket.park_due_soon': 'Parked ticket wakes within a day',
+  'ticket.categorized': 'Ticket categorized',
+  'ticket.intake_settled': 'Ticket intake settled',
+  'ticket.ready': 'Ticket ready',
+  'auto_help.staged': 'Auto-help suggested an answer',
+  'auto_help.answered': 'Auto-help answer sent',
+  'auto_help.nudged': 'Auto-help checked in',
+  'auto_help.help_requested': 'Requester still needs help',
+  'auto_help.resolved': 'Auto-help closed the ticket',
+  'ticket.fields_updated': 'Ticket updated (fields)',
+  'ticket.public_reply_added': 'Agent replied to requester',
+  'approval.requested': 'Approval requested',
+  'approval.decided': 'Approval decided',
+  'approval.clarification_requested': 'Approval clarification requested',
+  'ticket.aging': 'Ticket unresolved for N hours',
+  'ticket.unassigned_for': 'Ticket unassigned for N hours',
+  'ticket.requester_silent_for': 'Requester silent for N hours',
+  'ticket.sla_pre_breach': 'SLA about to breach',
+  'ticket.sla_breach': 'SLA breached',
+  'schedule.time': 'On a schedule (digest)',
+  manual: 'Manual / sub-workflow only',
+});
+
+const PG_INT_MAX = 2147483647;
+
+function intOrNull(digits) {
+  const value = Number.parseInt(digits, 10);
+  return Number.isFinite(value) && value > 0 && value <= PG_INT_MAX ? value : null;
+}
+
+function bigIntOrNull(digits) {
+  try {
+    const value = BigInt(digits);
+    return value > 0n ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where-clause for the Workflow Audit search box (QA 10-15).
+ *
+ * Matches what people type when they look for a run:
+ *  - "10029"      → TP-born ticket TP-10029, FreshService #10029, or run TP-NWF-10029
+ *  - "TP-10029", "tp10029", "TP 10029" → Ticket Pulse native number
+ *  - "#247279"    → FreshService ticket number
+ *  - "TP-NWF-77", "NWF-77" → the audit (run) id
+ *  - "TP-ID-501"  → internal ticket id
+ *  - text         → subject, workflow name/key, event type or event label
+ * The workspace scope stays on the outer where; this only adds an OR.
+ */
+export function runSearchFilter(search) {
   const trimmed = String(search || '').trim();
   if (!trimmed) return null;
   const or = [
@@ -97,18 +163,42 @@ function runSearchFilter(search) {
     { ticket: { is: { subject: { contains: trimmed, mode: 'insensitive' } } } },
     { eventType: { contains: trimmed, mode: 'insensitive' } },
   ];
-  if (/^\d+$/.test(trimmed)) {
-    or.push({ id: Number.parseInt(trimmed, 10) });
-    try {
-      or.push({ ticket: { is: { freshserviceTicketId: BigInt(trimmed) } } });
-    } catch {
-      // Ignore invalid bigint values even if they are numeric-looking.
-    }
-  }
-  // Audit IDs are shown as "TP-NWF-<runId>" (or "NWF-<runId>"); match on the run id.
-  const auditIdMatch = trimmed.match(/^(?:TP-)?NWF-(\d+)$/i);
+
+  const lower = trimmed.toLowerCase();
+  const eventTypes = Object.entries(AUDIT_EVENT_SEARCH_LABELS)
+    .filter(([type, label]) => (
+      label.toLowerCase().includes(lower)
+      || type.replace(/[._]/g, ' ').includes(lower)
+    ))
+    .map(([type]) => type);
+  if (eventTypes.length > 0) or.push({ eventType: { in: eventTypes } });
+
+  const auditIdMatch = trimmed.match(/^(?:TP[-\s]?)?NWF[-\s]?(\d+)$/i);
+  const ticketIdMatch = trimmed.match(/^TP[-\s]?ID[-\s]?(\d+)$/i);
+  const nativeMatch = trimmed.match(/^TP[-\s#]?(\d+)$/i);
+  const freshserviceMatch = trimmed.match(/^#\s*(\d+)$/);
+  const digitsMatch = trimmed.match(/^\d+$/);
+
   if (auditIdMatch) {
-    or.push({ id: Number.parseInt(auditIdMatch[1], 10) });
+    const id = intOrNull(auditIdMatch[1]);
+    if (id) or.push({ id });
+  } else if (ticketIdMatch) {
+    const id = intOrNull(ticketIdMatch[1]);
+    if (id) or.push({ ticketId: id });
+  } else if (nativeMatch) {
+    const nativeNumber = intOrNull(nativeMatch[1]);
+    if (nativeNumber) or.push({ ticket: { is: { nativeNumber } } });
+  } else if (freshserviceMatch) {
+    const freshserviceTicketId = bigIntOrNull(freshserviceMatch[1]);
+    if (freshserviceTicketId) or.push({ ticket: { is: { freshserviceTicketId } } });
+  } else if (digitsMatch) {
+    const number = intOrNull(trimmed);
+    if (number) {
+      or.push({ id: number });
+      or.push({ ticket: { is: { nativeNumber: number } } });
+    }
+    const freshserviceTicketId = bigIntOrNull(trimmed);
+    if (freshserviceTicketId) or.push({ ticket: { is: { freshserviceTicketId } } });
   }
   return { OR: or };
 }
@@ -555,6 +645,134 @@ export async function deleteArchivedWorkflowVariant(workspaceId, id) {
   });
 }
 
+// The audit LIST only needs what the run cards show plus what health and the
+// list filters read (step outputs, delivery status/payload, provider
+// attempts). It used to include every column of every step, delivery and
+// attempt — step inputs, rendered e-mail bodies, the run's eventContext — for
+// up to 500 runs, then sent it all to the browser (QA 10-15). The detail
+// endpoint (/audits/:auditId) loads the heavy parts for the one run opened.
+export const AUDIT_LIST_RUN_SELECT = Object.freeze({
+  id: true,
+  workspaceId: true,
+  workflowId: true,
+  workflowVersionId: true,
+  ticketId: true,
+  eventType: true,
+  status: true,
+  triggerSource: true,
+  startedAt: true,
+  completedAt: true,
+  durationMs: true,
+  error: true,
+  dryRun: true,
+  executionMode: true,
+  resumeAt: true,
+  workflow: {
+    select: {
+      id: true,
+      name: true,
+      key: true,
+      triggerType: true,
+      isEnabled: true,
+      mockModeEnabled: true,
+      publishedVersion: true,
+    },
+  },
+  ticket: {
+    select: {
+      id: true,
+      freshserviceTicketId: true,
+      nativeNumber: true,
+      origin: true,
+      subject: true,
+      status: true,
+      priority: true,
+      assessedPriority: true,
+      requester: {
+        select: { department: true },
+      },
+    },
+  },
+  steps: {
+    orderBy: { startedAt: 'asc' },
+    select: {
+      id: true,
+      nodeId: true,
+      nodeType: true,
+      status: true,
+      output: true,
+      error: true,
+      startedAt: true,
+      completedAt: true,
+      durationMs: true,
+    },
+  },
+  deliveries: {
+    orderBy: { queuedAt: 'asc' },
+    select: {
+      id: true,
+      status: true,
+      notificationType: true,
+      toRecipients: true,
+      ccRecipients: true,
+      bccRecipients: true,
+      error: true,
+      payload: true,
+      queuedAt: true,
+      sentAt: true,
+    },
+  },
+  aiProviderAttempts: {
+    orderBy: { startedAt: 'asc' },
+    select: {
+      id: true,
+      operation: true,
+      provider: true,
+      model: true,
+      status: true,
+      errorClass: true,
+      errorMessage: true,
+    },
+  },
+});
+
+/**
+ * scheduleMode ('after_hours' | 'standard' | null) per workflow, read from the
+ * published definition's metadata (draft as a fallback) inside Postgres so the
+ * list never pulls whole definitions. Cloned after-hours variants get a new
+ * key, so the label cannot rely on the key alone (QA 10-15 #12).
+ */
+export async function workflowScheduleModes(workflowIds = []) {
+  const ids = [...new Set((workflowIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  const modes = new Map();
+  if (ids.length === 0) return modes;
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT id,
+             COALESCE(
+               published_definition->'metadata'->>'scheduleMode',
+               draft_definition->'metadata'->>'scheduleMode'
+             ) AS "scheduleMode"
+        FROM notification_workflows
+       WHERE id = ANY(${ids}::int[])`;
+    for (const row of rows || []) {
+      modes.set(Number(row.id), row.scheduleMode || null);
+    }
+  } catch {
+    // Labels fall back to the workflow key; never fail the list over this.
+  }
+  return modes;
+}
+
+export async function attachWorkflowScheduleModes(runs = []) {
+  const modes = await workflowScheduleModes((runs || []).map((run) => run?.workflow?.id ?? run?.workflowId));
+  return (runs || []).map((run) => (
+    run?.workflow
+      ? { ...run, workflow: { ...run.workflow, scheduleMode: modes.get(Number(run.workflow.id)) ?? null } }
+      : run
+  ));
+}
+
 export async function listAuditRuns(workspaceId, {
   executionMode = 'live_mock',
   workflowId = null,
@@ -562,6 +780,8 @@ export async function listAuditRuns(workspaceId, {
   to = null,
   status = null,
   department = null,
+  eventType = null,
+  triggerSource = null,
   search = null,
   limit = 50,
   offset = 0,
@@ -583,6 +803,10 @@ export async function listAuditRuns(workspaceId, {
   }
   const normalizedStatus = String(status || '').trim().toLowerCase();
   if (normalizedStatus && normalizedStatus !== 'all') where.status = normalizedStatus;
+  const normalizedEventType = String(eventType || '').trim();
+  if (normalizedEventType && normalizedEventType !== 'all') where.eventType = normalizedEventType;
+  const normalizedTriggerSource = String(triggerSource || '').trim();
+  if (normalizedTriggerSource && normalizedTriggerSource !== 'all') where.triggerSource = normalizedTriggerSource;
   const normalizedDepartment = String(department || '').trim();
   if (normalizedDepartment && normalizedDepartment.toLowerCase() !== 'all') {
     // Department/location lives on the requester profile (Brisbane, Calgary, ...).
@@ -593,47 +817,14 @@ export async function listAuditRuns(workspaceId, {
   const searchFilter = runSearchFilter(search);
   if (searchFilter) where.AND = [searchFilter];
 
-  return prisma.notificationWorkflowRun.findMany({
+  const runs = await prisma.notificationWorkflowRun.findMany({
     where,
-    orderBy: { startedAt: 'desc' },
+    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
     skip: Math.max(0, Number.parseInt(offset, 10) || 0),
     take: parseLimit(limit, 50, 500),
-    include: {
-      workflow: {
-        select: {
-          id: true,
-          name: true,
-          key: true,
-          triggerType: true,
-          isEnabled: true,
-          mockModeEnabled: true,
-          publishedVersion: true,
-        },
-      },
-      ticket: {
-        select: {
-          id: true,
-          freshserviceTicketId: true,
-          subject: true,
-          status: true,
-          priority: true,
-          assessedPriority: true,
-          requester: {
-            select: { department: true },
-          },
-        },
-      },
-      steps: {
-        orderBy: { startedAt: 'asc' },
-      },
-      deliveries: {
-        orderBy: { queuedAt: 'asc' },
-      },
-      aiProviderAttempts: {
-        orderBy: { startedAt: 'asc' },
-      },
-    },
+    select: AUDIT_LIST_RUN_SELECT,
   });
+  return attachWorkflowScheduleModes(runs);
 }
 
 export async function listRuns(workspaceId, workflowId, { limit = 50 } = {}) {
@@ -705,6 +896,7 @@ export default {
   setWorkflowArchived,
   deleteArchivedWorkflowVariant,
   listAuditRuns,
+  attachWorkflowScheduleModes,
   listRuns,
   getSampleContext,
   recordSuppressionDecisions,

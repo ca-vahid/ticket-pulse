@@ -50,7 +50,11 @@ export const DEFAULT_OPTIONS = {
   groupMinPriority: 3, // group_unassigned: High and above
   dailyDigest: false,
   digestTime: '08:00',
+  // QA 10-15 #5: the urgency page offers requesters a Teams chat with me.
+  // Personal opt-in only: a workspace default can never turn it on.
+  requesterTeamsChat: false,
 };
+const PERSONAL_ONLY_OPTIONS = ['requesterTeamsChat'];
 
 /** Ticket event type → [preference key, recipient kind]. Shared with webPushService. */
 export const EVENT_MAP = {
@@ -104,7 +108,9 @@ export function effectivePrefs(wsDefaults = null, row = null) {
     const ws = wsDefaults?.events?.[e.key];
     events[e.key] = MODES.has(own) ? own : (MODES.has(ws) ? ws : e.mode);
   }
-  return { events, options: { ...DEFAULT_OPTIONS, ...(wsDefaults?.options || {}), ...(row?.options || {}) } };
+  const wsOptions = { ...(wsDefaults?.options || {}) };
+  for (const k of PERSONAL_ONLY_OPTIONS) delete wsOptions[k];
+  return { events, options: { ...DEFAULT_OPTIONS, ...wsOptions, ...(row?.options || {}) } };
 }
 
 /** Who did it? E-mail + technician id when the event carries them. */
@@ -966,7 +972,7 @@ class TeamsNotificationService {
 
   async saveMyPrefs(email, workspaceId, input = {}) {
     const tech = await this._tech(email, workspaceId);
-    const clean = cleanPrefs(input);
+    const clean = cleanPrefs(input, { personal: true });
     await prisma.notificationPreference.upsert({
       where: { workspaceId_technicianId: { workspaceId: tech.workspaceId, technicianId: tech.id } },
       update: { events: clean.events, options: clean.options },
@@ -1090,12 +1096,16 @@ class TeamsNotificationService {
   }
 }
 
-/** Only known keys and values survive. */
-export function cleanPrefs(input = {}) {
+/**
+ * Only known keys and values survive. `personal` (an agent saving their own
+ * choices) also keeps the personal-only options; workspace defaults drop them.
+ */
+export function cleanPrefs(input = {}, { personal = false } = {}) {
   const events = {};
   for (const [k, v] of Object.entries(input?.events || {})) if (EVENT_KEYS.has(k) && MODES.has(v)) events[k] = v;
   const o = input?.options || {};
   const options = {};
+  if (personal && typeof o.requesterTeamsChat === 'boolean') options.requesterTeamsChat = o.requesterTeamsChat;
   if (typeof o.respectAway === 'boolean') options.respectAway = o.respectAway;
   if (typeof o.urgentBypassesQuiet === 'boolean') options.urgentBypassesQuiet = o.urgentBypassesQuiet;
   if (typeof o.dailyDigest === 'boolean') options.dailyDigest = o.dailyDigest;

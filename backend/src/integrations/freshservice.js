@@ -1247,8 +1247,11 @@ class FreshServiceClient {
       // Keep explicit nulls (e.g. responder_id:null to UNASSIGN) — only drop
       // undefined/'' — so callers can clear a field in FreshService. compactObject
       // strips nulls, which silently swallowed unassignments.
+      // department_id is the exception: FreshService refuses a null department
+      // ("The value provided is of type Null", 400), so a cleared department is
+      // left out and the FreshService copy keeps the one it has.
       const payload = Object.fromEntries(
-        Object.entries(fields).filter(([, v]) => v !== undefined && v !== ''),
+        Object.entries(fields).filter(([k, v]) => v !== undefined && v !== '' && !(k === 'department_id' && v === null)),
       );
       const response = await this._put(`/tickets/${ticketId}`, { ticket: payload });
       return response.data.ticket;

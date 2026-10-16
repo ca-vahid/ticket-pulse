@@ -640,6 +640,25 @@ class UrgentResponseOnCallService {
   // ---- the daily check -----------------------------------------------------
 
   /**
+   * Who hears about a week that needs cover: the workspace coordinators'
+   * owner right now (the first at work, else the first active one), and in
+   * mode 'all' every one of them. Imported lazily (the resolver reaches into
+   * the engine, which imports this file). Never throws: [] when unknown.
+   */
+  async _coordinatorIds(workspaceId, now) {
+    try {
+      const { default: groups } = await import('../groupCoordinatorService.js');
+      const resolved = await groups.resolveCoordinator({ workspaceId, groupId: null, group: null, at: now });
+      if (!resolved?.technicianId) return [];
+      const ids = [resolved.technicianId, ...(Array.isArray(resolved.notify) ? resolved.notify : [])];
+      return [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    } catch (err) {
+      logger.warn(`Urgent response: the coordinators could not be worked out for workspace ${workspaceId}: ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
    * Once a day per week: when this week's or next week's on-call person has
    * leave that nobody covers and no request is open, the coordinator is told
    * and a `cover_needed` row is logged (the dedupe key keeps it to one a day).
@@ -655,7 +674,9 @@ class UrgentResponseOnCallService {
       const plan = await this.schedule(ws, { from: now, weeks: 2 });
       if (!plan.configured) return out;
       const settings = await settingsService.getSettings(ws, { suggest: false });
-      const tell = settings.coordinatorTechnicianId ?? settings.nobodyContactTechnicianId ?? null;
+      const coordinators = await this._coordinatorIds(ws, now);
+      const fallback = settings.nobodyContactTechnicianId ?? null;
+      const tell = coordinators.length ? coordinators : (fallback ? [fallback] : []);
       const today = localParts(now, plan.timezone).dateStr;
       for (const week of plan.weeks) {
         out.checked += 1;
@@ -666,7 +687,9 @@ class UrgentResponseOnCallService {
           workspaceId: ws,
           from: week.scheduled,
           sentence,
-          details: { weekIndex: week.index, startsAt: week.startsAt, endsAt: week.endsAt, leaveDays: week.leaveDays, toldTechnicianId: tell },
+          details: {
+            weekIndex: week.index, startsAt: week.startsAt, endsAt: week.endsAt, leaveDays: week.leaveDays, toldTechnicianId: tell[0] ?? null, ...(tell.length > 1 ? { toldTechnicianIds: tell } : {}),
+          },
           dedupeKey: `cover_needed:${ws}:${localParts(week.startsAt, plan.timezone).dateStr}:${today}`,
         });
         // Already said today, or the log is not there: say nothing rather than repeat every run.
@@ -674,7 +697,7 @@ class UrgentResponseOnCallService {
         out.flagged.push({ weekIndex: week.index, technicianId: week.scheduled.id, leaveDays: week.leaveDays });
         await this._tell({
           workspaceId: ws,
-          technicianIds: tell ? [tell] : [],
+          technicianIds: tell,
           title: `On-call needs cover: ${week.scheduled.name}, ${range}`,
           lines: [sentence, 'Set a cover or ask the rotation in Settings → Urgent Response → On-call.'],
           refKey: `urgent-cover-needed:${ws}:${week.index}:${today}`,

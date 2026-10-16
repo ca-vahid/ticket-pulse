@@ -165,6 +165,23 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
             </label>
           </div>
 
+          {/* QA 10-15 #5: a plain Teams chat link, not the bot, so it works without connecting. */}
+          <div className="mt-5 space-y-2 text-sm">
+            <div className="text-xs font-semibold text-muted-foreground">Requesters</div>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={data.options.requesterTeamsChat === true}
+                onChange={(e) => setOpt({ requesterTeamsChat: e.target.checked })}
+              />
+              <span>
+                <span className="text-foreground">Let requesters start a Teams chat with me from the urgency page</span>
+                <span className="block text-xs text-muted-foreground">When someone raises the urgency of a ticket assigned to you, the page offers a button to message you in Teams. Off until you turn it on.</span>
+              </span>
+            </label>
+          </div>
+
           {data.mutes?.length > 0 && (
             <div className="mt-5">
               <div className="mb-1 text-xs font-semibold text-muted-foreground">Muted tickets</div>

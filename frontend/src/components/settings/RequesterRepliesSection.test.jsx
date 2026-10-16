@@ -63,7 +63,7 @@ describe('RequesterRepliesSection', () => {
     expect(screen.getByText(/away for more than one working day/)).toBeInTheDocument();
     expect(screen.getByText(/A single day off, working from home and half days do not count/)).toBeInTheDocument();
     expect(screen.getByText(/Nothing is split until a person says so/)).toBeInTheDocument();
-    expect(screen.getByText(/Tickets are reopened by the mail workflow “Reopen on requester reply” for now/)).toBeInTheDocument();
+    expect(screen.getByText(/You do not need to turn this on: the mail workflow “Reopen on requester reply” already reopens tickets/)).toBeInTheDocument();
   });
 
   test('no JSON, no codes anywhere on the page', async () => {
@@ -135,7 +135,7 @@ describe('RequesterRepliesSection', () => {
 
     fireEvent.click(within(nothing).getByRole('button', { name: 'Bring back “Reopen on requester reply”' }));
     await waitFor(() => expect(api.restoreRequesterReplyWorkflow).toHaveBeenCalledWith(9764));
-    expect(await screen.findByText(/Tickets are reopened by the mail workflow “Reopen on requester reply” for now/)).toBeInTheDocument();
+    expect(await screen.findByText(/You do not need to turn this on: the mail workflow “Reopen on requester reply” already reopens tickets/)).toBeInTheDocument();
   });
 
   test('the thank-you switch saves at once and shows the monthly limit and this month\'s spend', async () => {

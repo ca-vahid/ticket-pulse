@@ -55,6 +55,13 @@ const prismaMock = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  notificationPreference: {
+    findUnique: jest.fn(),
+  },
+  ticketActivity: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+  },
 };
 
 const providerStatusMock = jest.fn();
@@ -510,5 +517,169 @@ describe('getPolicy — concurrent first read', () => {
   test('any other error still throws', async () => {
     prismaMock.urgentEscalationPolicy.upsert.mockRejectedValueOnce(Object.assign(new Error('db down'), { code: 'P1001' }));
     await expect(afterHoursUrgentEscalationService.getPolicy(1)).rejects.toThrow('db down');
+  });
+});
+
+// QA 10-15 #5: requesters can open a Teams chat with the assigned agent from
+// the urgency page — only when the agent opted in, the ticket is open and the
+// requester is inside the company.
+describe('urgency page — Teams chat with the assigned agent', () => {
+  const AGENT_EMAIL = 'sam.okafor@bgc-example.com';
+
+  function chatLink(ticketOverrides = {}, workspaceOverrides = {}) {
+    return {
+      id: 77,
+      workspaceId: 5,
+      ticketId: 610,
+      tokenPrefix: 'tok-chat',
+      enabled: true,
+      revokedAt: null,
+      expiresAt: null,
+      ticket: {
+        id: 610,
+        workspaceId: 5,
+        origin: 'ticketpulse',
+        nativeNumber: 10018,
+        freshserviceTicketId: 330333n,
+        subject: 'design software licence',
+        status: 'Open',
+        priority: 2,
+        assessedPriority: 'Medium',
+        assessedPriorityId: 2,
+        assignedTechId: 31,
+        workspace: { id: 5, name: 'IT', slug: 'it', defaultTimezone: 'America/Vancouver', internalDomains: ['bgc-example.com'], ...workspaceOverrides },
+        requester: { name: 'Priya Nair', email: 'priya.nair@bgc-example.com' },
+        assignedTech: { id: 31, name: 'Sam Okafor', email: AGENT_EMAIL, photoUrl: null },
+        ...ticketOverrides,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    policyContextMock = {
+      availability: { isAfterHours: false, isBusinessHours: true, isHoliday: false },
+      notificationPolicy: { afterHoursEnabled: true, holidaysEnabled: true },
+      afterHoursSupport: {},
+    };
+    prismaMock.urgentEscalationPolicy.upsert.mockResolvedValue(policyRow);
+    prismaMock.publicTicketStatusSettings.findUnique.mockResolvedValue(null);
+    prismaMock.urgentEscalationEvent.findFirst.mockResolvedValue(null);
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink());
+    prismaMock.notificationPreference.findUnique.mockResolvedValue({ options: { requesterTeamsChat: true } });
+    prismaMock.ticketActivity.findFirst.mockResolvedValue(null);
+    prismaMock.ticketActivity.create.mockResolvedValue({ id: 1 });
+  });
+
+  test('all rules met: offered with the agent name, never the agent e-mail', async () => {
+    const result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual({ available: true, agentName: 'Sam Okafor', agentFirstName: 'Sam' });
+    expect(JSON.stringify(result, (k, v) => (typeof v === 'bigint' ? String(v) : v))).not.toContain(AGENT_EMAIL);
+    expect(prismaMock.notificationPreference.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { workspaceId_technicianId: { workspaceId: 5, technicianId: 31 } },
+    }));
+  });
+
+  test('the page shows the TP number for a Ticket Pulse ticket and #id for a FreshService one', async () => {
+    let result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.ticket.displayRef).toBe('TP-10018');
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ origin: 'freshservice', nativeNumber: null }));
+    result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.ticket.displayRef).toBe('#330333');
+  });
+
+  test('agent has not opted in (no row, or switch off): not offered', async () => {
+    prismaMock.notificationPreference.findUnique.mockResolvedValue(null);
+    let result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual(expect.objectContaining({ available: false, agentName: null })); expect(result.teamsChat.reason).toBeUndefined();
+    prismaMock.notificationPreference.findUnique.mockResolvedValue({ options: { requesterTeamsChat: false, dailyDigest: true } });
+    result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat.available).toBe(false);
+  });
+
+  test('a preferences read failure means not offered (never a 500)', async () => {
+    prismaMock.notificationPreference.findUnique.mockRejectedValue(new Error('relation "notification_preferences" does not exist'));
+    const result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual(expect.objectContaining({ available: false }));
+  });
+
+  test('closed or resolved ticket: not offered', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ status: 'Resolved' }));
+    const result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual(expect.objectContaining({ available: false }));
+  });
+
+  test('no assigned agent: not offered', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ assignedTechId: null, assignedTech: null }));
+    const result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual(expect.objectContaining({ available: false }));
+  });
+
+  test('outside requester: not offered', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ requester: { name: 'Dana Whitfield', email: 'dana@vendor-example.com' } }));
+    const result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual(expect.objectContaining({ available: false }));
+  });
+
+  test('a subdomain of an internal domain counts as inside', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ requester: { name: 'Priya Nair', email: 'priya@ca.bgc-example.com' } }));
+    const result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat.available).toBe(true);
+  });
+
+  test('no internal domains set: requester must share the agent domain', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({}, { internalDomains: [] }));
+    let result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat.available).toBe(true);
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ requester: { name: 'Dana Whitfield', email: 'dana@vendor-example.com' } }, { internalDomains: [] }));
+    result = await afterHoursUrgentEscalationService.getPublicBusinessUrgency('tok-chat');
+    expect(result.teamsChat).toEqual(expect.objectContaining({ available: false }));
+  });
+
+  test('POST writes a history line and returns the Teams deep link', async () => {
+    const result = await afterHoursUrgentEscalationService.startRequesterTeamsChat('tok-chat', { ip: '10.0.0.1' });
+    const message = 'About TP-10018 – design software licence: ';
+    expect(result).toEqual({
+      available: true,
+      agentName: 'Sam Okafor',
+      agentFirstName: 'Sam',
+      url: `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(AGENT_EMAIL)}&message=${encodeURIComponent(message)}`,
+    });
+    expect(prismaMock.ticketActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ticketId: 610,
+        activityType: 'requester_teams_chat',
+        performedBy: 'Priya Nair',
+        details: expect.objectContaining({ via: 'urgency_page', agentName: 'Sam Okafor', technicianId: 31 }),
+      }),
+    });
+  });
+
+  test('POST again within ten minutes opens the chat but adds no second history line', async () => {
+    prismaMock.ticketActivity.findFirst.mockResolvedValue({ id: 9 });
+    const result = await afterHoursUrgentEscalationService.startRequesterTeamsChat('tok-chat');
+    expect(result.url).toMatch(/^https:\/\/teams\.microsoft\.com\/l\/chat\/0\/0\?users=/);
+    expect(prismaMock.ticketActivity.create).not.toHaveBeenCalled();
+  });
+
+  test('POST still returns the link if the history write fails', async () => {
+    prismaMock.ticketActivity.create.mockRejectedValue(new Error('db blip'));
+    const result = await afterHoursUrgentEscalationService.startRequesterTeamsChat('tok-chat');
+    expect(result.available).toBe(true);
+    expect(result.url).toContain('teams.microsoft.com');
+  });
+
+  test('POST refused when the chat is not available: no link, no history line', async () => {
+    prismaMock.notificationPreference.findUnique.mockResolvedValue({ options: {} });
+    const result = await afterHoursUrgentEscalationService.startRequesterTeamsChat('tok-chat');
+    expect(result).toEqual({ available: false, url: null });
+    expect(prismaMock.ticketActivity.create).not.toHaveBeenCalled();
+  });
+
+  test('POST refused for a closed ticket', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(chatLink({ status: 'Closed' }));
+    const result = await afterHoursUrgentEscalationService.startRequesterTeamsChat('tok-chat');
+    expect(result.url).toBeNull();
+    expect(prismaMock.ticketActivity.create).not.toHaveBeenCalled();
   });
 });

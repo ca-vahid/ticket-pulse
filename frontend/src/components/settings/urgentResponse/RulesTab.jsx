@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import {
+  ArrowDown, ArrowUp, ChevronRight, Trash2,
+} from 'lucide-react';
 import { urgentResponseAPI } from '../../../services/api';
 import FancySelect from '../../common/FancySelect';
 import { Switch } from '../../ui';
 import { SectionTitle, StatusDot } from '../../onboarding/onboardingUi';
 import { CARD_CLASS, InlineNumber, PeopleChecklist, TechPerson, TextButton, techOptions } from './urgentResponseUi';
 import {
-  PICK_STEPS, PRIORITY_LABEL, changeFieldLabel, changeValueLabel, diffPatch, fmtWhen, listOf,
-  pickRules, previewSentence, togglePriority, validateRules,
+  MAX_COORDINATORS, PICK_STEPS, PRIORITY_LABEL, changeFieldLabel, changeValueLabel, coordinatorsDirty, diffPatch, fmtWhen, listOf,
+  pickCoordinators, pickRules, previewSentence, togglePriority, validateRules,
 } from './urgentResponseFormat';
 
 /**
@@ -69,6 +71,68 @@ function Connector() {
   );
 }
 
+const iconButton = 'tp-focus-ring rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30';
+
+/**
+ * The workspace coordinators (QA 10-15): up to three people, top to bottom,
+ * and how they are used — written as two sentences. Same list look as the
+ * on-call order: a number, the person, move up / down, remove.
+ */
+function CoordinatorsEditor({ value, onChange, technicians, techById }) {
+  const ids = value.technicianIds;
+  const person = (id) => techById.get(id) || { id, name: `Person ${id}` };
+  const addable = technicians.filter((t) => t.isActive !== false && !ids.includes(t.id));
+  const setIds = (next) => onChange({ ...value, technicianIds: next });
+  const move = (i, d) => {
+    const next = [...ids];
+    [next[i], next[i + d]] = [next[i + d], next[i]];
+    setIds(next);
+  };
+
+  return (
+    <div className="mt-3 grid gap-1.5" data-testid="workspace-coordinators">
+      <span className="text-sm font-medium text-foreground">Coordinators</span>
+      <span className="text-xs text-muted-foreground">Used when the ticket’s group has no coordinator of its own. Most workspaces only need this.</span>
+      {!ids.length && <p className="text-sm text-muted-foreground">Nobody yet: the ticket stays with its last owner.</p>}
+      {ids.length > 0 && (
+        <ol className="divide-y divide-border" aria-label="Coordinators, in order">
+          {ids.map((id, i) => {
+            const p = person(id);
+            return (
+              <li key={id} className="flex items-center gap-2 py-1.5">
+                <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+                <TechPerson person={p} techById={techById} sub={p.isActive === false ? 'Inactive' : null} className="min-w-0 flex-1" />
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <button type="button" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${p.name} up`} className={iconButton}><ArrowUp className="h-4 w-4" aria-hidden="true" /></button>
+                  <button type="button" disabled={i === ids.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${p.name} down`} className={iconButton}><ArrowDown className="h-4 w-4" aria-hidden="true" /></button>
+                  <button type="button" onClick={() => setIds(ids.filter((x) => x !== id))} aria-label={`Remove ${p.name}`} className={`${iconButton} hover:text-red-600 dark:hover:text-red-300`}><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {ids.length < MAX_COORDINATORS ? (
+        addable.length > 0 && (
+          <div className="sm:max-w-xs">
+            <FancySelect value="" onChange={(v) => { if (v) setIds([...ids, Number(v)]); }} options={techOptions(addable)} placeholder="Add a coordinator" aria-label="Add a coordinator" />
+          </div>
+        )
+      ) : <p className="text-xs text-muted-foreground">Three is the most. Remove one to add someone else.</p>}
+      <fieldset className="mt-1">
+        <legend className="text-xs text-muted-foreground">When a ticket reaches them</legend>
+        <Radio name="coordinators-mode" value="first_available" current={value.mode} onChange={(mode) => onChange({ ...value, mode })}>
+          Give it to the first one who is working (by the order above)
+        </Radio>
+        <Radio name="coordinators-mode" value="all" current={value.mode} onChange={(mode) => onChange({ ...value, mode })}>
+          Alert all of them at once; the first one who is working owns it
+        </Radio>
+        <p className="text-xs text-muted-foreground">If none of them is working, the first one still gets it.</p>
+      </fieldset>
+    </div>
+  );
+}
+
 /** A person in the group list: their name, marked when they are no longer active. */
 const personName = (p) => (p ? `${p.name}${p.isActive === false ? ' (inactive)' : ''}` : null);
 
@@ -81,7 +145,7 @@ function GroupCoordinatorList({ items = [] }) {
   return (
     <div className="mt-3 border-t border-border pt-3" data-testid="group-coordinators">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-sm font-medium text-foreground">Group coordinators</span>
+        <span className="text-sm font-medium text-foreground">Group coordinators (optional)</span>
         <a href="/settings#groups" className="tp-focus-ring rounded text-xs font-medium text-primary hover:underline">Set them in Groups</a>
       </div>
       {list.length ? (
@@ -97,7 +161,7 @@ function GroupCoordinatorList({ items = [] }) {
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-xs text-muted-foreground">No group has its own coordinator yet, so the workspace coordinator is used for every ticket.</p>
+        <p className="mt-1 text-xs text-muted-foreground">No group has its own coordinator, so the coordinators above are used for every ticket.</p>
       )}
     </div>
   );
@@ -105,10 +169,13 @@ function GroupCoordinatorList({ items = [] }) {
 
 export default function RulesTab({
   settings, technicians, techById, teamsEnabled, onCall = null, timezone = null,
-  changesKey = 0, previewDelayMs = 600, onSaved, onOpenOnCall = null, groupCoordinators = [],
+  changesKey = 0, previewDelayMs = 600, onSaved, onOpenOnCall = null, groupCoordinators = [], workspaceCoordinators = null,
 }) {
   const saved = useMemo(() => pickRules(settings), [settings]);
   const [draft, setDraft] = useState(saved);
+  // The workspace coordinators are their own setting (PUT /coordinators), saved by the same Save.
+  const [coordSaved, setCoordSaved] = useState(() => pickCoordinators(workspaceCoordinators, settings));
+  const [coordDraft, setCoordDraft] = useState(coordSaved);
   const [status, setStatus] = useState(null);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState({ state: 'idle', data: null });
@@ -116,9 +183,11 @@ export default function RulesTab({
   const previewRun = useRef(0);
 
   const set = (patch) => { setDraft((d) => ({ ...d, ...patch })); setStatus(null); };
+  const setCoordinators = (next) => { setCoordDraft(next); setStatus(null); };
   const problems = useMemo(() => validateRules(draft), [draft]);
   const patch = useMemo(() => diffPatch(draft, saved), [draft, saved]);
-  const dirty = Object.keys(patch).length > 0;
+  const coordDirty = coordinatorsDirty(coordDraft, coordSaved);
+  const dirty = Object.keys(patch).length > 0 || coordDirty;
 
   const active = useMemo(() => technicians.filter((t) => t.isActive !== false), [technicians]);
   // A person already chosen stays in the list even after being made inactive.
@@ -158,12 +227,26 @@ export default function RulesTab({
     setSaving(true);
     setStatus(null);
     try {
-      const res = await urgentResponseAPI.updateSettings(patch);
-      const next = res?.data?.settings ? pickRules(res.data.settings) : draft;
-      setDraft(next);
-      const n = res?.data?.changes?.length || 0;
+      let n = 0;
+      let savedSettings = null;
+      if (Object.keys(patch).length) {
+        const res = await urgentResponseAPI.updateSettings(patch);
+        const next = res?.data?.settings ? pickRules(res.data.settings) : draft;
+        setDraft(next);
+        n += res?.data?.changes?.length || 0;
+        savedSettings = res?.data?.settings || patch;
+      }
+      let coordinators = null;
+      if (coordDirty) {
+        const res = await urgentResponseAPI.updateCoordinators({ technicianIds: coordDraft.technicianIds, mode: coordDraft.mode });
+        coordinators = res?.data?.technicianIds ? pickCoordinators(res.data) : coordDraft;
+        setCoordSaved(coordinators);
+        setCoordDraft(coordinators);
+        if (res?.data?.changed !== false) n += 1;
+      }
       setStatus({ ok: true, text: n ? `Saved. ${n} ${n === 1 ? 'change' : 'changes'} recorded below.` : 'Saved.' });
-      onSaved?.(res?.data?.settings || patch);
+      if (coordinators) onSaved?.(savedSettings || {}, { coordinators });
+      else onSaved?.(savedSettings || patch);
     } catch (err) {
       setStatus({ ok: false, text: err?.message || 'Could not save' });
     } finally {
@@ -308,18 +391,9 @@ export default function RulesTab({
             After
             <InlineNumber value={draft.maxMoves} onChange={(v) => set({ maxMoves: v })} max={10} label="Most moves before the coordinator" />
             {draft.maxMoves === 1 ? 'move' : 'moves'}, it goes to the coordinator, who is told. Then the clock stops.
-            <p className="text-xs leading-normal text-muted-foreground">The coordinator is the ticket’s group coordinator if they are at work, else the group’s backup if they are at work, else the person below.</p>
+            <p className="text-xs leading-normal text-muted-foreground">The coordinator is the ticket’s group coordinator if that group has one at work, else one of the coordinators below.</p>
           </div>
-          <div className="mt-2 grid gap-1.5 sm:max-w-sm">
-            <span className="text-sm font-medium text-foreground">Workspace coordinator (when a group has none)</span>
-            <span className="text-xs text-muted-foreground">Also used when a group’s coordinator and backup are both away.</span>
-            <FancySelect
-              value={draft.coordinatorTechnicianId ? String(draft.coordinatorTechnicianId) : ''}
-              onChange={(v) => set({ coordinatorTechnicianId: v ? Number(v) : null })}
-              options={personOptions(draft.coordinatorTechnicianId, 'Nobody (it stays with its last owner)')}
-              aria-label="Workspace coordinator"
-            />
-          </div>
+          <CoordinatorsEditor value={coordDraft} onChange={setCoordinators} technicians={technicians} techById={techById} />
           <GroupCoordinatorList items={groupCoordinators} />
         </section>
 
@@ -356,7 +430,7 @@ export default function RulesTab({
           <span role="status" className={`mr-auto text-sm ${status.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{status.text}</span>
         )}
         {!status && dirty && <span className="mr-auto text-sm text-muted-foreground">Unsaved changes</span>}
-        <button type="button" disabled={!dirty || saving} onClick={() => { setDraft(saved); setStatus(null); }} className="tp-focus-ring rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted disabled:opacity-40">Discard</button>
+        <button type="button" disabled={!dirty || saving} onClick={() => { setDraft(saved); setCoordDraft(coordSaved); setStatus(null); }} className="tp-focus-ring rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted disabled:opacity-40">Discard</button>
         <button type="button" disabled={!dirty || saving || problems.length > 0} onClick={save} className="tp-focus-ring rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
           {saving ? 'Saving…' : 'Save'}
         </button>

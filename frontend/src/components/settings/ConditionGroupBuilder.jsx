@@ -91,21 +91,21 @@ export const CG_FIELDS = [
 const OPERATORS_BY_TYPE = {
   string: [
     ['is', 'is'], ['is_not', 'is not'], ['contains', 'contains'], ['not_contains', "doesn't contain"],
-    ['in', 'is any of'], ['not_in', 'is none of'], ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],
+    ['in', 'is any of'], ['not_in', 'is none of'], ['is_empty', 'has no value'], ['is_not_empty', 'has a value'],
     ['matches_regex', 'matches regex'],
   ],
   enum: [
     ['is', 'is'], ['is_not', 'is not'], ['in', 'is any of'], ['not_in', 'is none of'],
-    ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],
+    ['is_empty', 'has no value'], ['is_not_empty', 'has a value'],
   ],
   boolean: [['is_true', 'is true'], ['is_false', 'is false']],
   duration: [['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
   number: [['is', 'is'], ['is_not', 'is not'], ['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
   // Date-typed custom fields (FR 08-05 Phase 1b).
-  date: [['before', 'is before'], ['after', 'is after'], ['is_empty', 'is empty'], ['is_not_empty', 'is not empty']],
+  date: [['before', 'is before'], ['after', 'is after'], ['is_empty', 'has no value'], ['is_not_empty', 'has a value']],
   list: [
     ['has_any', 'has any of'], ['has_all', 'has all of'], ['has_none', 'has none of'],
-    ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],
+    ['is_empty', 'has no value'], ['is_not_empty', 'has a value'],
   ],
 };
 

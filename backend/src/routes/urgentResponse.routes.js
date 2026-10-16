@@ -4,6 +4,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { ValidationError } from '../utils/errors.js';
 import settingsService from '../services/urgentResponse/settingsService.js';
 import onCallService from '../services/urgentResponse/onCallService.js';
+import workspaceCoordinatorService from '../services/workspaceCoordinatorService.js';
 import { URGENT_RESPONSE_MODES } from '../services/urgentResponse/rules.js';
 
 /**
@@ -20,7 +21,8 @@ import { URGENT_RESPONSE_MODES } from '../services/urgentResponse/rules.js';
  *   everything else                       workspace admins (requireAdmin)
  *
  * GET /settings also carries `groupCoordinators`: the groups with their own
- * coordinator / backup (edited in Settings → Groups, groupCoordinatorService).
+ * coordinator / backup (edited in Settings → Groups, groupCoordinatorService),
+ * and `workspaceCoordinators` (GET/PUT /coordinators, workspaceCoordinatorService).
  *
  * "Me" is the signed-in person's ACTIVE technician row in this workspace,
  * matched by e-mail — the same rule as the ticket routes (resolveTicketActor).
@@ -135,16 +137,32 @@ router.get('/settings', asyncHandler(async (req, res) => {
   const groupCoordinators = await import('../services/groupCoordinatorService.js')
     .then(({ default: groups }) => groups.listWithNames(req.workspaceId))
     .catch(() => []);
+  // The workspace coordinators (up to three and how they are used); the old single one when none is saved.
+  const workspaceCoordinators = await workspaceCoordinatorService.getEffective(req.workspaceId, { legacyId: settings?.coordinatorTechnicianId ?? null })
+    .catch(() => null);
   res.json({
     success: true,
     data: {
-      settings, technicians, teamsEnabled, onCallOrderSuggested: settings.onCallOrderSuggested === true, timezone, groupCoordinators,
+      settings, technicians, teamsEnabled, onCallOrderSuggested: settings.onCallOrderSuggested === true, timezone, groupCoordinators, workspaceCoordinators,
     },
   });
 }));
 
 router.put('/settings', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await settingsService.updateSettings(req.workspaceId, req.body || {}, sessionUser(req)) });
+}));
+
+/** The workspace coordinators: { technicianIds (0–3, in order), mode: 'first_available' | 'all' }. */
+router.get('/coordinators', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await workspaceCoordinatorService.getEffective(req.workspaceId) });
+}));
+
+router.put('/coordinators', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  res.json({
+    success: true,
+    data: await workspaceCoordinatorService.set(req.workspaceId, { technicianIds: body.technicianIds, mode: body.mode }, sessionUser(req)),
+  });
 }));
 
 router.get('/settings/changes', asyncHandler(async (req, res) => {

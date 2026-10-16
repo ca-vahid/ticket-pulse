@@ -493,3 +493,21 @@ describe('FreshServiceClient.deleteTicket (Delete in FreshService, 2 Oct 2026)',
     await expect(client.deleteTicket(243555)).rejects.toThrow('forbidden');
   });
 });
+
+describe('FreshServiceClient.updateTicket clears fields but never sends a null department', () => {
+  test('responder_id null is sent (unassign); department_id null is left out', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._put = jest.fn().mockResolvedValue({ data: { ticket: { id: 1 } } });
+    await client.updateTicket(1, { status: 4, responder_id: null, department_id: null, subject: undefined });
+    const sent = client._put.mock.calls[0][1].ticket;
+    expect(sent).toEqual({ status: 4, responder_id: null });
+    expect('department_id' in sent).toBe(false);
+  });
+
+  test('a real department is still sent', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._put = jest.fn().mockResolvedValue({ data: { ticket: { id: 1 } } });
+    await client.updateTicket(1, { department_id: 1000131299 });
+    expect(client._put.mock.calls[0][1].ticket).toEqual({ department_id: 1000131299 });
+  });
+});

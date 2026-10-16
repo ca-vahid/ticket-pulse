@@ -254,7 +254,7 @@ export const WORKFLOW_TEMPLATES = [
         type: 'llm_generate',
         data: {
           label: 'Draft first reply',
-          prompt: 'Draft a first reply to the requester for this new ticket. Acknowledge the specific problem, state what will happen next in plain language, and ask for any obviously missing detail. Do not promise timelines.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nDescription: {{ ticket.descriptionText }}\nRequester: {{ requester.name }}',
+          prompt: 'Draft a first reply to the requester for this new ticket. Acknowledge the specific problem, state what will happen next in plain language, and ask for any obviously missing detail. Do not promise timelines.\n\nTicket: {{ ticket.displayRef }} {{ ticket.subject }}\nDescription: {{ ticket.descriptionText }}\nRequester: {{ requester.name }}',
           outputMode: 'draft_email',
           promoteToEmail: false,
           maxTokens: 10000,
@@ -284,7 +284,7 @@ export const WORKFLOW_TEMPLATES = [
         type: 'llm_generate',
         data: {
           label: 'Write resolution summary',
-          prompt: 'Write a short resolution summary email for the requester: what the problem was, what was done, and how to reopen if it recurs. State only facts present in the context. Include a confidence field reflecting how sure you are the summary is accurate.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}',
+          prompt: 'Write a short resolution summary email for the requester: what the problem was, what was done, and how to reopen if it recurs. State only facts present in the context. Include a confidence field reflecting how sure you are the summary is accurate.\n\nTicket: {{ ticket.displayRef }} {{ ticket.subject }}',
           outputMode: 'draft_email',
           promoteToEmail: true,
           maxTokens: 10000,
@@ -296,9 +296,9 @@ export const WORKFLOW_TEMPLATES = [
         type: 'template_render',
         data: {
           contentSource: 'llm_with_template_fallback',
-          subject: 'Your ticket #{{ ticket.freshserviceTicketId }} has been resolved',
-          html: '<p>Your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) has been resolved.</p><p>Reply to this email if the problem comes back.</p>',
-          text: 'Your ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) has been resolved.\n\nReply to this email if the problem comes back.',
+          subject: 'Your ticket {{ ticket.displayRef }} has been resolved',
+          html: '<p>Your ticket <strong>{{ ticket.displayRef }}</strong> ({{ ticket.subject }}) has been resolved.</p><p>Reply to this email if the problem comes back.</p>',
+          text: 'Your ticket {{ ticket.displayRef }} ({{ ticket.subject }}) has been resolved.\n\nReply to this email if the problem comes back.',
           plainTextMode: 'auto',
         },
       },
@@ -419,9 +419,9 @@ export const WORKFLOW_TEMPLATES = [
         type: 'template_render',
         data: {
           contentSource: 'template_only',
-          subject: 'Still need help with ticket #{{ ticket.freshserviceTicketId }}?',
-          html: '<p>Just checking in on your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}).</p><p>If our last reply solved it, no action is needed. If you still need help, just reply to this email.</p>',
-          text: 'Just checking in on your ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}).\n\nIf our last reply solved it, no action is needed. If you still need help, just reply to this email.',
+          subject: 'Still need help with ticket {{ ticket.displayRef }}?',
+          html: '<p>Just checking in on your ticket <strong>{{ ticket.displayRef }}</strong> ({{ ticket.subject }}).</p><p>If our last reply solved it, no action is needed. If you still need help, just reply to this email.</p>',
+          text: 'Just checking in on your ticket {{ ticket.displayRef }} ({{ ticket.subject }}).\n\nIf our last reply solved it, no action is needed. If you still need help, just reply to this email.',
           plainTextMode: 'auto',
         },
       },
@@ -516,9 +516,9 @@ export const WORKFLOW_TEMPLATES = [
         type: 'template_render',
         data: {
           contentSource: 'template_only',
-          subject: 'Ticket #{{ ticket.freshserviceTicketId }} is now {{ ticket.status }}',
-          html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) moved to <strong>{{ ticket.status }}</strong>.</p><p>Reply to this email if anything looks wrong.</p>',
-          text: 'Ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) moved to {{ ticket.status }}.\n\nReply to this email if anything looks wrong.',
+          subject: 'Ticket {{ ticket.displayRef }} is now {{ ticket.status }}',
+          html: '<p>Ticket <strong>{{ ticket.displayRef }}</strong> ({{ ticket.subject }}) moved to <strong>{{ ticket.status }}</strong>.</p><p>Reply to this email if anything looks wrong.</p>',
+          text: 'Ticket {{ ticket.displayRef }} ({{ ticket.subject }}) moved to {{ ticket.status }}.\n\nReply to this email if anything looks wrong.',
           plainTextMode: 'auto',
         },
       },
@@ -787,7 +787,7 @@ export const WORKFLOW_TEMPLATES = [
         type: 'llm_generate',
         data: {
           label: 'Write breach digest',
-          prompt: 'Write a concise internal alert for IT coordinators: this ticket has breached its SLA. Summarize the issue, current status, assignee (or unassigned), and one suggested next action. Coaching tone — factual, no blame.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nStatus: {{ ticket.status }} · Assignee: {{ assignedAgent.name }}',
+          prompt: 'Write a concise internal alert for IT coordinators: this ticket has breached its SLA. Summarize the issue, current status, assignee (or unassigned), and one suggested next action. Coaching tone — factual, no blame.\n\nTicket: {{ ticket.displayRef }} {{ ticket.subject }}\nStatus: {{ ticket.status }} · Assignee: {{ assignedAgent.name }}',
           outputMode: 'draft_email',
           promoteToEmail: true,
           maxTokens: 10000,
@@ -799,9 +799,9 @@ export const WORKFLOW_TEMPLATES = [
         type: 'template_render',
         data: {
           contentSource: 'llm_with_template_fallback',
-          subject: 'SLA breached: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}',
-          html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.</p>',
-          text: 'Ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.',
+          subject: 'SLA breached: {{ ticket.displayRef }} {{ ticket.subject }}',
+          html: '<p>Ticket <strong>{{ ticket.displayRef }}</strong> ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.</p>',
+          text: 'Ticket {{ ticket.displayRef }} ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.',
           plainTextMode: 'auto',
         },
       },
@@ -1545,9 +1545,9 @@ function defaultRecipients(triggerType) {
 function defaultTemplate(triggerType) {
   if (triggerType === 'ticket.assigned') {
     return {
-      subject: 'Ticket assigned: #{{ ticket.freshserviceTicketId }}',
-      html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> has been assigned to {{ assignedAgent.name }}.</p><p>{{ ticket.subject }}</p>',
-      text: 'Ticket #{{ ticket.freshserviceTicketId }} has been assigned to {{ assignedAgent.name }}.\n\n{{ ticket.subject }}',
+      subject: 'Ticket assigned: {{ ticket.displayRef }}',
+      html: '<p>Ticket <strong>{{ ticket.displayRef }}</strong> has been assigned to {{ assignedAgent.name }}.</p><p>{{ ticket.subject }}</p>',
+      text: 'Ticket {{ ticket.displayRef }} has been assigned to {{ assignedAgent.name }}.\n\n{{ ticket.subject }}',
     };
   }
 
@@ -1571,9 +1571,9 @@ function defaultTemplate(triggerType) {
 
   if (triggerType === 'ticket.reassigned') {
     return {
-      subject: 'Ticket reassigned: #{{ ticket.freshserviceTicketId }}',
-      html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> has been reassigned to {{ assignedAgent.name }}.</p><p>{{ ticket.subject }}</p>',
-      text: 'Ticket #{{ ticket.freshserviceTicketId }} has been reassigned to {{ assignedAgent.name }}.\n\n{{ ticket.subject }}',
+      subject: 'Ticket reassigned: {{ ticket.displayRef }}',
+      html: '<p>Ticket <strong>{{ ticket.displayRef }}</strong> has been reassigned to {{ assignedAgent.name }}.</p><p>{{ ticket.subject }}</p>',
+      text: 'Ticket {{ ticket.displayRef }} has been reassigned to {{ assignedAgent.name }}.\n\n{{ ticket.subject }}',
     };
   }
 
@@ -1601,24 +1601,24 @@ function defaultTemplate(triggerType) {
 
   if (triggerType === 'ticket.resolved_closed') {
     return {
-      subject: 'Ticket resolved: #{{ ticket.freshserviceTicketId }}',
-      html: '<p>Your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> has been resolved.</p><p>{{ ticket.subject }}</p>',
-      text: 'Your ticket #{{ ticket.freshserviceTicketId }} has been resolved.\n\n{{ ticket.subject }}',
+      subject: 'Ticket resolved: {{ ticket.displayRef }}',
+      html: '<p>Your ticket <strong>{{ ticket.displayRef }}</strong> has been resolved.</p><p>{{ ticket.subject }}</p>',
+      text: 'Your ticket {{ ticket.displayRef }} has been resolved.\n\n{{ ticket.subject }}',
     };
   }
 
   return {
-    subject: 'Ticket received: #{{ ticket.freshserviceTicketId }}',
-    html: '<p>We received your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong>.</p><p>{{ ticket.subject }}</p>',
-    text: 'We received your ticket #{{ ticket.freshserviceTicketId }}.\n\n{{ ticket.subject }}',
+    subject: 'Ticket received: {{ ticket.displayRef }}',
+    html: '<p>We received your ticket <strong>{{ ticket.displayRef }}</strong>.</p><p>{{ ticket.subject }}</p>',
+    text: 'We received your ticket {{ ticket.displayRef }}.\n\n{{ ticket.subject }}',
   };
 }
 
 function defaultAfterHoursTemplate() {
   return {
-    subject: 'We received ticket #{{ ticket.freshserviceTicketId }} outside business hours',
+    subject: 'We received ticket {{ ticket.displayRef }} outside business hours',
     html: [
-      '<p>We received your request <strong>#{{ ticket.freshserviceTicketId }}</strong>.</p>',
+      '<p>We received your request <strong>{{ ticket.displayRef }}</strong>.</p>',
       '<p>{{ afterHoursSupport.message }}</p>',
       '<p><strong>{{ ticket.subject }}</strong></p>',
       '{% if availability.nextBusinessTimeLocal %}<p>Our next scheduled business-hours window starts {{ availability.nextBusinessTimeLocal }}.</p>{% endif %}',
@@ -1631,7 +1631,7 @@ function defaultAfterHoursTemplate() {
       '{% endif %}',
     ].join(''),
     text: [
-      'We received your request #{{ ticket.freshserviceTicketId }}.',
+      'We received your request {{ ticket.displayRef }}.',
       '',
       '{{ afterHoursSupport.message }}',
       '',

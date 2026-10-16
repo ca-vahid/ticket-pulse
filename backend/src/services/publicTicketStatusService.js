@@ -5,6 +5,7 @@ import { resolveAfterHoursActiveContact } from './urgentEscalationContactService
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { getTodayRange } from '../utils/timezone.js';
 import statusService, { heuristicBaseStatus } from './statusService.js';
+import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 export const DEFAULT_PUBLIC_TICKET_STATUS_SETTINGS = {
@@ -878,6 +879,12 @@ function publicTicket(ticket, settings) {
   const completedAt = lifecycleCompletedAt(ticket);
   const freshserviceUpdatedAt = lifecycleUpdatedAt(ticket);
   return {
+    // The one number the requester should see (QA 10-15 #7): TP-<n> for a
+    // Ticket Pulse ticket even when it also has a FreshService fallback copy,
+    // #<fs id> for a FreshService ticket. freshserviceTicketId stays for
+    // older consumers but the page never shows it next to displayRef.
+    displayRef: ticketDisplayRef(ticket),
+    origin: ticket.origin || TICKET_ORIGIN.FRESHSERVICE,
     freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
     subject: ticket.subject || 'Ticket status',
     summary: settings.showSummary ? summarize(ticket.descriptionText || ticket.description) : null,
@@ -986,7 +993,7 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
   } catch {
     ticket.statusBase = null;
   }
-  const [eta, stats, latestImmediateSupportEvent, latestUrgencyEvent] = await Promise.all([
+  const [eta, stats, latestImmediateSupportEvent, latestUrgencyEvent, escalationPolicy] = await Promise.all([
     computeTicketEta(ticket, settings),
     workspaceStats(ticket, settings),
     prisma.urgentEscalationEvent.findFirst({
@@ -1009,6 +1016,14 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
       orderBy: { createdAt: 'desc' },
       select: { id: true, status: true, createdAt: true, priorityWritebackStatus: true },
     }).catch(() => null),
+    // Which requester actions the workspace offers, so the page only shows the
+    // buttons that lead somewhere (same defaults as the escalation service).
+    prisma.urgentEscalationPolicy?.findUnique
+      ? prisma.urgentEscalationPolicy.findUnique({
+        where: { workspaceId: ticket.workspaceId },
+        select: { selfServiceEnabled: true, businessUrgencyEnabled: true },
+      }).catch(() => null)
+      : null,
   ]);
   return {
     workspace: {
@@ -1041,6 +1056,8 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
       urgencyRaised: Boolean(latestUrgencyEvent),
       urgencyRaisedAt: latestUrgencyEvent?.createdAt?.toISOString?.() || null,
       urgencyStatus: latestUrgencyEvent?.status || null,
+      raiseUrgencyAvailable: escalationPolicy?.businessUrgencyEnabled !== false,
+      immediateSupportAvailable: escalationPolicy?.selfServiceEnabled === true,
     },
     settings: {
       showRequesterName: settings.showRequesterName,

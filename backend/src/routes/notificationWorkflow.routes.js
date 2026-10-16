@@ -50,7 +50,9 @@ import {
   requesterContextFromSource,
 } from '../services/requesterProfileService.js';
 import {
+  NO_RECIPIENT_MESSAGE,
   classifyNotificationWorkflowRun,
+  isNoRecipientSkip,
 } from '../services/notificationWorkflowRunHealth.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
@@ -429,10 +431,19 @@ function previewTicketSearchWhere(workspaceId, search, filters = {}) {
   }
 
   if (filters.priority) {
+    // QA 10-15 #1: filter on the priority the card shows (priorityLabel):
+    // the assessed priority when there is one, else the FreshService number.
+    // The old "assessed OR number" let Urgent (4) match an assessed-Medium
+    // ticket whose raw priority was 4, and vice versa.
     and.push({
       OR: [
         { assessedPriority: { equals: filters.priority.label, mode: 'insensitive' } },
-        { priority: filters.priority.id },
+        {
+          AND: [
+            { OR: [{ assessedPriority: null }, { assessedPriority: '' }] },
+            { priority: filters.priority.id },
+          ],
+        },
       ],
     });
   }
@@ -667,6 +678,13 @@ function workflowRunWarnings(run = {}) {
         message: output.reason || 'A duplicate workflow delivery was suppressed.',
       });
     }
+    if (isNoRecipientSkip(step)) {
+      warnings.push({
+        type: 'no_recipient',
+        nodeId: step.nodeId || null,
+        message: NO_RECIPIENT_MESSAGE,
+      });
+    }
     const llm = output.llm || (step.nodeType === 'llm_generate' ? output : null);
     if (!llm || (!llm.failed && !llm.warning && llm.guardRejected !== true)) continue;
     warnings.push({
@@ -763,7 +781,7 @@ function redactRun(run) {
     health,
     fallbackSummary: health.fallbackSummary,
     warnings: workflowRunWarnings(run),
-    ticket: redactPayload(run.ticket),
+    ticket: run.ticket ? { ...redactPayload(run.ticket), displayRef: ticketDisplayRef(run.ticket) } : run.ticket,
     eventContext: redactPayload(run.eventContext),
     steps: (run.steps || []).map((step) => ({
       ...step,
@@ -779,37 +797,83 @@ function redactRun(run) {
   };
 }
 
-function auditRunSearchText(run = {}) {
-  return [
-    run.auditId,
-    run.status,
-    run.executionMode,
-    run.eventType,
-    run.workflow?.name,
-    run.workflow?.key,
-    run.workflow?.triggerType,
-    run.ticket?.freshserviceTicketId,
-    run.ticket?.subject,
-    run.health?.state,
-    run.health?.label,
-    run.fallbackSummary?.type,
-    run.fallbackSummary?.reason,
-    ...(run.warnings || []).flatMap((warning) => [
-      warning.type,
-      warning.message,
-    ]),
-    ...(run.health?.reasons || []).flatMap((reason) => [
-      reason.type,
-      reason.message,
-      ...(reason.ruleIds || []),
-    ]),
-  ].filter(Boolean).join(' ').toLowerCase();
+function auditTicketSummary(ticket) {
+  if (!ticket) return null;
+  return {
+    id: ticket.id,
+    freshserviceTicketId: ticket.freshserviceTicketId === null || ticket.freshserviceTicketId === undefined
+      ? null
+      : String(ticket.freshserviceTicketId),
+    nativeNumber: ticket.nativeNumber ?? null,
+    origin: ticket.origin || null,
+    displayRef: ticketDisplayRef(ticket),
+    subject: ticket.subject || null,
+    status: ticket.status || null,
+    priority: ticket.priority ?? null,
+    assessedPriority: ticket.assessedPriority || null,
+    department: ticket.requester?.department || null,
+  };
 }
 
-function auditRunMatchesSearch(run, search) {
-  const text = String(search || '').trim().toLowerCase();
-  if (!text) return true;
-  return auditRunSearchText(run).includes(text);
+/**
+ * One row of the audit list (QA 10-15). Health, warnings and the filter facets
+ * are worked out here from the step outputs; the browser gets only what the
+ * run card shows. `summary: true` tells the page to load /audits/:id for the
+ * detail pane (steps, rendered e-mail, LLM evidence).
+ */
+function auditRunListItem(run) {
+  const health = run.health || classifyNotificationWorkflowRun(run);
+  return {
+    summary: true,
+    id: run.id,
+    auditId: formatAuditId(run.id),
+    workspaceId: run.workspaceId,
+    workflowId: run.workflowId,
+    workflowVersionId: run.workflowVersionId ?? null,
+    ticketId: run.ticketId ?? null,
+    eventType: run.eventType,
+    status: run.status,
+    triggerSource: run.triggerSource || null,
+    executionMode: run.executionMode,
+    dryRun: run.dryRun === true,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt || null,
+    durationMs: run.durationMs ?? null,
+    error: truncateString(run.error || null, 500),
+    workflow: run.workflow ? {
+      id: run.workflow.id,
+      name: run.workflow.name,
+      key: run.workflow.key,
+      triggerType: run.workflow.triggerType,
+      isEnabled: run.workflow.isEnabled,
+      mockModeEnabled: run.workflow.mockModeEnabled,
+      publishedVersion: run.workflow.publishedVersion,
+      scheduleMode: run.workflow.scheduleMode ?? null,
+    } : null,
+    ticket: auditTicketSummary(run.ticket),
+    health,
+    fallbackSummary: health.fallbackSummary,
+    warnings: run.warnings || workflowRunWarnings(run),
+    signalLevel: signalLevelForAuditRun(run),
+    provider: providerForAuditRun(run),
+    // Statuses only: enough for the active-run poll and the card's step count.
+    steps: (run.steps || []).map((step) => ({
+      id: step.id,
+      nodeId: step.nodeId,
+      nodeType: step.nodeType,
+      status: step.status,
+    })),
+    deliveries: (run.deliveries || []).map((delivery) => ({
+      id: delivery.id,
+      status: delivery.status,
+      notificationType: delivery.notificationType || null,
+      toRecipients: delivery.toRecipients || [],
+      ccRecipients: delivery.ccRecipients || [],
+      bccRecipients: delivery.bccRecipients || [],
+      queuedAt: delivery.queuedAt || null,
+      sentAt: delivery.sentAt || null,
+    })),
+  };
 }
 
 function firstLlmForAuditRun(run = {}) {
@@ -853,7 +917,8 @@ function auditRunMatchesFilters(run = {}, query = {}) {
 }
 
 function hasAuditRunPostFilters(query = {}) {
-  return ['health', 'signalLevel', 'eventType', 'triggerSource', 'provider', 'fallbackSource']
+  // eventType and triggerSource are columns, so listAuditRuns filters them in SQL.
+  return ['health', 'signalLevel', 'provider', 'fallbackSource']
     .some((key) => {
       const value = String(query[key] || '').trim();
       return value && value !== 'all';
@@ -899,14 +964,31 @@ function emailFromWorkflowStep(step) {
     || normalizeEmailPayload(output);
 }
 
+// QA 10-15 #12: the audit re-render used the workflow's CURRENT definition,
+// so a run was shown with branding, links and schedule mode it never had once
+// the workflow was edited. A run pins the version that ran
+// (workflowVersionId); use that definition and fall back to the current one
+// only for runs without a pinned version (drafts, previews, old rows).
+function definitionForAuditRun(run) {
+  const pinned = run?.workflowVersion?.definition;
+  if (pinned && typeof pinned === 'object') return pinned;
+  return run?.workflow?.publishedDefinition || run?.workflow?.draftDefinition || {};
+}
+
 function workflowScheduleMode(workflow = {}) {
   return workflow?.publishedDefinition?.metadata?.scheduleMode
     || workflow?.draftDefinition?.metadata?.scheduleMode
     || null;
 }
 
+function scheduleModeForAuditRun(run) {
+  return definitionForAuditRun(run)?.metadata?.scheduleMode
+    || workflowScheduleMode(run?.workflow)
+    || null;
+}
+
 function sendNodeDataForStep(run, step) {
-  const definition = run?.workflow?.publishedDefinition || run?.workflow?.draftDefinition || {};
+  const definition = definitionForAuditRun(run);
   const node = (definition.nodes || []).find((candidate) => candidate.id === step?.nodeId)
     || (definition.nodes || []).find((candidate) => candidate.type === 'send_email')
     || null;
@@ -958,7 +1040,7 @@ async function finalEmailFromSendStep(run, step) {
       email: baseEmail,
       nodeData: sendNodeDataForStep(run, step),
       actionLinkRenderMode: 'live',
-      workflowScheduleMode: workflowScheduleMode(run.workflow),
+      workflowScheduleMode: scheduleModeForAuditRun(run),
       allowSignatureFailure: true,
     }));
     if (rerendered) return rerendered;
@@ -1793,16 +1875,22 @@ router.get(
       to: req.query.to,
       status: req.query.status,
       department: req.query.department,
+      eventType: req.query.eventType,
+      triggerSource: req.query.triggerSource,
       search: req.query.search,
       limit: usesPostFilters ? 500 : limit,
       offset: usesPostFilters ? 0 : offset,
     });
+    // Search runs in the database (runSearchFilter). Health, signal, provider
+    // and fallback come from step outputs, so those still filter here.
     const filtered = runs
-      .map(redactRun)
-      .filter((run) => auditRunMatchesSearch(run, req.query.search))
+      .map((run) => {
+        const health = classifyNotificationWorkflowRun(run);
+        return { ...run, health, fallbackSummary: health.fallbackSummary };
+      })
       .filter((run) => auditRunMatchesFilters(run, req.query));
-    const data = usesPostFilters ? filtered.slice(offset, offset + limit) : filtered;
-    res.json({ success: true, data });
+    const page = usesPostFilters ? filtered.slice(offset, offset + limit) : filtered;
+    res.json({ success: true, data: page.map(auditRunListItem) });
   }),
 );
 
@@ -1834,16 +1922,20 @@ router.get(
           select: {
             id: true,
             name: true,
+            key: true,
             triggerType: true,
             isEnabled: true,
             mockModeEnabled: true,
             publishedVersion: true,
           },
         },
+        workflowVersion: { select: { version: true } },
         ticket: {
           select: {
             id: true,
             freshserviceTicketId: true,
+            nativeNumber: true,
+            origin: true,
             subject: true,
             status: true,
             priority: true,
@@ -1857,17 +1949,22 @@ router.get(
           orderBy: { queuedAt: 'asc' },
         },
         aiProviderAttempts: {
-          orderBy: { createdAt: 'asc' },
+          // ai_provider_attempts has no created_at; ordering by it made Prisma
+          // reject this query. The list never called it until QA 10-15.
+          orderBy: { startedAt: 'asc' },
         },
       },
     });
     if (!run) throw new NotFoundError('Workflow audit run not found in this workspace');
-    res.json({ success: true, data: redactRun(run) });
+    const [withMode] = await notificationWorkflowRepository.attachWorkflowScheduleModes([run]);
+    res.json({ success: true, data: redactRun(withMode || run) });
   }),
 );
 
 // Returns the run's email re-rendered through the current engine (current template),
 // so the audit detail "Rendered Email" preview matches the live/preview/send-test output.
+// The send node (branding blocks, action links) and schedule mode come from the
+// workflow version that ran, not today's definition (QA 10-15 #12).
 router.get(
   '/audits/:auditId/rendered-email',
   asyncHandler(async (req, res) => {
@@ -1887,6 +1984,7 @@ router.get(
             draftDefinition: true,
           },
         },
+        workflowVersion: { select: { id: true, version: true, definition: true } },
         ticket: { select: { id: true, assessedPriority: true, priority: true } },
         steps: { orderBy: { startedAt: 'asc' } },
         deliveries: { orderBy: { queuedAt: 'asc' } },
@@ -1922,6 +2020,8 @@ router.post(
             draftDefinition: true,
           },
         },
+        // Replay the version that ran, same as the audit's rendered e-mail.
+        workflowVersion: { select: { id: true, version: true, definition: true } },
         ticket: {
           select: {
             id: true,

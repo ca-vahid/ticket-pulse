@@ -216,6 +216,9 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       // When a requester replies (14 Oct 2026): a thank-you / out-of-office
       // left the ticket closed. The conversation has the quiet line too.
       item = baseItem({ event: 'reply', verb: 'left the ticket closed', detail: d.note || null, importance: 2, machine: false });
+    } else if (t === 'requester_teams_chat') {
+      // QA 10-15 #5: the requester opened a Teams chat with the agent from the urgency page.
+      item = baseItem({ event: 'reply', verb: 'opened a Teams chat from the urgency page', detail: d.agentName ? `With ${d.agentName}` : null, importance: 2, machine: false });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

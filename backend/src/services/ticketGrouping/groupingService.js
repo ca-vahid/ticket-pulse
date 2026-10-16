@@ -441,6 +441,9 @@ class TicketGroupingService {
    * (until 12 Oct 2026 the FreshService sync wrote the matching noise rule's name over it, and a
    * noise guard could take the copy back into the totals). Undo removes the link first, so a copy
    * a person put back is never marked again.
+   * A copy that has been reopened is left alone (15 Oct 2026, TP-10006): a held alert attached to it
+   * reopened it, and every sweep marked it Grouped again while something else cleared the mark, so the
+   * open ticket dropped in and out of the queue every ten minutes. Only a copy that is still closed gets it back.
    */
   async _restoreMarks(workspaceId, now = new Date()) {
     const events = await soft(() => prisma.ticketGroupingEvent.findMany({
@@ -450,7 +453,7 @@ class TicketGroupingService {
     if (!events?.length) return 0;
     const lost = await soft(() => prisma.ticket.findMany({
       where: {
-        id: { in: events.map((e) => e.ticketId) }, workspaceId,
+        id: { in: events.map((e) => e.ticketId) }, workspaceId, status: { in: TERMINAL_STATUSES },
         OR: [{ isNoise: false }, { noiseRuleMatched: null }, { NOT: { noiseRuleMatched: { startsWith: 'Grouped:' } } }],
       },
       select: { id: true }, take: 500,

@@ -167,7 +167,7 @@ export default function GroupsPanel() {
     setSavingCoordinator(true); setError(null);
     try {
       await settingsAPI.setGroupCoordinator(g.id, value);
-      flash(value.coordinatorTechnicianId ? `Coordinator saved for ${g.name}.` : `${g.name} has no coordinator now: the workspace coordinator is used.`);
+      flash(value.coordinatorTechnicianId ? `Coordinator saved for ${g.name}.` : `${g.name} has no coordinator of its own now: the workspace coordinators are used.`);
       setCoordinatorFor(null);
       await load();
     } catch (err) { setError(err.message || 'Failed to save the coordinator'); }
@@ -383,16 +383,18 @@ function OriginBadge({ origin }) {
 }
 
 /**
- * A group's coordinator and backup (QA 10-14). Urgent response gives the
- * group's untouched urgent tickets to the coordinator when they are at work,
- * else to the backup, else to the workspace coordinator.
+ * A group's own coordinator and backup (QA 10-14) — optional since QA 10-15:
+ * most workspaces only set the workspace coordinators (Urgent Response →
+ * Rules). Urgent response gives the group's untouched urgent tickets to the
+ * coordinator when they are at work, else to the backup, else to the
+ * workspace coordinators.
  */
 function CoordinatorEditor({ group, technicians, saving, onSave, onClose }) {
   const [coordinatorId, setCoordinatorId] = useState(group.coordinatorTechnicianId ?? null);
   const [backupId, setBackupId] = useState(group.backupTechnicianId ?? null);
   // Active people only, but somebody already chosen stays listed after being made inactive.
   const people = (keepId) => technicians.filter((t) => t.isActive !== false || t.id === keepId);
-  const coordinatorOptions = [{ value: '', label: 'Nobody (the workspace coordinator is used)' }, ...techOptions(people(coordinatorId))];
+  const coordinatorOptions = [{ value: '', label: 'Nobody (the workspace coordinators are used)' }, ...techOptions(people(coordinatorId))];
   const backupOptions = [
     { value: '', label: 'No backup' },
     ...techOptions(people(backupId)).map((o) => (Number(o.value) === coordinatorId ? { ...o, disabled: true, hint: 'Coordinator' } : o)),
@@ -405,13 +407,14 @@ function CoordinatorEditor({ group, technicians, saving, onSave, onClose }) {
       <div>
         <h4 className="text-sm font-semibold text-foreground">Coordinator for {group.name}</h4>
         <p className="text-xs text-muted-foreground max-w-2xl">
-          An urgent ticket in this group that nobody touches goes to the coordinator if they are at work, else to the backup
-          if they are at work, else to the workspace coordinator (Settings → Urgent Response → Rules).
+          Most workspaces leave this empty and set their coordinators once in Settings → Urgent Response → Rules.
+          Set one here only when this group needs its own: an untouched urgent ticket in this group then goes to this
+          coordinator if they are at work, else to the backup if they are at work, else to the workspace coordinators.
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:max-w-2xl">
         <label className="grid gap-1">
-          <span className="text-xs font-medium text-muted-foreground">Coordinator</span>
+          <span className="text-xs font-medium text-muted-foreground">Group coordinator (optional) — leave empty to use the workspace coordinators</span>
           <FancySelect
             value={coordinatorId ? String(coordinatorId) : ''}
             onChange={(v) => {
@@ -425,7 +428,7 @@ function CoordinatorEditor({ group, technicians, saving, onSave, onClose }) {
           />
         </label>
         <label className="grid gap-1">
-          <span className="text-xs font-medium text-muted-foreground">Backup</span>
+          <span className="text-xs font-medium text-muted-foreground">Group backup (optional)</span>
           <FancySelect
             value={backupId ? String(backupId) : ''}
             onChange={(v) => setBackupId(v ? Number(v) : null)}

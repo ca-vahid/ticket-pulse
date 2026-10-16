@@ -88,6 +88,29 @@ export function pickRules(s = {}) {
   };
 }
 
+// ---------------------------------------------------------------- workspace coordinators (QA 10-15)
+
+export const MAX_COORDINATORS = 3;
+export const COORDINATOR_MODES = ['first_available', 'all'];
+
+/**
+ * The workspace coordinators in a stable shape: { technicianIds (up to three,
+ * in order), mode }. Without a saved list (an older server, or nothing saved
+ * yet) the single coordinator of the settings is the first entry, so nothing
+ * set before is lost.
+ */
+export function pickCoordinators(saved = null, settings = {}) {
+  const valid = (list) => [...new Set((Array.isArray(list) ? list : []).map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+  if (saved && Array.isArray(saved.technicianIds)) {
+    return { technicianIds: valid(saved.technicianIds).slice(0, MAX_COORDINATORS), mode: saved.mode === 'all' ? 'all' : 'first_available' };
+  }
+  return { technicianIds: valid([settings?.coordinatorTechnicianId]), mode: 'first_available' };
+}
+
+export function coordinatorsDirty(draft, saved) {
+  return draft.mode !== saved.mode || JSON.stringify(draft.technicianIds) !== JSON.stringify(saved.technicianIds);
+}
+
 export function togglePriority(list, priority, on) {
   return sortedPriorities(on ? [...list, priority] : list.filter((p) => p !== priority));
 }
@@ -235,6 +258,7 @@ const FIELD_LABEL = {
   nobodyMode: 'Nobody at work',
   nobodyContactTechnicianId: 'Nobody at work: person told',
   coordinatorTechnicianId: 'Workspace coordinator',
+  coordinators: 'Coordinators',
   maxMoves: 'Most moves',
   onCallOrder: 'On-call order',
   onCallHandoverDay: 'On-call handover day',
@@ -255,6 +279,11 @@ export function changeFieldLabel(field) {
 
 export function changeValueLabel(field, value, { techById = new Map() } = {}) {
   const person = (id) => techById.get(Number(id))?.name || `Person ${id}`;
+  if (field === 'coordinators') {
+    const ids = Array.isArray(value?.technicianIds) ? value.technicianIds : [];
+    if (!ids.length) return 'nobody';
+    return `${ids.map(person).join(', ')} (${value.mode === 'all' ? 'all at once' : 'first who is working'})`;
+  }
   if (/TechnicianIds$|^onCallOrder$/.test(field)) {
     const ids = Array.isArray(value) ? value : [];
     return ids.length ? ids.map(person).join(', ') : 'nobody';

@@ -539,7 +539,8 @@ function listWords(items) {
  *   role          coordinator: 'group' | 'group_backup' | 'workspace' — which one was used
  *   group         coordinator: the ticket's group name
  *   awayNote      coordinator: why the group's people were passed over, e.g. "Priya is on leave"
- *   contact       the person told when nobody is at work
+ *   alsoTold      coordinator: the other workspace coordinators told too (mode 'all'), names
+ *   contact       the person told when nobody is at work (a name, or several names)
  *   texted        on-call: the SMS went out
  *   actor         who pressed Undo
  *   days, range, asked, error
@@ -586,21 +587,28 @@ export function sentenceFor(action, ctx = {}) {
         : join('Nobody is at work', `Left for review instead of assigning it to ${from}`);
     }
     // `nobodyTold`: no contact and no coordinator is set, and the sentence says so.
-    const untold = !ctx.contact && ctx.nobodyTold === true;
-    if (shadow) return join(`Shadow: would have left it with ${from}${ctx.contact ? ` and told ${ctx.contact}` : ''}`, 'Nobody is at work', untold ? 'Nobody would have been told: no contact is set' : '');
-    return join('Nobody is at work', `Left with ${from}${ctx.contact ? `; ${ctx.contact} was told` : ''}`, untold ? 'Nobody was told: no contact is set' : '');
+    // `contact` is one name, or several (every workspace coordinator in mode 'all').
+    const contacts = (Array.isArray(ctx.contact) ? ctx.contact : [ctx.contact]).filter(Boolean);
+    const contact = listWords(contacts);
+    const untold = !contacts.length && ctx.nobodyTold === true;
+    if (shadow) return join(`Shadow: would have left it with ${from}${contact ? ` and told ${contact}` : ''}`, 'Nobody is at work', untold ? 'Nobody would have been told: no contact is set' : '');
+    return join('Nobody is at work', `Left with ${from}${contact ? `; ${contact} ${contacts.length > 1 ? 'were' : 'was'} told` : ''}`, untold ? 'Nobody was told: no contact is set' : '');
   }
   case 'on_call_assigned':
     if (shadow) return join(`Shadow: would have assigned to the on-call person, ${to}, and texted them`, 'Nobody is at work');
     return join('Nobody is at work', `Assigned to the on-call person, ${to}, ${ctx.texted === false ? 'who has no verified phone to text' : 'who was texted'}`);
   case 'coordinator': {
     const after = ctx.moves !== undefined && ctx.moves !== null ? `${word} and still untouched after ${movesText(ctx.moves)}` : `${word} and still untouched`;
+    // `alsoTold`: the other workspace coordinators (mode 'all'), told as well.
+    const also = Array.isArray(ctx.alsoTold) ? ctx.alsoTold.filter(Boolean) : [];
+    const alsoLive = also.length ? `${listWords(also)} ${also.length > 1 ? 'were' : 'was'} told too` : '';
+    const alsoShadow = also.length ? ` and told ${listWords(also)} too` : '';
     // `alreadyOwner`: the coordinator is the person who has it.
     if (ctx.alreadyOwner) {
       const role = coordinatorRole(ctx, from);
       return shadow
-        ? join(`Shadow: would have told ${role}, who already has it`, after)
-        : join(after, `It is already with ${role}, who was told`);
+        ? join(`Shadow: would have told ${role}, who already has it${alsoShadow}`, after)
+        : join(after, `It is already with ${role}, who was told`, alsoLive);
     }
     if (!ctx.to) {
       // The group named people, but none of them is at work and there is no workspace coordinator.
@@ -613,8 +621,8 @@ export function sentenceFor(action, ctx = {}) {
     }
     const role = coordinatorRole(ctx, to);
     return shadow
-      ? join(`Shadow: would have assigned to ${role}`, after)
-      : join(after, `Assigned to ${role}, who was told`);
+      ? join(`Shadow: would have assigned to ${role}${alsoShadow}`, after)
+      : join(after, `Assigned to ${role}, who was told`, alsoLive);
   }
   case 'undone':
     return endStop(`Moved back to ${to} by ${person(ctx.actor)} (undo)`);

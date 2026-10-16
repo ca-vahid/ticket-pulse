@@ -181,6 +181,33 @@ describe('notification workflow run health', () => {
     ]));
   });
 
+  test('a send step that resolved no recipient is a warning: "Not sent: no recipient"', () => {
+    const health = classifyNotificationWorkflowRun(run({
+      steps: [
+        {
+          nodeId: 'send-1',
+          nodeType: 'send_email',
+          status: 'completed',
+          output: { skipped: true, reason: 'No recipient email address resolved' },
+        },
+      ],
+    }));
+
+    expect(health.state).toBe(NOTIFICATION_WORKFLOW_RUN_HEALTH.COMPLETED_WITH_WARNING);
+    expect(health.notSent).toBe(true);
+    expect(health.summary).toBe('Not sent: no recipient');
+    expect(health.reasons).toEqual([
+      expect.objectContaining({ type: 'no_recipient', message: 'Not sent: no recipient' }),
+    ]);
+
+    // A preview-only skip is not a missing recipient.
+    const preview = classifyNotificationWorkflowRun(run({
+      steps: [{ nodeId: 'send-1', nodeType: 'send_email', status: 'completed', output: { skipped: true, reason: 'Preview only' } }],
+    }));
+    expect(preview.state).toBe(NOTIFICATION_WORKFLOW_RUN_HEALTH.COMPLETED_CLEAN);
+    expect(preview.notSent).toBe(false);
+  });
+
   test('classifies failed workflow or failed delivery as failed', () => {
     expect(classifyNotificationWorkflowRun(run({ status: 'failed' })).state)
       .toBe(NOTIFICATION_WORKFLOW_RUN_HEALTH.FAILED);

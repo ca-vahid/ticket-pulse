@@ -487,12 +487,21 @@ describe('the sweep', () => {
 
     const where = prismaMock.ticket.findMany.mock.calls[0][0].where;
     expect(where.OR).toEqual([{ isNoise: false }, { noiseRuleMatched: null }, { NOT: { noiseRuleMatched: { startsWith: 'Grouped:' } } }]);
+    expect(where.status).toEqual({ in: ['Resolved', 'Closed', 'Deleted', 'Spam'] });
     expect(prismaMock.ticketGroupingEvent.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 1, state: 'applied' });
     const writes = prismaMock.ticket.update.mock.calls.map((c) => c[0]);
     expect(writes).toEqual([
       { where: { id: 21 }, data: { isNoise: true, noiseRuleMatched: 'Grouped: repeat of #246525' } },
       { where: { id: 23 }, data: { isNoise: true, noiseRuleMatched: 'Grouped: same request as TP-1900' } },
     ]);
+  });
+
+  test('a copy that was reopened is not marked again (TP-10006 dropped in and out of the queue)', async () => {
+    prismaMock.ticketGroupingEvent.findMany.mockResolvedValue([{ ticketId: 31, targetTicketId: 10, kind: 'repeat' }]);
+    // The query only asks for closed copies, so the reopened one never comes back from it.
+    prismaMock.ticket.findMany.mockImplementationOnce(async ({ where }) => (where.status?.in?.includes('Open') ? [{ id: 31 }] : []));
+    expect(await grouping._restoreMarks(1, at('2026-10-15T23:50:00Z'))).toBe(0);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
   });
 
   test('nothing is written when every copy still has its mark', async () => {
