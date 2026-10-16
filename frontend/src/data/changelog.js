@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.76-preview';
+export const APP_VERSION = '4.2.77-preview';
 
 export const changelog = [
+  {
+    version: '4.2.77-preview',
+    date: 'October 15, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>My alerts, simpler</strong> &mdash; Mail &amp; alerts &rarr; My alerts is rebuilt. Pick any number of categories from a tree: tick a top category to cover all of it, or tick single subcategories. Priority is one of three choices, and when to alert is three plain switches. Each alert reads as one sentence with a switch to pause it.' },
+      { type: 'added', html: '<strong>Alerts in Teams</strong> &mdash; an alert can now arrive as a Teams message from Ticket Pulse, alone or with e-mail, SMS, WhatsApp or a call. A burst of tickets still arrives as one message.' },
+      { type: 'fixed', html: '<strong>The closed-e-mail figure in 4.2.76</strong> &mdash; the note said 84 of 153 closes; measured exactly, 67 FreshService tickets closed from Ticket Pulse had no closed e-mail run, all 69 closed in FreshService had one, and 17 closed another way are being traced.' },
+    ],
+  },
   {
     version: '4.2.76-preview',
     date: 'October 15, 2026',

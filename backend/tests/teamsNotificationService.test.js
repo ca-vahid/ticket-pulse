@@ -501,3 +501,43 @@ describe('workflow messages', () => {
     expect(await send({ emails: ['adrian@x.io'] })).toMatchObject({ sent: 0, skipped: 1, failed: 0 });
   });
 });
+
+describe('My alerts by Teams (alertReadiness / sendAgentAlert)', () => {
+  const tech = { id: 21, email: 'Sam.Okafor@example.com' };
+
+  test('readiness: off when Teams is off for the workspace, connected when a chat exists', async () => {
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValueOnce({ teamsEnabled: false });
+    expect(await svc.alertReadiness(1, tech.email)).toEqual({ available: false, connected: false });
+
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValueOnce({ teamsEnabled: true });
+    prismaMock.teamsConversation.findUnique.mockResolvedValueOnce({ conversationId: 'conv-9', disconnectedAt: null });
+    expect(await svc.alertReadiness(1, tech.email)).toEqual({ available: true, connected: true });
+
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValueOnce({ teamsEnabled: true });
+    prismaMock.teamsConversation.findUnique.mockResolvedValueOnce(null);
+    expect(await svc.alertReadiness(1, tech.email)).toEqual({ available: true, connected: false });
+  });
+
+  test('sends one card to a connected agent and never installs the app for one who is not', async () => {
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ teamsEnabled: true });
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'sam.okafor@example.com', conversationId: 'conv-9', aadObjectId: 'aad-9', disconnectedAt: null });
+    botMock.sendToConversation.mockClear();
+    const out = await svc.sendAgentAlert({ workspaceId: 1, technician: tech, title: '2 new tickets in Devices', lines: ['[TP-41](https://tp.example.com/x) — Laptop'] });
+    expect(out).toEqual({ sent: true, via: 'teams' });
+    expect(botMock.sendToConversation).toHaveBeenCalledTimes(1);
+
+    prismaMock.teamsConversation.findUnique.mockResolvedValue(null);
+    botMock.installForUser.mockClear();
+    const off = await svc.sendAgentAlert({ workspaceId: 1, technician: tech, title: 'x', lines: [] });
+    expect(off).toEqual({ sent: false, reason: 'teams_not_connected' });
+    expect(botMock.installForUser).not.toHaveBeenCalled();
+  });
+
+  test('a send failure comes back as a result, never a throw', async () => {
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ teamsEnabled: true });
+    prismaMock.teamsConversation.findUnique.mockResolvedValue({ email: 'sam.okafor@example.com', conversationId: 'conv-9', disconnectedAt: null });
+    botMock.sendToConversation.mockRejectedValueOnce(new Error('throttled'));
+    const out = await svc.sendAgentAlert({ workspaceId: 1, technician: tech, title: 'x', lines: ['a'] });
+    expect(out).toEqual(expect.objectContaining({ sent: false, error: 'throttled' }));
+  });
+});

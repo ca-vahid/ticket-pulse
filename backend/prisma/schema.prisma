@@ -2558,7 +2558,11 @@ model AgentAlertSubscription {
   label            String?    @db.VarChar(120) // optional friendly name (auto-derived if blank)
   // Match filter (ANDed; null = "any"). categoryId matches either the ticket's
   // internal top category OR its subcategory. tagId matches a tag on the ticket.
+  // categoryIds (Oct 2026): any of several categories; a top category covers
+  // all its subcategories. categoryId is the legacy single pick — read as a
+  // fallback when categoryIds is empty, no longer written.
   categoryId       Int?       @map("category_id")
+  categoryIds      Int[]      @default([]) @map("category_ids")
   tagId            Int?       @map("tag_id")
   priorityMin      Int?       @map("priority_min") // 1..4 (FS scale, 4=Urgent); null = any
   // Trigger flags — which events fire this subscription.
@@ -2570,6 +2574,7 @@ model AgentAlertSubscription {
   channelSms       Boolean    @default(false) @map("channel_sms")
   channelWhatsapp  Boolean    @default(false) @map("channel_whatsapp")
   channelPhone     Boolean    @default(false) @map("channel_phone")
+  channelTeams     Boolean    @default(false) @map("channel_teams") // a message from the Ticket Pulse bot
   isActive         Boolean    @default(true) @map("is_active")
   createdAt        DateTime   @default(now()) @map("created_at")
   updatedAt        DateTime   @updatedAt @map("updated_at")

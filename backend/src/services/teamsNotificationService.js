@@ -350,6 +350,51 @@ class TeamsNotificationService {
     return out;
   }
 
+  /**
+   * Whether "My alerts" can deliver to this person by Teams. available = the
+   * bot is configured and Teams is on for the workspace; connected = the
+   * person has a chat with the bot (and was not disconnected). Never throws.
+   */
+  async alertReadiness(workspaceId, email) {
+    try {
+      if (!bot.isTeamsConfigured()) return { available: false, connected: false };
+      const ws = await this.workspaceSettings(workspaceId);
+      if (!ws.teamsEnabled) return { available: false, connected: false };
+      const conv = email ? await prisma.teamsConversation.findUnique({ where: { email: lc(email) } }).catch(() => null) : null;
+      return { available: true, connected: Boolean(conv?.conversationId) && !conv?.disconnectedAt };
+    } catch (err) {
+      logger.warn(`Teams alert readiness check failed (non-fatal): ${err.message}`);
+      return { available: false, connected: false };
+    }
+  }
+
+  /**
+   * One coalesced "My alerts" batch as a Teams message (agentAlertService).
+   * Only to someone who already has a chat with the bot — an alert never
+   * installs the app. lines are card markdown (ticket links). Never throws.
+   * @returns {{ sent: boolean, reason?: string, error?: string }}
+   */
+  async sendAgentAlert({ workspaceId, technician, title, lines = [], url = null } = {}) {
+    try {
+      const ready = await this.alertReadiness(workspaceId, technician?.email);
+      if (!ready.available) return { sent: false, reason: 'teams_off' };
+      if (!ready.connected) return { sent: false, reason: 'teams_not_connected' };
+      const heading = String(title || 'Ticket Pulse alert').slice(0, 150);
+      const actions = [{ type: 'Action.OpenUrl', title: 'Manage my alerts', url: `${baseUrl()}/mail-alerts` }];
+      const card = textCard(heading, lines.length ? lines.slice(0, 13) : [heading], actions, { icon: '🔔', word: 'My alerts' });
+      const activityId = await this._send(technician.email, card, {
+        summary: heading, workspaceId: Number(workspaceId), technicianId: technician.id || null, eventKey: 'agent_alert',
+        bell: { title: heading, preview: heading, ...(url ? { webUrl: url } : {}) },
+      });
+      if (activityId === null) return { sent: false, reason: 'teams_disconnected' };
+      return { sent: true, via: 'teams' };
+    } catch (err) {
+      logger.warn(`Teams agent alert to technician ${technician?.id ?? '?'} failed (non-fatal): ${err.message}`);
+      await this._record({ workspaceId: Number(workspaceId) || null, email: technician?.email, technicianId: technician?.id || null, eventKey: 'agent_alert', status: 'failed', reason: String(err.message || 'send failed').replace(/[\w.+-]+@[\w.-]+/g, 'a person').slice(0, 120), summary: title });
+      return { sent: false, error: err.message };
+    }
+  }
+
   async _record(data) {
     await prisma.teamsDelivery.create({ data: { ...data, email: lc(data.email), summary: data.summary ? String(data.summary).slice(0, 500) : null } }).catch(() => {});
   }
