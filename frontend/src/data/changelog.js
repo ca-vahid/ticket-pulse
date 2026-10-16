@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.77-preview';
+export const APP_VERSION = '4.2.78-preview';
 
 export const changelog = [
+  {
+    version: '4.2.78-preview',
+    date: 'October 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Tickets is a fixed working area</strong> &mdash; on a computer screen the Tickets page no longer scrolls as a whole. The filters and the list are two panes that always fit the window: the list keeps its toolbar, column headings and page buttons in view and only the tickets scroll, and the filters keep their title in view and scroll on their own. Your mouse wheel scrolls whichever pane it is over. Once you scroll the list, the six number cards fold into one line (click a number there just like a card) and come back when you return to the top. Phones and small windows keep the normal page scroll.' },
+      { type: 'added', html: '<strong>Find a filter</strong> &mdash; a box at the top of the filters: type part of a name (&ldquo;pri&rdquo;, &ldquo;due&rdquo;, &ldquo;group&rdquo;) and only those sections stay, opened. Esc clears it.' },
+      { type: 'fixed', html: '<strong>The filters panel is never cut off</strong> &mdash; when the page scrolled, the panel&rsquo;s &ldquo;Filters&rdquo; title slid under the top bar and its last lines hung below the screen. It now always sits fully between the top bar and the bottom of the window.' },
+    ],
+  },
   {
     version: '4.2.77-preview',
     date: 'October 15, 2026',

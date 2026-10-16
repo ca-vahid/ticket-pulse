@@ -51,12 +51,16 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useSSE } from '../hooks/useSSE';
+import useMediaQuery from '../hooks/useMediaQuery';
 
 // Status vocabulary comes from the workspace registry in the queue meta
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
 const PAGE_SIZE = 25;
 // Bulk delete cap (2 Oct 2026) — matches the server's /tickets/bulk-delete cap.
 const BULK_DELETE_MAX = 25;
+
+// Desktop-sized window: the Tickets page becomes a fixed working area.
+const DOCKED_QUERY = '(min-width: 1024px) and (min-height: 600px)';
 
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last activity' },
@@ -1633,6 +1637,28 @@ export default function Tickets() {
   // compact/dense lists whose leftmost column is the subject (roomy's title
   // spans the whole row, and a reordered subject is not at the edge).
   const pinSubject = !roomy && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
+  // Fixed working area (16 Oct 2026, Vahid): on a desktop-sized window the
+  // page itself no longer scrolls. The filter rail and the list are two panes
+  // that fill the height under the cards; the list keeps its toolbar, column
+  // headings and pager on screen and only the rows scroll. Phones, tablets in
+  // portrait and short windows keep the normal page scroll.
+  const docked = useMediaQuery(DOCKED_QUERY);
+  // Once the rows are scrolled the six cards fold into one slim line; back at
+  // the top they unfold. Hysteresis (fold past 48 px, unfold at the top) and
+  // the 160 px floor stop a short list from flickering between the two.
+  const [cardsFolded, setCardsFolded] = useState(false);
+  useEffect(() => { if (!docked) setCardsFolded(false); }, [docked]);
+  const onListScroll = useCallback((e) => {
+    const el = e.currentTarget;
+    if (el.scrollTop <= 2) setCardsFolded(false);
+    else if (el.scrollTop > 48 && el.scrollHeight - el.clientHeight > 160) setCardsFolded(true);
+  }, []);
+  // A new filter, sort or page starts the list at its top (the page used to
+  // scroll back up; now the list pane does). Opening the side preview does not.
+  const listViewKey = queueSearchToKeep(location.search);
+  useEffect(() => {
+    if (docked && scrollWrapRef.current) scrollWrapRef.current.scrollTop = 0;
+  }, [docked, listViewKey]);
   // Live drag preview (QR2): write the recomputed template straight onto the
   // list card's CSS vars — zero React renders per pointermove; the commit on
   // pointerup re-renders once with the identical values.
@@ -1701,13 +1727,19 @@ export default function Tickets() {
     category, subcategory, group, source, createdFrom || createdTo, due, noise, view, urlSearch,
   ].filter(Boolean).length;
 
+  // The quick-segment cards and their folded one-line form share these.
+  const cardsStatusScoped = Boolean(statusesRaw) && statusesRaw !== 'any';
+  const cardIsActive = (key) => (key === 'all' ? (segment === 'all' && !cardsStatusScoped) : segment === key);
+  const pickCard = (key) => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null });
+  const listShown = view !== 'scheduled' && view !== 'grouped' && !isLoading && !loadError && tickets.length > 0 && !boardMode;
+
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
+    <div className={`tp-tickets-backdrop md:pl-[var(--tp-rail-w,58px)] ${docked ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'}`}>
       <AppHeader activePage="tickets" />
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
       <PullToRefresh onRefresh={() => Promise.allSettled([fetchTickets({ silent: true }), fetchStats()])} />
-      <main className={applyWidth('max-w-[2200px] mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn', layoutWidth)}>
+      <main className={applyWidth(`max-w-[2200px] mx-auto px-4 sm:px-6 animate-fadeIn ${docked ? 'flex min-h-0 w-full flex-1 flex-col pt-5 pb-4' : 'py-6 pb-20 md:pb-6'}`, layoutWidth)}>
         {/* Page header (v3.8.31): one slim row. The artwork band spent ~94 px and
             a subtitle to repeat the page you are already on; the title, the
             workspace and both actions fit on a single 33 px line. */}
@@ -1770,7 +1802,28 @@ export default function Tickets() {
                 FC); the hover gear deep-links admins to the configurator. */}
             {/* Phone (12 Oct 2026): one line you swipe sideways, not a wall of six
                 cards that pushed the list off the first screen. */}
-            <div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
+            {docked && cardsFolded && (
+              <div className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 px-1 animate-fadeIn" role="group" aria-label="Quick segments" data-testid="cards-folded">
+                {queueCards.map((key) => {
+                  const seg = QUEUE_CARD_REGISTRY[key];
+                  const active = cardIsActive(key);
+                  const count = stats?.[seg.countKey];
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => pickCard(key)}
+                      aria-pressed={active}
+                      className={`tp-focus-ring inline-flex items-baseline gap-1.5 rounded-md py-0.5 text-sm transition-colors ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <span className={`font-bold tabular-nums ${seg.num}`}>{count == null ? '–' : count.toLocaleString()}</span>
+                      <span className={active ? 'font-semibold underline decoration-blue-500 decoration-2 underline-offset-4' : ''}>{seg.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className={`${docked && cardsFolded ? '!hidden ' : ''}relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6`} role="group" aria-label="Quick segments">
               {queueCards.map((key, cardIndex) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
                 // Phone: "Mine" sits second — the rail's My open view, one tap
@@ -1856,7 +1909,7 @@ export default function Tickets() {
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showHeld ? 'rotate-180' : ''}`} aria-hidden="true" />
                 </button>
                 {showHeld && (
-                  <div id="tickets-held-replies" className="mt-3 tp-card rounded-xl p-4">
+                  <div id="tickets-held-replies" className={`mt-3 tp-card rounded-xl p-4 ${docked ? 'max-h-[40vh] overflow-y-auto settings-scrollbar' : ''}`}>
                     <HeldRepliesPanel onCountChange={setHeldCount} showGuidance />
                   </div>
                 )}
@@ -1865,10 +1918,10 @@ export default function Tickets() {
 
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}
-            <div className="lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-4 lg:items-start">
-              <TicketFilterRail meta={meta} stats={stats} facets={facets} />
+            <div className={docked ? 'grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4' : 'lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-4 lg:items-start'}>
+              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} />
 
-              <div className="min-w-0">
+              <div className={docked ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}>
                 {requesterId && (
                   <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-sm text-blue-800 dark:text-blue-200">
                     <UserRound className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
@@ -2027,7 +2080,9 @@ export default function Tickets() {
                         <>
                           {/* Phone: the count only; the full pager sits under the list. */}
                           <span className="text-xs tabular-nums text-muted-foreground sm:hidden" data-testid="queue-count-phone">{total.toLocaleString()} ticket{total === 1 ? '' : 's'}</span>
-                          <div className="hidden sm:block">
+                          {/* Docked: the pager under the list is always on screen, and this
+                              copy wrapped to a row of its own on a laptop. */}
+                          <div className={docked && listShown ? 'hidden' : 'hidden sm:block'}>
                             <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
                           </div>
                         </>
@@ -2037,7 +2092,9 @@ export default function Tickets() {
                 </div>
 
                 {/* Results — the peek is a fixed overlay drawer, so nothing here reflows */}
-                <div className="relative">
+                {/* Docked: the list manages its own scroll (headings and pager stay put);
+                    every other result (board, scheduled, grouped, empty) scrolls here. */}
+                <div className={docked ? `relative flex min-h-0 flex-1 flex-col ${listShown ? '' : 'overflow-y-auto settings-scrollbar'}` : 'relative'}>
                   {swipeHint && !panelView && !boardMode && !isLoading && tickets.length > 0 && (
                     <p className="mb-2 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground md:hidden" data-testid="swipe-hint">
                       <span className="min-w-0 flex-1">Slide a ticket to the left for Mine, Resolve and Select. Tap its status to change it.</span>
@@ -2115,7 +2172,7 @@ export default function Tickets() {
                        classes, so the two can never drift. */
                     <div
                       ref={listCardRef}
-                      className={`tp-card rounded-xl overflow-hidden ${wideByCard ? 'tp-q-wide' : ''}`}
+                      className={`tp-card rounded-xl overflow-hidden ${wideByCard ? 'tp-q-wide' : ''} ${docked ? 'flex min-h-0 flex-1 flex-col' : ''}`}
                       style={{ '--tp-q-grid': gridTemplate, '--tp-q-minw': `${listMinWidth + 36}px` }}
                     >
                       {/* Overflow wrapper (QR3): only once widths are pinned —
@@ -2132,8 +2189,17 @@ export default function Tickets() {
                           appeared at the foot, 16 Sep 2026). */}
                       {/* md, not xl (QA 09-21 #12): an iPad is 1024–1180 px wide and had no
                           way to reach the columns past the edge. */}
-                      <QueueSideScroll targetRef={scrollWrapRef} pinned={pinSubject && scrolls} showMap={columnMap && scrolls} arrows={sideArrows} deps={[tickets.length, gridTemplate, scrolls, layout, wideByCard]}>
-                        <div ref={scrollWrapRef} className={scrolls ? `md:overflow-x-auto overscroll-x-contain tp-scrollbar-none ${pinSubject ? 'tp-q-pin' : ''}` : ''}>
+                      <QueueSideScroll targetRef={scrollWrapRef} pinned={pinSubject && scrolls} showMap={columnMap && scrolls} arrows={sideArrows} frameClassName={docked ? 'flex min-h-0 flex-1 flex-col' : ''} deps={[tickets.length, gridTemplate, scrolls, layout, wideByCard, docked]}>
+                        {/* Docked: this one box scrolls both ways with its own bars, and the
+                            column headings stick to its top (.tp-q-docked in index.css). */}
+                        <div
+                          ref={scrollWrapRef}
+                          onScroll={docked ? onListScroll : undefined}
+                          data-testid="queue-scroll"
+                          className={docked
+                            ? `tp-q-docked min-h-0 flex-1 overflow-y-auto settings-scrollbar ${scrolls ? `overflow-x-auto overscroll-x-contain ${pinSubject ? 'tp-q-pin' : ''}` : 'overflow-x-hidden'}`
+                            : (scrolls ? `md:overflow-x-auto overscroll-x-contain tp-scrollbar-none ${pinSubject ? 'tp-q-pin' : ''}` : '')}
+                        >
                           <div className={scrolls ? 'md:min-w-[var(--tp-q-minw)]' : ''}>
                             {/* Header */}
                             <div className="tp-q-head hidden md:flex items-stretch border-b border-border bg-muted/40">
@@ -2641,10 +2707,10 @@ export default function Tickets() {
                           </div>
                         </div>
                       </QueueSideScroll>
-                      <StickyScrollbar targetRef={scrollWrapRef} deps={[tickets.length, gridTemplate, scrolls, wideByCard]} />
+                      {!docked && <StickyScrollbar targetRef={scrollWrapRef} deps={[tickets.length, gridTemplate, scrolls, wideByCard]} />}
 
                       {/* Full pagination */}
-                      <div className="px-4 py-3 border-t border-border/60 bg-muted/25">
+                      <div className={`px-4 border-t border-border/60 bg-muted/25 ${docked ? 'shrink-0 py-2' : 'py-3'}`}>
                         <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} />
                         {/* Keyboard hint (gap plan 2 P4.2) — desktop only, keys are pointless on touch */}
                         <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-muted-foreground/75">

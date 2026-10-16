@@ -24,7 +24,7 @@ import { motionReduced } from '../../utils/motionPreference';
 // a press that never moves is still a normal click.
 const DRAG_IGNORE = 'input,select,textarea,[role="separator"],[role="slider"],[contenteditable="true"],[data-no-drag]';
 
-export default function QueueSideScroll({ targetRef, pinned = false, showMap = false, arrows = false, deps = [], children }) {
+export default function QueueSideScroll({ targetRef, pinned = false, showMap = false, arrows = false, frameClassName = '', deps = [], children }) {
   const frameRef = useRef(null);
   const animRef = useRef(0);
   const [edges, setEdges] = useState({ left: false, right: false, pinW: 0, top: 0, ready: false });
@@ -247,7 +247,7 @@ export default function QueueSideScroll({ targetRef, pinned = false, showMap = f
           </div>
         </div>
       )}
-      <div ref={frameRef} className="relative">
+      <div ref={frameRef} className={`relative ${frameClassName}`}>
         {children}
         {edges.ready && (
           <>
