@@ -1182,6 +1182,17 @@ html[data-motion="reduce"] .tp-ai-live::before {
   .tp-q-wide .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
   .dark .tp-q-wide .tp-q-pin[data-scrolled] .tp-pin-subject { box-shadow: 8px 0 12px -8px rgb(0 0 0 / 0.7); }
 }
+/* Fixed working area (16 Oct 2026): the docked list scrolls inside its own
+   box, so the column headings stick to that box's top. Solid card under the
+   muted tint, or the rows would show through the headings. */
+.tp-q-docked .tp-q-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: hsl(var(--card));
+  background-image: linear-gradient(hsl(var(--muted) / 0.4), hsl(var(--muted) / 0.4));
+}
+
 /* E: dragging the list sideways. */
 [data-dragging] { cursor: grabbing; user-select: none; }
 

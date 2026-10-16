@@ -57,6 +57,9 @@ const TYPE_OPTIONS_FALLBACK = ['Incident', 'Service Request'];
 // the room the closing body will free — so the scroll offset stays valid and
 // the header you clicked stays under your cursor (click again to reopen).
 const RailScrollContext = createContext(null);
+// "Find a filter" (16 Oct 2026): a section whose title does not contain the
+// typed words hides; one that does opens.
+const RailFindContext = createContext('');
 
 /** One collapsible facet group in the rail. */
 function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = false, children }) {
@@ -64,6 +67,9 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
   const [open, setOpen] = useState(defaultOpen || activeCount > 0);
   // A filter applied from elsewhere (URL, views) pops its section open.
   useEffect(() => { if (activeCount > 0) setOpen(true); }, [activeCount]);
+  const find = useContext(RailFindContext);
+  const findHit = !find || String(title || '').toLowerCase().includes(find);
+  useEffect(() => { if (find && findHit) setOpen(true); }, [find, findHit]);
   // Smooth open/close (16 Sep 2026): the body stays mounted through a
   // grid-rows 0fr → 1fr transition and unmounts once the close has finished,
   // so a collapsed section still costs nothing and nothing snaps.
@@ -87,6 +93,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
     const t = setTimeout(() => setRendered(false), 320);
     return () => clearTimeout(t);
   }, [open]);
+  if (!findHit) return null;
   return (
     <div className="border-b border-border/60 last:border-b-0">
       <div className="flex items-center gap-1 w-full px-3 py-2 group">
@@ -326,7 +333,9 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  * desktop, collapsible to a slim bar, every facet URL-persisted. On mobile it
  * becomes a slide-over drawer behind the Filters button.
  */
-export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false }) {
+export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false }) {
+  const [findQuery, setFindQuery] = useState('');
+  const find = findQuery.trim().toLowerCase();
   // QA 09-18 #2: Source counts follow the current view when the list sent
   // them; the workspace-wide meta count is the fallback (first paint, errors).
   const sourceCounts = useMemo(() => {
@@ -677,6 +686,22 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             <ChevronsLeft className="w-4 h-4" aria-hidden="true" />
           </button>
         )}
+      </div>
+
+      <div className="px-3 pt-2 pb-1.5 border-b border-border/60">
+        <label className="relative block">
+          <span className="sr-only">Find a filter</span>
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" aria-hidden="true" />
+          <input
+            type="search"
+            value={findQuery}
+            onChange={(e) => setFindQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape' && findQuery) { e.stopPropagation(); setFindQuery(''); } }}
+            placeholder="Find a filter…"
+            data-testid="rail-find"
+            className="tp-focus-ring w-full rounded-md border border-input bg-card py-1 pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground/60"
+          />
+        </label>
       </div>
 
       <div
@@ -1236,7 +1261,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             <div className="pt-2.5 pb-1 flex justify-center shrink-0" aria-hidden="true">
               <span className="h-1.5 w-10 rounded-full bg-muted-foreground/40" />
             </div>
-            {body}
+            <RailFindContext.Provider value={find}>{body}</RailFindContext.Provider>
             <div className="pb-safe shrink-0" aria-hidden="true" />
           </Drawer.Content>
         </Drawer.Portal>
@@ -1251,8 +1276,13 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     <aside
       aria-label="Ticket filters"
       data-collapsed={collapsed ? 'true' : undefined}
-      className={`hidden lg:flex sticky top-4 self-start flex-col tp-card rounded-xl overflow-hidden max-h-[calc(100vh-2rem)]
-        transition-[width] duration-300 ease-out motion-off:transition-none ${collapsed ? 'w-11 h-[calc(100vh-2rem)]' : 'w-[clamp(256px,15vw,320px)]'}`}
+      // Docked (fixed working area): fills its grid cell, never longer than the
+      // window. Otherwise sticky UNDER the app header — top-4 used to slide the
+      // "Filters" title beneath the 64 px bar and push the bottom off screen.
+      className={`hidden lg:flex flex-col tp-card rounded-xl overflow-hidden
+        transition-[width] duration-300 ease-out motion-off:transition-none
+        ${docked ? 'h-full min-h-0' : 'sticky top-[calc(var(--tp-app-header-h,0px)_+_1rem)] self-start max-h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}
+        ${collapsed ? `w-11 ${docked ? '' : 'h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}` : 'w-[clamp(256px,15vw,320px)]'}`}
     >
       {/* Slim layer (collapsed) */}
       <div
@@ -1293,7 +1323,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
           collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100 delay-100'
         }`}
       >
-        {body}
+        <RailFindContext.Provider value={find}>{body}</RailFindContext.Provider>
       </div>
     </aside>
   );

@@ -275,13 +275,15 @@ describe('Width storage (QR1)', () => {
 describe('Overflow + flyout reset (QR3)', () => {
   test('pinned widths add the horizontal-scroll wrapper with the computed min-width floor; untouched users get none', async () => {
     await mountAndLoad();
-    const divs = () => [...card().querySelectorAll('div')];
-    expect(divs().find((d) => d.className.includes('md:overflow-x-auto'))).toBeUndefined();
+    // matchMedia matches everything here, so this is the docked (fixed working
+    // area) list: one box scrolls up/down always, sideways only once pinned.
+    const scrollBox = () => card().querySelector('[data-testid="queue-scroll"]');
+    expect(scrollBox().className).not.toMatch(/(^|\s)overflow-x-auto/);
 
     await dragRequester(300, 424); // → 300px (176 + 124)
     await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('300px')));
-    const scroller = divs().find((d) => d.className.includes('md:overflow-x-auto'));
-    expect(scroller).toBeTruthy();
+    const scroller = scrollBox();
+    expect(scroller.className).toMatch(/(^|\s)overflow-x-auto/);
     expect(scroller.querySelector('div').className).toContain('md:min-w-[var(--tp-q-minw)]');
     // Floor = 6 accent + 240 subject + 300 pinned + 150+210+116+88+74 tracks + 36 checkbox rail.
     expect(card().style.getPropertyValue('--tp-q-minw')).toBe('1220px');
