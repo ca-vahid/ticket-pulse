@@ -8,6 +8,7 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketLinkUrl } from '../utils/ticketLink.js';
 const TRIGGERS = ['created', 'priority_raised', 'recategorized'];
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+const MAX_CATEGORIES = 40; // categories one alert may watch
 
 // Storm protection = trailing-edge debounce. A subscription's matched events
 // buffer until the stream goes quiet (QUIET_MS with no new match) or a hard
@@ -19,38 +20,84 @@ const MAX_WAIT_MS = 90_000;
 const MAX_LISTED = 12; // tickets named in one alert before "…and N more"
 const MAX_DELIVERY_ATTEMPTS = 3; // give up (and mark sent) after this many failed flushes
 
-// categoryId/tagId are scalar refs (no Prisma relation), so names are resolved
-// via lookup maps — { cat: Map<id,name>, tag: Map<id,name> }.
+const present = (v) => v !== null && v !== undefined && v !== '';
+
+/** The categories an alert watches: the list, or the legacy single pick. */
+export function effectiveCategoryIds(sub) {
+  if (Array.isArray(sub?.categoryIds) && sub.categoryIds.length) return sub.categoryIds;
+  return present(sub?.categoryId) ? [Number(sub.categoryId)] : [];
+}
+
+/** Clean a categoryIds input: whole positive numbers, no repeats. */
+function cleanCategoryIds(raw) {
+  const list = Array.isArray(raw) ? raw : (present(raw) ? [raw] : []);
+  const out = [];
+  for (const v of list) {
+    const n = Number(v);
+    if (Number.isInteger(n) && n > 0 && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+// categoryIds/tagId are scalar refs (no Prisma relation), so names are resolved
+// via lookup maps — { cat: Map<id,name>, path: Map<id,"Top › Sub">, tag: Map<id,name> }.
 async function resolveNames(subs) {
-  const catIds = [...new Set(subs.map((s) => s.categoryId).filter((v) => v !== null && v !== undefined))];
-  const tagIds = [...new Set(subs.map((s) => s.tagId).filter((v) => v !== null && v !== undefined))];
+  const catIds = [...new Set(subs.flatMap((s) => effectiveCategoryIds(s)))];
+  const tagIds = [...new Set(subs.map((s) => s.tagId).filter(present))];
   const [cats, tags] = await Promise.all([
-    catIds.length ? prisma.competencyCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true } }) : [],
+    catIds.length ? prisma.competencyCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true, parentId: true } }) : [],
     tagIds.length ? prisma.ticketTag.findMany({ where: { id: { in: tagIds } }, select: { id: true, name: true } }) : [],
   ]);
-  return { cat: new Map(cats.map((c) => [c.id, c.name])), tag: new Map(tags.map((t) => [t.id, t.name])) };
+  const cat = new Map(cats.map((c) => [c.id, c.name]));
+  const parentIds = [...new Set(cats.map((c) => c.parentId).filter((id) => present(id) && !cat.has(id)))];
+  const parents = parentIds.length
+    ? await prisma.competencyCategory.findMany({ where: { id: { in: parentIds } }, select: { id: true, name: true } })
+    : [];
+  const parentName = new Map([...cat, ...parents.map((p) => [p.id, p.name])]);
+  const path = new Map(cats.map((c) => [c.id, present(c.parentId) ? `${parentName.get(c.parentId) || '?'} › ${c.name}` : c.name]));
+  return { cat, path, tag: new Map(tags.map((t) => [t.id, t.name])) };
+}
+
+function categoryList(sub, names) {
+  return effectiveCategoryIds(sub).map((id) => ({
+    id,
+    name: names?.cat?.get(id) || null,
+    path: names?.path?.get(id) || names?.cat?.get(id) || null,
+  }));
+}
+
+/** "Devices & Hardware, Account & Access › RDP" for one or two, "3 categories" past that. */
+function categorySummary(cats) {
+  const known = cats.filter((c) => c.path);
+  if (!cats.length) return '';
+  if (cats.length <= 2 && known.length === cats.length) return known.map((c) => c.path).join(', ');
+  return `${cats.length} categor${cats.length === 1 ? 'y' : 'ies'}`;
 }
 
 function subLabel(sub, names) {
   if (sub.label) return sub.label;
   const parts = [];
-  const catName = sub.categoryId !== null && sub.categoryId !== undefined ? names?.cat?.get(sub.categoryId) : null;
-  const tagName = sub.tagId !== null && sub.tagId !== undefined ? names?.tag?.get(sub.tagId) : null;
-  if (catName) parts.push(catName);
+  const cats = categorySummary(categoryList(sub, names));
+  const tagName = present(sub.tagId) ? names?.tag?.get(sub.tagId) : null;
+  if (cats) parts.push(cats);
   if (tagName) parts.push(`#${tagName}`);
   if (sub.priorityMin) parts.push(`${PRIORITY_LABELS[sub.priorityMin] || `P${sub.priorityMin}`}+`);
   return parts.join(' · ') || 'All tickets';
 }
 
 function shapeSub(sub, names) {
+  const categories = categoryList(sub, names);
   return {
     id: sub.id,
     label: sub.label,
     computedLabel: subLabel(sub, names),
-    categoryId: sub.categoryId,
-    categoryName: sub.categoryId !== null && sub.categoryId !== undefined ? (names?.cat?.get(sub.categoryId) || null) : null,
+    categoryIds: categories.map((c) => c.id),
+    categories,
+    // Legacy single-category fields, kept for older clients.
+    categoryId: categories[0]?.id ?? null,
+    categoryName: categories[0]?.name ?? null,
     tagId: sub.tagId,
-    tagName: sub.tagId !== null && sub.tagId !== undefined ? (names?.tag?.get(sub.tagId) || null) : null,
+    tagName: present(sub.tagId) ? (names?.tag?.get(sub.tagId) || null) : null,
     priorityMin: sub.priorityMin,
     onCreated: sub.onCreated,
     onPriorityRaised: sub.onPriorityRaised,
@@ -59,9 +106,15 @@ function shapeSub(sub, names) {
     channelSms: sub.channelSms,
     channelWhatsapp: sub.channelWhatsapp,
     channelPhone: sub.channelPhone,
+    channelTeams: sub.channelTeams === true,
     isActive: sub.isActive,
     updatedAt: sub.updatedAt,
   };
+}
+
+async function teamsService() {
+  const { default: teams } = await import('./teamsNotificationService.js');
+  return teams;
 }
 
 class AgentAlertService {
@@ -77,19 +130,54 @@ class AgentAlertService {
     return technician;
   }
 
-  /** Category (internal taxonomy) + tag options for the subscription picker. */
+  /** Teams readiness for this agent. Never throws. */
+  async _teamsReadiness(tech) {
+    try {
+      const teams = await teamsService();
+      const r = await teams.alertReadiness(tech.workspaceId, tech.email);
+      return { available: r?.available === true, connected: r?.available === true && r?.connected === true };
+    } catch (err) {
+      logger.warn(`agentAlert Teams readiness failed (non-fatal): ${err.message}`);
+      return { available: false, connected: false };
+    }
+  }
+
+  /** Category (internal taxonomy) tree + tag options for the alert editor. */
   async options(email, workspaceId) {
     const tech = await this._tech(email, workspaceId);
-    const [cats, tags] = await Promise.all([
+    const [cats, tags, teams] = await Promise.all([
       prisma.competencyCategory.findMany({ where: { workspaceId: tech.workspaceId, isActive: true }, select: { id: true, name: true, parentId: true }, orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }] }),
       prisma.ticketTag.findMany({ where: { workspaceId: tech.workspaceId, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      this._teamsReadiness(tech),
     ]);
     const nameById = new Map(cats.map((c) => [c.id, c.name]));
     const categories = cats.map((c) => ({
       id: c.id, name: c.name, parentId: c.parentId,
       path: c.parentId ? `${nameById.get(c.parentId) || '?'} › ${c.name}` : c.name,
     }));
-    return { categories, tags };
+    // Tree: top categories with their active subcategories. A subcategory
+    // whose parent is inactive stands on its own as a top row.
+    const tops = cats.filter((c) => !present(c.parentId) || !nameById.has(c.parentId));
+    const childrenOf = new Map();
+    for (const c of cats) {
+      if (present(c.parentId) && nameById.has(c.parentId)) {
+        if (!childrenOf.has(c.parentId)) childrenOf.set(c.parentId, []);
+        childrenOf.get(c.parentId).push({ id: c.id, name: c.name });
+      }
+    }
+    const tree = tops.map((c) => ({ id: c.id, name: c.name, children: childrenOf.get(c.id) || [] }));
+    // The agent's own skill categories — the "My categories" starter ticks these.
+    let mine = [];
+    try {
+      const skills = await prisma.technicianCompetency.findMany({
+        where: { technicianId: tech.id, workspaceId: tech.workspaceId },
+        select: { competencyCategoryId: true },
+      });
+      mine = (skills || []).map((s) => s.competencyCategoryId).filter((id) => nameById.has(id));
+    } catch (err) {
+      logger.warn(`agentAlert skill lookup failed (non-fatal): ${err.message}`);
+    }
+    return { categories, tree, tags, teams, mine };
   }
 
   async list(email, workspaceId) {
@@ -116,13 +204,21 @@ class AgentAlertService {
   }
 
   _normalize(input, workspaceId, technicianId) {
-    const priorityMin = input.priorityMin !== null && input.priorityMin !== undefined && input.priorityMin !== ''
+    const priorityMin = present(input.priorityMin)
       ? Math.min(4, Math.max(1, Number(input.priorityMin))) : null;
+    // categoryIds is the list; a legacy categoryId (older client, or an
+    // untouched old row) becomes a one-item list.
+    let categoryIds = cleanCategoryIds(input.categoryIds);
+    if (!categoryIds.length && present(input.categoryId)) categoryIds = cleanCategoryIds([input.categoryId]);
+    if (categoryIds.length > MAX_CATEGORIES) {
+      throw new ValidationError(`An alert can watch up to ${MAX_CATEGORIES} categories — pick a top category to cover all of its subcategories`);
+    }
     const data = {
       workspaceId, technicianId,
       label: input.label ? String(input.label).slice(0, 120) : null,
-      categoryId: input.categoryId !== null && input.categoryId !== undefined && input.categoryId !== '' ? Number(input.categoryId) : null,
-      tagId: input.tagId !== null && input.tagId !== undefined && input.tagId !== '' ? Number(input.tagId) : null,
+      categoryIds,
+      categoryId: null, // legacy column — no longer written
+      tagId: present(input.tagId) ? Number(input.tagId) : null,
       priorityMin,
       onCreated: input.onCreated !== false,
       onPriorityRaised: input.onPriorityRaised === true,
@@ -131,23 +227,34 @@ class AgentAlertService {
       channelSms: input.channelSms === true,
       channelWhatsapp: input.channelWhatsapp === true,
       channelPhone: input.channelPhone === true,
+      channelTeams: input.channelTeams === true,
       isActive: input.isActive !== false,
     };
     if (!data.onCreated && !data.onPriorityRaised && !data.onRecategorized) {
-      throw new ValidationError('Pick at least one trigger (new ticket, priority raised, or re-categorized)');
+      throw new ValidationError('Pick at least one moment to be alerted: a new ticket, a priority going up, or a move into these categories');
     }
-    if (!data.channelEmail && !data.channelSms && !data.channelWhatsapp && !data.channelPhone) {
-      throw new ValidationError('Pick at least one delivery channel');
+    if (!data.channelEmail && !data.channelSms && !data.channelWhatsapp && !data.channelPhone && !data.channelTeams) {
+      throw new ValidationError('Pick at least one way to be alerted');
     }
-    if (data.categoryId === null && data.tagId === null && data.priorityMin === null) {
-      throw new ValidationError('Choose at least a category, a tag, or a minimum priority to match');
+    if (!data.categoryIds.length && data.tagId === null && data.priorityMin === null) {
+      throw new ValidationError('Pick some categories, a tag or a priority — otherwise this alert would fire for every ticket');
     }
     return data;
+  }
+
+  /** Every id must be an active category of the workspace. */
+  async _assertCategories(workspaceId, ids) {
+    if (!ids.length) return;
+    const found = await prisma.competencyCategory.findMany({ where: { id: { in: ids }, workspaceId, isActive: true }, select: { id: true } });
+    if (found.length !== ids.length) {
+      throw new ValidationError('One of the chosen categories is no longer in use — reload the page and pick again');
+    }
   }
 
   async create(email, workspaceId, input) {
     const tech = await this._tech(email, workspaceId);
     const data = this._normalize(input, tech.workspaceId, tech.id);
+    await this._assertCategories(tech.workspaceId, data.categoryIds);
     const sub = await prisma.agentAlertSubscription.create({ data });
     return shapeSub(sub, await resolveNames([sub]));
   }
@@ -156,7 +263,14 @@ class AgentAlertService {
     const tech = await this._tech(email, workspaceId);
     const existing = await prisma.agentAlertSubscription.findFirst({ where: { id: Number(id), technicianId: tech.id, workspaceId: tech.workspaceId } });
     if (!existing) throw new NotFoundError('Alert subscription not found');
-    const data = this._normalize({ ...existing, ...input }, tech.workspaceId, tech.id);
+    const merged = { ...existing, ...input };
+    // An explicit list (even empty) replaces the legacy single pick.
+    if (Object.prototype.hasOwnProperty.call(input || {}, 'categoryIds')) merged.categoryId = null;
+    const data = this._normalize(merged, tech.workspaceId, tech.id);
+    // Only newly added categories must still be live — pausing an alert whose
+    // category was retired must not fail.
+    const before = new Set(effectiveCategoryIds(existing));
+    await this._assertCategories(tech.workspaceId, data.categoryIds.filter((c) => !before.has(c)));
     delete data.workspaceId; delete data.technicianId;
     const sub = await prisma.agentAlertSubscription.update({ where: { id: existing.id }, data });
     return shapeSub(sub, await resolveNames([sub]));
@@ -206,10 +320,16 @@ class AgentAlertService {
 
       const subs = await prisma.agentAlertSubscription.findMany({
         where: { workspaceId: ticket.workspaceId, isActive: true, [triggerCol]: true },
-        select: { id: true, technicianId: true, categoryId: true, tagId: true, priorityMin: true },
+        select: { id: true, technicianId: true, categoryId: true, categoryIds: true, tagId: true, priorityMin: true },
       });
+      // A ticket matches a category list through its top category OR its
+      // subcategory, so picking a top category covers all its subcategories.
+      const inCategories = (s) => {
+        const wanted = effectiveCategoryIds(s);
+        return !wanted.length || wanted.some((id) => catIds.includes(id));
+      };
       const matched = subs.filter((s) => (
-        (s.categoryId === null || catIds.includes(s.categoryId))
+        inCategories(s)
         && (s.tagId === null || tagIds.has(s.tagId))
         && (s.priorityMin === null || (priority !== null && priority !== undefined && priority >= s.priorityMin))
       ));
@@ -293,7 +413,7 @@ class AgentAlertService {
     const result = await this._deliver(sub, pref, events, tickets);
     const ids = events.map((e) => e.id);
     const delivered = Object.values(result.channels || {}).some((c) => c?.sent);
-    const anyChannel = sub.channelEmail || sub.channelSms || sub.channelWhatsapp || sub.channelPhone;
+    const anyChannel = sub.channelEmail || sub.channelSms || sub.channelWhatsapp || sub.channelPhone || sub.channelTeams;
     if (delivered || !anyChannel) {
       await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date(), deliveryResult: result } });
       return;
@@ -343,6 +463,31 @@ class AgentAlertService {
 
     const out = { channels: {} };
 
+    // Teams — one message per batch from the Ticket Pulse bot. A failure here
+    // never stops the other channels.
+    if (sub.channelTeams) {
+      try {
+        const md = (s) => String(s || '').replace(/[[\]*_`]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140);
+        const lines = tickets.slice(0, MAX_LISTED).map((t) => {
+          const link = ticketLinkUrl(publicBase, t);
+          const ref = link ? `[${ticketDisplayRef(t)}](${link})` : ticketDisplayRef(t);
+          return `${ref} — ${md(t.subject) || '(no subject)'} (${PRIORITY_LABELS[t.priority] || 'P?'})`;
+        });
+        if (tickets.length > MAX_LISTED) lines.push(`…and ${tickets.length - MAX_LISTED} more`);
+        const teams = await teamsService();
+        out.channels.teams = await teams.sendAgentAlert({
+          workspaceId: sub.workspaceId,
+          technician: sub.technician,
+          title: headline.charAt(0).toUpperCase() + headline.slice(1),
+          lines,
+          url: tickets.length === 1 ? ticketLinkUrl(publicBase, tickets[0]) : null,
+        });
+      } catch (err) {
+        logger.warn(`Agent alert Teams send failed (non-fatal): ${err.message}`);
+        out.channels.teams = { sent: false, error: err.message };
+      }
+    }
+
     // Email
     if (sub.channelEmail && sub.technician.email) {
       const esc = (s) => String(s || '').replace(/</g, '&lt;');
@@ -352,8 +497,13 @@ class AgentAlertService {
         `<ul>${rows}</ul>`,
         '<p style="color:#64748b;font-size:12px">You’re receiving this because you subscribed to this alert in Ticket Pulse. Manage your alerts in the agent portal.</p>',
       ].join('');
-      const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-      out.channels.email = await sendTransactionalEmail({ workspaceId: sub.workspaceId, to: sub.technician.email, subject: `Ticket Pulse alert: ${headline}`, html, label: 'agent alert' });
+      try {
+        const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+        out.channels.email = await sendTransactionalEmail({ workspaceId: sub.workspaceId, to: sub.technician.email, subject: `Ticket Pulse alert: ${headline}`, html, label: 'agent alert' });
+      } catch (err) {
+        logger.warn(`Agent alert e-mail send failed (non-fatal): ${err.message}`);
+        out.channels.email = { sent: false, error: err.message };
+      }
     }
 
     // SMS / WhatsApp / Phone — need a verified phone.
