@@ -502,6 +502,18 @@ async function initialize() {
       }
     }
 
+    // Close resolved tickets: Ticket Pulse tickets that stayed Resolved for the
+    // workspace's chosen time (Settings → Ticket Ops → When a ticket is
+    // resolved). Kill switch AUTO_CLOSE_RESOLVED_ENABLED=false.
+    if (config.sync.enableScheduledSync && process.env.AUTO_CLOSE_RESOLVED_ENABLED !== 'false') {
+      try {
+        const { default: autoCloseResolvedService } = await import('./services/autoCloseResolvedService.js');
+        autoCloseResolvedService.start();
+      } catch (e) {
+        logger.warn('Auto-close of resolved tickets failed to start (non-fatal):', e.message);
+      }
+    }
+
     // Auto-help settle jobs: their own tick and running guard, never inside
     // the park sweep (a drain runs model calls — audit S1, 26 Sep 2026).
     try {

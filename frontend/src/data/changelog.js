@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.85-preview';
+export const APP_VERSION = '4.2.86-preview';
 
 export const changelog = [
+  {
+    version: '4.2.86-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Close resolved tickets automatically</strong> &mdash; Settings &rarr; Ticket Ops &rarr; <em>When a ticket is resolved</em>. Ticket Pulse closes its own tickets once they have stayed Resolved for the time you choose (1 hour to 1 week), and closes the FreshService copy with them. A requester reply before then reopens the ticket as usual; FreshService tickets keep following FreshService. Before you save, the page tells you how many tickets are already past that time and will close straight away. On for IT, after 1 day.' },
+    ],
+  },
   {
     version: '4.2.85-preview',
     date: 'October 17, 2026',

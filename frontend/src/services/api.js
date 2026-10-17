@@ -812,6 +812,8 @@ export const ticketsAPI = {
   // "When a requester replies" workspace switches (13 Oct 2026): owner away → back to assignment; reply that is a new request → suggest a split.
   getRequesterReplySettings: async () => await api.get('/tickets/requester-reply-settings'),
   updateRequesterReplySettings: async (patch) => await api.put('/tickets/requester-reply-settings', patch),
+  getAutoCloseSettings: async () => await api.get('/tickets/auto-close-settings'),
+  updateAutoCloseSettings: async (patch) => await api.put('/tickets/auto-close-settings', patch),
   // Bring back a mail workflow the page archived (14 Oct 2026).
   restoreRequesterReplyWorkflow: async (workflowId) => await api.post('/tickets/requester-reply-settings/restore-workflow', { workflowId }),
   // "This reply looks like a new request" on one ticket.

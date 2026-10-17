@@ -1238,6 +1238,34 @@ router.put('/requester-reply-settings', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId), ...(retirement ? { retirement } : {}) });
 }));
 
+// ----------------------------- When a ticket is resolved (17 Oct 2026)
+// Close Ticket Pulse tickets that stayed Resolved for the chosen time
+// (autoCloseResolvedService). Same admin gate as the requester-reply page.
+
+router.get('/auto-close-settings', asyncHandler(async (req, res) => {
+  const { default: autoClose } = await import('../services/autoCloseResolvedService.js');
+  res.json({ success: true, data: await autoClose.pageContext(req.workspaceId) });
+}));
+
+router.put('/auto-close-settings', asyncHandler(async (req, res) => {
+  const actor = requireReplySettingsAdmin(req, res);
+  if (!actor) return;
+  const { default: autoClose, AFTER_HOURS_CHOICES } = await import('../services/autoCloseResolvedService.js');
+  const patch = {};
+  if (req.body?.enabled !== undefined) {
+    if (typeof req.body.enabled !== 'boolean') throw new ValidationError('enabled must be true or false');
+    patch.enabled = req.body.enabled;
+  }
+  if (req.body?.afterHours !== undefined) {
+    if (!AFTER_HOURS_CHOICES.includes(Number(req.body.afterHours))) throw new ValidationError('Choose one of the offered times');
+    patch.afterHours = Number(req.body.afterHours);
+  }
+  if (!Object.keys(patch).length) throw new ValidationError('Nothing to change');
+  const saved = await autoClose.setSettings(req.workspaceId, patch, actor);
+  logger.info(`Auto-close of resolved tickets for workspace ${req.workspaceId} set to ${JSON.stringify({ enabled: saved.enabled, afterHours: saved.afterHours })} by ${actor?.email || 'unknown'}`);
+  res.json({ success: true, data: await autoClose.pageContext(req.workspaceId) });
+}));
+
 // Bring back a workflow this page archived — only while the page itself is
 // not reopening (two reopens would race). Never done automatically.
 router.post('/requester-reply-settings/restore-workflow', asyncHandler(async (req, res) => {

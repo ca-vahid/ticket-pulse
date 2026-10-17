@@ -10,6 +10,7 @@ import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicke
 import TicketStatusesSection from './TicketStatusesSection';
 import TeamForwardsSection from './TeamForwardsSection';
 import RequesterRepliesSection from './RequesterRepliesSection';
+import ResolvedTicketsSection from './ResolvedTicketsSection';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
@@ -2406,6 +2407,7 @@ export default function TicketOpsPanel() {
       <DefaultStatusesSection />
       <TicketViewsSection />
       <RequesterRepliesSection />
+      <ResolvedTicketsSection />
       <SlaSection />
       <TrustedDomainsSection />
       <TeamForwardsSection />
