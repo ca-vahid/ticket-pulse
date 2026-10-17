@@ -241,6 +241,14 @@ class AlertOccurrenceService {
         })
         .catch((err) => logger.warn(`Alert occurrence: could not link ${created.id} to earlier ticket ${previous.id}: ${err.message}`));
     }
+    // Bursts of one check across servers become one incident (alertBundleService,
+    // 17 Oct 2026). Not awaited: the monitor's call never waits on bundling.
+    Promise.resolve()
+      .then(async () => {
+        const { default: alertBundleService } = await import('./alertBundleService.js');
+        await alertBundleService.afterAlertCreated(workspaceId, created.id, { fingerprintDisplay: input.fingerprintDisplay, alertId: input.reference?.alertId || null, title: input.title });
+      })
+      .catch((err) => logger.warn(`Alert occurrence: bundling skipped for ${created.id}: ${err.message}`));
     return { action: 'created', ticketId: created.id, previousTicketId: previous?.id ?? null, occurrenceCount: 1, lastOccurrenceAt: now, lastOccurrenceSummary: input.summary ?? null, priorityRaised: false };
   }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ChevronDown, Loader2, Pencil, Plus, Play, Radar, RefreshCw, Sparkles, TestTube, Trash2 } from 'lucide-react';
 import { alertCorrelationAPI } from '../../services/api';
+import AlertBundlingSection from './AlertBundlingSection';
 
 /**
  * Settings → Alert correlation (20 Sep 2026). Pair rules ("server down" ↔
@@ -226,6 +227,8 @@ export default function AlertCorrelationPanel() {
           ))}
         </ul>
       </section>
+
+      <AlertBundlingSection />
 
       <section className="tp-card rounded-xl p-4">
         <div className="flex flex-wrap items-center gap-3">
