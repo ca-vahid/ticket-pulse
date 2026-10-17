@@ -246,8 +246,10 @@ class AlertBundleService {
       requesterEmail: requester?.email,
       requesterName: requester?.name || undefined,
       externalRef: `${BUNDLE_PREFIX}${requesterId}:${check}:${now.toISOString()}`,
-      ...(first.groupId ? { groupId: first.groupId } : {}),
-      ...(first.internalGroupId ? { internalGroupId: first.internalGroupId } : {}),
+      // BigInt from the database; createTicket takes a number or a digit string
+      // (17 Oct 2026: the first live bundle failed on exactly this).
+      ...(first.groupId ? { groupId: String(first.groupId) } : {}),
+      ...(first.internalGroupId ? { internalGroupId: Number(first.internalGroupId) } : {}),
     }, ACTOR, { sourceChannel: TICKET_SOURCE.MONITORING_ALERT, suppressRequesterAck: true });
   }
 

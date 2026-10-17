@@ -110,6 +110,7 @@ describe('afterAlertCreated', () => {
     expect(input.subject).toBe('[Infra] Storage / RAID hardware fault — 3 servers');
     expect(input.externalRef.startsWith(`${BUNDLE_PREFIX}3877:hw-storage:`)).toBe(true);
     expect(input.requesterEmail).toBe('sentinel@bgcengineering.ca');
+    expect(input.groupId).toBe('1000208184'); // a digit string, never the BigInt the database returns
     expect(actor).toBe(ACTOR);
     expect(opts.sourceChannel).toBe(106);
     expect(setParent.mock.calls.map((c) => c[0])).toEqual([48, 49, 50]);
