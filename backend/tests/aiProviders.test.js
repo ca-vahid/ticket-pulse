@@ -72,7 +72,7 @@ describe('ai provider utilities', () => {
       .toBe(DEFAULT_RECLASSIFICATION_MODEL);
     expect(supportsOperation(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC, 'ticket_reclassification'))
       .toBe(true);
-    expect(supportsOperation(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC, 'assignment_pipeline'))
+    expect(supportsOperation('claude-haiku-4-5-20251001', AI_PROVIDER_ANTHROPIC, 'assignment_pipeline'))
       .toBe(false);
   });
 
@@ -82,7 +82,7 @@ describe('ai provider utilities', () => {
     // Sonnet 5 (the default) rejects non-default sampling params with a 400.
     expect(shouldOmitAnthropicTemperature(DEFAULT_ANTHROPIC_MODEL)).toBe(true);
     expect(shouldOmitAnthropicTemperature(SONNET_4_6_MODEL)).toBe(false);
-    expect(shouldOmitAnthropicTemperature(DEFAULT_RECLASSIFICATION_MODEL)).toBe(false);
+    expect(shouldOmitAnthropicTemperature('claude-haiku-4-5-20251001')).toBe(false);
   });
 
   test('exposes only the approved OpenAI options and marks Opus as expensive', () => {
@@ -150,11 +150,11 @@ describe('ticket_intake_extract registration (Phase AF)', () => {
     ]));
   });
 
-  test('Haiku is excluded from the op and marked non-vision', () => {
-    expect(supportsOperation(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC, 'ticket_intake_extract')).toBe(false);
+  test('Haiku 4.5 is excluded from the op and marked non-vision', () => {
+    expect(supportsOperation('claude-haiku-4-5-20251001', AI_PROVIDER_ANTHROPIC, 'ticket_intake_extract')).toBe(false);
     expect(getModelMetadata({ operation: 'ticket_intake_extract' }).map((entry) => entry.model))
-      .not.toContain(DEFAULT_RECLASSIFICATION_MODEL);
-    expect(modelSupportsVision(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC)).toBe(false);
+      .not.toContain('claude-haiku-4-5-20251001');
+    expect(modelSupportsVision('claude-haiku-4-5-20251001', AI_PROVIDER_ANTHROPIC)).toBe(false);
   });
 
   test('every MODEL_METADATA entry declares supportsVision as a boolean', () => {

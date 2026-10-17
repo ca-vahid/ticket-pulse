@@ -122,7 +122,7 @@ describe('ticketReclassificationService', () => {
         suggestedInternalSubcategoryName: null,
       },
       provider: 'anthropic',
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-haiku-5-5',
       fallbackUsed: false,
       attemptNumber: 1,
     });
@@ -133,11 +133,11 @@ describe('ticketReclassificationService', () => {
     expect(result.id).toBe(900);
     expect(result.scanned).toBe(1);
     expect(result.classified).toBe(1);
-    expect(result.model).toBe('claude-haiku-4-5-20251001');
+    expect(result.model).toBe('claude-haiku-5-5');
     expect(result.concurrency).toBe(10);
     expect(mockProviderSendJson).toHaveBeenCalledWith(expect.objectContaining({
       operation: 'ticket_reclassification',
-      legacyModel: 'claude-haiku-4-5-20251001',
+      legacyModel: 'claude-haiku-5-5',
     }));
     expect(prismaMock.ticketReclassificationRun.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -145,7 +145,7 @@ describe('ticketReclassificationService', () => {
         status: 'running',
         mode: 'apply',
         request: expect.objectContaining({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-5-5',
           concurrency: 10,
         }),
         beforeSnapshot: expect.arrayContaining([expect.objectContaining({ id: 501 })]),
@@ -159,7 +159,7 @@ describe('ticketReclassificationService', () => {
           scanned: 1,
           classified: 1,
           failed: 0,
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-5-5',
           concurrency: 10,
         }),
       }),

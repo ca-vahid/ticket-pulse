@@ -76,7 +76,11 @@ export function openAiReasoningFor(model, requested) {
   if (!rule || (effort !== 'none' && effort !== 'minimal')) return requested;
   return { ...requested, effort: rule[1] };
 }
-export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
+// The small classifiers (sentiment, grouping, reply check, reclassification,
+// leave) run on Haiku 5.5 since 16 Oct 2026 (Vahid): same answers as Haiku
+// 4.5 in a live check at about a tenth of the price. Haiku 4.5 stays selectable.
+export const HAIKU_4_5_MODEL = 'claude-haiku-4-5-20251001';
+export const DEFAULT_RECLASSIFICATION_MODEL = HAIKU_5_5_MODEL;
 export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
 
 const ALL_OPERATIONS = new Set(AI_OPERATIONS);
@@ -140,7 +144,7 @@ export const MODEL_METADATA = [
   },
   {
     provider: AI_PROVIDER_ANTHROPIC,
-    model: DEFAULT_RECLASSIFICATION_MODEL,
+    model: HAIKU_4_5_MODEL,
     label: 'Claude Haiku 4.5',
     // Explicit allow-list: the cheap tier never sees image-bearing ops
     // (ticket_intake_extract stays out on purpose).
@@ -334,9 +338,10 @@ export function getModelMetadata({ provider = null, operation = null } = {}) {
 }
 
 export function getDefaultProviderSetting(operation = 'assignment_pipeline', legacyModel = null) {
+  // Workflow e-mail drafting runs on Sonnet 5.5 since 16 Oct 2026 (Vahid):
+  // GPT-6.1 Sol timed out on half of IT's real drafts at the 45 s budget.
   const defaultPrimaryProvider = operation === 'autoresponse_classification'
     || operation === 'autoresponse_generation'
-    || operation === 'notification_workflow_generation'
     ? AI_PROVIDER_OPENAI
     : AI_PROVIDER_ANTHROPIC;
   const primaryProvider = providerForModel(legacyModel, defaultPrimaryProvider);
