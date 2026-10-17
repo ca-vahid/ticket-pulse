@@ -206,7 +206,7 @@ const T = {
   Message: {
     type: 'object', required: ['body'],
     properties: {
-      body: { type: 'string' }, bodyHtml: { type: 'string' },
+      body: { type: 'string', description: 'Plain text. A body carrying formatting tags (<p>, <b>, <br>, …) with no bodyHtml is read as HTML.' }, bodyHtml: { type: 'string' },
       stage: { type: 'string', enum: ['tier1', 'tier2', 'tier3'], nullable: true, description: 'Which stage of the calling system wrote this. Rendered into the author: "Simorgh · Tier 2 (Rostam)". Notes only.' },
       agent: { type: 'string', maxLength: 60, nullable: true, description: 'Display name of the sub-agent for that stage, e.g. "Rostam". Notes only.' },
     },

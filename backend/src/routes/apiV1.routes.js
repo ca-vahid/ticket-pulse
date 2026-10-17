@@ -394,6 +394,19 @@ function assertDueByAllowed(req, body) {
 }
 
 /**
+ * A note or reply whose plain-text `body` is really HTML (the Sentinel
+ * runbook sent "<p><b>Resolved automatically.</b> …</p>" as `body`, 17 Oct
+ * 2026, and TP-10194 showed the tags) is taken as `bodyHtml` — sanitized and
+ * stripped to text downstream like any other HTML body. Plain text that only
+ * mentions a "<" is left alone: it needs a real formatting tag to switch.
+ */
+const HTML_BODY_TAG_RE = /<\/?(p|br|b|strong|i|em|u|s|ul|ol|li|a|div|span|h[1-6]|code|pre|blockquote|table|thead|tbody|tr|th|td|hr)\b[^<>]*>/i;
+export function threadBodyFromApi(text, html) {
+  if (!html && typeof text === 'string' && HTML_BODY_TAG_RE.test(text)) return { bodyText: null, bodyHtml: text };
+  return { bodyText: text, bodyHtml: html || null };
+}
+
+/**
  * `addNote` (QA 09-16 #2): a private note that rides a ticket write so "the
  * record was resubmitted" is ONE call — reopen + fields + note — instead of
  * PATCH followed by POST /notes. Accepts a plain string or
@@ -404,13 +417,13 @@ export function normalizeAddNote(raw) {
   if (raw === undefined || raw === null) return null;
   if (typeof raw === 'string') {
     const text = raw.trim();
-    return text ? { bodyText: text, bodyHtml: null, stage: null, agent: null } : null;
+    return text ? { ...threadBodyFromApi(text, null), stage: null, agent: null } : null;
   }
   if (typeof raw !== 'object' || Array.isArray(raw)) throw problems.badRequest('addNote must be a string or an object with a body');
   const text = String(raw.body ?? raw.bodyText ?? '').trim();
   const html = raw.bodyHtml ? String(raw.bodyHtml) : null;
   if (!text && !html) throw problems.badRequest('addNote.body is required');
-  return { bodyText: text || null, bodyHtml: html, stage: raw.stage ?? null, agent: raw.agent ?? null };
+  return { ...threadBodyFromApi(text || null, html), stage: raw.stage ?? null, agent: raw.agent ?? null };
 }
 
 // Resubmission response (Phase PA): 200 + top-level resubmitted:true so Power
@@ -871,17 +884,14 @@ router.get('/tickets/:id/conversations', S('conversations:read'), asyncHandler(a
 }));
 
 router.post('/tickets/:id/replies', S(['tickets:write', 'conversations:write']), withIdempotency, asyncHandler(async (req, res) => {
-  const result = await ticketService.addReply((await tid(req)), req.workspaceId, {
-    bodyText: req.body?.body || req.body?.bodyText,
-    bodyHtml: req.body?.bodyHtml || null,
-  }, apiActor(req));
+  const result = await ticketService.addReply((await tid(req)), req.workspaceId,
+    threadBodyFromApi(req.body?.body || req.body?.bodyText, req.body?.bodyHtml), apiActor(req));
   res.status(201).json({ success: true, data: { entryId: result.entry.id, emailed: result.email?.sent === true } });
 }));
 
 router.post('/tickets/:id/notes', S('conversations:write'), withIdempotency, asyncHandler(async (req, res) => {
   const result = await ticketService.addPrivateNote((await tid(req)), req.workspaceId, {
-    bodyText: req.body?.body || req.body?.bodyText,
-    bodyHtml: req.body?.bodyHtml || null,
+    ...threadBodyFromApi(req.body?.body || req.body?.bodyText, req.body?.bodyHtml),
     // Simorgh A5: which stage of the caller wrote this ("tier2", "Rostam").
     stage: req.body?.stage ?? null,
     agent: req.body?.agent ?? null,
