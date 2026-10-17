@@ -7,7 +7,7 @@ import {
   endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks,
 } from 'date-fns';
 import {
-  BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
+  BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, ChevronsUp,
   GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Pin, PinOff, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
@@ -335,7 +335,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  * desktop, collapsible to a slim bar, every facet URL-persisted. On mobile it
  * becomes a slide-over drawer behind the Filters button.
  */
-export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false, tucked = false, createdWindow = null, onCreatedWindow = null }) {
+export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false, tucked = false, pull = null, createdWindow = null, onCreatedWindow = null }) {
   const [findQuery, setFindQuery] = useState('');
   const find = findQuery.trim().toLowerCase();
   // QA 09-18 #2: Source counts follow the current view when the list sent
@@ -355,8 +355,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
   // Pin + auto-tuck (16 Oct 2026, Vahid): pinned is today's rail and the
   // default. Unpinned, the rail tucks to its slim strip while the list is
-  // scrolled (`tucked`, the same moment the cards fold) and comes back at the
-  // top; resting the mouse on the strip slides the panel out OVER the list,
+  // scrolled (`tucked`, the same moment the cards fold) and comes back when
+  // you scroll up again once at the top (17 Oct 2026: `pull` = how far, shown
+  // on the strip); resting the mouse on the strip slides the panel out OVER the list,
   // so the list never reflows for a quick filter change.
   const [pinned, setPinned] = useState(() => {
     try { return localStorage.getItem('tp_filter_rail_pin') !== 'auto'; } catch { return true; }
@@ -1446,6 +1447,17 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             </span>
           )}
         </button>
+        {/* At the top of the list while tucked (17 Oct 2026): scrolling up
+            again brings the filters back; the bar fills as you pull. */}
+        {autoTucked && pull !== null && (
+          <div className="mt-2 flex flex-col items-center gap-1.5 animate-fadeIn motion-off:animate-none" data-testid="rail-pull" title="Scroll up again to show the filters">
+            <ChevronsUp className="h-3.5 w-3.5 text-muted-foreground/75" aria-hidden="true" />
+            <span className="relative h-12 w-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+              <span className="absolute inset-x-0 bottom-0 rounded-full bg-primary transition-[height] duration-150 ease-out motion-off:transition-none" style={{ height: `${Math.round(Math.min(1, Math.max(0, pull)) * 100)}%` }} data-testid="rail-pull-fill" />
+            </span>
+            <span className="text-[10px] font-medium text-muted-foreground/75 [writing-mode:vertical-rl] rotate-180 select-none">Scroll up to show</span>
+          </div>
+        )}
       </div>
 
       {/* Full layer — a floor (not a fixed width) so the counts never clip when

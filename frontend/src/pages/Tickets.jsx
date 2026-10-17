@@ -21,6 +21,7 @@ import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView } from '../utils/queueMemory';
+import { initialPull, stepPull, touchPull } from '../utils/pullToReveal';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
 import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
@@ -1723,6 +1724,37 @@ export default function Tickets() {
     else if (el.scrollTop > 48 && el.scrollHeight - el.clientHeight > 320) setCardsFolded(true);
     saveListScroll(el.scrollTop);
   }, [saveListScroll]);
+  // The filters tuck with the cards but do NOT come back just because the list
+  // reached its top (Vahid, 17 Oct 2026): browsing up is not asking for them.
+  // Scrolling up again once already at the top (utils/pullToReveal) does, as
+  // does a drag down on a touch screen; hovering the strip still peeks.
+  const [railTucked, setRailTucked] = useState(false);
+  const [railPull, setRailPull] = useState(0);
+  const pullRef = useRef({ wheel: initialPull(), touchY: null, idle: null });
+  useEffect(() => { if (cardsFolded) setRailTucked(true); }, [cardsFolded]);
+  useEffect(() => { if (!docked) setRailTucked(false); }, [docked]);
+  useEffect(() => () => clearTimeout(pullRef.current.idle), []);
+  const revealRail = useCallback(() => { setRailPull(0); setRailTucked(false); }, []);
+  const onListWheel = useCallback((e) => {
+    if (!railTucked) return;
+    const pull = pullRef.current;
+    const r = stepPull(pull.wheel, { deltaY: e.deltaY, deltaMode: e.deltaMode, atTop: e.currentTarget.scrollTop <= 2, now: e.timeStamp });
+    pull.wheel = r.state;
+    clearTimeout(pull.idle);
+    if (r.reveal) { revealRail(); return; }
+    setRailPull(r.progress);
+    if (r.progress > 0) pull.idle = setTimeout(() => setRailPull(0), 900);
+  }, [railTucked, revealRail]);
+  const onListTouchStart = useCallback((e) => {
+    pullRef.current.touchY = railTucked && e.currentTarget.scrollTop <= 2 ? e.touches[0]?.clientY ?? null : null;
+  }, [railTucked]);
+  const onListTouchMove = useCallback((e) => {
+    const start = pullRef.current.touchY;
+    if (start === null) return;
+    const r = touchPull((e.touches[0]?.clientY ?? start) - start);
+    if (r.reveal) { pullRef.current.touchY = null; revealRail(); } else setRailPull(r.progress);
+  }, [revealRail]);
+  const onListTouchEnd = useCallback(() => { pullRef.current.touchY = null; setRailPull(0); }, []);
   useEffect(() => {
     if (docked) return undefined;
     const onWin = () => saveListScroll(window.scrollY);
@@ -2025,7 +2057,7 @@ export default function Tickets() {
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}
             <div className={docked ? 'grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4' : 'lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-4 lg:items-start'}>
-              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} tucked={docked && cardsFolded} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
+              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} tucked={docked && railTucked} pull={docked && railTucked && !cardsFolded ? railPull : null} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
 
               <div className={docked ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}>
                 {requesterId && (
@@ -2318,6 +2350,10 @@ export default function Tickets() {
                         <div
                           ref={scrollWrapRef}
                           onScroll={docked ? onListScroll : undefined}
+                          onWheel={docked && railTucked ? onListWheel : undefined}
+                          onTouchStart={docked && railTucked ? onListTouchStart : undefined}
+                          onTouchMove={docked && railTucked ? onListTouchMove : undefined}
+                          onTouchEnd={docked && railTucked ? onListTouchEnd : undefined}
                           data-testid="queue-scroll"
                           className={docked
                             ? `tp-q-docked min-h-0 flex-1 overflow-y-auto settings-scrollbar ${scrolls ? `overflow-x-auto overscroll-x-contain ${pinSubject ? 'tp-q-pin' : ''}` : 'overflow-x-hidden'}`
