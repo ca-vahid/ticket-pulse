@@ -12,6 +12,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import prisma from '../src/services/prisma.js';
 import providerSettingsService from '../src/services/aiProviders/providerSettingsService.js';
+import { providerForModel } from '../src/utils/aiProviders.js';
 import notificationWorkflowEngine from '../src/services/notificationWorkflowEngine.js';
 import * as repo from '../src/services/notificationWorkflowRepository.js';
 import { buildPreviewEventContext } from '../src/routes/notificationWorkflow.routes.js';
@@ -29,7 +30,8 @@ const realGetSetting = providerSettingsService.getSetting.bind(providerSettingsS
 providerSettingsService.getSetting = async (workspaceId, operation, legacy) => {
   const s = await realGetSetting(workspaceId, operation, legacy);
   if (operation !== OP || !currentModel) return s;
-  return { ...s, primaryProvider: 'openai', primaryModel: currentModel, autoFallbackEnabled: false };
+  // The provider follows the model (a Claude model sent to OpenAI silently fell back to the OpenAI default).
+  return { ...s, primaryProvider: providerForModel(currentModel, 'openai'), primaryModel: currentModel, autoFallbackEnabled: false };
 };
 
 // The last N distinct (workflow, ticket) pairs whose real run (live or observe-only) drafted with the LLM.
@@ -71,7 +73,7 @@ for (const p of sample) {
         subject: llm.email?.subject || null,
         text: llm.email?.text || String(llm.email?.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
         ms: Date.now() - t0,
-        usd: costUsdFor({ provider: 'openai', model, inputTokens: u.inputTokens || 0, outputTokens: u.outputTokens || 0, cacheReadInputTokens: u.cacheReadInputTokens || 0 }),
+        usd: costUsdFor({ provider: providerForModel(model, 'openai'), model, inputTokens: u.inputTokens || 0, outputTokens: u.outputTokens || 0, cacheReadInputTokens: u.cacheReadInputTokens || 0 }),
       };
     } catch (err) {
       row.results[model] = { ok: false, error: err.message, ms: Date.now() - t0 };

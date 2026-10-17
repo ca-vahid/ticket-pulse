@@ -51,7 +51,7 @@ describe('providerSettingsService', () => {
     });
     expect(created.find((row) => row.operation === 'ticket_reclassification')).toMatchObject({
       primaryProvider: 'anthropic',
-      primaryModel: 'claude-haiku-4-5-20251001',
+      primaryModel: 'claude-haiku-5-5',
     });
     expect(created.find((row) => row.operation === 'autoresponse_generation')).toMatchObject({
       primaryProvider: 'openai',

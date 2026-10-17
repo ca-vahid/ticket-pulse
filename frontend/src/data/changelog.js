@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.82-preview';
+export const APP_VERSION = '4.2.83-preview';
 
 export const changelog = [
+  {
+    version: '4.2.83-preview',
+    date: 'October 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Workflow e-mails are drafted by Claude Sonnet 5.5</strong> &mdash; GPT-6.1 Sol stalled on about half of the drafts, so Sonnet 5.5 now writes them, with GPT-6.1 Sol as the backup. In a check on ten real IT drafts, Sonnet finished each in 7&ndash;12 seconds.' },
+      { type: 'improved', html: '<strong>Small checks on Claude Haiku 5.5</strong> &mdash; reading the mood of a reply, spotting a thank-you, grouping tickets, leave and re-categorizing now use Haiku 5.5. It gave the same answers as Haiku 4.5 at about a tenth of the price.' },
+    ],
+  },
   {
     version: '4.2.82-preview',
     date: 'October 16, 2026',
