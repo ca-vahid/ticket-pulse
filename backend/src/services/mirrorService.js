@@ -70,6 +70,11 @@ const RECONCILE_MAX_DEFER_MS = Number(process.env.NATIVE_TICKET_RECONCILE_MAX_DE
 // too, so a reopen on the FreshService copy is seen.
 const RECENTLY_CLOSED_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 const RECENTLY_CLOSED_LIMIT = 10;
+// Resolved and waiting for FreshService's supervisor rule to close the copy
+// (17 Oct 2026): checked on EVERY pass, not in the rotation. Behind ~170
+// closed tickets a lap took about an hour, so TP-10180 stayed Resolved in the
+// queue two hours after FreshService had closed it.
+const AWAITING_CLOSE_LIMIT = 15;
 // Open copies beyond the 30 most recently active were never checked at all (12 Oct 2026): fine
 // with 60 open Ticket Pulse-born tickets, not with the few hundred IT will have once its mail
 // arrives here. A slice of the rest is checked each pass and rotates, so every copy is reached.
@@ -1275,6 +1280,15 @@ class MirrorService {
       }).catch(() => []);
       this._recentClosedOffset.set(workspaceId, recent.length < RECENTLY_CLOSED_LIMIT ? 0 : offset + recent.length);
       tickets.push(...recent.filter((r) => !tickets.some((t) => t.id === r.id)));
+
+      const resolvedNames = await statusService.statusNamesForBase(workspaceId, ['Resolved']);
+      const awaitingClose = await Promise.resolve().then(() => prisma.ticket.findMany({
+        where: { ...recentWhere, status: { in: resolvedNames } },
+        include: { assignedTech: { select: { freshserviceId: true, name: true } } },
+        orderBy: { updatedAt: 'asc' },
+        take: AWAITING_CLOSE_LIMIT,
+      })).then((rows) => (Array.isArray(rows) ? rows : [])).catch(() => []);
+      tickets.push(...awaitingClose.filter((r) => !tickets.some((t) => t.id === r.id)));
 
       if (ACTIVE_ROTATE_LIMIT > 0 && tickets.length >= limit) {
         if (!this._activeRotateOffset) this._activeRotateOffset = new Map();

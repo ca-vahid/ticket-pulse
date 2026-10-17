@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.84-preview';
+export const APP_VERSION = '4.2.85-preview';
 
 export const changelog = [
+  {
+    version: '4.2.85-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Resolved tickets close sooner</strong> &mdash; when FreshService closes its copy of a resolved Ticket Pulse ticket, the ticket now turns Closed within a few minutes. It could take up to an hour, so resolved tickets lingered in the queue after they were closed.' },
+    ],
+  },
   {
     version: '4.2.84-preview',
     date: 'October 17, 2026',

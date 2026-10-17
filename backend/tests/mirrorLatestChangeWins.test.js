@@ -183,4 +183,26 @@ describe('mirrorService.reconcile — recently closed tickets rotate', () => {
     expect(reached.size).toBe(23);
     expect(mirrorService._recentClosedOffset.get(1)).toBe(0); // wrapped round after the short last slice
   });
+
+  test('Resolved tickets waiting for the FreshService close are checked on EVERY pass (TP-10180)', async () => {
+    jest.clearAllMocks();
+    mirrorService._recentClosedOffset = new Map();
+    mirrorService._reconcileResume = new Map();
+    jest.spyOn(mirrorService, '_getClient').mockResolvedValue({});
+    const seen = jest.spyOn(mirrorService, '_reconcileTicketAgainstFs').mockResolvedValue({ imported: 0, conflicts: 0 });
+    const closed = Array.from({ length: 170 }, (_, i) => ({ id: 2000 + i }));
+    const waiting = [{ id: 63859 }, { id: 63876 }, { id: 63884 }];
+    prismaMock.ticket.findMany.mockImplementation(async ({ where, skip = 0, take }) => {
+      const names = where.status?.in || [];
+      if (names.includes('Closed')) return closed.slice(skip, skip + take);
+      if (names.includes('Resolved')) return waiting.slice(0, take);
+      return [];
+    });
+    for (let pass = 0; pass < 3; pass++) {
+      seen.mockClear();
+      await mirrorService.reconcile(1, { activeOnly: true, limit: 30 });
+      const ids = seen.mock.calls.map(([t]) => t.id);
+      expect(ids).toEqual(expect.arrayContaining([63859, 63876, 63884]));
+    }
+  });
 });

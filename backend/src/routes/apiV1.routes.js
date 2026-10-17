@@ -15,6 +15,7 @@ import { verifyClientCredentials, issueAccessToken } from '../services/oauthClie
 import rateLimiter from '../services/apiRateLimitService.js';
 import { withIdempotency } from '../middleware/apiIdempotency.js';
 import { apiProblemHandler, problems, ApiProblem } from '../utils/apiProblem.js';
+import { looksLikeRealHtml } from '../utils/htmlContent.js';
 import { resolveCategoryNames } from '../services/categoryNameResolver.js';
 import ticketResubmissionService, { normalizeExternalRef } from '../services/ticketResubmissionService.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
@@ -400,9 +401,8 @@ function assertDueByAllowed(req, body) {
  * stripped to text downstream like any other HTML body. Plain text that only
  * mentions a "<" is left alone: it needs a real formatting tag to switch.
  */
-const HTML_BODY_TAG_RE = /<\/?(p|br|b|strong|i|em|u|s|ul|ol|li|a|div|span|h[1-6]|code|pre|blockquote|table|thead|tbody|tr|th|td|hr)\b[^<>]*>/i;
 export function threadBodyFromApi(text, html) {
-  if (!html && typeof text === 'string' && HTML_BODY_TAG_RE.test(text)) return { bodyText: null, bodyHtml: text };
+  if (!html && typeof text === 'string' && looksLikeRealHtml(text)) return { bodyText: null, bodyHtml: text };
   return { bodyText: text, bodyHtml: html || null };
 }
 
