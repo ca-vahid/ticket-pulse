@@ -19,6 +19,12 @@ describe('provider error classification', () => {
       retryable: true,
     });
 
+    const aborted = new Error('Request was aborted.');
+    expect(classifyProviderError(aborted)).toMatchObject({
+      errorClass: 'api_timeout',
+      retryable: true,
+    });
+
     const providerDown = new Error('upstream unavailable');
     providerDown.statusCode = 529;
     expect(classifyProviderError(providerDown)).toMatchObject({

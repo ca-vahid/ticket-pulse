@@ -264,18 +264,34 @@ describe('notification workflow LLM pipeline service', () => {
       signal.addEventListener('abort', () => reject(signal.reason), { once: true });
     }));
 
-    await expect(runNotificationWorkflowLlmPipeline({
-      workflow,
-      node,
-      eventContext: { event: { type: 'ticket.created' } },
-      state: {},
-      policy: { ...basePolicy, totalTimeoutMs: 10 },
-      contextBundle,
-      systemPrompt: 'Write an email.',
-      userMessage: 'Generate.',
-      maxTokens: 1000,
-      providerAttemptTimeoutMs: 2000,
-    })).rejects.toThrow('Notification LLM pipeline exceeded total timeout');
+    let caught;
+    try {
+      await runNotificationWorkflowLlmPipeline({
+        workflow,
+        node,
+        eventContext: { event: { type: 'ticket.created' } },
+        state: {},
+        policy: { ...basePolicy, totalTimeoutMs: 10 },
+        contextBundle,
+        systemPrompt: 'Write an email.',
+        userMessage: 'Generate.',
+        maxTokens: 1000,
+        providerAttemptTimeoutMs: 2000,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.message).toMatch('Notification LLM pipeline exceeded total timeout');
+    expect(caught.notificationLlmDiagnostics).toEqual(expect.objectContaining({
+      turn: 1,
+      policyTotalTimeoutMs: 1000,
+      providerAttemptTimeoutMs: 1000,
+      maxTurns: 4,
+      maxToolCalls: 6,
+    }));
+    expect(caught.notificationLlmProviderEvents).toEqual([]);
 
     expect(runToolTurnMock).toHaveBeenCalledWith(expect.objectContaining({
       attemptTimeoutMs: expect.any(Number),
