@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.89-preview';
+export const APP_VERSION = '4.2.90-preview';
 
 export const changelog = [
+  {
+    version: '4.2.90-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Tucked filters stay tucked at the top</strong> &mdash; with the Filters panel unpinned, scrolling back up to the top of the list no longer brings it back on its own. Keep scrolling up once you are at the top (a short pull) and it slides back; the slim strip shows a small bar that fills as you pull. Resting the mouse on the strip still shows the filters over the list.' },
+    ],
+  },
   {
     version: '4.2.89-preview',
     date: 'October 17, 2026',

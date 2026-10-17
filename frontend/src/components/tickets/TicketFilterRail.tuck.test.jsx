@@ -57,6 +57,20 @@ describe('TicketFilterRail — pin and auto-tuck', () => {
     expect(rail()).not.toHaveAttribute('data-tucked');
   });
 
+  test('at the top while tucked, the strip shows the pull and how far it has filled (17 Oct 2026)', () => {
+    localStorage.setItem('tp_filter_rail_pin', 'auto');
+    const { rerender } = mount({ tucked: true, pull: 0.5 });
+    expect(screen.getByTestId('rail-pull')).toHaveAttribute('title', 'Scroll up again to show the filters');
+    expect(screen.getByTestId('rail-pull-fill')).toHaveStyle({ height: '50%' });
+    // scrolled down (no pull) or pinned: no hint
+    rerender(<MemoryRouter><TicketFilterRail meta={META} docked tucked pull={null} /></MemoryRouter>);
+    expect(screen.queryByTestId('rail-pull')).toBeNull();
+    localStorage.setItem('tp_filter_rail_pin', 'pinned');
+    cleanup();
+    mount({ tucked: true, pull: 0.5 });
+    expect(screen.queryByTestId('rail-pull')).toBeNull();
+  });
+
   test('the third collapse by hand offers auto-tuck once; "Turn it on" unpins', () => {
     mount();
     for (let i = 0; i < 2; i += 1) {
