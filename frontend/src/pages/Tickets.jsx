@@ -2025,7 +2025,7 @@ export default function Tickets() {
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}
             <div className={docked ? 'grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4' : 'lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-4 lg:items-start'}>
-              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
+              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} tucked={docked && cardsFolded} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
 
               <div className={docked ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}>
                 {requesterId && (
