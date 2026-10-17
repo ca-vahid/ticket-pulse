@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.80-preview';
+export const APP_VERSION = '4.2.81-preview';
 
 export const changelog = [
+  {
+    version: '4.2.81-preview',
+    date: 'October 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Filters that tuck themselves away</strong> &mdash; the Filters panel on Tickets has a pin next to &ldquo;Clear all&rdquo;. Pinned (the default) it works exactly as before. Unpinned, it stays open while you set your filters, slides aside to a slim strip once you scroll the list (with the number cards), and comes back when you return to the top. Rest the mouse on the strip to slide the filters out over the list without moving it; they tuck away again when the mouse leaves. Your choice is remembered.' },
+      { type: 'improved', html: '<strong>A one-time tip</strong> &mdash; if you collapse the filters by hand a few times, Ticket Pulse offers to tuck them away for you. It asks once.' },
+    ],
+  },
   {
     version: '4.2.80-preview',
     date: 'October 16, 2026',

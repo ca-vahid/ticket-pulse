@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { Drawer } from 'vaul';
 import { DayPicker } from 'react-day-picker';
@@ -7,7 +8,7 @@ import {
 } from 'date-fns';
 import {
   BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
-  GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
+  GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Pin, PinOff, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
 import { PARKED_STATUS, statusDefsFromMeta, statusDotClass, statusNamesForBase, withParkedDefault } from './statusDefs';
@@ -334,7 +335,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  * desktop, collapsible to a slim bar, every facet URL-persisted. On mobile it
  * becomes a slide-over drawer behind the Filters button.
  */
-export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false, createdWindow = null, onCreatedWindow = null }) {
+export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false, tucked = false, createdWindow = null, onCreatedWindow = null }) {
   const [findQuery, setFindQuery] = useState('');
   const find = findQuery.trim().toLowerCase();
   // QA 09-18 #2: Source counts follow the current view when the list sent
@@ -351,6 +352,51 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   useEffect(() => {
     try { localStorage.setItem('tp_filter_rail', collapsed ? 'collapsed' : 'open'); } catch { /* no-op */ }
   }, [collapsed]);
+
+  // Pin + auto-tuck (16 Oct 2026, Vahid): pinned is today's rail and the
+  // default. Unpinned, the rail tucks to its slim strip while the list is
+  // scrolled (`tucked`, the same moment the cards fold) and comes back at the
+  // top; resting the mouse on the strip slides the panel out OVER the list,
+  // so the list never reflows for a quick filter change.
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem('tp_filter_rail_pin') !== 'auto'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tp_filter_rail_pin', pinned ? 'pinned' : 'auto'); } catch { /* no-op */ }
+  }, [pinned]);
+  const autoTucked = docked && !pinned && tucked && !collapsed;
+  const slim = collapsed || autoTucked;
+  const [peek, setPeek] = useState(false);
+  const peekTimer = useRef(null);
+  const asideRef = useRef(null);
+  const schedulePeek = (open, ms) => {
+    clearTimeout(peekTimer.current);
+    if (ms <= 0) setPeek(open);
+    else peekTimer.current = setTimeout(() => setPeek(open), ms);
+  };
+  useEffect(() => { if (!autoTucked) { clearTimeout(peekTimer.current); setPeek(false); } }, [autoTucked]);
+  useEffect(() => () => clearTimeout(peekTimer.current), []);
+  const togglePin = () => {
+    setPinned((p) => !p);
+    schedulePeek(false, 0);
+    try { localStorage.setItem('tp_filter_rail_hint', 'shown'); } catch { /* no-op */ }
+  };
+  // One-time hint: whoever collapses the rail by hand a third time is offered
+  // the auto-tuck once, and never again.
+  const [hintAt, setHintAt] = useState(null);
+  const collapseByHand = () => {
+    setCollapsed(true);
+    if (!docked || !pinned) return;
+    try {
+      if (localStorage.getItem('tp_filter_rail_hint')) return;
+      const n = Number(localStorage.getItem('tp_filter_rail_collapses') || 0) + 1;
+      localStorage.setItem('tp_filter_rail_collapses', String(n));
+      if (n < 3) return;
+      localStorage.setItem('tp_filter_rail_hint', 'shown');
+    } catch { return; }
+    const r = asideRef.current?.getBoundingClientRect();
+    setHintAt({ left: Math.round((r?.left || 0) + 44 + 10), top: Math.round((r?.top || 0) + 8) });
+  };
 
   // Saved filter views (per-user + workspace-shared). Admins can share.
   const canShare = meta?.actor?.role === 'admin' || meta?.actor?.workspaceRole === 'admin';
@@ -702,16 +748,31 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             Clear all ({activeTotal})
           </button>
         )}
+        {docked && !mobileOpen && (
+          <button
+            type="button"
+            onClick={togglePin}
+            aria-pressed={pinned}
+            aria-label={pinned ? 'Unpin filters' : 'Pin filters open'}
+            title={pinned
+              ? 'Pinned: the filters stay open. Click to let them tuck away while you scroll the list.'
+              : 'Unpinned: the filters tuck away while you scroll the list. Click to keep them open.'}
+            data-testid="rail-pin"
+            className={`tp-focus-ring ml-auto p-1 rounded-lg hover:bg-muted ${pinned ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
+          >
+            {pinned ? <Pin className="w-4 h-4" aria-hidden="true" /> : <PinOff className="w-4 h-4" aria-hidden="true" />}
+          </button>
+        )}
         {mobileOpen ? (
           <button onClick={onMobileClose} aria-label="Close filters" className="tp-focus-ring ml-auto p-1 rounded-lg text-muted-foreground/75 hover:bg-muted">
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
         ) : (
           <button
-            onClick={() => setCollapsed(true)}
+            onClick={collapseByHand}
             aria-label="Collapse filters"
             title="Collapse filters"
-            className="tp-focus-ring ml-auto p-1 rounded-lg text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted"
+            className={`tp-focus-ring ${docked ? '' : 'ml-auto '}p-1 rounded-lg text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted`}
           >
             <ChevronsLeft className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -1328,36 +1389,54 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   // freed space. Both content layers stay mounted and cross-fade.
   return (
     <aside
+      ref={asideRef}
       aria-label="Ticket filters"
       data-collapsed={collapsed ? 'true' : undefined}
+      data-tucked={autoTucked ? 'true' : undefined}
+      data-peek={peek ? 'true' : undefined}
+      onMouseEnter={autoTucked ? () => schedulePeek(true, 350) : undefined}
+      // The mouse leaving closes the peek, unless you are typing in a box
+      // inside it (Find a filter, a date). Focus left on a hidden button
+      // would otherwise hold it open after any click.
+      onMouseLeave={autoTucked ? (e) => {
+        const el = document.activeElement;
+        if (e.currentTarget.contains(el) && el?.matches?.('input[type="text"], input[type="search"], input:not([type]), textarea')) { clearTimeout(peekTimer.current); return; }
+        clearTimeout(peekTimer.current);
+        peekTimer.current = setTimeout(() => {
+          if (asideRef.current?.contains(document.activeElement)) document.activeElement.blur();
+          setPeek(false);
+        }, 300);
+      } : undefined}
+      onBlur={autoTucked ? (e) => { if (!e.currentTarget.contains(e.relatedTarget) && !e.currentTarget.matches(':hover')) schedulePeek(false, 0); } : undefined}
+      onKeyDown={peek ? (e) => { if (e.key === 'Escape') schedulePeek(false, 0); } : undefined}
       // Docked (fixed working area): fills its grid cell, never longer than the
       // window. Otherwise sticky UNDER the app header — top-4 used to slide the
       // "Filters" title beneath the 64 px bar and push the bottom off screen.
-      className={`hidden lg:flex flex-col tp-card rounded-xl overflow-hidden
+      className={`hidden lg:flex flex-col tp-card rounded-xl ${peek ? 'overflow-visible' : 'overflow-hidden'}
         transition-[width] duration-300 ease-out motion-off:transition-none
         ${docked ? 'relative h-full min-h-0' : 'sticky top-[calc(var(--tp-app-header-h,0px)_+_1rem)] self-start max-h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}
-        ${collapsed ? `w-11 ${docked ? '' : 'h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}` : 'w-[clamp(256px,15vw,320px)]'}`}
+        ${slim ? `w-11 ${docked ? '' : 'h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}` : 'w-[clamp(256px,15vw,320px)]'}`}
     >
       {/* Slim layer (collapsed) */}
       <div
-        aria-hidden={!collapsed}
+        aria-hidden={!slim}
         className={`absolute inset-x-0 top-0 flex flex-col items-center gap-2 py-3 transition-opacity duration-200 ${
-          collapsed ? 'opacity-100 delay-150' : 'opacity-0 pointer-events-none'
+          slim ? 'opacity-100 delay-150' : 'opacity-0 pointer-events-none'
         }`}
       >
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={() => { setCollapsed(false); if (autoTucked || (collapsed && docked && !pinned && tucked)) schedulePeek(true, 0); }}
           aria-label="Expand filters"
-          title="Expand filters"
-          tabIndex={collapsed ? 0 : -1}
+          title={autoTucked ? 'Show filters (they tuck away again when the mouse leaves)' : 'Expand filters'}
+          tabIndex={slim ? 0 : -1}
           className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
         >
           <ChevronsRight className="w-4 h-4" aria-hidden="true" />
         </button>
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={() => { setCollapsed(false); if (autoTucked || (collapsed && docked && !pinned && tucked)) schedulePeek(true, 0); }}
           aria-label={`Filters${activeTotal ? ` (${activeTotal} active)` : ''}`}
-          tabIndex={collapsed ? 0 : -1}
+          tabIndex={slim ? 0 : -1}
           className="tp-focus-ring relative p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
         >
           <ListFilter className="w-4 h-4" aria-hidden="true" />
@@ -1372,13 +1451,46 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
       {/* Full layer — a floor (not a fixed width) so the counts never clip when
           the rail is narrower than the old 248px at 100% zoom (16 Sep 2026). */}
       <div
-        aria-hidden={collapsed}
-        className={`flex flex-col w-full min-w-[256px] min-h-0 flex-1 transition-opacity duration-150 ${
-          collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100 delay-100'
+        aria-hidden={slim && !peek}
+        className={`flex flex-col min-w-[256px] min-h-0 transition-[opacity,transform] duration-200 ease-out motion-off:transition-none ${
+          peek
+            ? 'absolute inset-y-0 left-0 z-[35] w-[clamp(256px,15vw,320px)] rounded-xl border border-border bg-card shadow-soft opacity-100 translate-x-0'
+            : `w-full flex-1 ${slim ? 'opacity-0 pointer-events-none -translate-x-2' : 'opacity-100 delay-100'}`
         }`}
+        data-testid="rail-panel"
       >
         <RailFindContext.Provider value={find}>{body}</RailFindContext.Provider>
       </div>
+      {hintAt && createPortal(
+        <div
+          role="dialog"
+          aria-label="Tuck the filters away automatically"
+          data-testid="rail-tuck-hint"
+          onKeyDown={(e) => { if (e.key === 'Escape') setHintAt(null); }}
+          className="fixed z-50 w-72 rounded-xl border border-border bg-card p-3.5 shadow-soft animate-popIn"
+          style={{ left: hintAt.left, top: hintAt.top }}
+        >
+          <p className="text-sm font-semibold text-foreground">Tuck the filters away automatically?</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            They stay open while you set them, slide aside once you scroll the list, and come back at the top.
+            Rest the mouse on the strip to use them in between. The pin beside &ldquo;Filters&rdquo; switches it.
+          </p>
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" onClick={() => setHintAt(null)} className="tp-focus-ring rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">
+              No thanks
+            </button>
+            <button
+              type="button"
+              autoFocus
+              onClick={() => { setPinned(false); setCollapsed(false); setHintAt(null); }}
+              className="tp-focus-ring rounded-lg bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-blue-700"
+            >
+              Turn it on
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
     </aside>
   );
 }
