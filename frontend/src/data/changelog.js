@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.83-preview';
+export const APP_VERSION = '4.2.84-preview';
 
 export const changelog = [
+  {
+    version: '4.2.84-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Formatted notes from connected systems</strong> &mdash; when a connected system (such as the infrastructure monitor) sent a note with bold text or paragraphs in its plain-text field, the note showed the raw codes, like &ldquo;&lt;p&gt;&lt;b&gt;&rdquo;. Ticket Pulse now reads that formatting and shows the note as intended.' },
+    ],
+  },
   {
     version: '4.2.83-preview',
     date: 'October 16, 2026',

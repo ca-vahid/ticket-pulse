@@ -33,7 +33,7 @@ jest.unstable_mockModule('../src/services/oauthClientService.js', () => ({ verif
 jest.unstable_mockModule('../src/services/apiRateLimitService.js', () => ({ default: { hit: jest.fn().mockResolvedValue({ allowed: true, reset: 0 }) } }));
 jest.unstable_mockModule('../src/middleware/apiIdempotency.js', () => ({ withIdempotency: (_req, _res, next) => next() }));
 
-const { default: apiV1Routes, normalizeAddNote } = await import('../src/routes/apiV1.routes.js');
+const { default: apiV1Routes, normalizeAddNote, threadBodyFromApi } = await import('../src/routes/apiV1.routes.js');
 
 function buildApp() {
   const app = express();
@@ -60,6 +60,34 @@ describe('normalizeAddNote', () => {
     expect(normalizeAddNote(undefined)).toBeNull();
     expect(() => normalizeAddNote(42)).toThrow(/addNote must be/);
     expect(() => normalizeAddNote({})).toThrow(/body is required/);
+  });
+
+  test('HTML sent as the plain body becomes the HTML body (TP-10194)', () => {
+    const html = '<p><b>Resolved automatically.</b> BGC-BRI-DC1 now syncs time from BGC-VAN-DC1.</p>';
+    expect(normalizeAddNote(html)).toEqual({ bodyText: null, bodyHtml: html, stage: null, agent: null });
+    expect(normalizeAddNote({ body: html, agent: 'Infrastructure Monitor' })).toEqual({ bodyText: null, bodyHtml: html, stage: null, agent: 'Infrastructure Monitor' });
+    // an explicit bodyHtml wins; the plain body stays the plain body
+    expect(normalizeAddNote({ body: '<b>x</b>', bodyHtml: '<p>y</p>' })).toEqual({ bodyText: '<b>x</b>', bodyHtml: '<p>y</p>', stage: null, agent: null });
+  });
+});
+
+describe('threadBodyFromApi', () => {
+  test('only a real formatting tag switches a plain body to HTML', () => {
+    expect(threadBodyFromApi('Line one<br>line two', undefined)).toEqual({ bodyText: null, bodyHtml: 'Line one<br>line two' });
+    expect(threadBodyFromApi('disk < 10% free, load > 4', undefined)).toEqual({ bodyText: 'disk < 10% free, load > 4', bodyHtml: null });
+    expect(threadBodyFromApi('use <hostname> here', undefined)).toEqual({ bodyText: 'use <hostname> here', bodyHtml: null });
+    expect(threadBodyFromApi(undefined, '<p>z</p>')).toEqual({ bodyText: undefined, bodyHtml: '<p>z</p>' });
+  });
+});
+
+describe('POST /api/v1/tickets/:id/notes', () => {
+  test('an HTML body is passed on as bodyHtml', async () => {
+    const res = await request(buildApp())
+      .post('/api/v1/tickets/501/notes')
+      .send({ body: '<p><b>Resolved automatically.</b> back in sync.</p>', agent: 'Infrastructure Monitor' })
+      .expect(201);
+    expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledWith(501, 5, expect.objectContaining({ bodyText: null, bodyHtml: '<p><b>Resolved automatically.</b> back in sync.</p>', agent: 'Infrastructure Monitor' }), expect.any(Object));
+    expect(res.body.data.entryId).toBe(9001);
   });
 });
 
