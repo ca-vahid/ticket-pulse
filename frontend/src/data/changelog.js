@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.78-preview';
+export const APP_VERSION = '4.2.79-preview';
 
 export const changelog = [
+  {
+    version: '4.2.79-preview',
+    date: 'October 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>More room for the ticket list</strong> &mdash; once you scroll the Tickets list, the &ldquo;Tickets&rdquo; title row folds away along with the number cards, and New ticket becomes a plus beside &ldquo;Tickets&rdquo; in the top bar. The list gains about 110 pixels. Back at the top, everything returns.' },
+      { type: 'improved', html: '<strong>Smooth folding</strong> &mdash; the cards and the title row now shrink and fade away, and grow back, in about half a second instead of jumping.' },
+      { type: 'improved', html: '<strong>Export removed from Tickets</strong> &mdash; the old Export button above the list is gone.' },
+    ],
+  },
   {
     version: '4.2.78-preview',
     date: 'October 16, 2026',

@@ -997,6 +997,35 @@ html[data-motion="reduce"] .animate-fadeIn {
 }
 .tp-enter { animation: tpEnter 0.24s cubic-bezier(0.22, 1, 0.36, 1) both; }
 html[data-motion="reduce"] .tp-collapse { transition: none; }
+/* Tickets, scrolled (16 Oct 2026): the title row and the cards fold away and
+   the one-line counts fold in. Height and fade move together in both
+   directions; visibility flips only once the fold has finished closing. */
+.tp-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.32s ease-out 0.06s, visibility 0s linear 0s;
+}
+.tp-fold > * { min-height: 0; overflow: hidden; }
+.tp-fold--roomy > * { padding: 0.5rem 0.5rem 0; margin: -0.5rem -0.5rem 0; }
+.tp-fold[data-folded="true"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease-out, visibility 0s linear 0.45s;
+}
+.tp-head-new {
+  transition: opacity 0.3s ease-out, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s;
+}
+.tp-head-new.is-away {
+  opacity: 0;
+  transform: scale(0.6);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease-out, transform 0.3s ease-in, visibility 0s linear 0.3s;
+}
+html[data-motion="reduce"] .tp-fold,
+html[data-motion="reduce"] .tp-head-new { transition: none; }
 html[data-motion="reduce"] .tp-enter { animation: none; }
 
 @keyframes slideInRight {
