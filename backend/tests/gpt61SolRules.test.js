@@ -44,12 +44,24 @@ describe('GPT-6.1 Sol', () => {
     expect(openAiReasoningFor('gpt-6-luna', { effort: 'none' })).toEqual({ effort: 'none' });
   });
 
-  test('sendJson: GPT-6.1 Sol gets low reasoning and no temperature; GPT-6 Sol keeps none and its temperature', async () => {
+  test('sendJson: GPT-6.1 Sol gets low reasoning and no temperature, and so does a saved GPT-6 Sol setting', async () => {
     const provider = new OpenAiProvider();
     await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6.1-sol', temperature: 0.3 });
     expect(create.mock.calls[0][0]).toMatchObject({ model: 'gpt-6.1-sol', reasoning: { effort: 'low' } });
     expect(create.mock.calls[0][0]).not.toHaveProperty('temperature');
+    // A saved GPT-6 Sol setting (retired 16 Oct 2026) runs as GPT-6.1 Sol, with its rules.
     await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6-sol', temperature: 0.3 });
-    expect(create.mock.calls[1][0]).toMatchObject({ model: 'gpt-6-sol', reasoning: { effort: 'none' }, temperature: 0.3 });
+    expect(create.mock.calls[1][0]).toMatchObject({ model: 'gpt-6.1-sol', reasoning: { effort: 'low' } });
+    expect(create.mock.calls[1][0]).not.toHaveProperty('temperature');
+  });
+
+  test('a small JSON call keeps room for the reasoning GPT-6.1 insists on; models that skip reasoning keep the cap', async () => {
+    const provider = new OpenAiProvider();
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6.1-sol', maxTokens: 150 });
+    expect(create.mock.calls[0][0].max_output_tokens).toBe(150 + 1024);
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6.1-sol', maxTokens: 150, extra: { reasoning: { effort: 'medium' } } });
+    expect(create.mock.calls[1][0].max_output_tokens).toBe(150);
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'u', model: 'gpt-6-luna', maxTokens: 150 });
+    expect(create.mock.calls[2][0].max_output_tokens).toBe(150);
   });
 });

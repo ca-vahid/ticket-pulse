@@ -83,7 +83,7 @@ describe('ProviderGateway', () => {
       workspaceId: 1,
       legacyModel: 'claude-sonnet-5',
       runLinks: { assignmentPipelineRunId: 99 },
-      shadow: { model: 'gpt-6-sol' },
+      shadow: { model: 'gpt-6.1-sol' },
       systemPrompt: 'sys',
       tools: [],
       messages: [],
@@ -95,10 +95,10 @@ describe('ProviderGateway', () => {
     expect(recordSuccessMock).not.toHaveBeenCalled();
     expect(recordFailureMock).not.toHaveBeenCalled();
     const callOptions = openAiToolResponseMock.mock.calls[0][0];
-    expect(callOptions).toMatchObject({ model: 'gpt-6-sol', provider: 'openai', systemPrompt: 'sys' });
+    expect(callOptions).toMatchObject({ model: 'gpt-6.1-sol', provider: 'openai', systemPrompt: 'sys' });
     expect(callOptions.shadow).toBeUndefined();
     expect(callOptions.runLinks).toBeUndefined();
-    expect(result).toMatchObject({ shadow: true, provider: 'openai', model: 'gpt-6-sol', fallbackUsed: false });
+    expect(result).toMatchObject({ shadow: true, provider: 'openai', model: 'gpt-6.1-sol', fallbackUsed: false });
   });
 
   test('shadow turn infers Anthropic from a claude model id', async () => {

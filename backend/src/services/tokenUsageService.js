@@ -19,12 +19,17 @@ export const MODEL_PRICING_USD_PER_MTOK = [
   // Sonnet 5 and Sonnet 5.5 (28 Sep 2026): $2 / $10, cache write $2.50, read $0.20.
   ['claude-sonnet-5', 2, 10, 2.5, 0.20],
   ['claude-sonnet', 3, 15, 3.75, 0.30],
+  // Haiku 5.5 (7 Oct 2026): $0.10 / $0.50 up to 100K-token prompts, cache
+  // write $0.125, read $0.01 (prompts above 100K cost 5x; ours stay below).
+  ['claude-haiku-5-5', 0.10, 0.50, 0.125, 0.01],
   ['claude-haiku', 1, 5, 1.25, 0.10],
   // GPT-6 (22 Sep 2026): no cache-write fee; cached reads 90% off.
   ['gpt-6-luna', 0.10, 0.50, 0, 0.01],
-  ['gpt-6-sol', 2, 10, 0, 0.20],
-  // GPT-6.1 Sol (29 Sep 2026): same list price, cache write $2.50, read $0.10.
+  // GPT-6.1 Sol (29 Sep 2026, the OpenAI default since 16 Oct): same list
+  // price as GPT-6 Sol, cached reads $0.10. Listed before gpt-6-sol so the
+  // prefix match never picks the retired row.
   ['gpt-6.1-sol', 2, 10, 2.5, 0.10],
+  ['gpt-6-sol', 2, 10, 0, 0.20],
   ['gpt-5.6-luna', 0.20, 1.20, 0, 0.02],
   ['gpt-5.6-terra', 2, 12, 0, 0.20],
   ['gpt-5.6-sol', 5, 30, 0, 0.50],

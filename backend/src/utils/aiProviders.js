@@ -40,16 +40,19 @@ export const AI_OPERATIONS = [
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5-5';
 export const SONNET_5_MODEL = 'claude-sonnet-5';
 export const SONNET_4_6_MODEL = 'claude-sonnet-4-6';
-// GPT-6 Sol (released 22 Sep 2026, verified 23 Sep against the prod key: tool
-// call + history replay + image input through OpenAiProvider). $2/M in, $10/M
-// out, cached reads 90% off and no cache-write fee — the default OpenAI slot,
-// replacing GPT-5.6 Sol ($5/$30).
-export const DEFAULT_OPENAI_MODEL = 'gpt-6-sol';
+// Haiku 5.5 (7 Oct 2026): $0.10/M in, $0.50/M out up to 100K-token prompts
+// ($0.50/$2.50 above), cache read $0.01, write $0.125. Tools, forced
+// tool_choice, thinking 'disabled' and images verified live 16 Oct 2026; it
+// rejects `temperature` (400 "deprecated for this model").
+export const HAIKU_5_5_MODEL = 'claude-haiku-5-5';
+// GPT-6.1 Sol (29 Sep 2026) is the OpenAI default since 16 Oct 2026 (Vahid):
+// same $2/M in, $10/M out as GPT-6 Sol, cached reads half the price ($0.10),
+// fewer factual errors. GPT-6 Sol is retired: saved settings that name it read
+// as GPT-6.1 Sol (alias below) and it is no longer offered.
+export const DEFAULT_OPENAI_MODEL = 'gpt-6.1-sol';
+export const GPT_6_1_SOL_MODEL = DEFAULT_OPENAI_MODEL;
+export const RETIRED_GPT_6_SOL_MODEL = 'gpt-6-sol';
 export const OPENAI_ECONOMY_MODEL = 'gpt-6-luna';
-// GPT-6.1 Sol (29 Sep 2026): same $2/$10 as GPT-6 Sol, cached reads $0.10
-// (vs $0.20), fewer factual errors. Selectable; replaces GPT-6 Sol per
-// operation only after a replay against real tickets.
-export const GPT_6_1_SOL_MODEL = 'gpt-6.1-sol';
 
 /**
  * Per-model request rules for OpenAI (30 Sep 2026): GPT-6.1 rejects
@@ -91,6 +94,9 @@ const LEGACY_MODEL_ALIASES = new Map([
   // scripts/migrate-openai-models-gpt6.mjs so Settings shows what runs.
   ['gpt-5.5', DEFAULT_OPENAI_MODEL],
   ['gpt-5.6-sol', DEFAULT_OPENAI_MODEL],
+  // GPT-6 Sol retired 16 Oct 2026: saved settings read as GPT-6.1 Sol
+  // (scripts/migrate-openai-models-gpt61.mjs rewrites the rows themselves).
+  [RETIRED_GPT_6_SOL_MODEL, DEFAULT_OPENAI_MODEL],
   // gpt-5.6-luna is NOT aliased: it runs as ws2's assignment fallback and Luna 6
   // has not been shadow-tested on assignment (plans/AI_MODEL_COST_PLAN.md §3).
 ]);
@@ -148,6 +154,18 @@ export const MODEL_METADATA = [
   },
   {
     provider: AI_PROVIDER_ANTHROPIC,
+    model: HAIKU_5_5_MODEL,
+    label: 'Claude Haiku 5.5 (Economy)',
+    operations: AI_OPERATIONS,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsJson: true,
+    supportsThinking: false,
+    supportsVision: true,
+    costNotes: 'Economy Claude ($0.10/M in, $0.50/M out up to 100K-token prompts; $0.50/$2.50 above). Tools and images. Shadow-test before using it for assignment.',
+  },
+  {
+    provider: AI_PROVIDER_ANTHROPIC,
     model: DEFAULT_OPUS_MODEL,
     label: 'Claude Opus 4.8 (Expensive)',
     operations: AI_OPERATIONS,
@@ -161,19 +179,6 @@ export const MODEL_METADATA = [
   {
     provider: AI_PROVIDER_OPENAI,
     model: DEFAULT_OPENAI_MODEL,
-    label: 'GPT-6 Sol',
-    operations: AI_OPERATIONS,
-    supportsStreaming: false,
-    supportsTools: true,
-    supportsJson: true,
-    supportsThinking: true,
-    // Image input verified live 23 Sep 2026 (Responses `input_image`).
-    supportsVision: true,
-    costNotes: 'Default OpenAI model: roughly Sonnet-class on business workflows at about two-thirds the price ($2/M in, $10/M out, cached reads 90% off, no cache-write fee). Replaces GPT-5.6 Sol.',
-  },
-  {
-    provider: AI_PROVIDER_OPENAI,
-    model: GPT_6_1_SOL_MODEL,
     label: 'GPT-6.1 Sol',
     operations: AI_OPERATIONS,
     supportsStreaming: false,
@@ -181,7 +186,7 @@ export const MODEL_METADATA = [
     supportsJson: true,
     supportsThinking: true,
     supportsVision: true,
-    costNotes: 'Successor to GPT-6 Sol at the same price ($2/M in, $10/M out) with cached reads at $0.10 and fewer factual errors (OpenAI: 7.7% vs 11.4%). Behind Sonnet 5.5 on tool-heavy agent work.',
+    costNotes: 'Default OpenAI model ($2/M in, $10/M out, cached reads $0.10): replaced GPT-6 Sol, with fewer factual errors (OpenAI: 7.7% vs 11.4%). Runs at reasoning low or higher, without temperature.',
   },
   {
     provider: AI_PROVIDER_OPENAI,
@@ -252,7 +257,8 @@ export function shouldOmitAnthropicTemperature(model) {
   if (value === DEFAULT_OPUS_MODEL || value.startsWith(`${DEFAULT_OPUS_MODEL}-`)) return true;
   // Sonnet 5 and Sonnet 5.5 (claude-sonnet-5-5) reject non-default sampling
   // params (400), unlike Sonnet 4.6.
-  return value === 'claude-sonnet-5' || value.startsWith('claude-sonnet-5-');
+  // Haiku 5.5 too (400 "temperature is deprecated for this model", 16 Oct 2026).
+  return value === 'claude-sonnet-5' || value.startsWith('claude-sonnet-5-') || value === HAIKU_5_5_MODEL || value.startsWith(`${HAIKU_5_5_MODEL}-`);
 }
 
 /**

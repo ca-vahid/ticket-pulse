@@ -21,13 +21,14 @@ import {
 } from '../src/utils/aiProviders.js';
 
 describe('GPT-6 migration (23 Sep 2026)', () => {
-  test('gpt-5.5 and gpt-5.6-sol settings read as GPT-6 Sol; gpt-5.6-luna is left alone', () => {
-    expect(normalizeAiModel('gpt-5.5', AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
-    expect(normalizeAiModel('gpt-5.6-sol', AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
-    expect(normalizeAiModel('gpt-5', AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
+  test('gpt-5.5, gpt-5.6-sol and the retired gpt-6-sol read as GPT-6.1 Sol; gpt-5.6-luna is left alone', () => {
+    expect(normalizeAiModel('gpt-5.5', AI_PROVIDER_OPENAI)).toBe('gpt-6.1-sol');
+    expect(normalizeAiModel('gpt-6-sol', AI_PROVIDER_OPENAI)).toBe('gpt-6.1-sol');
+    expect(normalizeAiModel('gpt-5.6-sol', AI_PROVIDER_OPENAI)).toBe('gpt-6.1-sol');
+    expect(normalizeAiModel('gpt-5', AI_PROVIDER_OPENAI)).toBe('gpt-6.1-sol');
     expect(normalizeAiModel('gpt-6-luna', AI_PROVIDER_OPENAI)).toBe('gpt-6-luna');
     expect(normalizeAiModel('gpt-5.6-luna', AI_PROVIDER_OPENAI)).toBe('gpt-5.6-luna');
-    expect(defaultModelForProvider(AI_PROVIDER_OPENAI)).toBe('gpt-6-sol');
+    expect(defaultModelForProvider(AI_PROVIDER_OPENAI)).toBe('gpt-6.1-sol');
   });
 
   test('every registered model has its own price row (no silent Sonnet-price default)', async () => {
@@ -91,14 +92,13 @@ describe('ai provider utilities', () => {
     });
     // Approved set (23 Sep 2026): GPT-6 Sol (default), GPT-6 Luna (economy),
     // and GPT-5.6 Luna kept for the one ws2 fallback that still names it.
-    // 30 Sep 2026: GPT-6.1 Sol added (selectable, not the default).
+    // 16 Oct 2026: GPT-6.1 Sol replaced GPT-6 Sol (no longer offered).
     expect(openAiModels).toEqual([
-      expect.objectContaining({ model: 'gpt-6-sol', label: 'GPT-6 Sol' }),
       expect.objectContaining({ model: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' }),
       expect.objectContaining({ model: 'gpt-6-luna', label: 'GPT-6 Luna (Economy)' }),
       expect.objectContaining({ model: 'gpt-5.6-luna', label: expect.stringContaining('legacy') }),
     ]);
-    expect(DEFAULT_OPENAI_MODEL).toBe('gpt-6-sol');
+    expect(DEFAULT_OPENAI_MODEL).toBe('gpt-6.1-sol');
 
     const anthropicModels = getModelMetadata({
       provider: AI_PROVIDER_ANTHROPIC,

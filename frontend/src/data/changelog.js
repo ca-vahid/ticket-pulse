@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.81-preview';
+export const APP_VERSION = '4.2.82-preview';
 
 export const changelog = [
+  {
+    version: '4.2.82-preview',
+    date: 'October 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>GPT-6.1 Sol replaces GPT-6 Sol</strong> &mdash; every AI step that used GPT-6 Sol, mostly as the backup when Claude is unavailable, now uses GPT-6.1 Sol: the same price with cheaper repeated prompts and fewer factual errors. GPT-6 Sol is no longer offered.' },
+      { type: 'added', html: '<strong>Claude Haiku 5.5</strong> &mdash; the new low-cost Claude model can be chosen for any AI step in Settings &rarr; AI &amp; Routing.' },
+    ],
+  },
   {
     version: '4.2.81-preview',
     date: 'October 16, 2026',

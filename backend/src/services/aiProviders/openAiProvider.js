@@ -1,6 +1,9 @@
 import OpenAI from 'openai';
 import config from '../../config/index.js';
 import { normalizeAiModel, openAiOmitsTemperature, openAiReasoningFor } from '../../utils/aiProviders.js';
+
+// Room for the reasoning a model insists on when the caller asked for none.
+const RAISED_REASONING_HEADROOM = 1024;
 import {
   buildAnthropicMessageFromOpenAiResponse,
   convertAnthropicMessagesToOpenAiInput,
@@ -49,6 +52,13 @@ class OpenAiProvider {
     extra = {},
   }) {
     const selectedModel = normalizeAiModel(model || config.openai.model, 'openai');
+    // A model that cannot skip reasoning (GPT-6.1: low at least) spends part
+    // of max_output_tokens on hidden reasoning. A small JSON call (a 150-token
+    // reply check) could then return nothing visible, so the reasoning the
+    // caller did not ask for gets its own headroom (16 Oct 2026).
+    const requestedReasoning = extra.reasoning || { effort: 'none' };
+    const reasoning = openAiReasoningFor(selectedModel, requestedReasoning);
+    const outputCap = reasoning?.effort !== requestedReasoning?.effort ? maxTokens + RAISED_REASONING_HEADROOM : maxTokens;
     const response = await this.getClient().responses.create({
       model: selectedModel,
       instructions: systemPrompt,
@@ -58,8 +68,8 @@ class OpenAiProvider {
         verbosity: 'medium',
         ...(extra.text || {}),
       },
-      reasoning: openAiReasoningFor(selectedModel, extra.reasoning || { effort: 'none' }),
-      max_output_tokens: maxTokens,
+      reasoning,
+      max_output_tokens: outputCap,
       ...(temperature === null || openAiOmitsTemperature(selectedModel) ? {} : { temperature }),
     }, signal ? { signal } : undefined);
     const content = response.output_text || this._flattenResponseOutput(response);
