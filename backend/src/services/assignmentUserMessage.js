@@ -93,8 +93,28 @@ const HAND_BACK_LABELS = {
   location: 'Location issue',
   capacity: 'Capacity full',
   competency: 'Competency mismatch',
+  access: 'Access / permission limited',
+  escalate: 'Escalate to Advanced Troubleshooting Team',
   other: 'Other',
 };
+
+const LEVEL_ORDER = ['basic', 'intermediate', 'advanced', 'expert'];
+
+/** QA 10-16 item 1: the escalation instruction (level + scope from the hand-back snapshot). */
+function escalationLines(escalation) {
+  const who = escalation?.fromTechName || 'The previous assignee';
+  const scope = escalation?.scope || [escalation?.categoryName, escalation?.subcategoryName].filter(Boolean).join(' / ') || null;
+  const level = escalation?.level ? String(escalation.level).toLowerCase() : null;
+  const above = level && LEVEL_ORDER.includes(level) ? LEVEL_ORDER.slice(LEVEL_ORDER.indexOf(level) + 1) : LEVEL_ORDER;
+  const lines = [
+    `\nThis is an ESCALATION. ${who} is at level "${level || 'no recorded skill'}"${scope ? ` in ${scope}` : ''} and needs someone more advanced.`,
+    above.length
+      ? `You MUST recommend a technician whose competency level${scope ? ` in ${scope}` : ' in this ticket\'s category / subcategory'} is higher: ${above.join(' or ')}. Rank by that level first (subcategory skill first, then the category), then availability and workload.`
+      : 'They are already at the highest level; recommend another expert in this category if one is at work, and say in overallReasoning that nobody is more advanced.',
+    'If nobody more advanced is at work, still rank the best people, and say so plainly in overallReasoning - a coordinator will decide. A check after your pick enforces this.',
+  ];
+  return lines.join('\n');
+}
 
 /**
  * The reason the previous assignee gave when handing the ticket back (QA 09-25
@@ -112,6 +132,10 @@ export function buildHandBackReasonBlock(reason) {
     block += '\nThe previous assignee did not have the skills for this ticket\'s category. Prefer candidates with a stronger competency match for this category and subcategory.';
   } else if (reason.code === 'capacity') {
     block += '\nThe previous assignee was at capacity. Weigh current open workload and today\'s assignments; prefer someone with room.';
+  } else if (reason.code === 'access') {
+    block += '\nThe previous assignee did not have the access or permissions this ticket needs (a system, an admin right, a site). Prefer candidates who are known to hold that access for this category, and say in overallReasoning what access the work needs.';
+  } else if (reason.code === 'escalate') {
+    block += escalationLines(reason.escalation || null);
   }
   block += '\nTreat this reason as context for choosing the next person — do not mention it in agentBriefingHtml.';
   return block;

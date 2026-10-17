@@ -1,6 +1,25 @@
-export const APP_VERSION = '4.2.79-preview';
+export const APP_VERSION = '4.2.80-preview';
 
 export const changelog = [
+  {
+    version: '4.2.80-preview',
+    date: 'October 16, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>One question for every change of agent</strong> &mdash; moving a ticket to someone else, or handing it back, asks the same thing on every page: why, with room for a note. New reasons: <em>Access / permission limited</em>, and <em>Escalate to Advanced Troubleshooting Team</em> when a ticket goes back to the queue.' },
+      { type: 'added', html: '<strong>Escalate</strong> &mdash; an escalated ticket goes to someone at a higher skill level in its category. If nobody more advanced is at work, it waits for a coordinator instead of being assigned. The ticket and the review card say who escalated it and why.' },
+      { type: 'fixed', html: '<strong>Long e-mail threads in a reply</strong> &mdash; a requester&rsquo;s reply that carries the whole earlier thread now shows only what they wrote. The full e-mail is one click away.' },
+      { type: 'added', html: '<strong>Field Equipment categories</strong> &mdash; the Field Equipment team has its own 7 categories and 16 subcategories, and new tickets there are categorized by the AI. Tags are unchanged.' },
+      { type: 'added', html: '<strong>Shares (trial)</strong> &mdash; Assignment Review &rarr; Shares gives people a share of the tickets in categories you pick. In Shadow it only records who it would pick and shows how the split works out. Off everywhere.' },
+      { type: 'fixed', html: '<strong>My open and My tickets</strong> &mdash; My open shows only Open tickets. The new My tickets view shows everything you are working on: Open, Pending, Pending Response and parked.' },
+      { type: 'fixed', html: '<strong>Awaiting AI approval</strong> &mdash; the list now shows only tickets whose suggestion is still waiting, so it matches the count. Closed tickets no longer appear.' },
+      { type: 'added', html: '<strong>Date window on Tickets</strong> &mdash; 7d &middot; 30d &middot; 90d &middot; All on the toolbar, 90 days by default and remembered for you. Finished tickets older than the window are hidden; work in progress always shows, and a search looks at every date.' },
+      { type: 'fixed', html: '<strong>The quick cards</strong> &mdash; clicking a card such as Awaiting reply now shows exactly that card&rsquo;s tickets. It replaces the other filters instead of adding to them.' },
+      { type: 'fixed', html: '<strong>Back to Tickets from a ticket</strong> &mdash; on a ticket page, the Tickets icon in the side rail takes you back to the list you came from, with its filters.' },
+      { type: 'fixed', html: '<strong>Collapsed filter panel</strong> &mdash; once collapsed on a desktop, the Tickets filter panel can be opened again.' },
+      { type: 'improved', html: '<strong>Off, Shadow or Live</strong> &mdash; a mail workflow is now one of three choices instead of two switches, and the header says what will happen. Shadow runs and records but sends nothing. The word &ldquo;mock&rdquo; is gone from Mail Workflows.' },
+      { type: 'fixed', html: '<strong>E-mail branding preview</strong> &mdash; the header and footer preview now looks like the real e-mail. The AUS footer&rsquo;s logo is no longer squeezed.' },
+    ],
+  },
   {
     version: '4.2.79-preview',
     date: 'October 16, 2026',

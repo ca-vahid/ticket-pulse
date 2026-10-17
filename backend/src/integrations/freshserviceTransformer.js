@@ -4,6 +4,7 @@ import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId } from '../utils/fsEntryId.js';
 import { fsSystemConversationKind } from '../utils/fsSystemConversation.js';
+import { stripFlattenedQuoteHeader, stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
 import {
   FALLBACK_STATUS_LABELS,
   boundNameForFsStatus,
@@ -635,6 +636,20 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
         user_id: conversation.user_id || null,
       })).digest('hex')}`;
 
+    // QA 10-16 (#245244): a requester's reply can carry the whole earlier
+    // thread when FreshService does not find the cut. Keep what they wrote;
+    // the full mail stays in rawPayload. Only incoming requester replies —
+    // notes and forwards quote on purpose.
+    const trimQuoted = eventType === 'customer_reply';
+    const bodyHtml = trimQuoted ? stripQuotedHtml(conversation.body || '') || null : (conversation.body || null);
+    // The plain text is cut only when the HTML showed a real quote block (or
+    // there is no HTML): text alone can't tell a quote from a pasted bounce.
+    const htmlCut = trimQuoted && bodyHtml !== (conversation.body || null);
+    const bodyText = trimQuoted && (htmlCut || !conversation.body)
+      ? stripFlattenedQuoteHeader(stripQuotedText(conversation.body_text || '')) || null
+      : (conversation.body_text || null);
+    const trimmed = trimQuoted && (bodyHtml !== (conversation.body || null) || bodyText !== (conversation.body_text || null));
+
     return {
       ticketId,
       workspaceId,
@@ -657,10 +672,12 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
       visibility,
       title: conversation.subject || null,
       content: null,
-      bodyHtml: conversation.body || null,
-      bodyText: conversation.body_text || null,
+      bodyHtml,
+      bodyText,
       occurredAt: conversation.created_at ? new Date(conversation.created_at) : new Date(),
-      rawPayload: systemKind ? { ...conversation, tpSystemKind: systemKind } : conversation,
+      rawPayload: systemKind
+        ? { ...conversation, tpSystemKind: systemKind }
+        : trimmed ? { ...conversation, tpQuotedHistoryTrimmed: true } : conversation,
     };
   } catch (error) {
     logger.error('Error transforming ticket conversation entry:', error);

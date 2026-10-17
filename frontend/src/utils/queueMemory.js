@@ -28,6 +28,36 @@ export function rememberQueueView(workspaceId, search) {
   } catch { /* storage unavailable */ }
 }
 
+// Scroll position of the list (QA 10-16 #9): kept for this browser tab only,
+// and only for the exact view it was read on, so coming back to the list (the
+// nav rail, Back) lands on the same rows. A different view starts at the top.
+const SCROLL_PREFIX = 'tp_queue_scroll_ws';
+
+export function rememberQueueScroll(workspaceId, search, top) {
+  if (!workspaceId) return;
+  try {
+    sessionStorage.setItem(`${SCROLL_PREFIX}${workspaceId}`, JSON.stringify({ search: queueSearchToKeep(search), top: Math.max(0, Math.round(Number(top) || 0)) }));
+  } catch { /* storage unavailable */ }
+}
+
+/** The remembered { search, top } for this workspace, or null. */
+export function readQueueScroll(workspaceId) {
+  if (!workspaceId) return null;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`${SCROLL_PREFIX}${workspaceId}`) || 'null');
+    if (!saved || typeof saved.search !== 'string' || !Number.isFinite(saved.top)) return null;
+    return { search: saved.search, top: Math.max(0, saved.top) };
+  } catch {
+    return null;
+  }
+}
+
+/** The remembered scroll offset for exactly this view, or 0. */
+export function recallQueueScroll(workspaceId, search, entry = readQueueScroll(workspaceId)) {
+  if (!entry || entry.search !== queueSearchToKeep(search)) return 0;
+  return entry.top;
+}
+
 /** The remembered query string ('?…'), or '' when there is none or it is over a week old. */
 export function recallQueueView(workspaceId, now = Date.now()) {
   if (!workspaceId) return '';

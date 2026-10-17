@@ -591,9 +591,9 @@ const MOCK_AUDIT_RANGES = [
 ];
 
 const WORKFLOW_AUDIT_MODES = [
-  { value: 'live_mock', label: 'Live + mock' },
+  { value: 'live_mock', label: 'Live + Shadow' },
   { value: 'live', label: 'Live only' },
-  { value: 'mock', label: 'Mock only' },
+  { value: 'mock', label: 'Shadow only' },
   { value: 'preview', label: 'Preview only' },
   { value: 'all', label: 'All modes' },
 ];
@@ -4866,7 +4866,7 @@ function EmailBrandingPanel({
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</div>
           <div className="min-h-[420px] rounded-md border border-border bg-card p-4 text-sm text-foreground">
             {draft?.html ? (
-              <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(draft.html) }} />
+              <EmailBlockPreview html={draft.html} title={`${draft.name || 'Branding block'} preview`} />
             ) : (
               <div className="flex h-64 items-center justify-center text-muted-foreground">Upload or paste HTML for this block.</div>
             )}
@@ -4874,6 +4874,49 @@ function EmailBrandingPanel({
         </section>
       </div>
     </section>
+  );
+}
+
+/** What a mail client starts from: no app styles, a white page, Calibri 11 pt. */
+export function emailBlockPreviewDocument(html) {
+  return '<!doctype html><html><head><meta charset="utf-8">'
+    + '<style>html,body{margin:0;background:#ffffff;color:#000000;font-family:Calibri,Arial,sans-serif;font-size:11pt;}body{padding:8px;}</style>'
+    + `</head><body>${sanitizePreviewHtmlClient(html)}</body></html>`;
+}
+
+/**
+ * Header / footer preview in its own frame (QA 10-16): rendered inside the app,
+ * the app's own image rule (max-width: 100%) squeezed the logo into its table
+ * cell while its height stayed 90 px, so the AUS footer looked stretched. A mail
+ * client lets the cell grow; the frame does too. No scripts run in it; the
+ * frame grows to fit, including after the logo loads.
+ */
+export function EmailBlockPreview({ html, title = 'E-mail preview' }) {
+  const frameRef = useRef(null);
+  const [height, setHeight] = useState(160);
+  const doc = useMemo(() => emailBlockPreviewDocument(html), [html]);
+  const measure = useCallback(() => {
+    const d = frameRef.current?.contentDocument;
+    if (!d?.documentElement) return;
+    setHeight(Math.max(80, Math.ceil(d.documentElement.scrollHeight)));
+  }, []);
+  const onLoad = useCallback(() => {
+    measure();
+    const d = frameRef.current?.contentDocument;
+    Array.from(d?.images || []).forEach((img) => { if (!img.complete) img.addEventListener('load', measure, { once: true }); });
+  }, [measure]);
+  return (
+    <iframe
+      ref={frameRef}
+      title={title}
+      sandbox="allow-same-origin"
+      srcDoc={doc}
+      onLoad={onLoad}
+      // A mail client's white page in either theme (like the thread's mail well).
+      style={{ height, background: '#ffffff' }}
+      className="block w-full rounded border-0"
+      data-testid="email-block-preview"
+    />
   );
 }
 
@@ -5009,7 +5052,7 @@ function MockModeBadge({ compact = false }) {
     )}
     >
       <FlaskConical className={compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} />
-      Mock
+      Shadow
     </span>
   );
 }
@@ -5023,7 +5066,7 @@ export function AuditModeBadge({ mode, compact = false }) {
       icon: Send,
     },
     mock: {
-      label: 'Mock',
+      label: 'Shadow',
       className: 'border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200',
       icon: FlaskConical,
     },
@@ -5051,40 +5094,41 @@ export function AuditModeBadge({ mode, compact = false }) {
   );
 }
 
-// Stable on/off switch: the label never changes (so you always read it the same
-// way), and the track position + color shows the current state — not the action.
-function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone = 'emerald', compact = false }) {
-  const onTrack = tone === 'sky' ? 'bg-sky-500' : 'bg-emerald-500';
-  const onShell = tone === 'sky' ? 'border-sky-300 dark:border-sky-500/40 bg-sky-50 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200' : 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200';
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={`${label} ${checked ? 'on' : 'off'}`}
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={cls(
-        'inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? onShell : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
-      )}
-    >
-      {!compact && <span>{label}</span>}
-      <span className={cls('relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors', checked ? onTrack : 'bg-muted-foreground/40')}>
-        <span className={cls('inline-block h-3 w-3 transform rounded-full bg-card shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
-      </span>
-    </button>
-  );
+/** Off · Shadow · Live — what a workflow does, from its two stored flags. */
+export function workflowRunState(workflow) {
+  if (!workflow || workflow.isEnabled !== true) return 'off';
+  return workflow.mockModeEnabled === true ? 'shadow' : 'live';
 }
 
 /**
- * The workflow's state as words with dots — "Enabled · Mock · Observe-only" —
- * instead of two toggles and an amber banner ("t1", 22 Sep 2026). Click to
- * open a small menu that holds the Live and Mock switches and explains what
- * observe-only means. The observe-only word keeps its test id.
+ * The writes that move a workflow to `target`, in an order that never passes
+ * through a real-live moment: Shadow goes on before the workflow does, and
+ * comes off only on the way to Live. Each step is ['enabled' | 'shadow', bool].
  */
-function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onToggleMock, canToggleMock, mockTitle }) {
+export function workflowStateSteps(workflow, target) {
+  const enabled = workflow?.isEnabled === true;
+  const shadow = workflow?.mockModeEnabled === true;
+  if (target === 'off') return enabled ? [['enabled', false]] : [];
+  const steps = [];
+  if (target === 'shadow' && !shadow) steps.push(['shadow', true]);
+  if (target === 'live' && shadow) steps.push(['shadow', false]);
+  if (!enabled) steps.push(['enabled', true]);
+  return steps;
+}
+
+const WORKFLOW_RUN_STATES = [
+  { key: 'off', label: 'Off', dot: 'bg-muted-foreground/40', hint: 'Does not run.' },
+  { key: 'shadow', label: 'Shadow', dot: 'bg-amber-500', hint: 'Runs on every matching ticket and records what it would do. Sends nothing and changes nothing.' },
+  { key: 'live', label: 'Live', dot: 'bg-emerald-500', hint: 'Runs and takes real actions: sends e-mails, updates tickets.' },
+];
+
+/**
+ * The workflow's state is one choice — Off, Shadow or Live (QA 10-16). It used
+ * to be two switches, Live and Shadow, and Shadow alone did nothing: a user
+ * turned Shadow on with Live off and the workflows never ran. The header word
+ * always says what will happen; the menu holds the three choices.
+ */
+export function WorkflowStateLine({ workflow, published, saving, onSetState }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   useEffect(() => {
@@ -5095,15 +5139,9 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [open]);
   if (!workflow) return null;
-  const enabled = workflow.isEnabled === true;
-  const mock = workflow.mockModeEnabled === true;
-  const observe = enabled && mock;
-  const words = [
-    { key: 'live', dot: enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40', text: enabled ? 'Enabled' : published ? 'Off' : 'Draft' },
-    // Mock mode IS observe-only (runs, records, sends nothing) — one word for it (Vahid, 22 Sep 2026).
-    // 2 Oct 2026 (Vahid): that word is "Shadow", the same as Auto-help and Onboarding.
-    ...(mock ? [{ key: 'observe', dot: 'bg-amber-500', text: 'Shadow', testId: observe ? 'observe-only-warning' : undefined }] : []),
-  ];
+  const current = workflowRunState(workflow);
+  const shown = WORKFLOW_RUN_STATES.find((st) => st.key === current);
+  const word = current === 'off' && !published ? 'Draft' : shown.label;
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -5111,48 +5149,47 @@ function WorkflowStateLine({ workflow, published, saving, onToggleEnabled, onTog
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Live, off or shadow — click to change"
-        className="tp-focus-ring inline-flex h-8 items-center gap-2.5 rounded-md border border-transparent px-2 text-xs font-semibold text-foreground/85 hover:border-border hover:bg-muted/50"
+        title="Off, Shadow or Live — click to change"
+        className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-semibold text-foreground/85 hover:border-border hover:bg-muted/50"
         data-testid="workflow-state-line"
+        data-state={current}
       >
-        {words.map((w, i) => (
-          <span key={w.key} className="inline-flex items-center gap-1.5" data-testid={w.testId}>
-            {i > 0 && <span className="-ml-1 text-muted-foreground/40" aria-hidden="true">·</span>}
-            <span className={cls('h-2 w-2 rounded-full', w.dot)} aria-hidden="true" />
-            {w.text}
-          </span>
-        ))}
+        <span className={cls('h-2 w-2 rounded-full', shown.dot)} aria-hidden="true" />
+        <span data-testid={current === 'shadow' ? 'observe-only-warning' : undefined}>{word}</span>
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/60" aria-hidden="true" />
       </button>
       {open && (
-        <div role="dialog" aria-label="Workflow state" className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl border border-border bg-card p-3 shadow-xl animate-popIn">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-semibold text-foreground">Live</div>
-              <div className="text-[11px] leading-4 text-muted-foreground">Runs on matching events and takes real actions.</div>
-            </div>
-            <WorkflowToggle
-              label="Live"
-              tone="emerald"
-              compact
-              checked={enabled}
-              onClick={onToggleEnabled}
-              disabled={saving || (!enabled && !published)}
-              title={enabled ? 'Live: real notifications send on matching events. Click to turn off.' : published ? 'Off: this workflow does not run. Click to go live.' : 'Publish the workflow before it can go live.'}
-            />
+        <div role="dialog" aria-label="Workflow state" className="absolute right-0 top-full z-40 mt-1 w-80 rounded-xl border border-border bg-card p-3 shadow-xl animate-popIn">
+          <div role="radiogroup" aria-label="Workflow state" className="grid grid-cols-3 gap-1 rounded-lg bg-muted/60 p-1">
+            {WORKFLOW_RUN_STATES.map((st) => {
+              const active = st.key === current;
+              const blocked = st.key !== 'off' && !published;
+              return (
+                <button
+                  key={st.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={saving || blocked}
+                  title={blocked ? 'Publish the workflow first.' : st.hint}
+                  onClick={() => { if (!active) onSetState(st.key); }}
+                  className={cls(
+                    'tp-focus-ring inline-flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+                    active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  data-testid={`workflow-state-${st.key}`}
+                >
+                  <span className={cls('h-2 w-2 rounded-full', st.dot)} aria-hidden="true" />
+                  {st.label}
+                </button>
+              );
+            })}
           </div>
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-semibold text-foreground">Shadow</div>
-              <div className="text-[11px] leading-4 text-muted-foreground">Runs and records every step, but takes no real actions — no e-mails, no ticket updates.</div>
-            </div>
-            <WorkflowToggle label="Shadow" tone="sky" compact checked={mock} onClick={onToggleMock} disabled={saving || !canToggleMock} title={mockTitle} />
-          </div>
-          {observe && (
-            <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
-              <FlaskConical className="mr-1 inline h-3 w-3" aria-hidden="true" />
-              <strong>Live in shadow.</strong> It runs on matching tickets and only records what it would have done. Turn Shadow off to make it act.
-            </p>
+          <p className="mt-2.5 text-[11px] leading-4 text-muted-foreground">
+            <span className="font-semibold text-foreground/85">{shown.label}:</span> {shown.hint}
+          </p>
+          {!published && (
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">Publish the workflow before it can run in Shadow or Live.</p>
           )}
         </div>
       )}
@@ -6702,7 +6739,7 @@ export function LlmContextToolsPanel({
                     <span className="font-semibold">Tool mode is on for this workspace.</span>{' '}
                     The LLM may call the read-only Ticket Pulse evidence tools below while drafting.
                     Internal notes enter the evidence bundle but the output guard hard-blocks quoting them verbatim.
-                    Recommended rollout: run one non-critical workflow in <span className="font-semibold">mock mode for a week</span>,
+                    Recommended rollout: run one non-critical workflow in <span className="font-semibold">Shadow for a week</span>,
                     review its audit for unsupported claims and latency, then enable live delivery per workflow.
                   </div>
                   <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -7064,7 +7101,7 @@ export function MockAuditPanel({
               {visibleRuns.length} runs
             </span>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">Saved live, mock, and preview workflow runs with rendered email, delivery outcome, and LLM/tool evidence.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Saved Live, Shadow and preview workflow runs with rendered email, delivery outcome, and LLM/tool evidence.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -7407,7 +7444,7 @@ export function MockAuditPanel({
                       )}
                       {!compact && delivery?.status && (
                         <span className={cls('rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusClass(delivery.status))}>
-                          {delivery.status}
+                          {delivery.status === 'mocked' ? 'Shadow · not sent' : delivery.status}
                         </span>
                       )}
                       <span className="min-w-0 truncate">
@@ -8650,28 +8687,47 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function toggleMockMode() {
+  /**
+   * Off · Shadow · Live (QA 10-16). The two stored flags change in an order
+   * that never passes through a real-live moment: Shadow is switched on before
+   * the workflow is, and switched off only on the way to Live.
+   */
+  async function setWorkflowRunState(target) {
     if (!selected) return;
-    const nextEnabled = !selected.mockModeEnabled;
-    if (nextEnabled && !(selected?.publishedVersion > 0)) {
-      setMessage({ type: 'error', text: 'Publish the workflow before enabling mock mode' });
+    const current = workflowRunState(selected);
+    if (target === current) return;
+    if (target !== 'off' && !(selected?.publishedVersion > 0)) {
+      setMessage({ type: 'error', text: 'Publish the workflow before turning it on' });
       return;
     }
     setSaving(true);
     setMessage(null);
     try {
-      const response = await notificationWorkflowAPI.setMockMode(selected.id, nextEnabled);
-      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
-      setMessage({
-        type: 'success',
-        text: nextEnabled ? 'Mock mode enabled for this workflow' : 'Mock mode disabled for this workflow',
-      });
+      let response = null;
+      for (const [flag, value] of workflowStateSteps(selected, target)) {
+        response = flag === 'shadow'
+          ? await notificationWorkflowAPI.setMockMode(selected.id, value)
+          : await notificationWorkflowAPI.setEnabled(selected.id, value);
+      }
+      if (response?.data) applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      if (selectedIsAfterHoursWorkflow && response?.data) {
+        setAfterHoursPolicy((cur) => ({ ...cur, afterHoursEnabled: response.data.isEnabled === true }));
+        setAfterHoursDraft((cur) => ({ ...cur, afterHoursEnabled: response.data.isEnabled === true }));
+      }
+      const text = {
+        off: 'Workflow is off. It does not run.',
+        shadow: 'Workflow is in Shadow. It runs on matching tickets and records what it would do, but sends nothing.',
+        live: 'Workflow is live. It runs and takes real actions.',
+      }[target];
+      setMessage(response?.warning ? { type: 'warning', text: response.warning } : { type: 'success', text });
       await Promise.all([
         refreshHealth(),
-        nextEnabled || mockAuditOpen ? loadMockAuditRuns(mockAuditFilters) : Promise.resolve(),
+        target === 'shadow' || mockAuditOpen ? loadMockAuditRuns(mockAuditFilters) : Promise.resolve(),
       ]);
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
+      // A half-done change (one flag written) shows as it really is.
+      loadWorkflows(selected.id).catch(() => {});
     } finally {
       setSaving(false);
     }
@@ -8901,7 +8957,7 @@ export default function NotificationWorkflowsPanel({
     {
       id: 'mock-audit',
       label: 'Workflow Audit',
-      description: 'Review live, mock, and preview workflow runs.',
+      description: 'Review Live, Shadow and preview workflow runs.',
       icon: FlaskConical,
       activeIconClass: 'border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200',
       iconColor: 'text-sky-600 dark:text-sky-300',
@@ -8911,13 +8967,6 @@ export default function NotificationWorkflowsPanel({
   ];
   // Mock mode is independent of live-enable: it can be armed on a disabled
   // (but published) workflow so it is already in safe test mode before going live.
-  const canEnableMockMode = selectedIsPublished;
-  const canToggleMockMode = Boolean(selected?.mockModeEnabled || canEnableMockMode);
-  const mockModeButtonTitle = selected?.mockModeEnabled
-    ? 'Turn mock mode off.'
-    : !selectedIsPublished
-      ? 'Publish the workflow before turning on mock mode.'
-      : 'Run the real workflow and LLM, but redirect email to mock recipients instead of sending live.';
   const afterHoursScheduleDraft = useMemo(() => ({
     afterHoursEnabled: selectedIsAfterHoursWorkflow ? true : afterHoursDraft.afterHoursEnabled,
     holidaysEnabled: afterHoursDraft.holidaysEnabled,
@@ -9371,7 +9420,7 @@ export default function NotificationWorkflowsPanel({
       setMessage(response.warning ? { type: 'warning', text: response.warning } : {
         type: 'success',
         text: alsoDisableMock
-          ? 'Workflow enabled — mock mode is off, real actions will run.'
+          ? 'Workflow is live. Shadow is off, real actions will run.'
           : 'Workflow enabled in Shadow — it runs but takes no real actions.',
       });
       setEnableMockConfirm(null);
@@ -12192,10 +12241,7 @@ export default function NotificationWorkflowsPanel({
                   workflow={selected}
                   published={selectedIsPublished}
                   saving={saving}
-                  onToggleEnabled={toggleEnabled}
-                  onToggleMock={toggleMockMode}
-                  canToggleMock={canToggleMockMode}
-                  mockTitle={mockModeButtonTitle}
+                  onSetState={setWorkflowRunState}
                 />
                 <button
                   type="button"

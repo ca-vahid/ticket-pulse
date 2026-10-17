@@ -1297,6 +1297,45 @@ describe('ticketService.buildListWhere q matching', () => {
   });
 });
 
+describe('ticketService.buildListWhere aiState=suggested (QA 10-16 #6)', () => {
+  test('only unassigned, still-open, unparked tickets — the same set the stats chip counts', async () => {
+    const where = await ticketService.buildListWhere(1, { aiState: 'suggested' });
+    expect(where.AND).toEqual(expect.arrayContaining([
+      { assignedTechId: null },
+      { status: { in: expect.arrayContaining(['Open', 'Pending']) } },
+      { parkedUntil: null },
+      { pipelineRuns: { some: { status: 'completed', decision: 'pending_review' } } },
+    ]));
+    const statusClause = where.AND.find((c) => c.status);
+    expect(statusClause.status.in).not.toContain('Closed');
+    expect(statusClause.status.in).not.toContain('Resolved');
+  });
+});
+
+describe('ticketService.buildListWhere createdWithin date window (QA 10-16 #7)', () => {
+  const windowClause = (where) => (where.AND || []).find((c) => Array.isArray(c.OR) && c.OR.some((o) => o.createdAt));
+
+  test('90d hides finished tickets created before the window; open work of any age stays', async () => {
+    const where = await ticketService.buildListWhere(1, { createdWithin: '90d' });
+    const clause = windowClause(where);
+    expect(clause).toBeTruthy();
+    const start = clause.OR[0].createdAt.gte;
+    const expected = new Date(); expected.setHours(0, 0, 0, 0); expected.setDate(expected.getDate() - 90);
+    expect(start.getTime()).toBe(expected.getTime());
+    expect(clause.OR[1]).toEqual({ status: { in: expect.arrayContaining(['Open', 'Pending']) } });
+  });
+
+  test('"all", unknown values, explicit Created dates and created_* cards add no window', async () => {
+    for (const q of [
+      { createdWithin: 'all' }, { createdWithin: '12y' }, {},
+      { createdWithin: '30d', createdFrom: '2026-01-01' },
+      { createdWithin: '7d', segment: 'created_month' },
+    ]) {
+      expect(windowClause(await ticketService.buildListWhere(1, q))).toBeFalsy();
+    }
+  });
+});
+
 describe('ticketService.buildListWhere approval filter (16 Sep 2026)', () => {
   test('approval=pending → some approval still waiting (pending or info_requested)', async () => {
     const where = await ticketService.buildListWhere(1, { approval: 'pending' });

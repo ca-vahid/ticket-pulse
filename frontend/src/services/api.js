@@ -819,8 +819,9 @@ export const ticketsAPI = {
   splitNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/split`),
   dismissNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/dismiss`),
 
-  stats: async () => {
-    return await api.get('/tickets/stats');
+  // createdWithin: the list's date window ('7d' | '30d' | '90d'; omit = all time).
+  stats: async (createdWithin = null) => {
+    return await api.get('/tickets/stats', createdWithin ? { params: { createdWithin } } : undefined);
   },
 
   clone: async (id) => {
@@ -2175,6 +2176,13 @@ export const hrLifecycleAPI = {
 export const assignmentSpreadAPI = {
   get: (days = 30) => api.get('/assignment-spread', { params: { days } }),
   saveSettings: (patch) => api.put('/assignment-spread/settings', patch),
+};
+
+// Ticket shares (QA 10-16 item 4, proof of concept): Assignment Review → Shares.
+export const assignmentSharesAPI = {
+  get: (days = 14) => api.get('/assignment-shares', { params: { days } }),
+  preview: (draft) => api.post('/assignment-shares/preview', draft),
+  saveSettings: (settings) => api.put('/assignment-shares/settings', settings),
 };
 
 // Ticket grouping (plans/TICKET_GROUPING_PLAN.md): the Grouped view of Tickets.

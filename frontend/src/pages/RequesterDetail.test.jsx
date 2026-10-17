@@ -68,7 +68,7 @@ describe('RequesterDetail', () => {
     expect(within(tickets).getByTitle('Reza Zaim')).toHaveTextContent('Reza Zaim');
     expect(within(tickets).getByTestId('solution-mark')).toBeInTheDocument();
     expect(within(tickets).getByText(/Showing the latest 2 of 12/)).toBeInTheDocument();
-    expect(within(tickets).getByRole('link', { name: /See all in the queue/ })).toHaveAttribute('href', '/tickets?requesterId=9&requesterName=Sabina%20Greer&status=any');
+    expect(within(tickets).getByRole('link', { name: /See all in the queue/ })).toHaveAttribute('href', '/tickets?requesterId=9&requesterName=Sabina%20Greer&status=any&created=all');
     fireEvent.click(within(tickets).getByText('Printer jammed'));
     expect(await screen.findByText('ticket page')).toBeInTheDocument();
   });

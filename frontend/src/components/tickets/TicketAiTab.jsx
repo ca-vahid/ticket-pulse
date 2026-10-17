@@ -7,6 +7,7 @@ import {
 import { assignmentAPI } from '../../services/api';
 import { PersonAvatar, formatDayTime, pipelineRunLabel, pipelineTriggerLabel, timeAgo } from './ticketUi';
 import { getRecommendationList } from '../../utils/assignmentRecommendations';
+import RunEscalationLine from '../assignment/RunEscalationLine';
 
 /**
  * "AI & Routing" tab on the ticket page: every assignment pipeline run for
@@ -151,6 +152,9 @@ function RunCard({ run, techById, expanded, onToggle, returnTo }) {
               {Number(rebound.reboundCount) > 1 ? ` Return #${rebound.reboundCount} for this ticket.` : ''}
             </p>
           )}
+          {/* QA 10-16 item 1: an escalation and what the level check did. */}
+          <RunEscalationLine run={run} />
+
 
           {run.errorMessage && (
             <p className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/70 dark:bg-red-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-red-700 dark:text-red-200">

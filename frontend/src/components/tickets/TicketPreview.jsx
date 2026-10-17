@@ -16,6 +16,7 @@ import {
   ticketCategoryLabels, timeAgo,
 } from './ticketUi';
 import AssigneePicker from './AssigneePicker';
+import EscalationNote from './EscalationNote';
 import AiAssignModal from './AiAssignModal';
 import { PinnedCardChipsRow } from './PinnedIntakeCard';
 import RecipientsLine from './RecipientsLine';
@@ -555,6 +556,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   showAi={canReview}
                   aiSuggestion={aiSuggestionForPicker}
                   onAiAssign={canReview ? () => setAiOpen(true) : null}
+                  categoryLabel={[ticketCategoryLabels(ticket).category, ticketCategoryLabels(ticket).subcategory].filter(Boolean).join(' / ') || null}
                   onAssigned={() => { load({ silent: true }); onChanged?.(); }}
                 />
               ) : (
@@ -563,6 +565,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <span className="text-sm text-muted-foreground truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
                 </div>
               )}
+              <EscalationNote activities={ticket.activities} className="mt-1" />
               {canSeeAi && aiPending && aiTop && !ticket.assignedTechId && (
                 <div
                   className="mt-1.5 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-gradient-to-r from-indigo-50 dark:from-indigo-500/15 to-violet-50/60 dark:to-violet-500/10 p-2"

@@ -9,8 +9,9 @@ import {
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
   RotateCcw, OctagonAlert, ShieldCheck, UserCog, Search, X, PhoneCall,
-  Webhook, RefreshCw, Play,
+  Webhook, RefreshCw, Play, ChevronsUp,
 } from 'lucide-react';
+import { escalationLine } from '../../utils/handBack';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
 import { RecommendationCards } from './LivePipelineView';
 import HandoffHistoryStrip from './HandoffHistoryStrip';
@@ -1701,6 +1702,22 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
                 <> Reason given: <span className="font-semibold">{run.reboundFrom.reason.label}</span>{run.reboundFrom.reason.note ? <> — &ldquo;{run.reboundFrom.reason.note}&rdquo;</> : null}.</>
               )}
             </p>
+            {/* QA 10-16 item 1: an escalation, and what the level check did. */}
+            {run.reboundFrom.reason?.code === 'escalate' && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-200" data-testid="run-escalation">
+                <ChevronsUp className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                <span>
+                  {escalationLine({
+                    by: run.reboundFrom.reason.escalation?.fromTechName || run.reboundFrom.previousTechName,
+                    scope: run.reboundFrom.reason.escalation?.scope,
+                  })}
+                  {run.reboundFrom.reason.escalation?.level ? ` (their level: ${run.reboundFrom.reason.escalation.level})` : ''}.
+                  {run.recommendation?.escalation?.sentence && (
+                    <span className="block font-medium">{run.recommendation.escalation.sentence}</span>
+                  )}
+                </span>
+              </p>
+            )}
           </div>
         </div>
       ) : unverifiedRebound ? (

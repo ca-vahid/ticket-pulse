@@ -84,11 +84,14 @@ describe('TicketFilterRail workspace custom statuses (Phase 8b)', () => {
     expect(search.get('status')).toBe('Needs Rework');
   });
 
-  test('"My open" pins the full Open/Pending-BASE scope, customs included', () => {
+  test('"My open" pins the Open-BASE scope; "My tickets" the full Open/Pending-BASE scope + parked, customs included (QA 10-16 #5)', () => {
     renderRail();
     fireEvent.click(screen.getByRole('button', { name: 'My open' }));
-    const search = new URLSearchParams(screen.getByTestId('search').textContent);
+    let search = new URLSearchParams(screen.getByTestId('search').textContent);
     expect(search.get('assignee')).toBe('7');
-    expect(search.get('status')).toBe('Open,Pending,Needs Rework');
+    expect(search.get('status')).toBe('Open');
+    fireEvent.click(screen.getByRole('button', { name: 'My tickets' }));
+    search = new URLSearchParams(screen.getByTestId('search').textContent);
+    expect(search.get('status')).toBe('Open,Pending,Needs Rework,parked');
   });
 });

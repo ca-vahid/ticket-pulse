@@ -36,7 +36,7 @@ describe('Mail Workflows list page', () => {
     const rows = within(groups[0]).getAllByTestId('workflow-list-row');
     // The default variant leads its group.
     expect(rows[0]).toHaveTextContent('Ticket arrived');
-    expect(rows[0]).toHaveTextContent('Enabled');
+    expect(rows[0]).toHaveTextContent('Live');
     expect(rows[0]).toHaveTextContent('Default');
     expect(rows[0]).toHaveTextContent('v4');
     expect(rows[0]).toHaveTextContent('Ran 2h ago');

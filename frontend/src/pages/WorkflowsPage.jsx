@@ -14,6 +14,10 @@ export const WORKFLOW_TABS = [
   { id: 'mock-audit', label: 'Audit', Icon: FlaskConical },
 ];
 const TAB_IDS = WORKFLOW_TABS.map((t) => t.id);
+// QA 10-16: the address says /workflows/audit ("Shadow", never "mock"); the
+// panel's internal id stays 'mock-audit'. Old links are sent to the new one.
+const TAB_SLUGS = { 'mock-audit': 'audit' };
+const SLUG_TABS = { audit: 'mock-audit' };
 
 /**
  * Quiet section tabs that sit in the app header next to the page title
@@ -68,14 +72,17 @@ export default function WorkflowsPage() {
   }, [user?.role, availableWorkspaces, currentWorkspace?.id]);
   const canManageWorkspace = wsRole === 'admin';
 
-  const activeTab = TAB_IDS.includes(tab) ? tab : 'workflows';
+  const activeTab = TAB_IDS.includes(SLUG_TABS[tab] || tab) ? (SLUG_TABS[tab] || tab) : 'workflows';
 
   if (!canManageWorkspace) {
     return <Navigate to="/dashboard" replace />;
   }
+  if (TAB_SLUGS[tab]) {
+    return <Navigate to={`/workflows/${TAB_SLUGS[tab]}${window.location.search || ''}`} replace />;
+  }
 
   const handleTabChange = (id) => {
-    navigate(id === 'workflows' ? '/workflows' : `/workflows/${id}`);
+    navigate(id === 'workflows' ? '/workflows' : `/workflows/${TAB_SLUGS[id] || id}`);
   };
 
   return (

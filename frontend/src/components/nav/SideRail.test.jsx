@@ -2,8 +2,13 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import SideRail from './SideRail';
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="loc">{`${location.pathname}${location.search}`}</output>;
+}
 
 const authState = { user: { email: 'me@x.com', role: 'admin' } };
 const wsState = { currentWorkspace: { id: 1 }, availableWorkspaces: [{ id: 1, role: 'admin' }] };
@@ -64,6 +69,50 @@ describe('SideRail', () => {
     renderRail('/tickets/42');
     expect(screen.getByRole('button', { name: /Tickets/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Dashboard/ })).not.toHaveAttribute('aria-current');
+  });
+
+  test('on a ticket the active Tickets row goes back to the list (QA 10-16 #9)', () => {
+    render(
+      <MemoryRouter initialEntries={['/tickets/42']}>
+        <SideRail />
+        <Routes>
+          <Route path="/tickets" element={<LocationProbe />} />
+          <Route path="/tickets/:id" element={<span>ticket page</span>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const row = screen.getByRole('button', { name: /Tickets/ });
+    expect(row).toHaveAttribute('aria-current', 'page'); // keeps the active look
+    expect(row).toHaveAttribute('title', 'Back to Tickets');
+    fireEvent.click(row);
+    expect(screen.getByTestId('loc')).toHaveTextContent('/tickets');
+  });
+
+  test('the list a ticket was opened from (state.from) is where the row goes', () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/tickets/42', state: { from: '/tickets?segment=open&page=3' } }]}>
+        <SideRail />
+        <Routes>
+          <Route path="/tickets" element={<LocationProbe />} />
+          <Route path="/tickets/:id" element={<span>ticket page</span>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Tickets/ }));
+    expect(screen.getByTestId('loc')).toHaveTextContent('/tickets?segment=open&page=3');
+  });
+
+  test('on the list itself the active row does nothing', () => {
+    render(
+      <MemoryRouter initialEntries={['/tickets?segment=open']}>
+        <SideRail />
+        <Routes><Route path="/tickets" element={<LocationProbe />} /></Routes>
+      </MemoryRouter>,
+    );
+    const row = screen.getByRole('button', { name: /Tickets/ });
+    expect(row.className).toContain('cursor-default');
+    fireEvent.click(row);
+    expect(screen.getByTestId('loc')).toHaveTextContent('/tickets?segment=open');
   });
 
   test('marks Settings active on /settings', () => {

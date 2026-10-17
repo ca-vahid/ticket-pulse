@@ -31,7 +31,7 @@ const FILTER_GROUPS = Object.freeze([
   { key: 'category', label: 'Category', apiKeys: ['internalCategoryId', 'internalSubcategoryId'] },
   { key: 'group', label: 'Group', apiKeys: ['groupId'] },
   { key: 'source', label: 'Source', apiKeys: ['source'] },
-  { key: 'created', label: 'Created date', apiKeys: ['createdFrom', 'createdTo'] },
+  { key: 'created', label: 'Created date', apiKeys: ['createdFrom', 'createdTo', 'createdWithin'] },
   { key: 'due', label: 'Due date', apiKeys: ['due'] },
   { key: 'tag', label: 'Tags', apiKeys: ['tagId', 'tagMode'] },
   { key: 'type', label: 'Type', apiKeys: ['type'] },

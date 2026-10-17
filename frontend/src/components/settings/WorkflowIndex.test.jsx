@@ -90,7 +90,8 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     const row = rowFor('Assignment notice');
     expect(row).toHaveAttribute('data-state', 'on');
     expect(within(row).getByText('Default · v3 · ran 6h ago')).toBeInTheDocument();
-    expect(screen.queryByText('Shadow')).toBeNull();
+    // QA 10-16: the state word is Off / Shadow / Live, the same as the header
+    expect(within(rowFor('After-hours arrival')).getByText('Shadow')).toBeInTheDocument();
     expect(screen.queryByText('Routed')).toBeNull();
     // the same facts live in the meta line and the state, not in chips
     expect(rowFor('VIP variant')).toHaveAttribute('data-state', 'draft');
@@ -108,7 +109,7 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     expect(rowFor('VIP variant').className).not.toContain('shadow-[inset_3px_0_0');
   });
 
-  test('groups are collapsible with a plain count; rows show a quiet On/Off/Draft state, no switch (QA 09-22 #11); the row menu exists', () => {
+  test('groups are collapsible with a plain count; rows show a quiet Live/Shadow/Off/Draft state, no switch (QA 09-22 #11); the row menu exists', () => {
     window.localStorage.removeItem('tp_wf_collapsed_1');
     const props = renderIndex({ onRowAction: vi.fn() });
     const group = screen.getByRole('button', { name: /^Ticket assigned/ });
@@ -120,7 +121,7 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     fireEvent.click(group);
     // no switch in the sidebar any more — the state reads as text
     expect(screen.queryByRole('switch')).toBeNull();
-    expect(within(rowFor('Assignment notice')).getByText('On')).toBeInTheDocument();
+    expect(within(rowFor('Assignment notice')).getByText('Live')).toBeInTheDocument();
     expect(within(rowFor('VIP variant')).getByText('Draft')).toBeInTheDocument(); // draft: nothing published
     expect(props.onToggleEnabled).not.toHaveBeenCalled();
     // row menu
@@ -141,10 +142,10 @@ describe('WorkflowIndex sidebar (L2, 22 Sep 2026)', () => {
     expect(props.onRowAction).toHaveBeenCalledWith(retired, 'restore');
   });
 
-  test('filters are text: Enabled narrows, Failing shows a count only when something fails, Archived is a toggle', () => {
+  test('filters are text: Live or Shadow narrows, Failing shows a count only when something fails, Archived is a toggle', () => {
     const props = renderIndex({ onShowArchivedChange: vi.fn(), archivedCount: 4 });
     expect(screen.getByRole('button', { name: 'Failing' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Enabled' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Live or Shadow' }));
     expect(screen.queryByText('VIP variant')).toBeNull();
     expect(screen.getByText('Assignment notice')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Archived 4' }));

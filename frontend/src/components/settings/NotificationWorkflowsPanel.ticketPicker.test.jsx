@@ -423,9 +423,9 @@ describe('WorkflowEnableMockConfirmModal (QA 08-06 mock-mode visibility)', () =>
 describe('AuditModeBadge (mock runs are visibly labeled)', () => {
   afterEach(() => cleanup());
 
-  test('mock execution mode renders the sky "Mock" badge', () => {
+  test('mock execution mode renders the sky "Shadow" badge (QA 10-16: Shadow, never mock)', () => {
     render(<AuditModeBadge mode="mock" compact />);
-    const badge = screen.getByText('Mock');
+    const badge = screen.getByText('Shadow');
     expect(badge.closest('span')).toHaveClass('bg-sky-50');
   });
 
