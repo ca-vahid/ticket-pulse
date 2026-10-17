@@ -106,7 +106,7 @@ If you need immediate assistance, please call our helpdesk at [PHONE NUMBER].`,
       domainWhitelist: [],
       domainBlacklist: [],
 
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'none',
       verbosity: 'medium',
       maxOutputTokens: 800,

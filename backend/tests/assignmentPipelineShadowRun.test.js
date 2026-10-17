@@ -67,7 +67,7 @@ const turn = (content, usage) => ({
   message: { content, stop_reason: 'tool_use' },
   usage,
   provider: 'openai',
-  model: 'gpt-6-sol',
+  model: 'gpt-6.1-sol',
   attemptNumber: 1,
   fallbackUsed: false,
   shadow: true,
@@ -89,12 +89,12 @@ describe('assignmentPipelineService.shadowRun', () => {
   });
 
   test('returns the verdict and token counts, writes nothing', async () => {
-    const result = await service.shadowRun(501, 1, { model: 'gpt-6-sol', liveRunId: 3101 });
+    const result = await service.shadowRun(501, 1, { model: 'gpt-6.1-sol', liveRunId: 3101 });
 
     expect(result).toMatchObject({
       shadow: true,
       provider: 'openai',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       isNoise: false,
       noiseVetoed: false,
       turns: 2,
@@ -107,7 +107,7 @@ describe('assignmentPipelineService.shadowRun', () => {
 
     // The model saw the live prompt and tools, on the shadow model, with no run link.
     const opts = runToolTurnMock.mock.calls[0][0];
-    expect(opts.shadow).toEqual({ model: 'gpt-6-sol', provider: null });
+    expect(opts.shadow).toEqual({ model: 'gpt-6.1-sol', provider: null });
     expect(opts.runLinks).toEqual({});
     expect(opts.systemPrompt).toContain('You route tickets.');
     expect(opts.tools.map((t) => t.name)).toEqual(['get_ticket_details', 'submit_recommendation']);
@@ -135,7 +135,7 @@ describe('assignmentPipelineService.shadowRun', () => {
   test('a failed shadow throws and never marks the borrowed live run failed', async () => {
     runToolTurnMock.mockReset();
     runToolTurnMock.mockRejectedValueOnce(new Error('provider down'));
-    await expect(service.shadowRun(501, 1, { model: 'gpt-6-sol', liveRunId: 3101 })).rejects.toThrow('provider down');
+    await expect(service.shadowRun(501, 1, { model: 'gpt-6.1-sol', liveRunId: 3101 })).rejects.toThrow('provider down');
     expect(repoMock.updatePipelineRun).not.toHaveBeenCalled();
   });
 
