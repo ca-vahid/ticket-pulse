@@ -12,13 +12,15 @@ import TicketPreview from '../components/tickets/TicketPreview';
 import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import GroupedTicketsPanel from '../components/tickets/GroupedTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
+import CreatedWindowControl from '../components/tickets/CreatedWindowControl';
+import { WINDOW_PREF_KEY, isWindowKey, readStoredWindow, resolveCreatedWindow, storeWindow, windowChoice } from '../components/tickets/createdWindow';
 import TicketSearchBox from '../components/tickets/TicketSearchBox';
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
 import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
-import { queueSearchToKeep, recallQueueView, rememberQueueView } from '../utils/queueMemory';
+import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView } from '../utils/queueMemory';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
 import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
@@ -41,7 +43,7 @@ import {
   BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
   buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths, OccurrenceMark,
 } from '../components/tickets/queueColumns';
-import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/queueCards';
+import { QUEUE_CARD_REGISTRY, cardSearch, normalizeQueueCards } from '../components/tickets/queueCards';
 import { ticketsAPI } from '../services/api';
 import HeldRepliesPanel from '../components/tickets/HeldRepliesPanel';
 import FilterReliefNotice from '../components/tickets/FilterReliefNotice';
@@ -392,6 +394,38 @@ export default function Tickets() {
 
   const workspaceId = currentWorkspace?.id;
 
+  // Date window (QA 10-16 #7): 7d / 30d / 90d / All on the toolbar and in the
+  // rail. The person's pick is their default (local mirror paints first, the
+  // server preference wins on load); ?created= overrides it for one view.
+  const createdToken = searchParams.get('created') || '';
+  const [windowPref, setWindowPref] = useState(readStoredWindow);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => ticketsAPI.getQueuePreference(WINDOW_PREF_KEY))
+      .then((res) => {
+        const value = res?.data?.value;
+        if (cancelled || !isWindowKey(value)) return;
+        setWindowPref(value);
+        storeWindow(value);
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+  const createdWin = useMemo(() => resolveCreatedWindow({
+    token: createdToken, pref: windowPref, createdFrom, createdTo, segment, q: debouncedSearch,
+  }), [createdToken, windowPref, createdFrom, createdTo, segment, debouncedSearch]);
+  // Picking a window makes it the default and drops one-off dates/tokens.
+  const pickCreatedWindow = useCallback((key) => {
+    if (!isWindowKey(key)) return;
+    setWindowPref(key);
+    storeWindow(key);
+    Promise.resolve()
+      .then(() => ticketsAPI.setQueuePreference(WINDOW_PREF_KEY, key))
+      .catch(() => { /* local mirror still applies */ });
+    setParams({ created: null, createdFrom: null, createdTo: null });
+  }, [setParams]);
+
   // Sticky filters (14 Oct 2026): arriving on a bare /tickets (Back from a ticket
   // reached by stepping or a related link, the nav rail) restores this
   // workspace's last view; every change after that is remembered, "Clear all"
@@ -418,10 +452,14 @@ export default function Tickets() {
     return () => { cancelled = true; };
   }, [workspaceId]);
 
+  // Stat cards count in the list's date window (QA 10-16 #7). Read through a
+  // ref so fetchStats keeps one identity (the SSE handlers hold it).
+  const statsWindowRef = useRef(createdWin.statsKey);
+  statsWindowRef.current = createdWin.statsKey;
   const fetchStats = useCallback(() => {
-    ticketsAPI.stats().then((res) => setStats(res.data)).catch(() => {});
+    ticketsAPI.stats(statsWindowRef.current).then((res) => setStats(res.data)).catch(() => {});
   }, []);
-  useEffect(() => { fetchStats(); }, [fetchStats, workspaceId]);
+  useEffect(() => { fetchStats(); }, [fetchStats, workspaceId, createdWin.statsKey]);
 
   // Featured custom field (Phase 2): the one workspace definition flagged
   // isFeatured renders as a quiet chip on rows that carry a value.
@@ -557,7 +595,7 @@ export default function Tickets() {
     category: ['category', 'subcategory'],
     group: ['group'],
     source: ['source'],
-    created: ['createdFrom', 'createdTo'],
+    created: ['createdFrom', 'createdTo', 'created'],
     due: ['due'],
     tag: ['tag', 'tagMode'],
     type: ['type'],
@@ -582,6 +620,11 @@ export default function Tickets() {
     if (group.key === 'status' && statusesToAdd.length) {
       const current = String(next.get('status') || '').split(',').map((x) => x.trim()).filter(Boolean);
       next.set('status', [...new Set([...current, ...statusesToAdd.map((x) => x.status)])].join(','));
+    } else if (group.key === 'created') {
+      // Dropping the date filter means every date — the default window would
+      // otherwise come straight back (QA 10-16 #7).
+      for (const k of RELIEF_URL_KEYS.created) next.delete(k);
+      next.set('created', 'all');
     } else {
       for (const k of (RELIEF_URL_KEYS[group.key] || [])) next.delete(k);
     }
@@ -626,6 +669,7 @@ export default function Tickets() {
     if (source) params.source = source;
     if (createdFrom) params.createdFrom = createdFrom;
     if (createdTo) params.createdTo = createdTo;
+    if (createdWin.applied) params.createdWithin = createdWin.key;
     if (due) params.due = due;
     if (noise) params.noise = noise;
     if (solution) params.solution = solution;
@@ -646,7 +690,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,
@@ -1318,7 +1362,13 @@ export default function Tickets() {
     const handBack = handBackArg && typeof handBackArg.code === 'string' ? handBackArg : null; // onConfirm passes the click event
     const releasing = bulkAction.type === 'assign' && bulkAction.value == null;
     const releasesSomeone = Boolean(queryScope) || editableSelected.some((t) => t.assignedTechId);
-    if (releasing && releasesSomeone && !handBack) { setBulkHandBackOpen(true); return; }
+    // QA 10-16 item 1: moving tickets from one person to another asks the
+    // same question (not when you take them yourself).
+    const moving = bulkAction.type === 'assign' && bulkAction.value != null
+      && Number(bulkAction.value) !== Number(meta?.actor?.technicianId || 0);
+    const movesSomeone = moving && (Boolean(queryScope)
+      || editableSelected.some((t) => t.assignedTechId && Number(t.assignedTechId) !== Number(bulkAction.value)));
+    if (((releasing && releasesSomeone) || movesSomeone) && !handBack) { setBulkHandBackOpen(true); return; }
     setBulkHandBackOpen(false);
     setBulkBusy(true);
     lastLocalMutationRef.current = Date.now();
@@ -1328,7 +1378,7 @@ export default function Tickets() {
       try {
         const res = await ticketsAPI.bulkByQuery({
           query: bulkQueryParams,
-          action: { type: bulkAction.type, value: bulkAction.value, ...(releasing && handBack ? { handBack } : {}) },
+          action: { type: bulkAction.type, value: bulkAction.value, ...((releasing || moving) && handBack ? { handBack } : {}) },
           expectedTotal: queryScope.total,
         });
         setBulkResult({
@@ -1354,7 +1404,7 @@ export default function Tickets() {
     const targets = tagAction ? selectedTickets : editableSelected;
     const results = await Promise.allSettled(targets.map((t) => {
       if (bulkAction.type === 'assign') {
-        return releasing && handBack && t.assignedTechId
+        return (releasing || moving) && handBack && t.assignedTechId && Number(t.assignedTechId) !== Number(bulkAction.value)
           ? ticketsAPI.assign(t.id, bulkAction.value, { handBack })
           : ticketsAPI.assign(t.id, bulkAction.value);
       }
@@ -1378,8 +1428,10 @@ export default function Tickets() {
         });
       }
     });
-    // Bulk assign over completed AI decisions → one aggregated "why?" prompt.
-    if (bulkAction.type === 'assign' && bulkAction.value != null) {
+    // Bulk assign over completed AI decisions → one aggregated "why?" prompt —
+    // only when the reason dialog was not shown or was skipped (a given reason already reached
+    // the AI's correction loop on the server).
+    if (bulkAction.type === 'assign' && bulkAction.value != null && (!handBack || handBack.code === 'skipped')) {
       const overriddenIds = targets
         .filter((_, i) => results[i].status === 'fulfilled' && results[i].value?.data?.aiOverride)
         .map((t) => t.id);
@@ -1651,17 +1703,50 @@ export default function Tickets() {
   // floor stop a short list from flickering between the two.
   const [cardsFolded, setCardsFolded] = useState(false);
   useEffect(() => { if (!docked) setCardsFolded(false); }, [docked]);
+  // A new filter, sort or page starts the list at its top (the page used to
+  // scroll back up; now the list pane does). Opening the side preview does not.
+  const listViewKey = queueSearchToKeep(location.search);
+  // QA 10-16 #9: where the list was scrolled to is kept for this view, so
+  // coming back from a ticket (nav rail, Back) lands on the same rows.
+  const scrollMemoRef = useRef({ ws: null, key: '', timer: null });
+  scrollMemoRef.current.ws = workspaceId;
+  scrollMemoRef.current.key = listViewKey;
+  const saveListScroll = useCallback((top) => {
+    const memo = scrollMemoRef.current;
+    if (memo.timer) clearTimeout(memo.timer);
+    memo.timer = setTimeout(() => { memo.timer = null; rememberQueueScroll(memo.ws, memo.key, top); }, 150);
+  }, []);
+  useEffect(() => () => { if (scrollMemoRef.current.timer) clearTimeout(scrollMemoRef.current.timer); }, []);
   const onListScroll = useCallback((e) => {
     const el = e.currentTarget;
     if (el.scrollTop <= 2) setCardsFolded(false);
     else if (el.scrollTop > 48 && el.scrollHeight - el.clientHeight > 320) setCardsFolded(true);
-  }, []);
-  // A new filter, sort or page starts the list at its top (the page used to
-  // scroll back up; now the list pane does). Opening the side preview does not.
-  const listViewKey = queueSearchToKeep(location.search);
+    saveListScroll(el.scrollTop);
+  }, [saveListScroll]);
+  useEffect(() => {
+    if (docked) return undefined;
+    const onWin = () => saveListScroll(window.scrollY);
+    window.addEventListener('scroll', onWin, { passive: true });
+    return () => window.removeEventListener('scroll', onWin);
+  }, [docked, saveListScroll]);
   useEffect(() => {
     if (docked && scrollWrapRef.current) scrollWrapRef.current.scrollTop = 0;
   }, [docked, listViewKey]);
+  // Restore once, on the first load that has rows for the remembered view. The
+  // entry is read at mount, before this visit's own scroll events overwrite it.
+  const scrollRestoredRef = useRef(false);
+  const scrollEntryRef = useRef(undefined);
+  if (scrollEntryRef.current === undefined && workspaceId) scrollEntryRef.current = readQueueScroll(workspaceId);
+  useEffect(() => {
+    if (scrollRestoredRef.current || isLoading || !tickets.length || !workspaceId) return;
+    scrollRestoredRef.current = true;
+    const top = recallQueueScroll(workspaceId, listViewKey, scrollEntryRef.current);
+    if (!top) return;
+    requestAnimationFrame(() => {
+      if (docked && scrollWrapRef.current) scrollWrapRef.current.scrollTop = top;
+      else if (!docked && typeof window.scrollTo === 'function') window.scrollTo({ top });
+    });
+  }, [isLoading, tickets.length, workspaceId, listViewKey, docked]);
   // Live drag preview (QR2): write the recomputed template straight onto the
   // list card's CSS vars — zero React renders per pointermove; the commit on
   // pointerup re-renders once with the identical values.
@@ -1733,8 +1818,17 @@ export default function Tickets() {
   // The quick-segment cards and their folded one-line form share these.
   const cardsStatusScoped = Boolean(statusesRaw) && statusesRaw !== 'any';
   const cardIsActive = (key) => (key === 'all' ? (segment === 'all' && !cardsStatusScoped) : segment === key);
-  const pickCard = (key) => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null });
+  // QA 10-16 #8: a card REPLACES the other filters with its own, so the list
+  // is exactly the card's number. The search text, the sort and the date
+  // window stay (CARD_KEEP_KEYS).
+  const pickCard = (key) => setSearchParams((prev) => cardSearch(prev, key), { replace: true });
   const listShown = view !== 'scheduled' && view !== 'grouped' && !isLoading && !loadError && tickets.length > 0 && !boardMode;
+  // Cards whose count follows the date window say which one (QA 10-16 #7);
+  // read from the counts themselves, so the note never claims a window the
+  // numbers were not counted in.
+  // One-off "every date" for this view (setParams treats 'all' as unset).
+  const showAllTime = () => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('created', 'all'); next.delete('page'); return next; }, { replace: true });
+  const cardWindowNote = (seg) => (seg.windowed && windowChoice(stats?.createdWithin) ? ` · ${windowChoice(stats.createdWithin).short}` : '');
 
   return (
     <div className={`tp-tickets-backdrop md:pl-[var(--tp-rail-w,58px)] ${docked ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'}`}>
@@ -1829,7 +1923,7 @@ export default function Tickets() {
                       className={`tp-focus-ring inline-flex items-baseline gap-1.5 rounded-md py-0.5 text-sm transition-colors ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                       <span className={`font-bold tabular-nums ${seg.num}`}>{count == null ? '–' : count.toLocaleString()}</span>
-                      <span className={active ? 'font-semibold underline decoration-blue-500 decoration-2 underline-offset-4' : ''}>{seg.label}</span>
+                      <span className={active ? 'font-semibold underline decoration-blue-500 decoration-2 underline-offset-4' : ''}>{seg.label}{cardWindowNote(seg)}</span>
                     </button>
                   );
                 })}
@@ -1872,7 +1966,7 @@ export default function Tickets() {
                     // (every non-Deleted/Spam status, like the rail's view) —
                     // clearing to the Open+Pending default made the card lie
                     // (QA 08-04 #1). Other cards carry their own segment scope.
-                      onClick={() => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null })}
+                      onClick={() => pickCard(key)}
                       aria-pressed={active}
                       className={`tp-focus-ring flex flex-shrink-0 snap-start items-center gap-2 sm:gap-3 text-left px-2.5 py-2 sm:px-3.5 sm:py-3 rounded-xl bg-card border transition-all sm:flex-shrink ${
                         active ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-inset sm:ring-offset-0 ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle hover:border-border hover:shadow-soft'
@@ -1885,7 +1979,7 @@ export default function Tickets() {
                         <span className={`block text-lg sm:text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
                           {count == null ? '–' : count.toLocaleString()}
                         </span>
-                        <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1">{seg.label}</span>
+                        <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1" title={cardWindowNote(seg) ? `${seg.label}: finished tickets from the last ${windowChoice(stats?.createdWithin)?.label}, plus all open work` : undefined}>{seg.label}{cardWindowNote(seg)}</span>
                       </span>
                     </button>
                     {mineTile}
@@ -1931,7 +2025,7 @@ export default function Tickets() {
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}
             <div className={docked ? 'grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4' : 'lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-4 lg:items-start'}>
-              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} />
+              <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
 
               <div className={docked ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}>
                 {requesterId && (
@@ -2065,6 +2159,15 @@ export default function Tickets() {
                       </div>
                     )}
                   </div>
+                  {/* Date window (QA 10-16 #7): small, beside sort; the rail's
+                      Created section shows the same choice. */}
+                  <CreatedWindowControl
+                    className="hidden sm:inline-flex order-2"
+                    value={createdWin.key}
+                    custom={createdWin.custom}
+                    searching={createdWin.searching && !createdWin.custom}
+                    onPick={pickCreatedWindow}
+                  />
                   {/* Right end: AI-approval worklist connector + pagination */}
                   {!panelView && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
                     <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
@@ -2156,6 +2259,14 @@ export default function Tickets() {
                         onWiden={widenFilters}
                         onClearFilters={clearFiltersKeepingSearch}
                       />
+                      {createdWin.applied && (
+                        <p className="mt-3 text-xs text-muted-foreground" data-testid="window-empty-note">
+                          Finished tickets created before the last {windowChoice(createdWin.key)?.label} are hidden.{' '}
+                          <button type="button" onClick={showAllTime} className="tp-focus-ring rounded font-semibold text-primary hover:underline">
+                            Show all time
+                          </button>
+                        </p>
+                      )}
                     </div>
                   ) : boardMode ? (
                     <>
@@ -2755,7 +2866,7 @@ export default function Tickets() {
       )}
 
       {/* Mobile filter bottom sheet (vaul) — always mounted so it animates in/out */}
-      <TicketFilterRail meta={meta} stats={stats} facets={facets} sheet mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />
+      <TicketFilterRail meta={meta} stats={stats} facets={facets} sheet mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
 
       {/* Instant-save toast with Undo (QA 07-06 #3) */}
       {toast && (
@@ -2875,7 +2986,11 @@ export default function Tickets() {
       )}
       <HandBackReasonDialog
         open={bulkHandBackOpen}
-        count={queryScope ? queryScope.editable : editableSelected.filter((t) => t.assignedTechId).length}
+        mode={bulkAction?.type === 'assign' && bulkAction.value != null ? 'reassign' : 'unassign'}
+        toName={bulkAction?.value != null ? ((meta?.technicians || []).find((t) => t.id === bulkAction.value)?.name || null) : null}
+        count={queryScope
+          ? queryScope.editable
+          : editableSelected.filter((t) => t.assignedTechId && (bulkAction?.value == null || Number(t.assignedTechId) !== Number(bulkAction.value))).length}
         requireReason={!queryScope && Boolean(meta?.actor?.technicianId)
           && editableSelected.some((t) => t.assignedTechId === meta.actor.technicianId)}
         busy={bulkBusy}

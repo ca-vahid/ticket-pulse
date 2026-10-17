@@ -22,6 +22,7 @@ import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { rememberTicket } from '../utils/recentSearches';
 import { RichBody, SentSignature, IMG_REF_RE, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from '../components/tickets/InlineImageBody';
+import { replyBodyParts } from '../utils/quotedHistory';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
 import { buildHistoryItems, countMachine } from '../utils/ticketHistory';
 import TicketHistoryTimeline from '../components/tickets/TicketHistoryTimeline';
@@ -30,6 +31,7 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import AssigneePicker from '../components/tickets/AssigneePicker';
+import EscalationNote from '../components/tickets/EscalationNote';
 import DueDateEditor from '../components/tickets/DueDateEditor';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import CcChips from '../components/tickets/CcChips';
@@ -368,6 +370,10 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   // QA 10-13 #3: the opening e-mail's entry held only a 255-character plain-text preview;
   // `openingHtml` is the description's formatted body for those older entries (display only).
   const shownHtml = entry.bodyHtml || openingHtml || null;
+  // QA 10-16: a requester's reply shows what they wrote; the earlier thread
+  // their mail client quoted under it is one click away, never lost.
+  const replyParts = useMemo(() => replyBodyParts(entry, shownHtml), [entry, shownHtml]);
+  const [showFullMail, setShowFullMail] = useState(false);
   // Stable lists: the thumbnail strip loads pictures per list identity.
   const allImageAttachments = useMemo(() => (ticketId ? attachments.filter(isImageAttachment) : []), [attachments, ticketId]);
   // QA 10-13 #2: a picture the message names ("[Image: file]") is shown where it was, small and
@@ -648,7 +654,18 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
           </div>
         ) : (
           <>
-            <RichBody html={shownHtml} text={body} onImageRef={onImageRef} shownImages={shownImageNames} ticketId={ticketId} inlineImages={inlineImages} />
+            <RichBody html={showFullMail && replyParts.full ? replyParts.full : replyParts.fresh} text={body} onImageRef={onImageRef} shownImages={shownImageNames} ticketId={ticketId} inlineImages={inlineImages} />
+            {replyParts.full && (
+              <button
+                type="button"
+                onClick={() => setShowFullMail((v) => !v)}
+                aria-expanded={showFullMail}
+                className="tp-focus-ring mt-1 inline-flex items-center gap-1 rounded text-xs font-medium text-primary hover:underline"
+                data-testid="show-full-mail"
+              >
+                {showFullMail ? 'Hide the earlier messages' : 'Show the full e-mail (earlier messages it quoted)'}
+              </button>
+            )}
             {/* QA 10-13 #4: the signature that was added when this reply was mailed. */}
             {!isNote && <SentSignature entry={entry} />}
           </>
@@ -2770,7 +2787,7 @@ export default function TicketDetail() {
                           })()}
                           {ticket.requesterId && (related?.sameRequesterCount || 0) > 0 && (
                             <Link
-                              to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester.name || '')}&status=any`}
+                              to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester.name || '')}&status=any&created=all`}
                               title={`View all tickets from ${ticket.requester.name || 'this requester'}`}
                               className={`tp-focus-ring mt-1 inline-flex items-center gap-1 rounded text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-200 ${requesterOpen ? '' : 'max-sm:hidden'}`}
                             >
@@ -3676,7 +3693,7 @@ export default function TicketDetail() {
                             <p className="mb-2.5 text-xs text-muted-foreground" data-testid="related-bulk-sender">
                               {ticket?.requester?.name || 'This requester'} sends a lot of tickets ({related.requesterVolume.last30Days} in the last 30 days), so they are not listed here.{' '}
                               {ticket?.requesterId && (
-                                <Link to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester?.name || '')}&status=any`} className="tp-focus-ring text-primary hover:underline">
+                                <Link to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester?.name || '')}&status=any&created=all`} className="tp-focus-ring text-primary hover:underline">
                                   See all {related.sameRequesterCount}
                                 </Link>
                               )}
@@ -3993,6 +4010,7 @@ export default function TicketDetail() {
                         showAi={canReview}
                         aiSuggestion={canReview ? aiSuggestionForPicker : null}
                         onAiAssign={canReview ? () => setAiModalOpen(true) : null}
+                        categoryLabel={[ticketCategoryLabels(ticket).category, ticketCategoryLabels(ticket).subcategory].filter(Boolean).join(' / ') || null}
                         onAssigned={() => {
                           lastLocalMutationRef.current = Date.now();
                           fetchTicket({ silent: true });
@@ -4005,6 +4023,8 @@ export default function TicketDetail() {
                         <span className="text-sm text-muted-foreground truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
                       </div>
                     )}
+                    {/* QA 10-16 item 1: an escalation shows under the assignee. */}
+                    <EscalationNote activities={ticket.activities} className="mt-1.5 px-1" />
                   </SidebarField>
 
                   <SidebarField label="Type" flash={Boolean(liveChanges.ticketType)} onAck={() => ackChange('ticketType')}>

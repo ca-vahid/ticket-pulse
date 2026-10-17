@@ -189,6 +189,64 @@ describe('getQueueStats — createdThisWeek/Month/Year', () => {
   });
 });
 
+describe('getQueueStats — "My open" / "My tickets" counts (QA 10-16 #5)', () => {
+  test('Open-base only, and Open/Pending + parked, each per technician', async () => {
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    prismaMock.ticket.groupBy.mockReset();
+    prismaMock.ticket.groupBy
+      .mockResolvedValueOnce([{ assignedTechId: 5, _count: { _all: 3 } }]) // byTechnician (Open+Pending, not parked)
+      .mockResolvedValueOnce([{ assignedTechId: 5, _count: { _all: 1 } }]) // Open only
+      .mockResolvedValueOnce([{ assignedTechId: 5, _count: { _all: 4 } }]); // + parked
+
+    const stats = await ticketService.getQueueStats(7);
+    expect(stats.byTechnician).toEqual({ 5: 3 });
+    expect(stats.byTechnicianOpenOnly).toEqual({ 5: 1 });
+    expect(stats.byTechnicianActive).toEqual({ 5: 4 });
+
+    const [, openOnly, active] = prismaMock.ticket.groupBy.mock.calls.map((c) => c[0].where);
+    expect(openOnly).toEqual(expect.objectContaining({ isNoise: false, parkedUntil: null, status: { in: ['Open'] } }));
+    expect(active.OR).toEqual([
+      { status: { in: ['Open', 'Pending'] }, parkedUntil: null },
+      { parkedUntil: { not: null } },
+    ]);
+    prismaMock.ticket.groupBy.mockReset();
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+  });
+});
+
+describe('getQueueStats — date window (QA 10-16 #7)', () => {
+  test('all / resolved / deleted / noise follow the window; open-work counts do not', async () => {
+    prismaMock.ticket.count.mockReset();
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    // Force the per-count fallback so every where-clause is inspectable.
+    prismaMock.$queryRaw.mockRejectedValueOnce(new Error('scan off')).mockResolvedValue([]);
+
+    const stats = await ticketService.getQueueStats(7, { createdWithin: '30d' });
+    expect(stats.createdWithin).toBe('30d');
+
+    const wheres = prismaMock.ticket.count.mock.calls.map((c) => c[0].where);
+    const windowed = wheres.filter((w) => (w.AND || []).some((c) => Array.isArray(c.OR) && c.OR.some((o) => o.createdAt?.gte)));
+    // all, resolved, deleted, noise
+    expect(windowed).toHaveLength(4);
+    const start = windowed[0].AND[0].OR[0].createdAt.gte;
+    const expected = new Date(); expected.setHours(0, 0, 0, 0); expected.setDate(expected.getDate() - 30);
+    expect(start.getTime()).toBe(expected.getTime());
+    expect(windowed[0].AND[0].OR[1]).toEqual({ status: { in: ['Open', 'Pending'] } });
+  });
+
+  test('no window → createdWithin null and nothing windowed', async () => {
+    prismaMock.ticket.count.mockReset();
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.$queryRaw.mockRejectedValueOnce(new Error('scan off')).mockResolvedValue([]);
+    const stats = await ticketService.getQueueStats(7);
+    expect(stats.createdWithin).toBeNull();
+    const wheres = prismaMock.ticket.count.mock.calls.map((c) => c[0].where);
+    expect(wheres.some((w) => w.AND)).toBe(false);
+  });
+});
+
 // -------------------------------------------------- validation + route (FC3)
 
 describe('queue-card validation', () => {

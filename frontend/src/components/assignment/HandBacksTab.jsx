@@ -107,7 +107,7 @@ export default function HandBacksTab({ workspaceTimezone = 'America/Los_Angeles'
           <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
             <RotateCcw className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> Hand-backs
           </h3>
-          <p className="text-xs text-muted-foreground">Why tickets went back to the queue — use it to tune skills and routing, not to rank people.</p>
+          <p className="text-xs text-muted-foreground">Why tickets went back to the queue or moved to someone else — use it to tune skills and routing, not to rank people.</p>
         </div>
         <div className="w-44 text-xs text-muted-foreground">
           <span className="mb-0.5 block">Reason</span>
@@ -151,9 +151,9 @@ export default function HandBacksTab({ workspaceTimezone = 'America/Los_Angeles'
                 <th className="px-2 py-1.5 font-medium">When</th>
                 <th className="px-2 py-1.5 font-medium">Ticket</th>
                 <th className="px-2 py-1.5 font-medium">Category</th>
-                <th className="px-2 py-1.5 font-medium">Handed back by</th>
+                <th className="px-2 py-1.5 font-medium">Had the ticket</th>
                 <th className="px-2 py-1.5 font-medium">Reason</th>
-                <th className="px-2 py-1.5 font-medium">Where the AI sent it next</th>
+                <th className="px-2 py-1.5 font-medium">What happened next</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -182,12 +182,17 @@ export default function HandBacksTab({ workspaceTimezone = 'America/Los_Angeles'
                       </span>
                     ) : '—'}
                     {!it.selfHandBack && it.actor?.name && (
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">released by {it.actor.name}</span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">{it.kind === 'reassigned' ? 'moved' : 'released'} by {it.actor.name}</span>
                     )}
                   </td>
                   <td className="max-w-[20rem] px-2 py-2 text-xs">
                     <span className={it.reasonCode === 'skipped' ? 'text-muted-foreground' : 'text-foreground'}>{it.reasonLabel || handBackLabel(it.reasonCode)}</span>
                     {it.reasonNote && <span className="block text-muted-foreground" title={it.reasonNote}>&ldquo;{it.reasonNote}&rdquo;</span>}
+                    {it.reasonCode === 'escalate' && it.escalation?.scope && (
+                      <span className="block text-[11px] text-muted-foreground">
+                        needs more than {it.escalation.level || 'no recorded skill'} in {it.escalation.scope}
+                      </span>
+                    )}
                     {it.reasonCode === 'competency' && isAdmin && it.technician?.id && (
                       <Link
                         to={`/assignments/competencies?tech=${it.technician.id}`}

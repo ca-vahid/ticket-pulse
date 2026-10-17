@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Drawer } from 'vaul';
 import { DayPicker } from 'react-day-picker';
 import {
-  endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subDays, subMonths, subWeeks,
+  endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks,
 } from 'date-fns';
 import {
   BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -12,6 +12,7 @@ import {
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
 import { PARKED_STATUS, statusDefsFromMeta, statusDotClass, statusNamesForBase, withParkedDefault } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
+import { WINDOW_CHOICES, resolveCreatedWindow, windowChoice } from './createdWindow';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import 'react-day-picker/style.css';
 
@@ -36,8 +37,8 @@ const CREATED_PRESETS = [
   // "This year" (Mega 08-23 Phase FC): keeps the rail's presets in step with
   // the created_week/month/year quick cards.
   { key: 'year', label: 'This year', range: (now) => [startOfYear(now), now] },
-  { key: '7d', label: 'Last 7 days', range: (now) => [subDays(now, 7), now] },
-  { key: '30d', label: 'Last 30 days', range: (now) => [subDays(now, 30), now] },
+  // "Last 7 / 30 / 90 days" and "All time" are the date window now (QA 10-16
+  // #7): the same choice as the toolbar, rendered above these calendar presets.
 ];
 
 const DUE_OPTIONS = [
@@ -333,7 +334,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  * desktop, collapsible to a slim bar, every facet URL-persisted. On mobile it
  * becomes a slide-over drawer behind the Filters button.
  */
-export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false }) {
+export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false, createdWindow = null, onCreatedWindow = null }) {
   const [findQuery, setFindQuery] = useState('');
   const find = findQuery.trim().toLowerCase();
   // QA 09-18 #2: Source counts follow the current view when the list sent
@@ -444,6 +445,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   // QA 09-22 #4: no status is pre-selected (every status shows); "My open"
   // still pins the Open/Pending-BASE scope explicitly.
   const openStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+  const openBaseStatuses = useMemo(() => statusNamesForBase(statusDefs, 'Open'), [statusDefs]);
   // QA 09-23 #4: the workspace's default status filter ([] = every status).
   const defaultStatuses = useMemo(() => withParkedDefault(Array.isArray(meta?.defaultStatuses) ? meta.defaultStatuses : [], statusDefs), [meta?.defaultStatuses, statusDefs]);
 
@@ -502,7 +504,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   const activeTotal = [
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
     categories.length, subcategories.length, groups.length, sources.length, tags.length, impacts.length, urgencies.length, due.length,
-    origin, createdFrom || createdTo, noise, view, aiState, get('q'), approval || approvalCats.length,
+    origin, createdFrom || createdTo || get('created'), noise, view, aiState, get('q'), approval || approvalCats.length,
     get('reopened'), // Re-opened view (QA 09-25 #1)
     get('parkKind'), // Auto-help waiting view
     ...cfActiveKeys, // each cf_ param counts like the URL param it is
@@ -583,7 +585,24 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   })?.key || null;
   const applyPreset = (preset) => {
     const [from, to] = preset.range(now);
-    setParams({ createdFrom: day(from), createdTo: day(to) });
+    setParams({ createdFrom: day(from), createdTo: day(to), created: null });
+    setShowCalendar(false);
+  };
+  // Date window (QA 10-16 #7): the page hands its resolved window and picker
+  // down; standalone (tests, a page without one) the rail falls back to the
+  // URL token alone.
+  const win = createdWindow || resolveCreatedWindow({ token: get('created'), createdFrom, createdTo });
+  const pickWindow = (key) => {
+    if (onCreatedWindow) onCreatedWindow(key);
+    else {
+      // setParams treats 'all' as unset, so the token is written directly.
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('created', key);
+        for (const k of ['createdFrom', 'createdTo', 'page']) next.delete(k);
+        return next;
+      }, { replace: true });
+    }
     setShowCalendar(false);
   };
   const calendarRange = {
@@ -597,7 +616,13 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     // left board mode (which once fetched every status) showing closed cards
     // under an "open" label (QA 08-04 #15). Scope = Open/Pending-BASE names
     // so custom open statuses stay in "my open" (Phase 8b).
-    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: openStatuses.join(',') } }] : []),
+    // QA 10-16 #5: "My open" is Open-base only (Pending and Pending Response
+    // are not "open" to the person reading it); "My tickets" is everything of
+    // mine still being worked — Open/Pending bases plus parked.
+    ...(meta?.actor?.technicianId ? [
+      { key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: openBaseStatuses.join(',') } },
+      { key: 'my_tickets', label: 'My tickets', params: { assignee: String(meta.actor.technicianId), status: [...openStatuses, PARKED_STATUS].join(',') } },
+    ] : []),
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
     { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
     { key: 'awaiting', label: 'Awaiting reply', params: { segment: 'awaiting' } },
@@ -618,6 +643,11 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     { key: 'auto_help_waiting', label: 'Auto-help waiting', params: { parkKind: 'auto_help', status: 'any' }, icon: Hourglass },
   // QA 10-14 #1: an admin can hide the feature views a workspace does not use.
   ].filter((v) => !(Array.isArray(meta?.hiddenViews) && meta.hiddenViews.includes(v.key)));
+  const myCount = (map) => {
+    const me = meta?.actor?.technicianId;
+    if (me == null || !map) return undefined;
+    return map[me] ?? 0;
+  };
   const applyView = (v) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams();
@@ -634,7 +664,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -717,8 +747,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             {CANNED_VIEWS.map((v) => {
               const count = {
                 all: stats?.all, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
-                // "My open" = the open count the Members facet shows for me (16 Sep 2026).
-                mine: meta?.actor?.technicianId != null ? (stats?.byTechnician?.[meta.actor.technicianId] ?? (stats?.byTechnician ? 0 : undefined)) : undefined,
+                // QA 10-16 #5: each "my" view counts exactly what its list shows.
+                mine: myCount(stats?.byTechnicianOpenOnly),
+                my_tickets: myCount(stats?.byTechnicianActive),
                 awaiting_approval: stats?.awaitingApproval,
                 noise: stats?.noise, deleted: stats?.deleted, resolved: stats?.resolved,
               }[v.key];
@@ -1153,9 +1184,32 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
           <Section
             title="Created"
             icon={CalendarDays}
-            activeCount={createdFrom || createdTo ? 1 : 0}
-            onClear={() => { setParams({ createdFrom: null, createdTo: null }); setShowCalendar(false); }}
+            activeCount={createdFrom || createdTo || get('created') ? 1 : 0}
+            onClear={() => { setParams({ createdFrom: null, createdTo: null, created: null }); setShowCalendar(false); }}
           >
+            {/* The date window — the toolbar's 7d · 30d · 90d · All. */}
+            <div className="mb-1.5 flex items-center gap-0.5" role="group" aria-label="Created in the last" data-testid="rail-window">
+              {WINDOW_CHOICES.map((c) => {
+                const on = !win.custom && win.key === c.key;
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => pickWindow(c.key)}
+                    aria-pressed={on}
+                    title={c.key === 'all' ? 'Every ticket, whatever its age' : `Created in the last ${c.label} (open work always shows)`}
+                    className={`tp-focus-ring flex-1 rounded-md px-1 py-1 text-xs tabular-nums ${on ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'}`}
+                  >
+                    {c.key === 'all' ? 'All time' : c.label}
+                  </button>
+                );
+              })}
+            </div>
+            {!win.custom && win.key !== 'all' && (
+              <p className="px-1.5 pb-1.5 text-[10px] text-muted-foreground/75">
+                {win.searching ? 'A search looks at every date.' : `Finished tickets older than ${windowChoice(win.key)?.label} are hidden; open work always shows.`}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-0.5 mb-1">
               {CREATED_PRESETS.map((preset) => (
                 <button
@@ -1281,7 +1335,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
       // "Filters" title beneath the 64 px bar and push the bottom off screen.
       className={`hidden lg:flex flex-col tp-card rounded-xl overflow-hidden
         transition-[width] duration-300 ease-out motion-off:transition-none
-        ${docked ? 'h-full min-h-0' : 'sticky top-[calc(var(--tp-app-header-h,0px)_+_1rem)] self-start max-h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}
+        ${docked ? 'relative h-full min-h-0' : 'sticky top-[calc(var(--tp-app-header-h,0px)_+_1rem)] self-start max-h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}
         ${collapsed ? `w-11 ${docked ? '' : 'h-[calc(100vh_-_var(--tp-app-header-h,0px)_-_2rem)]'}` : 'w-[clamp(256px,15vw,320px)]'}`}
     >
       {/* Slim layer (collapsed) */}
@@ -1400,6 +1454,11 @@ export function ActiveFilterBar({ meta }) {
       label: t === 'none' ? 'Untagged' : `#${tagObj?.name || t}`,
       onRemove: () => removeFromCsv('tag', t),
     });
+  }
+  const createdTok = get('created');
+  if (createdTok) {
+    const choice = windowChoice(createdTok);
+    if (choice) chips.push({ label: choice.key === 'all' ? 'Created: all time' : `Created: last ${choice.label}`, onRemove: () => patch({ created: null }) });
   }
   const from = get('createdFrom');
   const to = get('createdTo');

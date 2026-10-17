@@ -1300,7 +1300,7 @@ router.get(
     if (duplicateMockDeliveryGroups7d.length > 0) {
       warnings.push({
         type: 'duplicate_mock_delivery_groups',
-        message: 'Mock notification audit found duplicate ticket/event delivery groups.',
+        message: 'Shadow audit found duplicate ticket/event delivery groups.',
         count: duplicateMockDeliveryGroups7d.length,
       });
     }
@@ -2203,7 +2203,7 @@ router.post(
     });
     if (!delivery) throw new NotFoundError('Notification delivery not found');
     if (delivery.status === 'mocked') {
-      throw new ValidationError('Mocked deliveries cannot be retried because no email was sent');
+      throw new ValidationError('Shadow deliveries cannot be retried because no email was sent');
     }
 
     await prisma.notificationDelivery.update({

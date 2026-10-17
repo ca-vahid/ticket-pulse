@@ -404,7 +404,7 @@ describe('notification workflow engine persistence', () => {
     expect(sendStep.output).toEqual(expect.objectContaining({
       mocked: true,
       skipped: true,
-      reason: 'Mock mode - email not sent',
+      reason: 'Shadow - email not sent',
     }));
   });
 

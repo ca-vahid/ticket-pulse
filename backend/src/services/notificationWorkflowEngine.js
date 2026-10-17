@@ -3432,7 +3432,7 @@ async function executeNode({
         deliveryId: delivery.id,
         mocked: true,
         skipped: true,
-        reason: 'Mock mode - email not sent',
+        reason: 'Shadow - email not sent',
         ...(recordInConversation ? { wouldRecordInConversation: true } : {}),
       };
     }

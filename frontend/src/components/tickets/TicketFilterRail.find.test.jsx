@@ -41,6 +41,9 @@ describe('TicketFilterRail — Find a filter', () => {
     const { rerender } = render(<MemoryRouter><TicketFilterRail meta={META} docked /></MemoryRouter>);
     const rail = () => screen.getByRole('complementary', { name: 'Ticket filters' });
     expect(rail().className).toContain('h-full');
+    // The slim layer (absolute) needs a containing block, or a collapsed rail's
+    // expand button floats to the top of the page (4.2.78 regression).
+    expect(rail().className).toContain('relative');
     expect(rail().className).not.toContain('sticky');
     rerender(<MemoryRouter><TicketFilterRail meta={META} /></MemoryRouter>);
     // Page-scroll mode docks UNDER the app header (it used to slide beneath it).

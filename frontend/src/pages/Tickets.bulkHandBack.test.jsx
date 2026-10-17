@@ -132,6 +132,27 @@ describe('Tickets bulk release — one hand-back reason (QA 09-25 item 3)', () =
     expect(assignSpy).toHaveBeenCalledWith(11, null, { handBack: { code: 'skipped', note: null } });
   });
 
+  // QA 10-16 item 1: moving tickets from one person to another asks the same
+  // question, without Escalate, and every move carries the reason.
+  test('bulk move to another person asks the same dialog (no Escalate) and every move carries the reason', async () => {
+    mount();
+    await screen.findAllByText('Row 11');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all tickets on this page' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk assign' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Juan Gonzalez' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm/ }));
+    const dialog = await screen.findByTestId('hand-back-dialog');
+    expect(dialog).toHaveAttribute('data-mode', 'reassign');
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: /move 2 tickets to Juan Gonzalez/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('hand-back-escalate')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Capacity full/));
+    fireEvent.click(screen.getByRole('button', { name: 'Reassign' }));
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledTimes(2));
+    expect(assignSpy).toHaveBeenCalledWith(11, 40, { handBack: { code: 'capacity', note: null } });
+    expect(assignSpy).toHaveBeenCalledWith(12, 40, { handBack: { code: 'capacity', note: null } });
+  });
+
   test('assignable-only people are offered under "Other teams" in the bulk picker', async () => {
     mount();
     await screen.findAllByText('Row 11');

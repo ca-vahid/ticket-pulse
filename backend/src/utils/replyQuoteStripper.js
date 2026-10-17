@@ -19,6 +19,9 @@ const HTML_QUOTE_CONTAINERS = [
   /<div[^>]*id="(?:divRplyFwdMsg|appendonsend)"[\s\S]*$/i,   // Outlook / OWA
   /<div[^>]*class="[^"]*moz-cite-prefix[^"]*"[\s\S]*$/i,      // Thunderbird
   /<hr[^>]*id="?stopSpelling"?[\s\S]*$/i,                     // older Outlook
+  // Outlook desktop's "From: / Sent:" block: a div with a thin grey top rule
+  // and no id (QA 10-16, #245244: a "Thank you" carried the whole thread).
+  /<div[^>]*style="[^"]*border-top:\s*solid\s+#(?:E1E1E1|B5C4DF)[^"]*"[\s\S]*$/i,
 ];
 
 const TEXT_QUOTE_MARKERS = [
@@ -57,4 +60,19 @@ export function stripQuotedText(text) {
   return meaningful(candidate) ? candidate : input;
 }
 
-export default { stripQuotedHtml, stripQuotedText };
+/**
+ * Outlook's "From: A Sent: <date> To: B" header flattened onto one line
+ * (FreshService's body_text has no line breaks). Only for a reply whose HTML
+ * already showed a quote block: on its own, a pasted bounce ("From: postmaster
+ * Sent: ... To: ...") would be cut out of the person's own text.
+ */
+const FLATTENED_HEADER = /\bFrom:\s[^\n]{1,200}?\bSent:\s[^\n]{1,80}?\bTo:\s/i;
+export function stripFlattenedQuoteHeader(text) {
+  const input = String(text || '');
+  const m = FLATTENED_HEADER.exec(input);
+  if (!m) return input;
+  const candidate = input.slice(0, m.index).trim();
+  return meaningful(candidate) ? candidate : input;
+}
+
+export default { stripQuotedHtml, stripQuotedText, stripFlattenedQuoteHeader };

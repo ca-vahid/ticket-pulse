@@ -348,13 +348,15 @@ describe('changing who holds a child (QA 10-09 #1)', () => {
   const pick = async (ref, name) => {
     fireEvent.click(within(rowOf(ref)).getByRole('button', { name: /Assignee: Muhammad Shahidullah/ }));
     fireEvent.click(within(await screen.findByRole('listbox', { name: 'Choose assignee' })).getByRole('option', { name: new RegExp(name) }));
+    // QA 10-16 #1: moving a ticket from one person to another asks why, on every page.
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip' }));
   };
 
   test('a Ticket Pulse child is assigned in place: the family reloads and the line says who has it', async () => {
     await openFamily();
     expect(api.family).toHaveBeenCalledTimes(1);
     await pick('TP-5000', 'Vahid Haeri');
-    await waitFor(() => expect(tickets.assign).toHaveBeenCalledWith(90, 1, {}));
+    await waitFor(() => expect(tickets.assign).toHaveBeenCalledWith(90, 1, expect.anything()));
     expect(tickets.fsUpdate).not.toHaveBeenCalled();
     expect(await screen.findByText('TP-5000 assigned to Vahid Haeri.')).toBeInTheDocument();
     await waitFor(() => expect(api.family).toHaveBeenCalledTimes(2));
@@ -365,7 +367,7 @@ describe('changing who holds a child (QA 10-09 #1)', () => {
   test('a FreshService child is written to FreshService instead', async () => {
     await openFamily();
     await pick('#241814', 'Vahid Haeri');
-    await waitFor(() => expect(tickets.fsUpdate).toHaveBeenCalledWith(91, { assignedTechId: 1 }));
+    await waitFor(() => expect(tickets.fsUpdate).toHaveBeenCalledWith(91, { assignedTechId: 1, handBack: { code: 'skipped', note: null } }));
     expect(tickets.assign).not.toHaveBeenCalled();
     expect(await screen.findByText('#241814 assigned to Vahid Haeri in FreshService.')).toBeInTheDocument();
   });

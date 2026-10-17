@@ -16,13 +16,15 @@ import {
  * Every key maps 1:1 to a buildListWhere segment branch AND a getQueueStats
  * count, so a card's number always equals what clicking it shows.
  */
+// `windowed`: the count follows the list's date window (QA 10-16 #7) - these
+// cards hold finished tickets; the open-work cards never hide anything by age.
 export const QUEUE_CARD_REGISTRY = {
-  all: { label: 'All tickets', Icon: Ticket, tile: 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300', num: 'text-blue-600 dark:text-blue-300', countKey: 'all' },
+  all: { label: 'All tickets', Icon: Ticket, tile: 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300', num: 'text-blue-600 dark:text-blue-300', countKey: 'all', windowed: true },
   open: { label: 'Open', Icon: Inbox, tile: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300', num: 'text-emerald-600 dark:text-emerald-300', countKey: 'open' },
   awaiting: { label: 'Awaiting reply', Icon: MessageSquare, tile: 'bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-300', num: 'text-foreground', countKey: 'awaiting' },
   due_today: { label: 'Due today', Icon: CalendarDays, tile: 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300', num: 'text-foreground', countKey: 'dueToday' },
   overdue: { label: 'Overdue', Icon: AlertCircle, tile: 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300', num: 'text-red-600 dark:text-red-300', countKey: 'overdue' },
-  resolved: { label: 'Resolved', Icon: CheckCircle2, tile: 'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300', num: 'text-foreground', countKey: 'resolved' },
+  resolved: { label: 'Resolved', Icon: CheckCircle2, tile: 'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300', num: 'text-foreground', countKey: 'resolved', windowed: true },
   // Created-period cards (calendar boundaries on the WORKSPACE clock,
   // Monday-start weeks — backend zonedBoundaries).
   created_week: { label: 'Tickets this week', Icon: CalendarRange, tile: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-600 dark:text-cyan-300', num: 'text-foreground', countKey: 'createdThisWeek' },
@@ -30,8 +32,8 @@ export const QUEUE_CARD_REGISTRY = {
   created_year: { label: 'Tickets this year', Icon: CalendarClock, tile: 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-300', num: 'text-foreground', countKey: 'createdThisYear' },
   // Opt-in cards (counts always existed; the rail's Views cover these too).
   unassigned: { label: 'Unassigned', Icon: UserRound, tile: 'bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300', num: 'text-foreground', countKey: 'unassigned' },
-  deleted: { label: 'Deleted & spam', Icon: Trash2, tile: 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300', num: 'text-foreground', countKey: 'deleted' },
-  noise: { label: 'Noise', Icon: VolumeX, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'noise' },
+  deleted: { label: 'Deleted & spam', Icon: Trash2, tile: 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300', num: 'text-foreground', countKey: 'deleted', windowed: true },
+  noise: { label: 'Noise', Icon: VolumeX, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'noise', windowed: true },
   // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date —
   // left out of Open / Overdue / Awaiting, counted here.
   parked: { label: 'Parked', Icon: PauseCircle, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'parked' },
@@ -55,4 +57,25 @@ export function normalizeQueueCards(value) {
   if (clean.some((k) => !QUEUE_CARD_REGISTRY[k])) return DEFAULT_QUEUE_CARDS;
   if (new Set(clean).size !== clean.length) return DEFAULT_QUEUE_CARDS;
   return clean;
+}
+
+// QA 10-16 #8: what survives a card click. Everything else is a filter and
+// goes, so the list shows exactly the card's number: the search text, the
+// sort and the date window (`created`, QA 10-16 #7) are not filters.
+export const CARD_KEEP_KEYS = ['q', 'sort', 'dir', 'created'];
+
+/** The query string a card click leads to (its segment and nothing else). */
+export function cardSearch(prev, key) {
+  const from = new URLSearchParams(prev);
+  const next = new URLSearchParams();
+  for (const k of CARD_KEEP_KEYS) {
+    const v = from.get(k);
+    if (v) next.set(k, v);
+  }
+  // "All tickets" widens the status scope to match its count (every
+  // non-Deleted/Spam status) - a workspace default status filter would make
+  // the card lie (QA 08-04 #1). Other cards carry their own segment scope.
+  if (key === 'all') next.set('status', 'any');
+  else next.set('segment', key);
+  return next;
 }

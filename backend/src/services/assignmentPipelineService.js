@@ -1064,6 +1064,21 @@ class AssignmentPipelineService {
     } catch (err) {
       logger.debug('Could not load reboundFrom for pipeline run', { runId, error: err.message });
     }
+    // QA 10-16 item 1: an escalation needs the level of the person who handed
+    // it back. A Ticket Pulse hand-back carries the snapshot; one FreshService
+    // reported (sync / sweep) is read here, once, and kept on the run.
+    if (reboundFrom?.reason?.code === 'escalate' && !reboundFrom.reason.escalation && reboundFrom.previousTechId) {
+      try {
+        const { default: escalationService } = await import('./escalation/escalationService.js');
+        const escalation = await escalationService.contextFor({
+          workspaceId, ticketId, technicianId: reboundFrom.previousTechId, technicianName: reboundFrom.previousTechName || null,
+        });
+        reboundFrom = { ...reboundFrom, reason: { ...reboundFrom.reason, escalation } };
+        await prisma.assignmentPipelineRun.update({ where: { id: runId }, data: { reboundFrom } }).catch(() => null);
+      } catch (err) {
+        logger.warn('Pipeline: escalation snapshot skipped', { runId, ticketId, error: err.message });
+      }
+    }
 
     // Ensure run is in running state (may already be if created as running)
     const initialProvider = providerForModel(assignmentConfig?.llmModel, 'anthropic');
@@ -1381,7 +1396,8 @@ class AssignmentPipelineService {
         recommendation = this._parseRecommendationFromTranscript(fullTranscript, runId);
       }
 
-      const topRec = recommendation?.recommendations?.[0];
+      // `let`: the escalation guard below may put a more advanced person first.
+      let topRec = recommendation?.recommendations?.[0];
       // An EMPTY recommendations array is the noise verdict for an ordinary run
       // — unchanged, and the only thing ws1 (auto-close on) ever acts on.
       //
@@ -1501,6 +1517,40 @@ class AssignmentPipelineService {
         }
       }
 
+      // Escalation (QA 10-16 item 1): the ticket was handed back with
+      // "Escalate to Advanced Troubleshooting Team". The AI was told to pick
+      // someone more advanced; this deterministic check makes sure: a pick
+      // that is not above the escalating person's level is swapped for the
+      // best eligible person who is (at work, not away), and when nobody is,
+      // the run stays a suggestion for a coordinator. Never blocks: an error
+      // keeps the AI's pick. Recorded on recommendation.escalation.
+      let escalationGuard = null;
+      if (recommendation && !isNoise && reboundFrom?.reason?.code === 'escalate' && reboundFrom.reason.escalation
+        && Array.isArray(recommendation.recommendations) && recommendation.recommendations.length) {
+        try {
+          const { default: escalationService } = await import('./escalation/escalationService.js');
+          escalationGuard = await escalationService.guard({
+            workspaceId, ticketId, runId, recommendation, escalation: reboundFrom.reason.escalation, now: new Date(),
+          });
+          if (escalationGuard) {
+            recommendation.escalation = escalationGuard.record;
+            if (escalationGuard.outcome === 'swapped') {
+              recommendation.recommendations = escalationGuard.recommendations;
+              topRec = recommendation.recommendations[0];
+              // The person put first never handed this ticket back.
+              llmIgnoredRebound = false;
+            }
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({ ...escalationGuard.step, pipelineRunId: runId, stepNumber: stepCounter })
+              .catch((stepError) => logger.warn('Pipeline: failed to record escalation_guard step', { runId, error: stepError.message }));
+            emit({ type: 'escalation_guard', outcome: escalationGuard.outcome, message: escalationGuard.sentence });
+          }
+        } catch (escalationError) {
+          escalationGuard = null;
+          logger.warn('Pipeline: escalation guard failed - assignment unchanged', { runId, ticketId, error: escalationError.message });
+        }
+      }
+
       let decision = resolvePipelineDecision({
         recommendation,
         triggerSource,
@@ -1511,6 +1561,10 @@ class AssignmentPipelineService {
         groupObserved,
         autoAssign: assignmentConfig?.autoAssign,
       });
+      // Escalation with nobody more advanced at work: a suggestion only, the
+      // coordinator decides (QA 10-16 item 1).
+      const escalationHeld = escalationGuard?.outcome === 'none_higher' && decision === 'auto_assigned';
+      if (escalationHeld) decision = 'pending_review';
 
       // Apply the never_noise veto: the dismissal becomes a pending review
       // with an explicit trace step so the run detail shows WHY the ticket
@@ -1687,6 +1741,50 @@ class AssignmentPipelineService {
       const urgentGuardHeld = urgentGuard?.outcome === 'hold' && urgentGuard.shadow !== true;
       const urgentGuardRedirected = Boolean(urgentGuard && urgentGuard.shadow !== true && assignTechId && assignTechId !== topRec?.techId);
 
+      // Ticket shares (QA 10-16 item 4, services/assignmentShares): for tickets
+      // in the categories an admin chose, the person comes from fixed
+      // percentages instead of the AI. Shadow only records who the rule would
+      // have picked (recommendation.share). Live sets the assignee, or in a
+      // suggest-only workspace puts the rule's pick first with the AI's own
+      // pick second. Never after a person was chosen by the urgent rule, and
+      // never throws: any error leaves the AI's pick.
+      let shareRule = null;
+      // An escalation (QA 10-16 #1) is a person's explicit ask for someone
+      // more advanced: the share rule and Spread's cap never move its pick.
+      const escalationLocked = Boolean(escalationGuard && ['swapped', 'kept'].includes(escalationGuard.outcome));
+      if (recommendation && !isNoise && !groupObserved && !urgentGuardHeld && !urgentGuardRedirected && !escalationGuard
+        && ['auto_assigned', 'pending_review'].includes(decision) && topRec?.techId) {
+        const before = { assignTechId, recommendations: recommendation.recommendations, share: recommendation.share };
+        try {
+          const { default: assignmentSharesService } = await import('./assignmentShares/sharesService.js');
+          shareRule = await assignmentSharesService.applyToRun({
+            workspaceId, ticketId, runId, decision, recommendation,
+            aiPick: { techId: topRec.techId, techName: topRec.techName || null },
+            dryRun: assignmentConfig?.dryRunMode ?? true,
+          });
+          if (shareRule?.record) recommendation.share = shareRule.record;
+          if (shareRule?.applied && shareRule.techId) {
+            if (decision === 'auto_assigned') assignTechId = shareRule.techId;
+            else if (Array.isArray(shareRule.recommendations)) recommendation.recommendations = shareRule.recommendations;
+          }
+          if (shareRule?.step) {
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({ ...shareRule.step, pipelineRunId: runId, stepNumber: stepCounter }).catch((stepError) => {
+              logger.warn('Pipeline: failed to record share_rule step', { runId, error: stepError.message });
+            });
+            emit({ type: 'share_rule', applied: shareRule.applied === true, message: shareRule.sentence });
+          }
+        } catch (shareError) {
+          shareRule = null;
+          assignTechId = before.assignTechId;
+          recommendation.recommendations = before.recommendations;
+          if (before.share === undefined) delete recommendation.share;
+          else recommendation.share = before.share;
+          logger.warn('Pipeline: ticket shares failed - assignment unchanged', { runId, ticketId, error: shareError.message });
+        }
+      }
+      const shareRuleAssigned = Boolean(shareRule?.applied && decision === 'auto_assigned' && shareRule.techId && assignTechId === shareRule.techId);
+
       // Assignment spread (QA 10-13 item 17, services/assignmentSpread): no
       // more than N automatic assignments to one person in M minutes, and a
       // new hire's Workstation + Laptop stay with one person. Every decision
@@ -1698,8 +1796,9 @@ class AssignmentPipelineService {
           const { default: assignmentSpreadService } = await import('./assignmentSpread/spreadService.js');
           spreadGuard = await assignmentSpreadService.guardAutoAssignment({
             workspaceId, ticketId, runId, techId: assignTechId, recommendation, reboundFrom,
-            techName: assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
-            locked: urgentGuardRedirected,
+            techName: shareRuleAssigned ? (shareRule.techName || null) : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
+            // Either/or: a ticket the share rule gave out is counted by Spread, never moved by its cap.
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
             dryRun: assignmentConfig?.dryRunMode ?? true,
           });
           if (spreadGuard?.techId && spreadGuard.moved) assignTechId = spreadGuard.techId;
@@ -1713,7 +1812,12 @@ class AssignmentPipelineService {
           logger.warn('Pipeline: assignment spread failed - assignment unchanged', { runId, ticketId, error: spreadError.message });
         }
       }
-      const assignmentDecisionNote = [urgentGuardRedirected ? urgentGuard.sentence : null, spreadGuard?.sentence || null].filter(Boolean).join(' ');
+      const assignmentDecisionNote = [
+        escalationGuard && ['swapped', 'kept'].includes(escalationGuard.outcome) ? escalationGuard.sentence : null,
+        urgentGuardRedirected ? urgentGuard.sentence : null,
+        shareRuleAssigned ? shareRule.sentence : null,
+        spreadGuard?.sentence || null,
+      ].filter(Boolean).join(' ');
 
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
@@ -1736,7 +1840,11 @@ class AssignmentPipelineService {
       } else if (groupExcluded) {
         // The "Group <X>" prefix is what the run detail page keys on to render
         // the blue "Manual approval required" strip — keep this format stable.
-        errorMessage = `Group ${excludedGroupName} is excluded from auto-assignment — manual approval required.`;
+        // An escalation that found nobody more advanced adds its sentence after it.
+        const escalationNote = escalationGuard?.outcome === 'none_higher' ? ` ${escalationGuard.sentence}` : '';
+        errorMessage = `Group ${excludedGroupName} is excluded from auto-assignment — manual approval required.${escalationNote}`;
+      } else if (escalationHeld || (escalationGuard?.outcome === 'none_higher' && decision === 'pending_review')) {
+        errorMessage = escalationGuard.sentence;
       }
 
       // Set decidedAt when the pipeline itself finalizes a decision. Without

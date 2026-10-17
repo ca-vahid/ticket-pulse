@@ -93,7 +93,7 @@ export function workflowState(workflow) {
   const lastRun = workflow.runs?.[0];
   if (workflow.isEnabled && lastRun && runFailed(lastRun.status)) return { key: 'failing', label: 'Failing', dot: 'bg-red-500' };
   if (workflow.isEnabled && workflow.mockModeEnabled) return { key: 'observe', label: 'Shadow', dot: 'bg-amber-500' };
-  if (workflow.isEnabled) return { key: 'on', label: 'Enabled', dot: 'bg-emerald-500' };
+  if (workflow.isEnabled) return { key: 'on', label: 'Live', dot: 'bg-emerald-500' };
   if (!(workflow.publishedVersion > 0)) return { key: 'draft', label: 'Draft', dot: 'bg-muted-foreground/40' };
   return { key: 'off', label: 'Off', dot: 'bg-muted-foreground/40' };
 }
@@ -153,6 +153,7 @@ function IndexRow({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const isEnabled = !!workflow.isEnabled;
+  const isShadow = isEnabled && workflow.mockModeEnabled === true;
   const isArchived = Boolean(workflow.archivedAt);
   const version = workflow.publishedVersion || 0;
   const state = workflowState(workflow);
@@ -184,15 +185,17 @@ function IndexRow({
       </button>
       {/* The enable switch moved to the workflow's own header (QA 09-22 #11):
           in the sidebar it was too easy to hit. The state stays readable. */}
+      {/* QA 10-16: one word for the state, the same three as the header —
+          Off, Shadow or Live. "On" used to cover Shadow too. */}
       {!isArchived && (
         <span
           className={cx(
             'flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide',
-            isEnabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground/70',
+            isShadow ? 'text-amber-700 dark:text-amber-300' : isEnabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground/70',
           )}
-          aria-label={`${name} is ${isEnabled ? 'on' : version === 0 ? 'a draft' : 'off'}`}
+          aria-label={`${name} is ${isShadow ? 'in Shadow' : isEnabled ? 'live' : version === 0 ? 'a draft' : 'off'}`}
         >
-          {isEnabled ? 'On' : version === 0 ? 'Draft' : 'Off'}
+          {isShadow ? 'Shadow' : isEnabled ? 'Live' : version === 0 ? 'Draft' : 'Off'}
         </span>
       )}
       {onRowAction && (
@@ -375,7 +378,7 @@ export default function WorkflowIndex({
       <div className="flex items-center gap-3 border-b border-border/60 px-3 pb-1.5 text-[11px]" role="group" aria-label="Filter workflows">
         {[
           { key: 'all', label: 'All' },
-          { key: 'enabled', label: 'Enabled' },
+          { key: 'enabled', label: 'Live or Shadow' },
           { key: 'failing', label: failingCount ? `Failing ${failingCount}` : 'Failing' },
         ].map((f) => {
           const on = filter === f.key && !showArchived;

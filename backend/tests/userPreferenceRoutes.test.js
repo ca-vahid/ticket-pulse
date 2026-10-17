@@ -178,6 +178,14 @@ describe('PUT /api/tickets/preferences/:key', () => {
     expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
   });
 
+  test('queue.createdWindow takes the four window choices only (QA 10-16 #7)', async () => {
+    for (const value of ['7d', '30d', '90d', 'all']) {
+      await request(buildApp()).put('/api/tickets/preferences/queue.createdWindow').send({ value }).expect(200);
+    }
+    await request(buildApp()).put('/api/tickets/preferences/queue.createdWindow').send({ value: '365d' }).expect(400);
+    expect(prismaMock.userPreference.upsert).toHaveBeenCalledTimes(4);
+  });
+
   test('the validator is per key — queue.columns still takes arbitrary JSON', async () => {
     await request(buildApp()).put('/api/tickets/preferences/queue.columns').send({ value: 'sepia' }).expect(200);
     expect(prismaMock.userPreference.upsert).toHaveBeenCalledTimes(1);

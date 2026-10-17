@@ -6,7 +6,7 @@ import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
 import HandBackReasonDialog from './HandBackReasonDialog';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { useCurrentIdentity } from '../../utils/currentIdentity';
-import { isSignedInAs, splitTeams } from '../../utils/handBack';
+import { asksChangeReason, isSignedInAs, splitTeams } from '../../utils/handBack';
 
 /**
  * Touch-first assignment for the mobile Tickets queue: a bottom sheet (vaul)
@@ -48,7 +48,8 @@ export default function MobileAssignSheet({
   // Hand-back reason (QA 09-25 item 3). The sheet closes first (its drawer
   // traps focus), so everything the write needs is captured at tap time.
   const me = useCurrentIdentity();
-  const [handBack, setHandBack] = useState(null); // { ticketId, assignFn, onAssigned, current, requireReason, error }
+  // QA 10-16 item 1: moving it to another person asks the same question.
+  const [handBack, setHandBack] = useState(null); // { mode, toId, toName, ticketId, assignFn, onAssigned, current, requireReason, categoryLabel, error }
   const [handBackBusy, setHandBackBusy] = useState(false);
 
   const aiCandidates = useMemo(() => {
@@ -73,26 +74,40 @@ export default function MobileAssignSheet({
   const done = (techId) => { onClose?.(); onAssigned?.(techId); };
   const { team: teamMembers, others: otherTeams } = useMemo(() => splitTeams(members), [members]);
 
+  const scopeLabel = (() => {
+    const { category, subcategory } = ticketCategoryLabels(ticket || {});
+    return [category, subcategory].filter(Boolean).join(' / ') || null;
+  })();
+  const askWhy = (mode, toTech = null) => {
+    setHandBack({
+      mode,
+      toId: toTech?.id ?? null,
+      toName: toTech?.name || null,
+      ticketId, assignFn, onAssigned, current, requireReason: isSignedInAs(me, current), categoryLabel: scopeLabel, error: null,
+    });
+    onClose?.();
+  };
+
   const pickUnassigned = () => {
     if (busy) return;
     if (value == null) { assign(null); return; }
-    setHandBack({
-      ticketId, assignFn, onAssigned, current, requireReason: isSignedInAs(me, current), error: null,
-    });
-    onClose?.();
+    askWhy('unassign');
   };
 
   const submitHandBack = async (reason) => {
     if (!handBack || handBackBusy) return;
     const ctx = handBack;
+    const target = ctx.mode === 'reassign' ? ctx.toId : null;
     setHandBackBusy(true);
     setHandBack(null);
     try {
-      await (ctx.assignFn ? ctx.assignFn(null, { handBack: reason }) : ticketsAPI.assign(ctx.ticketId, null, { handBack: reason }));
-      ctx.onAssigned?.(null);
+      const res = await (ctx.assignFn ? ctx.assignFn(target, { handBack: reason }) : ticketsAPI.assign(ctx.ticketId, target, { handBack: reason }));
+      // Skipped on a move away from an AI pick: still ask "why the override?".
+      if (target != null && reason?.code === 'skipped') overridePrompt.maybePrompt(res, ctx.ticketId, target);
+      ctx.onAssigned?.(target);
     } catch (err) {
       if (err?.message !== 'cancelled') {
-        setHandBack({ ...ctx, error: err?.response?.data?.message || err?.message || 'Could not unassign' });
+        setHandBack({ ...ctx, error: err?.response?.data?.message || err?.message || (target ? 'Could not reassign' : 'Could not unassign') });
       }
     }
     setHandBackBusy(false);
@@ -100,6 +115,11 @@ export default function MobileAssignSheet({
 
   const assign = async (techId) => {
     if (busy) return;
+    const toTech = technicians.find((t) => t.id === techId) || null;
+    if (ticketId != null && asksChangeReason({ fromId: value, toId: techId, toTech, me })) {
+      askWhy('reassign', toTech);
+      return;
+    }
     setBusy(true);
     try {
       const res = await (assignFn ? assignFn(techId) : ticketsAPI.assign(ticketId, techId));
@@ -144,6 +164,9 @@ export default function MobileAssignSheet({
           right after a successful assign (the component stays mounted). */}
       <HandBackReasonDialog
         open={Boolean(handBack)}
+        mode={handBack?.mode || 'unassign'}
+        toName={handBack?.toName || null}
+        categoryLabel={handBack?.categoryLabel || null}
         requireReason={handBack?.requireReason !== false}
         personName={handBack?.current?.name || null}
         busy={handBackBusy}

@@ -414,10 +414,10 @@ export async function setWorkflowEnabled(workspaceId, id, enabled, actor = null)
 
 export async function setWorkflowMockMode(workspaceId, id, enabled, actor = null) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
-  if (workflow.archivedAt) throw new ValidationError('Restore the workflow variant before changing mock mode');
+  if (workflow.archivedAt) throw new ValidationError('Restore the workflow variant before changing Shadow');
   const isEnabled = enabled === true || enabled === 'true';
   if (isEnabled && !workflow.publishedDefinition) {
-    throw new ValidationError('Publish the workflow before enabling mock mode');
+    throw new ValidationError('Publish the workflow before turning on Shadow');
   }
   // Mock mode is independent of live-enable: you may arm mock on a disabled
   // (but published) workflow so it is already in safe test mode before going live.

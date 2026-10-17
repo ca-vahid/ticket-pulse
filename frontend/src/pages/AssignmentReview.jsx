@@ -13,6 +13,8 @@ import DailyReviewManager from '../components/assignment/DailyReviewManager';
 import PromptManager from '../components/assignment/PromptManager';
 import HandBacksTab from '../components/assignment/HandBacksTab';
 import SpreadTab from '../components/assignment/SpreadTab';
+import SharesTab from '../components/assignment/SharesTab';
+import RunEscalationLine from '../components/assignment/RunEscalationLine';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
 import FilterDropdown from '../components/FilterDropdown';
@@ -25,7 +27,7 @@ import {
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
-  MessageSquare, Copy, KeyRound, Webhook, Eye,
+  MessageSquare, Copy, KeyRound, Webhook, Eye, PieChart,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -34,6 +36,8 @@ const ALL_TABS = [
   // QA 09-25 item 3: why tickets were handed back (process signal).
   { id: 'hand-backs', label: 'Hand-backs', icon: RotateCcw, minRole: 'reviewer' },
   { id: 'spread', label: 'Spread', icon: Users, minRole: 'reviewer' },
+  // QA 10-16 item 4: fixed-percentage shares for chosen categories (Off · Shadow · Live).
+  { id: 'shares', label: 'Shares', icon: PieChart, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Improvements', icon: Sparkles, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: MessageSquare, minRole: 'admin' },
@@ -2487,6 +2491,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         <p className="text-sm font-semibold text-foreground leading-snug mt-1.5 break-words">
           {run.ticket?.subject || 'No subject'}
         </p>
+        <RunEscalationLine run={run} className="mt-1" />
         {priorityMeta.rationale && (
           <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
             <span className="font-semibold text-muted-foreground">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
@@ -3193,6 +3198,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                     <Trash2 className="w-3.5 h-3.5 mt-0.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
                                   )}
                                 </div>
+                                <RunEscalationLine run={run} className="mt-1" />
                                 <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/75 leading-none">
                                   <span className="shrink-0 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                                   {priorityMeta.rationale && (
@@ -5120,6 +5126,7 @@ export default function AssignmentReview() {
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'hand-backs' && <HandBacksTab isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'spread' && <SpreadTab workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'shares' && <SharesTab workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}

@@ -302,7 +302,9 @@ router.get('/meta', asyncHandler(async (req, res) => {
 // slow-request log (26 Sep). Identical requests now share one computation;
 // the 2 s window keeps cards honest right after an assign or status change.
 router.get('/stats', readCache(2000), asyncHandler(async (req, res) => {
-  const stats = await ticketService.getQueueStats(req.workspaceId);
+  // ?createdWithin=7d|30d|90d (QA 10-16 #7): the list's date window, so the
+  // All / Resolved / Deleted / Noise counts match what their click lists.
+  const stats = await ticketService.getQueueStats(req.workspaceId, { createdWithin: req.query.createdWithin || null });
   res.json({ success: true, data: stats });
 }));
 
@@ -405,7 +407,7 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 
 // 'composer.greeting' (QA 09-18 #4): 'auto' adds the workspace greeting the
 // moment a reply starts; 'manual' waits for the Greeting button.
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'queue.sideArrows', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'queue.sideArrows', 'queue.createdWindow', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
 const PREFERENCE_VALIDATORS = {
@@ -419,6 +421,8 @@ const PREFERENCE_VALIDATORS = {
   'queue.columnMap': (v) => typeof v === 'boolean',
   // Round scroll arrows over the wide Tickets list (QA 10-07 #1): on / off.
   'queue.sideArrows': (v) => typeof v === 'boolean',
+  // Tickets list date window (QA 10-16 #7): the person's default.
+  'queue.createdWindow': (v) => ['7d', '30d', '90d', 'all'].includes(v),
 };
 const PREFERENCE_VALUE_MAX_BYTES = 8 * 1024;
 

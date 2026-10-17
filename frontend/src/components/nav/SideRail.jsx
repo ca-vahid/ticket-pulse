@@ -87,20 +87,30 @@ export default function SideRail() {
     return () => document.removeEventListener('keydown', onKey);
   }, [peekPinned]);
 
+  // QA 10-16 #9: on a page INSIDE a section (a ticket, /tickets/:id) the
+  // active row still works — it goes back to the section's main page. For
+  // Tickets that is the list the ticket was opened from (state.from), else a
+  // bare /tickets, which restores the last filters, page and scroll.
+  const sectionHome = (dest) => {
+    const from = location.state?.from;
+    if (typeof from === 'string' && (from === dest.path || from.startsWith(`${dest.path}?`))) return from;
+    return dest.path;
+  };
   const renderRow = (dest) => {
     const isActive = dest.id === activeId;
+    const onSectionHome = isActive && location.pathname === dest.path;
     const { Icon } = dest;
     return (
       <button
         key={dest.id}
         type="button"
-        onClick={() => { if (!isActive) navigate(dest.path); }}
+        onClick={() => { if (!isActive) navigate(dest.path); else if (!onSectionHome) navigate(sectionHome(dest)); }}
         aria-current={isActive ? 'page' : undefined}
-        title={dest.hint ? `${dest.label} — ${dest.hint}` : dest.label}
+        title={isActive && !onSectionHome ? `Back to ${dest.label}` : dest.hint ? `${dest.label} — ${dest.hint}` : dest.label}
         className={cn(
           'group/row relative mx-[9px] flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[13.5px] font-semibold transition-colors tp-focus-ring',
           isActive
-            ? `${dest.tile} cursor-default`
+            ? `${dest.tile} ${onSectionHome ? 'cursor-default' : 'cursor-pointer hover:brightness-95 dark:hover:brightness-110'}`
             : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >

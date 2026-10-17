@@ -148,6 +148,26 @@ describe('Quick filter cards (Phase FC)', () => {
     expect(inCards().getByText('Tickets this month').closest('button')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  test('a card REPLACES the other filters, keeping the search text and sort (QA 10-16 #8)', async () => {
+    mount('/tickets?aiState=suggested&assignee=42&priority=4&q=printer&sort=updatedAt&dir=asc&page=3');
+    await waitFor(() => expect(inCards().getByText('Awaiting reply')).toBeInTheDocument());
+
+    fireEvent.click(inCards().getByText('Awaiting reply').closest('button'));
+    await waitFor(() => expect(lastListParams().segment).toBe('awaiting'));
+    const p = lastListParams();
+    expect(p.aiState).toBeUndefined();
+    expect(p.assignedTechId).toBeUndefined();
+    expect(p.priority).toBeUndefined();
+    expect(p.page).toBe(1);
+    expect(p.q).toBe('printer');
+    expect(p.sort).toBe('updatedAt');
+    expect(p.dir).toBe('asc');
+
+    fireEvent.click(inCards().getByText('All tickets').closest('button'));
+    await waitFor(() => expect(lastListParams().segment).toBeUndefined());
+    expect(inCards().getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('a ?status= deep link filters the list and does NOT light the "All tickets" card', async () => {
     mount('/tickets?assignee=42&status=Open');
     await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());

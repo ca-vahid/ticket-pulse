@@ -222,6 +222,7 @@ function renderAssignee(ticket, ctx) {
             assignFn={fsRowEditable ? ((techId, extra) => ctx.fsAssign(ticket, techId, extra)) : undefined}
             onAssigned={(techId) => ctx.onManualAssigned(ticket.id, techId)}
             onOverride={ctx.onOverride}
+            categoryLabel={(() => { const c = ticketCategoryLabels(ticket); return [c.category, c.subcategory].filter(Boolean).join(' / ') || null; })()}
             size="sm"
             align="right"
             showAi={canReview}

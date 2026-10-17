@@ -6,7 +6,7 @@ import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
 import HandBackReasonDialog from './HandBackReasonDialog';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { useCurrentIdentity } from '../../utils/currentIdentity';
-import { isSignedInAs, splitTeams } from '../../utils/handBack';
+import { asksChangeReason, isSignedInAs, splitTeams } from '../../utils/handBack';
 
 /**
  * Rich assignee dropdown shared by the queue rows, peek drawer, and detail
@@ -32,8 +32,9 @@ export default function AssigneePicker({
   aiSuggestion = null, // { runId, state: 'suggested'|'analyzing'|'queued', techId, techName, score }
   ticketOrigin = null, // 'ticketpulse' | 'freshservice' — hides local agents on FS-born tickets
   currentTech = null, // the ticket's own assignee object {id,name,photoUrl,isActive,origin} — used when the assignee isn't in the active team list (deactivated / FS-only agents)
-  askHandBack = true, // false = clearing the assignee never asks why (forms that aren't a real ticket yet)
+  askHandBack = true, // false = changing the assignee never asks why (forms that aren't a real ticket yet)
   onOverride = null, // (res, ticketId, techId) => void: the parent asks "why?" (a queue row can unmount right after the save)
+  categoryLabel = null, // "Networking / VPN" — sharpens the Escalate hint in the reason dialog
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -61,8 +62,9 @@ export default function AssigneePicker({
   // as read-only (they can only be (re)assigned in FreshService).
   const currentReadOnly = Boolean(current) && !activeMatch;
   // Hand-back reason (QA 09-25 item 3): clearing the current assignee asks why.
+  // QA 10-16 item 1: so does moving it to another person — the same dialog.
   const me = useCurrentIdentity();
-  const [handBack, setHandBack] = useState(null); // null | { error }
+  const [handBack, setHandBack] = useState(null); // null | { mode: 'unassign'|'reassign', toId?, toName?, error }
   const [handBackBusy, setHandBackBusy] = useState(false);
   const selfHandBack = isSignedInAs(me, current);
 
@@ -136,22 +138,33 @@ export default function AssigneePicker({
   const pickUnassigned = () => {
     if (value == null || ticketId == null || !askHandBack) { assign(null); return; }
     setOpen(false);
-    setHandBack({ error: null });
+    setHandBack({ mode: 'unassign', error: null });
   };
 
   const submitHandBack = async (reason) => {
-    if (handBackBusy) return;
+    if (handBackBusy || !handBack) return;
+    const ctx = handBack;
+    const target = ctx.mode === 'reassign' ? ctx.toId : null;
     setHandBackBusy(true);
     // Close first: an FS-born ticket shows its own FreshService confirmation next.
     setHandBack(null);
     setBusy(true);
     try {
-      await write(null, { handBack: reason });
-      onAssigned?.(null);
+      // The reason rides the write; on a move over an AI pick the server also
+      // files it for the AI's correction loop — nobody is asked twice.
+      const res = await write(target, { handBack: reason });
+      // Skipped on a move away from an AI pick: the server has no reason to
+      // file, so the old "why the override?" prompt still asks (the AI's
+      // correction loop must not lose the move).
+      if (target != null && reason?.code === 'skipped') {
+        if (onOverride) onOverride(res, ticketId, target);
+        else overridePrompt.maybePrompt(res, ticketId, target);
+      }
+      onAssigned?.(target);
     } catch (err) {
       // A cancelled FS confirmation ends quietly; a refusal reopens with the message.
       if (err?.message !== 'cancelled') {
-        setHandBack({ error: err?.response?.data?.message || err?.message || 'Could not unassign' });
+        setHandBack({ ...ctx, error: err?.response?.data?.message || err?.message || (target ? 'Could not reassign' : 'Could not unassign') });
       }
     }
     setBusy(false);
@@ -160,6 +173,14 @@ export default function AssigneePicker({
 
   const assign = async (techId) => {
     if (busy) return;
+    // QA 10-16 item 1: a change from one person to another asks the same
+    // question as an unassign (not a first assignment, not picking it up yourself).
+    const toTech = technicians.find((t) => t.id === techId) || null;
+    if (askHandBack && ticketId != null && asksChangeReason({ fromId: value, toId: techId, toTech, me })) {
+      setOpen(false);
+      setHandBack({ mode: 'reassign', toId: techId, toName: toTech?.name || null, error: null });
+      return;
+    }
     setBusy(true);
     try {
       const res = await write(techId);
@@ -496,6 +517,9 @@ export default function AssigneePicker({
 
       <HandBackReasonDialog
         open={Boolean(handBack)}
+        mode={handBack?.mode || 'unassign'}
+        toName={handBack?.toName || null}
+        categoryLabel={categoryLabel}
         requireReason={selfHandBack}
         personName={current?.name || null}
         busy={handBackBusy}

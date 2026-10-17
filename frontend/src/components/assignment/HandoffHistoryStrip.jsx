@@ -23,8 +23,9 @@ export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, wo
       .catch(() => setHandBacks([]));
   }, [ticketId]);
 
+  // QA 10-16 item 1: a move to another person can carry a reason too.
   const reasonFor = (ep) => {
-    if (!handBacks.length || ep.endMethod !== 'rejected') return null;
+    if (!handBacks.length || !['rejected', 'reassigned'].includes(ep.endMethod)) return null;
     const byId = handBacks.find((h) => h.episodeId && h.episodeId === ep.id);
     if (byId) return byId;
     const endedAt = ep.endedAt ? new Date(ep.endedAt).getTime() : NaN;
@@ -74,7 +75,7 @@ export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, wo
           const wasRejected = ep.endMethod === 'rejected';
           const isNext = i < episodes.length - 1;
           const nextTransition = isNext ? (wasRejected ? 'rejected' : 'reassigned') : null;
-          const stated = wasRejected ? reasonFor(ep) : null;
+          const stated = isNext ? reasonFor(ep) : null;
 
           return (
             <div key={ep.id} className="flex items-center gap-1.5">

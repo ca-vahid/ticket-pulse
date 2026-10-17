@@ -1,8 +1,24 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, test } from 'vitest';
-import { queueSearchToKeep, recallQueueView, rememberQueueView } from './queueMemory';
+import { queueSearchToKeep, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView } from './queueMemory';
 
 afterEach(() => localStorage.clear());
+
+describe('queue scroll memory (QA 10-16 #9)', () => {
+  afterEach(() => sessionStorage.clear());
+
+  test('gives the offset back only for the same view (the preview is ignored)', () => {
+    rememberQueueScroll(1, '?status=Open&peek=5', 840.4);
+    expect(recallQueueScroll(1, '?status=Open')).toBe(840);
+    expect(recallQueueScroll(1, '?status=Pending')).toBe(0);
+    expect(recallQueueScroll(2, '?status=Open')).toBe(0);
+  });
+
+  test('never throws on garbage', () => {
+    sessionStorage.setItem('tp_queue_scroll_ws1', '{not json');
+    expect(recallQueueScroll(1, '')).toBe(0);
+  });
+});
 
 describe('queue view memory (sticky Tickets filters, 14 Oct 2026)', () => {
   test('remembers the filters per workspace and gives them back', () => {

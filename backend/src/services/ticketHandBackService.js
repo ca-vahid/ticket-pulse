@@ -26,11 +26,34 @@ export const HAND_BACK_REASONS = Object.freeze({
   location: 'Location issue',
   capacity: 'Capacity full',
   competency: 'Competency mismatch',
+  // QA 10-16 item 1: two more reasons, and the same dialog for a reassignment.
+  access: 'Access / permission limited',
+  escalate: 'Escalate to Advanced Troubleshooting Team',
   other: 'Other',
   skipped: 'No reason given',
 });
 
-const REAL_REASON_CODES = new Set(['location', 'capacity', 'competency', 'other']);
+const REAL_REASON_CODES = new Set(['location', 'capacity', 'competency', 'access', 'escalate', 'other']);
+
+/**
+ * QA 10-16 item 1: the same reason is now asked when the assignee changes to
+ * another person, not only when it is cleared. Both land in ticket_hand_backs
+ * (one list for the reports). A reassignment row is told apart by the audit row
+ * written with it (ticket_activities.details.handBack.kind = 'reassign', with
+ * the new person) - the table has no column for it and gets no migration.
+ * Escalate only makes sense when the ticket goes back to the queue.
+ */
+export const HAND_BACK_KINDS = Object.freeze({ UNASSIGN: 'unassign', REASSIGN: 'reassign' });
+const UNASSIGN_ONLY_CODES = new Set(['escalate']);
+// The AI correction loop keeps its own four codes; a reason given in the
+// dialog on a reassignment over an AI pick is recorded there too.
+const OVERRIDE_CODE_FOR = Object.freeze({ competency: 'wrong_skill', capacity: 'load_balancing' });
+export function overrideCodeFor(code) {
+  if (!REAL_REASON_CODES.has(code)) return null;
+  return OVERRIDE_CODE_FOR[code] || 'other';
+}
+// How far apart a hand-back row and its audit row may be.
+const EVENT_MATCH_MS = 2 * 60 * 1000;
 const NOTE_MAX = 500;
 // FS-born: how far apart our unassign and FreshService's activity timestamp may
 // be and still be the same event.
@@ -55,14 +78,17 @@ export function isRealReason(code) {
  * Validate a `handBack: { code, note }` payload. Returns null when absent,
  * otherwise `{ code, note }`. 'other' needs a note; 'skipped' carries none.
  */
-export function normalizeHandBack(input) {
+export function normalizeHandBack(input, { kind = HAND_BACK_KINDS.UNASSIGN } = {}) {
   if (input === undefined || input === null) return null;
   if (typeof input !== 'object' || Array.isArray(input)) {
     throw new ValidationError('handBack must be an object like { code, note }');
   }
   const code = String(input.code || '').trim().toLowerCase();
   if (!HAND_BACK_REASONS[code]) {
-    throw new ValidationError('handBack.code must be one of location, capacity, competency, other, skipped');
+    throw new ValidationError(`handBack.code must be one of ${Object.keys(HAND_BACK_REASONS).join(', ')}`);
+  }
+  if (kind === HAND_BACK_KINDS.REASSIGN && UNASSIGN_ONLY_CODES.has(code)) {
+    throw new ValidationError('Escalate sends the ticket back to the queue for someone more advanced - choose Unassigned to escalate');
   }
   let note = input.note === undefined || input.note === null ? '' : String(input.note).trim();
   if (note.length > NOTE_MAX) note = note.slice(0, NOTE_MAX);
@@ -74,11 +100,51 @@ export function normalizeHandBack(input) {
 }
 
 /** The `reboundFrom.reason` block the AI prompt and review surfaces read. */
-export function reasonForRebound(row) {
+export function reasonForRebound(row, { escalation = null } = {}) {
   if (!row || !isRealReason(row.reasonCode || row.code)) return null;
   const code = row.reasonCode || row.code;
-  return { code, label: handBackLabel(code), note: (row.reasonNote ?? row.note) || null };
+  return {
+    code,
+    label: handBackLabel(code),
+    note: (row.reasonNote ?? row.note) || null,
+    ...(code === 'escalate' && escalation ? { escalation } : {}),
+  };
 }
+
+/**
+ * The audit-row half of a hand-back (`details.handBack`): kind, the new person
+ * on a reassignment, the escalation snapshot. Matched by ticket + time.
+ * @returns {Promise<Map<number, object>>} hand-back row id → details.handBack
+ */
+export async function handBackEventDetails(rows) {
+  const list = (rows || []).filter((r) => r?.id && r.ticketId && r.createdAt);
+  const out = new Map();
+  if (!list.length) return out;
+  const times = list.map((r) => new Date(r.createdAt).getTime());
+  const activities = await Promise.resolve()
+    .then(() => prisma.ticketActivity.findMany({
+      where: {
+        ticketId: { in: [...new Set(list.map((r) => r.ticketId))] },
+        activityType: { in: ['assigned', 'fs_write_back'] },
+        performedAt: { gte: new Date(Math.min(...times) - EVENT_MATCH_MS), lte: new Date(Math.max(...times) + EVENT_MATCH_MS) },
+      },
+      select: { ticketId: true, performedAt: true, details: true },
+      orderBy: { performedAt: 'desc' },
+      take: 2000,
+    }))
+    .catch(() => []);
+  for (const r of list) {
+    const at = new Date(r.createdAt).getTime();
+    const hit = (activities || []).find((a) => a.ticketId === r.ticketId
+      && a.details?.handBack
+      && Math.abs(new Date(a.performedAt).getTime() - at) <= EVENT_MATCH_MS
+      && (!a.details.handBack.fromTechId || !r.technicianId || Number(a.details.handBack.fromTechId) === Number(r.technicianId)));
+    if (hit) out.set(r.id, hit.details.handBack);
+  }
+  return out;
+}
+
+const isReassignEvent = (details) => details?.kind === HAND_BACK_KINDS.REASSIGN;
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FALLBACK_TIMEZONE = 'America/Los_Angeles';
@@ -152,7 +218,7 @@ const ticketHandBackService = {
   async findPendingForRebound({ ticketId, technicianId = null, unassignedAt }) {
     const at = unassignedAt ? new Date(unassignedAt) : new Date();
     if (Number.isNaN(at.getTime())) return null;
-    return Promise.resolve()
+    const row = await Promise.resolve()
       .then(() => prisma.ticketHandBack.findFirst({
         where: {
           ticketId,
@@ -167,6 +233,11 @@ const ticketHandBackService = {
         orderBy: { createdAt: 'desc' },
       }))
       .catch(() => null);
+    if (!row) return null;
+    // QA 10-16: a reason given for a reassignment to a named person is not
+    // the unassign FreshService is reporting.
+    const details = await handBackEventDetails([row]).catch(() => new Map());
+    return isReassignEvent(details.get(row.id)) ? null : row;
   },
 
   /**
@@ -196,6 +267,7 @@ const ticketHandBackService = {
       .catch(() => []);
     const out = { checked: rows.length, queued: 0 };
     if (!rows.length) return out;
+    const events = await handBackEventDetails(rows).catch(() => new Map());
 
     let liveNames = ['Open', 'Pending'];
     try {
@@ -209,6 +281,8 @@ const ticketHandBackService = {
       // Newest first: only a ticket's latest hand-back can still be waiting.
       if (seenTickets.has(row.ticketId)) continue;
       seenTickets.add(row.ticketId);
+      // A reassignment to a named person never needs routing from here.
+      if (isReassignEvent(events.get(row.id))) continue;
       if ((sweepTries.get(row.id) || 0) >= SWEEP_MAX_TRIES) continue;
       try {
         const ticket = await prisma.ticket.findUnique({
@@ -231,7 +305,7 @@ const ticketHandBackService = {
         const rejectionCount = Math.max(1, await Promise.resolve()
           .then(() => prisma.ticketAssignmentEpisode.count({ where: { ticketId: ticket.id, endMethod: 'rejected' } }))
           .catch(() => 1));
-        const reason = reasonForRebound(row);
+        const reason = reasonForRebound(row, { escalation: events.get(row.id)?.escalation || null });
         const unassignedAt = new Date(row.createdAt).toISOString();
         const reboundFrom = {
           previousTechId: row.technicianId || null,
@@ -270,14 +344,26 @@ const ticketHandBackService = {
   },
 
   async forTicket(ticketId, workspaceId) {
-    return Promise.resolve()
+    const rows = await Promise.resolve()
       .then(() => prisma.ticketHandBack.findMany({
         where: { ticketId, workspaceId },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }))
-      .then((rows) => rows.map((r) => ({ ...r, reasonLabel: handBackLabel(r.reasonCode) })))
       .catch(() => []);
+    if (!rows?.length) return [];
+    const events = await handBackEventDetails(rows).catch(() => new Map());
+    return rows.map((r) => {
+      const ev = events.get(r.id) || null;
+      return {
+        ...r,
+        reasonLabel: handBackLabel(r.reasonCode),
+        kind: isReassignEvent(ev) ? 'reassigned' : 'handed_back',
+        toTechId: isReassignEvent(ev) ? (ev.toTechId ?? null) : null,
+        toTechName: isReassignEvent(ev) ? (ev.toTechName || null) : null,
+        escalation: r.reasonCode === 'escalate' ? (ev?.escalation || null) : null,
+      };
+    });
   },
 
   /**
@@ -373,6 +459,7 @@ const ticketHandBackService = {
       })).catch(() => []),
     ]);
 
+    const events = await handBackEventDetails(rows).catch(() => new Map());
     const ticketById = new Map(tickets.map((t) => [t.id, t]));
     const techById = new Map(techs.map((t) => [t.id, t]));
     const runById = new Map(linkedRuns.map((r) => [r.id, r]));
@@ -387,17 +474,24 @@ const ticketHandBackService = {
 
     const items = rows.map((r) => {
       const t = ticketById.get(r.ticketId) || null;
-      const run = r.pipelineRunId
-        ? runById.get(r.pipelineRunId)
-        : reboundRuns.find((x) => x.ticketId === r.ticketId && new Date(x.createdAt) >= new Date(r.createdAt));
+      const ev = events.get(r.id) || null;
+      const reassigned = isReassignEvent(ev);
+      // A reassignment went straight to a named person: no rebound run to read.
+      const run = reassigned
+        ? null
+        : r.pipelineRunId
+          ? runById.get(r.pipelineRunId)
+          : reboundRuns.find((x) => x.ticketId === r.ticketId && new Date(x.createdAt) >= new Date(r.createdAt));
       const categoryName = t?.internalCategory?.name || t?.tpSkill || t?.ticketCategory || null;
       return {
         id: r.id,
         createdAt: r.createdAt,
         origin: r.origin,
+        kind: reassigned ? 'reassigned' : 'handed_back',
         reasonCode: r.reasonCode,
         reasonLabel: handBackLabel(r.reasonCode),
         reasonNote: r.reasonNote || null,
+        escalation: r.reasonCode === 'escalate' ? (ev?.escalation || null) : null,
         selfHandBack: r.selfHandBack !== false,
         episodeId: r.episodeId || null,
         ticket: t ? {
@@ -409,7 +503,9 @@ const ticketHandBackService = {
         } : { id: r.ticketId, displayRef: `TP-ID-${r.ticketId}`, subject: null, categoryId: null, categoryName: null },
         technician: r.technicianId ? { id: r.technicianId, name: techById.get(r.technicianId)?.name || null } : null,
         actor: { id: r.actorTechId || null, name: r.actorName || techById.get(r.actorTechId)?.name || null },
-        next: describeNext(run, techById),
+        next: reassigned
+          ? { runId: null, text: `Moved to ${ev.toTechName || techById.get(ev.toTechId)?.name || 'another person'}`, decision: null, status: null }
+          : describeNext(run, techById),
       };
     });
 

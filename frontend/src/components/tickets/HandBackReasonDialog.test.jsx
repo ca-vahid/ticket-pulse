@@ -166,9 +166,11 @@ describe('AssigneePicker — clearing the assignee asks why', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
-  test('assigning a person never asks', async () => {
-    render(<AssigneePicker ticketId={501} value={7} technicians={[terry, cora]} />);
-    fireEvent.click(screen.getByRole('button', { name: /Assignee: Terry Tech/ }));
+  // QA 10-16 item 1 replaced "assigning a person never asks": moving it from
+  // one person to another now asks too (see HandBackReasonDialog.unified.test).
+  test('assigning an unassigned ticket to a person never asks', async () => {
+    render(<AssigneePicker ticketId={501} value={null} technicians={[terry, cora]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Unassigned — assign a member/ }));
     fireEvent.click(screen.getByRole('option', { name: /Cora Coordinator/ }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith(501, 2));
     expect(screen.queryByTestId('hand-back-dialog')).not.toBeInTheDocument();

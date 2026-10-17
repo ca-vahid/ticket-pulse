@@ -36,6 +36,7 @@ import customFieldService from './customFieldService.js';
 import queueCardConfigService from './queueCardConfigService.js';
 import ticketFormConfigService from './ticketFormConfigService.js';
 import { zonedStartOfMonth, zonedStartOfWeek, zonedStartOfYear } from '../utils/zonedBoundaries.js';
+import { createdWindowDays, createdWindowStart } from '../utils/createdWindow.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { decodeBasicEntities, looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
@@ -45,6 +46,7 @@ import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
 import ticketHandBackService, {
   normalizeHandBack, isRealReason as isRealHandBackReason, handBackLabel, reasonForRebound as reasonForHandBackRebound,
+  HAND_BACK_KINDS, overrideCodeFor,
 } from './ticketHandBackService.js';
 
 // Actor-kind attribution (MEGA 09-01 RO-1/TU-1) — pure helpers, re-exported so
@@ -734,7 +736,8 @@ export function markQueueStatsDirty(workspaceId) {
   const key = Number(workspaceId);
   if (!Number.isFinite(key)) return;
   queueStatsVersion.set(key, (queueStatsVersion.get(key) || 0) + 1);
-  queueStatsCache.delete(key);
+  // One entry per date window (QA 10-16 #7): `${ws}` or `${ws}:${days}`.
+  for (const k of [...queueStatsCache.keys()]) if (k === key || String(k).startsWith(`${key}:`)) queueStatsCache.delete(k);
 }
 
 /** A requester with this many tickets in 30 days is a sender (a team mailbox, an alert), not one person's history. */
@@ -1569,6 +1572,18 @@ class TicketService {
       }
       if (Object.keys(range).length) where.createdAt = range;
     }
+    // Date window (QA 10-16 #7): ?createdWithin=7d|30d|90d hides FINISHED
+    // tickets created before the window; work still in progress always shows.
+    // Explicit Created dates and the created_* cards carry their own dates.
+    const windowStart = createdWindowStart(query.createdWithin);
+    if (windowStart && !query.createdFrom && !query.createdTo && !String(query.segment || '').startsWith('created_')) {
+      where.AND = [...(where.AND || []), {
+        OR: [
+          { createdAt: { gte: windowStart } },
+          { status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) } },
+        ],
+      }];
+    }
     if (query.due) {
       const dueNow = new Date();
       const dueEndOfDay = new Date(dueNow); dueEndOfDay.setHours(23, 59, 59, 999);
@@ -1631,10 +1646,16 @@ class TicketService {
     // a recommendation no human has decided yet (decision=pending_review). Same
     // signal that renders the dashed "proposed" assignee slot in the queue, so
     // the filter and the slot always agree.
+    // QA 10-16 #6: only tickets still being worked can be awaiting approval —
+    // 45 closed IT tickets kept an undecided suggestion forever and the list
+    // showed 47 under a "2 awaiting" chip. Open/Pending bases, not parked:
+    // exactly the stats `awaitingApproval` count.
     if (query.aiState === 'suggested') {
       where.AND = [
         ...(where.AND || []),
         { assignedTechId: null },
+        { status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) } },
+        { parkedUntil: null },
         { pipelineRuns: { some: { status: 'completed', decision: 'pending_review' } } },
       ];
     }
@@ -2307,19 +2328,23 @@ class TicketService {
    * workspace's version, so the next ask recomputes — the cards never stay
    * wrong after somebody acts. FreshService-side changes show within the TTL.
    */
-  async getQueueStats(workspaceId) {
+  async getQueueStats(workspaceId, { createdWithin = null } = {}) {
+    // Date window (QA 10-16 #7): '7d' | '30d' | '90d' trims finished history
+    // from the all / resolved / deleted / noise counts exactly as the list does.
+    const windowDays = createdWindowDays(createdWithin);
     const ttl = this.queueStatsTtlMs ?? queueStatsDefaultTtl();
-    if (!ttl) return this._computeQueueStats(workspaceId);
-    const key = Number(workspaceId);
-    const version = queueStatsVersion.get(key) || 0;
+    if (!ttl) return this._computeQueueStats(workspaceId, { windowDays });
+    const versionKey = Number(workspaceId);
+    const key = windowDays ? `${versionKey}:${windowDays}` : versionKey;
+    const version = queueStatsVersion.get(versionKey) || 0;
     const hit = queueStatsCache.get(key);
     if (hit && hit.version === version && Date.now() - hit.at < ttl) return hit.value;
     const inflight = queueStatsInflight.get(key);
     if (inflight && inflight.version === version) return inflight.promise;
-    const promise = this._computeQueueStats(workspaceId)
+    const promise = this._computeQueueStats(workspaceId, { windowDays })
       .then((value) => {
         // Only keep it if nothing changed while it was computing.
-        if ((queueStatsVersion.get(key) || 0) === version) queueStatsCache.set(key, { value, version, at: Date.now() });
+        if ((queueStatsVersion.get(versionKey) || 0) === version) queueStatsCache.set(key, { value, version, at: Date.now() });
         return value;
       })
       .finally(() => {
@@ -2329,7 +2354,7 @@ class TicketService {
     return promise;
   }
 
-  async _computeQueueStats(workspaceId) {
+  async _computeQueueStats(workspaceId, { windowDays = null } = {}) {
     const now = new Date();
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
     // Registry-resolved scopes (Phase 8b) so custom statuses count where their
@@ -2352,15 +2377,16 @@ class TicketService {
     const monthStart = zonedStartOfMonth(now, timezone);
     const yearStart = zonedStartOfYear(now, timezone);
     const weekAhead = new Date(now.getTime() + 7 * 86400e3);
+    const windowStart = windowDays ? createdWindowStart(`${windowDays}d`, now) : null;
     // Perf (1 Oct 2026): the twelve plain counts used to be twelve queries run
     // at once — one stats load held most of the 9-connection pool and the
     // Tickets page cards took 2.5–7 s at the morning peak. They are one
     // FILTERed scan now; on any error the per-count queries below still run.
     const [counts, awaitingIds, awaitingApproval, technicianOpen] = await Promise.all([
-      this._queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead })
+      this._queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart })
         .catch((err) => {
           logger.warn(`Queue stats single scan failed (ws ${workspaceId}), using per-count queries: ${err.message}`);
-          return this._queueCountsSeparate(workspaceId, { open, visible, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead });
+          return this._queueCountsSeparate(workspaceId, { open, visible, openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart });
         }),
       this._awaitingReplyTicketIds(workspaceId),
       // "Awaiting AI approval": unassigned Open/Pending tickets with a pending
@@ -2386,6 +2412,36 @@ class TicketService {
     for (const row of technicianOpen) {
       if (row.assignedTechId !== null) byTechnician[row.assignedTechId] = row._count._all;
     }
+    // QA 10-16 #5: the "My open" (Open-base only) and "My tickets" (everything
+    // still being worked: Open/Pending bases plus parked) view counts. Same
+    // {techId: count} shape, same no-ranking rule; each mirrors its view's
+    // list filter exactly (status=<names> with parkedSplit, + 'parked').
+    const [techOpenOnly, techActive] = await Promise.all([
+      Promise.resolve().then(() => prisma.ticket.groupBy({
+        by: ['assignedTechId'],
+        where: { ...open, status: { in: openBaseNames }, assignedTechId: { not: null } },
+        _count: { _all: true },
+      })).catch(() => null),
+      Promise.resolve().then(() => prisma.ticket.groupBy({
+        by: ['assignedTechId'],
+        where: {
+          workspaceId,
+          isNoise: false,
+          assignedTechId: { not: null },
+          status: { notIn: ['Deleted', 'Spam'] },
+          OR: [{ status: { in: openNames }, parkedUntil: null }, { parkedUntil: { not: null } }],
+        },
+        _count: { _all: true },
+      })).catch(() => null),
+    ]);
+    const techMap = (rows) => {
+      if (!Array.isArray(rows)) return undefined;
+      const out = {};
+      for (const row of rows) if (row?.assignedTechId !== null && row?.assignedTechId !== undefined) out[row.assignedTechId] = row._count?._all || 0;
+      return out;
+    };
+    const byTechnicianOpenOnly = techMap(techOpenOnly);
+    const byTechnicianActive = techMap(techActive);
 
     return {
       all,
@@ -2402,17 +2458,24 @@ class TicketService {
       createdThisMonth,
       createdThisYear,
       byTechnician,
+      // Which date window all / resolved / deleted / noise were counted in (null = all time).
+      createdWithin: windowDays ? `${windowDays}d` : null,
+      ...(byTechnicianOpenOnly ? { byTechnicianOpenOnly } : {}),
+      ...(byTechnicianActive ? { byTechnicianActive } : {}),
       parked,
       parkedWakingWeek,
     };
   }
 
   /** The plain queue counts in ONE scan of the workspace's tickets (FILTER per count). */
-  async _queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead }) {
+  async _queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
     const ws = Number(workspaceId);
+    // Date window (QA 10-16 #7): finished tickets created before it are left
+    // out; tickets still being worked always count (same rule as the list).
+    const win = windowStart ? Prisma.sql`(created_at >= ${windowStart} OR status = ANY(${openNames}))` : Prisma.sql`TRUE`;
     const rows = await prisma.$queryRaw`
       SELECT
-        count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam'))::int AS "all",
+        count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND ${win})::int AS "all",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL)::int AS "openCount",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND assigned_tech_id IS NULL)::int AS "unassigned",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND status = ANY(${openBaseNames})
@@ -2420,9 +2483,9 @@ class TicketService {
             OR (fr_due_by >= ${now} AND fr_due_by <= ${endOfDay} AND first_public_agent_reply_at IS NULL)))::int AS "dueToday",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND status = ANY(${openBaseNames})
           AND (due_by < ${now} OR (fr_due_by < ${now} AND first_public_agent_reply_at IS NULL)))::int AS "overdue",
-        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${resolvedNames}))::int AS "resolved",
-        count(*) FILTER (WHERE status IN ('Deleted', 'Spam'))::int AS "deleted",
-        count(*) FILTER (WHERE is_noise)::int AS "noise",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${resolvedNames}) AND ${win})::int AS "resolved",
+        count(*) FILTER (WHERE status IN ('Deleted', 'Spam') AND ${win})::int AS "deleted",
+        count(*) FILTER (WHERE is_noise AND ${win})::int AS "noise",
         count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${weekStart})::int AS "createdThisWeek",
         count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${monthStart})::int AS "createdThisMonth",
         count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${yearStart})::int AS "createdThisYear",
@@ -2436,10 +2499,11 @@ class TicketService {
   }
 
   /** The same counts as separate queries — the fallback (and the reference the scan is checked against). */
-  async _queueCountsSeparate(workspaceId, { open, visible, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead }) {
+  async _queueCountsSeparate(workspaceId, { open, visible, openNames = [], openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
+    const win = windowStart ? { OR: [{ createdAt: { gte: windowStart } }, { status: { in: openNames } }] } : {};
     const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
       createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek] = await Promise.all([
-      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] }, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
       // dueToday/overdue count Open-BASE tickets only: Pending-base statuses
@@ -2464,9 +2528,9 @@ class TicketService {
           ],
         },
       }),
-      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: resolvedNames } } }),
-      prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] } } }),
-      prisma.ticket.count({ where: { workspaceId, isNoise: true } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: resolvedNames }, ...(windowStart ? { AND: [win] } : {}) } }),
+      prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] }, ...(windowStart ? { AND: [win] } : {}) } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: true, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: weekStart } } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: monthStart } } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: yearStart } } }),
@@ -2952,7 +3016,11 @@ class TicketService {
       throw new ValidationError('Bulk action must be assign, status, add_tags, remove_tags, or set_category');
     }
     // One hand-back reason for a bulk release — reject a bad one up front, not per ticket.
-    if (type === 'assign' && !action.value && action.handBack) normalizeHandBack(action.handBack);
+    // QA 10-16 item 1: a bulk move to a person may carry one reason too (it
+    // applies to the tickets that had someone else on them).
+    if (type === 'assign' && action.handBack) {
+      normalizeHandBack(action.handBack, { kind: action.value ? HAND_BACK_KINDS.REASSIGN : HAND_BACK_KINDS.UNASSIGN });
+    }
     // Tags are TP-side (both origins); field mutations are TP-born only.
     const TAG_ACTIONS = new Set(['add_tags', 'remove_tags']);
     const editable = TAG_ACTIONS.has(type) ? matching : matching.filter((t) => t.origin === TICKET_ORIGIN.TICKETPULSE);
@@ -2971,7 +3039,9 @@ class TicketService {
       try {
         if (type === 'assign') {
           await this.assignTicket(t.id, workspaceId, action.value ? Number(action.value) : null, actor, {
-            handBack: action.value ? null : (action.handBack || null),
+            // assignTicket keeps it only where the assignee really changes
+            // from one person to another (or is cleared).
+            handBack: action.handBack || null,
             allowAssignableOnly: true,
           });
         } else if (type === 'status') {
@@ -4160,6 +4230,7 @@ class TicketService {
     // touched; recorded once the write-back succeeds. Sync later ties it to
     // the rejected episode + rebound run it sees in FS activity.
     let fsHandBack = null;
+    let fsHandBackKind = HAND_BACK_KINDS.UNASSIGN;
     if (input.assignedTechId !== undefined) {
       if (input.assignedTechId === null) {
         fsPayload.responder_id = null;
@@ -4190,6 +4261,12 @@ class TicketService {
         }
       }
       changes.assignee = { from: ticket.assignedTech?.name || null, to: assignee?.name || null };
+      // QA 10-16 item 1: a reason for a change to another person, kept like a
+      // hand-back (validated before FreshService is touched).
+      if (assignee && ticket.assignedTechId && Number(ticket.assignedTechId) !== Number(assignee.id) && input.handBack) {
+        fsHandBack = normalizeHandBack(input.handBack, { kind: HAND_BACK_KINDS.REASSIGN });
+        fsHandBackKind = HAND_BACK_KINDS.REASSIGN;
+      }
     }
 
     if (input.internalCategoryId !== undefined || input.internalSubcategoryId !== undefined) {
@@ -4488,6 +4565,16 @@ class TicketService {
       }).catch(() => { /* duplicate startedAt guard — harmless */ });
     }
 
+    // QA 10-16 item 1: the reason's details ride the write-back's audit row
+    // (kind, the new person, the escalation snapshot) - the hand-back row has
+    // no column for them.
+    const fsHandBackEvent = fsHandBack
+      ? await this._handBackEvent({
+        ticket, workspaceId, handBack: fsHandBack, kind: fsHandBackKind,
+        toTechId: fsHandBackKind === HAND_BACK_KINDS.REASSIGN ? updated.assignedTechId : null,
+        toTechName: fsHandBackKind === HAND_BACK_KINDS.REASSIGN ? (updated.assignedTech?.name || null) : null,
+      })
+      : null;
     const writeBackAudit = await this._audit(ticket.id, 'fs_write_back', actor, {
       changes,
       fsTicketId: Number(ticket.freshserviceTicketId),
@@ -4495,6 +4582,7 @@ class TicketService {
       // whose FS updated_at is OLDER than this as stale and keeps the local
       // status until FreshService catches up.
       fsUpdatedAt: fsTicket.updated_at || null,
+      ...(fsHandBackEvent ? { handBack: fsHandBackEvent } : {}),
     });
     // ticket.fields_updated (TU-5) for the FIELD part of a write-back —
     // status and assignee have their own triggers (status_changed /
@@ -4552,7 +4640,66 @@ class TicketService {
         origin: TICKET_ORIGIN.FRESHSERVICE,
       });
     }
-    return { ...updated, displayRef: ticketDisplayRef(updated), synced: Object.keys(changes), aiOverride };
+    const reasonRecorded = fsHandBackKind === HAND_BACK_KINDS.REASSIGN && aiOverride
+      ? await this._recordOverrideFromHandBack(ticket.id, workspaceId, localPatch.assignedTechId, fsHandBack, actor)
+      : false;
+    return { ...updated, displayRef: ticketDisplayRef(updated), synced: Object.keys(changes), aiOverride, reasonRecorded };
+  }
+
+  /**
+   * QA 10-16 item 1: the `details.handBack` block of the audit row written
+   * with a hand-back or a reassignment reason. Escalate also snapshots the
+   * person's level in the ticket's category / subcategory. Never throws.
+   */
+  async _handBackEvent({ ticket, workspaceId, handBack, kind, toTechId = null, toTechName = null }) {
+    let escalation = null;
+    if (handBack?.code === 'escalate' && ticket.assignedTechId) {
+      escalation = await import('./escalation/escalationService.js')
+        .then(({ default: escalationService }) => escalationService.contextFor({
+          workspaceId,
+          ticketId: ticket.id,
+          technicianId: ticket.assignedTechId,
+          technicianName: ticket.assignedTech?.name || null,
+          ticket,
+        }))
+        .catch((err) => {
+          logger.warn(`Escalation snapshot skipped for ticket ${ticket.id}: ${err.message}`);
+          return null;
+        });
+    }
+    return {
+      code: handBack.code,
+      label: handBackLabel(handBack.code),
+      note: handBack.note || null,
+      kind,
+      fromTechId: ticket.assignedTechId || null,
+      fromTechName: ticket.assignedTech?.name || null,
+      ...(kind === HAND_BACK_KINDS.REASSIGN ? { toTechId: toTechId || null, toTechName: toTechName || null } : {}),
+      ...(escalation ? { escalation } : {}),
+    };
+  }
+
+  /**
+   * A reassignment over a completed AI pick: the reason from the one dialog
+   * also feeds the AI correction loop, so nobody is asked twice. Never throws.
+   */
+  async _recordOverrideFromHandBack(ticketId, workspaceId, toTechId, handBack, actor) {
+    const code = overrideCodeFor(handBack?.code);
+    if (!code || !toTechId) return false;
+    try {
+      const { default: assignmentCorrectionService } = await import('./assignmentCorrectionService.js');
+      const label = handBackLabel(handBack.code);
+      const correction = await assignmentCorrectionService.recordManualReassignReason(ticketId, workspaceId, {
+        toTechnicianId: toTechId,
+        reasonCode: code,
+        reason: `${label}${handBack.note ? ` - ${handBack.note}` : ''}`,
+        actorEmail: actor?.email || null,
+      });
+      return Boolean(correction);
+    } catch (err) {
+      logger.warn(`Override reason from the reassign dialog skipped for ticket ${ticketId}: ${err.message}`);
+      return false;
+    }
   }
 
   /** FS group display name for the membership error (best-effort). */
@@ -4857,8 +5004,14 @@ class TicketService {
   async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false, handBack: handBackInput = null, allowAssignableOnly = false } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const targetId = technicianId === null || technicianId === undefined ? null : Number(technicianId);
+    // QA 10-16 item 1: a change from one person to another may carry the same
+    // reason as a hand-back. Optional - workflows, the AI and the API send none.
+    const reassigning = targetId !== null && Boolean(ticket.assignedTechId)
+      && Number(ticket.assignedTechId) !== targetId && !fromFreshService;
     // Hand-back reason (QA 09-25 item 3) — validated before anything changes.
-    const handBack = targetId === null ? normalizeHandBack(handBackInput) : null;
+    const handBack = targetId === null
+      ? normalizeHandBack(handBackInput)
+      : (reassigning ? normalizeHandBack(handBackInput, { kind: HAND_BACK_KINDS.REASSIGN }) : null);
     // An assignment FreshService already made (mirror echo) is a fact, not a
     // pick — it may name an assignable-only person too.
     if (targetId !== null) await this._validateTechnician(workspaceId, targetId, { allowAssignableOnly: allowAssignableOnly || fromFreshService });
@@ -4914,6 +5067,16 @@ class TicketService {
       }).catch(() => { /* duplicate startedAt guard — harmless */ });
     }
 
+    const handBackEvent = (clearing || reassigning) && handBack
+      ? await this._handBackEvent({
+        ticket,
+        workspaceId,
+        handBack,
+        kind: reassigning ? HAND_BACK_KINDS.REASSIGN : HAND_BACK_KINDS.UNASSIGN,
+        toTechId: reassigning ? targetId : null,
+        toTechName: reassigning ? (updated.assignedTech?.name || null) : null,
+      })
+      : null;
     await this._audit(ticket.id, 'assigned', actor, {
       fromTechId: ticket.assignedTechId,
       toTechId: targetId,
@@ -4921,9 +5084,9 @@ class TicketService {
         ? `Reassigned in FreshService by ${String(actor?.name || '').replace(/ \(in FreshService\)$/, '')}`
         : (targetId === null
           ? (isHandBack ? `Handed back${isRealHandBackReason(handBack?.code) ? ` — ${handBackLabel(handBack.code)}` : ''}` : 'Unassigned')
-          : 'Ticket reassigned'),
+          : (reassigning && isRealHandBackReason(handBack?.code) ? `Ticket reassigned — ${handBackLabel(handBack.code)}` : 'Ticket reassigned')),
       ...(fromFreshService ? { via: 'freshservice' } : {}),
-      ...(clearing && handBack ? { handBack: { code: handBack.code, label: handBackLabel(handBack.code), note: handBack.note } } : {}),
+      ...(handBackEvent ? { handBack: handBackEvent } : {}),
     });
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
@@ -4935,11 +5098,28 @@ class TicketService {
         .catch((err) => logger.warn(`Open-task handover skipped for ticket ${ticket.id}: ${err.message}`));
     }
     if (clearing && (handBack || isHandBack)) {
-      await this._afterTpHandBack({ ticket, updated, workspaceId, actor, handBack, selfHandBack, isHandBack, now })
-        .catch((err) => logger.warn(`Hand-back follow-up failed for ticket ${ticket.id}: ${err.message}`));
+      await this._afterTpHandBack({
+        ticket, updated, workspaceId, actor, handBack, selfHandBack, isHandBack, now, escalation: handBackEvent?.escalation || null,
+      }).catch((err) => logger.warn(`Hand-back follow-up failed for ticket ${ticket.id}: ${err.message}`));
+    }
+    // QA 10-16 item 1: the reason for a change to another person is kept with
+    // the hand-backs (one list for the reports). No rebound: it went to a person.
+    if (reassigning && handBack) {
+      await ticketHandBackService.record({
+        workspaceId,
+        ticketId: ticket.id,
+        technicianId: ticket.assignedTechId,
+        actor,
+        handBack,
+        selfHandBack: Boolean(actor?.technicianId) && Number(actor.technicianId) === Number(ticket.assignedTechId),
+        origin: TICKET_ORIGIN.TICKETPULSE,
+      });
     }
     const aiOverride = targetId === null ? false : await this._isAiOverride(ticket.id, workspaceId, targetId);
-    return { ...updated, displayRef: ticketDisplayRef(updated), changed: true, aiOverride };
+    const reasonRecorded = reassigning && handBack && aiOverride
+      ? await this._recordOverrideFromHandBack(ticket.id, workspaceId, targetId, handBack, actor)
+      : false;
+    return { ...updated, displayRef: ticketDisplayRef(updated), changed: true, aiOverride, reasonRecorded };
   }
 
   /**
@@ -4947,7 +5127,7 @@ class TicketService {
    * for a real hand-back on a live ticket — queue the same rebound pipeline run
    * FS-born tickets get from sync, carrying the reason for the AI.
    */
-  async _afterTpHandBack({ ticket, updated, workspaceId, actor, handBack, selfHandBack, isHandBack, now }) {
+  async _afterTpHandBack({ ticket, updated, workspaceId, actor, handBack, selfHandBack, isHandBack, now, escalation = null }) {
     const prevTechId = ticket.assignedTechId;
     const episode = isHandBack
       ? await Promise.resolve().then(() => prisma.ticketAssignmentEpisode.findFirst({
@@ -4981,7 +5161,7 @@ class TicketService {
       .then(() => prisma.ticketAssignmentEpisode.count({ where: { ticketId: ticket.id, endMethod: 'rejected' } }))
       .catch(() => 1));
     const prevTechName = ticket.assignedTech?.name || 'The previous assignee';
-    const reason = reasonForHandBackRebound(handBack);
+    const reason = reasonForHandBackRebound(handBack, { escalation });
     const reboundFrom = {
       previousTechId: prevTechId,
       previousTechName: prevTechName,

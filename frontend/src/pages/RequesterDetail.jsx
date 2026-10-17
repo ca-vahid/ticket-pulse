@@ -238,7 +238,7 @@ export default function RequesterDetail() {
     try { await navigator.clipboard.writeText(r.email); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* blocked */ }
   };
 
-  const queueHref = `/tickets?requesterId=${r?.id}&requesterName=${encodeURIComponent(r?.name || '')}&status=any`;
+  const queueHref = `/tickets?requesterId=${r?.id}&requesterName=${encodeURIComponent(r?.name || '')}&status=any&created=all`;
 
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">

@@ -153,7 +153,8 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
         const byEpisode = new Map();
         const byTicket = new Map();
         for (const it of res?.data?.items || []) {
-          if (it.reasonCode === 'skipped') continue;
+          // A reason given for moving it to a named person (QA 10-16) is not a bounce.
+          if (it.reasonCode === 'skipped' || it.kind === 'reassigned') continue;
           if (it.episodeId && !byEpisode.has(it.episodeId)) byEpisode.set(it.episodeId, it);
           if (it.ticket?.id && !byTicket.has(it.ticket.id)) byTicket.set(it.ticket.id, it);
         }

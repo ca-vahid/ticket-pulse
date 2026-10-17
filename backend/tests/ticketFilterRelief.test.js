@@ -116,9 +116,9 @@ describe('filter relief — multiple filters', () => {
     expect(group.apiKeys).toEqual(['internalCategoryId', 'internalSubcategoryId']);
   });
 
-  test('the created-date bounds are one group, not two', async () => {
+  test('the created-date bounds and the date window are one group, not three (QA 10-16 #7)', async () => {
     const group = FILTER_GROUPS.find((g) => g.key === 'created');
-    expect(group.apiKeys).toEqual(['createdFrom', 'createdTo']);
+    expect(group.apiKeys).toEqual(['createdFrom', 'createdTo', 'createdWithin']);
   });
 });
 
