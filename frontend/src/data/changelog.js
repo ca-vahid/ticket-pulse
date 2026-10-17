@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.88-preview';
+export const APP_VERSION = '4.2.89-preview';
 
 export const changelog = [
+  {
+    version: '4.2.89-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Alert bursts bundle for real</strong> &mdash; the first burst after 4.2.88 could not open its incident (the team the alerts belong to was passed in a form ticket creation refused). Bursts now open their incident as intended.' },
+    ],
+  },
   {
     version: '4.2.88-preview',
     date: 'October 17, 2026',
