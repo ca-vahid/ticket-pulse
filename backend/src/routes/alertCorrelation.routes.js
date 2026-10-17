@@ -65,4 +65,31 @@ router.get('/activity', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await alertCorrelationService.activity(req.workspaceId, { days: req.query?.days }) });
 }));
 
+// Alert bundles (17 Oct 2026): bursts of one check from a connected monitor
+// become one parent incident (alertBundleService). Read for members, save admin-only.
+router.get('/bundling', asyncHandler(async (req, res) => {
+  const { default: alertBundleService, MIN_COUNT_CHOICES, WINDOW_CHOICES, BUNDLE_PREFIX } = await import('../services/alertBundleService.js');
+  const settings = await alertBundleService.getSettings(req.workspaceId);
+  const { default: prisma } = await import('../services/prisma.js');
+  const openBundles = await prisma.ticket.count({ where: { workspaceId: req.workspaceId, externalRef: { startsWith: BUNDLE_PREFIX }, status: { notIn: ['Resolved', 'Closed', 'Deleted', 'Spam'] } } }).catch(() => null);
+  res.json({ success: true, data: { ...settings, minCountChoices: MIN_COUNT_CHOICES, windowChoices: WINDOW_CHOICES, openBundles } });
+}));
+
+router.put('/bundling', requireAdmin, asyncHandler(async (req, res) => {
+  const { default: alertBundleService } = await import('../services/alertBundleService.js');
+  const patch = {};
+  if (req.body?.enabled !== undefined) {
+    if (typeof req.body.enabled !== 'boolean') return bad(res, 'enabled must be true or false');
+    patch.enabled = req.body.enabled;
+  }
+  if (req.body?.minCount !== undefined) patch.minCount = req.body.minCount;
+  if (req.body?.windowMinutes !== undefined) patch.windowMinutes = req.body.windowMinutes;
+  if (!Object.keys(patch).length) return bad(res, 'Nothing to change');
+  try {
+    const saved = await alertBundleService.setSettings(req.workspaceId, patch, requestActor(req));
+    logger.info(`Alert bundling for workspace ${req.workspaceId} set to ${JSON.stringify({ enabled: saved.enabled, minCount: saved.minCount, windowMinutes: saved.windowMinutes })} by ${req.user?.email || 'unknown'}`);
+    res.json({ success: true, data: saved });
+  } catch (err) { return bad(res, err.message); }
+}));
+
 export default router;

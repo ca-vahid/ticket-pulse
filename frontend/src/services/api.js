@@ -1373,6 +1373,8 @@ export const alertCorrelationAPI = {
   preview: (days) => api.post('/alert-correlation/preview', { days }),
   apply: (days) => api.post('/alert-correlation/apply', { days }),
   suggestions: (days) => api.get('/alert-correlation/suggestions', { params: { days } }),
+  getBundling: () => api.get('/alert-correlation/bundling'),
+  updateBundling: (patch) => api.put('/alert-correlation/bundling', patch),
   activity: (days) => api.get('/alert-correlation/activity', { params: { days } }),
 };
 

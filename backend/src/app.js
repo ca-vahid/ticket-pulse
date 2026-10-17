@@ -514,6 +514,17 @@ async function initialize() {
       }
     }
 
+    // Alert bundles: owners for new children and resolving bundles whose
+    // servers are all done (alertBundleService). Kill switch ALERT_BUNDLE_SWEEP_ENABLED=false.
+    if (config.sync.enableScheduledSync && process.env.ALERT_BUNDLE_SWEEP_ENABLED !== 'false') {
+      try {
+        const { default: alertBundleService } = await import('./services/alertBundleService.js');
+        alertBundleService.start();
+      } catch (e) {
+        logger.warn('Alert bundle sweep failed to start (non-fatal):', e.message);
+      }
+    }
+
     // Auto-help settle jobs: their own tick and running guard, never inside
     // the park sweep (a drain runs model calls — audit S1, 26 Sep 2026).
     try {

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.87-preview';
+export const APP_VERSION = '4.2.88-preview';
 
 export const changelog = [
+  {
+    version: '4.2.88-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Bursts from connected monitors become one incident</strong> &mdash; when the same check from a connected monitor (such as Sentinel&rsquo;s &ldquo;Storage / RAID hardware fault&rdquo;) fires on several servers in a short time, Ticket Pulse opens one incident with each server&rsquo;s ticket under it, so one person works the burst: the servers&rsquo; tickets take the incident&rsquo;s owner. The monitor still resolves each server&rsquo;s ticket, and the incident is resolved when they all are; later alerts of the same check join it. Settings &rarr; Alert correlation &rarr; <em>Bursts from connected monitors</em> (3 alerts within 1 hour by default). On for IT.' },
+    ],
+  },
   {
     version: '4.2.87-preview',
     date: 'October 17, 2026',
