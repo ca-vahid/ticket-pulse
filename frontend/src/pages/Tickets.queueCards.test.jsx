@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 // Mega 08-23 Phase FC — admin-configurable quick filter cards:
@@ -78,6 +78,9 @@ function baseMeta(extra = {}) {
 
 const lastListParams = () => listSpy.mock.calls.at(-1)[0];
 const cardRow = () => screen.getByRole('group', { name: 'Quick segments' });
+// The docked layout also mounts the folded one-line strip (aria-hidden until
+// the list scrolls), so card text is looked up inside the visible card row.
+const inCards = () => within(cardRow());
 
 function mount(initialEntry = '/tickets') {
   return render(<Tickets />, {
@@ -110,7 +113,7 @@ afterEach(cleanup);
 describe('Quick filter cards (Phase FC)', () => {
   test('no meta.queueCards → today\'s exact classic six render, in order', async () => {
     mount();
-    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
     const labels = [...cardRow().querySelectorAll('button')].map((b) => b.textContent);
     expect(labels).toEqual(DEFAULT_QUEUE_CARDS.map((k) => `${STATS[QUEUE_CARD_REGISTRY[k].countKey].toLocaleString()}${QUEUE_CARD_REGISTRY[k].label}`));
   });
@@ -118,58 +121,58 @@ describe('Quick filter cards (Phase FC)', () => {
   test('an invalid stored config (dupes) falls back to the defaults', async () => {
     metaSpy.mockResolvedValue(baseMeta({ queueCards: ['all', 'all', 'open', 'awaiting', 'overdue', 'resolved'] }));
     mount();
-    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
-    expect(screen.getByText('Due today')).toBeInTheDocument();
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
+    expect(inCards().getByText('Due today')).toBeInTheDocument();
     expect(cardRow().querySelectorAll('button')).toHaveLength(6);
   });
 
   test('a configured set renders the created-period card with its real count', async () => {
     metaSpy.mockResolvedValue(baseMeta({ queueCards: ['all', 'open', 'awaiting', 'created_month', 'overdue', 'resolved'] }));
     mount();
-    await waitFor(() => expect(screen.getByText('Tickets this month')).toBeInTheDocument());
+    await waitFor(() => expect(inCards().getByText('Tickets this month')).toBeInTheDocument());
     // Slot 4 swapped: Due today is gone, the month card shows createdThisMonth.
     expect(screen.queryByText('Due today')).not.toBeInTheDocument();
-    const monthCard = screen.getByText('Tickets this month').closest('button');
+    const monthCard = inCards().getByText('Tickets this month').closest('button');
     expect(monthCard).toHaveTextContent('17');
   });
 
   test('clicking "Tickets this month" writes ?segment=created_month (single-select segment key)', async () => {
     metaSpy.mockResolvedValue(baseMeta({ queueCards: ['all', 'open', 'awaiting', 'created_month', 'overdue', 'resolved'] }));
     mount();
-    await waitFor(() => expect(screen.getByText('Tickets this month')).toBeInTheDocument());
+    await waitFor(() => expect(inCards().getByText('Tickets this month')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByText('Tickets this month').closest('button'));
+    fireEvent.click(inCards().getByText('Tickets this month').closest('button'));
     await waitFor(() => expect(lastListParams().segment).toBe('created_month'));
     // Segment scope replaces the status checkboxes — no status param rides along.
     expect(lastListParams().status).toBeUndefined();
-    expect(screen.getByText('Tickets this month').closest('button')).toHaveAttribute('aria-pressed', 'true');
+    expect(inCards().getByText('Tickets this month').closest('button')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('a ?status= deep link filters the list and does NOT light the "All tickets" card', async () => {
     mount('/tickets?assignee=42&status=Open');
-    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
     await waitFor(() => expect(lastListParams().status).toBe('Open'));
     expect(lastListParams().assignedTechId).toBe('42');
-    expect(screen.getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'false');
+    expect(inCards().getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('?status=any (the "All tickets" card\'s own scope) still lights it', async () => {
     mount('/tickets?status=any');
-    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
-    expect(screen.getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
+    expect(inCards().getByText('All tickets').closest('button')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('the configurator gear renders for admins only and deep-links Settings → Ticket Ops', async () => {
     roleRef.value = 'admin';
     mount();
-    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
     const gear = screen.getByRole('link', { name: 'Customize quick filter cards' });
     expect(gear).toHaveAttribute('href', '/settings#ticket-ops');
 
     cleanup();
     roleRef.value = 'viewer';
     mount();
-    await waitFor(() => expect(screen.getByText('All tickets')).toBeInTheDocument());
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
     expect(screen.queryByRole('link', { name: 'Customize quick filter cards' })).not.toBeInTheDocument();
   });
 });

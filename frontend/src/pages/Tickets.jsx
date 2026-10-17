@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide,
-  ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
+  ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox,
   AlignJustify, CheckCheck, Columns3, Hand, ListChecks, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
@@ -61,6 +61,18 @@ const BULK_DELETE_MAX = 25;
 
 // Desktop-sized window: the Tickets page becomes a fixed working area.
 const DOCKED_QUERY = '(min-width: 1024px) and (min-height: 600px)';
+
+// Folds its child away (height and fade together, both ways) while `folded`;
+// a no-op off the docked layout. `roomy` leaves space for the cards' shadows
+// and their hover gear, which sit just outside the cards.
+function Fold({ on, folded, roomy = false, children }) {
+  if (!on) return children;
+  return (
+    <div className={`tp-fold${roomy ? ' tp-fold--roomy' : ''}`} data-folded={folded ? 'true' : 'false'} aria-hidden={folded || undefined} inert={folded ? '' : undefined}>
+      <div>{children}</div>
+    </div>
+  );
+}
 
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last activity' },
@@ -264,7 +276,6 @@ export default function Tickets() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [isExporting, setIsExporting] = useState(false);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false); // force-refresh button
@@ -1450,15 +1461,6 @@ export default function Tickets() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const exportCsv = async () => {
-    setIsExporting(true);
-    try {
-      const { page: _p, pageSize: _s, ...rest } = queryParams;
-      await ticketsAPI.exportCsv(rest);
-    } catch { /* toastless — download either happens or the browser shows the error */ }
-    setIsExporting(false);
-  };
-
   const totalPages = Math.max(1, Math.ceil(total / effectivePageSize));
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
   const isAgent = user?.role === 'agent';
@@ -1643,15 +1645,16 @@ export default function Tickets() {
   // headings and pager on screen and only the rows scroll. Phones, tablets in
   // portrait and short windows keep the normal page scroll.
   const docked = useMediaQuery(DOCKED_QUERY);
-  // Once the rows are scrolled the six cards fold into one slim line; back at
-  // the top they unfold. Hysteresis (fold past 48 px, unfold at the top) and
-  // the 160 px floor stop a short list from flickering between the two.
+  // Once the rows are scrolled the title row folds away and the six cards fold
+  // into one slim line (New ticket moves to the top bar); back at the top they
+  // unfold. Hysteresis (fold past 48 px, unfold at the top) and the 320 px
+  // floor stop a short list from flickering between the two.
   const [cardsFolded, setCardsFolded] = useState(false);
   useEffect(() => { if (!docked) setCardsFolded(false); }, [docked]);
   const onListScroll = useCallback((e) => {
     const el = e.currentTarget;
     if (el.scrollTop <= 2) setCardsFolded(false);
-    else if (el.scrollTop > 48 && el.scrollHeight - el.clientHeight > 160) setCardsFolded(true);
+    else if (el.scrollTop > 48 && el.scrollHeight - el.clientHeight > 320) setCardsFolded(true);
   }, []);
   // A new filter, sort or page starts the list at its top (the page used to
   // scroll back up; now the list pane does). Opening the side preview does not.
@@ -1735,7 +1738,25 @@ export default function Tickets() {
 
   return (
     <div className={`tp-tickets-backdrop md:pl-[var(--tp-rail-w,58px)] ${docked ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'}`}>
-      <AppHeader activePage="tickets" />
+      <AppHeader
+        activePage="tickets"
+        titleAddon={docked && ticketingOn ? (
+          /* Scrolled (16 Oct 2026, Vahid): the title row folds away, so New
+             ticket rides in the top bar as a plus beside the page name. */
+          <button
+            type="button"
+            onClick={() => navigate('/tickets/new')}
+            title="New ticket"
+            aria-label="New ticket"
+            aria-hidden={!cardsFolded || undefined}
+            tabIndex={cardsFolded ? 0 : -1}
+            data-testid="header-new-ticket"
+            className={`tp-focus-ring tp-head-new inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-subtle hover:bg-blue-700${cardsFolded ? '' : ' is-away'}`}
+          >
+            <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden="true" />
+          </button>
+        ) : null}
+      />
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
       <PullToRefresh onRefresh={() => Promise.allSettled([fetchTickets({ silent: true }), fetchStats()])} />
@@ -1743,7 +1764,7 @@ export default function Tickets() {
         {/* Page header (v3.8.31): one slim row. The artwork band spent ~94 px and
             a subtitle to repeat the page you are already on; the title, the
             workspace and both actions fit on a single 33 px line. */}
-        <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4 sm:flex-wrap sm:gap-3">
+        <Fold on={docked} folded={cardsFolded}><div className="flex items-center justify-between gap-2 mb-3 sm:mb-4 sm:flex-wrap sm:gap-3">
           <div className="flex items-baseline gap-x-2.5 gap-y-1 min-w-0 sm:flex-wrap">
             <h1 className="text-lg font-bold text-foreground">Tickets</h1>
             <span className="min-w-0 truncate rounded-full bg-muted px-2.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground">
@@ -1751,15 +1772,6 @@ export default function Tickets() {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={exportCsv}
-              disabled={isExporting || isLoading}
-              className="tp-focus-ring inline-flex flex-shrink-0 items-center gap-1.5 px-2.5 sm:px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
-              title="Export the current filtered list as CSV (up to 5000 rows)"
-            >
-              <Download className="w-4 h-4" aria-hidden="true" />
-              <span className="max-sm:sr-only">{isExporting ? 'Exporting…' : 'Export'}</span>
-            </button>
             {ticketingOn && (
               <button
                 onClick={() => navigate('/tickets/new')}
@@ -1770,7 +1782,7 @@ export default function Tickets() {
               </button>
             )}
           </div>
-        </div>
+        </div></Fold>
 
         {metaError && (
           <div className="tp-card rounded-xl p-8 text-center">
@@ -1802,8 +1814,8 @@ export default function Tickets() {
                 FC); the hover gear deep-links admins to the configurator. */}
             {/* Phone (12 Oct 2026): one line you swipe sideways, not a wall of six
                 cards that pushed the list off the first screen. */}
-            {docked && cardsFolded && (
-              <div className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 px-1 animate-fadeIn" role="group" aria-label="Quick segments" data-testid="cards-folded">
+            {docked && (
+              <Fold on folded={!cardsFolded}><div className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 px-1" role="group" aria-label="Quick segments" data-testid="cards-folded">
                 {queueCards.map((key) => {
                   const seg = QUEUE_CARD_REGISTRY[key];
                   const active = cardIsActive(key);
@@ -1821,9 +1833,9 @@ export default function Tickets() {
                     </button>
                   );
                 })}
-              </div>
+              </div></Fold>
             )}
-            <div className={`${docked && cardsFolded ? '!hidden ' : ''}relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6`} role="group" aria-label="Quick segments">
+            <Fold on={docked} folded={cardsFolded} roomy><div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
               {queueCards.map((key, cardIndex) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
                 // Phone: "Mine" sits second — the rail's My open view, one tap
@@ -1890,7 +1902,7 @@ export default function Tickets() {
                   <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
                 </Link>
               )}
-            </div>
+            </div></Fold>
 
             {/* Unmatched replies pill (Phase RL, RL-4): held inbound mail
                 waiting for attach / create / discard. Hidden when empty. */}
