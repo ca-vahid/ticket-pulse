@@ -578,6 +578,9 @@ class AlertCorrelationService {
 
   /** An agent wrote on it, or a person assigned / re-statused it. */
   async _humanTouched(ticket) {
+    // Ticket Pulse's own notes are written as agent notes (grouping's "this
+    // alert has now arrived 2 times", 17 Oct 2026: TP-10162 then counted as
+    // worked by a person and its pair never resolved). Only people count.
     const entry = await Promise.resolve().then(() => prisma.ticketThreadEntry.findFirst({
       where: {
         ticketId: ticket.id,
@@ -585,6 +588,8 @@ class AlertCorrelationService {
           { authorType: 'agent' },
           { source: 'freshservice_conversation', incoming: false },
         ],
+        // NULL-safe: a bare NOT would also drop entries with no actor e-mail.
+        AND: [{ OR: [{ actorEmail: null }, { NOT: { actorEmail: { endsWith: '@ticketpulse.internal' } } }] }],
       },
       select: { id: true },
     })).catch(() => null);

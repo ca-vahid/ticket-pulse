@@ -138,6 +138,23 @@ describe('pairing', () => {
     expect(res.actions.some((a) => a.type === 'left_to_person' && a.ticketId === 10)).toBe(true);
   });
 
+  test("Ticket Pulse's own notes are not a person (TP-10162, 17 Oct 2026): grouping's repeat note does not stop the pair resolving", async () => {
+    const fired = t(10, FIRED, { createdAt: new Date('2026-09-19T11:57:00Z') });
+    const cleared = t(11, RESOLVED, { createdAt: new Date('2026-09-19T12:12:00Z') });
+    prismaMock.ticket.findFirst.mockResolvedValue(cleared);
+    prismaMock.ticket.findMany.mockResolvedValue([fired, cleared]);
+    // The only agent-type note is grouping@ticketpulse.internal's: the query
+    // must leave it out (and keep entries with no actor e-mail in).
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(async ({ where }) => {
+      const filter = JSON.stringify(where.AND || []);
+      return filter.includes('@ticketpulse.internal') && filter.includes('"actorEmail":null') ? null : { id: 5 };
+    });
+    const res = await svc.evaluateTicket(11, 1);
+    expect(res.pair.touched).toBe(false);
+    expect(res.actions.some((a) => a.type === 'left_to_person')).toBe(false);
+    expect(ticketServiceMock.updateFsTicket.mock.calls.map((c) => c[0]).sort()).toEqual([10, 11]);
+  });
+
   test('an assignment a person wrote back to FreshService counts as a human touch (21 Sep 2026)', async () => {
     const fired = t(10, FIRED, { createdAt: new Date('2026-09-19T11:57:00Z') });
     const cleared = t(11, RESOLVED, { createdAt: new Date('2026-09-19T12:12:00Z') });

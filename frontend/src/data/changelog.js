@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.86-preview';
+export const APP_VERSION = '4.2.87-preview';
 
 export const changelog = [
+  {
+    version: '4.2.87-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Down / up alert pairs close again after a repeat</strong> &mdash; when the same alert arrived twice, Ticket Pulse&rsquo;s own &ldquo;this alert has now arrived 2 times&rdquo; note made alert pairing think a person was working the ticket, so the &ldquo;down&rdquo; ticket stayed open after its &ldquo;up&rdquo; arrived. Ticket Pulse&rsquo;s own notes no longer count as a person.' },
+    ],
+  },
   {
     version: '4.2.86-preview',
     date: 'October 17, 2026',
