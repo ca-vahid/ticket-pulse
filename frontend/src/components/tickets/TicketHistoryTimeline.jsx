@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { BadgeCheck, BookOpen,
-  ArrowRight, Bot, Building2, CalendarClock, Check, CheckSquare, ChevronDown, ChevronRight, Forward,
+  ArrowRight, Bot, Building2, CalendarClock, Check, CheckSquare, ChevronDown, ChevronRight, Forward, GitMerge,
   Hand, History, Inbox, Lock, Mail, MessageSquare, Pencil, Plus, RefreshCw, RotateCcw, Siren, Sparkles, Tag, UserRound, VolumeX, Zap,
 } from 'lucide-react';
 import { ActorKindChip } from './activityKind.jsx';
@@ -43,6 +43,7 @@ const EVENT_STYLE = {
   due: { icon: CalendarClock, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200' },
   task: { icon: CheckSquare, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200' },
   forward: { icon: Forward, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200' },
+  merge: { icon: GitMerge, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200' },
   solution: { icon: BadgeCheck, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' },
   noise: { icon: VolumeX, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200' },
   ai: { icon: Sparkles, tone: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200' },
@@ -134,7 +135,7 @@ function verbFor(item) {
 
 function isImportant(item) {
   if (item.machine) return false;
-  if (item.event === 'reopen' || item.event === 'created' || item.event === 'assignment') return true;
+  if (item.event === 'reopen' || item.event === 'created' || item.event === 'assignment' || item.event === 'merge') return true;
   if (item.event === 'status' && TERMINAL.has(key(item.to))) return true;
   if (item.event === 'priority' && key(item.to) === 'urgent') return true;
   return false;

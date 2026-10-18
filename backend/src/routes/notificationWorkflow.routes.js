@@ -125,10 +125,10 @@ function parsePage(value, fallback = 1) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function parsePageSize(value, fallback = 10) {
+function parsePageSize(value, fallback = 10, max = 25) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.min(parsed, 25);
+  return Math.min(parsed, max);
 }
 
 function dateIso(value) {
@@ -379,6 +379,25 @@ function parseStatusFilter(value) {
   return raw;
 }
 
+// Preview page filters (18 Oct 2026): origin, owner, age and noise, each a
+// one-word value so the picker's icon selects can send them as they are.
+const PREVIEW_CREATED_WINDOWS = { '24h': 1, '7d': 7, '30d': 30, '90d': 90 };
+
+function parsePreviewTicketFilters(query = {}) {
+  const pick = (value, allowed) => {
+    const raw = String(value || '').trim().toLowerCase();
+    return allowed.includes(raw) ? raw : null;
+  };
+  return {
+    status: parseStatusFilter(query.status),
+    priority: parsePriorityFilter(query.priority),
+    origin: pick(query.origin, ['ticketpulse', 'freshservice']),
+    assigned: pick(query.assigned, ['assigned', 'unassigned']),
+    created: pick(query.created, Object.keys(PREVIEW_CREATED_WINDOWS)),
+    noise: pick(query.noise, ['hide', 'only']),
+  };
+}
+
 function ticketEventTimestamp(ticket, triggerType) {
   if (triggerType === 'ticket.created') return dateIso(ticket.createdAt) || dateIso(ticket.freshserviceUpdatedAt);
   if (triggerType === 'ticket.assigned' || triggerType === 'ticket.reassigned') {
@@ -393,6 +412,10 @@ function ticketEventTimestamp(ticket, triggerType) {
 function serializePreviewTicket(ticket) {
   return {
     id: ticket.id,
+    displayRef: ticketDisplayRef(ticket),
+    origin: ticket.origin || 'freshservice',
+    nativeNumber: ticket.nativeNumber ?? null,
+    department: ticket.department || null,
     freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
     subject: ticket.subject || '',
     status: ticket.status,
@@ -421,13 +444,24 @@ function serializePreviewTicket(ticket) {
   };
 }
 
-function previewTicketSearchWhere(workspaceId, search, filters = {}) {
+function previewTicketSearchWhere(workspaceId, search, filters = {}, now = new Date()) {
   const trimmed = String(search || '').trim();
   const where = { workspaceId };
   const and = [];
 
   if (filters.status) {
     and.push({ status: { equals: filters.status, mode: 'insensitive' } });
+  }
+
+  if (filters.origin === 'ticketpulse') and.push({ origin: 'ticketpulse' });
+  if (filters.origin === 'freshservice') and.push({ NOT: { origin: 'ticketpulse' } });
+  if (filters.assigned === 'assigned') and.push({ NOT: { assignedTechId: null } });
+  if (filters.assigned === 'unassigned') and.push({ assignedTechId: null });
+  if (filters.noise === 'hide') and.push({ isNoise: false });
+  if (filters.noise === 'only') and.push({ isNoise: true });
+  if (filters.created && PREVIEW_CREATED_WINDOWS[filters.created]) {
+    const days = PREVIEW_CREATED_WINDOWS[filters.created];
+    and.push({ createdAt: { gte: new Date(now.getTime() - days * 24 * 60 * 60 * 1000) } });
   }
 
   if (filters.priority) {
@@ -459,12 +493,29 @@ function previewTicketSearchWhere(workspaceId, search, filters = {}) {
       { requester: { is: { email: { contains: trimmed, mode: 'insensitive' } } } },
       { assignedTech: { is: { name: { contains: trimmed, mode: 'insensitive' } } } },
       { assignedTech: { is: { email: { contains: trimmed, mode: 'insensitive' } } } },
+      // 18 Oct 2026: find what the header search finds — department, the
+      // internal category tree and skills, not only the FS fields.
+      { department: { contains: trimmed, mode: 'insensitive' } },
+      { tpSkill: { contains: trimmed, mode: 'insensitive' } },
+      { tpSubskill: { contains: trimmed, mode: 'insensitive' } },
+      { internalCategory: { is: { name: { contains: trimmed, mode: 'insensitive' } } } },
+      { internalSubcategory: { is: { name: { contains: trimmed, mode: 'insensitive' } } } },
     ];
 
-    if (/^\d+$/.test(trimmed)) {
-      try {
-        or.push({ freshserviceTicketId: BigInt(trimmed) });
-      } catch { /* ignore invalid bigint search */ }
+    // A ticket number the way people type it: TP-10194, #247711, 247711.
+    const ref = trimmed.match(/^(tp-?|#)?\s*(\d{1,12})$/i);
+    if (ref) {
+      const digits = ref[2];
+      const prefix = (ref[1] || '').toLowerCase();
+      const asInt = Number.parseInt(digits, 10);
+      if (prefix !== '#' && Number.isSafeInteger(asInt) && asInt <= 2147483647) {
+        or.push({ AND: [{ origin: 'ticketpulse' }, { nativeNumber: asInt }] });
+      }
+      if (!prefix.startsWith('tp')) {
+        try {
+          or.push({ freshserviceTicketId: BigInt(digits) });
+        } catch { /* ignore invalid bigint search */ }
+      }
     }
 
     and.push({ OR: or });
@@ -1819,11 +1870,11 @@ router.get(
   '/preview-tickets',
   asyncHandler(async (req, res) => {
     const page = parsePage(req.query.page);
-    const pageSize = parsePageSize(req.query.pageSize);
+    const pageSize = parsePageSize(req.query.pageSize, 10, 50);
     const search = String(req.query.search || '').trim();
-    const status = parseStatusFilter(req.query.status);
-    const priority = parsePriorityFilter(req.query.priority);
-    const where = previewTicketSearchWhere(req.workspaceId, search, { status, priority });
+    const filters = parsePreviewTicketFilters(req.query);
+    const { status, priority } = filters;
+    const where = previewTicketSearchWhere(req.workspaceId, search, filters);
     const [total, tickets] = await Promise.all([
       prisma.ticket.count({ where }),
       prisma.ticket.findMany({
@@ -1856,8 +1907,84 @@ router.get(
         filters: {
           status,
           priority: priority?.label || null,
+          origin: filters.origin,
+          assigned: filters.assigned,
+          created: filters.created,
+          noise: filters.noise,
         },
       },
+    });
+  }),
+);
+
+// Live progress for the Preview page (18 Oct 2026). A preview persists its
+// run and a step row per node as it goes, so while POST /test is still
+// running the page polls this for the newest preview run of the workflow
+// (started at or after `since`) and paints the pipeline step by step.
+// Light rows only: no input/output payloads, which arrive with /test.
+router.get(
+  '/preview-live',
+  asyncHandler(async (req, res) => {
+    const workflowId = parseId(req.query.workflowId, 'workflow id');
+    const sinceRaw = req.query.since ? new Date(String(req.query.since)) : null;
+    const since = sinceRaw && !Number.isNaN(sinceRaw.getTime())
+      ? sinceRaw
+      : new Date(Date.now() - 2 * 60 * 1000);
+    const ticketId = req.query.ticketId ? Number.parseInt(req.query.ticketId, 10) : null;
+    const run = await prisma.notificationWorkflowRun.findFirst({
+      where: {
+        workspaceId: req.workspaceId,
+        workflowId,
+        executionMode: 'preview',
+        triggerSource: 'preview',
+        startedAt: { gte: since },
+        ...(Number.isFinite(ticketId) && ticketId > 0 ? { ticketId } : {}),
+      },
+      orderBy: { startedAt: 'desc' },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        completedAt: true,
+        durationMs: true,
+        error: true,
+        steps: {
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            nodeId: true,
+            nodeType: true,
+            status: true,
+            startedAt: true,
+            completedAt: true,
+            durationMs: true,
+            error: true,
+          },
+        },
+      },
+    });
+    res.json({
+      success: true,
+      data: run ? {
+        runId: run.id,
+        auditId: `TP-NWF-${run.id}`,
+        status: run.status,
+        startedAt: dateIso(run.startedAt),
+        completedAt: dateIso(run.completedAt),
+        durationMs: run.durationMs,
+        error: run.error || null,
+        steps: run.steps.map((step) => ({
+          id: step.id,
+          nodeId: step.nodeId,
+          nodeType: step.nodeType,
+          status: step.status,
+          startedAt: dateIso(step.startedAt),
+          completedAt: dateIso(step.completedAt),
+          durationMs: step.durationMs,
+          error: step.error || null,
+        })),
+        serverTime: new Date().toISOString(),
+      } : { runId: null, steps: [], serverTime: new Date().toISOString() },
     });
   }),
 );

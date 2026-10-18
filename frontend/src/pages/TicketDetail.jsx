@@ -3,7 +3,7 @@ import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
 import {
-  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -429,6 +429,8 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   // sender's message, re-attributed; the forwarding agent rides rawPayload.
   const forwarded = forwardedMetaOf(entry);
   const forwardedBy = forwarded?.byName || forwarded?.byEmail || 'an agent';
+  // A message copied in by a merge (18 Oct 2026) says which ticket it came from.
+  const mergedFrom = entry.rawPayload?.mergedFrom || null;
   const forwardedTitle = forwarded
     ? [
       forwarded.kind === 'agent_cc' ? `Filed by ${forwardedBy} (Cc'd on the original email)` : `Forwarded by ${forwardedBy}`,
@@ -526,6 +528,17 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             </span>
           )}
           {viaEmail && <span className="text-[10px] text-muted-foreground/75">via email</span>}
+          {mergedFrom && (
+            <Link
+              to={`/tickets/${mergedFrom.ticketId}`}
+              data-testid="merged-from-chip"
+              className="tp-focus-ring inline-flex items-center gap-1 text-[10px] font-semibold text-violet-800 dark:text-violet-100 bg-violet-100 dark:bg-violet-500/25 border border-violet-300 dark:border-violet-400/40 rounded-full px-1.5 py-0.5 hover:underline"
+              title={`Copied from ${mergedFrom.ref}${mergedFrom.subject ? ` "${mergedFrom.subject}"` : ''} when it was merged into this ticket${mergedFrom.part === 'opening_email' ? ' (its opening e-mail)' : ''}`}
+            >
+              <GitMerge className="w-2.5 h-2.5" aria-hidden="true" />
+              Merged from {mergedFrom.ref}{mergedFrom.part === 'opening_email' ? ' · opening e-mail' : ''}
+            </Link>
+          )}
           {forwarded && (
             <span
               data-testid="forwarded-intake-chip"

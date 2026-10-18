@@ -986,6 +986,121 @@ describe('notification workflow routes', () => {
     expect(matches({ assessedPriority: null, priority: 3 })).toBe(false);
   });
 
+  test('preview-tickets takes origin, owner, age and noise filters and up to 50 per page (18 Oct 2026)', async () => {
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/preview-tickets')
+      .query({ origin: 'ticketpulse', assigned: 'unassigned', created: '7d', noise: 'hide', pageSize: 80 })
+      .expect(200);
+
+    const call = prismaMock.ticket.findMany.mock.calls[0][0];
+    expect(call.take).toBe(50);
+    expect(call.where.AND).toEqual(expect.arrayContaining([
+      { origin: 'ticketpulse' },
+      { assignedTechId: null },
+      { isNoise: false },
+      { createdAt: { gte: expect.any(Date) } },
+    ]));
+    const gte = call.where.AND.find((clause) => clause.createdAt).createdAt.gte;
+    expect(Date.now() - gte.getTime()).toBeGreaterThan(6.9 * 24 * 3600 * 1000);
+    expect(response.body.data.filters).toEqual(expect.objectContaining({
+      origin: 'ticketpulse', assigned: 'unassigned', created: '7d', noise: 'hide',
+    }));
+    expect(response.body.data.items[0]).toEqual(expect.objectContaining({
+      displayRef: expect.any(String),
+      origin: expect.any(String),
+    }));
+  });
+
+  test('preview-tickets ignores unknown filter values', async () => {
+    await request(buildApp())
+      .get('/api/notification-workflows/preview-tickets')
+      .query({ origin: 'mars', assigned: 'maybe', created: '5y', noise: 'loud' })
+      .expect(200);
+    const { where } = prismaMock.ticket.findMany.mock.calls[0][0];
+    expect(where.AND).toBeUndefined();
+  });
+
+  test('preview-tickets search reads TP-#### as a Ticket Pulse number and finds category / department', async () => {
+    await request(buildApp())
+      .get('/api/notification-workflows/preview-tickets')
+      .query({ search: 'TP-10194' })
+      .expect(200);
+    let or = prismaMock.ticket.findMany.mock.calls[0][0].where.AND[0].OR;
+    expect(or).toEqual(expect.arrayContaining([
+      { AND: [{ origin: 'ticketpulse' }, { nativeNumber: 10194 }] },
+    ]));
+    expect(or.some((clause) => clause.freshserviceTicketId)).toBe(false);
+
+    prismaMock.ticket.findMany.mockClear();
+    await request(buildApp())
+      .get('/api/notification-workflows/preview-tickets')
+      .query({ search: '#247711' })
+      .expect(200);
+    or = prismaMock.ticket.findMany.mock.calls[0][0].where.AND[0].OR;
+    expect(or).toEqual(expect.arrayContaining([{ freshserviceTicketId: BigInt(247711) }]));
+    expect(or.some((clause) => clause.AND)).toBe(false);
+
+    prismaMock.ticket.findMany.mockClear();
+    await request(buildApp())
+      .get('/api/notification-workflows/preview-tickets')
+      .query({ search: 'Payroll' })
+      .expect(200);
+    or = prismaMock.ticket.findMany.mock.calls[0][0].where.AND[0].OR;
+    expect(or).toEqual(expect.arrayContaining([
+      { department: { contains: 'Payroll', mode: 'insensitive' } },
+      { internalCategory: { is: { name: { contains: 'Payroll', mode: 'insensitive' } } } },
+    ]));
+  });
+
+  test('preview-live returns the newest preview run with light step rows', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce({
+      id: 7001,
+      status: 'running',
+      startedAt: new Date('2026-10-18T10:00:00Z'),
+      completedAt: null,
+      durationMs: null,
+      error: null,
+      steps: [
+        { id: 1, nodeId: 'trigger', nodeType: 'trigger', status: 'completed', startedAt: new Date('2026-10-18T10:00:00Z'), completedAt: new Date('2026-10-18T10:00:00Z'), durationMs: 2, error: null },
+        { id: 2, nodeId: 'llm_1', nodeType: 'llm', status: 'running', startedAt: new Date('2026-10-18T10:00:01Z'), completedAt: null, durationMs: null, error: null },
+      ],
+    });
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/preview-live')
+      .query({ workflowId: 12, ticketId: 501, since: '2026-10-18T09:59:55Z' })
+      .expect(200);
+
+    const args = prismaMock.notificationWorkflowRun.findFirst.mock.calls[0][0];
+    expect(args.where).toEqual(expect.objectContaining({
+      workspaceId: 1,
+      workflowId: 12,
+      ticketId: 501,
+      executionMode: 'preview',
+      triggerSource: 'preview',
+      startedAt: { gte: new Date('2026-10-18T09:59:55Z') },
+    }));
+    expect(args.select.steps.select.input).toBeUndefined();
+    expect(args.select.steps.select.output).toBeUndefined();
+    expect(response.body.data).toEqual(expect.objectContaining({
+      runId: 7001,
+      auditId: 'TP-NWF-7001',
+      status: 'running',
+    }));
+    expect(response.body.data.steps.map((step) => [step.nodeId, step.status])).toEqual([
+      ['trigger', 'completed'],
+      ['llm_1', 'running'],
+    ]);
+  });
+
+  test('preview-live answers an empty run before the preview has started', async () => {
+    prismaMock.notificationWorkflowRun.findFirst.mockResolvedValueOnce(null);
+    const response = await request(buildApp())
+      .get('/api/notification-workflows/preview-live')
+      .query({ workflowId: 12 })
+      .expect(200);
+    expect(response.body.data).toEqual(expect.objectContaining({ runId: null, steps: [] }));
+  });
+
   test('audit run list returns slim rows: no event context, step payloads or e-mail bodies (QA 10-15)', async () => {
     repositoryMock.listAuditRuns.mockResolvedValueOnce([
       {

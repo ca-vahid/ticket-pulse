@@ -1944,6 +1944,7 @@ export const notificationWorkflowAPI = {
   setEnabled: (id, enabled) => api.put(`/notification-workflows/${id}/enabled`, { enabled }),
   setMockMode: (id, enabled) => api.put(`/notification-workflows/${id}/mock-mode`, { enabled }),
   getPreviewTickets: (params = {}) => api.get('/notification-workflows/preview-tickets', { params }),
+  getPreviewLive: (params = {}) => api.get('/notification-workflows/preview-live', { params }),
   getRoutingMetadata: (params = {}) => api.get('/notification-workflows/routing/metadata', { params }),
   previewRouting: (data) => api.post('/notification-workflows/routing/preview', data),
   test: (data) => apiLongTimeout.post('/notification-workflows/test', data),

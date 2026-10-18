@@ -58,13 +58,60 @@ beforeEach(() => {
   prismaMock.ticketApproval.updateMany.mockResolvedValue({ count: 0 });
 });
 
-describe('merge note carries the source description (QA 09-21 #3)', () => {
-  test('the target note quotes the merged ticket\'s description on its own line', async () => {
-    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (where.id === 10 ? { ...TP_SOURCE, descriptionText: 'test 2 — the requester wrote this in the description' } : TARGET));
-    await ticketMergeService.merge(10, 1, { targetTicketId: 20 }, { email: 'c@bgc.ca', name: 'Coord' });
-    const targetNote = ticketServiceMock.addPrivateNote.mock.calls.find(([id]) => id === 20)?.[2]?.bodyText || '';
-    expect(targetNote).toMatch(/Merged TP-10/);
-    expect(targetNote).toMatch(/\n\nDescription of TP-10: "test 2 — the requester wrote this in the description"/);
+describe('merged content arrives as full messages (18 Oct 2026; was a quoted description, QA 09-21 #3)', () => {
+  test('an FS-born source opening e-mail is copied as a rich message from its sender, marked with where it came from', async () => {
+    prismaMock.technician = { findFirst: jest.fn().mockResolvedValue({ id: 7 }) };
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.createMany.mockResolvedValue({ count: 1 });
+    const html = '<p>Hi Richard, I checked the machine and it is working for me. Are you on VPN?</p><p>Thanks,<br>Mehdi</p>';
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (where.id === 11
+      ? { ...FS_SOURCE, subject: 'Re: anyone working today?', description: html, descriptionText: 'Hi Richard, I checked the machine…', createdAt: new Date('2026-10-17T15:10:00Z'), requester: { name: 'Mehdi Abbaspour', email: 'mabbaspour@bgc.ca' } }
+      : TARGET));
+    await ticketMergeService.merge(11, 1, { targetTicketId: 20 }, { email: 'c@bgc.ca', name: 'Coord' });
+
+    const [copy] = prismaMock.ticketThreadEntry.createMany.mock.calls[0][0].data;
+    expect(copy).toEqual(expect.objectContaining({
+      ticketId: 20,
+      externalEntryId: 'merged:11:description',
+      eventType: 'reply',
+      bodyHtml: html,
+      actorName: 'Mehdi Abbaspour',
+      actorEmail: 'mabbaspour@bgc.ca',
+      authorType: 'agent',
+      occurredAt: new Date('2026-10-17T15:10:00Z'),
+      mirrorState: null,
+    }));
+    expect(copy.rawPayload.mergedFrom).toEqual(expect.objectContaining({ ticketId: 11, ref: '#900', part: 'opening_email' }));
+
+    // The note says what happened and links back; it no longer quotes the body.
+    const note = ticketServiceMock.addPrivateNote.mock.calls.find(([id]) => id === 20)?.[2] || {};
+    expect(note.bodyText).toMatch(/^Merged #900 "Re: anyone working today\?" into this ticket\./);
+    expect(note.bodyText).toMatch(/Its opening e-mail is now in this conversation, marked "Merged from #900"\./);
+    expect(note.bodyText).toMatch(/1 attachment stays on #900\./);
+    expect(note.bodyText).not.toMatch(/Description of/);
+    expect(note.bodyHtml).toContain('<a href="/tickets/11">#900</a>');
+
+    const fromRow = activityMock.create.mock.calls.find(([row]) => row.activityType === 'merged_from')[0];
+    expect(fromRow.details).toEqual(expect.objectContaining({ srcRef: '#900', sourceSubject: 'Re: anyone working today?', descriptionCopied: true, attachmentsLeft: 1, actorName: 'Coord' }));
+    delete prismaMock.technician;
+  });
+
+  test('a TP-born source opening e-mail entry becomes a plain message with the full body', async () => {
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([
+      { id: 100, source: 'email_inbound', eventType: 'original_email', actorName: 'R', occurredAt: new Date(), bodyText: 'short preview', bodyHtml: null },
+      ...ENTRIES,
+    ]);
+    prismaMock.ticketThreadEntry.createMany.mockResolvedValue({ count: 3 });
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (where.id === 10
+      ? { ...TP_SOURCE, description: '<p>The <b>full</b> opening mail</p>', descriptionText: 'The full opening mail' }
+      : TARGET));
+    const result = await ticketMergeService.merge(10, 1, { targetTicketId: 20 }, { email: 'c@bgc.ca', name: 'Coord' });
+    const data = prismaMock.ticketThreadEntry.createMany.mock.calls[0][0].data;
+    expect(data).toHaveLength(3);
+    expect(data[0]).toEqual(expect.objectContaining({ eventType: 'reply', bodyHtml: '<p>The <b>full</b> opening mail</p>', bodyText: 'The full opening mail' }));
+    expect(data.every((row) => row.rawPayload?.mergedFrom?.ref === 'TP-10')).toBe(true);
+    expect(data.some((row) => row.externalEntryId === 'merged:10:description')).toBe(false);
+    expect(result.copied).toBe(3);
   });
 });
 

@@ -24,6 +24,50 @@ import ticketActivityRepository from './ticketActivityRepository.js';
  *  - Optional requester notification (TP-born sources only): a public reply
  *    through the normal reply path, so it emails via the usual machinery.
  */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * The note left on the surviving ticket (18 Oct 2026): what came over and
+ * from where, in a few short lines with a link back. The merged content is
+ * NOT quoted here — it arrives as full messages in the conversation.
+ */
+export function mergeNoteContent({ srcRef, sourceId, subject, copied = 0, descriptionCopied = false, sweptBits = [], approvals = 0, attachmentCount = 0, actorLabel = 'an agent' }) {
+  const what = [
+    descriptionCopied ? 'its opening e-mail' : null,
+    copied ? `${copied} message${copied === 1 ? '' : 's'}` : null,
+  ].filter(Boolean);
+  const listed = what.join(' and ');
+  const arrived = what.length
+    ? `${listed.charAt(0).toUpperCase()}${listed.slice(1)} ${what.length > 1 || copied > 1 ? 'are' : 'is'} now in this conversation, marked "Merged from ${srcRef}".`
+    : `${srcRef} had no messages to copy.`;
+  const extras = [
+    sweptBits.length ? `${sweptBits.join(' and ')} moved over.` : null,
+    approvals ? `${approvals} pending approval${approvals === 1 ? '' : 's'} on ${srcRef} cancelled.` : null,
+    attachmentCount > 0 ? `${attachmentCount} attachment${attachmentCount === 1 ? ' stays' : 's stay'} on ${srcRef}.` : null,
+  ].filter(Boolean);
+  const subjectText = subject ? ` "${subject}"` : '';
+  const bodyText = [
+    `Merged ${srcRef}${subjectText} into this ticket.`,
+    arrived,
+    ...extras,
+    `Merged by ${actorLabel}.`,
+  ].join('\n');
+  const link = `<a href="/tickets/${Number(sourceId)}">${escapeHtml(srcRef)}</a>`;
+  const bodyHtml = [
+    `<p><strong>Merged ${link}${subject ? ` &ldquo;${escapeHtml(subject)}&rdquo;` : ''} into this ticket.</strong></p>`,
+    `<p>${escapeHtml(arrived)}</p>`,
+    extras.length ? `<ul>${extras.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>` : '',
+    `<p>Merged by ${escapeHtml(actorLabel)}.</p>`,
+  ].join('');
+  return { bodyText, bodyHtml };
+}
+
 class TicketMergeService {
   async merge(sourceId, workspaceId, { targetTicketId, notifyRequester = false, resolutionReason = null, resolutionNote = null }, actor) {
     const targetId = Number(targetTicketId);
@@ -31,7 +75,7 @@ class TicketMergeService {
     if (targetId === sourceId) throw new ValidationError('A ticket cannot be merged into itself');
 
     const [source, target] = await Promise.all([
-      prisma.ticket.findFirst({ where: { id: sourceId, workspaceId } }),
+      prisma.ticket.findFirst({ where: { id: sourceId, workspaceId }, include: { requester: { select: { name: true, email: true } } } }),
       prisma.ticket.findFirst({ where: { id: targetId, workspaceId } }),
     ]);
     if (!source) throw new NotFoundError('This ticket no longer exists in the workspace');
@@ -76,33 +120,79 @@ class TicketMergeService {
       },
       orderBy: { occurredAt: 'asc' },
     });
-    let copied = 0;
-    if (entries.length) {
-      const result = await prisma.ticketThreadEntry.createMany({
-        data: entries.map((e) => ({
-          ticketId: targetId,
-          workspaceId,
-          externalEntryId: `merged:${sourceId}:${e.id}`,
-          source: e.source,
-          eventType: e.eventType,
-          actorName: e.actorName,
-          actorEmail: e.actorEmail,
-          actorFreshserviceId: e.actorFreshserviceId,
-          authorType: e.authorType,
-          incoming: e.incoming,
-          isPrivate: e.isPrivate,
-          visibility: e.visibility,
-          title: e.title,
-          content: e.content,
-          bodyHtml: e.bodyHtml,
-          bodyText: e.bodyText,
-          occurredAt: e.occurredAt,
-          // Copies are TP-side records of the merge — never mirrored to FS.
-          mirrorState: null,
-        })),
-        skipDuplicates: true,
+    // Every copy says where it came from (rawPayload.mergedFrom), so the
+    // conversation can mark it "Merged from #247711" (18 Oct 2026).
+    const mergedFrom = { ticketId: sourceId, ref: srcRef, subject: source.subject || null, origin: source.origin || null };
+    const copyData = entries.map((e) => {
+      // The opening e-mail stays an opening e-mail only on its own ticket:
+      // on the target it is one more message (the target's page would show
+      // its OWN description in an 'original_email' entry), with its full body.
+      const opening = e.eventType === 'original_email';
+      return {
+        ticketId: targetId,
+        workspaceId,
+        externalEntryId: `merged:${sourceId}:${e.id}`,
+        source: e.source,
+        eventType: opening ? 'reply' : e.eventType,
+        actorName: e.actorName,
+        actorEmail: e.actorEmail,
+        actorFreshserviceId: e.actorFreshserviceId,
+        authorType: e.authorType,
+        incoming: e.incoming,
+        isPrivate: e.isPrivate,
+        visibility: e.visibility,
+        title: e.title,
+        content: opening && source.descriptionText ? source.descriptionText : e.content,
+        bodyHtml: opening && !e.bodyHtml ? (source.description || null) : e.bodyHtml,
+        bodyText: opening && source.descriptionText ? source.descriptionText : e.bodyText,
+        occurredAt: e.occurredAt,
+        emailMessageId: null,
+        rawPayload: { ...(e.rawPayload && typeof e.rawPayload === 'object' ? e.rawPayload : {}), mergedFrom: { ...mergedFrom, part: opening ? 'opening_email' : 'message' } },
+        // Copies are TP-side records of the merge — never mirrored to FS.
+        mirrorState: null,
+      };
+    });
+    // The description is a field, not a message, so an FS-born ticket's
+    // opening e-mail (an agent's reply FreshService turned into a ticket)
+    // never travelled with the copies, and the merge note quoted 600
+    // characters of it as flat text (18 Oct 2026). It now arrives as the
+    // e-mail it was: full formatting, its sender, its time.
+    const hasOpening = entries.some((e) => e.eventType === 'original_email');
+    const descriptionHtml = String(source.description || '').trim();
+    const descriptionText = String(source.descriptionText || '').trim();
+    let descriptionCopied = false;
+    if (!hasOpening && (descriptionHtml || descriptionText)) {
+      const senderEmail = source.requester?.email || null;
+      const senderIsAgent = senderEmail
+        ? Boolean(await prisma.technician.findFirst({ where: { workspaceId, email: { equals: senderEmail, mode: 'insensitive' } }, select: { id: true } }).catch(() => null))
+        : false;
+      copyData.unshift({
+        ticketId: targetId,
+        workspaceId,
+        externalEntryId: `merged:${sourceId}:description`,
+        source: 'merge',
+        eventType: 'reply',
+        actorName: source.requester?.name || senderEmail || 'Requester',
+        actorEmail: senderEmail,
+        authorType: senderIsAgent ? 'agent' : 'requester',
+        incoming: true,
+        isPrivate: false,
+        visibility: 'public',
+        title: source.subject || null,
+        content: descriptionText || null,
+        bodyHtml: descriptionHtml || null,
+        bodyText: descriptionText || null,
+        occurredAt: source.createdAt || new Date(),
+        rawPayload: { mergedFrom: { ...mergedFrom, part: 'opening_email' } },
+        mirrorState: null,
       });
-      copied = result.count;
+      descriptionCopied = true;
+    }
+    let copied = 0;
+    if (copyData.length) {
+      const result = await prisma.ticketThreadEntry.createMany({ data: copyData, skipDuplicates: true });
+      copied = Math.max(0, result.count - (descriptionCopied ? 1 : 0));
+      if (descriptionCopied && result.count === 0) descriptionCopied = false;
     }
 
     // 2. Union tags onto the target.
@@ -171,22 +261,21 @@ class TicketMergeService {
       swept.tasks ? `${swept.tasks} open task${swept.tasks === 1 ? '' : 's'}` : null,
       swept.children ? `${swept.children} child ticket${swept.children === 1 ? '' : 's'}` : null,
     ].filter(Boolean);
-    // QA 09-21 #3: the source's description is the one thing the copied
-    // conversation never carries (it is a field, not a message). Quote it.
-    const sourceDescription = String(source.descriptionText || '').replace(/\s+/g, ' ').trim();
-    const descriptionLine = sourceDescription
-      ? `Description of ${srcRef}: "${sourceDescription.length > 600 ? `${sourceDescription.slice(0, 600)}…` : sourceDescription}"`
-      : null;
-    await ticketService.addPrivateNote(targetId, workspaceId, {
-      bodyText: [
-        `Merged ${srcRef} ("${source.subject || 'no subject'}") into this ticket — ${copied} message${copied === 1 ? '' : 's'} copied in.`,
-        sweptBits.length ? `${sweptBits.join(' and ')} moved over.` : null,
-        swept.approvals ? `${swept.approvals} pending approval${swept.approvals === 1 ? '' : 's'} on ${srcRef} cancelled.` : null,
-        attachmentCount > 0 ? `${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'} remain on ${srcRef}.` : null,
-        `Merged by ${actorLabel}.`,
-        descriptionLine,
-      ].filter(Boolean).join(descriptionLine ? '\n' : ' ').replace(`.\n${descriptionLine}`, `.\n\n${descriptionLine}`),
-    }, actor).catch((err) => logger.warn(`Merge target note failed (non-fatal): ${err.message}`));
+    // The note says what happened; the content itself arrived above as full
+    // messages (the opening e-mail first), each marked "Merged from …".
+    const note = mergeNoteContent({
+      srcRef,
+      sourceId,
+      subject: source.subject,
+      copied,
+      descriptionCopied,
+      sweptBits,
+      approvals: swept.approvals,
+      attachmentCount,
+      actorLabel,
+    });
+    await ticketService.addPrivateNote(targetId, workspaceId, note, actor)
+      .catch((err) => logger.warn(`Merge target note failed (non-fatal): ${err.message}`));
 
     // 5. Optional requester notification BEFORE closing. addReply routes a
     //    public reply through FreshService for an FS-born source (which emails
@@ -237,7 +326,23 @@ class TicketMergeService {
     }
 
     // 7. Audit both sides.
-    const details = { sourceId, targetId, srcRef, tgtRef, copied, requesterNotified, swept, actorKind: actorKindOf(actor), actorEmail: actor?.email || null };
+    const details = {
+      sourceId,
+      targetId,
+      srcRef,
+      tgtRef,
+      sourceSubject: source.subject || null,
+      targetSubject: target.subject || null,
+      copied,
+      descriptionCopied,
+      attachmentsLeft: attachmentCount,
+      sourceClosed,
+      requesterNotified,
+      swept,
+      actorKind: actorKindOf(actor),
+      actorEmail: actor?.email || null,
+      actorName: actor?.name || null,
+    };
     await Promise.all([
       ticketActivityRepository.create({ ticketId: sourceId, activityType: 'merged_into', performedBy: actor?.email || 'system', details }),
       ticketActivityRepository.create({ ticketId: targetId, activityType: 'merged_from', performedBy: actor?.email || 'system', details }),
