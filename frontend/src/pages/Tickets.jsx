@@ -5,6 +5,7 @@ import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox,
   AlignJustify, CheckCheck, Columns3, Hand, ListChecks, ListFilter, Loader2, MailQuestion, Plus, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
+  Focus as FocusIcon,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -41,7 +42,7 @@ import {
 import ParkDialog, { ParkedMark } from '../components/tickets/ParkControls';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs, PARKED_STATUS, withParkedDefault } from '../components/tickets/statusDefs';
 import {
-  BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
+  BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, FOCUS_COLUMN_KEYS, FOCUS_TRACKS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
   buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths, OccurrenceMark,
 } from '../components/tickets/queueColumns';
 import { QUEUE_CARD_REGISTRY, cardSearch, normalizeQueueCards } from '../components/tickets/queueCards';
@@ -513,7 +514,7 @@ export default function Tickets() {
       const v = localStorage.getItem('tp_ticket_layout');
       // Roomy was retired 17 Oct 2026 (Vahid: "quite useless"): it, and the
       // legacy 'comfortable' density, open as compact.
-      if (v === 'compact' || v === 'board' || v === 'dense') return v;
+      if (v === 'compact' || v === 'board' || v === 'dense' || v === 'focus') return v;
       return 'compact';
     } catch { return 'compact'; }
   });
@@ -936,10 +937,12 @@ export default function Tickets() {
   const [pulse, setPulse] = useState(0); // bumps so an open preview re-fetches
   const pendingIdsRef = useRef(new Set());
   // Row layout: 'compact' — type folds into the title, one tight line per
-  // ticket — or 'dense' below; 'board' is the drag-drop board.
+  // ticket — 'dense' below, or 'focus' (Compact's rows with only the five
+  // columns a person acts on); 'board' is the drag-drop board.
   // Dense (full-width train, 16 Sep 2026): compact's grid with tighter rows and
   // smaller type — for the people who zoomed the browser to 50 % to get it.
   const dense = layout === 'dense';
+  const focus = layout === 'focus';
   const cellPad = dense ? 'py-1' : 'py-2.5';
   const [pendingCount, setPendingCount] = useState(0);
   const lastLocalMutationRef = useRef(0);
@@ -1687,8 +1690,13 @@ export default function Tickets() {
   // track index in the user's order, `--tp-q-grid` (set on the list card)
   // carries the matching template. Essentials (category/assignee/status/due)
   // always render for the md band — deselecting one only hides it at xl.
+  // Focus view (17 Oct 2026): a fixed five-column set with its own tracks, no
+  // pinned widths and no resize handles — it always fits the card.
+  const listColumnKeys = focus ? FOCUS_COLUMN_KEYS : columnKeys;
+  const listWidths = useMemo(() => (focus ? {} : colWidths), [focus, colWidths]);
+  const listTracks = focus ? FOCUS_TRACKS : null;
   const colMeta = useMemo(() => {
-    const ordered = columnKeys.filter((k) => QUEUE_COLUMNS.some((c) => c.key === k));
+    const ordered = listColumnKeys.filter((k) => QUEUE_COLUMNS.some((c) => c.key === k));
     // Track 1 = accent, then EVERY column — subject included — in the user's
     // order (16 Sep 2026).
     const start = new Map(ordered.map((k, i) => [k, i + 2]));
@@ -1718,10 +1726,10 @@ export default function Tickets() {
       };
     }
     return out;
-  }, [columnKeys]);
+  }, [listColumnKeys]);
   const gridTemplate = useMemo(
-    () => buildQueueGridTemplate(columnKeys, { widths: colWidths, floor: dense }),
-    [columnKeys, colWidths, dense],
+    () => buildQueueGridTemplate(listColumnKeys, { widths: listWidths, floor: dense, tracks: listTracks }),
+    [listColumnKeys, listWidths, dense, listTracks],
   );
   // Overflow floor (QR3): once widths are pinned the header+rows wrapper gets
   // min-width = pinned px + every other column's own floor (+36px checkbox
@@ -1729,8 +1737,8 @@ export default function Tickets() {
   // dashboard's .tp-compact-scroll recipe (index.css:62-66) at xl. 0 (and no
   // scroll container at all) until the user actually resizes something.
   const gridMinWidth = useMemo(
-    () => buildQueueGridMinWidth(columnKeys, { widths: colWidths, force: dense }),
-    [columnKeys, colWidths, dense],
+    () => buildQueueGridMinWidth(listColumnKeys, { widths: listWidths, force: dense, tracks: listTracks }),
+    [listColumnKeys, listWidths, dense, listTracks],
   );
   // Dense (16 Sep 2026): one line per ticket, so the list keeps its column
   // floors and scrolls sideways instead of wrapping — same wrapper as pinned
@@ -1739,12 +1747,12 @@ export default function Tickets() {
   // 1440 screen crushed the Subject track to 0 and its header ran into
   // Requester): the same scroll wrapper, with every column at its own floor.
   const floorMinWidth = useMemo(
-    () => buildQueueGridMinWidth(columnKeys, { widths: colWidths, force: true }),
-    [columnKeys, colWidths],
+    () => buildQueueGridMinWidth(listColumnKeys, { widths: listWidths, force: true, tracks: listTracks }),
+    [listColumnKeys, listWidths, listTracks],
   );
   const [listCardWidth, setListCardWidth] = useState(0);
   const listOverflows = listCardWidth > 0 && floorMinWidth + 36 > listCardWidth;
-  const widthsPinned = Object.keys(colWidths).length > 0 || dense || listOverflows;
+  const widthsPinned = Object.keys(listWidths).length > 0 || dense || listOverflows;
   const listMinWidth = Math.max(gridMinWidth, listOverflows ? floorMinWidth : 0);
   // QA 10-07 #1: on a laptop (under 1280px, filter rail open) a dense list
   // took the wide list's minimum width while still drawing the tablet layout:
@@ -1760,7 +1768,7 @@ export default function Tickets() {
   // F (2 Oct 2026): the checkbox + subject stay put while the columns slide —
   // when the subject is the leftmost column (a reordered subject is not at
   // the edge) and the person has not switched it off.
-  const pinSubject = freezeSubject && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
+  const pinSubject = freezeSubject && listColumnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
   // Fixed working area (16 Oct 2026, Vahid): on a desktop-sized window the
   // page itself no longer scrolls. The filter rail and the list are two panes
   // that fill the height under the cards; the list keeps its toolbar, column
@@ -1873,15 +1881,15 @@ export default function Tickets() {
   const previewColumnWidth = useCallback((key, px) => {
     const el = listCardRef.current;
     if (!el) return;
-    const widths = { ...colWidths, [key]: px };
-    el.style.setProperty('--tp-q-grid', buildQueueGridTemplate(columnKeys, { widths }));
-    el.style.setProperty('--tp-q-minw', `${buildQueueGridMinWidth(columnKeys, { widths }) + 36}px`);
-  }, [columnKeys, colWidths]);
+    const widths = { ...listWidths, [key]: px };
+    el.style.setProperty('--tp-q-grid', buildQueueGridTemplate(listColumnKeys, { widths }));
+    el.style.setProperty('--tp-q-minw', `${buildQueueGridMinWidth(listColumnKeys, { widths }) + 36}px`);
+  }, [listColumnKeys, listWidths]);
   const rowColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.render && colMeta[c.key]?.render), [colMeta]);
   // Phase QX: with the Priority column on, the subject line drops its dot at
   // xl (the column carries dot + word); below xl the column never renders
   // (not an md essential), so the dot stays there. Mobile cards keep theirs.
-  const priorityColumnOn = columnKeys.includes('priority');
+  const priorityColumnOn = listColumnKeys.includes('priority');
   const headerColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.key !== 'subject' && colMeta[c.key]?.headerRender), [colMeta]);
   const headerPad = cellPad;
   const headerCell = (col) => (
@@ -1899,7 +1907,7 @@ export default function Tickets() {
            the header tooltip so the "why no sort?" question answers itself. */
         <span title={col.headerTitle} className="cursor-help">{col.label}</span>
       ) : col.label}
-      <ColumnResizeHandle
+      {!focus && <ColumnResizeHandle
         colKey={col.key}
         label={col.label}
         minPx={col.minPx}
@@ -1907,7 +1915,7 @@ export default function Tickets() {
         onPreview={previewColumnWidth}
         onCommit={commitColumnWidth}
         onReset={resetColumnWidth}
-      />
+      />}
     </span>
   );
 
@@ -2161,6 +2169,7 @@ export default function Tickets() {
                     {[
                       { key: 'dense', Icon: AlignJustify, label: 'Dense', hint: 'The tightest rows and smaller type — the most tickets on one screen.' },
                       { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
+                      { key: 'focus', Icon: FocusIcon, label: 'Focus', hint: 'Only what you act on — subject, status, owner, due, updated — with room for the subject. Requester and category sit under the title.' },
                       { key: 'board', Icon: Columns3, label: 'Board', hint: 'Open / Pending / Closed columns — drag a card to change its status (Ticket Pulse tickets save directly; FreshService tickets confirm first).' },
                     ].map(({ key, Icon, label, hint }) => (
                       <button
@@ -2237,7 +2246,7 @@ export default function Tickets() {
                       custom columns apply at xl+ and mobile keeps its cards.
                       Last in the row (17 Oct 2026) so switching to the board,
                       which hides it, moves nothing else. */}
-                  {!boardMode && (
+                  {!boardMode && !focus && (
                     <div className="hidden md:block order-2">
                       <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} freezeSubject={freezeSubject} onFreezeSubjectChange={updateFreezeSubject} />
                     </div>
@@ -2435,7 +2444,7 @@ export default function Tickets() {
                                   <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
                                   Subject{sortIndicator('subject')}
                                   </button>
-                                  <ColumnResizeHandle
+                                  {!focus && <ColumnResizeHandle
                                     colKey="subject"
                                     label="Subject"
                                     minPx={QUEUE_COLUMNS[0].minPx}
@@ -2443,7 +2452,7 @@ export default function Tickets() {
                                     onPreview={previewColumnWidth}
                                     onCommit={commitColumnWidth}
                                     onReset={resetColumnWidth}
-                                  />
+                                  />}
                                 </span>
                                 {headerColumns.map(headerCell)}
                               </div>
@@ -2562,12 +2571,14 @@ export default function Tickets() {
                                     {/* At xl the requester has a real column (QA 08-07
                                       #6); below xl the meta line keeps name+office
                                       so the tablet band loses nothing. */}
-                                    <span className="qx:hidden">
+                                    <span className={focus ? '' : 'qx:hidden'}>
                                       {' · '}
                                       {ticket.requester?.name || 'Unknown requester'}
                                       {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
                                         ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
                                     </span>
+                                    {/* Focus: the category has no column, so it reads here (leaf first). */}
+                                    {focus && (() => { const c = ticketCategoryLabels(ticket); const leaf = c.subcategory || c.category; return leaf ? <span className="hidden qx:inline" data-testid="focus-category">{` · ${leaf}`}</span> : null; })()}
                                     {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
                                       <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
                                     )}
@@ -2584,6 +2595,7 @@ export default function Tickets() {
                                   cell: (key) => `${CELL} ${colMeta[key]?.cls || ''}`,
                                   cellStyle: (key) => colMeta[key]?.style,
                                   cellPad,
+                                  focus,
                                   technicians: meta?.technicians || [],
                                   statusDefs,
                                   groupNames,
