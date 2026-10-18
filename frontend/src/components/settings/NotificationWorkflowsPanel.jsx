@@ -71,6 +71,13 @@ import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowListPage from './WorkflowListPage';
+import RunResultView, { formatDuration } from './workflowRun/RunResultView';
+import WorkflowPreviewPage, {
+  IconSelect,
+  PREVIEW_FILTER_DEFAULTS,
+  relativeTime,
+  ticketRef as previewTicketRef,
+} from './workflowRun/WorkflowPreviewPage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
 
@@ -1391,22 +1398,6 @@ function LlmHelpModal({ topic, onClose }) {
   );
 }
 
-function statusClass(status) {
-  if (status === 'completed' || status === 'sent') return 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30';
-  if (status === 'failed') return 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30';
-  if (status === 'mocked') return 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30';
-  if (status === 'running' || status === 'queued') return 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30';
-  return 'bg-muted/50 text-foreground/85 border-border';
-}
-
-function statusDotClass(status) {
-  if (status === 'completed' || status === 'sent') return 'bg-emerald-500';
-  if (status === 'failed') return 'bg-red-500';
-  if (status === 'mocked') return 'bg-sky-500';
-  if (status === 'running' || status === 'queued') return 'bg-amber-500';
-  return 'bg-muted-foreground/60';
-}
-
 function healthClass(state) {
   if (state === 'completed_clean') return 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30';
   if (state === 'completed_with_repair' || state === 'completed_with_warning') return 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30';
@@ -1466,14 +1457,6 @@ function auditTicketLabel(run) {
 
 function auditTicketSubject(run) {
   return run?.ticket?.subject || run?.eventContext?.ticket?.subject || 'No subject captured';
-}
-
-function deliveryRecipientCount(delivery) {
-  return [
-    ...(delivery?.toRecipients || []),
-    ...(delivery?.ccRecipients || []),
-    ...(delivery?.bccRecipients || []),
-  ].length;
 }
 
 function auditDeliveryForRun(run) {
@@ -1582,11 +1565,6 @@ function auditToolRecordsForRun(run, diagnostics = []) {
     seen.add(key);
     return true;
   });
-}
-
-function recipientLine(label, values) {
-  const items = values || [];
-  return `${label}: ${items.length ? items.join(', ') : 'None'}`;
 }
 
 function routingWindowTone(mode) {
@@ -3215,39 +3193,6 @@ function previewStepIssue(step) {
   return null;
 }
 
-function previewToneClasses(tone) {
-  if (tone === 'red') {
-    return {
-      card: 'border-red-200 dark:border-red-500/30 bg-red-50/60 dark:bg-red-500/10',
-      badge: 'border-red-200 dark:border-red-500/30 bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
-      icon: 'text-red-600 dark:text-red-300',
-      panel: 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200',
-    };
-  }
-  if (tone === 'amber') {
-    return {
-      card: 'border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10',
-      badge: 'border-amber-200 dark:border-amber-500/30 bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
-      icon: 'text-amber-600 dark:text-amber-300',
-      panel: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200',
-    };
-  }
-  if (tone === 'blue') {
-    return {
-      card: 'border-blue-200 dark:border-blue-500/30 bg-blue-50/60 dark:bg-blue-500/10',
-      badge: 'border-blue-200 dark:border-blue-500/30 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
-      icon: 'text-blue-600 dark:text-blue-300',
-      panel: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200',
-    };
-  }
-  return {
-    card: 'border-emerald-200 dark:border-emerald-500/30 bg-card',
-    badge: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
-    icon: 'text-emerald-600 dark:text-emerald-300',
-    panel: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200',
-  };
-}
-
 function llmStepDiagnostic(step) {
   if (step?.nodeType !== 'llm_generate') return null;
   const output = step.output || {};
@@ -3341,12 +3286,12 @@ function auditLlmsForRun(run) {
     }));
 }
 
-function collectPreviewIssues(preview, steps, email, recipients) {
+function collectPreviewIssues(preview, steps, email, recipients, { expectEmail = true, failedTitle = 'Preview run failed' } = {}) {
   const issues = [];
   if (preview?.status === 'failed' || preview?.error) {
     issues.push({
       tone: 'red',
-      title: 'Preview run failed',
+      title: failedTitle,
       detail: preview.error || 'The engine stopped before completing the workflow.',
     });
   }
@@ -3390,7 +3335,7 @@ function collectPreviewIssues(preview, steps, email, recipients) {
       });
     }
   }
-  if (preview && !email) {
+  if (preview && !email && expectEmail) {
     issues.push({
       tone: 'amber',
       title: 'No final email rendered',
@@ -3457,120 +3402,153 @@ function collectPreviewIssues(preview, steps, email, recipients) {
   return issues;
 }
 
-// Neutral, reusable detail card — the mature replacement for the per-section colored boxes.
-function AuditSection({ title, icon: Icon, right, children, className }) {
-  return (
-    <section className={cls('overflow-hidden rounded-lg border border-border bg-card', className)}>
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground/75" />}
-          {title}
-        </div>
-        {right}
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
+// ── Run models for workflowRun/RunResultView (18 Oct 2026) ────────────────
+// Preview and Audit hand the shared run view a plain model built here, from
+// the same helpers the old pop-up and tabs used.
+
+// Definition nodes in the order a run meets them: breadth-first from the
+// trigger along the edges. Nodes nothing leads to never run, so they are left out.
+function definitionPipelineOrder(definition) {
+  const nodes = definition?.nodes || [];
+  const edges = definition?.edges || [];
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const start = nodes.find((node) => node.type === 'trigger') || nodes[0];
+  if (!start) return [];
+  const order = [];
+  const seen = new Set();
+  const queue = [start.id];
+  while (queue.length) {
+    const id = queue.shift();
+    if (seen.has(id) || !byId.has(id)) continue;
+    seen.add(id);
+    order.push(byId.get(id));
+    for (const edge of edges) {
+      if (edge.source === id && !seen.has(edge.target)) queue.push(edge.target);
+    }
+  }
+  return order;
 }
 
-function AuditStat({ label, value, tone = 'default' }) {
-  const valueClass = tone === 'warn' ? 'text-amber-700 dark:text-amber-200' : tone === 'bad' ? 'text-red-700 dark:text-red-200' : 'text-foreground';
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{label}</span>
-      <span className={cls('text-xs font-semibold', valueClass)}>{value}</span>
-    </div>
-  );
+function runStepsForView(records = [], { definition = null, running = false } = {}) {
+  const nodes = definition?.nodes || [];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const occurrences = new Map();
+  const steps = records
+    .filter((step) => step && step.nodeType !== 'llm_tool')
+    .map((step) => {
+      const count = (occurrences.get(step.nodeId) || 0) + 1;
+      occurrences.set(step.nodeId, count);
+      const typeLabel = NODE_LABELS[step.nodeType] || step.nodeType;
+      const hasPayload = (step.output !== undefined && step.output !== null)
+        || (step.input !== undefined && step.input !== null);
+      let issue = null;
+      if (hasPayload) issue = previewStepIssue(step);
+      else if (step.status === 'failed' || step.error) issue = { tone: 'red', label: 'Failed', detail: step.error || 'Step failed.' };
+      const summary = hasPayload ? summarizePreviewStep(step) : null;
+      return {
+        key: count > 1 ? `${step.nodeId}~${count}` : step.nodeId,
+        nodeId: step.nodeId,
+        nodeType: step.nodeType,
+        typeLabel,
+        name: nodeById.get(step.nodeId)?.data?.label || typeLabel,
+        status: step.status,
+        durationMs: step.durationMs ?? null,
+        summary: summary && summary !== step.status ? summary : null,
+        issue,
+        error: step.error || null,
+        input: step.input,
+        output: step.output,
+        hasPayload,
+      };
+    });
+  if (nodes.length) {
+    const reached = new Set(steps.map((step) => step.nodeId));
+    for (const node of definitionPipelineOrder(definition)) {
+      if (reached.has(node.id)) continue;
+      const typeLabel = NODE_LABELS[node.type] || node.type;
+      steps.push({
+        key: node.id,
+        nodeId: node.id,
+        nodeType: node.type,
+        typeLabel,
+        name: node.data?.label || typeLabel,
+        status: running ? 'pending' : 'not_reached',
+        durationMs: null,
+        summary: null,
+        issue: null,
+        hasPayload: false,
+      });
+    }
+  }
+  return steps;
 }
 
-function ActionLinkDiagnostics({ diagnostics }) {
-  const items = [
-    ['publicStatus', 'Public status', 'blue'],
-    ['raiseUrgency', 'Raise urgency', 'amber'],
-    ['afterHoursSupport', 'After-hours support', 'red'],
-  ]
-    .map(([key, label, tone]) => ({ key, label, tone, diagnostic: diagnostics?.[key] }))
-    .filter((item) => item.diagnostic?.requested);
-  if (!items.length) return null;
-  return (
-    <AuditSection title="Action blocks">
-      <div className="divide-y divide-border/60">
-        {items.map(({ key, label, tone, diagnostic }) => {
-          const applied = diagnostic.applied && !diagnostic.skipped;
-          const dot = diagnostic.skipped
-            ? 'bg-amber-400'
-            : diagnostic.forced || diagnostic.warning
-              ? 'bg-blue-400'
-              : applied
-                ? 'bg-emerald-500'
-                : 'bg-muted-foreground/40';
-          const stateLabel = diagnostic.skipped ? 'Skipped' : diagnostic.forced ? 'Forced test' : applied ? 'Rendered' : 'Checked';
-          return (
-            <div key={key} className="flex items-start gap-2.5 py-2 text-xs first:pt-0 last:pb-0">
-              <span className={cls('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-foreground/85">{label}</span>
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{stateLabel}</span>
-                </div>
-                <div className="mt-0.5 leading-5 text-muted-foreground">
-                  {diagnostic.reason || diagnostic.warning || diagnostic.liveWouldSkipReason || 'Ready'}
-                </div>
-                {key === 'afterHoursSupport' && diagnostic.hasActiveContact && (
-                  <div className="mt-0.5 text-[11px] text-muted-foreground/75">
-                    Active contact configured{diagnostic.phoneVerified ? ' with verified phone' : ''}
-                    {diagnostic.rotationLabel ? ` (${diagnostic.rotationLabel})` : ''}
-                  </div>
-                )}
-                {tone === 'red' && diagnostic.hasUrl && (
-                  <div className="mt-0.5 text-[11px] text-muted-foreground/75">Action link URL captured in rendered email</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </AuditSection>
-  );
+function llmDiagnosticsForView(diagnostics = [], definition = null) {
+  const nodeById = new Map((definition?.nodes || []).map((node) => [node.id, node]));
+  return diagnostics.map((diagnostic) => {
+    const reason = diagnostic.llm?.promptPolicy?.toneOverride?.reason;
+    const label = nodeById.get(diagnostic.nodeId)?.data?.label;
+    return {
+      ...diagnostic,
+      name: label || (diagnostic.nodeId && !String(diagnostic.nodeId).startsWith('provider-attempt') ? diagnostic.nodeId : null),
+      toneOverrideText: reason ? (TONE_OVERRIDE_REASON_TEXT[reason] || reason) : null,
+    };
+  });
 }
 
-function BrandingDiagnostics({ branding }) {
-  const items = [
-    ['header', 'Header'],
-    ['footer', 'Footer / sign-off'],
-  ]
-    .map(([key, label]) => ({ key, label, diagnostic: branding?.[key] }))
-    .filter((item) => item.diagnostic?.requested);
-  if (!items.length) return null;
-  return (
-    <AuditSection title="Branding">
-      <div className="divide-y divide-border/60">
-        {items.map(({ key, label, diagnostic }) => {
-          const dot = diagnostic.applied
-            ? diagnostic.fallback
-              ? 'bg-blue-400'
-              : 'bg-emerald-500'
-            : 'bg-amber-400';
-          const stateLabel = diagnostic.applied ? (diagnostic.fallback ? 'Default used' : 'Applied') : 'Skipped';
-          return (
-            <div key={key} className="flex items-start gap-2.5 py-2 text-xs first:pt-0 last:pb-0">
-              <span className={cls('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-foreground/85">{label}</span>
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{stateLabel}</span>
-                </div>
-                <div className="mt-0.5 leading-5 text-muted-foreground">
-                  {diagnostic.blockName || diagnostic.reason || 'Workspace default'}
-                </div>
-                {diagnostic.warning && <div className="mt-0.5 text-[11px] text-muted-foreground/75">{diagnostic.warning}</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </AuditSection>
-  );
+function issuesTone(issues = []) {
+  if (issues.some((issue) => issue.tone === 'red')) return 'red';
+  if (issues.some((issue) => issue.tone === 'amber')) return 'amber';
+  return null;
+}
+
+function llmModelFact(llm = []) {
+  if (llm.length > 1) return `${llm.length} LLM steps`;
+  const first = llm[0]?.llm;
+  return [first?.provider, first?.model].filter(Boolean).join(' · ') || null;
+}
+
+function buildPreviewRunModel({ preview, live, running, definition, ticket, startedAt, finishedAt }) {
+  const finalSteps = preview?.steps || [];
+  const records = !running && finalSteps.length ? finalSteps : (live?.steps?.length ? live.steps : finalSteps);
+  const steps = runStepsForView(records, { definition, running });
+  const email = preview?.state?.email || null;
+  const recipients = preview?.state?.recipients || {};
+  const llmRaw = preview ? llmDiagnosticsFromPreview(preview, finalSteps) : [];
+  const llm = llmDiagnosticsForView(llmRaw, definition);
+  const expectEmail = steps.some((step) => step.nodeType === 'send_email' || step.nodeType === 'template_render');
+  const issues = preview
+    ? collectPreviewIssues(preview, finalSteps, email, recipients, { expectEmail })
+    : (live?.error ? [{ tone: 'red', title: 'Preview run failed', detail: live.error }] : []);
+  const durationMs = live?.durationMs ?? (startedAt ? (finishedAt || Date.now()) - startedAt : null);
+  const toCount = (recipients.to || []).length;
+  return {
+    summary: {
+      status: running ? 'running' : (preview?.status || live?.status || null),
+      ref: previewTicketRef(ticket),
+      subject: ticket?.subject || null,
+      auditId: previewAuditId(preview) || live?.auditId || null,
+      facts: [
+        formatDuration(durationMs),
+        llmModelFact(llm),
+        preview && expectEmail ? `${toCount} recipient${toCount === 1 ? '' : 's'}` : null,
+      ],
+      issueTone: issuesTone(issues),
+    },
+    steps,
+    email,
+    recipients,
+    llm,
+    tools: preview ? auditToolRecordsForRun({ steps: finalSteps }, llmRaw) : [],
+    context: llmRaw.find((diagnostic) => diagnostic.llm?.context)?.llm?.context || null,
+    issues,
+    actionLinks: email?.actionLinks || null,
+    branding: email?.branding || null,
+    routing: preview?.routingPreview || null,
+    warnings: Array.isArray(preview?.warnings) ? preview.warnings : [],
+    pendingEmail: running,
+    emptyEmailText: expectEmail ? 'This run did not render an e-mail.' : 'This workflow does not send an e-mail.',
+  };
 }
 
 function EmailFieldsView({ email }) {
@@ -3934,51 +3912,6 @@ export function TicketContextPicker({
   );
 }
 
-function PreviewStepCard({ step }) {
-  const nodeLabel = NODE_LABELS[step.nodeType] || step.nodeType;
-  const issue = previewStepIssue(step);
-  const tone = issue?.tone || (step.status === 'running' ? 'blue' : 'emerald');
-  const classes = previewToneClasses(tone);
-  return (
-    <div className={cls('rounded-md border p-3 shadow-sm', classes.card)}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{nodeLabel}</div>
-          <div className="truncate text-sm font-semibold text-foreground">{step.nodeId}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{summarizePreviewStep(step)}</div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className={cls('rounded-full border px-2 py-0.5 text-xs font-medium', statusClass(step.status))}>
-            {step.status}
-          </span>
-          {issue && (
-            <span className={cls('rounded-full border px-2 py-0.5 text-[11px] font-semibold', classes.badge)}>
-              {issue.label}
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-        {Number.isFinite(step.durationMs) && <span>{step.durationMs} ms</span>}
-        {step.error && <span className="text-red-600 dark:text-red-300">{step.error}</span>}
-      </div>
-      {issue && (
-        <div className={cls('mt-3 flex gap-2 rounded-md border px-3 py-2 text-xs', classes.panel)}>
-          <AlertCircle className={cls('mt-0.5 h-3.5 w-3.5 shrink-0', classes.icon)} />
-          <span>{issue.detail}</span>
-        </div>
-      )}
-      <details className="mt-2">
-        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Inspect input/output</summary>
-        <div className="mt-2 grid gap-2">
-          <pre className="max-h-40 overflow-auto rounded-md bg-gray-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-gray-100">{formatJson(step.input)}</pre>
-          <pre className="max-h-56 overflow-auto rounded-md bg-gray-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-gray-100">{formatJson(step.output)}</pre>
-        </div>
-      </details>
-    </div>
-  );
-}
-
 function VariablePicker({
   variables,
   search,
@@ -4201,381 +4134,6 @@ function FullContentEditorModal({
           >
             Apply to workflow
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PreviewModal({
-  open,
-  preview,
-  running,
-  error,
-  tickets,
-  ticketsLoading,
-  ticketSearch,
-  ticketPage,
-  ticketPriority,
-  ticketStatus,
-  selectedTicket,
-  testSending,
-  testResult,
-  onClose,
-  onTicketSearchChange,
-  onTicketPriorityChange,
-  onTicketStatusChange,
-  onTicketPageChange,
-  onSelectTicket,
-  onRunPreview,
-  onSendTestEmail,
-  forceActionLinks,
-  onForceActionLinksChange,
-}) {
-  const [showTicketPicker, setShowTicketPicker] = useState(false);
-  const [copiedAuditId, setCopiedAuditId] = useState(false);
-  const hasPreview = Boolean(preview);
-
-  useEffect(() => {
-    if (!open) {
-      setShowTicketPicker(false);
-      setCopiedAuditId(false);
-      return;
-    }
-    if (hasPreview) setShowTicketPicker(false);
-  }, [open, hasPreview, preview?.runId, preview?.auditId]);
-
-  if (!open) return null;
-
-  const steps = preview?.steps || [];
-  const email = preview?.state?.email || null;
-  const recipients = preview?.state?.recipients || {};
-  const llmDiagnostics = llmDiagnosticsFromPreview(preview, steps);
-  const llmOutput = llmDiagnostics[0]?.llm || null;
-  const auditId = previewAuditId(preview);
-  const issues = collectPreviewIssues(preview, steps, email, recipients);
-  const failedSteps = steps.filter((step) => step.status === 'failed' || step.output?.failed).length;
-  const warningSteps = steps.filter((step) => previewStepIssue(step)?.tone === 'amber').length;
-  const completedSteps = steps.filter((step) => step.status === 'completed').length;
-  const showPicker = showTicketPicker || !selectedTicket || (!preview && !running);
-  const healthTone = issues.some((issue) => issue.tone === 'red') ? 'red' : issues.length > 0 ? 'amber' : preview ? 'emerald' : 'gray';
-  const copiedLabel = copiedAuditId ? 'Copied' : 'Copy ID';
-
-  async function copyAuditId() {
-    if (!auditId) return;
-    try {
-      await navigator.clipboard.writeText(auditId);
-      setCopiedAuditId(true);
-      window.setTimeout(() => setCopiedAuditId(false), 1500);
-    } catch {
-      setCopiedAuditId(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/45 dark:bg-black/70 p-4">
-      <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-md bg-card shadow-2xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Workflow Preview</div>
-            <h3 className="text-lg font-semibold text-foreground">Live step audit</h3>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>Real workspace ticket, real LLM generation, no workflow-recipient email. Uses current unsaved editor changes.</span>
-              {auditId && (
-                <button
-                  type="button"
-                  onClick={copyAuditId}
-                  className="inline-flex items-center gap-1 rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 font-mono text-xs font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
-                  title="Copy audit ID"
-                >
-                  <Clipboard className="h-3.5 w-3.5" />
-                  {auditId}
-                  <span className="font-sans text-[11px]">{copiedLabel}</span>
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onRunPreview}
-              disabled={running || !selectedTicket}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
-            >
-              {running ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {preview ? 'Run again' : 'Run preview'}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50"
-            >
-              <XCircle className="h-4 w-4" />
-              Close
-            </button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-          {running && (
-            <div className="mb-4 flex items-center gap-2 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-sm text-blue-800 dark:text-blue-200">
-              <RefreshCw className="h-4 w-4 animate-spin" />
-              Running workflow preview. LLM calls can take a moment.
-            </div>
-          )}
-          {error && (
-            <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-sm text-red-700 dark:text-red-200">
-              <AlertCircle className="h-4 w-4" />
-              {error}
-            </div>
-          )}
-
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2">
-            <label className="inline-flex items-start gap-2 text-sm text-blue-950 dark:text-blue-200">
-              <input
-                type="checkbox"
-                checked={forceActionLinks === true}
-                onChange={(event) => onForceActionLinksChange(event.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-300 focus:ring-blue-500"
-              />
-              <span>
-                <span className="font-semibold">Show all checked action blocks for testing</span>
-                <span className="block text-xs text-blue-700 dark:text-blue-200">Test preview can force timing-gated sections so copy, links, and styling are visible.</span>
-              </span>
-            </label>
-            <span className="rounded-full border border-blue-300 dark:border-blue-500/40 bg-card px-2 py-1 text-xs font-semibold text-blue-700 dark:text-blue-200">
-              Live sends remain timing-aware
-            </span>
-          </div>
-
-          {preview && (
-            <section className="mb-4 rounded-md border border-border bg-card p-4 shadow-sm">
-              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Troubleshooting Summary</div>
-                  <h4 className="text-base font-semibold text-foreground">
-                    {issues.length > 0 ? `${issues.length} item${issues.length === 1 ? '' : 's'} need review` : 'Preview completed cleanly'}
-                  </h4>
-                </div>
-                {auditId && (
-                  <button
-                    type="button"
-                    onClick={copyAuditId}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground/85 hover:bg-muted/50"
-                  >
-                    <Clipboard className="h-3.5 w-3.5" />
-                    {copiedAuditId ? 'Copied audit ID' : 'Copy audit ID'}
-                  </button>
-                )}
-              </div>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-                <PreviewMetric label="Run status" value={preview.status} tone={healthTone} />
-                <PreviewMetric label="Audit ID" value={auditId} tone="gray" />
-                <PreviewMetric label="Steps" value={`${completedSteps}/${steps.length} completed`} tone={failedSteps ? 'red' : warningSteps ? 'amber' : 'emerald'} />
-                <PreviewMetric
-                  label="LLM"
-                  value={llmDiagnostics.length > 1
-                    ? `${llmDiagnostics.length} LLM nodes`
-                    : [llmOutput?.provider, llmOutput?.model].filter(Boolean).join(' / ') || 'Not recorded'}
-                  tone={llmDiagnostics.some((diagnostic) => diagnostic.llm?.failed) ? 'red' : 'gray'}
-                />
-                <PreviewMetric label="Recipients" value={(recipients.to || []).join(', ') || 'None'} tone={(recipients.to || []).length ? 'gray' : 'amber'} />
-              </div>
-              {preview.routingPreview && (
-                <div className={cls(
-                  'mt-3 rounded-md border px-3 py-2 text-sm',
-                  preview.routingPreview.wouldRunSelectedWorkflow
-                    ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
-                    : 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-900 dark:text-amber-200',
-                )}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-bold uppercase tracking-wide opacity-80">Routing preview</div>
-                      <div className="mt-0.5 font-semibold">
-                        {preview.routingPreview.wouldRunSelectedWorkflow
-                          ? 'This ticket matches the selected workflow variant'
-                          : preview.routingPreview.fallbackWorkflowId
-                            ? 'This ticket falls back to the default workflow variant'
-                            : 'This ticket is routed to a different workflow variant'}
-                      </div>
-                      {preview.routingPreview.reason && (
-                        <div className="mt-0.5 text-xs opacity-90">{preview.routingPreview.reason}</div>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-1 text-[11px] font-semibold">
-                      {(preview.routingPreview.selectedWorkflowIds || []).map((id) => (
-                        <span key={id} className="rounded-full bg-card/80 px-2 py-0.5 ring-1 ring-current/15">Selected #{id}</span>
-                      ))}
-                      {preview.routingPreview.fallbackWorkflowId && (
-                        <span className="rounded-full bg-card/80 px-2 py-0.5 ring-1 ring-current/15">Fallback #{preview.routingPreview.fallbackWorkflowId}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {issues.length > 0 && (
-                <div className="mt-3 grid gap-2 lg:grid-cols-2">
-                  {issues.map((issue, index) => {
-                    const classes = previewToneClasses(issue.tone);
-                    return (
-                      <div key={`${issue.title}-${index}`} className={cls('rounded-md border px-3 py-2 text-sm', classes.panel)}>
-                        <div className="flex gap-2">
-                          <AlertCircle className={cls('mt-0.5 h-4 w-4 shrink-0', classes.icon)} />
-                          <div className="min-w-0">
-                            <div className="font-semibold">{issue.title}</div>
-                            <div className="mt-0.5 text-xs opacity-90">{issue.detail}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          )}
-
-          {!showPicker && selectedTicket && (
-            <section className="mb-4 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">Selected test ticket</div>
-                  <div className="truncate text-sm font-semibold text-foreground">#{selectedTicket.freshserviceTicketId} {selectedTicket.subject || 'No subject'}</div>
-                  <div className="mt-0.5 truncate text-xs text-muted-foreground">{ticketPreviewSubtitle(selectedTicket)}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowTicketPicker(true)}
-                  className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-card px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
-                >
-                  Change ticket
-                </button>
-              </div>
-            </section>
-          )}
-
-          {showPicker && (
-            <TicketContextPicker
-              className="mb-4"
-              title="Preview Ticket"
-              description="Search current-workspace tickets and choose the real ticket context for this preview."
-              tickets={tickets}
-              ticketsLoading={ticketsLoading}
-              ticketSearch={ticketSearch}
-              ticketPage={ticketPage}
-              ticketPriority={ticketPriority}
-              ticketStatus={ticketStatus}
-              selectedTicket={selectedTicket}
-              onTicketSearchChange={onTicketSearchChange}
-              onTicketPriorityChange={onTicketPriorityChange}
-              onTicketStatusChange={onTicketStatusChange}
-              onTicketPageChange={onTicketPageChange}
-              onSelectTicket={(ticket) => {
-                onSelectTicket(ticket);
-                setShowTicketPicker(false);
-              }}
-              onRun={onRunPreview}
-              running={running}
-              runLabel="Run with selected ticket"
-            />
-          )}
-
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(390px,0.85fr)]">
-            <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-foreground">Execution Timeline</h4>
-                {preview?.status && (
-                  <span className={cls('rounded-full border px-2 py-0.5 text-xs font-medium', statusClass(preview.status))}>
-                    {preview.status}
-                  </span>
-                )}
-              </div>
-              <div className="space-y-3">
-                {steps.length === 0 && (
-                  <div className="rounded-md border border-dashed border-input px-3 py-8 text-center text-sm text-muted-foreground">
-                    {running ? 'Waiting for step output...' : 'Run a preview to see step output.'}
-                  </div>
-                )}
-                {steps.map((step) => <PreviewStepCard key={`${step.nodeId}-${step.nodeType}`} step={step} />)}
-              </div>
-            </section>
-
-            <aside className="space-y-4">
-              <div className="rounded-md border border-border bg-card p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-violet-600 dark:text-violet-300" />
-                  <h4 className="text-sm font-semibold text-foreground">LLM Diagnostics</h4>
-                </div>
-                <LlmDiagnosticsList diagnostics={llmDiagnostics} />
-              </div>
-
-              <div className="rounded-md border border-border bg-card p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Mail className="h-4 w-4 text-blue-600 dark:text-blue-300" />
-                    <h4 className="text-sm font-semibold text-foreground">Email Preview</h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onSendTestEmail}
-                    disabled={!email || testSending || running}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                    {testSending ? 'Sending...' : 'Send test to me'}
-                  </button>
-                </div>
-                {testResult && (
-                  <div className={cls(
-                    'mb-3 rounded-md border px-3 py-2 text-xs',
-                    testResult.type === 'error' ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
-                  )}
-                  >
-                    {testResult.text}
-                  </div>
-                )}
-                {email ? (
-                  <div className="space-y-3">
-                    {email.actionLinks && (
-                      <ActionLinkDiagnostics diagnostics={email.actionLinks} />
-                    )}
-                    {email.branding && (
-                      <BrandingDiagnostics branding={email.branding} />
-                    )}
-                    <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-                      {auditId && <div><span className="font-semibold text-foreground">Audit ID:</span> {auditId}</div>}
-                      <div><span className="font-semibold text-foreground">Original To:</span> {(recipients.to || []).join(', ') || 'none'}</div>
-                      {(recipients.cc || []).length > 0 && <div><span className="font-semibold text-foreground">Cc:</span> {recipients.cc.join(', ')}</div>}
-                      {(recipients.bcc || []).length > 0 && <div><span className="font-semibold text-foreground">Bcc:</span> {recipients.bcc.join(', ')}</div>}
-                    </div>
-                    {!(recipients.to || []).length && (
-                      <div className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-                        No original To recipient was resolved. The test email still sends only to your account.
-                      </div>
-                    )}
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Subject</div>
-                      <div className="mt-1 text-sm font-medium text-foreground">{email.subject}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rendered Body</div>
-                      <div className="mt-1 max-h-96 overflow-auto rounded-md border border-border p-3 text-sm text-foreground/85">
-                        {email.html ? (
-                          <div dangerouslySetInnerHTML={{ __html: email.html }} />
-                        ) : (
-                          <pre className="whitespace-pre-wrap font-sans">{email.text}</pre>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-dashed border-input px-3 py-8 text-center text-sm text-muted-foreground">
-                    The rendered email will appear after preview completes.
-                  </div>
-                )}
-              </div>
-            </aside>
-          </div>
         </div>
       </div>
     </div>
@@ -6918,8 +6476,6 @@ export function LlmContextToolsPanel({
   );
 }
 
-const AUDIT_SELECT_CLASS = 'w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30';
-
 // Filters most people never touch live behind "More filters" (QA 10-15 #4).
 const AUDIT_MORE_FILTER_KEYS = ['health', 'signalLevel', 'triggerSource', 'provider', 'fallbackSource', 'department'];
 
@@ -6943,6 +6499,30 @@ function auditDetailCacheKey(run) {
   ].join('|');
 }
 
+const AUDIT_MORE_SELECT_CLASS = 'tp-focus-ring h-8 w-full min-w-0 rounded-md border border-border bg-card px-2 text-xs font-semibold text-foreground/85';
+
+function auditRunVisualState(run) {
+  const status = String(run?.status || '').toLowerCase();
+  if (status === 'failed') return 'failed';
+  if (status === 'running' || status === 'queued') return 'running';
+  if (status === 'waiting') return 'waiting';
+  if (run?.health?.notSent || run?.health?.degraded || ['completed_with_warning', 'completed_with_repair', 'completed_with_fallback'].includes(run?.health?.state)) return 'warn';
+  return 'done';
+}
+
+function AuditRunStateIcon({ run }) {
+  const state = auditRunVisualState(run);
+  if (state === 'failed') return <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-300" aria-label="Failed" />;
+  if (state === 'running') return <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary" aria-label="Running" />;
+  if (state === 'waiting') return <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Waiting" />;
+  if (state === 'warn') return <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-300" aria-label="Completed with notes" />;
+  return <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" aria-label="Completed" />;
+}
+
+// Workflow Audit (redesigned 18 Oct 2026): one toolbar row (search, icon
+// filters, "More" for the rest), a dense run list, and the run itself in the
+// same view the Preview page uses — e-mail and LLM output wide, checks on
+// the right, the pipeline across the top.
 export function MockAuditPanel({
   workflows,
   selectedWorkflow,
@@ -6965,8 +6545,6 @@ export function MockAuditPanel({
   hasMore = false,
   onPageChange,
   onPageSizeChange,
-  compact = false,
-  onToggleCompact,
 }) {
   // Search is applied server-side (so it spans all runs, not just the current page).
   const visibleRuns = runs || [];
@@ -6976,7 +6554,21 @@ export function MockAuditPanel({
     [workflows],
   );
   const moreFilterCount = auditActiveMoreFilterCount(filters);
-  const [showMoreFilters, setShowMoreFilters] = useState(() => moreFilterCount > 0);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onPointer = (event) => {
+      if (moreRef.current && !moreRef.current.contains(event.target)) setMoreOpen(false);
+    };
+    const onKey = (event) => { if (event.key === 'Escape') setMoreOpen(false); };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [moreOpen]);
 
   // Heavy detail (steps, rendered e-mail, LLM evidence) loads only for the
   // run that is open, and is kept for the last few runs looked at.
@@ -7029,7 +6621,6 @@ export function MockAuditPanel({
   const activeHealth = activeRun?.health || null;
   const activeDelivery = auditDeliveryForRun(activeRun);
   const activeLlmDiagnostics = auditLlmsForRun(activeRun);
-  const activeLlm = activeLlmDiagnostics[0]?.llm || null;
   const activeSteps = activeRun?.steps || [];
   const activeToolRecords = auditToolRecordsForRun(activeRun, activeLlmDiagnostics);
   const activeSendStep = [...activeSteps].reverse().find((step) => step.nodeType === 'send_email');
@@ -7049,11 +6640,7 @@ export function MockAuditPanel({
   // Fetch the email re-rendered through the current engine so the preview matches the
   // live/send-test output (current template) rather than the historically stored email.
   const [renderedEmail, setRenderedEmail] = useState(null);
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [emailDevice, setEmailDevice] = useState('desktop');
-  const [detailTab, setDetailTab] = useState('email');
   useEffect(() => {
-    setEmailModalOpen(false);
     if (!activeRun?.id) {
       setRenderedEmail(null);
       return undefined;
@@ -7066,8 +6653,6 @@ export function MockAuditPanel({
     return () => { cancelled = true; };
   }, [activeRun?.id, activeRun?.auditId]);
   const displayEmail = renderedEmail || activeEmail;
-  const displayBodyHtml = displayEmail?.html || null;
-  const displayBodyText = displayEmail?.text || null;
   const recipientStep = activeSteps.find((step) => step.nodeType === 'recipient_resolver');
   const activeRecipients = activeDelivery
     ? {
@@ -7076,244 +6661,219 @@ export function MockAuditPanel({
       bcc: activeDelivery.bccRecipients || [],
     }
     : (recipientStep?.output?.recipients || { to: [], cc: [], bcc: [] });
-  const activeRecipientCount = [
-    ...(activeRecipients.to || []),
-    ...(activeRecipients.cc || []),
-    ...(activeRecipients.bcc || []),
-  ].length;
-  const canSendTest = Boolean(activeRun && (activeEmail || renderedEmail) && onSendTestToMe);
+
+  const runModel = useMemo(() => {
+    if (!activeRun) return null;
+    const expectEmail = activeSteps.some((step) => step.nodeType === 'send_email');
+    const issues = detailReady || !activeRun.summary
+      ? collectPreviewIssues(
+        { status: activeRun.status, error: activeRun.error },
+        activeSteps,
+        displayEmail,
+        activeRecipients,
+        { expectEmail, failedTitle: 'Run failed' },
+      )
+      : [];
+    if (activeHealth?.notSent && activeHealth.summary && !issues.some((issue) => issue.title === activeHealth.summary)) {
+      issues.unshift({ tone: 'amber', title: activeHealth.summary, detail: null });
+    }
+    const llm = llmDiagnosticsForView(activeLlmDiagnostics);
+    const deliveryStatus = activeDelivery?.status === 'mocked' ? 'Shadow · not sent' : activeDelivery?.status || null;
+    return {
+      summary: {
+        status: String(activeRun.status || '').toLowerCase() || null,
+        ref: auditTicketLabel(activeRun),
+        subject: auditTicketSubject(activeRun),
+        auditId: activeRun.auditId || `TP-NWF-${activeRun.id}`,
+        facts: [
+          workflowDisplayName(activeRun.workflow || selectedWorkflow),
+          activeEventLabel,
+          formatDate(activeRun.startedAt),
+          formatDuration(activeRun.durationMs),
+          llmModelFact(llm),
+          deliveryStatus,
+        ],
+        badges: (
+          <>
+            <AuditModeBadge mode={activeRun.executionMode} compact />
+            {activeHealth && activeHealth.state !== 'completed_clean' && (
+              <span className={cls('rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', healthClass(activeHealth.state))}>
+                {activeHealth.label || runHealthLabel(activeRun)}
+              </span>
+            )}
+          </>
+        ),
+        issueTone: issuesTone(issues),
+      },
+      steps: runStepsForView(activeSteps),
+      email: displayEmail,
+      recipients: activeRecipients,
+      llm,
+      tools: activeToolRecords,
+      context: activeContext,
+      issues,
+      actionLinks: actionDiagnostics,
+      branding: brandingDiagnostics,
+      routing: null,
+      health: activeHealth,
+      warnings: Array.isArray(activeRun.warnings) ? activeRun.warnings : [],
+      eventContext: activeRun.eventContext || null,
+      loadingDetail: activeDetailPending && detailLoading,
+      emptyEmailText: activeDetailPending
+        ? (detailLoading ? 'Loading this run…' : 'Could not load this run. Try refreshing.')
+        : expectEmail ? 'No e-mail was captured for this run.' : 'This workflow does not send an e-mail.',
+    };
+    // The derived values above all follow from these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRun, detailReady, detailLoading, displayEmail, selectedWorkflow, workflowsById]);
+
+  const setFilter = (patch) => onFiltersChange({ ...filters, ...patch });
+  const workflowOptions = [
+    ['selected', 'Selected workflow'],
+    ['all', 'All workflows'],
+    ...(workflows || [])
+      .filter((workflow) => !workflow.archivedAt || String(workflow.id) === String(filters.workflowId))
+      .map((workflow) => [String(workflow.id), `${workflowDisplayName(workflow)}${workflow.archivedAt ? ' (archived)' : ''}`]),
+  ];
 
   return (
     <section
       className={cls(
-        'px-4 py-4 sm:px-6',
+        'flex flex-col',
         // Below lg the list and detail stack, so the tab scrolls instead of clipping.
-        tabbed ? 'flex min-h-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden' : 'shrink-0 border-b border-border/60',
+        tabbed ? 'min-h-0 flex-1 overflow-y-auto lg:overflow-hidden' : 'shrink-0 border-b border-border/60',
       )}
       data-testid="workflow-audit-panel"
     >
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <FlaskConical className="h-4 w-4 text-sky-700 dark:text-sky-200" />
-            <h3 className="text-sm font-semibold text-foreground">Workflow Audit</h3>
-            <span className="text-xs text-muted-foreground">
-              {visibleRuns.length} runs
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">Saved Live, Shadow and preview workflow runs with rendered email, delivery outcome, and LLM/tool evidence.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onSendTestToMe?.(activeRun)}
-            disabled={!canSendTest || testSending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            title={activeEmail ? 'Send this rendered workflow email only to your account' : 'No rendered email was captured for this run'}
-          >
-            {testSending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-            Send test to me
-          </button>
-          <button
-            type="button"
-            onClick={onToggleCompact}
-            aria-pressed={compact}
-            title="Toggle compact run list"
-            className={cls(
-              'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold transition',
-              compact ? 'border-sky-300 dark:border-sky-500/40 bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200' : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
-            )}
-          >
-            <Rows3 className="h-3.5 w-3.5" />
-            Compact
-          </button>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-sky-200 dark:border-sky-500/30 bg-card px-3 py-2 text-xs font-semibold text-sky-700 dark:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-500/15 disabled:opacity-50"
-          >
-            {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </button>
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
-            >
-              <ChevronUp className="h-3.5 w-3.5" />
-              Collapse
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* QA 10-15 #4: one auto-fit grid, so filters wrap into compact rows at
-          laptop widths / 125% scaling instead of stacking full-width. */}
-      <div className="mb-2 grid shrink-0 grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2" data-testid="workflow-audit-filters">
-        <label className="relative min-w-0 sm:col-span-2">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground/75" />
+      <div
+        className="settings-scrollbar flex shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border px-4 py-2"
+        data-testid="workflow-audit-filters"
+      >
+        <h3 className="mr-1 flex shrink-0 items-center gap-1.5 text-sm font-semibold text-foreground">
+          <FlaskConical className="h-4 w-4 text-primary" aria-hidden="true" />
+          Audit
+        </h3>
+        <label className="relative min-w-[220px] flex-1">
           <span className="sr-only">Search workflow audit</span>
+          <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <input
             value={filters.search}
-            onChange={(event) => onFiltersChange({ ...filters, search: event.target.value })}
-            placeholder="Ticket (TP-1042 or #12345), subject, workflow, event or TP-NWF id"
-            className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-xs font-medium text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
+            onChange={(event) => setFilter({ search: event.target.value })}
+            placeholder="TP-1042, #12345, subject, workflow, event or TP-NWF id"
+            className="tp-focus-ring h-8 w-full rounded-md border border-border bg-card pl-8 pr-2 text-xs text-foreground placeholder:text-muted-foreground/75"
           />
         </label>
-        <label className="min-w-0">
-          <span className="sr-only">Filter workflow audit by execution mode</span>
-          <select
-            value={filters.executionMode}
-            onChange={(event) => onFiltersChange({ ...filters, executionMode: event.target.value })}
-            className={AUDIT_SELECT_CLASS}
+        <IconSelect
+          label="Mode"
+          ariaLabel="Filter workflow audit by execution mode"
+          Icon={Eye}
+          options={WORKFLOW_AUDIT_MODES.map((option) => [option.value, option.label])}
+          value={filters.executionMode}
+          defaultValue="live_mock"
+          onChange={(value) => setFilter({ executionMode: value })}
+        />
+        <IconSelect
+          label="Workflow"
+          ariaLabel="Filter workflow audit by workflow"
+          Icon={Waypoints}
+          options={workflowOptions}
+          value={String(filters.workflowId)}
+          defaultValue="selected"
+          onChange={(value) => setFilter({ workflowId: value })}
+        />
+        <IconSelect
+          label="When"
+          ariaLabel="Filter workflow audit by date range"
+          Icon={CalendarClock}
+          options={MOCK_AUDIT_RANGES.map((option) => [option.value, option.label])}
+          value={filters.range}
+          defaultValue="7d"
+          onChange={(value) => setFilter({ range: value })}
+        />
+        <IconSelect
+          label="Status"
+          ariaLabel="Filter workflow audit by run status"
+          Icon={Activity}
+          options={MOCK_AUDIT_STATUSES.map((option) => [option.value, option.label])}
+          value={filters.status}
+          onChange={(value) => setFilter({ status: value })}
+        />
+        <IconSelect
+          label="Event"
+          ariaLabel="Filter workflow audit by event type"
+          Icon={Inbox}
+          options={WORKFLOW_AUDIT_EVENT_FILTERS.map((option) => [option.value, option.label])}
+          value={filters.eventType || 'all'}
+          onChange={(value) => setFilter({ eventType: value })}
+        />
+        <div className="relative shrink-0" ref={moreRef}>
+          <button
+            type="button"
+            onClick={() => setMoreOpen((value) => !value)}
+            aria-expanded={moreOpen}
+            aria-controls="workflow-audit-more-filters"
+            aria-label={`More filters${moreFilterCount > 0 ? ` (${moreFilterCount} on)` : ''}`}
+            className={cls(
+              'tp-focus-ring inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-semibold',
+              moreFilterCount > 0 ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:text-foreground',
+            )}
           >
-            {WORKFLOW_AUDIT_MODES.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Filter workflow audit by workflow</span>
-          <select
-            value={filters.workflowId}
-            onChange={(event) => onFiltersChange({ ...filters, workflowId: event.target.value })}
-            className={AUDIT_SELECT_CLASS}
-          >
-            <option value="selected">Selected workflow</option>
-            <option value="all">All workflows</option>
-            {workflows
-              .filter((workflow) => !workflow.archivedAt || String(workflow.id) === String(filters.workflowId))
-              .map((workflow) => (
-                <option key={workflow.id} value={workflow.id}>
-                  {workflowDisplayName(workflow)}{workflow.archivedAt ? ' (archived)' : ''}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Filter workflow audit by date range</span>
-          <select
-            value={filters.range}
-            onChange={(event) => onFiltersChange({ ...filters, range: event.target.value })}
-            className={AUDIT_SELECT_CLASS}
-          >
-            {MOCK_AUDIT_RANGES.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Filter workflow audit by run status</span>
-          <select
-            value={filters.status}
-            onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}
-            className={AUDIT_SELECT_CLASS}
-          >
-            {MOCK_AUDIT_STATUSES.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Filter workflow audit by event type</span>
-          <select
-            value={filters.eventType || 'all'}
-            onChange={(event) => onFiltersChange({ ...filters, eventType: event.target.value })}
-            className={AUDIT_SELECT_CLASS}
-          >
-            {WORKFLOW_AUDIT_EVENT_FILTERS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
+            More
+            {moreFilterCount > 0 && <span className="font-mono">{moreFilterCount}</span>}
+            <ChevronDown className={cls('h-3 w-3 transition-transform', moreOpen && 'rotate-180')} aria-hidden="true" />
+          </button>
+        </div>
         <button
           type="button"
-          onClick={() => setShowMoreFilters((value) => !value)}
-          aria-expanded={showMoreFilters}
-          aria-controls="workflow-audit-more-filters"
-          className="tp-focus-ring inline-flex min-w-0 items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground shadow-subtle transition hover:bg-muted/50 hover:text-foreground"
+          onClick={onRefresh}
+          disabled={loading}
+          aria-label="Refresh workflow audit"
+          title="Refresh"
+          className="tp-focus-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
         >
-          <span className="truncate">
-            More filters
-            {moreFilterCount > 0 ? <span className="text-primary">{` (${moreFilterCount} on)`}</span> : null}
-          </span>
-          <ChevronDown className={cls('h-3.5 w-3.5 shrink-0 transition-transform', showMoreFilters && 'rotate-180')} />
+          <RefreshCw className={cls('h-4 w-4', loading && 'animate-spin')} />
         </button>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Collapse workflow audit"
+            className="tp-focus-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      {showMoreFilters && (
+      {moreOpen && (
         <div
           id="workflow-audit-more-filters"
-          className="mb-3 grid shrink-0 grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2"
+          className="grid shrink-0 grid-cols-2 gap-2 border-b border-border bg-muted/30 px-4 py-2 sm:grid-cols-3 xl:grid-cols-6"
         >
-          <label className="min-w-0">
-            <span className="sr-only">Filter workflow audit by run health</span>
-            <select
-              value={filters.health || 'all'}
-              onChange={(event) => onFiltersChange({ ...filters, health: event.target.value })}
-              className={AUDIT_SELECT_CLASS}
-            >
-              {MOCK_AUDIT_HEALTH_STATES.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="sr-only">Filter workflow audit by incident signal</span>
-            <select
-              value={filters.signalLevel || 'all'}
-              onChange={(event) => onFiltersChange({ ...filters, signalLevel: event.target.value })}
-              className={AUDIT_SELECT_CLASS}
-            >
-              {WORKFLOW_AUDIT_SIGNAL_LEVELS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="sr-only">Filter workflow audit by trigger source</span>
-            <select
-              value={filters.triggerSource || 'all'}
-              onChange={(event) => onFiltersChange({ ...filters, triggerSource: event.target.value })}
-              className={AUDIT_SELECT_CLASS}
-            >
-              {WORKFLOW_AUDIT_SOURCE_FILTERS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="sr-only">Filter workflow audit by LLM provider</span>
-            <select
-              value={filters.provider || 'all'}
-              onChange={(event) => onFiltersChange({ ...filters, provider: event.target.value })}
-              className={AUDIT_SELECT_CLASS}
-            >
-              {WORKFLOW_AUDIT_PROVIDER_FILTERS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="sr-only">Filter workflow audit by fallback reason</span>
-            <select
-              value={filters.fallbackSource || 'all'}
-              onChange={(event) => onFiltersChange({ ...filters, fallbackSource: event.target.value })}
-              className={AUDIT_SELECT_CLASS}
-            >
-              {WORKFLOW_AUDIT_FALLBACK_FILTERS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+          {[
+            ['health', 'run health', MOCK_AUDIT_HEALTH_STATES],
+            ['signalLevel', 'incident signal', WORKFLOW_AUDIT_SIGNAL_LEVELS],
+            ['triggerSource', 'trigger source', WORKFLOW_AUDIT_SOURCE_FILTERS],
+            ['provider', 'LLM provider', WORKFLOW_AUDIT_PROVIDER_FILTERS],
+            ['fallbackSource', 'fallback reason', WORKFLOW_AUDIT_FALLBACK_FILTERS],
+          ].map(([key, label, options]) => (
+            <label key={key} className="min-w-0">
+              <span className="sr-only">{`Filter workflow audit by ${label}`}</span>
+              <select
+                value={filters[key] || 'all'}
+                onChange={(event) => setFilter({ [key]: event.target.value })}
+                className={AUDIT_MORE_SELECT_CLASS}
+              >
+                {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+          ))}
           <label className="min-w-0">
             <span className="sr-only">Filter workflow audit by requester department</span>
             <select
               value={filters.department || 'all'}
-              onChange={(event) => onFiltersChange({ ...filters, department: event.target.value })}
-              className={AUDIT_SELECT_CLASS}
+              onChange={(event) => setFilter({ department: event.target.value })}
+              className={AUDIT_MORE_SELECT_CLASS}
             >
               <option value="all">All departments</option>
               {departments.map((department) => (
@@ -7323,40 +6883,27 @@ export function MockAuditPanel({
           </label>
         </div>
       )}
-      {!showMoreFilters && <div className="mb-1" />}
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-700 dark:text-red-200">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2 text-xs font-semibold text-red-700 dark:text-red-200" role="alert">
           <AlertCircle className="h-3.5 w-3.5" />
           {error}
         </div>
       )}
-      {testResult && (
-        <div className={cls(
-          'mb-3 flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold',
-          testResult.type === 'error'
-            ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
-            : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
-        )}
-        >
-          {testResult.type === 'error' ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-          {testResult.text}
-        </div>
-      )}
 
-      {/* List beside detail from lg (1024 px) with a bounded list width; below
-          that they stack and the list keeps a usable height of its own. */}
+      {/* List beside the run from lg (1024 px); below that they stack and the
+          list keeps a usable height of its own. */}
       <div
         className={cls(
-          'grid gap-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] lg:overflow-hidden',
-          tabbed ? 'lg:min-h-0 lg:flex-1' : 'min-h-[300px] lg:max-h-[430px]',
+          'grid lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]',
+          tabbed ? 'lg:min-h-0 lg:flex-1' : 'min-h-[300px] lg:h-[560px]',
         )}
         data-testid="workflow-audit-split"
       >
-        <div className="flex min-h-0 min-w-0 flex-col gap-2">
+        <div className="flex min-h-0 min-w-0 flex-col border-b border-border lg:border-b-0 lg:border-r">
           <div
             className={cls(
-              'settings-scrollbar h-[40vh] min-h-[220px] space-y-2 overflow-auto rounded-xl border border-border bg-muted/20 p-2 shadow-subtle transition-opacity lg:h-auto lg:min-h-0 lg:flex-1',
+              'settings-scrollbar h-[40vh] min-h-[220px] overflow-auto transition-opacity lg:h-auto lg:min-h-0 lg:flex-1',
               loading && visibleRuns.length > 0 && 'opacity-60',
             )}
             aria-busy={loading}
@@ -7365,467 +6912,110 @@ export function MockAuditPanel({
             {loading && visibleRuns.length === 0 && (
               <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-muted-foreground">
                 <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-              Loading workflow audit
+                Loading workflow audit
               </div>
             )}
             {!loading && visibleRuns.length === 0 && (
               <div className="flex h-full min-h-[200px] items-center justify-center px-6 text-center text-sm text-muted-foreground">
-              No workflow runs match the current filters.
+                No workflow runs match the current filters.
               </div>
             )}
-            {visibleRuns.map((run, index) => {
+            {visibleRuns.map((run) => {
               const delivery = auditDeliveryForRun(run);
-              const healthState = run.health?.state;
               const selected = activeRun?.id === run.id;
-              const recipientCount = deliveryRecipientCount(delivery);
-              const st = String(run.status || '').toLowerCase();
-              const tone = (st === 'completed' || st === 'sent')
-                ? 'emerald'
-                : st === 'failed'
-                  ? 'red'
-                  : (st === 'running' || st === 'queued')
-                    ? 'amber'
-                    : run.executionMode === 'preview'
-                      ? 'violet'
-                      : run.executionMode === 'mock'
-                        ? 'sky'
-                        : 'slate';
-              const borderLeftClass = {
-                emerald: 'border-l-emerald-400', red: 'border-l-red-400', amber: 'border-l-amber-400',
-                violet: 'border-l-violet-400', sky: 'border-l-sky-400', slate: 'border-l-input',
-              }[tone];
-              const dotClass = {
-                emerald: 'bg-emerald-500', red: 'bg-red-500', amber: 'bg-amber-500',
-                violet: 'bg-violet-500', sky: 'bg-sky-500', slate: 'bg-muted-foreground/60',
-              }[tone];
+              const modeLabel = run.executionMode === 'mock' ? 'Shadow' : run.executionMode === 'preview' ? 'Preview' : run.executionMode === 'live' ? 'Live' : run.executionMode;
               return (
-                <motion.button
+                <button
                   key={run.id}
                   type="button"
                   onClick={() => onSelectRun(run)}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.24), ease: [0.22, 1, 0.36, 1] }}
-                  whileHover={{ y: -2 }}
-                  whileTap={{ scale: 0.994 }}
+                  aria-current={selected ? 'true' : undefined}
                   className={cls(
-                    'group relative block w-full overflow-hidden rounded-lg border border-border border-l-[3px] bg-card text-left shadow-subtle transition-shadow duration-200 hover:shadow-soft',
-                    compact ? 'p-2' : 'p-3',
-                    borderLeftClass,
+                    'tp-focus-ring flex w-full items-start gap-2 border-b border-border/60 px-3 py-1.5 text-left transition-colors',
+                    selected ? 'bg-primary/10 shadow-[inset_3px_0_0_hsl(var(--primary))]' : 'hover:bg-muted/60',
                   )}
                 >
-                  {selected && (
-                    <motion.span
-                      layoutId="auditSelectedHighlight"
-                      className="pointer-events-none absolute inset-0 rounded-lg bg-blue-50/70 dark:bg-blue-500/10 ring-2 ring-inset ring-blue-500/30"
-                      transition={{ type: 'spring', stiffness: 520, damping: 42 }}
-                    />
-                  )}
-                  <div className="relative space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground transition-colors group-hover:bg-secondary/70">
-                        {auditTicketLabel(run)}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
-                        {auditTicketSubject(run)}
-                      </span>
-                      <span className={cls('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(run.status))}>
-                        <span className={cls('h-1.5 w-1.5 rounded-full', dotClass)} />
-                        {run.status}
-                      </span>
-                    </div>
-
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-muted-foreground/75">
-                      <AuditModeBadge mode={run.executionMode} compact />
-                      {!compact && (
-                        <span className={cls('rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', healthClass(healthState))}>
-                          {runHealthLabel(run)}
-                        </span>
+                  <AuditRunStateIcon run={run} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                      <span className="shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">{auditTicketLabel(run)}</span>
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{auditTicketSubject(run)}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/75" title={formatDate(run.startedAt)}>{relativeTime(run.startedAt)}</span>
+                    </span>
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+                      <span className="truncate">{workflowEventLabelForRun(run, workflowsById)}</span>
+                      <span className="shrink-0 text-muted-foreground/50">·</span>
+                      <span className="shrink-0">{modeLabel}</span>
+                      {delivery?.status && delivery.status !== 'mocked' && (
+                        <>
+                          <span className="shrink-0 text-muted-foreground/50">·</span>
+                          <span className="shrink-0 capitalize">{delivery.status}</span>
+                        </>
                       )}
-                      {!compact && delivery?.status && (
-                        <span className={cls('rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', statusClass(delivery.status))}>
-                          {delivery.status === 'mocked' ? 'Shadow · not sent' : delivery.status}
-                        </span>
-                      )}
-                      <span className="min-w-0 truncate">
-                        {workflowEventLabelForRun(run, workflowsById)}
-                        <span className="px-1 text-muted-foreground/50">·</span>
-                        {formatDate(run.startedAt)}
-                        {!compact && recipientCount > 0 ? (
-                          <>
-                            <span className="px-1 text-muted-foreground/50">·</span>
-                            {recipientCount} recip
-                          </>
-                        ) : null}
-                      </span>
-                    </div>
+                    </span>
                     {run.health?.summary && (
-                      <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-200">
-                        <AlertCircle className="h-3 w-3 shrink-0" aria-hidden="true" />
-                        <span className="truncate">{run.health.summary}</span>
-                      </div>
+                      <span className="mt-0.5 block truncate text-[11px] font-semibold text-amber-700 dark:text-amber-200">{run.health.summary}</span>
                     )}
-                  </div>
-                </motion.button>
+                  </span>
+                </button>
               );
             })}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-subtle">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-3 py-1.5">
             <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-              <span>Rows</span>
+              <span className="sr-only">Runs per page</span>
               <select
                 value={pageSize}
                 onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
-                className="rounded-md border border-border bg-card px-1.5 py-1 text-[11px] font-semibold text-foreground/85 focus:border-blue-400 focus:outline-none"
+                className="tp-focus-ring h-7 rounded-md border border-border bg-card px-1.5 text-[11px] font-semibold text-foreground/85"
               >
                 {[50, 100, 250].map((n) => (
-                  <option key={n} value={n}>{n}</option>
+                  <option key={n} value={n}>{n} / page</option>
                 ))}
               </select>
             </label>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium text-muted-foreground">
-              Page {page + 1}
-                <span className="px-1 text-muted-foreground/50">·</span>
-                {visibleRuns.length} shown
+            <div className="flex items-center gap-1">
+              <span className="px-1 font-mono text-[11px] text-muted-foreground">
+                p{page + 1} · {visibleRuns.length}
               </span>
               <button
                 type="button"
                 onClick={() => onPageChange?.(Math.max(0, page - 1))}
                 disabled={page === 0 || loading}
-                className="inline-flex items-center gap-0.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-muted-foreground shadow-subtle transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Previous page"
+                className="tp-focus-ring inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40"
               >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              Prev
+                <ChevronLeft className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => onPageChange?.(page + 1)}
                 disabled={!hasMore || loading}
-                className="inline-flex items-center gap-0.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-muted-foreground shadow-subtle transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Next page"
+                className="tp-focus-ring inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40"
               >
-              Next
-                <ChevronRight className="h-3.5 w-3.5" />
+                <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
         </div>
 
-        <div className="flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-subtle lg:min-h-0">
-          {!activeRun ? (
+        <div className="flex min-h-[70vh] min-w-0 flex-col lg:min-h-0" data-testid="workflow-audit-detail">
+          {!runModel ? (
             <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground/75">
               <FlaskConical className="h-6 w-6 text-muted-foreground/50" />
-              Select a workflow run.
+              Pick a run on the left.
             </div>
           ) : (
-            <motion.div
+            <RunResultView
               key={activeRun.id}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              {/* Run summary header */}
-              <div className="shrink-0 px-4 pt-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h4 className="text-base font-semibold leading-snug text-foreground">
-                      <span className="font-mono text-sm text-muted-foreground/75">{auditTicketLabel(activeRun)}</span> {auditTicketSubject(activeRun)}
-                    </h4>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground/75">
-                      <span className="font-mono">{activeRun.auditId || `TP-NWF-${activeRun.id}`}</span>
-                      <span className="text-muted-foreground/50">·</span>
-                      <span>{workflowDisplayName(activeRun.workflow || selectedWorkflow)}</span>
-                      <span className="text-muted-foreground/50">·</span>
-                      <span>{formatDate(activeRun.startedAt)}</span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                    <span className={cls('inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(activeDelivery?.status || activeRun.status))}>
-                      <span className={cls('h-1.5 w-1.5 rounded-full', statusDotClass(activeDelivery?.status || activeRun.status))} />
-                      {activeDelivery?.status || activeRun.status}
-                    </span>
-                    {activeHealth && (
-                      <span className={cls('rounded-full border px-2 py-0.5 text-[11px] font-semibold', healthClass(activeHealth.state))}>
-                        {activeHealth.label || runHealthLabel(activeRun)}
-                      </span>
-                    )}
-                    <AuditModeBadge mode={activeRun.executionMode} />
-                  </div>
-                </div>
-                <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-border/60 pt-2.5">
-                  <AuditStat label="Event" value={activeEventLabel} />
-                  <AuditStat
-                    label="Email"
-                    value={activeHealth?.notSent
-                      ? (activeHealth.summary || 'Not sent')
-                      : (activeEmail || renderedEmail) ? (activeDelivery?.status || 'Captured') : (activeDetailPending ? '…' : 'None')}
-                    tone={activeHealth?.notSent || (!activeEmail && !renderedEmail && !activeDetailPending) ? 'warn' : 'default'}
-                  />
-                  <AuditStat label="Recipients" value={activeRecipientCount} tone={activeRecipientCount ? 'default' : 'warn'} />
-                  <AuditStat
-                    label="LLM"
-                    value={activeLlmDiagnostics.length > 1
-                      ? `${activeLlmDiagnostics.length} nodes`
-                      : [activeLlm?.provider, activeLlm?.model].filter(Boolean).join(' / ') || 'None'}
-                    tone={activeLlmDiagnostics.some((diagnostic) => diagnostic.llm?.failed || diagnostic.llm?.status === 'failed') ? 'bad' : 'default'}
-                  />
-                  <AuditStat label="Context" value={activeContext ? (activeContext.mode || 'used') : 'None'} />
-                  <AuditStat label="Tools" value={activeToolRecords.length} />
-                </div>
-              </div>
-
-              {/* Tabs */}
-              <div className="mt-3 flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {[
-                  { id: 'email', label: 'Email' },
-                  { id: 'llm', label: 'LLM & Tools' },
-                  { id: 'steps', label: 'Steps', count: activeSteps.length || null },
-                  { id: 'diagnostics', label: 'Diagnostics', count: (Array.isArray(activeRun.warnings) ? activeRun.warnings.length : 0) || null },
-                ].map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setDetailTab(t.id)}
-                    className={cls(
-                      '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-semibold transition-colors',
-                      detailTab === t.id ? 'border-blue-500 text-blue-700 dark:text-blue-200' : 'border-transparent text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {t.label}
-                    {t.count != null && <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{t.count}</span>}
-                  </button>
-                ))}
-              </div>
-
-              {/* Tab content */}
-              <div className="settings-scrollbar min-h-0 flex-1 space-y-3 overflow-auto p-4">
-                {activeDetailPending && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-                    {detailLoading
-                      ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      : <AlertCircle className="h-3.5 w-3.5" />}
-                    {detailLoading ? 'Loading run details' : 'Could not load this run. Try Refresh.'}
-                  </div>
-                )}
-                {detailTab === 'email' && (
-                  <>
-                    <AuditSection title="Recipients" icon={Mail}>
-                      <div className="space-y-1 text-xs leading-5 text-foreground/85">
-                        <div>{recipientLine('To', activeRecipients.to)}</div>
-                        <div>{recipientLine('Cc', activeRecipients.cc)}</div>
-                        <div>{recipientLine('Bcc', activeRecipients.bcc)}</div>
-                      </div>
-                    </AuditSection>
-
-                    <AuditSection
-                      title="Rendered email"
-                      right={(displayBodyHtml || displayBodyText) ? (
-                        <button
-                          type="button"
-                          onClick={() => setEmailModalOpen(true)}
-                          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-200 transition hover:bg-blue-100 dark:hover:bg-blue-500/20"
-                        >
-                          <Maximize2 className="h-3.5 w-3.5" />
-                          Open
-                        </button>
-                      ) : null}
-                    >
-                      <div className="mb-2 truncate text-sm font-semibold text-foreground">{displayEmail?.subject || 'No subject rendered'}</div>
-                      {(displayBodyHtml || displayBodyText) ? (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setEmailModalOpen(true)}
-                          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setEmailModalOpen(true); }}
-                          title="Open the full rendered email"
-                          className="block max-h-40 cursor-pointer overflow-hidden rounded-md border border-border/60 bg-muted/25 p-3 text-sm leading-6 text-foreground [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
-                        >
-                          {displayBodyHtml ? (
-                            <div className="pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(displayBodyHtml) }} />
-                          ) : (
-                            <pre className="pointer-events-none whitespace-pre-wrap font-sans text-sm leading-6">{displayBodyText}</pre>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-muted-foreground">No email body captured for this run.</div>
-                      )}
-                    </AuditSection>
-
-                    <ActionLinkDiagnostics diagnostics={actionDiagnostics} />
-                    <BrandingDiagnostics branding={brandingDiagnostics} />
-                  </>
-                )}
-
-                {detailTab === 'llm' && (
-                  <>
-                    {(activeContext || activeToolRecords.length > 0) && (
-                      <AuditSection
-                        title="LLM evidence & tools"
-                        icon={Bot}
-                        right={activeContext?.contextHash ? (
-                          <span className="max-w-[180px] truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-mono font-semibold text-muted-foreground">{activeContext.contextHash}</span>
-                        ) : null}
-                      >
-                        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
-                          <div>Mode: <span className="font-semibold text-foreground">{activeContext?.mode || 'not recorded'}</span></div>
-                          <div>Signal: <span className="font-semibold text-foreground">{signalLevelLabel(activeContext?.signalLevel || 'none')}</span></div>
-                          <div>Thread: <span className="font-semibold text-foreground">{activeContext?.threadEntryCount || 0}</span></div>
-                          <div>Redactions: <span className="font-semibold text-foreground">{activeContext?.redactionCount || 0}</span></div>
-                        </div>
-                        {activeContext?.signalRationale && (
-                          <div className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                            <div className="font-semibold text-foreground">
-                              Signal confidence: {activeContext.signalConfidence || 'unknown'}
-                              {Number.isFinite(Number(activeContext.signalConfidenceScore)) ? ` (${activeContext.signalConfidenceScore})` : ''}
-                            </div>
-                            <div>{activeContext.signalRationale}</div>
-                            {activeContext.signalCounts && (
-                              <div className="mt-1 text-muted-foreground">
-                                Similar {activeContext.signalCounts.similarTickets || 0} | Open strong {activeContext.signalCounts.openStrongSimilarTickets || 0} | Requesters {activeContext.signalCounts.distinctRequesters || 0} | Departments {activeContext.signalCounts.distinctDepartments || 0}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {(activeContext?.allowedPublicPhrases || []).length > 0 && (
-                          <div className="mt-2 text-xs leading-5 text-muted-foreground">
-                            Allowed wording: {activeContext.allowedPublicPhrases.join('; ')}
-                          </div>
-                        )}
-                        {activeToolRecords.length > 0 && (
-                          <div className="mt-3 space-y-2">
-                            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Tool calls</div>
-                            <div className="space-y-2">
-                              {activeToolRecords.map((tool, index) => (
-                                <details key={`${tool.name}-${index}`} className="rounded-md border border-border bg-card">
-                                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground/85">
-                                    {tool.name} <span className="ml-1 text-muted-foreground/75">{tool.status || 'completed'}{Number.isFinite(tool.durationMs) ? `, ${tool.durationMs} ms` : ''}</span>
-                                  </summary>
-                                  <pre className="max-h-40 overflow-auto border-t border-border/60 bg-slate-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-slate-100">{formatJson(tool.output || tool.input)}</pre>
-                                </details>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </AuditSection>
-                    )}
-
-                    <AuditSection title="LLM diagnostics" icon={Bot}>
-                      <LlmDiagnosticsList
-                        diagnostics={activeLlmDiagnostics}
-                        emptyText="No LLM diagnostics were captured for this workflow run."
-                      />
-                    </AuditSection>
-                  </>
-                )}
-
-                {detailTab === 'steps' && (
-                  activeSteps.length > 0 ? (
-                    <div className="relative space-y-3 pl-5">
-                      <span className="absolute bottom-2 left-1 top-2 w-px bg-secondary" aria-hidden />
-                      {activeSteps.map((step) => (
-                        <div key={step.id || `${step.nodeId}-${step.startedAt}`} className="relative">
-                          <span className={cls('absolute -left-[18px] top-3 h-2.5 w-2.5 rounded-full ring-2 ring-card', statusDotClass(step.status))} />
-                          <PreviewStepCard step={step} />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="py-10 text-center text-sm text-muted-foreground/75">No steps recorded for this run.</div>
-                  )
-                )}
-
-                {detailTab === 'diagnostics' && (
-                  <>
-                    {Array.isArray(activeRun.warnings) && activeRun.warnings.length > 0 && (
-                      <AuditSection title="Run warnings" icon={AlertCircle}>
-                        <div className="space-y-1.5 text-xs leading-5 text-muted-foreground">
-                          {activeRun.warnings.map((warning, index) => (
-                            <div key={`${warning.type || 'warning'}-${index}`} className="flex gap-2">
-                              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-                              <span>
-                                <span className="font-semibold text-foreground/85">{warning.type || 'warning'}:</span> {warning.message || 'Review this run before enabling live sends.'}
-                                {warning.templateFallbackUsed && <span> Template fallback was used.</span>}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </AuditSection>
-                    )}
-
-                    {activeHealth?.degraded && (
-                      <AuditSection title={`${activeHealth.label || 'Run health'} run`} icon={AlertCircle}>
-                        <div className="space-y-1.5 text-xs leading-5 text-muted-foreground">
-                          {activeHealth.fallbackSummary && (
-                            <div><span className="font-semibold text-foreground/85">Fallback:</span> {activeHealth.fallbackSummary.reason || activeHealth.fallbackSummary.type}</div>
-                          )}
-                          {(activeHealth.reasons || []).map((reason, index) => (
-                            <div key={`${reason.type || 'reason'}-${index}`} className="flex gap-2">
-                              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-                              <span>
-                                <span className="font-semibold text-foreground/85">{reason.type || 'reason'}:</span> {reason.message || 'Review this run before live sends.'}
-                                {reason.ruleIds?.length > 0 && <span> Rules: {reason.ruleIds.join(', ')}.</span>}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </AuditSection>
-                    )}
-
-                    <AuditSection title="Redacted event context" icon={Code}>
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 dark:ring-1 dark:ring-white/10 p-3 text-[11px] leading-5 text-slate-100">{formatJson(activeRun.eventContext)}</pre>
-                    </AuditSection>
-                  </>
-                )}
-              </div>
-
-              {emailModalOpen && (displayBodyHtml || displayBodyText) && (
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/70 p-4"
-                  onClick={() => setEmailModalOpen(false)}
-                >
-                  <div
-                    className="flex h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-card shadow-2xl"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Rendered email</div>
-                        <div className="truncate text-sm font-semibold text-foreground">{displayEmail?.subject || 'No subject rendered'}</div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {displayBodyHtml && (
-                          <div className="flex items-center rounded-md border border-border p-0.5">
-                            <button type="button" onClick={() => setEmailDevice('desktop')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'desktop' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground/85')}>Desktop</button>
-                            <button type="button" onClick={() => setEmailDevice('mobile')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'mobile' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground/85')}>Mobile</button>
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setEmailModalOpen(false)}
-                          className="rounded-md p-1 text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85"
-                          aria-label="Close"
-                        >
-                          <XCircle className="h-5 w-5" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-auto bg-muted p-4">
-                      {displayBodyHtml ? (
-                        <iframe
-                          title="Rendered email"
-                          sandbox=""
-                          srcDoc={sanitizePreviewHtmlClient(displayBodyHtml)}
-                          className={cls('mx-auto block h-full rounded-lg border border-border bg-card', emailDevice === 'mobile' ? 'w-[390px]' : 'w-full max-w-2xl')}
-                        />
-                      ) : (
-                        <pre className="mx-auto max-w-2xl whitespace-pre-wrap rounded-lg bg-card p-4 font-sans text-sm leading-6 text-foreground shadow-sm">{displayBodyText}</pre>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </motion.div>
+              model={runModel}
+              wideAt="xl"
+              onSendTest={onSendTestToMe ? () => onSendTestToMe(activeRun) : undefined}
+              testSending={testSending}
+              testResult={testResult}
+              signalLabel={signalLevelLabel}
+            />
           )}
         </div>
       </div>
@@ -8083,14 +7273,27 @@ export default function NotificationWorkflowsPanel({
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewRunning, setPreviewRunning] = useState(false);
   const [previewError, setPreviewError] = useState(null);
-  const [previewTickets, setPreviewTickets] = useState({ items: [], page: 1, pageSize: 10, total: 0, totalPages: 1 });
+  const [previewTickets, setPreviewTickets] = useState({ items: [], page: 1, pageSize: 25, total: 0, totalPages: 1 });
   const [previewTicketsLoading, setPreviewTicketsLoading] = useState(false);
-  const [previewTicketSearch, setPreviewTicketSearch] = useState('');
-  const [previewTicketPriority, setPreviewTicketPriority] = useState('all');
-  const [previewTicketStatus, setPreviewTicketStatus] = useState('all');
+  // Preview page (18 Oct 2026): one filter object, 25 or 50 a page (kept).
+  const [previewFilters, setPreviewFilters] = useState(PREVIEW_FILTER_DEFAULTS);
   const [previewTicketPage, setPreviewTicketPage] = useState(1);
+  const [previewTicketPageSize, setPreviewTicketPageSize] = useState(() => {
+    try {
+      return Number(window.localStorage.getItem('tp_wf_preview_page_size')) === 50 ? 50 : 25;
+    } catch {
+      return 25;
+    }
+  });
   const [selectedPreviewTicket, setSelectedPreviewTicket] = useState(null);
-  const [forcePreviewActionLinks, setForcePreviewActionLinks] = useState(true);
+  // Live progress while POST /test runs: the run's step rows, polled.
+  const [previewLive, setPreviewLive] = useState(null);
+  const [previewStartedAt, setPreviewStartedAt] = useState(null);
+  const [previewFinishedAt, setPreviewFinishedAt] = useState(null);
+  // The definition as the editor had it when Preview opened (the editor is
+  // not mounted while the page shows); runs and the pipeline use it.
+  const previewDefinitionRef = useRef(null);
+  const previewPreviousRunIdRef = useRef(null);
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
   // Ticket metadata (technicians / categories / groups / approval categories /
@@ -9008,25 +8211,17 @@ export default function NotificationWorkflowsPanel({
 
   async function loadPreviewTickets({
     page = previewTicketPage,
-    search = previewTicketSearch,
-    priority = previewTicketPriority,
-    status = previewTicketStatus,
+    pageSize = previewTicketPageSize,
+    filters = previewFilters,
   } = {}) {
     setPreviewTicketsLoading(true);
-    setPreviewError(null);
     try {
-      const response = await notificationWorkflowAPI.getPreviewTickets({
-        page,
-        pageSize: 9,
-        search,
-        priority,
-        status,
-      });
-      const payload = response.data || { items: [], page, pageSize: 9, total: 0, totalPages: 1 };
-      setPreviewTickets(payload);
-      if (selectedPreviewTicket && !payload.items.some((ticket) => ticket.id === selectedPreviewTicket.id)) {
-        setSelectedPreviewTicket(null);
+      const params = { page, pageSize };
+      for (const [key, value] of Object.entries(filters || {})) {
+        if (key === 'search' ? String(value || '').trim() : value && value !== 'all') params[key] = value;
       }
+      const response = await notificationWorkflowAPI.getPreviewTickets(params);
+      setPreviewTickets(response.data || { items: [], page, pageSize, total: 0, totalPages: 1 });
     } catch (error) {
       setPreviewError(error.message);
     } finally {
@@ -9060,16 +8255,38 @@ export default function NotificationWorkflowsPanel({
   useEffect(() => {
     if (!previewModalOpen) return undefined;
     const handle = window.setTimeout(() => {
-      loadPreviewTickets({
-        page: previewTicketPage,
-        search: previewTicketSearch,
-        priority: previewTicketPriority,
-        status: previewTicketStatus,
-      });
-    }, 250);
+      loadPreviewTickets({ page: previewTicketPage, pageSize: previewTicketPageSize, filters: previewFilters });
+    }, 120);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewModalOpen, previewTicketPage, previewTicketSearch, previewTicketPriority, previewTicketStatus]);
+  }, [previewModalOpen, previewTicketPage, previewTicketPageSize, previewFilters]);
+
+  // Live pipeline: while the preview runs, read its run's step rows. `since`
+  // allows for clock drift; the previous preview's run is never taken for
+  // this one.
+  useEffect(() => {
+    if (!previewRunning || !previewStartedAt || !selected?.id) return undefined;
+    let cancelled = false;
+    let timer = null;
+    const since = new Date(previewStartedAt - 15000).toISOString();
+    const tick = async () => {
+      try {
+        const response = await notificationWorkflowAPI.getPreviewLive({
+          workflowId: selected.id,
+          ticketId: selectedPreviewTicket?.id,
+          since,
+        });
+        const live = response?.data;
+        if (!cancelled && live?.runId && live.runId !== previewPreviousRunIdRef.current) setPreviewLive(live);
+      } catch { /* the live view is best-effort; the final result still arrives */ }
+      if (!cancelled) timer = window.setTimeout(tick, 1200);
+    };
+    timer = window.setTimeout(tick, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [previewRunning, previewStartedAt, selected?.id, selectedPreviewTicket?.id]);
 
   useEffect(() => {
     if (activeGlobalTab !== 'llm-context') return undefined;
@@ -9433,37 +8650,54 @@ export default function NotificationWorkflowsPanel({
   }
 
   function openPreviewModal() {
+    if (!selected || !draft) return;
+    try {
+      previewDefinitionRef.current = currentSessionDefinitionForPreview();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'This workflow is not ready to preview' });
+      return;
+    }
     setPreviewModalOpen(true);
     setPreview(null);
+    setPreviewLive(null);
     setPreviewError(null);
     setPreviewTestResult(null);
     setPreviewTicketPage(1);
   }
 
-  async function runPreview() {
-    if (!selected || !draft) return;
-    if (!selectedPreviewTicket) {
-      setPreviewError('Select a ticket before running preview');
-      return;
-    }
-    setPreviewModalOpen(true);
+  function closePreviewPage() {
+    setPreviewModalOpen(false);
+  }
+
+  async function runPreview(ticket = selectedPreviewTicket) {
+    if (!selected || !ticket || previewRunning) return;
+    const previewDefinition = previewDefinitionRef.current || draft;
+    if (!previewDefinition) return;
+    previewPreviousRunIdRef.current = preview?.runId || previewLive?.runId || null;
+    setSelectedPreviewTicket(ticket);
+    setPreview(null);
+    setPreviewLive(null);
+    setPreviewStartedAt(Date.now());
+    setPreviewFinishedAt(null);
     setPreviewRunning(true);
     setPreviewError(null);
     setPreviewTestResult(null);
     setMessage(null);
     try {
-      const previewDefinition = currentSessionDefinitionForPreview();
+      // Every checked action block shows in a preview, whatever the hour,
+      // so its copy and links can be checked (live sends stay timing-aware).
       const response = await notificationWorkflowAPI.test({
         workflowId: selected.id,
-        ticketId: selectedPreviewTicket.id,
+        ticketId: ticket.id,
         definition: previewDefinition,
         executeLlm: true,
-        forceActionLinks: forcePreviewActionLinks,
+        forceActionLinks: true,
       });
       setPreview(response.data);
     } catch (error) {
       setPreviewError(error.message);
     } finally {
+      setPreviewFinishedAt(Date.now());
       setPreviewRunning(false);
     }
   }
@@ -12073,6 +11307,52 @@ export default function NotificationWorkflowsPanel({
     );
   }
 
+  if (previewModalOpen && selected) {
+    const previewModel = buildPreviewRunModel({
+      preview,
+      live: previewLive,
+      running: previewRunning,
+      definition: previewDefinitionRef.current || draft,
+      ticket: selectedPreviewTicket,
+      startedAt: previewStartedAt,
+      finishedAt: previewFinishedAt,
+    });
+    return (
+      <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
+        <NotificationToast message={message} onDismiss={dismissMessage} />
+        <WorkflowPreviewPage
+          workflowName={workflowDisplayName(selected)}
+          onBack={closePreviewPage}
+          tickets={previewTickets}
+          ticketsLoading={previewTicketsLoading}
+          filters={previewFilters}
+          onFiltersChange={(patch) => {
+            setPreviewFilters((current) => ({ ...current, ...patch }));
+            setPreviewTicketPage(1);
+          }}
+          page={previewTicketPage}
+          onPageChange={setPreviewTicketPage}
+          pageSize={previewTicketPageSize}
+          onPageSizeChange={(size) => {
+            setPreviewTicketPageSize(size);
+            setPreviewTicketPage(1);
+            try { window.localStorage.setItem('tp_wf_preview_page_size', String(size)); } catch { /* per-browser nicety */ }
+          }}
+          runTicket={selectedPreviewTicket}
+          running={previewRunning}
+          hasRun={Boolean(preview || previewLive)}
+          error={previewError}
+          onRun={runPreview}
+          model={previewModel}
+          onSendTest={sendPreviewTestEmail}
+          testSending={previewTestSending}
+          testResult={previewTestResult}
+          signalLabel={signalLevelLabel}
+        />
+      </div>
+    );
+  }
+
   const workflowListView = workflowTabActive && workflowView === 'list';
   const showPanelHeader = !hideTabBar || (workflowTabActive && !workflowListView);
 
@@ -12672,45 +11952,6 @@ export default function NotificationWorkflowsPanel({
         saving={saving}
         onCancel={() => setDeleteConfirm(null)}
         onConfirm={deleteArchivedWorkflow}
-      />
-      <PreviewModal
-        open={previewModalOpen}
-        preview={preview}
-        running={previewRunning}
-        error={previewError}
-        tickets={previewTickets}
-        ticketsLoading={previewTicketsLoading}
-        ticketSearch={previewTicketSearch}
-        ticketPage={previewTicketPage}
-        ticketPriority={previewTicketPriority}
-        ticketStatus={previewTicketStatus}
-        selectedTicket={selectedPreviewTicket}
-        testSending={previewTestSending}
-        testResult={previewTestResult}
-        onClose={() => setPreviewModalOpen(false)}
-        onTicketSearchChange={(value) => {
-          setPreviewTicketSearch(value);
-          setPreviewTicketPage(1);
-        }}
-        onTicketPriorityChange={(value) => {
-          setPreviewTicketPriority(value);
-          setPreviewTicketPage(1);
-        }}
-        onTicketStatusChange={(value) => {
-          setPreviewTicketStatus(value);
-          setPreviewTicketPage(1);
-        }}
-        onTicketPageChange={setPreviewTicketPage}
-        onSelectTicket={(ticket) => {
-          setSelectedPreviewTicket(ticket);
-          setPreview(null);
-          setPreviewError(null);
-          setPreviewTestResult(null);
-        }}
-        onRunPreview={runPreview}
-        onSendTestEmail={sendPreviewTestEmail}
-        forceActionLinks={forcePreviewActionLinks}
-        onForceActionLinksChange={setForcePreviewActionLinks}
       />
     </div>
   );

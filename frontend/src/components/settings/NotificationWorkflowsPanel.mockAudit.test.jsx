@@ -130,7 +130,8 @@ describe('Workflow Audit panel (QA 10-15)', () => {
   test('the detail loads once for the open run, not with the list', async () => {
     const { rerender } = renderPanel();
     await waitFor(() => expect(getAuditMock).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('Steps')).toBeInTheDocument();
+    // The run opens in the shared run view: steps checklist on the right.
+    expect(await screen.findByTestId('run-steps')).toBeInTheDocument();
     // Re-render with the same run (e.g. typing in search): served from cache.
     rerender(
       <MockAuditPanel
@@ -150,30 +151,42 @@ describe('Workflow Audit panel (QA 10-15)', () => {
     expect(screen.getByTestId('workflow-audit-list')).toHaveTextContent('TP-1042');
   });
 
-  test('less-used filters sit behind "More filters", which counts the ones in use', () => {
+  test('less-used filters sit behind "More", which counts the ones in use', () => {
     renderPanel({ filters: { ...FILTERS, provider: 'openai', department: 'Brisbane' } });
     const toggle = screen.getByRole('button', { name: /More filters/ });
-    expect(toggle).toHaveTextContent('(2 on)');
-    // Opens by itself when some are in use; closes on click.
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.click(toggle);
+    expect(toggle).toHaveTextContent('2');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByLabelText('Filter workflow audit by LLM provider')).not.toBeInTheDocument();
-    // The everyday filters stay out.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Filter workflow audit by LLM provider')).toHaveValue('openai');
+    fireEvent.click(toggle);
+    expect(screen.queryByLabelText('Filter workflow audit by LLM provider')).not.toBeInTheDocument();
+    // The everyday filters stay in the toolbar.
     expect(screen.getByLabelText('Filter workflow audit by event type')).toBeInTheDocument();
     expect(screen.getByLabelText('Search workflow audit')).toBeInTheDocument();
   });
 
-  test('layout: filters wrap in an auto-fit grid; list and detail sit side by side only from lg', () => {
+  test('layout: filters stay on one row; list and run sit side by side only from lg (18 Oct 2026)', () => {
     renderPanel();
     const filters = screen.getByTestId('workflow-audit-filters');
-    expect(filters.className).toContain('grid-cols-[repeat(auto-fill,minmax(160px,1fr))]');
-    expect(filters.className).not.toMatch(/(^|\s)xl:grid-cols-/);
+    expect(filters.className).toContain('flex-nowrap');
+    expect(filters.className).toContain('overflow-x-auto');
     const split = screen.getByTestId('workflow-audit-split');
-    expect(split.className).toContain('lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)]');
+    expect(split.className).toContain('lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]');
     // Below lg nothing is clipped: the tab scrolls and the list has its own height.
     expect(split.className).not.toMatch(/(^|\s)overflow-hidden/);
     expect(screen.getByTestId('workflow-audit-panel').className).toContain('overflow-y-auto');
     expect(screen.getByTestId('workflow-audit-list').className).toContain('h-[40vh]');
+  });
+
+  test('the open run shows the e-mail, issues and the pipeline in the shared run view', async () => {
+    renderPanel();
+    await waitFor(() => expect(getAuditMock).toHaveBeenCalled());
+    expect(await screen.findByTestId('run-pipeline')).toBeInTheDocument();
+    const issues = await screen.findByTestId('run-issues');
+    await waitFor(() => expect(issues).toHaveTextContent('Not sent: no recipient'));
+    expect(screen.getByTestId('run-summary')).toHaveTextContent('TP-NWF-91');
+    expect(screen.getByTestId('run-summary')).toHaveTextContent('TP-1042');
   });
 });

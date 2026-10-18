@@ -215,3 +215,35 @@ describe('requester Teams chat from the urgency page (QA 10-15 #5)', () => {
     expect(flat[0]).toMatchObject({ verb: 'opened a Teams chat from the urgency page', detail: 'With Sam Okafor', actor: 'Priya Nair', machine: false });
   });
 });
+
+describe('merge rows say which ticket and what came over (18 Oct 2026)', () => {
+  test('merged_from names the merged ticket, the person, and what was copied', () => {
+    const items = buildHistoryItems({
+      activities: [{
+        id: 77,
+        activityType: 'merged_from',
+        performedBy: 'vhaeri@bgcengineering.ca',
+        performedAt: iso(0),
+        details: { srcRef: '#247711', tgtRef: 'TP-10179', sourceSubject: 'Re: anyone working today?', copied: 0, descriptionCopied: true, attachmentsLeft: 1, swept: { tasks: 0, children: 0, approvals: 0 }, actorName: 'Vahid Haeri' },
+      }],
+    });
+    const flat = items.flatMap((i) => (i.items ? i.items : [i]));
+    expect(flat[0]).toMatchObject({
+      event: 'merge',
+      verb: 'merged in',
+      to: '#247711',
+      actor: 'Vahid Haeri',
+      machine: false,
+      detail: '"Re: anyone working today?" · Opening e-mail copied in · 0 messages copied in · 1 attachment left on #247711',
+    });
+  });
+
+  test('merged_into points at the surviving ticket', () => {
+    const items = buildHistoryItems({
+      activities: [{ id: 78, activityType: 'merged_into', performedBy: 'a@b.c', performedAt: iso(0), details: { srcRef: '#247711', tgtRef: 'TP-10179', targetSubject: 'anyone working today?' } }],
+    });
+    const flat = items.flatMap((i) => (i.items ? i.items : [i]));
+    expect(flat[0]).toMatchObject({ event: 'merge', verb: 'merged this ticket into', to: 'TP-10179', actor: 'a@b.c' });
+    expect(flat[0].detail).toContain('The conversation continues there');
+  });
+});

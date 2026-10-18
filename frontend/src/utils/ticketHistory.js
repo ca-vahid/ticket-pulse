@@ -223,10 +223,37 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {
       item = baseItem({ event: 'created', verb: 'created the ticket', detail: d.note || null });
+    } else if (t === 'merged_from' || t === 'merged_into') {
+      // 18 Oct 2026: said only "merged from" — now which ticket, and what came over.
+      const into = t === 'merged_into';
+      const subject = into ? d.targetSubject : d.sourceSubject;
+      const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+      const bits = into
+        ? [subject ? `"${subject}"` : null, 'The conversation continues there']
+        : [
+          subject ? `"${subject}"` : null,
+          d.descriptionCopied ? 'Opening e-mail copied in' : null,
+          Number.isFinite(d.copied) ? `${plural(d.copied, 'message')} copied in` : null,
+          d.swept?.tasks ? `${plural(d.swept.tasks, 'open task')} moved over` : null,
+          d.swept?.children ? `${plural(d.swept.children, 'child ticket')} moved over` : null,
+          d.swept?.approvals ? `${plural(d.swept.approvals, 'pending approval')} cancelled` : null,
+          d.attachmentsLeft ? `${plural(d.attachmentsLeft, 'attachment')} left on ${d.srcRef || 'the merged ticket'}` : null,
+          d.requesterNotified ? 'Requester told' : null,
+        ];
+      item = baseItem({
+        event: 'merge',
+        verb: into ? 'merged this ticket into' : 'merged in',
+        to: (into ? d.tgtRef : d.srcRef) || null,
+        detail: bits.filter(Boolean).join(' · ') || null,
+        importance: 3,
+        machine: false,
+      });
     } else {
       item = baseItem({ event: 'system', verb: humanize(t), detail: d.note || null });
     }
-    const shownActor = t === 'urgent_response' ? 'Ticket Pulse' : actor;
+    const shownActor = t === 'urgent_response'
+      ? 'Ticket Pulse'
+      : ((t === 'merged_from' || t === 'merged_into') && d.actorName) ? d.actorName : actor;
     items.push({ ...item, key: `a-${a.id}`, at, kind, machine: item.machine ?? machine, actor: shownActor, source, sig: `a|${t}|${shownActor}|${item.from || ''}|${item.to || ''}|${item.detail || (t === 'urgent_response' ? item.verb : '')}` });
   }
 

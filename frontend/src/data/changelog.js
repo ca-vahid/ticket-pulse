@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.2.98-preview';
+export const APP_VERSION = '4.2.99-preview';
 
 export const changelog = [
+  {
+    version: '4.2.99-preview',
+    date: 'October 18, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Workflow Preview is a full page</strong> &mdash; Preview opens as its own page with a Back button to the workflow, and your unsaved edits are kept. Tickets are listed in a dense table with a Run button on every row, 25 or 50 to a page. One row of filters covers priority, status, where the ticket was born, owner, how recent it is, and noise. Search finds TP and FreshService numbers, people, categories and departments. Every action block always shows in a preview, so the separate switch is gone.' },
+      { type: 'new', html: '<strong>Watch a preview run</strong> &mdash; the steps fill in across the top as the workflow runs, each with a tick, a warning, or a mark for steps it never reached. The e-mail is shown full width, as it will look on a desktop or a phone. Under it is the LLM&rsquo;s output: model, time, tokens, guard result, prompt source, what it wrote, its tool calls, and the evidence it saw. Issues, the step checklist, action blocks, branding and routing are listed down the right.' },
+      { type: 'improved', html: '<strong>Workflow Audit, redesigned</strong> &mdash; filters sit on one row, with the less-used ones under More. Runs are listed compactly, and the open run uses the same view as Preview: pipeline, e-mail, LLM output and checks on one screen, with no tabs.' },
+      { type: 'fixed', html: '<strong>Merged tickets bring their full e-mail</strong> &mdash; merging a ticket now copies its opening e-mail into the conversation as a full message, with its formatting, sender and time, instead of a cut-off quote in the merge note. Every copied message is marked &ldquo;Merged from&rdquo; with a link back. The merge note says briefly what came over, and the Activity tab shows which ticket was merged and what was copied.' },
+    ],
+  },
   {
     version: '4.2.98-preview',
     date: 'October 17, 2026',
