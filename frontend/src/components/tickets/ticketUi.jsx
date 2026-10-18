@@ -1023,29 +1023,40 @@ export function MirrorChip({ ticket }) {
 //    that warms to blue on the parent's hover (the picker button carries `group`).
 //  - 'muted': a quiet, passive "Unassigned" for read-only rows (e.g. FS-born in the
 //    queue) where you can't assign inline — no hover, dimmer, clearly non-actionable.
-// Deliberately not amber: in an all-unassigned view the old yellow pill on every row
-// was noisy and repetitive.
+// Deliberately not amber by default: in an all-unassigned view the old yellow pill
+// on every row was noisy and repetitive. `attention` (the Focus view, Vahid 17 Oct
+// 2026) is the one exception — amber text and a dashed amber ring, no fill, so a
+// gap reads at a glance; `attentionMuted` is the same on a read-only row.
 export function UnassignedBadge({ size = 'h-6 w-6', withLabel = true, labelClass = 'text-xs', variant = 'interactive' }) {
-  const muted = variant === 'muted';
+  const muted = variant === 'muted' || variant === 'attentionMuted';
+  const attention = variant === 'attention' || variant === 'attentionMuted';
   return (
     <span
       className="inline-flex items-center gap-1.5 min-w-0"
       title={muted ? 'Unassigned — managed in FreshService' : 'Unassigned — click to assign'}
+      data-unassigned={attention ? 'attention' : undefined}
     >
       <span
         aria-hidden="true"
         className={`${size} rounded-full border-[1.5px] border-dashed inline-flex items-center justify-center flex-shrink-0 transition-colors ${
-          muted
-            ? 'border-input text-muted-foreground/50'
-            : 'border-input text-muted-foreground/75 group-hover:border-blue-400 group-hover:text-blue-500'
+          attention
+            ? `border-amber-400 text-amber-600 dark:border-amber-400/70 dark:text-amber-300 ${muted ? '' : 'group-hover:border-amber-500'}`
+            : muted
+              ? 'border-input text-muted-foreground/50'
+              : 'border-input text-muted-foreground/75 group-hover:border-blue-400 group-hover:text-blue-500'
         }`}
       >
         <UserPlus className="w-3 h-3" strokeWidth={2.2} />
       </span>
       {withLabel
         ? (
-          <span className={`${labelClass} font-medium truncate ${muted ? 'text-muted-foreground/75' : 'text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-300'}`}>
-            {muted ? 'Unassigned' : 'Assign'}
+          <span className={`${labelClass} font-medium truncate ${
+            attention
+              ? 'text-amber-700 dark:text-amber-300'
+              : muted ? 'text-muted-foreground/75' : 'text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-300'
+          }`}
+          >
+            {muted || attention ? 'Unassigned' : 'Assign'}
           </span>
         )
         : <span className="sr-only">Unassigned</span>}

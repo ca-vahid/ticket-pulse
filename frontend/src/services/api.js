@@ -957,6 +957,8 @@ export const ticketsAPI = {
   // Undo a duplicate dismissal: unlink, revert the guard's run, reopen.
   notDuplicate: async (id) => await api.post(`/tickets/${id}/not-duplicate`),
   mergeTicket: async (id, targetTicketRef, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketRef, notifyRequester }),
+  // Related card (17 Oct 2026): merge `sourceId` INTO `targetTicketId`; an FS-born source can be deleted in FreshService in the same call.
+  mergeInto: async (sourceId, targetTicketId, { deleteFsSource = false } = {}) => await api.post(`/tickets/${sourceId}/merge`, { targetTicketId, deleteFsSource }),
   // Multi-merge (QA 07-13 #1): primaryId survives; ticketIds fold into it.
   mergeMany: async (primaryId, ticketIds, notifyRequester = false) => await api.post(`/tickets/${primaryId}/merge-many`, { ticketIds, notifyRequester }),
   // Split (QA 09-08): the inverse of merge. `splittable` lists the messages a

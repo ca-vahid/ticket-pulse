@@ -1122,11 +1122,35 @@ router.post('/:id/merge', asyncHandler(async (req, res) => {
     const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
     targetTicketId = (await resolveTicketRefOrThrow(req.body.targetTicketRef, req.workspaceId)).id;
   }
-  const result = await ticketMergeService.merge(parseTicketId(req), req.workspaceId, {
+  // Merging a FreshService-born ticket can also delete it IN FreshService
+  // (17 Oct 2026, the Related card's merge: an agent's reply that FS turned
+  // into a new ticket). Same people as /:id/fs-delete; checked BEFORE the
+  // merge so nothing half-happens on a refusal.
+  const deleteFsSource = req.body?.deleteFsSource === true;
+  const actor = req.ticketActor;
+  if (deleteFsSource && !(actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.workspaceRole === 'reviewer')) {
+    throw new AuthorizationError('Deleting tickets requires reviewer or admin access.', 'delete_requires_reviewer');
+  }
+  const sourceId = parseTicketId(req);
+  const result = await ticketMergeService.merge(sourceId, req.workspaceId, {
     targetTicketId,
     notifyRequester: req.body?.notifyRequester === true,
-  }, req.ticketActor);
-  res.json({ success: true, data: result });
+  }, actor);
+  // The merge stands either way; a FreshService refusal is reported, not thrown.
+  let fsDelete = null;
+  if (deleteFsSource) {
+    const source = await prisma.ticket.findFirst({ where: { id: sourceId, workspaceId: req.workspaceId }, select: { origin: true, freshserviceTicketId: true } });
+    if (source?.origin === 'freshservice' && source.freshserviceTicketId) {
+      try {
+        await ticketService.deleteFsTicketInFreshService(sourceId, req.workspaceId, actor);
+        fsDelete = { deleted: true };
+      } catch (err) {
+        logger.warn(`Merge: ticket ${sourceId} merged but the FreshService delete failed: ${err.message}`);
+        fsDelete = { deleted: false, error: err.message };
+      }
+    }
+  }
+  res.json({ success: true, data: { ...result, ...(fsDelete ? { fsDelete } : {}) } });
 }));
 
 // Multi-merge (QA 07-13 #1): :id is the PRIMARY that survives; body.ticketIds

@@ -36,7 +36,8 @@ jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: 
 jest.unstable_mockModule('../src/services/mirrorService.js', () => ({
   default: { enqueueTicketCreate: jest.fn(), enqueueFieldSync: jest.fn(), enqueueThreadEntry: jest.fn(), getClient: jest.fn(), getInteractiveClient: jest.fn() },
 }));
-jest.unstable_mockModule('../src/services/ticketMergeService.js', () => ({ default: { mergedInto: jest.fn().mockResolvedValue(null) } }));
+const mergeMock = { mergedInto: jest.fn().mockResolvedValue(null), merge: jest.fn() };
+jest.unstable_mockModule('../src/services/ticketMergeService.js', () => ({ default: mergeMock }));
 jest.unstable_mockModule('../src/services/scheduledTicketService.js', () => ({ default: {} }));
 jest.unstable_mockModule('../src/middleware/workspace.js', () => ({
   requireWorkspace: (req, _res, next) => { req.workspaceId = 7; next(); },
@@ -171,5 +172,42 @@ describe('POST /api/tickets/bulk-delete', () => {
     await request(buildApp(user, { withReadonlyGate: true })).post('/api/tickets/bulk-delete').send({ ids: [1] }).expect(403);
     await request(buildApp(user)).post('/api/tickets/bulk-delete').send({ ids: [1] }).expect(403);
     expect(ticketServiceMock.bulkDeleteTickets).not.toHaveBeenCalled();
+  });
+});
+
+// 17 Oct 2026: the Related card merges another ticket into the open one and,
+// for a FreshService-born ticket, can delete it in FreshService in the same call.
+describe('POST /api/tickets/:id/merge with deleteFsSource', () => {
+  const admin = { email: 'ada@example.com', name: 'Ada Admin', role: 'admin' };
+  beforeEach(() => {
+    mergeMock.merge.mockResolvedValue({ source: { id: 42 }, target: { id: 63857 }, copied: 2 });
+    prismaMock.ticket.findFirst.mockResolvedValue({ origin: 'freshservice', freshserviceTicketId: 247711n });
+  });
+
+  test('merges, then deletes the FS-born source in FreshService', async () => {
+    const res = await request(buildApp(admin)).post('/api/tickets/42/merge').send({ targetTicketId: 63857, deleteFsSource: true }).expect(200);
+    expect(mergeMock.merge).toHaveBeenCalledWith(42, 7, expect.objectContaining({ targetTicketId: 63857 }), expect.objectContaining({ email: 'ada@example.com' }));
+    expect(ticketServiceMock.deleteFsTicketInFreshService).toHaveBeenCalledWith(42, 7, expect.objectContaining({ email: 'ada@example.com' }));
+    expect(res.body.data.fsDelete).toEqual({ deleted: true });
+  });
+
+  test('a FreshService refusal keeps the merge and reports the reason', async () => {
+    ticketServiceMock.deleteFsTicketInFreshService.mockRejectedValue(new Error('FreshService refused the delete — locked.'));
+    const res = await request(buildApp(admin)).post('/api/tickets/42/merge').send({ targetTicketId: 63857, deleteFsSource: true }).expect(200);
+    expect(res.body.data.copied).toBe(2);
+    expect(res.body.data.fsDelete).toEqual({ deleted: false, error: 'FreshService refused the delete — locked.' });
+  });
+
+  test('a TP-born source is never sent to the FreshService delete', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ origin: 'ticketpulse', freshserviceTicketId: 247700n });
+    const res = await request(buildApp(admin)).post('/api/tickets/42/merge').send({ targetTicketId: 63857, deleteFsSource: true }).expect(200);
+    expect(ticketServiceMock.deleteFsTicketInFreshService).not.toHaveBeenCalled();
+    expect(res.body.data.fsDelete).toBeUndefined();
+  });
+
+  test('asking to delete without reviewer/admin access is refused before anything merges', async () => {
+    memberRole('viewer');
+    await request(buildApp({ email: 'vic@example.com', name: 'Vic', role: 'viewer' })).post('/api/tickets/42/merge').send({ targetTicketId: 63857, deleteFsSource: true }).expect(403);
+    expect(mergeMock.merge).not.toHaveBeenCalled();
   });
 });
