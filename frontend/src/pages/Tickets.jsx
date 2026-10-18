@@ -553,6 +553,29 @@ export default function Tickets() {
       .catch(() => { /* offline/legacy backend — the mirror already painted */ });
     return () => { cancelled = true; };
   }, [workspaceId]);
+  // Keep Subject in place (Vahid, 17 Oct 2026): the checkbox + subject stay
+  // put while the other columns scroll sideways — on unless someone turns it
+  // off in the Columns menu. Same choreography as the switches above.
+  const [freezeSubject, setFreezeSubject] = useState(() => {
+    try { return localStorage.getItem('tp_queue_freeze_subject') !== '0'; } catch { return true; }
+  });
+  const updateFreezeSubject = useCallback((on) => {
+    setFreezeSubject(on);
+    try { localStorage.setItem('tp_queue_freeze_subject', on ? '1' : '0'); } catch { /* no-op */ }
+    ticketsAPI.setQueuePreference('queue.freezeSubject', Boolean(on)).catch(() => { /* local mirror still applies */ });
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference('queue.freezeSubject')
+      .then((res) => {
+        const value = res?.data?.value;
+        if (cancelled || typeof value !== 'boolean') return;
+        setFreezeSubject(value);
+        try { localStorage.setItem('tp_queue_freeze_subject', value ? '1' : '0'); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
   const updateColumnMap = useCallback((on) => {
     setColumnMap(on);
     try { localStorage.setItem('tp_queue_column_map', on ? '1' : '0'); } catch { /* no-op */ }
@@ -1691,7 +1714,7 @@ export default function Tickets() {
   // F (2 Oct 2026): the checkbox + subject stay put while the columns slide —
   // compact/dense lists whose leftmost column is the subject (roomy's title
   // spans the whole row, and a reordered subject is not at the edge).
-  const pinSubject = !roomy && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
+  const pinSubject = freezeSubject && !roomy && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
   // Fixed working area (16 Oct 2026, Vahid): on a desktop-sized window the
   // page itself no longer scrolls. The filter rail and the list are two panes
   // that fill the height under the cards; the list keeps its toolbar, column
@@ -2108,7 +2131,7 @@ export default function Tickets() {
                       custom columns apply at xl+ and mobile keeps its cards. */}
                   {!boardMode && (
                     <div className="hidden md:block order-2">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} />
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} freezeSubject={freezeSubject} onFreezeSubjectChange={updateFreezeSubject} />
                     </div>
                   )}
                   {/* View — two list densities plus the drag-drop board

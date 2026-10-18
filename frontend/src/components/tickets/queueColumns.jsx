@@ -1079,8 +1079,14 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
  * "Always shown", Reset-to-default footer. Same shell as FilterFlyout.
  * Hidden in board mode (the board has status columns, not these).
  */
-export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null, sideArrows = false, onSideArrowsChange = null }) {
+export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null, sideArrows = false, onSideArrowsChange = null, freezeSubject = true, onFreezeSubjectChange = null }) {
   const [open, setOpen] = useState(false);
+  // 17 Oct 2026 (Vahid): on a short window the menu ran off the bottom of the
+  // screen and its switches (Scroll arrows, Reset) could not be reached. It is
+  // capped to the room under the button; the column list shrinks first and the
+  // switches + footer stay in view (the whole menu scrolls only if even they
+  // do not fit).
+  const [roomPx, setRoomPx] = useState(null);
   // QA 09-21 #12: on a touch screen (iPad) a `draggable` row swallows the tap
   // as a drag start and the checkbox never toggles. Coarse pointers get
   // non-draggable rows with ▲▼ buttons; mice keep drag-to-reorder.
@@ -1101,6 +1107,12 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
 
   useEffect(() => {
     if (!open) return undefined;
+    const measure = () => {
+      const r = rootRef.current?.getBoundingClientRect();
+      if (r) setRoomPx(Math.max(220, Math.floor(window.innerHeight - r.bottom - 12)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
     setOrder([
       ...value.filter((k) => QUEUE_COLUMN_MAP.has(k)),
       ...QUEUE_COLUMNS.map((c) => c.key).filter((k) => !value.includes(k)),
@@ -1109,7 +1121,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+    return () => { window.removeEventListener('resize', measure); document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -1178,12 +1190,14 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
         <div
           role="dialog"
           aria-label="Customize columns"
-          className="absolute top-full mt-1 z-30 left-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn"
+          data-testid="columns-menu"
+          style={roomPx ? { maxHeight: `${roomPx}px` } : undefined}
+          className="absolute top-full mt-1 z-30 left-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn flex flex-col overflow-y-auto settings-scrollbar"
         >
-          <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
+          <p className="flex-none px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
             {coarsePointer ? 'Use the arrows to reorder' : 'Drag a row to reorder'} · applies on large screens (smaller screens keep the essentials)
           </p>
-          <ul className="max-h-[min(60vh,26rem)] overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
+          <ul className="min-h-[6rem] flex-1 max-h-[min(60vh,26rem)] overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
             {order.map((key) => {
               const col = QUEUE_COLUMN_MAP.get(key);
               if (!col) return null;
@@ -1249,7 +1263,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           {/* Column map (2 Oct 2026): a personal, opt-in row of jump links +
               a mini-map over the list when it scrolls sideways. */}
           {onColumnMapChange && (
-            <label className="mt-1 flex items-start gap-2 px-1.5 py-1.5 rounded-md border-t border-border/60 pt-2 cursor-pointer hover:bg-muted/60">
+            <label title="Jump links and a mini-map above the list when it scrolls sideways. Just for you." className="flex-none mt-1 flex items-start gap-2 px-1.5 py-1.5 rounded-md border-t border-border/60 pt-2 cursor-pointer hover:bg-muted/60">
               <input
                 type="checkbox"
                 role="switch"
@@ -1259,7 +1273,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               />
               <span className="min-w-0">
                 <span className="block text-sm text-foreground/85">Column map</span>
-                <span className="block text-[11px] leading-snug text-muted-foreground/75">Jump links and a mini-map above the list when it scrolls sideways. Just for you.</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground/75 truncate">Jump links above a wide list</span>
               </span>
             </label>
           )}
@@ -1267,7 +1281,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               rows. They are now a personal choice, off until someone wants
               them; dragging, Shift + wheel and the arrow keys always work. */}
           {onSideArrowsChange && (
-            <label className="flex items-start gap-2 px-1.5 py-1.5 rounded-md cursor-pointer hover:bg-muted/60">
+            <label title="Round arrows over the list that page it sideways. Without them: drag the list, Shift + wheel, or the arrow keys. Just for you." className="flex-none flex items-start gap-2 px-1.5 py-1.5 rounded-md cursor-pointer hover:bg-muted/60">
               <input
                 type="checkbox"
                 role="switch"
@@ -1277,13 +1291,30 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               />
               <span className="min-w-0">
                 <span className="block text-sm text-foreground/85">Scroll arrows</span>
-                <span className="block text-[11px] leading-snug text-muted-foreground/75">Round arrows over the list that page it sideways. Without them: drag the list, Shift + wheel, or the arrow keys. Just for you.</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground/75 truncate">Arrows that page the list sideways</span>
+              </span>
+            </label>
+          )}
+          {/* Keep Subject in place (17 Oct 2026): off, the whole row scrolls
+              sideways, subject included. */}
+          {onFreezeSubjectChange && (
+            <label title="The Subject column stays put while the other columns scroll sideways. Off: the whole row scrolls. Just for you." className="flex-none flex items-start gap-2 px-1.5 py-1.5 rounded-md cursor-pointer hover:bg-muted/60">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={freezeSubject}
+                onChange={(e) => onFreezeSubjectChange(e.target.checked)}
+                className="tp-focus-ring mt-0.5 rounded border-input text-blue-600 dark:text-blue-300"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm text-foreground/85">Keep Subject in place</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground/75 truncate">Stays put while columns scroll</span>
               </span>
             </label>
           )}
           {/* Footer: column-set reset (QC4) beside the width reset (QR3) —
               two different customizations, two explicit ways back. */}
-          <div className="mt-1.5 flex items-stretch gap-1 border-t border-border/60 pt-1">
+          <div className="flex-none mt-1.5 flex items-stretch gap-1 border-t border-border/60 pt-1">
             <button
               onClick={reset}
               disabled={!customized}

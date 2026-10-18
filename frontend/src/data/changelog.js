@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.90-preview';
+export const APP_VERSION = '4.2.91-preview';
 
 export const changelog = [
+  {
+    version: '4.2.91-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The Columns menu fits your window</strong> &mdash; on a shorter screen the menu ran off the bottom, so its switches and Reset buttons were out of reach. It now fits the room under the button: the column list scrolls on its own and the switches stay in view.' },
+      { type: 'new', html: '<strong>Keep Subject in place</strong> &mdash; a new switch in the Columns menu. On (as before), the Subject column stays put while the other columns scroll sideways; off, the whole row scrolls together. Your choice follows you to any device.' },
+    ],
+  },
   {
     version: '4.2.90-preview',
     date: 'October 17, 2026',

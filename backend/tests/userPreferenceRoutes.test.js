@@ -159,6 +159,14 @@ describe('PUT /api/tickets/preferences/:key', () => {
     });
   });
 
+  test('queue.freezeSubject takes true / false only (17 Oct 2026)', async () => {
+    const res = await request(buildApp()).put('/api/tickets/preferences/queue.freezeSubject').send({ value: false }).expect(200);
+    expect(res.body.data).toEqual({ key: 'queue.freezeSubject', value: false });
+    prismaMock.userPreference.upsert.mockClear();
+    await request(buildApp()).put('/api/tickets/preferences/queue.freezeSubject').send({ value: 'off' }).expect(400);
+    expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
+  });
+
   test.each(['system', 'light', 'dark'])('ui.theme accepts %s', async (value) => {
     const res = await request(buildApp()).put('/api/tickets/preferences/ui.theme').send({ value }).expect(200);
     expect(res.body.data).toEqual({ key: 'ui.theme', value });
