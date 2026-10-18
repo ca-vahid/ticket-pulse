@@ -31,7 +31,7 @@ export function logTimeZoneDataCheck(logger) {
   if (result.ok) {
     logger.info(`Time-zone data ${result.tz} (Node ${result.node}): BC's permanent UTC-7 is known`);
   } else {
-    logger.error(`Time-zone data ${result.tz} (Node ${result.node}) is too old for BC's permanent UTC-7: 15 Nov 2026 20:00 UTC reads as ${result.vancouverHour}:00 in Vancouver, not 13:00. Business hours, SLA clocks and shift checks will be an hour off; move the app to Node 22 or newer.`);
+    logger.error(`Time-zone data ${result.tz} (Node ${result.node}) is too old for BC's permanent UTC-7: 15 Nov 2026 20:00 UTC reads as ${result.vancouverHour}:00 in Vancouver, not 13:00. Business hours, SLA clocks and shift checks will be an hour off; set ICU_TIMEZONE_FILES_DIR to backend/tzdata/<release> (see tzdata/README.md).`);
   }
   return result;
 }
