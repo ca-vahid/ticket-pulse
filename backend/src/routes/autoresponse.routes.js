@@ -228,11 +228,11 @@ router.get('/availability/check', asyncHandler(async (req, res) => {
  * GET /api/autoresponse/eta/debug
  * Debug endpoint: returns queue stats and computed ETA for the current moment.
  * Query params:
- *  - timezone (optional): IANA timezone (default: America/Los_Angeles)
+ *  - timezone (optional): IANA timezone (default: America/Vancouver)
  *  - staleDays (optional): number (default: 3)
  */
 router.get('/eta/debug', asyncHandler(async (req, res) => {
-  const timezone = req.query.timezone || 'America/Los_Angeles';
+  const timezone = req.query.timezone || 'America/Vancouver';
   const staleDays = req.query.staleDays ? parseInt(req.query.staleDays, 10) : 3;
 
   const queueStats = await queueStatsService.getQueueStats({ timezone, staleDays, workspaceId: req.workspaceId });

@@ -31,7 +31,7 @@ class AvailabilityService {
       startTime: '09:00',
       endTime: '17:00',
       isEnabled: true,
-      timezone: 'America/Los_Angeles',
+      timezone: 'America/Vancouver',
       workspaceId,
     }));
 
@@ -76,11 +76,11 @@ class AvailabilityService {
   /**
    * Check if a given date/time falls within business hours
    * @param {Date} dateTime - The date/time to check
-   * @param {string} timezone - The timezone to use (default: America/Los_Angeles)
+   * @param {string} timezone - The timezone to use (default: America/Vancouver)
    * @param {number|null} workspaceId - When set, scope business hours and holidays to this workspace
    * @returns {Promise<{isBusinessHours: boolean, reason: string}>}
    */
-  async isBusinessHours(dateTime = new Date(), timezone = 'America/Los_Angeles', workspaceId = null) {
+  async isBusinessHours(dateTime = new Date(), timezone = 'America/Vancouver', workspaceId = null) {
     const date = new Date(dateTime);
     const zoned = toZonedTime(date, timezone);
     const dayOfWeek = zoned.getDay(); // 0=Sunday, 6=Saturday
@@ -136,11 +136,11 @@ class AvailabilityService {
   /**
    * Get next business day/time
    * @param {Date} fromDate - Starting date
-   * @param {string} timezone - The timezone to use (default: America/Los_Angeles)
+   * @param {string} timezone - The timezone to use (default: America/Vancouver)
    * @param {number|null} workspaceId - When set, scope business hours and holidays
    * @returns {Promise<{nextBusinessTime: Date, reason: string}>}
    */
-  async getNextBusinessTime(fromDate = new Date(), timezone = 'America/Los_Angeles', workspaceId = null) {
+  async getNextBusinessTime(fromDate = new Date(), timezone = 'America/Vancouver', workspaceId = null) {
     const date = new Date(fromDate);
     const maxDaysToCheck = 14; // Check up to 2 weeks ahead
     let daysChecked = 0;
@@ -256,11 +256,11 @@ class AvailabilityService {
   /**
    * Check if a given date is a holiday
    * @param {Date} date - The date to check
-   * @param {string} timezone - The timezone to use (default: America/Los_Angeles)
+   * @param {string} timezone - The timezone to use (default: America/Vancouver)
    * @param {number|null} workspaceId - When set, include shared holidays (workspaceId null) and this workspace's holidays
    * @returns {Promise<{isHoliday: boolean, name: string|null}>}
    */
-  async isHoliday(date, timezone = 'America/Los_Angeles', workspaceId = null) {
+  async isHoliday(date, timezone = 'America/Vancouver', workspaceId = null) {
     const checkDate = new Date(date);
 
     // Holiday.date is a @db.Date column (PostgreSQL DATE), stored as midnight UTC.
@@ -327,7 +327,7 @@ class AvailabilityService {
    */
   async calculateETA(stats = {}) {
     const now = new Date();
-    const timezone = stats.timezone || 'America/Los_Angeles';
+    const timezone = stats.timezone || 'America/Vancouver';
     const workspaceId = stats.workspaceId ?? null;
     const ticketsArrivedSoFarToday = stats.ticketsArrivedSoFarToday ?? stats.todayTicketCount ?? 0;
     const recentOpenBacklog = stats.recentOpenBacklog ?? stats.openTicketCount ?? 0;

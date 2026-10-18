@@ -71,7 +71,7 @@ export const TIMEZONE_MAP = {
   Vancouver: 'America/Vancouver',
   'Los Angeles': 'America/Los_Angeles',
   'San Francisco': 'America/Los_Angeles',
-  Default: 'America/Los_Angeles',
+  Default: 'America/Vancouver',
 };
 
 // FreshService time_zone strings -> IANA timezone identifiers

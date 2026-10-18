@@ -528,7 +528,7 @@ export async function buildPreviewEventContext({ ticket, triggerType }) {
     workspace: {
       id: ticket.workspaceId,
       name: ticket.workspace?.name || ticket.workspaceName || null,
-      timezone: ticket.workspace?.defaultTimezone || 'America/Los_Angeles',
+      timezone: ticket.workspace?.defaultTimezone || 'America/Vancouver',
     },
     ticket: {
       // Everything a live run has (QA 10-05 #5); the fields below stay as they were.

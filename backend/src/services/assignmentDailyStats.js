@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import { tallyGroupedRuns, adjustForHandledInFs } from './assignmentStatsAggregation.js';
 import { getTodayRange } from '../utils/timezone.js';
 
-const PACIFIC_TIMEZONE = 'America/Los_Angeles';
+const PACIFIC_TIMEZONE = 'America/Vancouver';
 
 export function getStatsDayWindow(timezone = PACIFIC_TIMEZONE, reference = new Date()) {
   const { start } = getTodayRange(timezone, reference);

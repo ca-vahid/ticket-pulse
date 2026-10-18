@@ -663,7 +663,7 @@ class AutoHelpPlaybookService {
       .then(async () => {
         const workspace = await prisma.workspace.findUnique({ where: { id: ws }, select: { defaultTimezone: true } });
         const { default: availabilityService } = await import('./availabilityService.js');
-        const bh = await availabilityService.isBusinessHours(new Date(at), workspace?.defaultTimezone || 'America/Los_Angeles', ws);
+        const bh = await availabilityService.isBusinessHours(new Date(at), workspace?.defaultTimezone || 'America/Vancouver', ws);
         return bh?.isBusinessHours === false;
       })
       .catch((err) => { logger.warn(`Auto-help after-hours check failed (ws ${ws}): ${err.message}`); return false; });

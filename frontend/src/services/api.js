@@ -340,7 +340,7 @@ function applyNoiseParam(params) {
 }
 
 export const dashboardAPI = {
-  getDashboard: async (timezone = 'America/Los_Angeles', date = null) => {
+  getDashboard: async (timezone = 'America/Vancouver', date = null) => {
     const params = { timezone };
     if (date) {
       const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
@@ -349,7 +349,7 @@ export const dashboardAPI = {
     return await api.get('/dashboard', { params: applyNoiseParam(params) });
   },
 
-  getTechnician: async (id, timezone = 'America/Los_Angeles', date = null) => {
+  getTechnician: async (id, timezone = 'America/Vancouver', date = null) => {
     const params = { timezone };
     if (date) {
       const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
@@ -379,7 +379,7 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/ticket/${idOrFsId}/history`);
   },
 
-  getWeeklyStats: async (timezone = 'America/Los_Angeles', date = null) => {
+  getWeeklyStats: async (timezone = 'America/Vancouver', date = null) => {
     const params = { timezone };
     if (date) {
       const dateStr = typeof date === 'string' ? date : formatDateLocal(date);
@@ -388,7 +388,7 @@ export const dashboardAPI = {
     return await api.get('/dashboard/weekly-stats', { params: applyNoiseParam(params) });
   },
 
-  getWeeklyDashboard: async (weekStart = null, timezone = 'America/Los_Angeles') => {
+  getWeeklyDashboard: async (weekStart = null, timezone = 'America/Vancouver') => {
     const params = { timezone };
     if (weekStart) {
       const dateStr = typeof weekStart === 'string' ? weekStart : formatDateLocal(weekStart);
@@ -397,7 +397,7 @@ export const dashboardAPI = {
     return await api.get('/dashboard/weekly', { params: applyNoiseParam(params) });
   },
 
-  getTechnicianWeekly: async (id, weekStart = null, timezone = 'America/Los_Angeles') => {
+  getTechnicianWeekly: async (id, weekStart = null, timezone = 'America/Vancouver') => {
     const params = { timezone };
     if (weekStart) {
       const dateStr = typeof weekStart === 'string' ? weekStart : formatDateLocal(weekStart);
@@ -406,7 +406,7 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}/weekly`, { params: applyNoiseParam(params) });
   },
 
-  getTechnicianMonthly: async (id, month = null, timezone = 'America/Los_Angeles') => {
+  getTechnicianMonthly: async (id, month = null, timezone = 'America/Vancouver') => {
     const params = { timezone };
     if (month) params.month = month; // "YYYY-MM"
     return await api.get(`/dashboard/technician/${id}/monthly`, { params: applyNoiseParam(params) });
@@ -420,7 +420,7 @@ export const dashboardAPI = {
    * @param {object}   period   - { type: 'daily'|'weekly'|'monthly', date?, weekStart?, month? }
    * @param {string}   timezone
    */
-  getTimeline: async (techIds, period = {}, timezone = 'America/Los_Angeles') => {
+  getTimeline: async (techIds, period = {}, timezone = 'America/Vancouver') => {
     const params = { techIds: techIds.join(','), timezone };
     if (period.date)      params.date      = period.date;
     if (period.weekStart) params.weekStart  = period.weekStart;
@@ -452,7 +452,7 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}/feedback`);
   },
 
-  getMonthlyDashboard: async (monthStart = null, timezone = 'America/Los_Angeles') => {
+  getMonthlyDashboard: async (monthStart = null, timezone = 'America/Vancouver') => {
     const params = { timezone };
     if (monthStart) {
       // monthStart should be first day of the month (YYYY-MM-DD)

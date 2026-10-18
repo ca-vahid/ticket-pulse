@@ -310,7 +310,7 @@ export function releaseAllowance(settings, releasedAt = [], now = new Date()) {
 // ---- "how have they worked" -----------------------------------------------------
 
 /** YYYY-MM-DD of an instant in a time zone. */
-export function dayIn(date, timeZone = 'America/Los_Angeles') {
+export function dayIn(date, timeZone = 'America/Vancouver') {
   try {
     return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(date));
   } catch {
@@ -380,7 +380,7 @@ export function releaseOfDay(runs, gapMinutes = 15) {
  * @param {Array<{queuedAt, claimedAt}>} queuedRuns  every queued run released in the period
  * No person is ranked anywhere: counts are per rule and per day.
  */
-export function summarize(runs, queuedRuns, { settings, timeZone = 'America/Los_Angeles', days = 30, now = new Date() } = {}) {
+export function summarize(runs, queuedRuns, { settings, timeZone = 'America/Vancouver', days = 30, now = new Date() } = {}) {
   const windowMinutes = settings?.capWindowMinutes || 10;
   const capCount = settings?.capCount || 3;
   const dayMap = new Map();

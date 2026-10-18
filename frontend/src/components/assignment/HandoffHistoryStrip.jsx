@@ -10,7 +10,7 @@ import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
  * Renders as a chain of pills:
  *   [Andrew] --reject--> [Adrian] --reassign--> [Mehdi] (current)
  */
-export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, workspaceTimezone = 'America/Los_Angeles' }) {
+export default function HandoffHistoryStrip({ ticketId, freshserviceTicketId, workspaceTimezone = 'America/Vancouver' }) {
   const [episodes, setEpisodes] = useState(null);
   const [loading, setLoading] = useState(true);
   // Stated hand-back reasons for this ticket (QA 09-25 item 3).

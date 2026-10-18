@@ -62,7 +62,7 @@ vi.mock('xlsx', () => ({
 //   ranked (old bug):  Bob (55), Alice (20), Cara (15)
 //   alphabetical (fix): Alice, Bob, Cara
 const TEAM_FIXTURE = {
-  metadata: { range: { start: '2026-07-18', end: '2026-08-17', timezone: 'America/Los_Angeles' } },
+  metadata: { range: { start: '2026-07-18', end: '2026-08-17', timezone: 'America/Vancouver' } },
   summary: { activeTechnicians: 3, rangeBusinessDays: 21, totalAssigned: 90 },
   technicians: [
     {
@@ -100,7 +100,7 @@ const TEAM_FIXTURE = {
 const CATEGORIES_FIXTURE = {
   metadata: {
     categoryMode: 'legacy',
-    range: { start: '2026-07-18', end: '2026-08-17', timezone: 'America/Los_Angeles' },
+    range: { start: '2026-07-18', end: '2026-08-17', timezone: 'America/Vancouver' },
   },
   summary: { totalCreated: 42, open: 9, overdue: 1, reviewNeeded: 0, automationFailures: 0, automationRuns: 5 },
   rows: [],

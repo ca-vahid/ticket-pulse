@@ -95,7 +95,7 @@ class ScheduledSyncService {
 
     logger.info(`Starting scheduled sync for workspace "${wsName}" (id=${wsId}) every ${intervalMinutes}m (cron "${cronExpression}")`);
 
-    const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+    const tz = workspace.defaultTimezone || 'America/Vancouver';
 
     const job = cron.schedule(
       cronExpression,
@@ -185,7 +185,7 @@ class ScheduledSyncService {
       () => this.runVTSync(wsId, wsName, 'scheduled'),
       {
         scheduled: true,
-        timezone: workspace.defaultTimezone || 'America/Los_Angeles',
+        timezone: workspace.defaultTimezone || 'America/Vancouver',
       },
     );
 
@@ -253,7 +253,7 @@ class ScheduledSyncService {
   async startAssignmentFastSyncForWorkspace(workspace) {
     const wsId = workspace.id;
     const wsName = workspace.name;
-    const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+    const tz = workspace.defaultTimezone || 'America/Vancouver';
     const secondOffset = (wsId * 13) % 60;
     // v3.8.91: per-workspace cadence (Settings → Workspaces). 1 = every minute
     // (the historical behaviour); N = every N minutes, N in 1..30.
@@ -359,7 +359,7 @@ class ScheduledSyncService {
       },
       {
         scheduled: true,
-        timezone: workspace.defaultTimezone || config.timezone || 'America/Los_Angeles',
+        timezone: workspace.defaultTimezone || config.timezone || 'America/Vancouver',
       },
     );
 
@@ -394,7 +394,7 @@ class ScheduledSyncService {
   startEmbeddingBackfillForWorkspace(workspace) {
     const wsId = workspace.id;
     this.stopEmbeddingBackfillForWorkspace(wsId);
-    const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+    const tz = workspace.defaultTimezone || 'America/Vancouver';
     const job = cron.schedule('30 3 * * *', async () => {
       try {
         const { default: ticketEmbeddingService } = await import('./ticketEmbeddingService.js');
@@ -513,7 +513,7 @@ class ScheduledSyncService {
       } catch (error) {
         logger.warn(`Mailbox hold digest tick failed (non-fatal): ${error.message}`);
       }
-    }, { scheduled: true, timezone: 'America/Los_Angeles' });
+    }, { scheduled: true, timezone: 'America/Vancouver' });
   }
 
   /**
@@ -534,7 +534,7 @@ class ScheduledSyncService {
       } catch (error) {
         logger.warn(`Noise close digest tick failed (non-fatal): ${error.message}`);
       }
-    }, { scheduled: true, timezone: 'America/Los_Angeles' });
+    }, { scheduled: true, timezone: 'America/Vancouver' });
   }
 
   stopNoiseCloseDigest() {
@@ -564,7 +564,7 @@ class ScheduledSyncService {
       } catch (error) {
         logger.warn(`Urgent response digest tick failed (non-fatal): ${error.message}`);
       }
-    }, { scheduled: true, timezone: 'America/Los_Angeles' });
+    }, { scheduled: true, timezone: 'America/Vancouver' });
   }
 
   stopUrgentResponseDigest() {

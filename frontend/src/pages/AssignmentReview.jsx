@@ -46,7 +46,7 @@ const ALL_TABS = [
   // AssignmentConfigPanel); old ?tab=config deep links fall through to Queue.
 ];
 
-const PACIFIC_TIMEZONE = 'America/Los_Angeles';
+const PACIFIC_TIMEZONE = 'America/Vancouver';
 const QUEUE_SUBVIEW_TO_URL = {
   pending: 'awaiting',
   assigned: 'decided',
@@ -663,8 +663,8 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           ago") answers "is it alive right now?" without watching logs. */}
       <div className="max-w-4xl mx-auto mb-4 sm:mb-5">
         {(() => {
-          const tz = today.range?.timezone || queueStatus?.timezone || 'America/Los_Angeles';
-          const tzLabel = tz === 'America/Los_Angeles' ? 'Pacific Time' : tz.replace(/_/g, ' ');
+          const tz = today.range?.timezone || queueStatus?.timezone || 'America/Vancouver';
+          const tzLabel = tz === 'America/Vancouver' ? 'Pacific Time' : tz.replace(/_/g, ' ');
           let dayLabel = '';
           try {
             dayLabel = new Intl.DateTimeFormat('en-US', {
@@ -1257,7 +1257,7 @@ function buildTechOptions(techPhotos) {
     }));
 }
 
-function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles', timeRange = '7d', onTimeRangeChange, onHeaderActionChange }) {
+function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Vancouver', timeRange = '7d', onTimeRangeChange, onHeaderActionChange }) {
   const navigate = useNavigate();
   const [queue, setQueue] = useState({ items: [], total: 0, totals: { all: 0, unassigned: 0, outsideAssigned: 0 }, inProgress: [] });
   const [outsideAssignedRuns, setOutsideAssignedRuns] = useState({ items: [], total: 0 });
@@ -3703,7 +3703,7 @@ function RunNowLiveOverlay({ info, onClose }) {
   );
 }
 
-function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
+function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Vancouver' }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [runs, setRuns] = useState({ items: [], total: 0 });
@@ -4010,7 +4010,7 @@ function ConfigSection({ icon: Icon, title, children, defaultOpen = true }) {
   );
 }
 
-function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
+function WebhookConfigCard({ workspaceTimezone = 'America/Vancouver' }) {
   const [config, setConfig] = useState(null);
   const [secret, setSecret] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -4624,7 +4624,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
   );
 }
 
-export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles' }) {
+export function AssignmentConfigPanel({ workspaceTimezone = 'America/Vancouver' }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -4954,7 +4954,7 @@ export default function AssignmentReview() {
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
   const { user } = useAuth();
   const [assignmentHeaderAction, setAssignmentHeaderAction] = useState(null);
-  const [workspaceTimezone, setWorkspaceTimezone] = useState('America/Los_Angeles');
+  const [workspaceTimezone, setWorkspaceTimezone] = useState('America/Vancouver');
   const [timeRange, setTimeRange] = useState('7d');
   const [competencyRequestCount, setCompetencyRequestCount] = useState(0);
 
@@ -4971,19 +4971,19 @@ export default function AssignmentReview() {
     let cancelled = false;
 
     if (!currentWorkspace?.id) {
-      setWorkspaceTimezone('America/Los_Angeles');
+      setWorkspaceTimezone('America/Vancouver');
       return undefined;
     }
 
     workspaceAPI.getById(currentWorkspace.id)
       .then((res) => {
         if (!cancelled) {
-          setWorkspaceTimezone(res?.data?.defaultTimezone || 'America/Los_Angeles');
+          setWorkspaceTimezone(res?.data?.defaultTimezone || 'America/Vancouver');
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setWorkspaceTimezone('America/Los_Angeles');
+          setWorkspaceTimezone('America/Vancouver');
         }
       });
 

@@ -822,7 +822,7 @@ export function PromptDiffModal({
   );
 }
 
-export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles' }) {
+export default function PromptManager({ workspaceTimezone = 'America/Vancouver' }) {
   const [versions, setVersions] = useState([]);
   const [published, setPublished] = useState(null);
   // Version bodies are cached in a ref (not state) so loadPromptVersion keeps

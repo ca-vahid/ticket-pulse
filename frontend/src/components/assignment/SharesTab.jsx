@@ -109,7 +109,7 @@ function CategoryPicker({ categories, selected, onChange, disabled }) {
   );
 }
 
-export default function SharesTab({ workspaceTimezone = 'America/Los_Angeles' }) {
+export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
   const [days, setDays] = useState(14);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

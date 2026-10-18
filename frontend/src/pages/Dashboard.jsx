@@ -367,28 +367,28 @@ export default function Dashboard() {
   useEffect(() => {
     const dateStr = formatDateLocal(selectedDate);
     const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-    fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+    fetchDashboard('America/Vancouver', isCurrentDay ? null : dateStr);
   }, [selectedDate, fetchDashboard, formatDateLocal]);
 
   // Fetch weekly stats when selected date or week changes
   useEffect(() => {
     const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
     const dateStr = formatDateLocal(dateToUse);
-    fetchWeeklyStats('America/Los_Angeles', dateStr);
+    fetchWeeklyStats('America/Vancouver', dateStr);
   }, [selectedDate, selectedWeek, viewMode, formatDateLocal, fetchWeeklyStats]);
 
   // Fetch weekly dashboard data when in weekly mode or selectedWeek changes
   useEffect(() => {
     if (viewMode !== 'weekly') return;
     const weekStartStr = formatDateLocal(selectedWeek);
-    fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+    fetchWeeklyDashboard(weekStartStr, 'America/Vancouver');
   }, [viewMode, selectedWeek, formatDateLocal, fetchWeeklyDashboard]);
 
   // Fetch monthly dashboard data when in monthly mode or selectedMonth changes
   useEffect(() => {
     if (viewMode !== 'monthly') return;
     const monthStartStr = formatDateLocal(selectedMonth);
-    fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
+    fetchMonthlyDashboard(monthStartStr, 'America/Vancouver');
   }, [viewMode, selectedMonth, formatDateLocal, fetchMonthlyDashboard]);
 
   // Poll for background sync status every 5 seconds (deferred until primary data arrives)
@@ -442,17 +442,17 @@ export default function Dashboard() {
     await new Promise(resolve => setTimeout(resolve, 500));
     if (viewMode === 'weekly') {
       const weekStartStr = formatDateLocal(selectedWeek);
-      await fetchWeeklyDashboard(weekStartStr, 'America/Los_Angeles');
+      await fetchWeeklyDashboard(weekStartStr, 'America/Vancouver');
     } else if (viewMode === 'monthly') {
       const monthStartStr = formatDateLocal(selectedMonth);
-      await fetchMonthlyDashboard(monthStartStr, 'America/Los_Angeles');
+      await fetchMonthlyDashboard(monthStartStr, 'America/Vancouver');
     } else {
       const dateStr = formatDateLocal(selectedDate);
       const isCurrentDay = selectedDate.toDateString() === new Date().toDateString();
-      await fetchDashboard('America/Los_Angeles', isCurrentDay ? null : dateStr);
+      await fetchDashboard('America/Vancouver', isCurrentDay ? null : dateStr);
     }
     const dateToUse = viewMode === 'weekly' ? selectedWeek : selectedDate;
-    await fetchWeeklyStats('America/Los_Angeles', formatDateLocal(dateToUse));
+    await fetchWeeklyStats('America/Vancouver', formatDateLocal(dateToUse));
   }, [viewMode, selectedDate, selectedWeek, selectedMonth, invalidateCurrentView, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard, fetchWeeklyStats, formatDateLocal]);
 
   const handleToggleNoise = useCallback(async () => {

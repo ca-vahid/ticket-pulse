@@ -16,6 +16,7 @@ import routes from './routes/index.js';
 import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
 import { retryBoot, isTransientDbError } from './utils/bootRetry.js';
+import { logTimeZoneDataCheck } from './utils/tzDataCheck.js';
 import graphNotificationRoutes from './routes/graphNotifications.routes.js';
 import sendgridEventRoutes from './routes/sendgridEvents.routes.js';
 import settingsRepository from './services/settingsRepository.js';
@@ -182,6 +183,7 @@ app.get('/health', async (req, res) => {
       name: 'ticket-pulse',
       version: pkg.version,
       environment: config.env,
+      tzData: process.versions.tz || null,
     },
     uptime: Math.floor((Date.now() - APP_START_TIME) / 1000),
     checks,
@@ -643,6 +645,7 @@ const PORT = config.port;
 
 app.listen(PORT, () => {
   logger.info(`Server started on port ${PORT}`);
+  logTimeZoneDataCheck(logger);
   logger.info(`Environment: ${config.env}`);
   logger.info(`Database: ${config.database.url.split('@')[1] || 'configured'}`);
 

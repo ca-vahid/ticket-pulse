@@ -22,7 +22,7 @@ import { getDateColumnMonthDay } from '../utils/timezone.js';
  *  - walk exceeds MAX_WALK_DAYS      → pure wall-clock (logged)
  */
 
-const FALLBACK_TIMEZONE = 'America/Los_Angeles';
+const FALLBACK_TIMEZONE = 'America/Vancouver';
 // Hard cap on the day walk. 400 days of zero business capacity means the
 // calendar is misconfigured (e.g. every day is a recurring holiday) — fall
 // back to wall-clock rather than looping forever.

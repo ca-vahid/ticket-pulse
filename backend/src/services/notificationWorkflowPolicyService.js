@@ -185,7 +185,7 @@ function dateFromContext(context = {}) {
 async function availabilityForContext(context = {}, policy = null) {
   const { default: availabilityService } = await import('./availabilityService.js');
   const workspaceId = Number(context.workspace?.id || context.ticket?.workspaceId || policy?.workspaceId || 0) || null;
-  const timezone = context.workspace?.timezone || 'America/Los_Angeles';
+  const timezone = context.workspace?.timezone || 'America/Vancouver';
   const checkedAt = dateFromContext(context);
   const [businessHours, holiday] = await Promise.all([
     availabilityService.isBusinessHours(checkedAt, timezone, workspaceId),
@@ -224,7 +224,7 @@ async function routingPreviewInputs(workspaceId, policyDraft = null, referenceDa
     ...(policyDraft || {}),
     workspaceId,
   });
-  const timezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const timezone = workspace?.defaultTimezone || 'America/Vancouver';
   const businessHours = await availabilityService.getBusinessHours(workspaceId);
   return {
     availabilityService,

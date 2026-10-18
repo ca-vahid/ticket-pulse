@@ -597,7 +597,7 @@ export const MODULES = {
       startTime: r.startTime,
       endTime: r.endTime,
       isEnabled: r.isEnabled !== false,
-      timezone: r.timezone ?? 'America/Los_Angeles',
+      timezone: r.timezone ?? 'America/Vancouver',
     }),
     keyOf: (row) => `day-${row.dayOfWeek}`,
     toData: (row) => ({
@@ -605,7 +605,7 @@ export const MODULES = {
       startTime: row.startTime,
       endTime: row.endTime,
       isEnabled: row.isEnabled !== false,
-      timezone: row.timezone ?? 'America/Los_Angeles',
+      timezone: row.timezone ?? 'America/Vancouver',
     }),
   }),
 

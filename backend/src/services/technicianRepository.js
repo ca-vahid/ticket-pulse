@@ -324,7 +324,7 @@ class TechnicianRepository {
           freshserviceId: BigInt(data.freshserviceId),
           name: data.name,
           email: data.email || null,
-          timezone: data.timezone || 'America/Los_Angeles',
+          timezone: data.timezone || 'America/Vancouver',
           isActive: data.isActive !== undefined ? data.isActive : true,
         },
       });
@@ -347,7 +347,7 @@ class TechnicianRepository {
           workspaceId: data.workspaceId,
           name: data.name,
           email: data.email ? data.email.trim().toLowerCase() : null,
-          timezone: data.timezone || 'America/Los_Angeles',
+          timezone: data.timezone || 'America/Vancouver',
           location: data.location || null,
           photoUrl: data.photoUrl || null,
           isActive: true,
@@ -411,7 +411,7 @@ class TechnicianRepository {
         freshserviceId: BigInt(data.freshserviceId),
         name: data.name,
         email: data.email || null,
-        timezone: data.timezone || 'America/Los_Angeles',
+        timezone: data.timezone || 'America/Vancouver',
         isActive: data.isActive !== undefined ? data.isActive : true,
       };
 

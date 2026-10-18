@@ -184,7 +184,7 @@ export function categoryMatches(categoryIds, { categoryId = null, subcategoryId 
  * starts Monday 00:00, a month on the 1st at 00:00.
  * @returns {{ key: string, start: Date, startDate: string }}
  */
-export function periodOf(now, period = 'week', timeZone = 'America/Los_Angeles') {
+export function periodOf(now, period = 'week', timeZone = 'America/Vancouver') {
   const tz = safeZone(timeZone);
   const [dateStr, isoDay] = formatInTimeZone(now, tz, 'yyyy-MM-dd i').split(' ');
   let startDate;
@@ -214,7 +214,7 @@ function leaveWindow(leave) {
  * Is a person on approved leave at an instant? WFH and IGNORED are not leave.
  * A part-day leave counts only during its hours (workspace time).
  */
-export function onLeaveAt(leaves, at, timeZone = 'America/Los_Angeles') {
+export function onLeaveAt(leaves, at, timeZone = 'America/Vancouver') {
   const tz = safeZone(timeZone);
   const [dateStr, hh, mm] = formatInTimeZone(at, tz, 'yyyy-MM-dd HH mm').split(' ');
   const minutes = Number(hh) * 60 + Number(mm);

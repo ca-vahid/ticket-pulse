@@ -369,15 +369,15 @@ describe('notification workflow policy routing', () => {
     prismaMock.workspace.findUnique.mockResolvedValue({
       id: 1,
       name: 'IT',
-      defaultTimezone: 'America/Los_Angeles',
+      defaultTimezone: 'America/Vancouver',
     });
     prismaMock.notificationWorkflowPolicy.findUnique.mockResolvedValue(null);
     availabilityServiceMock.getBusinessHours.mockResolvedValue([
-      { dayOfWeek: 1, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles' },
-      { dayOfWeek: 2, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles' },
-      { dayOfWeek: 3, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles' },
-      { dayOfWeek: 4, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles' },
-      { dayOfWeek: 5, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles' },
+      { dayOfWeek: 1, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
+      { dayOfWeek: 2, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
+      { dayOfWeek: 3, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
+      { dayOfWeek: 4, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
+      { dayOfWeek: 5, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
     ]);
     availabilityServiceMock.isHoliday.mockResolvedValue({ isHoliday: false, name: null });
     availabilityServiceMock.isBusinessHours.mockResolvedValue({

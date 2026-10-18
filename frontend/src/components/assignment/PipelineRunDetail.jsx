@@ -639,7 +639,7 @@ function isHandledInFreshServiceRun(run) {
   return run?.syncPayload?.preflightAbort?.code === 'superseded_assignee';
 }
 
-function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
+function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Vancouver' }) {
   const [syncing, setSyncing] = useState(false);
   const [localSyncStatus, setLocalSyncStatus] = useState(run.syncStatus);
   const [localSyncedAt, setLocalSyncedAt] = useState(run.syncedAt);
@@ -742,7 +742,7 @@ function SyncStatusCard({ run, onSyncComplete, isAdmin = false, workspaceTimezon
   );
 }
 
-function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Los_Angeles' }) {
+function PriorityAlertAuditCard({ run, workspaceTimezone = 'America/Vancouver' }) {
   const deliveries = Array.isArray(run.notificationDeliveries) ? run.notificationDeliveries : [];
   const escalationStep = Array.isArray(run.steps)
     ? run.steps.find((step) => step.stepName === 'after_hours_urgent_escalation')
@@ -1156,7 +1156,7 @@ function TranscriptSection({ transcript }) {
   );
 }
 
-export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
+export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Vancouver' }) {
   const location = useLocation();
   const navigate = useNavigate();
   const mountedRef = useRef(true);

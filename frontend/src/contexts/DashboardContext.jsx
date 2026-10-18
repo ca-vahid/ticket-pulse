@@ -9,7 +9,7 @@ import { readRoleHint, canPrefetchOps } from '../utils/roleHint';
 
 const DashboardContext = createContext(null);
 
-const TZ = 'America/Los_Angeles';
+const TZ = 'America/Vancouver';
 const DASHBOARD_REFRESH_SSE_ROUTES = ['/dashboard', '/technician', '/timeline', '/analytics', '/visuals'];
 // Cold-load cache warming (weekly + daily dashboard + week stats). The agent
 // page (/technician/:id) never reads those payloads — warming them there

@@ -151,7 +151,7 @@ export default function TechnicianDetail() {
       try {
         setIsLoading(true);
         // selectedDate is already in YYYY-MM-DD format or null
-        const data = await getTechnician(parseInt(id, 10), 'America/Los_Angeles', selectedDate);
+        const data = await getTechnician(parseInt(id, 10), 'America/Vancouver', selectedDate);
         setTechnician(data);
       } catch (err) {
         setError(err.message);

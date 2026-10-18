@@ -30,7 +30,7 @@ describe('analyticsService pure helpers', () => {
 
   test('parseAnalyticsRange defaults to a 30-day window with previous comparison', () => {
     const range = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles' },
+      { timezone: 'America/Vancouver' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
 
@@ -157,7 +157,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence returns canonical category and subcategory metrics', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'previous' },
+      { timezone: 'America/Vancouver', compare: 'previous' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const baseTicket = {
@@ -242,7 +242,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence gives category-only canonical tickets a child bucket', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const base = {
@@ -306,7 +306,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence keeps standalone legacy fallback counts out of canonical treemap hierarchy', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const ticket = {
@@ -346,7 +346,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence does not merge legacy fallback rows into canonical treemap parents', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const canonicalTicket = {
@@ -399,7 +399,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence keeps unmapped counts out of canonical treemap hierarchy', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const canonicalTicket = {
@@ -461,7 +461,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence hides subcategory semantics for legacy workspaces', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const ticket = {
@@ -509,7 +509,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence keeps tiny canonical treemap leaves available for responsive clustering', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const makeTicket = (id, subcategoryId, subcategoryName) => ({
@@ -560,7 +560,7 @@ describe('analyticsService pure helpers', () => {
 
   test('buildCategoryIntelligence excludes zero-created rows from treemap hierarchy', () => {
     const rangeInfo = parseAnalyticsRange(
-      { timezone: 'America/Los_Angeles', compare: 'none' },
+      { timezone: 'America/Vancouver', compare: 'none' },
       new Date('2026-04-26T19:00:00.000Z'),
     );
     const openOnlyTicket = {

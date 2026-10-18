@@ -329,6 +329,6 @@ describe('the small reads', () => {
   test('timezone falls back when the workspace has none', async () => {
     expect(await settings.timezone(1)).toBe('America/Vancouver');
     prismaMock.workspace.findUnique.mockResolvedValue(null);
-    expect(await settings.timezone(1)).toBe('America/Los_Angeles');
+    expect(await settings.timezone(1)).toBe('America/Vancouver');
   });
 });

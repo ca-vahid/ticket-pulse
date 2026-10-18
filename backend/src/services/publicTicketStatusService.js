@@ -568,7 +568,7 @@ function withTicketEtaTiming(ticket, eta) {
 
 async function workspaceStats(ticket, settings) {
   if (!settings.showWorkspaceStats) return null;
-  const timezone = ticket.workspace?.defaultTimezone || 'America/Los_Angeles';
+  const timezone = ticket.workspace?.defaultTimezone || 'America/Vancouver';
   const { start, end } = getTodayRange(timezone);
   const weekStart = new Date(start.getTime() - 6 * 24 * 60 * 60 * 1000);
   const [createdToday, resolvedToday, createdWeek, resolvedWeek] = await Promise.all([
@@ -1028,7 +1028,7 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
   return {
     workspace: {
       name: ticket.workspace?.name || ticket.workspaceName || 'Ticket Pulse',
-      timezone: ticket.workspace?.defaultTimezone || 'America/Los_Angeles',
+      timezone: ticket.workspace?.defaultTimezone || 'America/Vancouver',
     },
     ticket: publicTicket(ticket, settings),
     timeline: publicTimeline(ticket),

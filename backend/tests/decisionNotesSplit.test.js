@@ -75,7 +75,7 @@ const automatedRun = {
 describe('search_decision_notes bucket split (NT-5)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Los_Angeles' });
+    prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
     prismaMock.assignmentPipelineRun.findMany.mockImplementation(({ where }) => {
       // Human bucket query filters decidedByEmail NOT NULL; machine bucket
       // filters decidedByEmail null.

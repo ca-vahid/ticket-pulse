@@ -155,7 +155,7 @@ class AssignmentSharesService {
 
   async _timeZone(ws) {
     const workspace = await soft(() => prisma.workspace.findUnique({ where: { id: ws }, select: { defaultTimezone: true } }), null);
-    return workspace?.defaultTimezone || 'America/Los_Angeles';
+    return workspace?.defaultTimezone || 'America/Vancouver';
   }
 
   /**

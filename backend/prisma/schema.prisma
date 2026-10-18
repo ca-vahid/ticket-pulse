@@ -62,7 +62,7 @@ model Workspace {
   name                    String   @db.VarChar(100)
   slug                    String   @unique @db.VarChar(50)
   freshserviceWorkspaceId BigInt   @map("freshservice_workspace_id")
-  defaultTimezone         String   @default("America/Los_Angeles") @map("default_timezone") @db.VarChar(50)
+  defaultTimezone         String   @default("America/Vancouver") @map("default_timezone") @db.VarChar(50)
   syncIntervalMinutes     Int      @default(5) @map("sync_interval_minutes")
   // Assignment fast sync / status refresh lane (v3.8.91): minutes between
   // runs per workspace (default 1 = every minute, the historical behaviour).
@@ -1245,7 +1245,7 @@ model Technician {
   name            String    @db.VarChar(255)
   email           String?   @db.VarChar(255)
   photoUrl        String?   @map("photo_url") @db.Text
-  timezone        String    @default("America/Los_Angeles") @db.VarChar(50)
+  timezone        String    @default("America/Vancouver") @db.VarChar(50)
   location        String?   @db.VarChar(100)
   workspaceId     Int       @map("workspace_id")
   workspace       Workspace @relation(fields: [workspaceId], references: [id])
@@ -1945,7 +1945,7 @@ model BusinessHour {
   startTime   String    @db.VarChar(5)
   endTime     String    @db.VarChar(5)
   isEnabled   Boolean   @default(true) @map("is_enabled")
-  timezone    String    @default("America/Los_Angeles") @db.VarChar(50)
+  timezone    String    @default("America/Vancouver") @db.VarChar(50)
   workspaceId Int       @map("workspace_id")
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
   createdAt   DateTime  @default(now()) @map("created_at")

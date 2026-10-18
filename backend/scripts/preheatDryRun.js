@@ -21,7 +21,7 @@ async function dryRun(workspaceId) {
     console.log(`workspace ${workspaceId}: not found`);
     return;
   }
-  const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+  const tz = workspace.defaultTimezone || 'America/Vancouver';
   const todayLocal = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
   const startIso = formatInTimeZone(
     new Date(`${todayLocal}T12:00:00.000Z`), tz,

@@ -154,7 +154,7 @@ export function addDays(iso, days) {
 }
 
 /** 17:00 local on `iso` in the workspace time zone, as an ISO instant. */
-export function dueInstant(iso, timeZone = 'America/Los_Angeles') {
+export function dueInstant(iso, timeZone = 'America/Vancouver') {
   if (!iso) return null;
   let offset = 'Z';
   try {
@@ -204,7 +204,7 @@ class HrLifecycleService {
 
   async _timeZone(workspaceId) {
     const ws = await soft(() => prisma.workspace.findUnique({ where: { id: Number(workspaceId) }, select: { defaultTimezone: true } }));
-    return ws?.defaultTimezone || 'America/Los_Angeles';
+    return ws?.defaultTimezone || 'America/Vancouver';
   }
 
   async _technicians(workspaceId) {
@@ -663,7 +663,7 @@ class HrLifecycleService {
   /** Who of these people has a full-day OFF leave today. */
   async _awayToday(ids, tz) {
     if (!ids.length) return new Set();
-    const today = new Date(`${localDate(new Date(), tz || 'America/Los_Angeles')}T00:00:00Z`);
+    const today = new Date(`${localDate(new Date(), tz || 'America/Vancouver')}T00:00:00Z`);
     const off = await soft(() => prisma.technicianLeave.findMany({
       where: { technicianId: { in: ids }, leaveDate: today, status: 'APPROVED', category: 'OFF' },
       select: { technicianId: true, isFullDay: true },

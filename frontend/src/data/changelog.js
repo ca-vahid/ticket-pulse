@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.91-preview';
+export const APP_VERSION = '4.2.92-preview';
 
 export const changelog = [
+  {
+    version: '4.2.92-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>BC keeps its clocks from 1 November</strong> &mdash; British Columbia stays on UTC-7 all year from 1 November 2026. Ticket Pulse now uses Vancouver time everywhere it used Los Angeles time (business hours, SLA clocks, the overnight queue, digests, on-call handovers, dashboards), so nothing moves an hour when California falls back.' },
+      { type: 'improved', html: '<strong>Newer server runtime</strong> &mdash; the server moves to Node 22, which knows the new BC rule. It checks its own time-zone data at every start and logs an error if it is ever out of date.' },
+      { type: 'improved', html: '<strong>Canadian time zones in the pickers</strong> &mdash; the workspace time zone offers Vancouver, Edmonton, Toronto and Halifax, and the member time-zone list puts the Canadian zones first. The assignment AI now knows Toronto is 3 hours ahead of Vancouver in summer and 2 in winter.' },
+    ],
+  },
   {
     version: '4.2.91-preview',
     date: 'October 17, 2026',

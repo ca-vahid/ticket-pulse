@@ -72,7 +72,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
-      timeZone: 'America/Los_Angeles',
+      timeZone: 'America/Vancouver',
     });
   };
 
@@ -114,13 +114,13 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           <span className={`text-muted-foreground/75 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'sm:w-[105px]' : 'sm:w-[68px]'}`}>
             {(() => {
               const d = new Date(ticket.createdAt);
-              const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' });
+              const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Vancouver' });
               if (!showFullDate) {
-                return `${d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Los_Angeles' })} ${time}`;
+                return `${d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Vancouver' })} ${time}`;
               }
-              const mo = d.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'America/Los_Angeles' });
-              const day = d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'America/Los_Angeles' });
-              const wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Los_Angeles' });
+              const mo = d.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'America/Vancouver' });
+              const day = d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'America/Vancouver' });
+              const wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Vancouver' });
               return `${mo}/${day} ${wd}. ${time}`;
             })()}
           </span>

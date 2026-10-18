@@ -43,7 +43,7 @@ export const MIN_WORKING_DAYS_AWAY = 2;
 const LOOKAHEAD_DAYS = 120;
 export const OWNER_AWAY_ACTIVITY = 'owner_away_reroute';
 export const OWNER_AWAY_ACTOR = Object.freeze({ name: 'Ticket Pulse (owner away)', email: null, role: 'automation', technicianId: null });
-const FALLBACK_TIMEZONE = 'America/Los_Angeles';
+const FALLBACK_TIMEZONE = 'America/Vancouver';
 
 const soft = (fn, fallback) => Promise.resolve().then(fn).catch(() => fallback);
 

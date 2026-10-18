@@ -705,7 +705,7 @@ function ReclassifyTicketsSection({ onClose }) {
                     {run.mode} / {run.status}
                   </div>
                   <div>
-                    <span>{formatDateTimeInTimezone(run.createdAt, 'America/Los_Angeles')}</span>
+                    <span>{formatDateTimeInTimezone(run.createdAt, 'America/Vancouver')}</span>
                     <span className="ml-2 text-muted-foreground/75">
                       scanned {run.summary?.scanned || 0}, classified {run.summary?.classified || 0}, failed {run.summary?.failed || 0}
                       {run.summary?.model ? `, ${RECLASSIFICATION_MODELS.find((model) => model.value === run.summary.model)?.label || run.summary.model}` : ''}

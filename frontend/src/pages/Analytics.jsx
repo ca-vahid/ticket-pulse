@@ -1002,7 +1002,7 @@ export default function Analytics({ view = 'standard' }) {
       groupBy,
       compare: 'none',
       excludeNoise: excludeNoise ? 'true' : 'false',
-      timezone: currentWorkspace?.defaultTimezone || 'America/Los_Angeles',
+      timezone: currentWorkspace?.defaultTimezone || 'America/Vancouver',
     };
     if (range === 'custom' && customStart && customEnd) {
       p.start = customStart;

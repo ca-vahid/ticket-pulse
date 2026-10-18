@@ -47,7 +47,7 @@ const SUMMARY_LOOKBACK_MS = 4 * 24 * 60 * 60 * 1000;
 
 export const AUTO_HELP_SOURCE = 'auto_help';
 export const AUTO_HELP_ACTOR = Object.freeze({ name: 'Ticket Pulse (Auto-help)', email: null, role: 'automation' });
-const FALLBACK_TIMEZONE = 'America/Los_Angeles';
+const FALLBACK_TIMEZONE = 'America/Vancouver';
 // partial_context joined 30 Sep 2026: a draft that left out steps the
 // knowledge doesn't cover is still suggested to an agent (marked partial) -
 // it was recorded and silently never shown. Never auto-sent.
@@ -609,7 +609,7 @@ class AutoHelpDeliveryService {
       const workspace = await Promise.resolve()
         .then(() => prisma.workspace.findUnique({ where: { id: ws }, select: { name: true, defaultTimezone: true } }))
         .catch(() => null);
-      const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+      const tz = workspace?.defaultTimezone || 'America/Vancouver';
       const { formatInTimeZone } = await import('date-fns-tz');
       const today = formatInTimeZone(now, tz, 'yyyy-MM-dd');
       if (row.afterHoursSummarySentFor === today) continue;

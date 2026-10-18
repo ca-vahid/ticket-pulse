@@ -8,7 +8,7 @@ import { ticketSourceLabel, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
 import { computePickAccuracy, fetchPickInputs, pickAccuracyExportRows } from './aiPickAccuracy.js';
 
-const DEFAULT_TIMEZONE = 'America/Los_Angeles';
+const DEFAULT_TIMEZONE = 'America/Vancouver';
 // Canonical fallbacks. Since Phase 8b every per-workspace site resolves the
 // registry through the helpers below so custom statuses count under their
 // base; 'Waiting on Customer' is a legacy FS label that predates the registry

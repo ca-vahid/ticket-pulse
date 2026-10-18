@@ -34,7 +34,7 @@ vi.mock('xlsx', () => ({
 }));
 
 const TEAM_FIXTURE = {
-  metadata: { range: { start: '2026-07-09', end: '2026-08-08', timezone: 'America/Los_Angeles' } },
+  metadata: { range: { start: '2026-07-09', end: '2026-08-08', timezone: 'America/Vancouver' } },
   summary: {
     activeTechnicians: 3,
     rangeBusinessDays: 21,

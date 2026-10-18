@@ -640,7 +640,7 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
     workspace: {
       id: ticket.workspaceId,
       name: ticket.workspace?.name || ticket.workspaceName || null,
-      timezone: ticket.workspace?.defaultTimezone || 'America/Los_Angeles',
+      timezone: ticket.workspace?.defaultTimezone || 'America/Vancouver',
     },
     ticket: {
       id: ticket.id,

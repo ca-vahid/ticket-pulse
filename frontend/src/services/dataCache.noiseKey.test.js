@@ -14,16 +14,16 @@ import { cacheKeys } from './dataCache';
 describe('technician cache keys carry the noise toggle', () => {
   test('daily + weekly keys differ by the exclude-noise setting', () => {
     state.excludeNoise = false;
-    const dailyAll = cacheKeys.techDaily(7, 'America/Los_Angeles', '2026-09-25');
-    const weeklyAll = cacheKeys.techWeekly(7, 'America/Los_Angeles', '2026-09-21');
+    const dailyAll = cacheKeys.techDaily(7, 'America/Vancouver', '2026-09-25');
+    const weeklyAll = cacheKeys.techWeekly(7, 'America/Vancouver', '2026-09-21');
     state.excludeNoise = true;
-    const dailyClean = cacheKeys.techDaily(7, 'America/Los_Angeles', '2026-09-25');
-    const weeklyClean = cacheKeys.techWeekly(7, 'America/Los_Angeles', '2026-09-21');
+    const dailyClean = cacheKeys.techDaily(7, 'America/Vancouver', '2026-09-25');
+    const weeklyClean = cacheKeys.techWeekly(7, 'America/Vancouver', '2026-09-21');
     expect(dailyClean).not.toBe(dailyAll);
     expect(weeklyClean).not.toBe(weeklyAll);
     // The date / week markers the SSE invalidation predicates match stay intact.
     expect(dailyClean).toContain('date=2026-09-25');
     expect(weeklyClean).toContain('weekStart=2026-09-21');
-    expect(dailyAll).toBe('ws3:tech:daily:id=7:tz=America/Los_Angeles:date=2026-09-25');
+    expect(dailyAll).toBe('ws3:tech:daily:id=7:tz=America/Vancouver:date=2026-09-25');
   });
 });

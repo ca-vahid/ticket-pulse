@@ -551,8 +551,8 @@ class AfterHoursUrgentEscalationService {
     const rotationAnchor = normalizeDate(
       input.afterHoursRotationAnchorDate
       ?? current.afterHoursRotationAnchorDate
-      ?? defaultRotationAnchorDate('America/Los_Angeles'),
-    ) || defaultRotationAnchorDate('America/Los_Angeles');
+      ?? defaultRotationAnchorDate('America/Vancouver'),
+    ) || defaultRotationAnchorDate('America/Vancouver');
 
     const actorEmail = String(actor?.email || actor?.username || '').trim() || null;
     const data = {
@@ -986,7 +986,7 @@ class AfterHoursUrgentEscalationService {
       workspace: {
         id: workspaceId,
         name: ticket.workspace?.name,
-        timezone: ticket.workspace?.defaultTimezone || 'America/Los_Angeles',
+        timezone: ticket.workspace?.defaultTimezone || 'America/Vancouver',
       },
       ticket: {
         id: ticket.id,
@@ -1078,7 +1078,7 @@ class AfterHoursUrgentEscalationService {
       workspace: {
         id: workspace?.id || state.link.workspaceId,
         name: workspace?.name || 'Ticket Pulse',
-        timezone: workspace?.defaultTimezone || 'America/Los_Angeles',
+        timezone: workspace?.defaultTimezone || 'America/Vancouver',
       },
       branding: publicBranding(state.publicSettings, workspace),
       refreshedAt: new Date().toISOString(),
@@ -1197,7 +1197,7 @@ class AfterHoursUrgentEscalationService {
       workspace: {
         id: workspaceId,
         name: ticket.workspace?.name,
-        timezone: ticket.workspace?.defaultTimezone || 'America/Los_Angeles',
+        timezone: ticket.workspace?.defaultTimezone || 'America/Vancouver',
       },
       ticket: {
         id: ticket.id,
@@ -1301,7 +1301,7 @@ class AfterHoursUrgentEscalationService {
       workspace: {
         id: workspace?.id || state.link.workspaceId,
         name: workspace?.name || 'Ticket Pulse',
-        timezone: workspace?.defaultTimezone || 'America/Los_Angeles',
+        timezone: workspace?.defaultTimezone || 'America/Vancouver',
       },
       branding: publicBranding(state.publicSettings, workspace),
       refreshedAt: new Date().toISOString(),

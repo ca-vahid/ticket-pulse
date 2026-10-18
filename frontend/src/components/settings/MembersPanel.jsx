@@ -13,8 +13,8 @@ import {
 import PhotoUploadDialog from './PhotoUploadDialog';
 
 const COMMON_TIMEZONES = [
-  'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York',
-  'America/Toronto', 'America/Vancouver', 'UTC',
+  'America/Vancouver', 'America/Edmonton', 'America/Toronto', 'America/Halifax',
+  'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York', 'UTC',
 ];
 
 function Avatar({ name, photoUrl, size = 'h-8 w-8', dim = false }) {
@@ -222,7 +222,7 @@ export default function MembersPanel() {
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', location: '', timezone: 'America/Los_Angeles' });
+  const [editForm, setEditForm] = useState({ name: '', location: '', timezone: 'America/Vancouver' });
   const [togglingId, setTogglingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('active');
@@ -751,7 +751,7 @@ export default function MembersPanel() {
                       editing={editing}
                       editForm={editForm}
                       setEditForm={setEditForm}
-                      onStartEdit={isLocal ? () => { setEditingId(t.id); setEditForm({ name: t.name || '', location: t.location || '', timezone: t.timezone || 'America/Los_Angeles' }); setError(null); } : null}
+                      onStartEdit={isLocal ? () => { setEditingId(t.id); setEditForm({ name: t.name || '', location: t.location || '', timezone: t.timezone || 'America/Vancouver' }); setError(null); } : null}
                       onCancelEdit={() => { setEditingId(null); setError(null); }}
                       onSaveEdit={() => saveEdit(t.id)}
                       saving={saving}

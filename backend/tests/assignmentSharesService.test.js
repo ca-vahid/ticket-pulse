@@ -54,7 +54,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   store.clear();
   shares._reset();
-  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Los_Angeles' });
+  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
   prismaMock.ticket.findUnique.mockResolvedValue({ id: 501, createdAt: NOW, internalCategoryId: 10, internalSubcategoryId: null });
   prismaMock.ticket.findMany.mockResolvedValue([]);
   prismaMock.ticket.groupBy.mockResolvedValue([]);

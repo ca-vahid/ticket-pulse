@@ -7,7 +7,7 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   ticket: { findUnique: jest.fn(), findFirst: jest.fn() },
-  workspace: { findUnique: jest.fn(async () => ({ defaultTimezone: 'America/Los_Angeles' })) },
+  workspace: { findUnique: jest.fn(async () => ({ defaultTimezone: 'America/Vancouver' })) },
 };
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));

@@ -141,7 +141,7 @@ export default {
   sync: {
     ticketInterval: 30, // seconds
     technicianInterval: 300, // 5 minutes
-    defaultTimezone: 'America/Los_Angeles',
+    defaultTimezone: 'America/Vancouver',
     enableScheduledSync,
   },
 

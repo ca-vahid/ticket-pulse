@@ -43,15 +43,15 @@ const FRESHSERVICE_TZ_TO_IANA = {
 
 /** Normalize a timezone string to a valid IANA identifier */
 export function toIANA(tz) {
-  if (!tz) return 'America/Los_Angeles';
+  if (!tz) return 'America/Vancouver';
   if (FRESHSERVICE_TZ_TO_IANA[tz]) return FRESHSERVICE_TZ_TO_IANA[tz];
   // Already an IANA identifier (contains '/') — validate it
   try {
     Intl.DateTimeFormat('en-US', { timeZone: tz });
     return tz;
   } catch {
-    console.warn(`Invalid timezone "${tz}", falling back to America/Los_Angeles`);
-    return 'America/Los_Angeles';
+    console.warn(`Invalid timezone "${tz}", falling back to America/Vancouver`);
+    return 'America/Vancouver';
   }
 }
 
@@ -87,14 +87,14 @@ export function localTimeToUTC(dateStr, timeStr, tz) {
 export function getPTTimeOfDay(utcDateStr) {
   const d = new Date(utcDateStr);
   return d.toLocaleTimeString('en-US', {
-    timeZone: 'America/Los_Angeles', hour12: false,
+    timeZone: 'America/Vancouver', hour12: false,
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 }
 
 /** Get PT calendar date string (YYYY-MM-DD) from a UTC date */
 export function getPTDateStr(utcDate) {
-  return new Date(utcDate).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  return new Date(utcDate).toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' });
 }
 
 /** Return true if the ticket was created before 10 AM UTC on its coverage day (i.e. overnight) */
@@ -208,7 +208,7 @@ export function insertMarkersForDay(tickets, dateStr, techConfigs, days) {
       const d2 = new Date(created);
       const isWkend = d2.getDay() === 0 || d2.getDay() === 6;
       const label = d2.toLocaleDateString('en-US', {
-        weekday: 'long', month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles',
+        weekday: 'long', month: 'short', day: 'numeric', timeZone: 'America/Vancouver',
       });
       const hInfo = getHolidayInfo(ptDate);
       const holidayLabel = hInfo.isCanadian

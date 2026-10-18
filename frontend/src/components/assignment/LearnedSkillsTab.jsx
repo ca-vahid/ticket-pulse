@@ -34,7 +34,7 @@ function plural(n, one, many) {
  * { [techId]: { photoUrl } }. Photos are never part of the learned-skills
  * payload; a missing photo falls back to initials. `techPhotos` skips the fetch.
  */
-export default function LearnedSkillsTab({ workspaceTimezone = 'America/Los_Angeles', techPhotos: techPhotosProp = null }) {
+export default function LearnedSkillsTab({ workspaceTimezone = 'America/Vancouver', techPhotos: techPhotosProp = null }) {
   const [fetchedPhotos, setFetchedPhotos] = useState(null);
   useEffect(() => {
     if (techPhotosProp) return undefined;

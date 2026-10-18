@@ -146,7 +146,7 @@ function firstIsoIn(section) {
 }
 
 /** Local calendar date (YYYY-MM-DD) of an instant in a time zone. */
-export function localDate(at, timeZone = 'America/Los_Angeles') {
+export function localDate(at, timeZone = 'America/Vancouver') {
   try {
     return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at));
   } catch {
@@ -158,7 +158,7 @@ export function localDate(at, timeZone = 'America/Los_Angeles') {
  * @param {{ subject?: string, text?: string, requesterEmail?: string|null, createdAt?: Date|string, timeZone?: string }} notice
  * @returns {null | object}
  */
-export function classifyHrNotice({ subject = '', text = '', requesterEmail = null, createdAt = new Date(), timeZone = 'America/Los_Angeles' } = {}) {
+export function classifyHrNotice({ subject = '', text = '', requesterEmail = null, createdAt = new Date(), timeZone = 'America/Vancouver' } = {}) {
   const subj = clean(subject) || '';
   if (!subj || OWN_CHILD.test(subj)) return null;
   const body = String(text || '').replace(/\s+/g, ' ');

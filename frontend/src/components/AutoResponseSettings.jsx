@@ -59,7 +59,7 @@ export default function AutoResponseSettings() {
         startTime: '09:00',
         endTime: '17:00',
         isEnabled: true,
-        timezone: 'America/Los_Angeles',
+        timezone: 'America/Vancouver',
       },
     ]);
   };

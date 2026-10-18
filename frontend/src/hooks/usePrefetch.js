@@ -52,7 +52,7 @@ function cancelIdle(id) {
   }
 }
 
-const TZ = 'America/Los_Angeles';
+const TZ = 'America/Vancouver';
 
 /**
  * Prefetch adjacent time periods for the current view.

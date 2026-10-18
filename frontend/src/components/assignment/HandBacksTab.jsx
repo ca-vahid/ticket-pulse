@@ -54,7 +54,7 @@ function CountList({ title, rows }) {
  * selected per hand-back row; a missing/failed photo falls back to initials.
  * `techPhotos` may be passed in to skip the fetch.
  */
-export default function HandBacksTab({ workspaceTimezone = 'America/Los_Angeles', isAdmin = false, techPhotos: techPhotosProp = null }) {
+export default function HandBacksTab({ workspaceTimezone = 'America/Vancouver', isAdmin = false, techPhotos: techPhotosProp = null }) {
   const [fetchedPhotos, setFetchedPhotos] = useState(null);
   useEffect(() => {
     if (techPhotosProp) return undefined;

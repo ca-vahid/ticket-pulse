@@ -91,7 +91,7 @@ beforeEach(() => {
   prismaMock.technician.findFirst.mockResolvedValue({ id: 3, name: 'Ari Agent' });
   prismaMock.workspaceAccess.findUnique.mockResolvedValue(null);
   prismaMock.workspaceAccess.findFirst.mockResolvedValue(null);
-  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, nativeTicketingEnabled: true, defaultTimezone: 'America/Los_Angeles', internalDomains: [] });
+  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, nativeTicketingEnabled: true, defaultTimezone: 'America/Vancouver', internalDomains: [] });
   extractMock.mockResolvedValue(RESULT);
   runServiceMock.record.mockResolvedValue(77);
   runServiceMock.listForTicket.mockResolvedValue([]);

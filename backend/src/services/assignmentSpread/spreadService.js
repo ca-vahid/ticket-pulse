@@ -444,7 +444,7 @@ class AssignmentSpreadService {
     const period = [7, 14, 30].includes(Number(days)) ? Number(days) : 30;
     const settings = await this.getSettings(ws, { fresh: true });
     const workspace = await soft(() => prisma.workspace.findUnique({ where: { id: ws }, select: { defaultTimezone: true } }), null);
-    const timeZone = workspace?.defaultTimezone || 'America/Los_Angeles';
+    const timeZone = workspace?.defaultTimezone || 'America/Vancouver';
     const since = new Date(new Date(now).getTime() - period * 24 * 60 * MINUTE_MS);
 
     // Only the small `spread` object leaves the database, never the whole recommendation.

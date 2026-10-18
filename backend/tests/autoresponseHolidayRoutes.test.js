@@ -25,7 +25,7 @@ jest.unstable_mockModule('../src/services/autoResponseRepository.js', () => ({ d
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
-jest.unstable_mockModule('../src/config/index.js', () => ({ default: { sync: { defaultTimezone: 'America/Los_Angeles' } } }));
+jest.unstable_mockModule('../src/config/index.js', () => ({ default: { sync: { defaultTimezone: 'America/Vancouver' } } }));
 
 const { default: router } = await import('../src/routes/autoresponse.routes.js');
 

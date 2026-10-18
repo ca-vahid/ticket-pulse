@@ -79,7 +79,7 @@ Call **get_agent_availability** to see who is available right now:
   - HALF-DAY-OFF (PM) means the agent is available now but unavailable later. Only assign if the ticket can plausibly wrap before the leave window starts.
   - HALF-DAY-WFH works the same way for physical-presence eligibility — they can't do on-site work during the WFH window, but can outside of it.
 - Check each agent's **onShift** status and **shiftStatus** — agents whose shift has ended or hasn't started yet should be deprioritized. Prefer agents currently on shift with time remaining.
-- Agents are in different timezones (e.g., Toronto is 3 hours ahead of Vancouver). A ticket analyzed at 9am PT can be assigned to an Eastern agent who started at 8am ET and is already 3 hours into their shift.
+- Agents are in different timezones (e.g., Toronto is 3 hours ahead of Vancouver from mid-March to early November and 2 hours ahead the rest of the year, because BC no longer changes its clocks). A ticket analyzed at 9am Pacific can be assigned to an Eastern agent who started at 8am ET and is already 2-3 hours into their shift. Always read each agent's own shiftStatus rather than working the difference out yourself.
 
 ## Step 4: Find Matching Agents
 Call **find_matching_agents** with:
@@ -407,6 +407,7 @@ function injectAfterHoursWorkflowGuidance(prompt) {
 // choice is to keep it as-is (with only targeted section patches applied) and
 // skip the rest of the upgrade.
 const LEGACY_DEFAULT_LINE_FRAGMENTS = [
+  '- Agents are in different timezones (e.g., Toronto is 3 hours ahead of Vancouver). A ticket analyzed at 9am PT can be assigned to an Eastern agent who started at 8am ET and is already 3 hours into their shift.',
   'You are an IT helpdesk ticket assignment assistant.',
   '## Step 1: Check Business Hours',
   'Call **check_business_hours** first.',

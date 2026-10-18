@@ -54,8 +54,8 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 const { executeTool, TOOL_SCHEMAS, COMPETENCY_MATCH_SCORES, competencyMatchScore } = await import('../src/services/assignmentTools.js');
 
 const techs = [
-  { id: 1, name: 'Busy Expert', email: 'busy@example.com', location: 'Vancouver', timezone: 'America/Los_Angeles', workStartTime: '09:00', workEndTime: '17:00', freshserviceId: BigInt(101) },
-  { id: 2, name: 'Available Peer', email: 'peer@example.com', location: 'Vancouver', timezone: 'America/Los_Angeles', workStartTime: '09:00', workEndTime: '17:00', freshserviceId: BigInt(102) },
+  { id: 1, name: 'Busy Expert', email: 'busy@example.com', location: 'Vancouver', timezone: 'America/Vancouver', workStartTime: '09:00', workEndTime: '17:00', freshserviceId: BigInt(101) },
+  { id: 2, name: 'Available Peer', email: 'peer@example.com', location: 'Vancouver', timezone: 'America/Vancouver', workStartTime: '09:00', workEndTime: '17:00', freshserviceId: BigInt(102) },
 ];
 
 describe('assignmentTools risk and routing helpers', () => {
@@ -63,7 +63,7 @@ describe('assignmentTools risk and routing helpers', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-05-22T19:00:00.000Z'));
     jest.clearAllMocks();
 
-    prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Los_Angeles' });
+    prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
     prismaMock.assignmentConfig.findUnique.mockResolvedValue({
       scoringWeights: { competency: 0.35, workload: 0.30, location: 0.20, recency: 0.15 },
       excludedGroupIds: [1000206163],
@@ -86,7 +86,7 @@ describe('assignmentTools risk and routing helpers', () => {
         email: 'requester@example.com',
         department: 'Vancouver',
         jobTitle: 'Engineer',
-        timeZone: 'America/Los_Angeles',
+        timeZone: 'America/Vancouver',
       },
     });
     prismaMock.technician.findMany.mockResolvedValue(techs);

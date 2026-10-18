@@ -20,7 +20,7 @@ import {
  * missing (soft()).
  */
 
-const FALLBACK_TIMEZONE = 'America/Los_Angeles';
+const FALLBACK_TIMEZONE = 'America/Vancouver';
 const MAX_TECHNICIANS = 500;
 
 export const soft = (fn, fallback = null) => Promise.resolve().then(fn).catch((err) => {

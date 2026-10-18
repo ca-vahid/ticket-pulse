@@ -75,7 +75,7 @@ beforeEach(() => {
   prismaMock.technician.findFirst.mockResolvedValue(null);
   prismaMock.workspaceAccess.findUnique.mockResolvedValue(null);
   prismaMock.workspaceAccess.findFirst.mockResolvedValue(null);
-  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, nativeTicketingEnabled: true, defaultTimezone: 'America/Los_Angeles', internalDomains: [] });
+  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, nativeTicketingEnabled: true, defaultTimezone: 'America/Vancouver', internalDomains: [] });
   holdMock.list.mockResolvedValue([{ id: 501, reason: 'unknown_reference', status: 'held' }]);
   holdMock.count.mockResolvedValue(1);
   emailHealthMock.getGraphSendLane.mockResolvedValue(null);

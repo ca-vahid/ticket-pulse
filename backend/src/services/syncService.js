@@ -285,7 +285,7 @@ class SyncService {
       return settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
     }
     const config = await settingsRepository.getFreshServiceConfig();
-    return { ...config, defaultTimezone: 'America/Los_Angeles', syncIntervalMinutes: 5 };
+    return { ...config, defaultTimezone: 'America/Vancouver', syncIntervalMinutes: 5 };
   }
 
   async _getTicketPulseLookupMaps(wsConfig) {
@@ -989,7 +989,7 @@ class SyncService {
         return { skipped: true, reason: 'freshservice_not_configured' };
       }
 
-      const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+      const tz = workspace.defaultTimezone || 'America/Vancouver';
       const todayLocal = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
       // ISO datetime at 00:00 in the workspace TZ → JS Date in UTC
       const startIso = formatInTimeZone(new Date(`${todayLocal}T12:00:00.000Z`), tz, 'yyyy-MM-dd\'T\'00:00:00XXX');
