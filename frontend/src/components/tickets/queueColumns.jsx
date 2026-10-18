@@ -6,7 +6,7 @@ import AssigneePicker from './AssigneePicker';
 import StatusPicker from './StatusPicker';
 import {
   AgentFirstName, PersonAvatar, PriorityDot, QueueStatePill, SlaChip, StatusPill, UnassignedBadge,
-  PRIORITY_LABELS, QUEUE_STATE_NOTE,
+  PRIORITY_LABELS, QUEUE_STATE_NOTE, QUEUE_STATE_STYLES,
   dueIn, formatDayTime, ticketCategoryLabels, ticketSourceLabel, timeAgo, timeAgoShort,
 } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
@@ -376,7 +376,7 @@ function renderStatus(ticket, ctx) {
     );
   }
   return (
-    <span className={`${ctx.cell('status')} py-1`} style={ctx.cellStyle('status')}>
+    <span className={`${ctx.cell('status')} py-1 gap-1.5`} style={ctx.cellStyle('status')}>
       {(isEditable || fsRowEditable) && !removedLike ? (
         <StatusPicker
           ticketId={ticket.id}
@@ -398,6 +398,13 @@ function renderStatus(ticket, ctx) {
         />
       ) : (
         <StatusPill status={ticket.status} size="sm" tone={statusToneFromDefs(statusDefs, ticket.status)} />
+      )}
+      {/* Focus view (17 Oct 2026): who acts next rides beside the status as
+          quiet text instead of a column of its own. */}
+      {ctx.focus && QUEUE_STATE_STYLES[ticket.state] && (
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={QUEUE_STATE_STYLES[ticket.state].hint} data-testid="focus-state">
+          {QUEUE_STATE_STYLES[ticket.state].label}
+        </span>
       )}
     </span>
   );
@@ -794,6 +801,17 @@ export const QUEUE_COLUMN_MAP = new Map(QUEUE_COLUMNS.map((c) => [c.key, c]));
 export const DEFAULT_COLUMN_KEYS = QUEUE_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key);
 
 /**
+ * Focus view (Vahid, 17 Oct 2026, in place of Roomy): the five things a
+ * person acts on, whatever the Columns menu says, with the subject given the
+ * room. Requester, office and category move to the line under the subject;
+ * State rides beside Status; priority stays the row's left strip + dot.
+ */
+export const FOCUS_COLUMN_KEYS = Object.freeze(['subject', 'status', 'assignee', 'due', 'lastActivity']);
+export const FOCUS_TRACKS = Object.freeze({
+  subject: 'minmax(0,3fr)', status: 'minmax(200px,0.9fr)', assignee: '200px', due: '96px', lastActivity: '96px',
+});
+
+/**
  * Normalize a stored/foreign column list into a safe ordered key list:
  * unknown keys + dupes dropped, the mandatory pair (subject, requester)
  * inserted up front when missing, null/garbage → today's defaults. Subject is
@@ -826,15 +844,17 @@ export function normalizeColumnKeys(value) {
  * wrapper's floor holds — subject keeps its flexible slack until the user
  * pins it directly.
  */
-export function buildQueueGridTemplate(columnKeys, { widths = {}, floor = false } = {}) {
+export function buildQueueGridTemplate(columnKeys, { widths = {}, floor = false, tracks = null } = {}) {
   const hasPinned = Object.keys(widths).length > 0 || floor;
   const subjectCol = QUEUE_COLUMN_MAP.get('subject');
+  // `tracks` (Focus view) swaps a column's registry track for its own.
+  const trackFor = (k) => tracks?.[k] || QUEUE_COLUMN_MAP.get(k).track;
   const subjectTrack = widths.subject != null
     ? `${widths.subject}px`
     : hasPinned
-      ? subjectCol.track.replace('minmax(0,', `minmax(${subjectCol.minPx}px,`)
-      : subjectCol.track;
-  const trackOf = (k) => (k === 'subject' ? subjectTrack : widths[k] != null ? `${widths[k]}px` : QUEUE_COLUMN_MAP.get(k).track);
+      ? trackFor('subject').replace('minmax(0,', `minmax(${subjectCol.minPx}px,`)
+      : trackFor('subject');
+  const trackOf = (k) => (k === 'subject' ? subjectTrack : widths[k] != null ? `${widths[k]}px` : trackFor(k));
   // Every track — subject included — sits where the user put it (16 Sep 2026).
   const ordered = columnKeys.filter((k) => QUEUE_COLUMN_MAP.has(k));
   const keys = ordered.includes('subject') ? ordered : ['subject', ...ordered];
@@ -898,12 +918,12 @@ export function normalizeColumnWidths(value) {
  * overflow wrapper (QR3) sets this as min-width so cells never collapse below
  * their floor; returns 0 with no pinned widths (no wrapper → today's layout).
  */
-export function buildQueueGridMinWidth(columnKeys, { widths = {}, force = false } = {}) {
+export function buildQueueGridMinWidth(columnKeys, { widths = {}, force = false, tracks = null } = {}) {
   if (Object.keys(widths).length === 0 && !force) return 0;
   const minOf = (key) => {
     if (widths[key] != null) return widths[key];
     const col = QUEUE_COLUMN_MAP.get(key);
-    const m = col.track.match(/([\d.]+)px/);
+    const m = (tracks?.[key] || col.track).match(/([\d.]+)px/);
     const parsed = m ? parseFloat(m[1]) : 0;
     return key === 'subject' ? Math.max(parsed, col.minPx) : parsed;
   };

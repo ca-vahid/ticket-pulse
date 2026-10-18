@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.96-preview';
+export const APP_VERSION = '4.2.97-preview';
 
 export const changelog = [
+  {
+    version: '4.2.97-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Focus view</strong> &mdash; a third list view beside Dense and Compact, at the same row height as Compact. It shows only what you act on &mdash; subject, status, assignee, due and last update &mdash; and gives the subject about three times the room, so long titles read in full. The requester, office and category sit on the line under the title, &ldquo;who acts next&rdquo; (such as Requester replied) sits beside the status, and High and Urgent keep their coloured strip. It ignores your Columns choices and never scrolls sideways; switching back to Compact brings your own columns back.' },
+    ],
+  },
   {
     version: '4.2.96-preview',
     date: 'October 17, 2026',

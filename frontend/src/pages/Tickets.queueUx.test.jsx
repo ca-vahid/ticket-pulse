@@ -705,3 +705,31 @@ describe('Toolbar + pager tidy-up (17 Oct 2026)', () => {
     await waitFor(() => expect(lastListParams().pageSize).toBe(100));
   });
 });
+
+describe('Focus view (17 Oct 2026)', () => {
+  test('five fixed columns with room for the subject; no Columns button, no resize handles', async () => {
+    localStorage.setItem('tp_ticket_layout', 'focus');
+    localStorage.setItem('tp_queue_columns', JSON.stringify(['subject', 'requester', 'category', 'priority', 'state', 'reopened']));
+    listSpy.mockResolvedValue({ data: { items: [{ ...row(1, 'Open'), state: 'requester_responded', internalCategory: { name: 'Network' }, internalSubcategory: { name: 'VPN' } }], total: 1 } });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    expect(screen.getByRole('button', { name: /^Focus$/ })).toHaveAttribute('aria-pressed', 'true');
+    const card = document.querySelector('[style*="--tp-q-grid"]');
+    expect(card.style.getPropertyValue('--tp-q-grid')).toBe('6px minmax(0,3fr) minmax(200px,0.9fr) 200px 96px 96px');
+    expect(screen.queryByRole('button', { name: /^Columns/ })).toBeNull();
+    expect(screen.queryByRole('separator', { name: /Resize/ })).toBeNull();
+    // State rides beside Status; the category reads under the subject.
+    expect(screen.getAllByTestId('focus-state')[0]).toHaveTextContent('Requester replied');
+    expect(screen.getAllByTestId('focus-category')[0]).toHaveTextContent('VPN');
+  });
+
+  test('switching back to Compact restores your own columns', async () => {
+    localStorage.setItem('tp_ticket_layout', 'focus');
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: /^Compact$/ }));
+    await waitFor(() => expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE));
+    expect(screen.getByRole('button', { name: /^Columns/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('focus-state')).toBeNull();
+  });
+});
