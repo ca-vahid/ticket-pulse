@@ -20,7 +20,7 @@ describe('tzDataCheck', () => {
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('permanent UTC-7 is known'));
       expect(logger.error).not.toHaveBeenCalled();
     } else {
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('move the app to Node 22'));
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('ICU_TIMEZONE_FILES_DIR'));
     }
   });
 });

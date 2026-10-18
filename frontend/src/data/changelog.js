@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.92-preview';
+export const APP_VERSION = '4.2.93-preview';
 
 export const changelog = [
+  {
+    version: '4.2.93-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The server now has the latest time-zone rules</strong> &mdash; the Node 22 build on our host shipped time-zone data from before the BC change, so Ticket Pulse now loads the current official rules (2026e) itself at start. Vancouver stays on UTC-7 after 1 November, and Alberta and Manitoba are right too.' },
+    ],
+  },
   {
     version: '4.2.92-preview',
     date: 'October 17, 2026',
