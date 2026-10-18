@@ -166,9 +166,9 @@ describe('Drag resize (QR2)', () => {
 
     fireEvent(handle, pointer('pointerup', 360));
     await waitFor(() => expect(putWidthCalls().length).toBe(1), { timeout: 2500 });
-    expect(putWidthCalls()[0][1]).toEqual({ compact: { requester: 236 }, roomy: {} });
+    expect(putWidthCalls()[0][1]).toEqual({ compact: { requester: 236 } });
     // Optimistic localStorage mirror rides the commit.
-    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 236 }, roomy: {} });
+    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 236 } });
     // Still exactly one PUT after the debounce window — one commit per drag.
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(putWidthCalls().length).toBe(1);
@@ -184,18 +184,18 @@ describe('Drag resize (QR2)', () => {
     fireEvent(handle, pointer('pointermove', 3000)); // 176 + 2500 → ceiling
     expect(currentTemplate()).toBe(pinnedCompact('800px'));
     fireEvent(handle, pointer('pointerup', 3000));
-    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 800 }, roomy: {} }), { timeout: 2500 });
+    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 800 } }), { timeout: 2500 });
   });
 
   test('double-click resets that column back to its registry track', async () => {
-    localStorage.setItem('tp_queue_columnWidths', JSON.stringify({ compact: { requester: 220 }, roomy: {} }));
+    localStorage.setItem('tp_queue_columnWidths', JSON.stringify({ compact: { requester: 220 } }));
     await mountAndLoad();
     expect(currentTemplate()).toBe(pinnedCompact('220px'));
 
     fireEvent.doubleClick(await findHandle('Requester'));
     // Last pinned width gone → the exact stock template returns (subject slack included).
     await waitFor(() => expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE));
-    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: {}, roomy: {} }), { timeout: 2500 });
+    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: {} }), { timeout: 2500 });
   });
 
   test('keyboard: arrow keys nudge the focused separator ±16px', async () => {
@@ -206,7 +206,7 @@ describe('Drag resize (QR2)', () => {
     await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('192px')));
     fireEvent.keyDown(handle, { key: 'ArrowLeft' });
     await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('176px'))); // pinned at the default px now
-    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 176 }, roomy: {} }), { timeout: 2500 });
+    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: { requester: 176 } }), { timeout: 2500 });
   });
 
   test('the handle never swallows header sorting: sort button works, handle clicks do not sort', async () => {
@@ -228,7 +228,7 @@ describe('Drag resize (QR2)', () => {
 describe('Width storage (QR1)', () => {
   test('below xl stored widths are ignored: the md literal templates stay, widths ride only the xl var', async () => {
     getPrefSpy.mockImplementation((key) => Promise.resolve({
-      data: { key, value: key === 'queue.columnWidths' ? { compact: { requester: 300 }, roomy: {} } : null },
+      data: { key, value: key === 'queue.columnWidths' ? { compact: { requester: 300 } } : null },
     }));
     await mountAndLoad();
     await waitFor(() => expect(currentTemplate()).toBe(pinnedCompact('300px')));
@@ -241,7 +241,7 @@ describe('Width storage (QR1)', () => {
     const handle = await findHandle('Requester');
     expect(handle).toHaveClass('hidden', 'qx:block');
     // Server value won → mirror refreshed for the next first paint.
-    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 300 }, roomy: {} });
+    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: { requester: 300 } });
   });
 
   test('garbage in the stored value is dropped: unknown keys/layouts, junk numbers → stock template', async () => {
@@ -293,8 +293,8 @@ describe('Overflow + flyout reset (QR3)', () => {
 
     fireEvent.click(resetWidths);
     await waitFor(() => expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE));
-    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: {}, roomy: {} });
-    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: {}, roomy: {} }), { timeout: 2500 });
+    expect(JSON.parse(localStorage.getItem('tp_queue_columnWidths'))).toEqual({ compact: {} });
+    await waitFor(() => expect(putWidthCalls().at(-1)[1]).toEqual({ compact: {} }), { timeout: 2500 });
     // Cleared on both layouts → the button disarms.
     expect(screen.getByRole('button', { name: /reset widths/i })).toBeDisabled();
   });

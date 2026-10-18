@@ -1007,7 +1007,7 @@ html[data-motion="reduce"] .tp-collapse { transition: none; }
   transition: grid-template-rows 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.32s ease-out 0.06s, visibility 0s linear 0s;
 }
 .tp-fold > * { min-height: 0; overflow: hidden; }
-.tp-fold--roomy > * { padding: 0.5rem 0.5rem 0; margin: -0.5rem -0.5rem 0; }
+.tp-fold--padded > * { padding: 0.5rem 0.5rem 0; margin: -0.5rem -0.5rem 0; }
 .tp-fold[data-folded="true"] {
   grid-template-rows: 0fr;
   opacity: 0;
