@@ -298,3 +298,35 @@ describe('sendDailyDigests', () => {
     expect(sendTransactionalEmailMock).not.toHaveBeenCalled();
   });
 });
+
+describe('get — one held message in full (17 Oct 2026, Tickets popup)', () => {
+  test('sanitized body, plain text, why it was held, and a fuller best-guess ticket', async () => {
+    prismaMock.mailboxHeldMessage.findFirst.mockResolvedValue({
+      id: 31, workspaceId: 1, status: 'held', reason: 'sender_burst',
+      decision: { rule: 'sender_burst', details: { cap: 3, sender: 'azure-noreply@microsoft.com' } },
+      candidates: [], subject: 'Resolved: VM back', snippet: 'Alert resolved', fromEmail: 'azure-noreply@microsoft.com',
+      bodyHtml: '<p>Alert <b>resolved</b></p><script>alert(1)</script>',
+      emailPayload: { bodyText: 'Alert resolved', hasAttachments: false },
+      bestGuessTicketId: 63832, resolvedTicketId: null, connection: { address: 'it@example.com' },
+    });
+    prismaMock.ticket.findMany.mockResolvedValue([{
+      id: 63832, nativeNumber: 10155, origin: 'ticketpulse', freshserviceTicketId: null, subject: 'Fired: VM down', status: 'Closed',
+      createdAt: new Date('2026-10-17T12:02:00Z'), updatedAt: new Date('2026-10-17T13:00:00Z'),
+      requester: { name: 'Microsoft Azure', email: 'azure-noreply@microsoft.com' }, assignedTech: null,
+    }]);
+    const out = await mailboxHoldService.get(31, 1);
+    expect(out.bodyHtml).toContain('<b>resolved</b>');
+    expect(out.bodyHtml).not.toContain('script');
+    expect(out.bodyText).toBe('Alert resolved');
+    expect(out.decision.details).toEqual({ cap: 3, sender: 'azure-noreply@microsoft.com' });
+    expect(out.connectionAddress).toBe('it@example.com');
+    expect(out.emailPayload).toBeUndefined();
+    expect(out.bestGuessTicket).toEqual(expect.objectContaining({ id: 63832, displayRef: 'TP-10155', status: 'Closed', requesterName: 'Microsoft Azure' }));
+    expect(prismaMock.mailboxHeldMessage.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 31, workspaceId: 1 } }));
+  });
+
+  test('another workspace (or a missing id) is not found', async () => {
+    prismaMock.mailboxHeldMessage.findFirst.mockResolvedValue(null);
+    await expect(mailboxHoldService.get(99, 1)).rejects.toThrow(/not found/);
+  });
+});

@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.94-preview';
+export const APP_VERSION = '4.2.95-preview';
 
 export const changelog = [
+  {
+    version: '4.2.95-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Unmatched replies, reviewed in a popup</strong> &mdash; the &ldquo;unmatched replies&rdquo; button now sits in the toolbar row instead of taking a row of its own, and opens a popup: the waiting emails on the left; on the right, why each one is waiting in plain words, the ticket it probably belongs to with a one-click &ldquo;Add to TP-&hellip; as a reply&rdquo;, the other choices (another ticket, a new ticket, discard) and the email itself. After each decision the next email opens.' },
+      { type: 'fixed', html: '<strong>Every hold reason has words</strong> &mdash; held emails showed raw codes such as &ldquo;sender_burst&rdquo;; they now read &ldquo;Burst from one sender&rdquo;, &ldquo;Two tickets match&rdquo; and &ldquo;Could not file&rdquo;, here and in Settings &rarr; Ticket Mailboxes.' },
+    ],
+  },
   {
     version: '4.2.94-preview',
     date: 'October 17, 2026',

@@ -46,7 +46,7 @@ import {
 } from '../components/tickets/queueColumns';
 import { QUEUE_CARD_REGISTRY, cardSearch, normalizeQueueCards } from '../components/tickets/queueCards';
 import { ticketsAPI } from '../services/api';
-import HeldRepliesPanel from '../components/tickets/HeldRepliesPanel';
+import HeldRepliesDialog from '../components/tickets/HeldRepliesDialog';
 import FilterReliefNotice from '../components/tickets/FilterReliefNotice';
 import { groupMoveFor } from '../components/tickets/assigneeGroupMove';
 import { useAuth } from '../contexts/AuthContext';
@@ -2114,29 +2114,9 @@ export default function Tickets() {
               )}
             </div></Fold>
 
-            {/* Unmatched replies pill (Phase RL, RL-4): held inbound mail
-                waiting for attach / create / discard. Hidden when empty. */}
-            {(heldCount > 0 || showHeld) && (
-              <div className="mb-4" data-testid="held-replies-slot">
-                <button
-                  type="button"
-                  onClick={() => setShowHeld((v) => !v)}
-                  aria-expanded={showHeld}
-                  aria-controls="tickets-held-replies"
-                  className="tp-focus-ring inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20 text-sm font-medium shadow-subtle"
-                  data-testid="held-replies-pill"
-                >
-                  <MailQuestion className="w-4 h-4" aria-hidden="true" />
-                  {heldCount} unmatched {heldCount === 1 ? 'reply' : 'replies'} waiting for review
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showHeld ? 'rotate-180' : ''}`} aria-hidden="true" />
-                </button>
-                {showHeld && (
-                  <div id="tickets-held-replies" className={`mt-3 tp-card rounded-xl p-4 ${docked ? 'max-h-[40vh] overflow-y-auto settings-scrollbar' : ''}`}>
-                    <HeldRepliesPanel onCountChange={setHeldCount} showGuidance />
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Unmatched replies (Phase RL, RL-4): the button sits in the
+                toolbar row below and opens HeldRepliesDialog (17 Oct 2026). */}
+            <HeldRepliesDialog open={showHeld} onClose={() => setShowHeld(false)} onCountChange={setHeldCount} />
 
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}
@@ -2278,8 +2258,23 @@ export default function Tickets() {
                     </div>
                   )}
                   {/* Right end: AI-approval worklist connector + pagination */}
-                  {!panelView && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
+                  {!panelView && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0 || heldCount > 0) && (
                     <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
+                      {/* Unmatched replies (17 Oct 2026): in this row instead of
+                          a row of its own; opens the popup. Hidden when empty. */}
+                      {heldCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowHeld(true)}
+                          aria-haspopup="dialog"
+                          title="Emails Ticket Pulse could not file on its own — review them"
+                          className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                          data-testid="held-replies-pill"
+                        >
+                          <MailQuestion className="h-4 w-4" aria-hidden="true" />
+                          {heldCount} unmatched {heldCount === 1 ? 'reply' : 'replies'}
+                        </button>
+                      )}
                       {(stats?.awaitingApproval || 0) > 0 && (
                         <button
                           onClick={() => setParams({ aiState: aiState === 'suggested' ? null : 'suggested', segment: null })}
