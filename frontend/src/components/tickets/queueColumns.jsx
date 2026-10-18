@@ -28,7 +28,7 @@ import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
  * built once per row by Tickets.jsx and carries:
  *   cell(key)        base className: CELL + responsive visibility + xl placement
  *   cellStyle(key)   style carrying the computed `--tp-q-col` track index
- *   cellPad, roomy   layout bits
+ *   cellPad          layout bits
  *   technicians, statusDefs, groupNames, slaCalendarAware   workspace meta
  *   canReview, canSeeAi                                     role bits
  *   fx, aiLive, aiProgress, isEditable, fsRowEditable,
@@ -414,7 +414,7 @@ function renderDue(ticket, ctx) {
           : resolvedLike
             ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30">Done</span>
             : ticket.dueBy
-              ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} compact={!ctx.roomy} />
+              ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} compact />
               : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
@@ -758,7 +758,7 @@ function renderOccurrences(ticket, ctx) {
  *   mdEssential    part of the fixed below-xl projection (renders at md even
  *                  when deselected; deselection only applies at xl+)
  *   render         cell renderer — subject is layout-owned in Tickets.jsx
- *                  (compact cell vs roomy full-width row 1), so it has none.
+ *                  (the title cell with its meta line), so it has none.
  */
 export const QUEUE_COLUMNS = [
   { key: 'subject', label: 'Subject', mandatory: true, defaultOn: true, sortField: 'subject', track: 'minmax(0,2.4fr)', minPx: 240, mdEssential: true, render: null },
@@ -816,8 +816,7 @@ export function normalizeColumnKeys(value) {
 
 /**
  * One computed gridTemplateColumns for header + rows (QC3): accent track,
- * subject (compact) / the roomy 60px type slot, then the chosen non-subject
- * columns in user order. Applied at xl+ via the `--tp-q-grid` variable; the
+ * then every chosen column — subject included — in user order. Applied at xl+ via the `--tp-q-grid` variable; the
  * below-xl templates stay hardcoded in Tickets.jsx (fixed essentials).
  *
  * Phase QR: `widths` ({key: px}, the CURRENT layout's user-resized columns)
@@ -827,7 +826,7 @@ export function normalizeColumnKeys(value) {
  * wrapper's floor holds — subject keeps its flexible slack until the user
  * pins it directly.
  */
-export function buildQueueGridTemplate(columnKeys, { roomy = false, widths = {}, floor = false } = {}) {
+export function buildQueueGridTemplate(columnKeys, { widths = {}, floor = false } = {}) {
   const hasPinned = Object.keys(widths).length > 0 || floor;
   const subjectCol = QUEUE_COLUMN_MAP.get('subject');
   const subjectTrack = widths.subject != null
@@ -836,16 +835,10 @@ export function buildQueueGridTemplate(columnKeys, { roomy = false, widths = {},
       ? subjectCol.track.replace('minmax(0,', `minmax(${subjectCol.minPx}px,`)
       : subjectCol.track;
   const trackOf = (k) => (k === 'subject' ? subjectTrack : widths[k] != null ? `${widths[k]}px` : QUEUE_COLUMN_MAP.get(k).track);
-  // Roomy: the subject spans row 1, column 2 is the fixed type slot, and the
-  // chosen columns follow. Compact / dense: every track — subject included —
-  // sits where the user put it (16 Sep 2026).
+  // Every track — subject included — sits where the user put it (16 Sep 2026).
   const ordered = columnKeys.filter((k) => QUEUE_COLUMN_MAP.has(k));
-  const keys = roomy ? ordered.filter((k) => k !== 'subject') : (ordered.includes('subject') ? ordered : ['subject', ...ordered]);
-  return [
-    '6px',
-    ...(roomy ? ['60px'] : []),
-    ...keys.map(trackOf),
-  ].join(' ');
+  const keys = ordered.includes('subject') ? ordered : ['subject', ...ordered];
+  return ['6px', ...keys.map(trackOf)].join(' ');
 }
 
 // ------------------------------------------------- resizable widths (Phase QR)
@@ -853,7 +846,9 @@ export function buildQueueGridTemplate(columnKeys, { roomy = false, widths = {},
 export const MAX_COLUMN_PX = 800;
 const WIDTHS_STORAGE_KEY = 'tp_queue_columnWidths';
 const WIDTHS_PREF_KEY = 'queue.columnWidths';
-const EMPTY_WIDTHS = () => ({ compact: {}, roomy: {} });
+// One list layout since Roomy went (17 Oct 2026); the stored value keeps its
+// `compact` key, so widths people already set carry over.
+const EMPTY_WIDTHS = () => ({ compact: {} });
 
 /** Clamp a candidate px width to [registry minPx, 800]. */
 export function clampColumnWidth(key, px) {
@@ -876,14 +871,15 @@ export function columnFallbackPx(key) {
 }
 
 /**
- * Normalize a stored/foreign widths value into {compact:{key:px}, roomy:{…}}:
- * unknown layouts/keys dropped, non-numeric junk dropped, survivors clamped.
+ * Normalize a stored/foreign widths value into {compact:{key:px}}: other
+ * layouts (the old `roomy`) and unknown keys dropped, non-numeric junk
+ * dropped, survivors clamped.
  * Only user-resized keys are ever stored — unset keys keep registry tracks.
  */
 export function normalizeColumnWidths(value) {
   const out = EMPTY_WIDTHS();
   if (!value || typeof value !== 'object') return out;
-  for (const layout of ['compact', 'roomy']) {
+  for (const layout of ['compact']) {
     const src = value[layout];
     if (!src || typeof src !== 'object' || Array.isArray(src)) continue;
     for (const [k, v] of Object.entries(src)) {
@@ -902,7 +898,7 @@ export function normalizeColumnWidths(value) {
  * overflow wrapper (QR3) sets this as min-width so cells never collapse below
  * their floor; returns 0 with no pinned widths (no wrapper → today's layout).
  */
-export function buildQueueGridMinWidth(columnKeys, { roomy = false, widths = {}, force = false } = {}) {
+export function buildQueueGridMinWidth(columnKeys, { widths = {}, force = false } = {}) {
   if (Object.keys(widths).length === 0 && !force) return 0;
   const minOf = (key) => {
     if (widths[key] != null) return widths[key];
@@ -911,7 +907,7 @@ export function buildQueueGridMinWidth(columnKeys, { roomy = false, widths = {},
     const parsed = m ? parseFloat(m[1]) : 0;
     return key === 'subject' ? Math.max(parsed, col.minPx) : parsed;
   };
-  let sum = 6 + (roomy ? 60 : minOf('subject'));
+  let sum = 6 + minOf('subject');
   for (const k of columnKeys) {
     if (k !== 'subject' && QUEUE_COLUMN_MAP.has(k)) sum += minOf(k);
   }
@@ -919,14 +915,14 @@ export function buildQueueGridMinWidth(columnKeys, { roomy = false, widths = {},
 }
 
 /**
- * Per-user column widths (QR1) — {compact:{key:px}, roomy:{key:px}} under the
+ * Per-user column widths (QR1) — {compact:{key:px}} under the
  * 'queue.columnWidths' preference. Same storage choreography as columnKeys in
  * Tickets.jsx: localStorage mirror ('tp_queue_columnWidths') paints instantly,
  * the server value WINS on load, writes are optimistic with a debounced
  * fire-and-forget PUT. Widths apply at xl+ only — below xl the hardcoded
  * essentials templates never read them (enforced by the GRID_* classes).
  */
-export function useColumnWidths(layout, workspaceId) {
+export function useColumnWidths(workspaceId) {
   const [allWidths, setAllWidths] = useState(() => {
     try {
       return normalizeColumnWidths(JSON.parse(localStorage.getItem(WIDTHS_STORAGE_KEY) || 'null'));
@@ -957,7 +953,7 @@ export function useColumnWidths(layout, workspaceId) {
   }, [workspaceId]);
 
   // Board has no list columns; its (hidden) customizer state rides compact.
-  const layoutKey = layout === 'roomy' ? 'roomy' : 'compact';
+  const layoutKey = 'compact';
   const setWidth = useCallback((key, px) => {
     if (!QUEUE_COLUMN_MAP.has(key)) return;
     setAllWidths((prev) => {
@@ -978,7 +974,7 @@ export function useColumnWidths(layout, workspaceId) {
   }, [layoutKey, persist]);
   const resetAllWidths = useCallback(() => {
     setAllWidths((prev) => {
-      if (Object.keys(prev.compact).length === 0 && Object.keys(prev.roomy).length === 0) return prev;
+      if (Object.keys(prev.compact).length === 0) return prev;
       const next = EMPTY_WIDTHS();
       persist(next);
       return next;
@@ -990,7 +986,7 @@ export function useColumnWidths(layout, workspaceId) {
     setWidth,
     resetWidth,
     resetAllWidths,
-    hasCustomWidths: Object.keys(allWidths.compact).length > 0 || Object.keys(allWidths.roomy).length > 0,
+    hasCustomWidths: Object.keys(allWidths.compact).length > 0,
   };
 }
 

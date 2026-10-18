@@ -524,7 +524,7 @@ export function QueueStatePill({ state, className = '' }) {
 /**
  * Featured custom-field chip (Custom Fields Activation Phase 2): the ONE
  * per-workspace definition flagged isFeatured renders as a quiet slate
- * "Label: value" chip on queue rows (compact + roomy) and in the peek
+ * "Label: value" chip on queue rows and in the peek
  * Details. Truncated to ~24 chars with the full text in the tooltip.
  */
 export function FeaturedFieldChip({ def, value, className = '' }) {

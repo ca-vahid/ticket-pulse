@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.2.95-preview';
+export const APP_VERSION = '4.2.96-preview';
 
 export const changelog = [
+  {
+    version: '4.2.96-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Roomy view removed for good</strong> &mdash; the code behind the retired Roomy view is gone. Nothing changes on screen: Compact, Dense and Board work as before, and column widths you set carry over.' },
+    ],
+  },
   {
     version: '4.2.95-preview',
     date: 'October 17, 2026',

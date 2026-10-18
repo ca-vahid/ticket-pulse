@@ -70,12 +70,12 @@ const BULK_DELETE_MAX = 25;
 const DOCKED_QUERY = '(min-width: 1024px) and (min-height: 600px)';
 
 // Folds its child away (height and fade together, both ways) while `folded`;
-// a no-op off the docked layout. `roomy` leaves space for the cards' shadows
+// a no-op off the docked layout. `padded` leaves space for the cards' shadows
 // and their hover gear, which sit just outside the cards.
-function Fold({ on, folded, roomy = false, children }) {
+function Fold({ on, folded, padded = false, children }) {
   if (!on) return children;
   return (
-    <div className={`tp-fold${roomy ? ' tp-fold--roomy' : ''}`} data-folded={folded ? 'true' : 'false'} aria-hidden={folded || undefined} inert={folded ? '' : undefined}>
+    <div className={`tp-fold${padded ? ' tp-fold--padded' : ''}`} data-folded={folded ? 'true' : 'false'} aria-hidden={folded || undefined} inert={folded ? '' : undefined}>
       <div>{children}</div>
     </div>
   );
@@ -109,13 +109,10 @@ const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department', 'par
 // registry (labels/icons/tile tokens/count keys), defaulting to the classic
 // six until configured.
 
-// Two row layouts (user picks via the toolbar toggle). No REF column — the
-// number lives small under the subject.
-//   COMPACT: the Type (INC/REQ) tag folds into the title line, so its column
-//     is gone and that width flows into the subject — kills the truncation
-//     that a narrow subject track caused.
-//   ROOMY: the subject spans row 1 full-width; row 2 holds a slim type slot,
-//     then the chosen columns.
+// One row layout for the list (Compact, and Dense on the same grid). No REF
+// column — the number lives small under the subject. The Type (INC/REQ) tag
+// folds into the title line, so its column is gone and that width flows into
+// the subject. (Roomy, the two-line layout, was removed 17 Oct 2026.)
 //
 // Tablet band (QA 08-04 #5/#6): below xl the fixed tracks used to claim 644px
 // before the subject saw a single pixel — on an iPad (768 portrait, or 1024
@@ -137,7 +134,6 @@ const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department', 'par
 const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] qx:[grid-template-columns:var(--tp-q-grid)] items-center';
 // The list card is wide enough for the column layout below 1280px (QA 10-07 #1).
 const QUEUE_WIDE_CARD_PX = 720;
-const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] qx:[grid-template-columns:var(--tp-q-grid)] items-stretch';
 
 function pageWindow(current, total) {
   const pages = new Set([1, total]);
@@ -633,7 +629,7 @@ export default function Tickets() {
   const {
     widths: colWidths, setWidth: commitColumnWidth, resetWidth: resetColumnWidth,
     resetAllWidths, hasCustomWidths,
-  } = useColumnWidths(layout, workspaceId);
+  } = useColumnWidths(workspaceId);
   // Board view (QA 07-27 #3): Open / Pending / Closed columns with drag-drop.
   const boardMode = layout === 'board';
   // Board density (QA 08-07 #12): cards are far shorter than list rows, so the
@@ -939,16 +935,12 @@ export default function Tickets() {
   const refreshTimerRef = useRef(null);
   const [pulse, setPulse] = useState(0); // bumps so an open preview re-fetches
   const pendingIdsRef = useRef(new Set());
-  // Row layout — the two ends of the old density spectrum, each a real layout:
-  //   'compact' — type folds into the title, one tight line per ticket (scan a
-  //               big queue). 'roomy' — the title gets its own full-width line
-  //               with everything else beneath (read, nothing ever clips).
-  // Persisted; migrates the old 3-way density value in place.
-  const roomy = layout === 'roomy';
+  // Row layout: 'compact' — type folds into the title, one tight line per
+  // ticket — or 'dense' below; 'board' is the drag-drop board.
   // Dense (full-width train, 16 Sep 2026): compact's grid with tighter rows and
   // smaller type — for the people who zoomed the browser to 50 % to get it.
   const dense = layout === 'dense';
-  const cellPad = roomy ? 'py-1.5' : dense ? 'py-1' : 'py-2.5';
+  const cellPad = dense ? 'py-1' : 'py-2.5';
   const [pendingCount, setPendingCount] = useState(0);
   const lastLocalMutationRef = useRef(0);
 
@@ -1697,17 +1689,13 @@ export default function Tickets() {
   // always render for the md band — deselecting one only hides it at xl.
   const colMeta = useMemo(() => {
     const ordered = columnKeys.filter((k) => QUEUE_COLUMNS.some((c) => c.key === k));
-    // Roomy: track 1 = accent, 2 = the type slot, then the chosen columns
-    // (subject spans row 1). Compact / dense: track 1 = accent, then EVERY
-    // column — subject included — in the user's order (16 Sep 2026).
-    const start = roomy
-      ? new Map(ordered.filter((k) => k !== 'subject').map((k, i) => [k, i + 3]))
-      : new Map(ordered.map((k, i) => [k, i + 2]));
-    const rowStart = roomy ? 'qx:row-start-2' : 'qx:row-start-1';
+    // Track 1 = accent, then EVERY column — subject included — in the user's
+    // order (16 Sep 2026).
+    const start = new Map(ordered.map((k, i) => [k, i + 2]));
     const out = {};
     for (const col of QUEUE_COLUMNS) {
       if (col.key === 'subject') {
-        const placed = !roomy && start.has('subject');
+        const placed = start.has('subject');
         out.subject = {
           render: true,
           cls: placed ? 'qx:[grid-column:var(--tp-q-col)] qx:row-start-1' : 'qx:col-start-2 qx:row-start-1',
@@ -1718,25 +1706,22 @@ export default function Tickets() {
         continue;
       }
       const visible = start.has(col.key);
-      const pos = visible ? `qx:[grid-column:var(--tp-q-col)] ${rowStart}` : '';
+      const pos = visible ? 'qx:[grid-column:var(--tp-q-col)] qx:row-start-1' : '';
       const headerPos = visible ? 'qx:[grid-column:var(--tp-q-col)] qx:row-start-1' : '';
       const mdVisible = Boolean(col.mdEssential);
-      // In roomy the md "Ticket" header span covers the category track, so the
-      // category header only exists at xl (matches the pre-QC layout).
-      const mdHeaderVisible = mdVisible && !(roomy && col.key === 'category');
       out[col.key] = {
         render: visible || mdVisible,
         cls: mdVisible ? (visible ? pos : 'qx:hidden') : `hidden qx:flex ${pos}`,
-        headerRender: visible || mdHeaderVisible,
-        headerCls: mdHeaderVisible ? (visible ? headerPos : 'qx:hidden') : `hidden qx:flex ${headerPos}`,
+        headerRender: visible || mdVisible,
+        headerCls: mdVisible ? (visible ? headerPos : 'qx:hidden') : `hidden qx:flex ${headerPos}`,
         style: visible ? { '--tp-q-col': start.get(col.key) } : undefined,
       };
     }
     return out;
-  }, [columnKeys, roomy]);
+  }, [columnKeys]);
   const gridTemplate = useMemo(
-    () => buildQueueGridTemplate(columnKeys, { roomy, widths: colWidths, floor: dense }),
-    [columnKeys, roomy, colWidths, dense],
+    () => buildQueueGridTemplate(columnKeys, { widths: colWidths, floor: dense }),
+    [columnKeys, colWidths, dense],
   );
   // Overflow floor (QR3): once widths are pinned the header+rows wrapper gets
   // min-width = pinned px + every other column's own floor (+36px checkbox
@@ -1744,8 +1729,8 @@ export default function Tickets() {
   // dashboard's .tp-compact-scroll recipe (index.css:62-66) at xl. 0 (and no
   // scroll container at all) until the user actually resizes something.
   const gridMinWidth = useMemo(
-    () => buildQueueGridMinWidth(columnKeys, { roomy, widths: colWidths, force: dense }),
-    [columnKeys, roomy, colWidths, dense],
+    () => buildQueueGridMinWidth(columnKeys, { widths: colWidths, force: dense }),
+    [columnKeys, colWidths, dense],
   );
   // Dense (16 Sep 2026): one line per ticket, so the list keeps its column
   // floors and scrolls sideways instead of wrapping — same wrapper as pinned
@@ -1754,8 +1739,8 @@ export default function Tickets() {
   // 1440 screen crushed the Subject track to 0 and its header ran into
   // Requester): the same scroll wrapper, with every column at its own floor.
   const floorMinWidth = useMemo(
-    () => buildQueueGridMinWidth(columnKeys, { roomy, widths: colWidths, force: true }),
-    [columnKeys, roomy, colWidths],
+    () => buildQueueGridMinWidth(columnKeys, { widths: colWidths, force: true }),
+    [columnKeys, colWidths],
   );
   const [listCardWidth, setListCardWidth] = useState(0);
   const listOverflows = listCardWidth > 0 && floorMinWidth + 36 > listCardWidth;
@@ -1773,9 +1758,9 @@ export default function Tickets() {
   const scrolls = widthsPinned && !narrowCard;
   const scrollWrapRef = useRef(null);
   // F (2 Oct 2026): the checkbox + subject stay put while the columns slide —
-  // compact/dense lists whose leftmost column is the subject (roomy's title
-  // spans the whole row, and a reordered subject is not at the edge).
-  const pinSubject = freezeSubject && !roomy && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
+  // when the subject is the leftmost column (a reordered subject is not at
+  // the edge) and the person has not switched it off.
+  const pinSubject = freezeSubject && columnKeys.find((k) => QUEUE_COLUMNS.some((c) => c.key === k)) === 'subject';
   // Fixed working area (16 Oct 2026, Vahid): on a desktop-sized window the
   // page itself no longer scrolls. The filter rail and the list are two panes
   // that fill the height under the cards; the list keeps its toolbar, column
@@ -1889,16 +1874,16 @@ export default function Tickets() {
     const el = listCardRef.current;
     if (!el) return;
     const widths = { ...colWidths, [key]: px };
-    el.style.setProperty('--tp-q-grid', buildQueueGridTemplate(columnKeys, { roomy, widths }));
-    el.style.setProperty('--tp-q-minw', `${buildQueueGridMinWidth(columnKeys, { roomy, widths }) + 36}px`);
-  }, [columnKeys, roomy, colWidths]);
+    el.style.setProperty('--tp-q-grid', buildQueueGridTemplate(columnKeys, { widths }));
+    el.style.setProperty('--tp-q-minw', `${buildQueueGridMinWidth(columnKeys, { widths }) + 36}px`);
+  }, [columnKeys, colWidths]);
   const rowColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.render && colMeta[c.key]?.render), [colMeta]);
   // Phase QX: with the Priority column on, the subject line drops its dot at
   // xl (the column carries dot + word); below xl the column never renders
   // (not an md essential), so the dot stays there. Mobile cards keep theirs.
   const priorityColumnOn = columnKeys.includes('priority');
   const headerColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.key !== 'subject' && colMeta[c.key]?.headerRender), [colMeta]);
-  const headerPad = roomy ? 'py-2' : cellPad;
+  const headerPad = cellPad;
   const headerCell = (col) => (
     <span key={col.key} data-qcol={col.key} data-qlabel={col.label} className={`${CELL} relative ${colMeta[col.key].headerCls} ${headerPad} ${col.headerClass || ''}`} style={colMeta[col.key].style}>
       {col.sortField ? (
@@ -2045,7 +2030,7 @@ export default function Tickets() {
                 })}
               </div></Fold>
             )}
-            <Fold on={docked} folded={cardsFolded} roomy><div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
+            <Fold on={docked} folded={cardsFolded} padded><div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
               {queueCards.map((key, cardIndex) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
                 // Phone: "Mine" sits second — the rail's My open view, one tap
@@ -2444,45 +2429,24 @@ export default function Tickets() {
                                   className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
                                 />
                               </span>
-                              {roomy ? (
-                              /* Roomy header rides the SAME grid as the rows so every
-                                 label sits over its column — the old flat flex shoved
-                                 one "Status · Due · Updated" clump into the corner
-                                 (QA 07-30 #1). At md "Ticket" spans the type+category
-                                 tracks; at xl it sits on the slim type slot and every
-                                 chosen column gets its own label (the columns are
-                                 user-ordered now, so no fixed span can cover them). */
-                                <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
-                                  <span aria-hidden="true" />
-                                  <span className={`${CELL} py-2 [grid-column:2/4] qx:[grid-column:2/3] qx:row-start-1 qx:!px-1.5`}>
-                                    <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded whitespace-nowrap">
-                                    Ticket{sortIndicator('subject')}
-                                    </button>
-                                  </span>
-                                  {headerColumns.map(headerCell)}
-                                </div>
-                              ) : (
-                                <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
-                                  <span aria-hidden="true" className="tp-pin tp-pin-accent self-stretch" />
-                                  <span data-qcol="subject" data-qlabel="Subject" data-pin-end="" className={`${CELL} tp-pin tp-pin-subject relative ${cellPad} ${colMeta.subject.headerCls}`} style={colMeta.subject.style}>
-                                    <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
-                                    Subject{sortIndicator('subject')}
-                                    </button>
-                                    {/* Subject is resizable in compact only — roomy's
-                                      col 2 is the fixed 60px type slot (QR2). */}
-                                    <ColumnResizeHandle
-                                      colKey="subject"
-                                      label="Subject"
-                                      minPx={QUEUE_COLUMNS[0].minPx}
-                                      value={colWidths.subject}
-                                      onPreview={previewColumnWidth}
-                                      onCommit={commitColumnWidth}
-                                      onReset={resetColumnWidth}
-                                    />
-                                  </span>
-                                  {headerColumns.map(headerCell)}
-                                </div>
-                              )}
+                              <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
+                                <span aria-hidden="true" className="tp-pin tp-pin-accent self-stretch" />
+                                <span data-qcol="subject" data-qlabel="Subject" data-pin-end="" className={`${CELL} tp-pin tp-pin-subject relative ${cellPad} ${colMeta.subject.headerCls}`} style={colMeta.subject.style}>
+                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
+                                  Subject{sortIndicator('subject')}
+                                  </button>
+                                  <ColumnResizeHandle
+                                    colKey="subject"
+                                    label="Subject"
+                                    minPx={QUEUE_COLUMNS[0].minPx}
+                                    value={colWidths.subject}
+                                    onPreview={previewColumnWidth}
+                                    onCommit={commitColumnWidth}
+                                    onReset={resetColumnWidth}
+                                  />
+                                </span>
+                                {headerColumns.map(headerCell)}
+                              </div>
                             </div>
 
                             {/* Row dividers ride the --border token (Phase QX, QA 08-27 #4):
@@ -2519,9 +2483,8 @@ export default function Tickets() {
                                 const assigneeReadOnly = ticket.assignedTech
                                 && !(meta?.technicians || []).some((t) => t.id === ticket.assignedTechId);
 
-                                // ---- Row cell pieces, arranged per layout below (compact:
-                                //      one tight line, type folded into the title; roomy:
-                                //      title on its own line, everything else beneath). ----
+                                // ---- Row cell pieces: one tight line, type folded into the
+                                //      title. ----
                                 const typePill = <TypePill type={ticket.ticketType} />;
                                 const priorityDot = isEditable
                                   ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
@@ -2539,7 +2502,7 @@ export default function Tickets() {
                                     state={linkState}
                                     onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
                                     onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
-                                    className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : dense ? 'text-[12.5px]' : 'text-sm'}`}
+                                    className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${dense ? 'text-[12.5px]' : 'text-sm'}`}
                                   >
                                     {ticket.subject || '(no subject)'}
                                   </Link>
@@ -2621,7 +2584,6 @@ export default function Tickets() {
                                   cell: (key) => `${CELL} ${colMeta[key]?.cls || ''}`,
                                   cellStyle: (key) => colMeta[key]?.style,
                                   cellPad,
-                                  roomy,
                                   technicians: meta?.technicians || [],
                                   statusDefs,
                                   groupNames,
@@ -2699,70 +2661,41 @@ export default function Tickets() {
                                     </span>
                                     <div className="flex-1 min-w-0">
                                       <div className="hidden md:flex">
-                                        {roomy ? (
-                                          <div className={`flex-1 ${GRID_ROOMY}`}>
-                                            <span aria-hidden="true" className={`self-stretch ${accent}`} style={{ gridRow: '1 / 3' }} />
-                                            {/* Roomy: the title (+ ref/requester) spans the full width on line 1.
-                                              Tightened (QA 07-30 #1): the old py-2 + py-1.5 stack read as
-                                              dead space — title now hugs its detail line. */}
-                                            <span className="px-3 pt-1.5 pb-0.5 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
-                                              {/* Wrap below qx: chips fall to a second line in normal
-                                                flow instead of overlaying the neighbour column when
-                                                the tablet-band subject track runs out (QA 08-04 #6).
-                                                The dot+subject stay one non-wrapping unit so the
-                                                priority dot never strands on a line of its own. */}
-                                              <span className="flex flex-wrap qx:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
-                                                <span className="flex items-center gap-1.5 min-w-0">
-                                                  {priorityEl}
-                                                  {subjectBtn}
-                                                </span>
-                                                {subjectChips}
+                                        <div className={`flex-1 ${GRID_COMPACT}`}>
+                                          <span aria-hidden="true" className={`self-stretch tp-pin-accent ${accent} ${accent === 'bg-transparent' || accent === 'tp-ai-accent' ? 'tp-pin' : ''}`} />
+                                          {/* Compact: type folds into the title line so the subject gets the width */}
+                                          <span className={`${CELL} tp-pin tp-pin-subject ${cellPad} ${colMeta.subject.cls} flex-col !items-start justify-center gap-0.5`} style={colMeta.subject.style}>
+                                            {/* Wrap below xl: pills
+                                              wrap under the subject rather than colliding into the
+                                              category column on iPad widths (QA 08-04 #6). The
+                                              dot+type+subject group never wraps internally, so the
+                                              SR/INC pill stays glued to its subject line.
+                                              Dense (16 Sep 2026): ONE line — the ref follows the
+                                              subject the FreshService way, nothing wraps, the list
+                                              scrolls sideways instead. */}
+                                            <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap qx:flex-nowrap'}`}>
+                                              <span className="flex items-center gap-1.5 min-w-0">
+                                                {priorityEl}
+                                                <span className="shrink-0">{typePill}</span>
+                                                {subjectBtn}
+                                                {dense && (
+                                                  <Link
+                                                    to={ticketHref}
+                                                    state={linkState}
+                                                    onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                                    className="tp-focus-ring shrink-0 rounded font-mono text-[11px] text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300"
+                                                    data-testid="dense-ref"
+                                                  >
+                                                    {ticket.displayRef}
+                                                  </Link>
+                                                )}
                                               </span>
-                                              {subjectMeta}
+                                              {subjectChips}
                                             </span>
-                                            {/* Row 2: the slim type slot, then the chosen
-                                              columns (canonical DOM order; xl placement
-                                              via --tp-q-col — see colMeta). */}
-                                            <span className={`${CELL} ${cellPad} qx:col-start-2 qx:row-start-2`}>{typePill}</span>
-                                            {columnCells}
-                                          </div>
-                                        ) : (
-                                          <div className={`flex-1 ${GRID_COMPACT}`}>
-                                            <span aria-hidden="true" className={`self-stretch tp-pin-accent ${accent} ${accent === 'bg-transparent' || accent === 'tp-ai-accent' ? 'tp-pin' : ''}`} />
-                                            {/* Compact: type folds into the title line so the subject gets the width */}
-                                            <span className={`${CELL} tp-pin tp-pin-subject ${cellPad} ${colMeta.subject.cls} flex-col !items-start justify-center gap-0.5`} style={colMeta.subject.style}>
-                                              {/* Wrap below xl — same rationale as the roomy row: pills
-                                                wrap under the subject rather than colliding into the
-                                                category column on iPad widths (QA 08-04 #6). The
-                                                dot+type+subject group never wraps internally, so the
-                                                SR/INC pill stays glued to its subject line.
-                                                Dense (16 Sep 2026): ONE line — the ref follows the
-                                                subject the FreshService way, nothing wraps, the list
-                                                scrolls sideways instead. */}
-                                              <span className={`flex items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full ${dense ? 'flex-nowrap overflow-hidden' : 'flex-wrap qx:flex-nowrap'}`}>
-                                                <span className="flex items-center gap-1.5 min-w-0">
-                                                  {priorityEl}
-                                                  <span className="shrink-0">{typePill}</span>
-                                                  {subjectBtn}
-                                                  {dense && (
-                                                    <Link
-                                                      to={ticketHref}
-                                                      state={linkState}
-                                                      onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                                      className="tp-focus-ring shrink-0 rounded font-mono text-[11px] text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300"
-                                                      data-testid="dense-ref"
-                                                    >
-                                                      {ticket.displayRef}
-                                                    </Link>
-                                                  )}
-                                                </span>
-                                                {subjectChips}
-                                              </span>
-                                              {!dense && subjectMeta}
-                                            </span>
-                                            {columnCells}
-                                          </div>
-                                        )}
+                                            {!dense && subjectMeta}
+                                          </span>
+                                          {columnCells}
+                                        </div>
                                       </div>
 
                                       {/* Mobile card. 12 Oct 2026: slides left for quick
