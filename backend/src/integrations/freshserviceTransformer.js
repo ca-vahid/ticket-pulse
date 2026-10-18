@@ -209,7 +209,7 @@ export function transformAgent(fsAgent, workspaceId = null) {
       freshserviceId: fsAgent.id,
       name: `${fsAgent.first_name || ''} ${fsAgent.last_name || ''}`.trim() || 'Unknown',
       email: fsAgent.email || null,
-      timezone: FRESHSERVICE_TZ_TO_IANA[fsAgent.time_zone] || fsAgent.time_zone || 'America/Los_Angeles',
+      timezone: FRESHSERVICE_TZ_TO_IANA[fsAgent.time_zone] || fsAgent.time_zone || 'America/Vancouver',
       // location: explicitly NOT included - managed manually
       workspaceId: agentWorkspaceId ? BigInt(agentWorkspaceId) : null,
       isActive: fsAgent.active !== undefined ? fsAgent.active : true,

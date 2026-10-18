@@ -33,9 +33,9 @@ process.env.WEB_PUSH_PRIVATE_KEY = 'priv';
 const { WebPushService, isAllowedEndpoint, deviceLabel } = await import('../src/services/webPushService.js');
 
 const SUB = { id: 7, email: 'ana@x.io', endpoint: 'https://fcm.googleapis.com/fcm/send/abc', p256dh: 'k', auth: 'a' };
-const tech = { id: 5, name: 'Ana', email: 'ana@x.io', timezone: 'America/Los_Angeles', workStartTime: null, workEndTime: null };
+const tech = { id: 5, name: 'Ana', email: 'ana@x.io', timezone: 'America/Vancouver', workStartTime: null, workEndTime: null };
 const ctxFor = (type, extra = {}, ticket = {}) => ({
-  workspace: { id: 1, timezone: 'America/Los_Angeles' },
+  workspace: { id: 1, timezone: 'America/Vancouver' },
   event: { type, extra },
   ticket: { id: 42, displayRef: 'TP-42', subject: 'Printer is down', priority: 2, ...ticket },
   assignedAgent: { id: 5 },

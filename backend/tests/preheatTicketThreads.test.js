@@ -133,7 +133,7 @@ beforeEach(() => {
   mockFetchConversations.mockReset();
 
   mockWorkspaceFindUnique.mockResolvedValue({
-    id: 7, name: 'WS', defaultTimezone: 'America/Los_Angeles',
+    id: 7, name: 'WS', defaultTimezone: 'America/Vancouver',
   });
   // Default: feature ENABLED for the workspace, so the existing tests
   // exercise the actual preheat code path. The new "disabled" test

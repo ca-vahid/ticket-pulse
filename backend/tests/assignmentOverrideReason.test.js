@@ -36,7 +36,7 @@ beforeEach(() => {
     { id: 9, name: 'Chosen Tech' },
   ]);
   prismaMock.assignmentCorrection.create.mockImplementation(async ({ data }) => ({ id: 900, ...data }));
-  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Los_Angeles' });
+  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
   appendFeedback.mockResolvedValue(undefined);
 });
 

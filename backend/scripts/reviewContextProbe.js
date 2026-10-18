@@ -13,7 +13,7 @@ async function probe(workspaceId) {
     select: { id: true, name: true, defaultTimezone: true },
   });
   if (!ws) return;
-  const tz = ws.defaultTimezone || 'America/Los_Angeles';
+  const tz = ws.defaultTimezone || 'America/Vancouver';
   const today = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
   const startIso = formatInTimeZone(
     new Date(`${today}T12:00:00.000Z`), tz,

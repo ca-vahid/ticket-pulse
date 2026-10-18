@@ -218,7 +218,7 @@ describe('TechnicianDetailNew (agent page rebuild)', () => {
     await mounted();
     // The weekly fetch is anchored to the URL's week start, not the default.
     const { dashboardAPI } = await import('../services/api');
-    expect(dashboardAPI.getTechnicianWeekly).toHaveBeenCalledWith(7, '2026-07-20', 'America/Los_Angeles');
+    expect(dashboardAPI.getTechnicianWeekly).toHaveBeenCalledWith(7, '2026-07-20', 'America/Vancouver');
     // The closed chip arrived active — the evidence table tells the closed story.
     await waitFor(() => {
       expect(screen.getByText(/Closed on .+ · \d+ tickets?/)).toBeInTheDocument();

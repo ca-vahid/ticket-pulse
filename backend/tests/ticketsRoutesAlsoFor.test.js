@@ -63,7 +63,7 @@ function buildApp(sessionUser = { email: 'ada@example.com', name: 'Ada Admin', r
 beforeEach(() => {
   jest.clearAllMocks();
   prismaMock.technician.findFirst.mockResolvedValue(null);
-  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, defaultTimezone: 'America/Los_Angeles', internalDomains: [] });
+  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, defaultTimezone: 'America/Vancouver', internalDomains: [] });
   prismaMock.workspaceAccess.findUnique.mockResolvedValue(null);
   prismaMock.workspaceAccess.findFirst.mockResolvedValue(null);
   alsoForMock.isAlsoForNotifyEnabled.mockResolvedValue(false);

@@ -89,7 +89,7 @@ function buildApp(sessionUser = { email: 'Ada@X.io', name: 'Ada Admin', role: 'a
 beforeEach(() => {
   jest.clearAllMocks();
   prismaMock.technician.findFirst.mockResolvedValue(null); // admin needs no tech profile
-  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, defaultTimezone: 'America/Los_Angeles', internalDomains: [] });
+  prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, defaultTimezone: 'America/Vancouver', internalDomains: [] });
   prismaMock.queueCardConfig.findUnique.mockResolvedValue(null);
   prismaMock.queueCardConfig.upsert.mockImplementation(({ update, create }) => Promise.resolve({
     id: 1, workspaceId: 7, cards: update?.cards ?? create.cards,
@@ -104,17 +104,17 @@ describe('zonedBoundaries — calendar starts on the workspace wall clock', () =
   const now = new Date('2026-08-23T02:00:00Z');
 
   test('week starts Monday 00:00 in the workspace zone (not server/UTC)', () => {
-    expect(zonedStartOfWeek(now, 'America/Los_Angeles').toISOString()).toBe('2026-08-17T07:00:00.000Z');
+    expect(zonedStartOfWeek(now, 'America/Vancouver').toISOString()).toBe('2026-08-17T07:00:00.000Z');
     // UTC would already be Sunday Aug 23 — a UTC cut would misfile the whole evening.
     expect(zonedStartOfWeek(now, 'UTC').toISOString()).toBe('2026-08-17T00:00:00.000Z');
   });
 
   test('month starts on the 1st 00:00 zone-local (DST-aware offset)', () => {
-    expect(zonedStartOfMonth(now, 'America/Los_Angeles').toISOString()).toBe('2026-08-01T07:00:00.000Z');
+    expect(zonedStartOfMonth(now, 'America/Vancouver').toISOString()).toBe('2026-08-01T07:00:00.000Z');
   });
 
   test('year starts Jan 1 00:00 zone-local — winter offset (PST, not PDT)', () => {
-    expect(zonedStartOfYear(now, 'America/Los_Angeles').toISOString()).toBe('2026-01-01T08:00:00.000Z');
+    expect(zonedStartOfYear(now, 'America/Vancouver').toISOString()).toBe('2026-01-01T08:00:00.000Z');
   });
 
   test('a zone ahead of UTC can already be in the NEXT week', () => {
@@ -137,7 +137,7 @@ describe('buildListWhere — created_* and noise segments', () => {
     const where = await ticketService.buildListWhere(7, { segment });
     const clause = createdClause(where);
     expect(clause).toBeDefined();
-    expect(clause.gte.toISOString()).toBe(boundaryFn(new Date(), 'America/Los_Angeles').toISOString());
+    expect(clause.gte.toISOString()).toBe(boundaryFn(new Date(), 'America/Vancouver').toISOString());
     // Counts creations, not open work: any non-Deleted/Spam status.
     expect(where.status).toEqual({ notIn: ['Deleted', 'Spam'] });
     expect(where.isNoise).toBe(false);
@@ -178,9 +178,9 @@ describe('getQueueStats — createdThisWeek/Month/Year', () => {
       .filter((w) => w.createdAt?.gte);
     expect(createdWheres).toHaveLength(3);
     const expected = [
-      zonedStartOfWeek(new Date(), 'America/Los_Angeles'),
-      zonedStartOfMonth(new Date(), 'America/Los_Angeles'),
-      zonedStartOfYear(new Date(), 'America/Los_Angeles'),
+      zonedStartOfWeek(new Date(), 'America/Vancouver'),
+      zonedStartOfMonth(new Date(), 'America/Vancouver'),
+      zonedStartOfYear(new Date(), 'America/Vancouver'),
     ].map((d) => d.toISOString()).sort();
     expect(createdWheres.map((w) => w.createdAt.gte.toISOString()).sort()).toEqual(expected);
     for (const w of createdWheres) {
@@ -309,7 +309,7 @@ describe('PUT /api/tickets/queue-cards', () => {
 
 describe('getMeta.queueCards', () => {
   beforeEach(() => {
-    prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, name: 'IT', isActive: true, nativeTicketingEnabled: true, defaultTimezone: 'America/Los_Angeles' });
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, name: 'IT', isActive: true, nativeTicketingEnabled: true, defaultTimezone: 'America/Vancouver' });
     prismaMock.group.findMany.mockResolvedValue([]);
     prismaMock.technician.findMany.mockResolvedValue([]);
     prismaMock.competencyCategory.findMany.mockResolvedValue([]);

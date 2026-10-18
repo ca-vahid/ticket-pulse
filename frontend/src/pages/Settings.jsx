@@ -120,7 +120,7 @@ export default function Settings() {
     twilio_whatsapp_content_sid: '',
     twilio_whatsapp_content_variables: '{"1":"{{message}}"}',
     sync_interval_minutes: 5,
-    default_timezone: 'America/Los_Angeles',
+    default_timezone: 'America/Vancouver',
     dashboard_refresh_seconds: 30,
   });
 
@@ -222,7 +222,7 @@ export default function Settings() {
         twilio_whatsapp_content_sid: settings.twilio_whatsapp_content_sid || '',
         twilio_whatsapp_content_variables: settings.twilio_whatsapp_content_variables || '{"1":"{{message}}"}',
         sync_interval_minutes: settings.sync_interval_minutes || 5,
-        default_timezone: settings.default_timezone || 'America/Los_Angeles',
+        default_timezone: settings.default_timezone || 'America/Vancouver',
         dashboard_refresh_seconds: settings.dashboard_refresh_seconds || 30,
       });
     }
@@ -1248,10 +1248,10 @@ export default function Settings() {
                             onChange={handleChange}
                             className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           >
-                            <option value="America/Los_Angeles">Pacific (Los Angeles)</option>
-                            <option value="America/Denver">Mountain (Denver)</option>
-                            <option value="America/Chicago">Central (Chicago)</option>
-                            <option value="America/New_York">Eastern (New York)</option>
+                            <option value="America/Vancouver">Pacific (Vancouver)</option>
+                            <option value="America/Edmonton">Mountain (Edmonton)</option>
+                            <option value="America/Toronto">Eastern (Toronto)</option>
+                            <option value="America/Halifax">Atlantic (Halifax)</option>
                           </select>
                         </div>
 
@@ -1553,7 +1553,7 @@ export default function Settings() {
                   here from Assignment Review's Configuration tab). */}
                 {activeSectionId === 'ai-routing' && (
                   <div className="p-6">
-                    <AssignmentConfigPanel workspaceTimezone={currentWorkspace?.defaultTimezone || 'America/Los_Angeles'} />
+                    <AssignmentConfigPanel workspaceTimezone={currentWorkspace?.defaultTimezone || 'America/Vancouver'} />
                   </div>
                 )}
 

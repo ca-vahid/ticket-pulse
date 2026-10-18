@@ -23,7 +23,7 @@ import { ticketRefLabel } from '../tickets/ticketUi';
 
 // Day boundaries elsewhere on this page are Pacific — position markers in the
 // same timezone so the strip agrees with the date filter.
-const APP_TZ = 'America/Los_Angeles';
+const APP_TZ = 'America/Vancouver';
 const HOUR_FMT = new Intl.DateTimeFormat('en-US', {
   timeZone: APP_TZ, hour: 'numeric', minute: '2-digit', hourCycle: 'h23',
 });

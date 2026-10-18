@@ -88,7 +88,7 @@ const prismaMock = {
     findMany: jest.fn(async () => db.groups),
     findFirst: jest.fn(async ({ where }) => db.groups.find((g) => g.id === where.id) || null),
   },
-  workspace: { findUnique: jest.fn(async () => ({ defaultTimezone: 'America/Los_Angeles' })) },
+  workspace: { findUnique: jest.fn(async () => ({ defaultTimezone: 'America/Vancouver' })) },
   $transaction: jest.fn(async (ops) => Promise.all(ops)),
 };
 
@@ -360,7 +360,7 @@ describe('live: family creation', () => {
     expect(ev.decision).toBe('create_family_after_the_fact');
     expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].subject.split(' - ')[1])).toEqual(['Laptop', 'Phone', 'iPad']);
     expect(db.families[0]).toMatchObject({ afterTheFact: true, template: 'offboarding_after_fact' });
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver' }).format(new Date());
     expect(ticketSvc.createTicket.mock.calls[0][1].dueBy).toBe(dueInstant(today));
   });
 

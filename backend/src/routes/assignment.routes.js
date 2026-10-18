@@ -40,7 +40,7 @@ import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
-const ASSIGNMENT_STATS_TIMEZONE = 'America/Los_Angeles';
+const ASSIGNMENT_STATS_TIMEZONE = 'America/Vancouver';
 const ESCALATION_CHANNELS = new Set(['email', 'sms', 'whatsapp', 'phone_call']);
 const PRIORITY_AUDIT_TRIGGERS = ['priority_assessment_after_hours', 'priority_assessment_only', 'priority_changed'];
 
@@ -375,7 +375,7 @@ router.get('/queue-status', requireAdmin, asyncHandler(async (req, res) => {
     where: { id: req.workspaceId },
     select: { defaultTimezone: true },
   });
-  const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const tz = workspace?.defaultTimezone || 'America/Vancouver';
   const bh = await availabilityService.isBusinessHours(new Date(), tz, req.workspaceId);
   const queuedCount = await assignmentRepository.countQueuedRuns(req.workspaceId);
 
@@ -1105,7 +1105,7 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
     where: { id: req.workspaceId },
     select: { defaultTimezone: true },
   });
-  const workspaceTimezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const workspaceTimezone = workspace?.defaultTimezone || 'America/Vancouver';
   const feedbackTimestamp = convertToTimezone(new Date(), workspaceTimezone);
 
   if (decision === 'modified' && overrideReason) {

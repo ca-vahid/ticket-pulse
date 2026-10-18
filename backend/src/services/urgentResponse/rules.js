@@ -30,7 +30,7 @@ export const UNDOABLE_ACTIONS = Object.freeze(['moved', 'redirected', 'on_call_a
 
 export const DEFAULT_SHIFT_START = '09:00';
 export const DEFAULT_SHIFT_END = '17:00';
-const FALLBACK_TIMEZONE = 'America/Los_Angeles';
+const FALLBACK_TIMEZONE = 'America/Vancouver';
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const MAX_MINUTES = 480;

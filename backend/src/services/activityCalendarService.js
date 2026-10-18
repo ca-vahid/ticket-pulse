@@ -15,7 +15,7 @@ import { formatDateInTimezone } from '../utils/timezone.js';
  *   matching the rest of the dashboard).
  * @returns {Array<{date: string, count: number}>} sorted ascending by date
  */
-export function bucketTicketsByDay(rows, timezone = 'America/Los_Angeles') {
+export function bucketTicketsByDay(rows, timezone = 'America/Vancouver') {
   const counts = new Map();
   for (const row of rows || []) {
     const ts = row?.firstAssignedAt || row?.createdAt;
@@ -34,7 +34,7 @@ export function bucketTicketsByDay(rows, timezone = 'America/Los_Angeles') {
  * Per-day handled counts for one technician over the trailing `days` window.
  * Single light query — only two timestamp columns are selected, no includes.
  */
-export async function getActivityCalendar({ technicianId, workspaceId, days = 365, timezone = 'America/Los_Angeles' }) {
+export async function getActivityCalendar({ technicianId, workspaceId, days = 365, timezone = 'America/Vancouver' }) {
   const cutoff = new Date(Date.now() - days * 86_400_000);
   const rows = await prisma.ticket.findMany({
     where: {

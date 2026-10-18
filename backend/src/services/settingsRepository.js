@@ -46,7 +46,7 @@ const DEFAULT_SETTINGS = {
   freshservice_domain: '',
   freshservice_api_key: '',
   sync_interval_minutes: 5,
-  default_timezone: 'America/Los_Angeles',
+  default_timezone: 'America/Vancouver',
   dashboard_refresh_seconds: 30,
   csat_sync_days: '90',
   avoidance_min_wait_minutes: '15',

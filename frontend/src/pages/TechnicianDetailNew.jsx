@@ -256,20 +256,20 @@ export default function TechnicianDetailNew() {
         let data;
         if (viewMode === 'weekly') {
           const weekStart = selectedWeek ? formatDateLocal(selectedWeek) : null;
-          data = unwrap(await getTechnicianWeekly(techId, weekStart, 'America/Los_Angeles'));
+          data = unwrap(await getTechnicianWeekly(techId, weekStart, 'America/Vancouver'));
           if (!data) throw new Error('Failed to fetch weekly technician data');
         } else if (viewMode === 'monthly') {
           const monthStr = selectedMonth
             ? `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`
             : null;
-          const res = await dashboardAPI.getTechnicianMonthly(parseInt(id, 10), monthStr, 'America/Los_Angeles');
+          const res = await dashboardAPI.getTechnicianMonthly(parseInt(id, 10), monthStr, 'America/Vancouver');
           if (!res.success || !res.data) throw new Error('Failed to fetch monthly technician data');
           data = res.data;
         } else {
           const dateStr = selectedDate
             ? (typeof selectedDate === 'string' ? selectedDate : formatDateLocal(selectedDate))
             : null;
-          data = unwrap(await getTechnician(techId, 'America/Los_Angeles', dateStr));
+          data = unwrap(await getTechnician(techId, 'America/Vancouver', dateStr));
           if (!data) throw new Error('Failed to fetch technician data');
         }
         if (mySeq !== fetchSeqRef.current) return;

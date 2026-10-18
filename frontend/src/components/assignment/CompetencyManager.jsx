@@ -1250,7 +1250,7 @@ function MatrixTab({ onAnalyze }) {
 
 // ─── Sub-tab: Live Analysis View ─────────────────────────────────────────
 
-function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, workspaceTimezone = 'America/Los_Angeles' }) {
+function LiveAnalysisView({ techId, techName, onBack, onComplete, forceNew, workspaceTimezone = 'America/Vancouver' }) {
   const navigate = useNavigate();
   const [status, setStatus] = useState('checking');
   const [events, setEvents] = useState([]);
@@ -1809,7 +1809,7 @@ function CompetencyDiff({ before, after }) {
 
 // ─── Sub-tab: Run History ─────────────────────────────────────────────────
 
-function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Los_Angeles' }) {
+function RunHistoryTab({ deepRunId, workspaceTimezone = 'America/Vancouver' }) {
   const navigate = useNavigate();
   const [runs, setRuns] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
@@ -2048,7 +2048,7 @@ const COMPETENCY_TABS = [
   { id: 'prompt', label: 'Prompt', icon: FileText },
 ];
 
-export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, workspaceTimezone = 'America/Los_Angeles' }) {
+export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, workspaceTimezone = 'America/Vancouver' }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentWorkspace } = useWorkspace();

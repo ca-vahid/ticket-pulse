@@ -147,7 +147,7 @@ export async function handBackEventDetails(rows) {
 const isReassignEvent = (details) => details?.kind === HAND_BACK_KINDS.REASSIGN;
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const FALLBACK_TIMEZONE = 'America/Los_Angeles';
+const FALLBACK_TIMEZONE = 'America/Vancouver';
 
 async function workspaceTimezone(workspaceId) {
   const ws = await Promise.resolve()

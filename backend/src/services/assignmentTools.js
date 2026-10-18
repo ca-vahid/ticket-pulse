@@ -481,7 +481,7 @@ async function getWorkspaceTimezone(workspaceId) {
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  return workspace?.defaultTimezone || 'America/Los_Angeles';
+  return workspace?.defaultTimezone || 'America/Vancouver';
 }
 
 const RISK_REASON_PATTERN = /\b(busy|no time|meeting|unavailable|not available|ooo|out of office|away|vacation|time off|on leave|back tomorrow|until tomorrow|few days off|fully booked|booked solid)\b/i;
@@ -708,7 +708,7 @@ async function getAgentAvailability(workspaceId) {
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  const hqTimezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const hqTimezone = workspace?.defaultTimezone || 'America/Vancouver';
   const { start: dateStart, end: dateEnd, dateStr: todayStr } = getLocalDateBounds(hqTimezone);
 
   const [techs, leaves] = await Promise.all([
@@ -1805,7 +1805,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  const timezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const timezone = workspace?.defaultTimezone || 'America/Vancouver';
   const { start: dateStart, end: dateEnd } = getLocalDateBounds(timezone);
   const { start: todayStart, end: todayEnd } = getTodayRange(timezone);
 
@@ -2088,7 +2088,7 @@ async function searchTickets(workspaceId, params) {
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const tz = workspace?.defaultTimezone || 'America/Vancouver';
 
   const where = { workspaceId };
 
@@ -2231,7 +2231,7 @@ async function getTechTicketHistory(workspaceId, params) {
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const tz = workspace?.defaultTimezone || 'America/Vancouver';
 
   const tech = await prisma.technician.findFirst({
     where: { id: tech_id, workspaceId },
@@ -2522,7 +2522,7 @@ async function getWorkloadStats(workspaceId) {
     where: { id: workspaceId },
     select: { defaultTimezone: true },
   });
-  const timezone = workspace?.defaultTimezone || 'America/Los_Angeles';
+  const timezone = workspace?.defaultTimezone || 'America/Vancouver';
   const { start, end } = getTodayRange(timezone);
   const todayStr = formatDateInTimezone(null, timezone);
 

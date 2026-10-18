@@ -132,7 +132,7 @@ class NotificationTimeTriggerService {
         const workspace = workspaceById.get(workflow.workspaceId);
         if (!workspace) continue;
         const config = this._triggerConfig(workflow);
-        const timezone = workspace.defaultTimezone || 'America/Los_Angeles';
+        const timezone = workspace.defaultTimezone || 'America/Vancouver';
         const nowInTz = zonedNowParts(timezone);
         const [hh, mm] = String(config.time || '08:00').split(':').map(Number);
         const slotMinutes = hh * 60 + mm;

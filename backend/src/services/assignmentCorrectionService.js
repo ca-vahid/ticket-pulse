@@ -158,7 +158,7 @@ class AssignmentCorrectionService {
       where: { id: workspaceId },
       select: { defaultTimezone: true },
     });
-    const timestamp = convertToTimezone(new Date(), workspace?.defaultTimezone || 'America/Los_Angeles');
+    const timestamp = convertToTimezone(new Date(), workspace?.defaultTimezone || 'America/Vancouver');
     const ticketRef = `Ticket #${run.ticket?.freshserviceTicketId || ticketId} (${run.ticket?.subject || 'unknown'})`;
     const feedbackEntry = `[${timestamp}] ${ticketRef}: Coordinator reassigned after an AI pick. Original: ${fromTech?.name || 'unassigned/unknown'}. Corrected: ${toTech?.name || `technician #${toTechId}`}. Reason code: ${code}. Reason: ${reasonText}`;
     await assignmentRepository.appendFeedback(workspaceId, feedbackEntry).catch((error) => {
@@ -371,7 +371,7 @@ class AssignmentCorrectionService {
       where: { id: workspaceId },
       select: { defaultTimezone: true },
     });
-    const timestamp = convertToTimezone(now, workspace?.defaultTimezone || 'America/Los_Angeles');
+    const timestamp = convertToTimezone(now, workspace?.defaultTimezone || 'America/Vancouver');
     const feedbackEntry = buildCorrectionFeedbackEntry({
       timestamp,
       ticket: run.ticket,

@@ -101,7 +101,7 @@ describe('agentAlertService quiet hours', () => {
       const orig = Intl.DateTimeFormat;
       // eslint-disable-next-line no-global-assign
       Intl.DateTimeFormat = function () { return { format: () => hhmm }; };
-      const r = svc._inQuietHours(pref, 'America/Los_Angeles');
+      const r = svc._inQuietHours(pref, 'America/Vancouver');
       Intl.DateTimeFormat = orig;
       return r;
     };

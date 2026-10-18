@@ -54,7 +54,7 @@ beforeEach(() => {
 
 // Mon–Fri 09:00–17:00 Pacific (the seeded default calendar).
 const WEEKDAYS_9_5 = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
-  dayOfWeek, startTime: '09:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles',
+  dayOfWeek, startTime: '09:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver',
 }));
 
 describe('SLA policies', () => {

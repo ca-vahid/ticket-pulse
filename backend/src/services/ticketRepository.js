@@ -63,7 +63,7 @@ class TicketRepository {
    * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Array>} Array of tickets
    */
-  async getAllToday(timezone = 'America/Los_Angeles', workspaceId = null) {
+  async getAllToday(timezone = 'America/Vancouver', workspaceId = null) {
     try {
       const { start, end } = getTodayRange(timezone);
 
@@ -467,7 +467,7 @@ class TicketRepository {
    * @param {number|null} workspaceId - When set, restrict to this workspace
    * @returns {Promise<Object>} Count statistics
    */
-  async getStats(timezone = 'America/Los_Angeles', date = null, workspaceId = null) {
+  async getStats(timezone = 'America/Vancouver', date = null, workspaceId = null) {
     try {
       const { start, end } = getTodayRange(timezone, date);
 

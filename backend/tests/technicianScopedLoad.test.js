@@ -34,7 +34,7 @@ const {
 } = await import('../src/services/statsCalculator.js');
 const { getTodayRange } = await import('../src/utils/timezone.js');
 
-const TZ = 'America/Los_Angeles';
+const TZ = 'America/Vancouver';
 const TECH = { id: 5, name: 'Ada Tech', workspaceId: 1, email: 'ada@example.com', photoUrl: null, timezone: TZ, isActive: true };
 
 const STATUS_SETS = {

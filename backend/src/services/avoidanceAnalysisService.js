@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import logger from '../utils/logger.js';
 
-const PT_TIMEZONE = 'America/Los_Angeles';
+const PT_TIMEZONE = 'America/Vancouver';
 const BUSINESS_CLOSE = '17:00';
 const COVERAGE_END = '09:00';
 

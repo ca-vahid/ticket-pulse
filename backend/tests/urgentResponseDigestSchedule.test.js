@@ -45,7 +45,7 @@ describe('startUrgentResponseDigest', () => {
     const [expression, , options] = cronScheduleMock.mock.calls[0];
     expect(expression).toBe('10 8 * * 1');
     expect(expression).not.toMatch(/[-/]/);
-    expect(options).toEqual({ scheduled: true, timezone: 'America/Los_Angeles' });
+    expect(options).toEqual({ scheduled: true, timezone: 'America/Vancouver' });
   });
 
   test('the tick sends the digests and logs how many went out; a failure is only a warning', async () => {

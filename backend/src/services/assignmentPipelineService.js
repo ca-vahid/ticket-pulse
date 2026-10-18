@@ -322,7 +322,7 @@ class AssignmentPipelineService {
         where: { id: workspaceId },
         select: { defaultTimezone: true },
       });
-      const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+      const tz = workspace?.defaultTimezone || 'America/Vancouver';
       const bh = await availabilityService.isBusinessHours(new Date(), tz, workspaceId);
 
       if (!bh.isBusinessHours) {
@@ -1043,7 +1043,7 @@ class AssignmentPipelineService {
       where: { id: workspaceId },
       select: { defaultTimezone: true },
     });
-    const wsTz = workspace?.defaultTimezone || 'America/Los_Angeles';
+    const wsTz = workspace?.defaultTimezone || 'America/Vancouver';
     const now = new Date();
     const localDate = formatDateInTimezone(now, wsTz);
     const localTime = formatInTimeZone(now, wsTz, 'HH:mm');
@@ -2486,7 +2486,7 @@ class AssignmentPipelineService {
             await this._retryOrphanedSyncs(ws.id).catch((e) => logger.warn(`[orphan-sync retry] ws ${ws.id}: ${e.message}`));
             const queuedCount = await assignmentRepository.countQueuedRuns(ws.id);
             if (queuedCount === 0) continue;
-            const tz = ws.defaultTimezone || 'America/Los_Angeles';
+            const tz = ws.defaultTimezone || 'America/Vancouver';
             const bh = await availabilityService.isBusinessHours(new Date(), tz, ws.id);
             if (!bh.isBusinessHours) continue;
             logger.info(`[queue-drain] Draining ${queuedCount} queued run(s) for workspace ${ws.id} (${ws.name})`);

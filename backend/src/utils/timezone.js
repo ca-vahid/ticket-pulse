@@ -3,7 +3,7 @@ import config from '../config/index.js';
 
 /**
  * Get "today" start and end timestamps in a specific timezone
- * @param {string} timezone - IANA timezone string (e.g., 'America/Los_Angeles')
+ * @param {string} timezone - IANA timezone string (e.g., 'America/Vancouver')
  * @param {Date} date - Optional date to get range for (defaults to now)
  * @returns {Object} { start: Date, end: Date } - Start and end of day in UTC
  */
@@ -118,7 +118,7 @@ export function formatDateInTimezone(date = null, timezone = config.sync.default
  * This function resolves "today" in the target timezone and returns UTC-midnight
  * boundaries that correctly match @db.Date values.
  *
- * @param {string} timezone - IANA timezone string (e.g., 'America/Los_Angeles')
+ * @param {string} timezone - IANA timezone string (e.g., 'America/Vancouver')
  * @param {Date} date - Optional reference date (defaults to now)
  * @returns {Object} { start: Date, end: Date, dateStr: string }
  */

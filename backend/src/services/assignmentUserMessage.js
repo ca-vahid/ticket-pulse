@@ -14,7 +14,7 @@ import { formatInTimeZone } from 'date-fns-tz';
  * @param {string}  args.dayOfWeek       e.g. "Monday"
  * @param {string}  args.localDate       e.g. "2026-04-21"
  * @param {string}  args.localTime       e.g. "14:32"
- * @param {string}  args.wsTz            IANA tz, e.g. "America/Los_Angeles"
+ * @param {string}  args.wsTz            IANA tz, e.g. "America/Vancouver"
  * @param {object}  [args.reboundFrom]   { previousTechName, unassignedAt, reboundCount }
  * @returns {string}
  */

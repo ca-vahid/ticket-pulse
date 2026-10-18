@@ -52,7 +52,7 @@ const DATA = {
   ],
 };
 
-const mount = () => render(<MemoryRouter><SharesTab workspaceTimezone="America/Los_Angeles" /></MemoryRouter>);
+const mount = () => render(<MemoryRouter><SharesTab workspaceTimezone="America/Vancouver" /></MemoryRouter>);
 const shareInput = (name) => screen.getByLabelText(`Share for ${name}, percent`);
 
 beforeEach(() => {

@@ -51,7 +51,7 @@ Write the brief FROM the data. Rules:
 - Be concrete and discussion-ready: what changed, what stands out, what deserves a decision.
 - Neutral, professional tone. No praise/blame of individual people — this team reviews workload as a team.`;
 
-const tzOf = (dataset) => dataset?.window?.timezone || 'America/Los_Angeles';
+const tzOf = (dataset) => dataset?.window?.timezone || 'America/Vancouver';
 
 function domainOf(email) {
   const at = String(email || '').lastIndexOf('@');
@@ -68,7 +68,7 @@ class ReportService {
       where: { id: workspaceId },
       select: { name: true, defaultTimezone: true },
     });
-    const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+    const tz = workspace?.defaultTimezone || 'America/Vancouver';
     // COMPLETE-DAY window, anchored to last midnight in the workspace
     // timezone (feedback 07-14): "last 7 days" = the 7 full days ending
     // yesterday. Two people generating the same scope on the same day get an

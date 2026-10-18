@@ -22,7 +22,7 @@ export function formatDateLocal(date) {
  */
 export function formatDateTimeInTimezone(
   date,
-  timezone = 'America/Los_Angeles',
+  timezone = 'America/Vancouver',
   options = {},
 ) {
   if (!date) return '';
@@ -57,7 +57,7 @@ export function formatDateTimeInTimezone(
  */
 export function formatDateOnlyInTimezone(
   date,
-  timezone = 'America/Los_Angeles',
+  timezone = 'America/Vancouver',
   options = {},
 ) {
   return formatDateTimeInTimezone(date, timezone, {

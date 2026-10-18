@@ -286,7 +286,7 @@ describe('public status payload: display number and actions (QA 10-15 #7)', () =
     status: 'Open',
     priority: 2,
     createdAt: new Date('2026-10-14T16:00:00Z'),
-    workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Los_Angeles' },
+    workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' },
     requester: { name: 'Priya Nair', email: 'priya.nair@example.com' },
     assignedTech: { id: 7, name: 'Sam Okafor', email: 'sam.okafor@example.com', photoUrl: null },
   };

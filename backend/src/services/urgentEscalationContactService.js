@@ -26,7 +26,7 @@ function verifiedPhone(preference = {}) {
   return phone && preference?.phoneVerifiedAt ? phone : null;
 }
 
-function startOfWorkspaceWeek(date = new Date(), timezone = 'America/Los_Angeles') {
+function startOfWorkspaceWeek(date = new Date(), timezone = 'America/Vancouver') {
   const zoned = toZonedTime(date, timezone);
   const day = zoned.getDay();
   const daysSinceMonday = (day + 6) % 7;
@@ -35,7 +35,7 @@ function startOfWorkspaceWeek(date = new Date(), timezone = 'America/Los_Angeles
   return fromZonedTime(zoned, timezone);
 }
 
-export function defaultRotationAnchorDate(timezone = 'America/Los_Angeles', reference = new Date()) {
+export function defaultRotationAnchorDate(timezone = 'America/Vancouver', reference = new Date()) {
   return startOfWorkspaceWeek(reference, timezone);
 }
 
@@ -183,7 +183,7 @@ export async function resolveAfterHoursActiveContact(workspaceId, options = {}) 
     };
   }
 
-  const timezone = workspace?.defaultTimezone || options.timezone || 'America/Los_Angeles';
+  const timezone = workspace?.defaultTimezone || options.timezone || 'America/Vancouver';
   const at = options.at ? new Date(options.at) : new Date();
   const showPhone = policy.showAfterHoursPhoneInEmail !== false;
   const rows = Array.isArray(policy.recipients) ? policy.recipients : [];

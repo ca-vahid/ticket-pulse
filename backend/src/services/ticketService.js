@@ -99,7 +99,7 @@ const workspaceTimezoneCache = new Map(); // workspaceId → { timezone, fetched
 async function workspaceTimezone(workspaceId) {
   const cached = workspaceTimezoneCache.get(workspaceId);
   if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.timezone;
-  let timezone = 'America/Los_Angeles';
+  let timezone = 'America/Vancouver';
   try {
     const ws = await prisma.workspace.findUnique({
       where: { id: workspaceId }, select: { defaultTimezone: true },

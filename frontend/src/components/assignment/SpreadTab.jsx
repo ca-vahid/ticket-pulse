@@ -78,7 +78,7 @@ function Fact({ label, value, note }) {
   );
 }
 
-export default function SpreadTab({ workspaceTimezone = 'America/Los_Angeles' }) {
+export default function SpreadTab({ workspaceTimezone = 'America/Vancouver' }) {
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

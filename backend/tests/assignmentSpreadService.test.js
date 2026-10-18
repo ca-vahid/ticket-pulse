@@ -60,7 +60,7 @@ beforeEach(() => {
   prismaMock.technician.findFirst.mockImplementation(async ({ where }) => PEOPLE[where.id] || null);
   prismaMock.hrLifecycleFamilyMember.findMany.mockResolvedValue([]);
   prismaMock.ticketAssignmentEpisode.findMany.mockResolvedValue([]);
-  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Los_Angeles' });
+  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
   prismaMock.$queryRaw.mockResolvedValue([]);
   urgentMock._person.mockImplementation(async (_ctx, id) => PEOPLE[id] || null);
   urgentMock._state.mockImplementation((_ctx, tech) => ({ atWork: atWork.has(tech.id) }));

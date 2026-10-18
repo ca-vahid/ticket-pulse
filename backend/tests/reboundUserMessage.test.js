@@ -5,7 +5,7 @@ const baseArgs = {
   dayOfWeek: 'Tuesday',
   localDate: '2026-04-21',
   localTime: '14:32',
-  wsTz: 'America/Los_Angeles',
+  wsTz: 'America/Vancouver',
 };
 
 describe('buildUserMessage — non-rebound runs', () => {

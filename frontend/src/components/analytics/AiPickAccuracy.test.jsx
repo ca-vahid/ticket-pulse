@@ -182,10 +182,10 @@ describe('AiPickAccuracy', () => {
   it('loads its own data for the page range, and passes the trend to the page chart block', async () => {
     analyticsAPI.getAiPickAccuracy.mockResolvedValue({ success: true, data: payload() });
     const ChartBlock = vi.fn(() => <div data-testid="chart" />);
-    render(<AiPickAccuracy params={{ range: '30d', timezone: 'America/Los_Angeles' }} ChartBlock={ChartBlock} />);
+    render(<AiPickAccuracy params={{ range: '30d', timezone: 'America/Vancouver' }} ChartBlock={ChartBlock} />);
     expect(screen.getByTestId('ai-pick-loading')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('chart')).toBeInTheDocument());
-    expect(analyticsAPI.getAiPickAccuracy).toHaveBeenCalledWith({ range: '30d', timezone: 'America/Los_Angeles' });
+    expect(analyticsAPI.getAiPickAccuracy).toHaveBeenCalledWith({ range: '30d', timezone: 'America/Vancouver' });
     const options = ChartBlock.mock.calls[0][0].options;
     expect(options.series.map((s) => s.name)).toEqual(['Tickets counted', 'First choice did it', 'In the list', 'Not on the list']);
   });

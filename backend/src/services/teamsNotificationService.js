@@ -81,19 +81,19 @@ const baseUrl = () => resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
 const lc = (s) => String(s || '').trim().toLowerCase();
 const fmtDue = (d, tz) => {
   if (!d) return null;
-  try { return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz || 'America/Los_Angeles' }).format(new Date(d)); } catch { return null; }
+  try { return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz || 'America/Vancouver' }).format(new Date(d)); } catch { return null; }
 };
 function localHHMM(tz, at = new Date()) {
-  try { return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz || 'America/Los_Angeles' }).format(at); } catch { return '12:00'; }
+  try { return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz || 'America/Vancouver' }).format(at); } catch { return '12:00'; }
 }
 // Rows the digest card lists; the counts above them are not limited by it.
 const DIGEST_ROWS = 10;
 
 function localDay(tz, at = new Date()) {
-  try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Los_Angeles' }).format(at); } catch { return at.toISOString().slice(0, 10); }
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Vancouver' }).format(at); } catch { return at.toISOString().slice(0, 10); }
 }
 function localWeekday(tz, at = new Date()) {
-  try { return new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: tz || 'America/Los_Angeles' }).format(at); } catch { return 'Mon'; }
+  try { return new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: tz || 'America/Vancouver' }).format(at); } catch { return 'Mon'; }
 }
 function inWindow(start, end, now) {
   if (!start || !end) return false;
@@ -484,7 +484,7 @@ class TeamsNotificationService {
   }
 
   async _awayReason(tech, workspaceId) {
-    const tz = tech.timezone || 'America/Los_Angeles';
+    const tz = tech.timezone || 'America/Vancouver';
     const day = localDay(tz);
     const leave = await prisma.technicianLeave.findFirst({
       where: { workspaceId, technicianId: tech.id, leaveDate: new Date(`${day}T00:00:00Z`) },
@@ -904,7 +904,7 @@ class TeamsNotificationService {
       if (!wantsDigest) continue;
       const tech = await prisma.technician.findUnique({ where: { id: row.technicianId }, select: { id: true, name: true, email: true, timezone: true } });
       if (!tech?.email) continue;
-      const tz = tech.timezone || 'America/Los_Angeles';
+      const tz = tech.timezone || 'America/Vancouver';
       if (localHHMM(tz, now) < (prefs.options.digestTime || '08:00')) continue;
       if (row.lastDigestAt && localDay(tz, row.lastDigestAt) === localDay(tz, now)) continue;
       if (['Sat', 'Sun'].includes(localWeekday(tz, now))) continue;
@@ -929,7 +929,7 @@ class TeamsNotificationService {
     // Tickets page), and the numbers are real counts.
     const where = { OR: await this._openTicketScopes(techs), isNoise: false };
     const now = new Date();
-    const tz = techs[0].timezone || 'America/Los_Angeles';
+    const tz = techs[0].timezone || 'America/Vancouver';
     const today = localDay(tz, now);
     const [open, openCount, overdueCount, nearDue] = await Promise.all([
       prisma.ticket.findMany({

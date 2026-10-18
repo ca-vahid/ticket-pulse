@@ -785,7 +785,7 @@ class AssignmentDailyReviewService {
     return {
       workspace,
       config,
-      timezone: workspace.defaultTimezone || 'America/Los_Angeles',
+      timezone: workspace.defaultTimezone || 'America/Vancouver',
     };
   }
 

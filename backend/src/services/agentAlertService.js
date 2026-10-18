@@ -439,7 +439,7 @@ class AgentAlertService {
     if (!pref?.quietHoursEnabled || !pref.quietHoursStart || !pref.quietHoursEnd) return false;
     let hhmm;
     try {
-      hhmm = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz || 'America/Los_Angeles' }).format(new Date());
+      hhmm = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz || 'America/Vancouver' }).format(new Date());
     } catch { hhmm = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); }
     const [s, e, n] = [pref.quietHoursStart, pref.quietHoursEnd, hhmm];
     // Window may wrap past midnight (e.g. 22:00 → 07:00).

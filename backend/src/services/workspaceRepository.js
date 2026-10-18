@@ -58,7 +58,7 @@ class WorkspaceRepository {
           name: data.name,
           slug: data.slug,
           freshserviceWorkspaceId: BigInt(data.freshserviceWorkspaceId),
-          defaultTimezone: data.defaultTimezone || 'America/Los_Angeles',
+          defaultTimezone: data.defaultTimezone || 'America/Vancouver',
           syncIntervalMinutes: data.syncIntervalMinutes || 5,
           isActive: data.isActive !== undefined ? data.isActive : true,
         },

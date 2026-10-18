@@ -166,7 +166,7 @@ router.post(
         name,
         slug: wsSlug,
         freshserviceWorkspaceId,
-        defaultTimezone: defaultTimezone || 'America/Los_Angeles',
+        defaultTimezone: defaultTimezone || 'America/Vancouver',
         syncIntervalMinutes: syncIntervalMinutes || 5,
       });
       logger.info(`Created workspace: ${ws.name} (slug: ${ws.slug})`);

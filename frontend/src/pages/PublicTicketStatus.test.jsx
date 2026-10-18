@@ -15,7 +15,7 @@ import PublicTicketStatus from './PublicTicketStatus';
 const basePayload = (overrides = {}) => {
   const { ticket = {}, ...rest } = overrides;
   return {
-    workspace: { name: 'IT', timezone: 'America/Los_Angeles' },
+    workspace: { name: 'IT', timezone: 'America/Vancouver' },
     ticket: {
       displayRef: 'TP-10018',
       origin: 'ticketpulse',

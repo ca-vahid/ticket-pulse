@@ -86,7 +86,7 @@ class ScheduledTicketService {
     let recurrenceFields = {};
     if (recurrence !== 'none') {
       const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { defaultTimezone: true } });
-      const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+      const tz = workspace?.defaultTimezone || 'America/Vancouver';
       const local = toZonedTime(when, tz);
       recurrenceFields = {
         recurrence,
@@ -152,7 +152,7 @@ class ScheduledTicketService {
         // Re-arm: advance to the next occurrence (rolling forward past any
         // missed ones — a row stuck in 'error' for weeks must not machine-gun
         // catch-up tickets), or complete when the end date is passed.
-        const tz = row.timezone || 'America/Los_Angeles';
+        const tz = row.timezone || 'America/Vancouver';
         let next = nextOccurrence(row.scheduledForAt, row, tz);
         while (next && next.getTime() <= Date.now()) next = nextOccurrence(next, row, tz);
         const done = !next || (row.endAt && next > row.endAt);

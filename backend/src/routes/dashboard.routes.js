@@ -210,7 +210,7 @@ router.get(
   '/',
   readCache(10_000),
   asyncHandler(async (req, res) => {
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const dateParam = req.query.date; // Format: YYYY-MM-DD
     const excludeNoise = req.query.excludeNoise === 'true';
     const isViewingToday = !dateParam; // Determine if we're viewing today vs historical date
@@ -305,7 +305,7 @@ router.get(
   '/weekly-stats',
   readCache(15_000),
   asyncHandler(async (req, res) => {
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const dateParam = req.query.date || formatDateInTimezone(null, timezone);
 
     // Calculate Monday of the week
@@ -395,13 +395,13 @@ router.get(
  * Get weekly aggregated dashboard data for all technicians
  * Query params:
  *   - weekStart: Monday of the week (YYYY-MM-DD, optional - defaults to current week)
- *   - timezone: Timezone for date calculations (default: America/Los_Angeles)
+ *   - timezone: Timezone for date calculations (default: America/Vancouver)
  */
 router.get(
   '/weekly',
   readCache(15_000),
   asyncHandler(async (req, res) => {
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const weekStartParam = req.query.weekStart; // Format: YYYY-MM-DD
 
     const excludeNoise = req.query.excludeNoise === 'true';
@@ -498,7 +498,7 @@ router.get(
   readCache(10_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const dateParam = req.query.date; // Format: YYYY-MM-DD
     const excludeNoise = req.query.excludeNoise === 'true';
     const isViewingToday = !dateParam;
@@ -597,14 +597,14 @@ router.get(
  * Get weekly stats for a specific technician
  * Query params:
  *   - weekStart: Monday of the week (YYYY-MM-DD, optional - defaults to current week)
- *   - timezone: Timezone for date calculations (default: America/Los_Angeles)
+ *   - timezone: Timezone for date calculations (default: America/Vancouver)
  */
 router.get(
   '/technician/:id/weekly',
   readCache(15_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const weekStartParam = req.query.weekStart;
 
     if (isNaN(techId)) {
@@ -754,14 +754,14 @@ router.get(
  * Get monthly stats for a single technician
  * Query params:
  *   - month: "YYYY-MM" (optional, defaults to current month)
- *   - timezone: Timezone for date calculations (default: America/Los_Angeles)
+ *   - timezone: Timezone for date calculations (default: America/Vancouver)
  */
 router.get(
   '/technician/:id/monthly',
   readCache(15_000),
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const monthParam = req.query.month; // Format: "YYYY-MM"
 
     if (isNaN(techId)) {
@@ -928,7 +928,7 @@ router.get(
  *   - date:       daily mode — YYYY-MM-DD (default: today)
  *   - weekStart:  weekly mode — Monday YYYY-MM-DD
  *   - month:      monthly mode — YYYY-MM
- *   - timezone:   IANA timezone (default: America/Los_Angeles)
+ *   - timezone:   IANA timezone (default: America/Vancouver)
  *
  * Response: { technicians: [{ id, name, photoUrl, timezone, workStartTime, workEndTime, avoidance }] }
  */
@@ -936,7 +936,7 @@ router.get(
   '/timeline',
   readCache(30_000),
   asyncHandler(async (req, res) => {
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const excludeNoise = req.query.excludeNoise === 'true';
     const rawIds = req.query.techIds || '';
     const techIds = rawIds.split(',').map(Number).filter((n) => !isNaN(n) && n > 0);
@@ -1037,13 +1037,13 @@ router.get(
  * Get monthly aggregated dashboard data with daily breakdown
  * Query params:
  *   - monthStart: First day of the month (YYYY-MM-DD, optional - defaults to current month)
- *   - timezone: Timezone for date calculations (default: America/Los_Angeles)
+ *   - timezone: Timezone for date calculations (default: America/Vancouver)
  */
 router.get(
   '/monthly',
   readCache(15_000),
   asyncHandler(async (req, res) => {
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const monthStartParam = req.query.monthStart; // Format: YYYY-MM-DD
 
     const excludeNoise = req.query.excludeNoise === 'true';
@@ -1251,7 +1251,7 @@ router.get(
  * feeding the agent page's activity heatmap.
  * Query params:
  *   - days: trailing window size (default 365, max 400)
- *   - timezone: IANA TZ for day bucketing (default America/Los_Angeles)
+ *   - timezone: IANA TZ for day bucketing (default America/Vancouver)
  * Response: { days: [{ date: 'YYYY-MM-DD', count }] } (only non-zero days).
  */
 router.get(
@@ -1264,7 +1264,7 @@ router.get(
     }
     const daysRaw = parseInt(req.query.days, 10);
     const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 400) : 365;
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
 
     // Lightweight ownership check — the full getById include (every ticket)
     // would defeat the point of this endpoint's skinny query.
@@ -1295,7 +1295,7 @@ router.get(
  *     When both provided, overrides window. Used for deep-linking from
  *     the dashboard Rej badge (e.g. "only show rejections on Apr 17").
  *   - window: '7d' | '30d' | 'all' (default '7d')
- *   - timezone: IANA TZ for interpreting start/end (default America/Los_Angeles)
+ *   - timezone: IANA TZ for interpreting start/end (default America/Vancouver)
  */
 router.get(
   '/technician/:id/bounced',
@@ -1305,7 +1305,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const techId = parseInt(req.params.id, 10);
     const { start, end } = req.query;
-    const timezone = req.query.timezone || 'America/Los_Angeles';
+    const timezone = req.query.timezone || 'America/Vancouver';
     const window = req.query.window === '30d' || req.query.window === 'all' ? req.query.window : '7d';
 
     const where = {

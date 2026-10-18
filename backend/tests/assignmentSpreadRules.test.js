@@ -252,8 +252,8 @@ describe('how the rules have worked', () => {
   const at = (iso) => new Date(iso);
 
   test('the day is the workspace\'s day, not UTC', () => {
-    expect(dayIn(at('2026-10-09T03:00:00Z'), 'America/Los_Angeles')).toBe('2026-10-08');
-    expect(dayIn(at('2026-10-09T12:00:00Z'), 'America/Los_Angeles')).toBe('2026-10-09');
+    expect(dayIn(at('2026-10-09T03:00:00Z'), 'America/Vancouver')).toBe('2026-10-08');
+    expect(dayIn(at('2026-10-09T12:00:00Z'), 'America/Vancouver')).toBe('2026-10-09');
   });
 
   test('largest burst = the most one person got inside any ten minutes', () => {
@@ -298,7 +298,7 @@ describe('how the rules have worked', () => {
       { id: 25, ticketId: 25, techId: 5, at: new Date(d14 + 5000), spread: { rule: 'cap_gave_way', unit: 'ticket:25' } },
     ];
     const queued = [0, 2, 4].map((m) => ({ queuedAt: new Date(d14 - 3 * 3600000), claimedAt: new Date(d14 - 3600000 + m * 60000) }));
-    const out = summarize([...before, ...after], queued, { settings: normalizeSettings({ enabled: true }, 1), timeZone: 'America/Los_Angeles', days: 14, now });
+    const out = summarize([...before, ...after], queued, { settings: normalizeSettings({ enabled: true }, 1), timeZone: 'America/Vancouver', days: 14, now });
 
     expect(out.perDay).toHaveLength(14);
     expect(out.totals).toEqual({ assignments: 12, moved: 1, keptTogether: 1, gaveWay: 1, guarded: 6 });

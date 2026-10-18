@@ -9,14 +9,14 @@ function formatEventTime(value, showFullDate) {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
-    timeZone: 'America/Los_Angeles',
+    timeZone: 'America/Vancouver',
   });
   if (!showFullDate) {
-    return `${d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Los_Angeles' })} ${time}`;
+    return `${d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Vancouver' })} ${time}`;
   }
-  const mo = d.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'America/Los_Angeles' });
-  const day = d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'America/Los_Angeles' });
-  const wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Los_Angeles' });
+  const mo = d.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'America/Vancouver' });
+  const day = d.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'America/Vancouver' });
+  const wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Vancouver' });
   return `${mo}/${day} ${wd}. ${time}`;
 }
 

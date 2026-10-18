@@ -36,7 +36,7 @@ const DATA = {
   ],
 };
 
-const mount = () => render(<MemoryRouter><SpreadTab workspaceTimezone="America/Los_Angeles" /></MemoryRouter>);
+const mount = () => render(<MemoryRouter><SpreadTab workspaceTimezone="America/Vancouver" /></MemoryRouter>);
 
 beforeEach(() => {
   getSpy.mockReset();

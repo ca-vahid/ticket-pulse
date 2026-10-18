@@ -452,7 +452,7 @@ export default function TimelineExplorer() {
         // defaulting to UTC "today" (which is tomorrow evening in Pacific time).
         period.date = selectedDate || formatDateLocal(new Date());
       }
-      const res = await dashboardAPI.getTimeline(techIds, period, 'America/Los_Angeles');
+      const res = await dashboardAPI.getTimeline(techIds, period, 'America/Vancouver');
       if (!res.success) throw new Error('Failed to load timeline');
       setTechData(res.data);
     } catch (e) {

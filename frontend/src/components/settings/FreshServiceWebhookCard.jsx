@@ -12,7 +12,7 @@ import {
 import { assignmentAPI } from '../../services/api';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 
-export default function FreshServiceWebhookCard({ workspaceTimezone = 'America/Los_Angeles' }) {
+export default function FreshServiceWebhookCard({ workspaceTimezone = 'America/Vancouver' }) {
   const [config, setConfig] = useState(null);
   const [secret, setSecret] = useState(null);
   const [loading, setLoading] = useState(true);

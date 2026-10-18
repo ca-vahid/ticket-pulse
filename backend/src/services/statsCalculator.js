@@ -762,7 +762,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
  * @param {Array} technicians - Array of technicians with tickets
  * @param {Date} monthStartDate - First day of the month (Date object)
  * @param {Date} monthEndDate - Last day of the month (Date object)
- * @param {string} timezone - Timezone identifier (e.g. America/Los_Angeles)
+ * @param {string} timezone - Timezone identifier (e.g. America/Vancouver)
  * @returns {Object} Monthly dashboard data with daily breakdown & aggregates
  */
 export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndDate, timezone, serviceAccountNames = [], statusSets = null) {
