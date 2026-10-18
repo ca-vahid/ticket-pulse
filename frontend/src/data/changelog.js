@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.2.97-preview';
+export const APP_VERSION = '4.2.98-preview';
 
 export const changelog = [
+  {
+    version: '4.2.98-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Merge from the Related card</strong> &mdash; every ticket listed under Related on a ticket page now has a small merge icon. It asks first and says exactly what happens: the other ticket&rsquo;s conversation is copied into the one you have open, tags are combined, and the other ticket is closed (or, if it came from FreshService, noted). For a FreshService ticket &mdash; such as an agent&rsquo;s reply FreshService turned into a new ticket &mdash; you can also delete it in FreshService in the same step; it goes to FreshService&rsquo;s trash and can be restored there. Available to reviewers and admins, on Ticket Pulse tickets that are Open or Pending.' },
+      { type: 'improved', html: '<strong>Unassigned stands out in Focus</strong> &mdash; in the Focus view a ticket with no owner reads &ldquo;Unassigned&rdquo; in amber, so gaps show at a glance. Compact and Dense keep the quiet &ldquo;Assign&rdquo;.' },
+    ],
+  },
   {
     version: '4.2.97-preview',
     date: 'October 17, 2026',

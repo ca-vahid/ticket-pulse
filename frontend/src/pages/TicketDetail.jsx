@@ -80,7 +80,8 @@ import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
-import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
+import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON, mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
+import RelatedMergeButton from '../components/tickets/RelatedMergeButton';
 import EditTicketModal from '../components/tickets/EditTicketModal';
 import { groupMoveFor } from '../components/tickets/assigneeGroupMove';
 import FsDeleteDialog from '../components/tickets/FsDeleteDialog';
@@ -1908,6 +1909,8 @@ export default function TicketDetail() {
       setSavingField(null);
     }
   };
+  // Bumped after a merge from the Related card so the list re-reads.
+  const [relatedNonce, setRelatedNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setRelated(null);
@@ -1916,7 +1919,23 @@ export default function TicketDetail() {
       .then((res) => { if (!cancelled) setRelated(res.data); })
       .catch(() => { if (!cancelled) setRelated({ sameRequester: [], nearDuplicates: [], similarByContent: [] }); });
     return () => { cancelled = true; };
-  }, [ticketId]);
+  }, [ticketId, relatedNonce]);
+  // Merge from the Related card (17 Oct 2026): this ticket must be able to
+  // receive a merge (Ticket Pulse–born, Open or Pending — mergeRules) and the
+  // person a reviewer or admin; any related ticket of either origin can go in.
+  const mergeableHere = (r) => Boolean(ticket) && canReview && ticketingOn
+    && !mergeSurvivorBlockedReason(ticket, statusDefs)
+    && r.id !== ticket.id && !['Deleted', 'Spam'].includes(r.status);
+  const afterRelatedMerge = ({ source, fsDelete }) => {
+    lastLocalMutationRef.current = Date.now();
+    setRelatedNonce((n) => n + 1);
+    fetchTicket({ silent: true });
+    if (fsDelete && !fsDelete.deleted) {
+      showToast('red', `${source.displayRef} was merged, but FreshService did not delete it: ${fsDelete.error || 'unknown reason'}`, { duration: 7000 });
+    } else {
+      showToast('emerald', `${source.displayRef} merged into ${ticket.displayRef}${fsDelete?.deleted ? ' and deleted in FreshService' : ''}`);
+    }
+  };
   const dismissDupes = () => {
     try { sessionStorage.setItem(`tp_dupe_dismiss_${ticketId}`, '1'); } catch { /* no-op */ }
     setDupeDismissed(true);
@@ -3706,15 +3725,16 @@ export default function TicketDetail() {
                               </p>
                               <ul className="space-y-1 mb-2.5">
                                 {related.sameRequester.map((r) => (
-                                  <li key={r.id}>
+                                  <li key={r.id} className="flex items-center gap-1">
                                     <Link
                                       to={`/tickets/${r.id}`}
-                                      className="tp-focus-ring flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50/60 dark:hover:bg-blue-500/10 border border-transparent hover:border-blue-100 dark:hover:border-blue-500/20"
+                                      className="tp-focus-ring flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50/60 dark:hover:bg-blue-500/10 border border-transparent hover:border-blue-100 dark:hover:border-blue-500/20"
                                     >
                                       <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{r.displayRef}</span>
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                       <StatusPill status={r.status} className="!text-[9px] !px-1.5" />
                                     </Link>
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -3737,15 +3757,16 @@ export default function TicketDetail() {
                               </div>
                               <ul className="space-y-1">
                                 {related.nearDuplicates.map((r) => (
-                                  <li key={r.id}>
+                                  <li key={r.id} className="flex items-center gap-1">
                                     <Link
                                       to={`/tickets/${r.id}`}
-                                      className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-amber-100/70 dark:hover:bg-amber-500/15"
+                                      className="tp-focus-ring flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 rounded-md hover:bg-amber-100/70 dark:hover:bg-amber-500/15"
                                     >
                                       <span className="font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-300 whitespace-nowrap">{r.displayRef}</span>
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                       <span className="text-[10px] text-muted-foreground/75 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
                                     </Link>
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -3762,10 +3783,10 @@ export default function TicketDetail() {
                               </div>
                               <ul className="space-y-1">
                                 {related.similarByContent.map((r) => (
-                                  <li key={r.id}>
+                                  <li key={r.id} className="flex items-center gap-1">
                                     <Link
                                       to={`/tickets/${r.id}`}
-                                      className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70 dark:hover:bg-violet-500/15"
+                                      className="tp-focus-ring flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70 dark:hover:bg-violet-500/15"
                                     >
                                       <span className="font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300 whitespace-nowrap">{r.displayRef}</span>
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
@@ -3776,6 +3797,7 @@ export default function TicketDetail() {
                                         {Math.round((r.similarity || 0) * 100)}%
                                       </span>
                                     </Link>
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>

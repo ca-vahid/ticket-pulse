@@ -228,6 +228,7 @@ function renderAssignee(ticket, ctx) {
             showAi={canReview}
             aiSuggestion={canReview ? (ticket.ai || (aiLive ? { state: 'analyzing' } : null)) : null}
             onAiAssign={canReview ? () => ctx.setAiTicket(ticket) : null}
+            attention={Boolean(ctx.focus)}
           />
         )}
         {/* Provenance badge AFTER the picker so avatars/names align vertically
@@ -298,7 +299,7 @@ function renderAssignee(ticket, ctx) {
                 <AgentFirstName name={ticket.assignedTech.name} className="text-xs text-muted-foreground" />
               </>
             ) : (
-              <UnassignedBadge variant="muted" />
+              <UnassignedBadge variant={ctx.focus ? 'attentionMuted' : 'muted'} />
             )}
           </span>
           {!canSeeAi ? null : ticket.ai?.state === 'suggested' ? (

@@ -35,6 +35,7 @@ export default function AssigneePicker({
   askHandBack = true, // false = changing the assignee never asks why (forms that aren't a real ticket yet)
   onOverride = null, // (res, ticketId, techId) => void: the parent asks "why?" (a queue row can unmount right after the save)
   categoryLabel = null, // "Networking / VPN" — sharpens the Escalate hint in the reason dialog
+  attention = false, // Focus view: an empty owner reads amber "Unassigned" (UnassignedBadge variant)
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -340,7 +341,7 @@ export default function AssigneePicker({
             </span>
           </>
         ) : (
-          <UnassignedBadge size={sm ? 'h-5 w-5' : 'h-7 w-7'} labelClass={sm ? 'text-xs' : 'text-sm'} variant={disabled ? 'muted' : 'interactive'} />
+          <UnassignedBadge size={sm ? 'h-5 w-5' : 'h-7 w-7'} labelClass={sm ? 'text-xs' : 'text-sm'} variant={disabled ? (attention ? 'attentionMuted' : 'muted') : (attention ? 'attention' : 'interactive')} />
         )}
         {!disabled && (
           <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-muted-foreground/75 ml-auto flex-shrink-0 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />

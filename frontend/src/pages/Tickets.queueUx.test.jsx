@@ -721,6 +721,10 @@ describe('Focus view (17 Oct 2026)', () => {
     // State rides beside Status; the category reads under the subject.
     expect(screen.getAllByTestId('focus-state')[0]).toHaveTextContent('Requester replied');
     expect(screen.getAllByTestId('focus-category')[0]).toHaveTextContent('VPN');
+    // An empty owner reads amber "Unassigned" in Focus (17 Oct 2026).
+    const gap = document.querySelector('[data-unassigned="attention"]');
+    expect(gap).not.toBeNull();
+    expect(gap).toHaveTextContent('Unassigned');
   });
 
   test('switching back to Compact restores your own columns', async () => {
@@ -731,5 +735,6 @@ describe('Focus view (17 Oct 2026)', () => {
     await waitFor(() => expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE));
     expect(screen.getByRole('button', { name: /^Columns/ })).toBeInTheDocument();
     expect(screen.queryByTestId('focus-state')).toBeNull();
+    expect(document.querySelector('[data-unassigned="attention"]')).toBeNull();
   });
 });
