@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox,
-  AlignJustify, CheckCheck, Columns3, Hand, ListChecks, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
+  AlignJustify, CheckCheck, Columns3, Hand, ListChecks, ListFilter, Loader2, MailQuestion, Plus, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -58,7 +58,11 @@ import useMediaQuery from '../hooks/useMediaQuery';
 
 // Status vocabulary comes from the workspace registry in the queue meta
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
-const PAGE_SIZE = 25;
+// Rows per page (Vahid, 17 Oct 2026): a personal choice, remembered (local
+// mirror + the queue.pageSize preference). The list route allows up to 200.
+const PAGE_SIZE_CHOICES = [25, 50, 100, 200];
+const DEFAULT_PAGE_SIZE = 25;
+const KBD = 'font-mono border border-border rounded px-1 bg-card';
 // Bulk delete cap (2 Oct 2026) — matches the server's /tickets/bulk-delete cap.
 const BULK_DELETE_MAX = 25;
 
@@ -154,7 +158,7 @@ function pageWindow(current, total) {
  * jumps, a numbered window, and a type-a-page-number input. `compact` is the
  * top-of-list variant (no number row).
  */
-function Pagination({ page, totalPages, total, pageSize, onPage, compact = false }) {
+function Pagination({ page, totalPages, total, pageSize, onPage, compact = false, onPageSize = null, hints = false }) {
   const [jump, setJump] = useState('');
   const go = (p) => onPage(Math.min(totalPages, Math.max(1, p)));
   const commitJump = () => {
@@ -188,7 +192,24 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${compact ? '' : 'justify-between'}`}>
-      <span className="text-xs text-muted-foreground whitespace-nowrap">{rangeText}</span>
+      <span className="inline-flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
+        {rangeText}
+        {onPageSize && (
+          <label className="inline-flex items-center gap-1 text-muted-foreground/75">
+            Show
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSize(Number(e.target.value))}
+              aria-label="Tickets per page"
+              data-testid="page-size"
+              className="tp-focus-ring h-7 rounded-lg border border-border bg-card pl-1.5 pr-6 text-xs font-semibold text-foreground/85"
+            >
+              {PAGE_SIZE_CHOICES.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            per page
+          </label>
+        )}
+      </span>
       <div className="flex items-center gap-1">
         <button onClick={() => go(1)} disabled={page <= 1} aria-label="First page" title="First page" className={navBtn}>
           <ChevronsLeft className="w-4 h-4" aria-hidden="true" />
@@ -219,7 +240,19 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
           <ChevronsRight className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
-      {jumpBox}
+      <span className="inline-flex items-center gap-4">
+        {/* Keyboard hint (gap plan 2 P4.2), in the pager row since 17 Oct 2026 —
+            wide desktops only; keys are pointless on touch. */}
+        {hints && (
+          <span className="hidden 2xl:inline-flex items-center gap-3 text-[10px] text-muted-foreground/75" data-testid="kbd-hints">
+            <span><kbd className={KBD}>j</kbd>/<kbd className={KBD}>k</kbd> move</span>
+            <span><kbd className={KBD}>↵</kbd> open</span>
+            <span><kbd className={KBD}>x</kbd> select</span>
+            <span><kbd className={KBD}>Ctrl K</kbd> commands</span>
+          </span>
+        )}
+        {jumpBox}
+      </span>
     </div>
   );
 }
@@ -281,7 +314,6 @@ export default function Tickets() {
   const [loadError, setLoadError] = useState(null);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [manualRefreshing, setManualRefreshing] = useState(false); // force-refresh button
   const sortMenuRef = useRef(null);
   useEffect(() => {
     if (!sortMenuOpen) return undefined;
@@ -483,9 +515,10 @@ export default function Tickets() {
   const [layout, setLayout] = useState(() => {
     try {
       const v = localStorage.getItem('tp_ticket_layout');
-      if (v === 'compact' || v === 'roomy' || v === 'board' || v === 'dense') return v;
-      // Migrate legacy density: comfortable → roomy, compact/dense → compact.
-      return localStorage.getItem('tp_ticket_density') === 'comfortable' ? 'roomy' : 'compact';
+      // Roomy was retired 17 Oct 2026 (Vahid: "quite useless"): it, and the
+      // legacy 'comfortable' density, open as compact.
+      if (v === 'compact' || v === 'board' || v === 'dense') return v;
+      return 'compact';
     } catch { return 'compact'; }
   });
   useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
@@ -607,7 +640,25 @@ export default function Tickets() {
   // board fetches a DOUBLE page — 50 cards fill the taller columns instead of
   // stranding three shallow stacks above a pager (backend caps pageSize at
   // 100, so no server change). Every PAGE_SIZE consumer below reads this.
-  const effectivePageSize = boardMode ? 50 : PAGE_SIZE;
+  const [pageSizePref, setPageSizePref] = useState(() => {
+    try {
+      const n = Number(localStorage.getItem('tp_queue_page_size'));
+      return PAGE_SIZE_CHOICES.includes(n) ? n : DEFAULT_PAGE_SIZE;
+    } catch { return DEFAULT_PAGE_SIZE; }
+  });
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference('queue.pageSize')
+      .then((res) => {
+        const value = Number(res?.data?.value);
+        if (cancelled || !PAGE_SIZE_CHOICES.includes(value)) return;
+        setPageSizePref(value);
+        try { localStorage.setItem('tp_queue_page_size', String(value)); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+  const effectivePageSize = boardMode ? 50 : pageSizePref;
 
   // FR 09-09: which URL params make up each filter group the relief endpoint
   // can name. Kept beside queryParams so the two never drift.
@@ -1536,6 +1587,16 @@ export default function Tickets() {
     setParams({ page: p === 1 ? null : p }, { resetPage: false });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+  // A new page size keeps the first row on screen in view: it lands on the
+  // page that now holds it.
+  const changePageSize = (n) => {
+    if (!PAGE_SIZE_CHOICES.includes(n) || n === pageSizePref) return;
+    const firstRow = (page - 1) * pageSizePref;
+    setPageSizePref(n);
+    try { localStorage.setItem('tp_queue_page_size', String(n)); } catch { /* no-op */ }
+    ticketsAPI.setQueuePreference('queue.pageSize', n).catch(() => { /* local mirror still applies */ });
+    goPage(Math.floor(firstRow / n) + 1);
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / effectivePageSize));
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
@@ -2126,21 +2187,15 @@ export default function Tickets() {
                     onOpenTask={(task) => { if (task?.ticket?.id) openTicket(`${task.ticket.id}?tab=tasks`); }}
                     onFilterDepartment={(name) => { setSearch(name); setParams({ q: name }); }}
                   />
-                  {/* Columns customizer (Phase QC) — list layouts only; the
-                      board's columns are statuses, not these. Desktop-only:
-                      custom columns apply at xl+ and mobile keeps its cards. */}
-                  {!boardMode && (
-                    <div className="hidden md:block order-2">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} freezeSubject={freezeSubject} onFreezeSubjectChange={updateFreezeSubject} />
-                    </div>
-                  )}
                   {/* View — two list densities plus the drag-drop board
-                      (Open / Pending / Closed columns, QA 07-27 #3). */}
-                  <div className="hidden md:inline-flex order-2 items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
+                      (Open / Pending / Closed columns, QA 07-27 #3). Roomy was
+                      retired 17 Oct 2026. Every control in this row is 36px
+                      tall (h-9) since then; the force-refresh button went too
+                      (the list is live and phones keep pull-to-refresh). */}
+                  <div className="hidden md:inline-flex order-2 h-9 items-stretch rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
                     {[
                       { key: 'dense', Icon: AlignJustify, label: 'Dense', hint: 'The tightest rows and smaller type — the most tickets on one screen.' },
                       { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
-                      { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
                       { key: 'board', Icon: Columns3, label: 'Board', hint: 'Open / Pending / Closed columns — drag a card to change its status (Ticket Pulse tickets save directly; FreshService tickets confirm first).' },
                     ].map(({ key, Icon, label, hint }) => (
                       <button
@@ -2148,24 +2203,13 @@ export default function Tickets() {
                         onClick={() => setLayout(key)}
                         aria-pressed={layout === key}
                         title={hint}
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300' : 'text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50'}`}
+                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300' : 'text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50'}`}
                       >
                         <Icon className="w-4 h-4" aria-hidden="true" />
                         {label}
                       </button>
                     ))}
                   </div>
-                  {/* Force refresh — belt-and-suspenders next to the live/SSE
-                      machinery: refetches the list + stat cards right now. */}
-                  <button
-                    onClick={() => { if (!manualRefreshing) { setManualRefreshing(true); Promise.allSettled([fetchTickets({ silent: true }), fetchStats()]).finally(() => setManualRefreshing(false)); } }}
-                    disabled={manualRefreshing}
-                    aria-label="Refresh tickets now"
-                    title="Refresh now"
-                    className="tp-focus-ring order-2 inline-flex items-center justify-center bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40 disabled:opacity-60"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${manualRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-                  </button>
                   {/* Phone: pick several tickets, then act on them from the bar
                       that rises above the tab bar (desktop uses the row boxes). */}
                   {!boardMode && !panelView && (
@@ -2184,7 +2228,7 @@ export default function Tickets() {
                     <button
                       onClick={() => setSortMenuOpen((v) => !v)}
                       aria-expanded={sortMenuOpen}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 text-sm bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40"
+                      className="tp-focus-ring inline-flex h-9 items-center gap-1.5 text-sm bg-card border border-input rounded-lg px-2.5 text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40"
                     >
                       {dir === 'desc'
                         ? <ArrowDownWideNarrow className="w-4 h-4 text-muted-foreground/75" aria-hidden="true" />
@@ -2217,12 +2261,22 @@ export default function Tickets() {
                   {/* Date window (QA 10-16 #7): small, beside sort; the rail's
                       Created section shows the same choice. */}
                   <CreatedWindowControl
-                    className="hidden sm:inline-flex order-2"
+                    className="hidden sm:inline-flex order-2 h-9"
                     value={createdWin.key}
                     custom={createdWin.custom}
                     searching={createdWin.searching && !createdWin.custom}
                     onPick={pickCreatedWindow}
                   />
+                  {/* Columns customizer (Phase QC) — list layouts only; the
+                      board's columns are statuses, not these. Desktop-only:
+                      custom columns apply at xl+ and mobile keeps its cards.
+                      Last in the row (17 Oct 2026) so switching to the board,
+                      which hides it, moves nothing else. */}
+                  {!boardMode && (
+                    <div className="hidden md:block order-2">
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} freezeSubject={freezeSubject} onFreezeSubjectChange={updateFreezeSubject} />
+                    </div>
+                  )}
                   {/* Right end: AI-approval worklist connector + pagination */}
                   {!panelView && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
                     <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
@@ -2230,7 +2284,7 @@ export default function Tickets() {
                         <button
                           onClick={() => setParams({ aiState: aiState === 'suggested' ? null : 'suggested', segment: null })}
                           aria-pressed={aiState === 'suggested'}
-                          className={`tp-focus-ring inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border text-xs font-semibold shadow-subtle transition-colors ${
+                          className={`tp-focus-ring inline-flex h-9 items-center gap-1.5 pl-2.5 pr-3 rounded-lg border text-xs font-semibold transition-colors ${
                             aiState === 'suggested'
                               ? 'border-indigo-400 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200'
                               : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20'
@@ -2893,14 +2947,7 @@ export default function Tickets() {
 
                       {/* Full pagination */}
                       <div className={`px-4 border-t border-border/60 bg-muted/25 ${docked ? 'shrink-0 py-2' : 'py-3'}`}>
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} />
-                        {/* Keyboard hint (gap plan 2 P4.2) — desktop only, keys are pointless on touch */}
-                        <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-muted-foreground/75">
-                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">j</kbd>/<kbd className="font-mono border border-border rounded px-1 bg-card">k</kbd> move</span>
-                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">↵</kbd> open</span>
-                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">x</kbd> select</span>
-                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">Ctrl K</kbd> commands</span>
-                        </p>
+                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} onPageSize={boardMode ? null : changePageSize} hints />
                       </div>
                     </div>
                   )}

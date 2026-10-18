@@ -131,6 +131,11 @@ describe('TicketFilterRail — Custom fields facet (Phase 2)', () => {
     expect(urlParams().get('cf_expedite')).toBeNull();
   });
 
+  test('the count matches the Filtered view bar: Open + Pending is 2 (17 Oct 2026)', async () => {
+    renderRail('/tickets?status=Open,Pending');
+    expect(await screen.findByRole('button', { name: /clear all \(2\)/i })).toBeInTheDocument();
+  });
+
   test('saved views capture the dynamic cf_* family (schema-free params blob)', async () => {
     renderRail('/tickets?cf_client_name=acme&cf_amount_gte=10&priority=3');
     await screen.findByLabelText('Filter by Client Name');

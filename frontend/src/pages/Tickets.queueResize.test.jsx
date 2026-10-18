@@ -257,19 +257,6 @@ describe('Width storage (QR1)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE);
   });
-
-  test('widths are per layout: compact pins do not touch roomy, roomy pins apply there', async () => {
-    localStorage.setItem('tp_ticket_layout', 'roomy');
-    getPrefSpy.mockImplementation((key) => Promise.resolve({
-      data: { key, value: key === 'queue.columnWidths' ? { compact: { requester: 300 }, roomy: { status: 200 } } : null },
-    }));
-    await mountAndLoad();
-    // Roomy: 60px type slot (never resizable — no Subject separator), the
-    // compact-only 300px ignored, roomy's own status pin applied.
-    await waitFor(() => expect(currentTemplate()).toBe('6px 60px 176px minmax(150px,1fr) 210px 200px 88px 74px'));
-    expect(screen.queryByRole('separator', { name: 'Resize Subject column' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('separator', { name: 'Resize Status column' })).toBeInTheDocument();
-  });
 });
 
 describe('Overflow + flyout reset (QR3)', () => {

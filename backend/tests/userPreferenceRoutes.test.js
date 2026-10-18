@@ -159,6 +159,15 @@ describe('PUT /api/tickets/preferences/:key', () => {
     });
   });
 
+  test('queue.pageSize takes one of 25 / 50 / 100 / 200 (17 Oct 2026)', async () => {
+    const res = await request(buildApp()).put('/api/tickets/preferences/queue.pageSize').send({ value: 100 }).expect(200);
+    expect(res.body.data).toEqual({ key: 'queue.pageSize', value: 100 });
+    prismaMock.userPreference.upsert.mockClear();
+    await request(buildApp()).put('/api/tickets/preferences/queue.pageSize').send({ value: 500 }).expect(400);
+    await request(buildApp()).put('/api/tickets/preferences/queue.pageSize').send({ value: '50' }).expect(400);
+    expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
+  });
+
   test('queue.freezeSubject takes true / false only (17 Oct 2026)', async () => {
     const res = await request(buildApp()).put('/api/tickets/preferences/queue.freezeSubject').send({ value: false }).expect(200);
     expect(res.body.data).toEqual({ key: 'queue.freezeSubject', value: false });

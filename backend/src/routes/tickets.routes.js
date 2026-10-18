@@ -283,7 +283,8 @@ router.get('/filter-relief', asyncHandler(async (req, res) => {
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
-  const result = await ticketService.listTickets(req.workspaceId, req.query, { actor: req.ticketActor });
+  // Up to 200 a page (17 Oct 2026: the Tickets pager offers 25 / 50 / 100 / 200).
+  const result = await ticketService.listTickets(req.workspaceId, req.query, { actor: req.ticketActor, maxPageSize: 200 });
   res.json({ success: true, data: result });
 }));
 
@@ -407,7 +408,7 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 
 // 'composer.greeting' (QA 09-18 #4): 'auto' adds the workspace greeting the
 // moment a reply starts; 'manual' waits for the Greeting button.
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'queue.sideArrows', 'queue.freezeSubject', 'queue.createdWindow', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'queue.sideArrows', 'queue.freezeSubject', 'queue.pageSize', 'queue.createdWindow', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
 const PREFERENCE_VALIDATORS = {
@@ -423,6 +424,8 @@ const PREFERENCE_VALIDATORS = {
   'queue.sideArrows': (v) => typeof v === 'boolean',
   // Subject kept in place while the other columns scroll sideways (17 Oct 2026): on / off.
   'queue.freezeSubject': (v) => typeof v === 'boolean',
+  // Tickets per page (17 Oct 2026): one of the choices the pager offers.
+  'queue.pageSize': (v) => [25, 50, 100, 200].includes(v),
   // Tickets list date window (QA 10-16 #7): the person's default.
   'queue.createdWindow': (v) => ['7d', '30d', '90d', 'all'].includes(v),
 };

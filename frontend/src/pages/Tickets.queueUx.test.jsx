@@ -72,7 +72,6 @@ import { DEFAULT_COLUMN_KEYS } from '../components/tickets/queueColumns';
 const GRID_VAR_CLASS = 'qx:[grid-template-columns:var(--tp-q-grid)]';
 // Defaults must reproduce the pre-QC hardcoded xl templates exactly.
 const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 176px minmax(150px,1fr) 210px 116px 88px 74px';
-const DEFAULT_ROOMY_TEMPLATE = '6px 60px 176px minmax(150px,1fr) 210px 116px 88px 74px';
 
 const row = (id, status) => ({
   id,
@@ -212,22 +211,13 @@ describe('Computed column templates (Phase QC — QC3)', () => {
     expect(colOf(statusHeader)).toBe('6');
   });
 
-  test('roomy: computed template has the 60px type slot; the Ticket header sits on it at xl (md span unchanged)', async () => {
+  test('Roomy is retired (17 Oct 2026): a saved roomy layout opens as compact, and there is no Roomy button', async () => {
     localStorage.setItem('tp_ticket_layout', 'roomy');
     mount();
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
-
-    expect(currentTemplate()).toBe(DEFAULT_ROOMY_TEMPLATE);
-    const cells = screen.getAllByTitle('Rita Requester · Vancouver HQ');
-    expect(cells[0]).toHaveClass('hidden', 'qx:flex');
-    expect(cells[0].closest('div').className).toContain(GRID_VAR_CLASS);
-
-    // md keeps the old type+category span; at xl the columns are user-ordered
-    // so every column labels itself and "Ticket" collapses onto the type slot.
-    const ticketHeaderBtn = screen.getByRole('button', { name: /^Ticket$/ });
-    const span = ticketHeaderBtn.closest('span');
-    expect(span).toHaveClass('[grid-column:2/4]', 'qx:[grid-column:2/3]');
-    expect(span.closest('div').className).toContain(GRID_VAR_CLASS);
+    expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE);
+    expect(screen.queryByRole('button', { name: /^Roomy$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Compact$/ })).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
@@ -679,5 +669,39 @@ describe('Priority + State columns (Mega 08-30 Phase QX)', () => {
     const header = screen.getByText('State', { selector: 'span.cursor-help' });
     expect(header.title).toMatch(/Requester replied › Re-opened › Response due › New/);
     expect(header.title).toMatch(/First-response history is incomplete/);
+  });
+});
+
+describe('Toolbar + pager tidy-up (17 Oct 2026)', () => {
+  test('one height, no refresh button, Columns last in the row', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    expect(screen.queryByRole('button', { name: /refresh tickets now/i })).toBeNull();
+    const columns = screen.getByRole('button', { name: /^Columns/ });
+    const dateWindow = screen.getByTestId('created-window');
+    expect(columns.className).toContain('h-9');
+    expect(dateWindow.className).toContain('h-9');
+    expect(screen.getByRole('group', { name: 'View layout' }).className).toContain('h-9');
+    // DOCUMENT_POSITION_FOLLOWING: the Columns button comes after the date window
+    expect(dateWindow.compareDocumentPosition(columns) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('tickets per page: 25 by default; 50 refetches, is remembered and saved for the person', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    expect(lastListParams().pageSize).toBe(25);
+    const picker = screen.getByTestId('page-size');
+    expect(picker).toHaveValue('25');
+    fireEvent.change(picker, { target: { value: '50' } });
+    await waitFor(() => expect(lastListParams().pageSize).toBe(50));
+    expect(localStorage.getItem('tp_queue_page_size')).toBe('50');
+    expect(setPrefSpy).toHaveBeenCalledWith('queue.pageSize', 50);
+    expect(screen.getByTestId('kbd-hints')).toBeInTheDocument();
+  });
+
+  test('a saved page size from the server wins', async () => {
+    getPrefSpy.mockImplementation((key) => Promise.resolve({ data: { key, value: key === 'queue.pageSize' ? 100 : null } }));
+    mount();
+    await waitFor(() => expect(lastListParams().pageSize).toBe(100));
   });
 });

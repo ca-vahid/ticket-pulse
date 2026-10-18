@@ -1178,7 +1178,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
         aria-expanded={open}
         aria-haspopup="dialog"
         title="Choose and reorder the list's columns (applies on large screens)"
-        className={`tp-focus-ring relative inline-flex items-center gap-1.5 text-sm rounded-lg px-2.5 min-h-[44px] py-2 border transition-colors ${
+        className={`tp-focus-ring relative inline-flex h-9 items-center gap-1.5 text-sm rounded-lg px-2.5 border transition-colors ${
           customized ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 font-medium' : 'bg-card text-foreground/85 border-input hover:border-blue-300 dark:hover:border-blue-500/40'
         }`}
       >
