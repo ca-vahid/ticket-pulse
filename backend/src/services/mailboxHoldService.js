@@ -315,6 +315,52 @@ class MailboxHoldService {
     }));
   }
 
+  /**
+   * One held message with what a person needs to decide (17 Oct 2026, the
+   * Tickets popup): the list row plus the email itself — sanitized HTML (the
+   * page shows it in a sandboxed frame) and plain text — and a fuller look at
+   * the best-guess ticket (requester, when it was opened, last activity).
+   */
+  async get(id, workspaceId) {
+    const row = await prisma.mailboxHeldMessage.findFirst({
+      where: { id: Number(id), workspaceId: Number(workspaceId) },
+      include: { connection: { select: { address: true } } },
+    });
+    if (!row) throw new ValidationError('Held message not found');
+    const ids = [row.bestGuessTicketId, row.resolvedTicketId].filter(Boolean);
+    const tickets = ids.length
+      ? await prisma.ticket.findMany({
+        where: { id: { in: ids }, workspaceId: Number(workspaceId) },
+        select: { ...TICKET_SUMMARY_SELECT, createdAt: true, updatedAt: true, requester: { select: { name: true, email: true } }, assignedTech: { select: { name: true } } },
+      })
+      : [];
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    const best = row.bestGuessTicketId ? byId.get(row.bestGuessTicketId) || null : null;
+    const payload = row.emailPayload && typeof row.emailPayload === 'object' ? row.emailPayload : {};
+    const { default: sanitizeHtml } = await import('sanitize-html');
+    const { EMAIL_SANITIZE_OPTIONS } = await import('./notificationWorkflowSignatureService.js');
+    const bodyHtml = row.bodyHtml ? sanitizeHtml(row.bodyHtml, EMAIL_SANITIZE_OPTIONS) : null;
+    const presented = presentHeld({
+      ...row,
+      bestGuessTicket: best,
+      resolvedTicket: row.resolvedTicketId ? byId.get(row.resolvedTicketId) || null : null,
+    });
+    return {
+      ...presented,
+      bodyHtml,
+      bodyText: typeof payload.bodyText === 'string' ? payload.bodyText.slice(0, 50000) : (presented.snippet || null),
+      hasAttachments: payload.hasAttachments === true,
+      bestGuessTicket: presented.bestGuessTicket && best ? {
+        ...presented.bestGuessTicket,
+        createdAt: best.createdAt,
+        updatedAt: best.updatedAt,
+        requesterName: best.requester?.name || null,
+        requesterEmail: best.requester?.email || null,
+        assigneeName: best.assignedTech?.name || null,
+      } : presented.bestGuessTicket,
+    };
+  }
+
   async count(workspaceId, status = 'held') {
     return prisma.mailboxHeldMessage.count({ where: { workspaceId: Number(workspaceId), status } });
   }

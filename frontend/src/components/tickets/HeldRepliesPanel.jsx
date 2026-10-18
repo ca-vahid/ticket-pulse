@@ -29,6 +29,23 @@ export const HOLD_REASON_META = {
     tone: 'slate',
     help: 'This mailbox is set to never create tickets from unmatched mail.',
   },
+  // 17 Oct 2026: the three reasons the helpdesk mailbox added had no wording
+  // and showed their raw codes ("sender_burst").
+  ambiguous_ticket: {
+    label: 'Two tickets match',
+    tone: 'sky',
+    help: 'Two or more tickets match this sender and subject, so Ticket Pulse did not pick one for you.',
+  },
+  sender_burst: {
+    label: 'Burst from one sender',
+    tone: 'amber',
+    help: 'One sender sent more new emails in a single check than the limit, so the extra ones were held instead of each opening a ticket.',
+  },
+  ingest_error: {
+    label: 'Could not file',
+    tone: 'slate',
+    help: 'Creating the ticket or adding the reply failed. Nothing was lost; a person decides.',
+  },
 };
 
 const TONE = {
@@ -38,7 +55,7 @@ const TONE = {
   slate: 'bg-muted text-muted-foreground border-border',
 };
 
-function ReasonChip({ reason }) {
+export function ReasonChip({ reason }) {
   const meta = HOLD_REASON_META[reason] || { label: reason, tone: 'slate', help: '' };
   return (
     <span
@@ -58,7 +75,7 @@ function fmtWhen(iso) {
 }
 
 /** Ticket typeahead for "Attach to ticket" — global search, tickets only. */
-function TicketPicker({ onPick, onCancel, initialQuery = '' }) {
+export function TicketPicker({ onPick, onCancel, initialQuery = '' }) {
   const [q, setQ] = useState(initialQuery);
   const [results, setResults] = useState([]);
   const [busy, setBusy] = useState(false);

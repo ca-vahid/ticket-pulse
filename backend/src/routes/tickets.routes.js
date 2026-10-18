@@ -702,6 +702,13 @@ router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, re
   res.json({ success: true, data: rows, meta: { heldCount } });
 }));
 
+// One held message in full (17 Oct 2026): the Tickets "unmatched replies"
+// popup shows the email and why it is waiting next to the choices.
+router.get('/mailboxes/held/:heldId', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  res.json({ success: true, data: await mailboxHoldService.get(Number(req.params.heldId), req.workspaceId) });
+}));
+
 router.post('/mailboxes/held/:heldId/attach', requireTicketingStaff, asyncHandler(async (req, res) => {
   const ticketId = Number(req.body?.ticketId);
   if (!Number.isInteger(ticketId) || ticketId <= 0) throw new ValidationError('ticketId is required');
