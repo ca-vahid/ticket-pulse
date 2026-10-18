@@ -556,6 +556,12 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     get('parkKind'), // Auto-help waiting view
     ...cfActiveKeys, // each cf_ param counts like the URL param it is
   ].filter(Boolean).length;
+  // What the badge and "Clear all" SHOW (17 Oct 2026): the same number as the
+  // Filtered view bar's "Reset filters (n)" — Open + Pending read "2" there
+  // and "1" here. Each status counts, as each is its own chip. (activeTotal
+  // itself still matches saved views by URL params.)
+  const statusValues = statusRaw && statusRaw !== 'any' ? csvList(statusRaw).length : 0;
+  const shownTotal = activeTotal + Math.max(0, statusValues - 1);
 
   const clearAll = () => {
     setSearchParams((prev) => {
@@ -746,7 +752,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             onClick={clearAll}
             className="tp-focus-ring text-[11px] font-semibold text-red-500 hover:text-red-700 dark:hover:text-red-200 rounded px-1"
           >
-            Clear all ({activeTotal})
+            Clear all ({shownTotal})
           </button>
         )}
         {docked && !mobileOpen && (
@@ -1436,14 +1442,14 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         </button>
         <button
           onClick={() => { setCollapsed(false); if (autoTucked || (collapsed && docked && !pinned && tucked)) schedulePeek(true, 0); }}
-          aria-label={`Filters${activeTotal ? ` (${activeTotal} active)` : ''}`}
+          aria-label={`Filters${shownTotal ? ` (${shownTotal} active)` : ''}`}
           tabIndex={slim ? 0 : -1}
           className="tp-focus-ring relative p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
         >
           <ListFilter className="w-4 h-4" aria-hidden="true" />
-          {activeTotal > 0 && (
+          {shownTotal > 0 && (
             <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 rounded-full bg-blue-600 text-white text-[9px] font-bold inline-flex items-center justify-center">
-              {activeTotal}
+              {shownTotal}
             </span>
           )}
         </button>
@@ -1655,7 +1661,7 @@ export function ActiveFilterBar({ meta }) {
           className="tp-focus-ring ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 shadow-subtle"
         >
           <X className="w-3.5 h-3.5" aria-hidden="true" />
-          Reset filters ({chips.length})
+          Reset filters ({chips.length + Math.max(0, cfKeys.length - 1)})
         </button>
       </div>
     </div>

@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.2.93-preview';
+export const APP_VERSION = '4.2.94-preview';
 
 export const changelog = [
+  {
+    version: '4.2.94-preview',
+    date: 'October 17, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>A tidier Tickets toolbar</strong> &mdash; every control in the row above the list is now the same height; Columns sits at the end of the row, so switching to the board no longer moves the other buttons; the refresh button is gone (the list updates live); and the Roomy view was retired (if you used it, you now see Compact).' },
+      { type: 'new', html: '<strong>Tickets per page</strong> &mdash; choose 25, 50, 100 or 200 at the bottom of the list. Your choice is remembered on every device.' },
+      { type: 'improved', html: '<strong>One row for the pager</strong> &mdash; the keyboard tips (j/k, Enter, x, Ctrl K) now sit in the pager row instead of a line of their own.' },
+      { type: 'fixed', html: '<strong>Filter counts agree</strong> &mdash; the Filters panel said 1 while &ldquo;Reset filters&rdquo; said 2 for Open + Pending. Both now count each status you picked.' },
+    ],
+  },
   {
     version: '4.2.93-preview',
     date: 'October 17, 2026',
