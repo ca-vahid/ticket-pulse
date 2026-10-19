@@ -98,21 +98,25 @@ export async function evaluateNoiseCloseGuard({ ticketId, workspaceId }) {
 
     const requesterEmail = ticket.requester?.email || null;
     const sender = noiseRules.classifySender({ subject: ticket.subject, requesterEmail });
-    if (sender.humanPrefix) return hold(NOISE_CLOSE_HOLD_REASONS.FORWARDED);
-    if (sender.machineAddress) return { hold: false, reason: null, message: null };
 
-    // Only our own people count by history. An outside sender with a past
-    // real ticket is usually a vendor whose support case once came in; their
-    // marketing mail is still noise (Veeam, 1Password: 30-day replay, 27 Sep).
-    // Where no internal domains are configured, history alone decides.
+    // Only our own people count. An outside sender with a past real ticket is
+    // usually a vendor whose support case once came in; their marketing mail is
+    // still noise (Veeam, 1Password: 30-day replay, 27 Sep). Where no internal
+    // domains are configured, the old rules apply unchanged.
     const workspace = await prisma.workspace.findUnique({
       where: { id: Number(workspaceId) },
       select: { internalDomains: true },
     });
     const internalDomains = workspace?.internalDomains || [];
-    if (internalDomains.length > 0 && !emailDomainIsInternal(requesterEmail, internalDomains)) {
-      return { hold: false, reason: null, message: null };
-    }
+    const outsider = internalDomains.length > 0 && !emailDomainIsInternal(requesterEmail, internalDomains);
+
+    // "RE:" / "FW:" means one of our people forwarded or answered it, so only
+    // a sender from our own domains counts. A vendor's auto-reply titled "Re:
+    // 1Password Support Request 844052" is not a person (19 Oct 2026, Vahid:
+    // five such acknowledgements sat unassigned in IT).
+    if (sender.humanPrefix && !outsider) return hold(NOISE_CLOSE_HOLD_REASONS.FORWARDED);
+    if (sender.machineAddress) return { hold: false, reason: null, message: null };
+    if (outsider) return { hold: false, reason: null, message: null };
 
     if (ticket.requesterId) {
       const realTicket = await prisma.ticket.findFirst({

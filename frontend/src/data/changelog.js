@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.02-preview';
+export const APP_VERSION = '4.3.03-preview';
 
 export const changelog = [
+  {
+    version: '4.3.03-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Vendor auto-replies no longer pile up unassigned</strong> &mdash; when the AI marks a ticket as noise, a subject starting with &ldquo;Re:&rdquo; or &ldquo;FW:&rdquo; now holds the close only if the sender is one of our own people. An outside company&rsquo;s automatic reply, such as &ldquo;Re: 1Password Support Request&rdquo;, closes as noise and shows in the morning noise digest with Reopen &amp; route. Forwards from staff are still held for a person.' },
+    ],
+  },
   {
     version: '4.3.02-preview',
     date: 'October 19, 2026',
