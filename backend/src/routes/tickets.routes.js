@@ -1782,6 +1782,7 @@ router.post('/', requireNativeTicketing, asyncHandler(async (req, res) => {
   const ticket = await ticketService.createTicket(req.workspaceId, body, req.ticketActor, {
     enforceRequired: true,
     allowAssignableOnly: true,
+    liftPastedImages: true,
     ...(linkRunId ? { intakeRunId: linkRunId } : {}),
   });
   res.status(201).json({ success: true, data: ticket });

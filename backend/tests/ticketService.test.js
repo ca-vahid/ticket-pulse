@@ -167,6 +167,45 @@ describe('ticketService.createTicket', () => {
     expect(result.triage.queued).toBe(true);
   });
 
+  test('a picture pasted into the description becomes an attachment instead of breaking the size limit', async () => {
+    const big = 'A'.repeat(160000);
+    await ticketService.createTicket(1, {
+      subject: 'Screen shows an error',
+      description: `<p>See below</p><img src="data:image/png;base64,${big}">`,
+      requesterEmail: 'rita@example.com',
+    }, actor, { liftPastedImages: true });
+
+    const stored = prismaMock.ticket.create.mock.calls[0][0].data.description;
+    expect(stored).toContain('[Pasted image attached: pasted-image-1.png]');
+    expect(stored).not.toContain('data:image');
+    expect(attachmentServiceMock.upload).toHaveBeenCalledWith(expect.objectContaining({
+      ticketId: 501, fileName: 'pasted-image-1.png', contentType: 'image/png',
+    }));
+  });
+
+  test('keeps the description as sent when attachment storage is not configured', async () => {
+    attachmentServiceMock.isConfigured.mockReturnValueOnce(false);
+    await ticketService.createTicket(1, {
+      subject: 'Small pasted icon',
+      description: '<p>Hi</p><img src="data:image/png;base64,AAAA">',
+      requesterEmail: 'rita@example.com',
+    }, actor, { liftPastedImages: true });
+
+    expect(prismaMock.ticket.create.mock.calls[0][0].data.description).toContain('data:image/png');
+    expect(attachmentServiceMock.upload).not.toHaveBeenCalled();
+  });
+
+  test('mail, API and automation intakes keep a pasted picture in the description', async () => {
+    await ticketService.createTicket(1, {
+      subject: 'Signature logo inline',
+      description: '<p>Hi</p><img src="data:image/png;base64,AAAA">',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    expect(prismaMock.ticket.create.mock.calls[0][0].data.description).toContain('data:image/png');
+    expect(attachmentServiceMock.upload).not.toHaveBeenCalled();
+  });
+
   test('refuses when native ticketing is disabled for the workspace', async () => {
     prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, nativeTicketingEnabled: false });
     await expect(ticketService.createTicket(1, {
