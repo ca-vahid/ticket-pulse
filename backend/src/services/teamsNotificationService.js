@@ -21,6 +21,7 @@ import bot from '../integrations/teamsBotClient.js';
 import { ticketCard, approvalCard, digestCard, textCard, EVENT_META, OUTCOMES, htmlToCardMarkdown, textToCardMarkdown } from './teamsCards.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { findNoteImages, noteImagePath, noteTextForPreview, noteTextWithoutMarkers, tokenFromDecisionUrl } from './approvalNoteImages.js';
 
 /** What an agent can choose from. mode: 'teams' | 'digest' | 'off'. */
 export const EVENTS = [
@@ -632,7 +633,7 @@ class TeamsNotificationService {
     this._notifyApproval(input).catch((err) => logger.warn(`Teams approval card to ${input?.approval?.approverEmail} skipped: ${err.message}`));
   }
 
-  async _notifyApproval({ approval, ticket, decisionUrl, categoryName, requestedByName, note }) {
+  async _notifyApproval({ approval, ticket, decisionUrl, categoryName, requestedByName, note, noteImages = [] }) {
     const ws = await this.workspaceSettings(ticket.workspaceId);
     if (!ws.teamsEnabled) return;
     const email = lc(approval.approverEmail);
@@ -644,13 +645,15 @@ class TeamsNotificationService {
     const a = {
       approvalId: approval.id, ticketId: ticket.id, workspaceId: ticket.workspaceId, categoryName,
       ref: ticketDisplayRef(ticket), subject: ticket.subject, requesterName: ticket.requester?.name || null,
-      askedByName: requestedByName, noteMd: textToCardMarkdown(note), decisionUrl,
+      askedByName: requestedByName, decisionUrl,
+      // 19 Oct 2026: pasted pictures show as pictures, not as "[Image: name]".
+      noteMd: textToCardMarkdown(noteImages.length ? noteTextWithoutMarkers(note) : note), noteImages,
       tierLabel: approval.tier && approval.tier > 1 ? `Tier ${approval.tier}` : null,
     };
     await this._send(email, approvalCard(a), {
       summary: `Approval waiting: ${categoryName || ticket.subject || ''}`,
       workspaceId: ticket.workspaceId, technicianId: tech?.id || null, ticketId: ticket.id, eventKey: 'approval_waiting', refKey: `approval:${approval.id}`,
-      bell: { title: `Approval waiting: ${categoryName || ticket.subject || ''}`.slice(0, 150), preview: note || ticket.subject, webUrl: decisionUrl },
+      bell: { title: `Approval waiting: ${categoryName || ticket.subject || ''}`.slice(0, 150), preview: noteTextForPreview(note) || ticket.subject, webUrl: decisionUrl },
     });
   }
 
@@ -660,12 +663,18 @@ class TeamsNotificationService {
     const t = await prisma.ticket.findFirst({ where: { id: ap.ticketId }, select: { id: true, subject: true, freshserviceTicketId: true, nativeNumber: true, origin: true, requester: { select: { name: true } } } });
     const cat = ap.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: ap.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const last = await prisma.teamsDelivery.findFirst({ where: { ticketId: ap.ticketId, eventKey: 'approval_waiting', email: lc(ap.approverEmail) }, orderBy: { id: 'desc' }, select: { id: true } });
+    // The card's own link carries the token the pictures are served under.
+    const token = decisionUrl && String(decisionUrl).startsWith(baseUrl()) ? tokenFromDecisionUrl(decisionUrl) : null;
+    const noteImages = token
+      ? (await findNoteImages(ap)).map((img) => ({ name: img.fileName, url: noteImagePath(token, img.id, { absolute: true }) })).filter((x) => x.url)
+      : [];
     return {
       approval: ap,
       model: {
         approvalId: ap.id, ticketId: ap.ticketId, workspaceId: ap.workspaceId, categoryName: cat?.name || null,
         ref: t ? ticketDisplayRef(t) : null, subject: t?.subject || null, requesterName: t?.requester?.name || null,
-        askedByName: null, noteMd: textToCardMarkdown(ap.requestNote), tierLabel: ap.tier && ap.tier > 1 ? `Tier ${ap.tier}` : null,
+        askedByName: null, noteMd: textToCardMarkdown(noteImages.length ? noteTextWithoutMarkers(ap.requestNote) : ap.requestNote), noteImages,
+        tierLabel: ap.tier && ap.tier > 1 ? `Tier ${ap.tier}` : null,
         // The approver's own link rides in the card data (the token is stored hashed).
         decisionUrl: decisionUrl && String(decisionUrl).startsWith(baseUrl()) ? decisionUrl : `${baseUrl()}/approvals`,
         lastDeliveryId: last?.id || null,

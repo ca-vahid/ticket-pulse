@@ -14,6 +14,9 @@ import { sseManager } from '../routes/sse.routes.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import assetronReservationService from './assetronReservationService.js';
 import { ticketLinkUrl } from '../utils/ticketLink.js';
+import {
+  findNoteImages, noteHtmlWithImages, noteImagePath, noteTextForPreview, tokenFromDecisionUrl, imagePixelWidth,
+} from './approvalNoteImages.js';
 const APPROVAL_EXPIRY_DAYS = 30;
 
 function newToken() {
@@ -484,8 +487,15 @@ class TicketApprovalService {
     const attachments = await Promise.resolve().then(async () => {
       const { default: attachmentService } = await import('./attachmentService.js');
       const rows = await attachmentService.listForTicket(ticket.id, ticket.workspaceId);
-      return (rows || []).map((a) => ({ id: a.id, name: a.fileName, sizeBytes: a.sizeBytes ?? null, contentType: a.contentType || null }));
+      // Signature logos that ride on every e-mail are not files the approver needs (19 Oct 2026).
+      return (rows || []).filter((a) => !a.recurring).map((a) => ({ id: a.id, name: a.fileName, sizeBytes: a.sizeBytes ?? null, contentType: a.contentType || null }));
     }).catch(() => []);
+
+    // 19 Oct 2026: pictures pasted into the request note are shown where the note names them.
+    const noteImages = await findNoteImages(approval);
+    const requestNoteHtml = noteImages.length
+      ? noteHtmlWithImages(approval.requestNoteHtml || null, approval.requestNote || null, noteImages, { srcFor: (img) => noteImagePath(token, img.id) })
+      : (approval.requestNoteHtml || null);
 
     // Visibility gates for requester contact detail — reuse the public-status
     // settings so one Settings card governs every unauthenticated surface.
@@ -630,7 +640,7 @@ class TicketApprovalService {
         requestedByName,
         requestedByPhotoUrl: looksLikeEmail(approval.requestedBy) ? photoUrl('requestedBy') : null,
         requestNote: approval.requestNote,
-        requestNoteHtml: approval.requestNoteHtml || null,
+        requestNoteHtml,
         createdAt: approval.createdAt,
         expiresAt: approval.expiresAt,
         decidedAt: approval.decidedAt,
@@ -1431,6 +1441,21 @@ class TicketApprovalService {
 
   // ------------------------------------------------------------- internals
 
+  /**
+   * One picture the request note names, for the magic-link page, the e-mail
+   * fallback and Teams (19 Oct 2026). The token opens only the files its own
+   * note names, never the rest of the ticket's files.
+   */
+  async noteImageByToken(token, imageId) {
+    const approval = await this._findByToken(token);
+    const image = (await findNoteImages(approval)).find((img) => img.id === Number(imageId));
+    if (!image) throw new NotFoundError('Picture not found');
+    const { default: attachmentService } = await import('./attachmentService.js');
+    const buffer = await attachmentService.bufferFor(image);
+    if (!buffer) throw new NotFoundError('This picture is no longer in storage');
+    return { contentType: image.contentType, buffer };
+  }
+
   async _findByToken(token) {
     if (!token || String(token).length < 20) throw new ValidationError('Invalid approval link');
     const approval = await prisma.ticketApproval.findUnique({
@@ -1809,6 +1834,33 @@ class TicketApprovalService {
     ]);
     const attachments = [requesterPhoto, requestedByPhoto].filter(Boolean);
 
+    // 19 Oct 2026: pictures pasted into the note travel inline too, in place of "[Image: name]".
+    const noteImages = await findNoteImages(approval);
+    if (noteImages.length) {
+      const cids = new Map();
+      const widths = new Map();
+      let total = 0;
+      const { default: attachmentService } = await import('./attachmentService.js');
+      for (const [i, img] of noteImages.entries()) {
+        const buffer = await attachmentService.bufferFor(img);
+        if (!buffer || total + buffer.length > 10 * 1024 * 1024) continue;
+        total += buffer.length;
+        const cid = `note-image-${i + 1}`;
+        cids.set(img.id, cid);
+        const w = imagePixelWidth(buffer);
+        widths.set(img.id, w ? Math.min(w, 560) : 560);
+        attachments.push({ name: img.fileName, contentType: img.contentType, contentBytes: buffer.toString('base64'), contentId: cid, inline: true });
+      }
+      noteHtml = noteHtmlWithImages(noteHtml, null, noteImages, {
+        srcFor: (img) => (cids.has(img.id) ? `cid:${cids.get(img.id)}` : null),
+        widthFor: (img) => widths.get(img.id) || null,
+      });
+    }
+    const decisionToken = tokenFromDecisionUrl(decisionUrl);
+    const cardImages = decisionToken
+      ? noteImages.map((img) => ({ name: img.fileName, url: noteImagePath(decisionToken, img.id, { absolute: true }) })).filter((x) => x.url)
+      : [];
+
     const html = renderApproverRequestEmail({
       workspaceName: await this._workspaceName(ticket),
       categoryName,
@@ -1838,11 +1890,11 @@ class TicketApprovalService {
 
     // Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): the same request as a card the approver can decide from.
     import('./teamsNotificationService.js')
-      .then(({ default: teams }) => teams.notifyApproval({ approval, ticket, decisionUrl, categoryName, requestedByName, note: approval.requestNote || null }))
+      .then(({ default: teams }) => teams.notifyApproval({ approval, ticket, decisionUrl, categoryName, requestedByName, note: approval.requestNote || null, noteImages: cardImages }))
       .catch(() => {});
     // And to the approver's own phone or browser, when they turned that on.
     import('./webPushService.js')
-      .then(({ default: push }) => push.notifyApproval({ approval, ticket, categoryName, requestedByName, note: approval.requestNote || null }))
+      .then(({ default: push }) => push.notifyApproval({ approval, ticket, categoryName, requestedByName, note: noteTextForPreview(approval.requestNote) }))
       .catch(() => {});
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');

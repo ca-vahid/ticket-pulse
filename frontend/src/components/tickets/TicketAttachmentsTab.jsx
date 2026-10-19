@@ -56,7 +56,7 @@ function Thumb({ a, url }) {
 }
 
 export default function TicketAttachmentsTab({
-  ticketId, attachments = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null,
+  ticketId, attachments = [], signatureImages = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null,
 }) {
   const [filter, setFilter] = useState('all');
   const [view, setView] = useState(() => { try { return localStorage.getItem('tp_attach_view') || 'grid'; } catch { return 'grid'; } });
@@ -144,7 +144,7 @@ export default function TicketAttachmentsTab({
 
       {shown.length === 0 ? (
         <p className="py-10 text-center text-sm italic text-muted-foreground">
-          {rows.length === 0 ? 'No attachments on this ticket yet.' : 'No attachments from this source.'}
+          {rows.length === 0 ? (signatureImages.length ? 'No attachments on this ticket, apart from signature logos.' : 'No attachments on this ticket yet.') : 'No attachments from this source.'}
         </p>
       ) : view === 'grid' ? (
         <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
@@ -188,6 +188,25 @@ export default function TicketAttachmentsTab({
             </li>
           ))}
         </ul>
+      )}
+
+      {/* 19 Oct 2026: signature logos that come with nearly every e-mail. Not counted as files; listed here so nothing is hidden. */}
+      {signatureImages.length > 0 && (
+        <details className="mt-4 border-t border-border pt-3 text-[12px] text-muted-foreground" data-testid="signature-images">
+          <summary className="tp-focus-ring w-fit cursor-pointer rounded">
+            {signatureImages.length === 1 ? '1 signature logo' : `${signatureImages.length} signature logos`} not counted
+            <span className="text-muted-foreground/75"> · pictures that come with e-mails on many tickets</span>
+          </summary>
+          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {signatureImages.map((a) => (
+              <li key={a.id} className="flex items-center gap-1.5">
+                <ImageIcon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+                <button type="button" onClick={() => onPreview?.(a, signatureImages)} className="tp-focus-ring max-w-[260px] truncate rounded hover:text-foreground hover:underline" title={`Preview ${a.fileName}`}>{a.fileName}</button>
+                <span className="text-muted-foreground/75">{formatBytes(a.sizeBytes)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </section>
   );

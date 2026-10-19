@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.2.99-preview';
+export const APP_VERSION = '4.3.01-preview';
 
 export const changelog = [
+  {
+    version: '4.3.01-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Pictures in approval requests reach the approver</strong> &mdash; a picture pasted into &ldquo;Why are you asking&rdquo; showed only as &ldquo;[Image: pasted-image-1.png]&rdquo;. It now appears in place in the approval e-mail, on the approval page the e-mail links to, and on the Teams card, where a click opens it full size.' },
+      { type: 'improved', html: '<strong>Signature logos are no longer counted as attachments</strong> &mdash; the company logo in an e-mail signature made almost every e-mailed ticket show one attachment. A picture that arrives by e-mail on many different tickets is now treated as a signature logo: it still shows inside the message, but it is left out of the Attachments count and the strip under the message. The Attachments tab lists it at the bottom, so nothing is hidden.' },
+      { type: 'fixed', html: '<strong>A merged opening e-mail names the person who wrote it</strong> &mdash; FreshService files an agent&rsquo;s reply under the person it answers. When that reply is merged in, the message is now shown from the agent whose signature and address are above the quoted e-mail, not from the requester.' },
+    ],
+  },
   {
     version: '4.2.99-preview',
     date: 'October 18, 2026',

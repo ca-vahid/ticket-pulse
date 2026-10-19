@@ -44,6 +44,7 @@ import { appendSignatureToEmail, getEnabledSignatureForSend, signatureAsSent } f
 import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
+import { markRecurring } from './recurringImageService.js';
 import ticketHandBackService, {
   normalizeHandBack, isRealReason as isRealHandBackReason, handBackLabel, reasonForRebound as reasonForHandBackRebound,
   HAND_BACK_KINDS, overrideCodeFor,
@@ -2674,7 +2675,7 @@ class TicketService {
           id: true, fileName: true, contentType: true, sizeBytes: true,
           threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
         },
-      }),
+      }).then((rows) => markRecurring(ticket.workspaceId, rows)),
       // Active pinned workflow cards (field cards) — dismissed ones stay in the
       // table for re-run bookkeeping but never ship to the client.
       prisma.ticketPinnedCard.findMany({

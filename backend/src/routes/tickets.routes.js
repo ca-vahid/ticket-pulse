@@ -2553,6 +2553,25 @@ ticketApprovalPublicRouter.get('/:token/photo', asyncHandler(async (req, res) =>
   return res.end(decoded.buffer);
 }));
 
+// A picture pasted into the request note (19 Oct 2026): the page, the e-mail and the
+// Teams card show it in place. Only the files the note names; raster formats only
+// (an SVG could carry script on the API's origin).
+const NOTE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/bmp']);
+ticketApprovalPublicRouter.get('/:token/image/:imageId', asyncHandler(async (req, res) => {
+  const imageId = Number(req.params.imageId);
+  if (!Number.isInteger(imageId) || imageId <= 0) throw new ValidationError('Invalid picture');
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const { contentType, buffer } = await ticketApprovalService.noteImageByToken(req.params.token, imageId);
+  const type = String(contentType || '').toLowerCase();
+  if (!NOTE_IMAGE_TYPES.has(type)) throw new NotFoundError('Picture not found');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Content-Type', type);
+  res.setHeader('Content-Length', String(buffer.length));
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  return res.end(buffer);
+}));
+
 // Approvals v2: escalate / forward from the magic link.
 // Approvals v3 — the requester's / agent's reply link (no login). The token
 // is personal to one recipient of one question; the thread shown is limited to

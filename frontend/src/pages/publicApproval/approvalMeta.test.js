@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { absoluteApiUrl, personMetaLines } from './approvalMeta';
+import { absoluteApiImageSrcs, absoluteApiUrl, personMetaLines } from './approvalMeta';
 
 describe('absoluteApiUrl', () => {
   test('prefixes app-relative API paths with the configured API origin', () => {
@@ -11,6 +11,17 @@ describe('absoluteApiUrl', () => {
     expect(absoluteApiUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
     expect(absoluteApiUrl(null)).toBeNull();
     expect(absoluteApiUrl('')).toBeNull();
+  });
+});
+
+describe('absoluteApiImageSrcs (19 Oct 2026: pictures in the request note)', () => {
+  test('points note pictures at the API origin and leaves other images alone', () => {
+    const origin = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+    const html = '<p>x</p><img src="/api/ticket-approvals/public/tok/image/7" alt="a.png"><img src="https://cdn.test/b.png">';
+    const out = absoluteApiImageSrcs(html);
+    expect(out).toContain(`src="${origin}/api/ticket-approvals/public/tok/image/7"`);
+    expect(out).toContain('src="https://cdn.test/b.png"');
+    expect(absoluteApiImageSrcs(null)).toBeNull();
   });
 });
 
