@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.03-preview';
+export const APP_VERSION = '4.3.04-preview';
 
 export const changelog = [
+  {
+    version: '4.3.04-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Clearer sender names on Ticket Pulse e-mails</strong> &mdash; approval e-mails now come from &ldquo;Ticket Pulse Approval&rdquo;, and their subject leads with what is being approved instead of &ldquo;Approval needed:&rdquo;. The daily and weekly reports (noise closed, urgent response, unmatched replies, Knowledge review, Auto-help overnight) come from &ldquo;Ticket Pulse Reports&rdquo;, alerts from &ldquo;Ticket Pulse Alerts&rdquo;, and task, park and hand-over notices from &ldquo;Ticket Pulse Notifications&rdquo;. E-mails to requesters keep the name each team set in Email branding.' },
+      { type: 'improved', html: '<strong>Super admins get the reports too</strong> &mdash; the noise-close digest, the urgent-response week, the unmatched-replies digest and the Auto-help morning summary now go to the workspace&rsquo;s admins and to every super admin.' },
+    ],
+  },
   {
     version: '4.3.03-preview',
     date: 'October 19, 2026',

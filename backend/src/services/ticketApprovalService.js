@@ -1778,7 +1778,9 @@ class TicketApprovalService {
     const requesterName = ticket.requester?.name || null;
     // Subject: what is asked, for whom, and the ref last (threading + inbox filters). Identical on a
     // re-request so it lands in the same conversation.
-    const subject = `Approval needed: ${categoryName || 'request'}${requesterName ? ` for ${requesterName}` : ''} — ${ticket.subject || 'ticket'} [${ref}]`;
+    // The sender name says it is an approval (Ticket Pulse Approval), so the
+    // subject leads with what is being approved (19 Oct 2026, Vahid).
+    const subject = `${categoryName || 'Request'}${requesterName ? ` for ${requesterName}` : ''} — ${ticket.subject || 'ticket'} [${ref}]`;
 
     // T3.9: the request note supports placeholders. Plain values substitute
     // before escaping; {{decision.url}} becomes a real link after escaping.

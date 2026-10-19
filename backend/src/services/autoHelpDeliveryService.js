@@ -629,7 +629,8 @@ class AutoHelpDeliveryService {
         .catch(() => []);
       const overnight = (runs || []).filter((r) => r.outcomeDetail?.scheduledAuto && !r.outcomeDetail.scheduledAuto.summarizedAt);
       if (!overnight.length) continue;
-      const to = row.afterHoursSummaryTo?.length ? row.afterHoursSummaryTo : await this._workspaceAdminEmails(ws);
+      // Default list: the workspace's admins plus every super admin (19 Oct 2026).
+      const to = row.afterHoursSummaryTo?.length ? row.afterHoursSummaryTo : await this._summaryRecipients(ws);
       if (!to.length) {
         logger.warn(`Auto-help morning summary (ws ${ws}): nobody to send it to (no recipients set, no workspace admins)`);
         continue;
@@ -655,6 +656,11 @@ class AutoHelpDeliveryService {
       logger.info(`Auto-help morning summary (ws ${ws}): ${overnight.length} overnight answer(s) to ${to.length} recipient(s)`);
     }
     return { sent };
+  }
+
+  async _summaryRecipients(workspaceId) {
+    const { reportRecipients } = await import('./reportRecipients.js');
+    return reportRecipients(workspaceId);
   }
 
   async _workspaceAdminEmails(workspaceId) {

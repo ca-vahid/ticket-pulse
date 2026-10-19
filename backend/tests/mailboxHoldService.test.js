@@ -267,7 +267,7 @@ describe('rehydrateEmail', () => {
 });
 
 describe('sendDailyDigests', () => {
-  test('emails workspace admins once per workspace with held rows; skips workspaces with empty queues', async () => {
+  test('emails workspace admins and super admins once per workspace with held rows; skips workspaces with empty queues', async () => {
     prismaMock.mailboxHeldMessage.groupBy.mockResolvedValue([{ workspaceId: 5, _count: { _all: 2 } }]);
     prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'Admin@bgcengineering.ca' }]);
     prismaMock.workspace.findUnique.mockResolvedValue({ name: 'PA' });
@@ -276,15 +276,16 @@ describe('sendDailyDigests', () => {
 
     const result = await mailboxHoldService.sendDailyDigests({ appUrl: 'https://ticketpulse.example' });
 
-    expect(result.sent).toEqual([{ workspaceId: 5, count: 2, recipients: 1, sent: true, via: 'sendgrid' }]);
+    expect(result.sent).toEqual([{ workspaceId: 5, count: 2, recipients: 2, sent: true, via: 'sendgrid' }]);
     const params = sendTransactionalEmailMock.mock.calls[0][0];
-    expect(params).toMatchObject({ workspaceId: 5, to: ['admin@bgcengineering.ca'], label: 'mailbox-hold-digest' });
+    // fallback@example.com is the super admin list (admin_emails setting mock).
+    expect(params).toMatchObject({ workspaceId: 5, to: ['admin@bgcengineering.ca', 'fallback@example.com'], label: 'mailbox-hold-digest' });
     expect(params.subject).toBe('Ticket Pulse: 2 unmatched replies waiting for review');
     expect(params.html).toContain('https://ticketpulse.example/settings#ticket-mailboxes');
     expect(params.html).toContain('&lt;script&gt;'); // subjects are escaped
   });
 
-  test('falls back to the global admin_emails setting when the workspace has no admin rows; no rows → nothing sent', async () => {
+  test('reaches the super admins when the workspace has no admin rows; no rows → nothing sent', async () => {
     prismaMock.mailboxHeldMessage.groupBy.mockResolvedValue([{ workspaceId: 5, _count: { _all: 1 } }]);
     prismaMock.workspaceAccess.findMany.mockResolvedValue([]);
     prismaMock.mailboxHeldMessage.findMany.mockResolvedValue([heldRow()]);
