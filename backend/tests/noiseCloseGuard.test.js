@@ -101,6 +101,22 @@ describe('what may still close', () => {
     expect(await guard()).toMatchObject({ hold: true, reason: R.PERSON });
   });
 
+  test('an outside sender\'s "Re:" auto-reply is not a person (1Password support acknowledgement)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue(ticket({ requester: { email: 'support@agilebits.com' }, subject: 'Re: 1Password Support Request 844052' }));
+    expect(await guard()).toMatchObject({ hold: false });
+  });
+
+  test('a "FW:" from one of our people is still held', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue(ticket({ requester: { email: 'someone@bgcengineering.ca' }, subject: 'FW: Your invoice is ready' }));
+    expect(await guard()).toMatchObject({ hold: true, reason: R.FORWARDED });
+  });
+
+  test('no internal domains configured: "Re:" from anyone still holds, as before', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ internalDomains: [] });
+    prismaMock.ticket.findUnique.mockResolvedValue(ticket({ requester: { email: 'support@agilebits.com' }, subject: 'Re: 1Password Support Request 844052' }));
+    expect(await guard()).toMatchObject({ hold: true, reason: R.FORWARDED });
+  });
+
   test('a ticket that no longer exists is not held', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue(null);
     expect(await guard()).toMatchObject({ hold: false });
