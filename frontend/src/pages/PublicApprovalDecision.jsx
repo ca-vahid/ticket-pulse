@@ -26,6 +26,7 @@ import ApprovalRail from './publicApproval/ApprovalRail';
 import { usePublicTheme } from './publicApproval/usePublicTheme';
 import {
   STATUS_BADGE,
+  absoluteApiImageSrcs,
   classifyLoadError,
   isOpenForDecision,
   isPastDate,
@@ -630,7 +631,7 @@ export default function PublicApprovalDecision() {
               <DecisionBanner approval={approval} decidedByYou={decidedByYou} bannerRef={bannerRef} isDark={isDark} />
             </div>
             <ApprovalThread
-              approval={approval}
+              approval={approval.requestNoteHtml ? { ...approval, requestNoteHtml: absoluteApiImageSrcs(approval.requestNoteHtml) } : approval}
               messages={approval.messages || []}
               people={approval.participants ? [approval.participants.requester, approval.participants.agent, ...(approval.participants.approvers || [])].filter(Boolean) : []}
               viewerEmail={approval.approverEmail}

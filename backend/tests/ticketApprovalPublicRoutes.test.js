@@ -20,6 +20,7 @@ const approvalServiceMock = {
   getByToken: jest.fn(),
   decideByToken: jest.fn(),
   photoSubjectEmail: jest.fn(),
+  noteImageByToken: jest.fn(),
 };
 const azureAdMock = { isConfigured: jest.fn(() => true), getUserPhoto: jest.fn(), getUserProfile: jest.fn() };
 
@@ -91,6 +92,23 @@ describe('GET /api/ticket-approvals/public/:token', () => {
     approvalServiceMock.getByToken.mockRejectedValue(err);
     const res = await request(buildApp()).get(`/api/ticket-approvals/public/${TOKEN}`).expect(404);
     expect(res.body.success).toBe(false);
+  });
+});
+
+describe('GET /api/ticket-approvals/public/:token/image/:imageId (19 Oct 2026)', () => {
+  test('serves a picture the note names, readable cross-origin', async () => {
+    approvalServiceMock.noteImageByToken.mockResolvedValue({ contentType: 'image/png', buffer: Buffer.from(PNG_1X1, 'base64') });
+    const res = await request(buildApp()).get(`/api/ticket-approvals/public/${TOKEN}/image/71289`).expect(200);
+    expect(approvalServiceMock.noteImageByToken).toHaveBeenCalledWith(TOKEN, 71289);
+    expect(res.headers['content-type']).toBe('image/png');
+    expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  test('an SVG is never served (it could carry script) and a bad id is refused', async () => {
+    approvalServiceMock.noteImageByToken.mockResolvedValue({ contentType: 'image/svg+xml', buffer: Buffer.from('<svg/>') });
+    await request(buildApp()).get(`/api/ticket-approvals/public/${TOKEN}/image/5`).expect(404);
+    await request(buildApp()).get(`/api/ticket-approvals/public/${TOKEN}/image/abc`).expect(400);
   });
 });
 

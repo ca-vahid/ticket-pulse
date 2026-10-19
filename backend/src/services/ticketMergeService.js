@@ -68,6 +68,32 @@ export function mergeNoteContent({ srcRef, sourceId, subject, copied = 0, descri
   return { bodyText, bodyHtml };
 }
 
+/**
+ * Who wrote an opening e-mail that is really a reply (19 Oct 2026). FreshService
+ * makes a ticket from an agent's "Re:" and files it under the original sender:
+ * #247711 was Mehdi's answer, quoting Richard ("From: Richard Carter Sent: …")
+ * under his signature. When the quoted header names the requester, the addresses
+ * written above it are the candidates for the real writer. Returns them in order
+ * (lower-cased); an empty list keeps the requester as sender.
+ */
+export function replyWriterCandidates(text, requester = {}) {
+  const body = String(text || '').replace(/\s+/g, ' ');
+  const header = /(?:^|\s|_{5,}|-{5,})From:\s*(.{1,160}?)\s+(?:Sent|Date):/i.exec(body);
+  if (!header || header.index < 20) return [];
+  const quotedFrom = header[1].toLowerCase();
+  const reqEmail = String(requester?.email || '').toLowerCase();
+  const reqName = String(requester?.name || '').toLowerCase().trim();
+  const namesRequester = (reqEmail && quotedFrom.includes(reqEmail)) || (reqName && quotedFrom.includes(reqName));
+  if (!namesRequester) return [];
+  const above = body.slice(0, header.index);
+  const found = [];
+  for (const m of above.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) {
+    const email = m[0].toLowerCase().replace(/\.+$/, '');
+    if (email !== reqEmail && !found.includes(email)) found.push(email);
+  }
+  return found;
+}
+
 class TicketMergeService {
   async merge(sourceId, workspaceId, { targetTicketId, notifyRequester = false, resolutionReason = null, resolutionNote = null }, actor) {
     const targetId = Number(targetTicketId);
@@ -162,20 +188,31 @@ class TicketMergeService {
     const descriptionText = String(source.descriptionText || '').trim();
     let descriptionCopied = false;
     if (!hasOpening && (descriptionHtml || descriptionText)) {
-      const senderEmail = source.requester?.email || null;
-      const senderIsAgent = senderEmail
+      let senderEmail = source.requester?.email || null;
+      let senderName = source.requester?.name || null;
+      let senderIsAgent = senderEmail
         ? Boolean(await prisma.technician.findFirst({ where: { workspaceId, email: { equals: senderEmail, mode: 'insensitive' } }, select: { id: true } }).catch(() => null))
         : false;
+      // An agent's reply that FreshService filed under the requester is labelled with the agent.
+      for (const email of replyWriterCandidates(descriptionText || descriptionHtml.replace(/<[^>]+>/g, ' '), source.requester)) {
+        const writer = await prisma.technician.findFirst({ where: { workspaceId, email: { equals: email, mode: 'insensitive' } }, select: { name: true, email: true } }).catch(() => null);
+        if (writer) {
+          senderEmail = writer.email;
+          senderName = writer.name || writer.email;
+          senderIsAgent = true;
+          break;
+        }
+      }
       copyData.unshift({
         ticketId: targetId,
         workspaceId,
         externalEntryId: `merged:${sourceId}:description`,
         source: 'merge',
         eventType: 'reply',
-        actorName: source.requester?.name || senderEmail || 'Requester',
+        actorName: senderName || senderEmail || 'Requester',
         actorEmail: senderEmail,
         authorType: senderIsAgent ? 'agent' : 'requester',
-        incoming: true,
+        incoming: !senderIsAgent,
         isPrivate: false,
         visibility: 'public',
         title: source.subject || null,

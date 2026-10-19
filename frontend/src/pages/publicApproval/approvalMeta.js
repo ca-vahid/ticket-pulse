@@ -134,6 +134,12 @@ export function absoluteApiUrl(url) {
   return url.startsWith('/') ? `${API_ORIGIN}${url}` : url;
 }
 
+/** The same for pictures inside note HTML (19 Oct 2026: pasted pictures in the request note). */
+export function absoluteApiImageSrcs(html) {
+  if (!html || typeof html !== 'string' || !API_ORIGIN) return html;
+  return html.replace(/(<img\b[^>]*?\bsrc=")(\/api\/)/gi, `$1${API_ORIGIN}/api/`);
+}
+
 // Directory records often repeat the office in several fields ("Vancouver" as department AND location, or a
 // title that already ends in ", Vancouver"). Build the rail lines without repeating a word the reader saw.
 export function personMetaLines({ title, location, department } = {}) {

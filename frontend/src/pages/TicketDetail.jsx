@@ -387,7 +387,8 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   }, [ticketId, allImageAttachments, openingImages, shownHtml, entry.eventType, entry.bodyText, entry.content]);
   const imageAttachments = useMemo(() => {
     const inBody = new Set(inlineImages.map((a) => a.id));
-    return inBody.size ? allImageAttachments.filter((a) => !inBody.has(a.id)) : allImageAttachments;
+    // Signature logos are not repeated in the strip under a message (19 Oct 2026).
+    return allImageAttachments.filter((a) => !inBody.has(a.id) && !a.recurring);
   }, [allImageAttachments, inlineImages]);
   const fileAttachments = useMemo(() => (ticketId ? attachments.filter((a) => !isImageAttachment(a)) : attachments), [attachments, ticketId]);
   const shownImageNames = useMemo(() => (ticketId ? new Set(imageAttachments.map((a) => String(a.fileName || '').trim().toLowerCase())) : null), [imageAttachments, ticketId]);
@@ -1501,6 +1502,9 @@ export default function TicketDetail() {
     }
     return [...seen.values()];
   }, [ticket?.attachments]);
+  // 19 Oct 2026: a signature logo found on many tickets (`recurring`, from the server) still
+  // shows where the e-mail places it, but is not counted or listed as a file of this ticket.
+  const listedAttachments = useMemo(() => ticketAttachments.filter((a) => !a.recurring), [ticketAttachments]);
 
   const attachmentsByEntry = useMemo(() => {
     const map = new Map();
@@ -1521,7 +1525,7 @@ export default function TicketDetail() {
   // Pictures the description already shows in place are not repeated in the strip under it.
   const descriptionStripImages = useMemo(() => {
     const inBody = new Set(picturesShownInBody(descriptionImages, ticket?.description, ticket?.descriptionText).map((a) => a.id));
-    return inBody.size ? descriptionImages.filter((a) => !inBody.has(a.id)) : descriptionImages;
+    return descriptionImages.filter((a) => !inBody.has(a.id) && !a.recurring);
   }, [descriptionImages, ticket?.description, ticket?.descriptionText]);
   // Non-image ticket-level files (invoices, docs) — a chip row under the
   // description so the original message's files live with the message, not
@@ -1707,8 +1711,8 @@ export default function TicketDetail() {
   const previewItems = useMemo(() => {
     const at = new Map((ticket?.thread || []).map((e) => [e.id, new Date(e.occurredAt).getTime()]));
     const created = ticket?.createdAt ? new Date(ticket.createdAt).getTime() : 0;
-    return [...ticketAttachments].sort((x, y) => ((x.threadEntryId ? at.get(x.threadEntryId) || 0 : created) - (y.threadEntryId ? at.get(y.threadEntryId) || 0 : created)) || (x.id - y.id));
-  }, [ticketAttachments, ticket?.thread, ticket?.createdAt]);
+    return [...listedAttachments].sort((x, y) => ((x.threadEntryId ? at.get(x.threadEntryId) || 0 : created) - (y.threadEntryId ? at.get(y.threadEntryId) || 0 : created)) || (x.id - y.id));
+  }, [listedAttachments, ticket?.thread, ticket?.createdAt]);
   // Resolve an inline "[Image: name]" reference to an attachment by file name
   // (case/space-insensitive) and preview it; fall back to a download if the
   // exact bytes aren't attached (e.g. an inline paste that didn't upload).
@@ -2998,7 +3002,7 @@ export default function TicketDetail() {
             <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-border mb-4 overflow-x-auto no-scrollbar print-hide">
               {[
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
-                { key: 'attachments', label: 'Attachments', icon: Paperclip, count: ticketAttachments.length },
+                { key: 'attachments', label: 'Attachments', icon: Paperclip, count: listedAttachments.length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
                 { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
                 { key: 'links', label: 'Related', icon: GitBranch, count: linkCount },
@@ -3834,7 +3838,8 @@ export default function TicketDetail() {
                 {pageTab === 'attachments' && (
                   <TicketAttachmentsTab
                     ticketId={ticketId}
-                    attachments={ticketAttachments}
+                    attachments={listedAttachments}
+                    signatureImages={ticketAttachments.filter((a) => a.recurring)}
                     entries={conversationEntries}
                     onPreview={previewImage}
                     onDownload={downloadAttachment}
@@ -4267,7 +4272,7 @@ export default function TicketDetail() {
                     <button type="button" onClick={() => setPageTab('attachments')} className="tp-focus-ring rounded text-left hover:text-primary" title="Open the Attachments tab">
                       <h2 className="text-sm font-bold text-foreground hover:text-primary">Attachments</h2>
                     </button>
-                    <span className="text-xs text-muted-foreground/75">({ticketAttachments.length})</span>
+                    <span className="text-xs text-muted-foreground/75">({listedAttachments.length})</span>
                     {canWrite && (
                       <>
                         <input
@@ -4305,11 +4310,11 @@ export default function TicketDetail() {
                       </div>
                     </div>
                   )}
-                  {ticketAttachments.length === 0 ? (
+                  {listedAttachments.length === 0 ? (
                     <p className="text-xs text-muted-foreground/75">No files attached{canWrite ? ' — drop something in with Add.' : '.'}</p>
                   ) : (
                     <ul className="space-y-1.5">
-                      {ticketAttachments.slice(0, 5).map((a) => (
+                      {listedAttachments.slice(0, 5).map((a) => (
                         <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border/60 bg-muted/30">
                           {isImageAttachment(a)
                             ? <ImageIcon className="w-[18px] h-[18px] text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
@@ -4353,9 +4358,9 @@ export default function TicketDetail() {
                       ))}
                     </ul>
                   )}
-                  {ticketAttachments.length > 0 && (
+                  {listedAttachments.length > 0 && (
                     <button type="button" onClick={() => setPageTab('attachments')} className="tp-focus-ring mt-2 text-xs font-semibold text-primary hover:underline">
-                      {ticketAttachments.length > 5 ? `View all ${ticketAttachments.length} in the Attachments tab →` : 'Open the Attachments tab →'}
+                      {listedAttachments.length > 5 ? `View all ${listedAttachments.length} in the Attachments tab →` : 'Open the Attachments tab →'}
                     </button>
                   )}
                 </div>

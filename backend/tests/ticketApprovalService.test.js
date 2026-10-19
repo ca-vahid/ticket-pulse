@@ -11,7 +11,9 @@ const prismaMock = {
   mailboxConnection: { findFirst: jest.fn() },
   technician: { findFirst: jest.fn() },
   requester: { findFirst: jest.fn() },
+  ticketAttachment: { findMany: jest.fn().mockResolvedValue([]) },
 };
+const attachmentServiceMock = { bufferFor: jest.fn(), listForTicket: jest.fn().mockResolvedValue([]) };
 const activityMock = { create: jest.fn() };
 const sendgridMock = { sendEmail: jest.fn().mockResolvedValue({ status: 'ok' }) };
 const graphMock = { isConfigured: () => false };
@@ -31,6 +33,7 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({ default: {}, ss
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 jest.unstable_mockModule('../src/services/publicTicketStatusService.js', () => publicStatusMock);
 jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: azureAdMock }));
+jest.unstable_mockModule('../src/services/attachmentService.js', () => ({ default: attachmentServiceMock }));
 
 const {
   default: ticketApprovalService, sanitizeNoteHtml, sanitizeDescriptionHtml, prettifyLocalPart,
@@ -740,6 +743,26 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     expect(email.html).not.toContain('cid:requested-by-photo');
     expect(email.html).not.toMatch(/<img[^>]+src="https?:/);
     azureAdMock.getUserPhoto.mockReset();
+  });
+
+  test('a picture pasted into the note travels inline in its place (19 Oct 2026)', async () => {
+    const PNG = Buffer.alloc(40); PNG.set([0x89, 0x50, 0x4e, 0x47]); PNG.writeUInt32BE(1400, 16);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket, requester: { name: 'Rita', email: 'rita@x.io' } });
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'New Computer Upgrade', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([{ id: 71289, fileName: 'pasted-image-1.png', contentType: 'image/png', sizeBytes: 40, blobName: 'b', source: 'upload', createdAt: new Date() }]);
+    attachmentServiceMock.bufferFor.mockResolvedValue(PNG);
+
+    await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: '[Image: pasted-image-1.png]', noteHtml: '<i>[Image: pasted-image-1.png]</i>' }, { email: 'alo@x.io' });
+
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.attachments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'pasted-image-1.png', contentType: 'image/png', contentId: 'note-image-1', inline: true, contentBytes: PNG.toString('base64') }),
+    ]));
+    // Wide screenshots are held to the e-mail's column; the marker text is gone.
+    expect(email.html).toContain('<img src="cid:note-image-1" alt="pasted-image-1.png" width="560"');
+    expect(email.html).not.toContain('[Image: pasted-image-1.png]');
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([]);
   });
 
   test('uses the directory name when the requester is a known technician', async () => {

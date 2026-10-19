@@ -286,7 +286,18 @@ export function approvalCard(a, stage = 'ask', { error = null } = {}) {
     body.push(text(`**${stage.headline || (stage.done === 'approved' ? 'You approved this' : stage.done === 'rejected' ? 'You did not approve this' : 'Already decided')}**${stage.detail ? ` — ${stage.detail}` : ''}`, { spacing: 'Medium' }));
     actions.push({ type: 'Action.OpenUrl', title: 'Open the approval', url: a.decisionUrl });
   } else {
-    if (a.noteMd) body.push(...longText('n', a.noteMd, { heading: `WHY ${String(a.askedByName || 'THE AGENT').split(' ')[0].toUpperCase()} IS ASKING`, framed: true }));
+    const heading = `WHY ${String(a.askedByName || 'THE AGENT').split(' ')[0].toUpperCase()} IS ASKING`;
+    const pictures = (a.noteImages || []).filter((img) => img?.url).slice(0, 6);
+    if (pictures.length) {
+      // 19 Oct 2026: pictures pasted into the note, each opening full size on a click.
+      body.push({
+        type: 'Container', style: 'emphasis', showBorder: true, roundedCorners: true, spacing: 'Medium',
+        items: [
+          ...(a.noteMd ? longText('n', a.noteMd, { heading }) : [label(heading)]),
+          ...pictures.map((img) => ({ type: 'Image', url: img.url, altText: img.name || 'Picture from the request', size: 'Stretch', spacing: 'Small', selectAction: { type: 'Action.OpenUrl', url: img.url } })),
+        ],
+      });
+    } else if (a.noteMd) body.push(...longText('n', a.noteMd, { heading, framed: true }));
     if (stage?.confirm) {
       const rejecting = stage.confirm === 'rejected';
       body.push({

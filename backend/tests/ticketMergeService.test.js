@@ -33,7 +33,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-const { default: ticketMergeService } = await import('../src/services/ticketMergeService.js');
+const { default: ticketMergeService, replyWriterCandidates } = await import('../src/services/ticketMergeService.js');
 const { ValidationError } = await import('../src/utils/errors.js');
 
 const TP_SOURCE = { id: 10, origin: 'ticketpulse', status: 'Open', subject: 'Src', nativeNumber: 10, workspaceId: 1 };
@@ -94,6 +94,34 @@ describe('merged content arrives as full messages (18 Oct 2026; was a quoted des
     const fromRow = activityMock.create.mock.calls.find(([row]) => row.activityType === 'merged_from')[0];
     expect(fromRow.details).toEqual(expect.objectContaining({ srcRef: '#900', sourceSubject: 'Re: anyone working today?', descriptionCopied: true, attachmentsLeft: 1, actorName: 'Coord' }));
     delete prismaMock.technician;
+  });
+
+  test('an agent reply FreshService filed under the requester is labelled with the agent who wrote it (19 Oct 2026)', async () => {
+    prismaMock.technician = {
+      findFirst: jest.fn(async ({ where }) => (String(where.email.equals).toLowerCase() === 'mabbaspour@bgc.ca' ? { id: 38, name: 'Mehdi Abbaspour', email: 'mabbaspour@bgc.ca' } : null)),
+    };
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.createMany.mockResolvedValue({ count: 1 });
+    const text = 'Hi Richard, I checked the machine and is working for me, are you using VPN? Thanks, Mehdi Abbaspour Senior IT Specialist E: mabbaspour@bgc.ca '
+      + '________________________________ From: Richard Carter Sent: Saturday, October 17, 2026 6:05 AM To: IT Helpdesk Subject: anyone working today? Hi there, I am unable to log in. RC E: rcarter@bgc.ca';
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (where.id === 11
+      ? { ...FS_SOURCE, subject: 'Re: anyone working today?', description: `<p>${text}</p>`, descriptionText: text, createdAt: new Date('2026-10-17T16:53:43Z'), requester: { name: 'Richard Carter', email: 'rcarter@bgc.ca' } }
+      : TARGET));
+    await ticketMergeService.merge(11, 1, { targetTicketId: 20 }, { email: 'c@bgc.ca', name: 'Coord' });
+
+    const [copy] = prismaMock.ticketThreadEntry.createMany.mock.calls[0][0].data;
+    expect(copy).toEqual(expect.objectContaining({
+      externalEntryId: 'merged:11:description', actorName: 'Mehdi Abbaspour', actorEmail: 'mabbaspour@bgc.ca', authorType: 'agent', incoming: false,
+    }));
+    delete prismaMock.technician;
+  });
+
+  test('replyWriterCandidates only reads a writer when the quoted header names the requester', () => {
+    const reply = 'Thanks, Mehdi E: mabbaspour@bgc.ca ________________________________ From: Richard Carter Sent: Sat';
+    expect(replyWriterCandidates(reply, { name: 'Richard Carter', email: 'rcarter@bgc.ca' })).toEqual(['mabbaspour@bgc.ca']);
+    // A requester forwarding someone else's mail stays the sender.
+    expect(replyWriterCandidates(reply, { name: 'Ann Lee', email: 'alee@bgc.ca' })).toEqual([]);
+    expect(replyWriterCandidates('Please call me at jo@bgc.ca', { name: 'Jo', email: 'jo2@bgc.ca' })).toEqual([]);
   });
 
   test('a TP-born source opening e-mail entry becomes a plain message with the full body', async () => {

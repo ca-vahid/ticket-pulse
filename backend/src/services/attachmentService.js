@@ -4,6 +4,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { fsConversationEntryIdCandidates, parseFsConversationId } from '../utils/fsEntryId.js';
+import { markRecurring } from './recurringImageService.js';
 
 async function streamToBuffer(stream) {
   const chunks = [];
@@ -377,7 +378,7 @@ class AttachmentService {
   }
 
   async listForTicket(ticketId, workspaceId) {
-    return prisma.ticketAttachment.findMany({
+    const rows = await prisma.ticketAttachment.findMany({
       where: { ticketId, workspaceId },
       orderBy: { id: 'asc' },
       select: {
@@ -385,6 +386,22 @@ class AttachmentService {
         threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
       },
     });
+    // Signature logos seen on many tickets carry `recurring: true` (19 Oct 2026).
+    return markRecurring(workspaceId, rows);
+  }
+
+  /** One stored file's bytes (blob, or FreshService on first use). Null when gone. */
+  async bufferFor(attachment) {
+    if (!attachment?.blobName || !this.isConfigured()) return null;
+    try {
+      return await this._container().getBlockBlobClient(attachment.blobName).downloadToBuffer();
+    } catch (err) {
+      if (attachment.source === 'freshservice' && err?.statusCode === 404) {
+        return this._fetchAndCacheFsAttachment(attachment).catch(() => null);
+      }
+      logger.warn(`Attachment ${attachment.id} bytes unavailable: ${err.message}`);
+      return null;
+    }
   }
 
   /**
