@@ -708,7 +708,7 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     expect(email.html).toContain('Why Jane is asking');
     expect(email.html).toContain('Jane Doe');
     expect(email.html).not.toContain('jane.doe@x.io');
-    expect(email.subject).toBe('Approval needed: Laptop purchase for Rita — New laptop [TP-ID-501]');
+    expect(email.subject).toBe('Laptop purchase for Rita — New laptop [TP-ID-501]');
     // The category is the title (29 Sep 2026 redesign).
     expect(email.html).toContain('>Laptop purchase<');
     expect(email.html).toContain('Requested for');

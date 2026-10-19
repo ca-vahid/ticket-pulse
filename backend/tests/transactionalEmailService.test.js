@@ -68,7 +68,7 @@ describe('transactionalEmailService sender identity', () => {
       to: 'approver@example.com',
       subject: 'Approval requested',
       html: '<p>Approve?</p>',
-      label: 'approval',
+      label: 'workflow',
     });
 
     expect(result).toEqual({ sent: true, via: 'msgraph' });

@@ -58,6 +58,45 @@ function htmlFromText(text) {
  * @returns {{ via: 'msgraph'|'sendgrid', provider: string, providerMessageId: string|null,
  *            messageId: string|null, from: string|null, replyTo: string|null }}
  */
+// Display names for the e-mails Ticket Pulse sends to its own people (19 Oct
+// 2026, Vahid), keyed by the send's label. A caller's own fromName still wins
+// (an approver's question carries their name), and anything not listed here,
+// above all every e-mail to a requester, keeps the workspace's sender name
+// from Email branding. On the Graph lane Exchange may still show the mailbox's
+// own name; the SendGrid lane keeps these exactly.
+export const SYSTEM_SENDER_NAMES = Object.freeze({
+  approval: 'Ticket Pulse Approval',
+  report: 'Ticket Pulse Reports',
+  alert: 'Ticket Pulse Alerts',
+  notice: 'Ticket Pulse Notifications',
+});
+const LABEL_KIND = Object.freeze({
+  'noise-close-digest': 'report',
+  'urgent-response-digest': 'report',
+  'mailbox-hold-digest': 'report',
+  'knowledge-review-digest': 'report',
+  'auto-help-overnight-summary': 'report',
+  'agent alert': 'alert',
+  'sync-health-alert': 'alert',
+  'urgent response notice': 'alert',
+  'park wake': 'notice',
+  'ready to close': 'notice',
+  'task assignment': 'notice',
+  'task due reminder': 'notice',
+  'open tasks handed over': 'notice',
+  'auto-help-assignee': 'notice',
+  'auto-help-preview': 'notice',
+  'auto-help handover': 'notice',
+});
+
+export function systemSenderName(label) {
+  const key = String(label || '').trim().toLowerCase();
+  if (!key) return null;
+  if (key === 'approval' || key.startsWith('approval ')) return SYSTEM_SENDER_NAMES.approval;
+  const kind = LABEL_KIND[key];
+  return kind ? SYSTEM_SENDER_NAMES[kind] : null;
+}
+
 export async function deliverTransactionalEmail({
   workspaceId,
   to,
@@ -94,7 +133,7 @@ export async function deliverTransactionalEmail({
   // mailbox displayName). Sends without a workspaceId (sync-health and other
   // global notices) resolve to the global default. Callers that already
   // resolved a name (reply-as-agent) pass it through.
-  const senderName = fromName || await resolveFromName(workspaceId ?? null);
+  const senderName = fromName || systemSenderName(label) || await resolveFromName(workspaceId ?? null);
   const threading = ticket?.id
     ? await threadingHeadersForTicket(ticket.id)
     : { inReplyTo: null, references: [] };

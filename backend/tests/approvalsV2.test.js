@@ -132,7 +132,7 @@ describe('escalate()', () => {
     const subjects = sendgridMock.sendEmail.mock.calls.map((c) => c[0]);
     const toNeville = subjects.find((m) => m.to.includes('neville@x.io'));
     const toRequester = subjects.find((m) => m.to.includes('req@x.io'));
-    expect(toNeville.subject).toMatch(/^Approval needed/);
+    expect(toNeville.subject).not.toMatch(/^Approval needed/);
     expect(toNeville.html).toContain('Needs CISO sign-off');
     expect(toNeville.html).toContain('escalated this request');
     expect(toRequester.subject).toMatch(/^Escalated:/);

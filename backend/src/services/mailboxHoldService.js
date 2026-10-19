@@ -450,19 +450,8 @@ class MailboxHoldService {
    * admin, else the global admin_emails setting / ADMIN_EMAILS env.
    */
   async _digestRecipients(workspaceId) {
-    const access = await prisma.workspaceAccess.findMany({
-      where: { workspaceId, role: 'admin' },
-      select: { email: true },
-    }).catch(() => []);
-    const emails = [...new Set(access.map((a) => String(a.email || '').trim().toLowerCase()).filter(Boolean))];
-    if (emails.length) return emails;
-    let raw = null;
-    try {
-      const { default: settingsRepository } = await import('./settingsRepository.js');
-      raw = await settingsRepository.get('admin_emails');
-    } catch { /* fall through */ }
-    const source = raw && String(raw).trim() ? String(raw) : (process.env.ADMIN_EMAILS || '');
-    return source.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const { reportRecipients } = await import('./reportRecipients.js');
+    return reportRecipients(workspaceId);
   }
 
   /**

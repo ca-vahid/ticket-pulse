@@ -12,7 +12,6 @@
  */
 import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
-import settingsRepository from '../settingsRepository.js';
 import { resolvePublicBaseUrl } from '../../utils/publicBaseUrl.js';
 import { soft } from './settingsService.js';
 
@@ -44,18 +43,10 @@ class UrgentResponseDigestService {
     return { since: new Date(now.getTime() - WINDOW_MS), until: now };
   }
 
-  /** Workspace admins; the global admin list when the workspace has none. */
+  /** Workspace admins plus every super admin (reportRecipients). */
   async _recipients(workspaceId) {
-    const access = await prisma.workspaceAccess.findMany({
-      where: { workspaceId: Number(workspaceId), role: 'admin' },
-      select: { email: true },
-      take: 200,
-    }).catch(() => []);
-    const emails = [...new Set(access.map((a) => String(a.email || '').trim().toLowerCase()).filter(Boolean))];
-    if (emails.length) return emails;
-    const raw = await settingsRepository.get('admin_emails').catch(() => null);
-    const source = raw && String(raw).trim() ? String(raw) : (process.env.ADMIN_EMAILS || '');
-    return source.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const { reportRecipients } = await import('../reportRecipients.js');
+    return reportRecipients(workspaceId);
   }
 
   /**

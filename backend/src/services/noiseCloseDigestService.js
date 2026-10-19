@@ -49,16 +49,10 @@ export function closeReason(recommendation) {
 }
 
 class NoiseCloseDigestService {
+  /** Workspace admins plus every super admin (reportRecipients). */
   async _recipients(workspaceId) {
-    const access = await prisma.workspaceAccess.findMany({
-      where: { workspaceId: Number(workspaceId), role: 'admin' },
-      select: { email: true },
-    }).catch(() => []);
-    const emails = [...new Set(access.map((a) => String(a.email || '').trim().toLowerCase()).filter(Boolean))];
-    if (emails.length) return emails;
-    const raw = await settingsRepository.get('admin_emails').catch(() => null);
-    const source = raw && String(raw).trim() ? String(raw) : (process.env.ADMIN_EMAILS || '');
-    return source.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const { reportRecipients } = await import('./reportRecipients.js');
+    return reportRecipients(workspaceId);
   }
 
   async enabled(workspaceId) {
