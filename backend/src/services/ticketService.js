@@ -3573,11 +3573,24 @@ class TicketService {
     // AF2: a validated TicketIntakeRun id (the route checks it belongs to the
     // workspace) — stamped on the created audit and linked after the insert.
     intakeRunId = null,
+    // The interactive New Ticket composer only: pictures pasted into the
+    // description become attachments. Mail, API, Teams and automation intakes
+    // keep their description exactly as before.
+    liftPastedImages = false,
   } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
     }
+
+    // Pictures pasted into a new ticket's description become attachments before
+    // the size check, as replies and notes do (19 Oct 2026: three creates in a
+    // row were refused at the 100 000-character limit). Only when storage is
+    // configured, so a picture is never dropped without somewhere to keep it.
+    const inlineDescription = liftPastedImages && attachmentService.isConfigured()
+      ? extractInlineImages(input?.description)
+      : { html: input?.description, files: [] };
+    if (inlineDescription.files.length) input = { ...input, description: inlineDescription.html };
 
     const parsed = createTicketSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
@@ -3777,6 +3790,19 @@ class TicketService {
       }
       throw err;
     });
+
+    // Pasted pictures lifted from the description (above) are stored on the new
+    // ticket. Non-fatal: the ticket exists either way and the text says where
+    // each picture went.
+    for (const file of inlineDescription.files) {
+      await attachmentService.upload({
+        workspaceId, ticketId: ticket.id, fileName: file.originalname, contentType: file.mimetype,
+        buffer: file.buffer, uploadedBy: actor?.email || null,
+      }).catch((err) => logger.warn(`Ticket ${ticket.id}: pasted picture ${file.originalname} not stored: ${err.message}`));
+    }
+    if (inlineDescription.files.length) {
+      logger.info(`Ticket ${ticket.id}: ${inlineDescription.files.length} pasted picture(s) moved from the description to attachments`);
+    }
 
     // Tags at creation (gap plan 2 P1.3) — validated + audited by setTags.
     if (Array.isArray(data.tagIds) && data.tagIds.length) {

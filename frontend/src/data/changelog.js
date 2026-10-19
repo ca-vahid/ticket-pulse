@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.01-preview';
+export const APP_VERSION = '4.3.02-preview';
 
 export const changelog = [
+  {
+    version: '4.3.02-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>New tickets accept pasted pictures</strong> &mdash; a screenshot pasted into a new ticket&rsquo;s description no longer stops the ticket being created with &ldquo;description must contain at most 100000 characters&rdquo;. The picture is saved as an attachment on the new ticket and a short line in the description says where it went, the same way replies and notes already work.' },
+    ],
+  },
   {
     version: '4.3.01-preview',
     date: 'October 19, 2026',
