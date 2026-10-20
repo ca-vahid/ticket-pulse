@@ -60,8 +60,8 @@ const HERO_ART = '/brand/status/hero-network.webp';
 // Whole-page backdrop (gpt-image-2, 20 Oct 2026): a BC glacial river valley
 // drawn over a contour-map grid — BGC's ground, not a stock gradient. The sky
 // fills the top so the cards sit on calm, light colour; PAGE_BG shows if the
-// image fails.
-const PAGE_ART = '/brand/status/page-backdrop.webp';
+// image fails. Phones get a 700px portrait crop of the same scene (river and
+// the big peak, 55 KB) instead of the 1536px landscape cropped to a sliver.
 
 // Uploaded logos often carry a wide white or transparent margin (the BGC mark
 // is about a quarter padding on every side), which made it read as a speck in
@@ -660,8 +660,7 @@ function Shell({ children }) {
       <div
         aria-hidden="true"
         data-testid="status-page-backdrop"
-        className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-bottom bg-no-repeat"
-        style={{ backgroundImage: `url(${PAGE_ART})` }}
+        className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-bottom bg-no-repeat bg-[url('/brand/status/page-backdrop-portrait.webp')] sm:bg-[url('/brand/status/page-backdrop.webp')]"
       />
       {children}
     </main>
@@ -770,19 +769,19 @@ export function StatusView({ data, loading = false, onRefresh }) {
           rule on top. The logo gets real height (56–64px) now. */}
       <header className="border-b border-white/70 bg-white/75 shadow-subtle backdrop-blur-md" data-testid="status-header">
         <div aria-hidden="true" className="h-1" style={{ backgroundColor: accent }} />
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4 sm:px-6 sm:py-5">
-          <div className="flex min-w-0 items-center gap-4">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-6 sm:py-5">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             {branding.logoDataUrl ? (
               <img
                 src={logoSrc}
                 alt={branding.logoAltText || brandName}
-                className="h-14 max-w-[12rem] shrink-0 object-contain sm:h-16"
+                className="h-12 max-w-[8rem] shrink-0 object-contain sm:h-16 sm:max-w-[12rem]"
                 data-testid="status-logo"
               />
             ) : (
               <span
                 aria-hidden="true"
-                className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-lg font-semibold text-white sm:h-16 sm:w-16"
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-base font-semibold text-white sm:h-16 sm:w-16 sm:text-lg"
                 style={{ backgroundColor: accent }}
               >
                 {initials(brandName) || 'TP'}
@@ -790,20 +789,21 @@ export function StatusView({ data, loading = false, onRefresh }) {
             )}
             <span aria-hidden="true" className="hidden h-10 w-px shrink-0 bg-slate-300/80 sm:block" />
             <div className="min-w-0 leading-tight">
-              <p className="truncate text-base font-semibold text-slate-900 sm:text-lg">{brandName}</p>
-              <p className="mt-0.5 text-sm text-slate-600">Request status</p>
+              <p className="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-slate-900 sm:text-lg">{brandName}</p>
+              <p className="mt-0.5 text-xs text-slate-600 sm:text-sm">Request status</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="tp-focus-ring inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/90 px-3 text-sm font-medium text-slate-700 shadow-subtle hover:bg-white hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
+            aria-label="Refresh"
+            className="tp-focus-ring inline-flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white/90 text-sm font-medium text-slate-700 shadow-subtle hover:bg-white hover:text-slate-900 disabled:cursor-wait disabled:opacity-60 sm:h-9 sm:w-auto sm:px-3"
           >
             {loading
               ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
               : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
-            Refresh
+            <span aria-hidden="true" className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </header>

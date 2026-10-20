@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.06-preview';
+export const APP_VERSION = '4.3.07-preview';
 
 export const changelog = [
+  {
+    version: '4.3.07-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Request status page on phones</strong> &mdash; phones get a portrait version of the river-valley backdrop (smaller to download, and the mountains stay in frame). In the header the team name wraps onto two lines instead of being cut off, Refresh becomes a 40px icon button, and the logo is a little smaller so everything fits on one row.' },
+    ],
+  },
   {
     version: '4.3.06-preview',
     date: 'October 19, 2026',
