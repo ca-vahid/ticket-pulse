@@ -306,8 +306,12 @@ describe('PublicTicketStatus', () => {
   test('page backdrop and a full-size header logo', async () => {
     renderPage(basePayload({ branding: { brandName: 'Example IT Help', accentColor: '#2563eb', logoDataUrl: 'data:image/png;base64,AAAA', logoAltText: 'Example' } }));
     const logo = await screen.findByRole('img', { name: 'Example' });
-    expect(logo).toHaveClass('h-14');
-    expect(screen.getByTestId('status-page-backdrop').style.backgroundImage).toContain('/brand/status/page-backdrop.webp');
+    expect(logo).toHaveClass('h-12', 'sm:h-16');
+    // Portrait crop on phones, the wide scene from sm up.
+    const backdrop = screen.getByTestId('status-page-backdrop');
+    expect(backdrop.className).toContain("bg-[url('/brand/status/page-backdrop-portrait.webp')]");
+    expect(backdrop.className).toContain("sm:bg-[url('/brand/status/page-backdrop.webp')]");
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
     expect(screen.getByTestId('status-header')).toHaveTextContent('Request status');
   });
 
