@@ -117,9 +117,16 @@ export function IconSelect({
             : 'border-border bg-card text-muted-foreground hover:text-foreground',
         )}
       >
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>{optionLabel}</option>
-        ))}
+        {/* An entry is [value, label], or { group, options } for an <optgroup>. */}
+        {options.map((entry) => (Array.isArray(entry) ? (
+          <option key={entry[0]} value={entry[0]}>{entry[1]}</option>
+        ) : (
+          <optgroup key={`group:${entry.group}`} label={entry.group}>
+            {entry.options.map(([optionValue, optionLabel]) => (
+              <option key={optionValue} value={optionValue}>{optionLabel}</option>
+            ))}
+          </optgroup>
+        )))}
       </select>
       <ChevronDown className="pointer-events-none absolute right-1.5 h-3 w-3 text-muted-foreground/75" aria-hidden="true" />
     </label>

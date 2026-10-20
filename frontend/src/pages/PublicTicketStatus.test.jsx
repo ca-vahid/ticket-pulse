@@ -82,7 +82,9 @@ const stepStates = () => within(screen.getByRole('list', { name: 'Progress' }))
   .map(item => item.getAttribute('data-state'));
 
 describe('PublicTicketStatus', () => {
-  beforeEach(() => apiMock.get.mockReset());
+  // Braces matter: a function returned from beforeEach runs as a teardown, and
+  // mockReset() returns the mock itself — which would call the API again.
+  beforeEach(() => { apiMock.get.mockReset(); });
   afterEach(() => cleanup());
 
   test('a Ticket Pulse ticket shows its TP number exactly once and never the FreshService id', async () => {
@@ -167,6 +169,130 @@ describe('PublicTicketStatus', () => {
     renderPage(basePayload({ ticket: { assignedAgent: null } }));
     expect(await screen.findByText('Our support team')).toBeInTheDocument();
     expect(screen.queryByText('Not assigned yet')).not.toBeInTheDocument();
+  });
+
+  // QA 10-19 #6: the server decides the stage from the status first.
+  const serverProgress = (overrides = {}) => ({
+    stage: 'closed',
+    tone: 'resolved',
+    headline: 'Closed',
+    current: 4,
+    assigned: false,
+    waitingOnRequester: false,
+    reopened: false,
+    resumeAt: null,
+    mergedInto: null,
+    steps: [
+      { key: 'received', label: 'Received', state: 'complete' },
+      { key: 'assigned', label: 'Assigned', state: 'skipped' },
+      { key: 'in_progress', label: 'In progress', state: 'skipped' },
+      { key: 'closed', label: 'Closed', state: 'complete' },
+    ],
+    ...overrides,
+  });
+
+  test('closed with nobody assigned: Closed, skipped steps marked, never Received', async () => {
+    renderPage(basePayload({
+      ticket: { status: 'Closed', statusTone: 'resolved', assignedAgent: { name: null, photoUrl: null }, assignedAt: null },
+      timeline: [{ key: 'received' }, { key: 'closed', label: 'Closed' }],
+      eta: { state: 'resolved', isComplete: true, sampleSize: 0 },
+      progress: serverProgress(),
+    }));
+    expect(await screen.findByTestId('status-headline')).toHaveTextContent('Closed');
+    expect(stepStates()).toEqual(['complete', 'skipped', 'skipped', 'complete']);
+    expect(screen.getByText('Assigned', { exact: false }).textContent).toMatch(/skipped/);
+    expect(screen.getByText('This request is closed.')).toBeInTheDocument();
+    expect(screen.queryByText('Not assigned yet')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Mark as urgent/ })).not.toBeInTheDocument();
+  });
+
+  test('an older payload without progress still reads a closed, unassigned ticket as Closed', async () => {
+    renderPage(basePayload({
+      ticket: { status: 'Closed', statusTone: 'neutral', assignedAgent: { name: null, photoUrl: null }, assignedAt: null },
+      timeline: [{ key: 'received' }],
+      eta: { state: 'resolved', sampleSize: 0 },
+    }));
+    expect(await screen.findByTestId('status-headline')).toHaveTextContent('Closed');
+    expect(stepStates()).toEqual(['complete', 'skipped', 'skipped', 'complete']);
+  });
+
+  test('merged: says where the request continues and links there', async () => {
+    renderPage(basePayload({
+      ticket: { status: 'Closed', statusTone: 'resolved' },
+      progress: serverProgress({
+        stage: 'merged',
+        headline: 'Merged',
+        mergedInto: { displayRef: 'TP-10020', statusUrl: 'https://status.example.com/ticket-status/other' },
+        steps: [
+          { key: 'received', label: 'Received', state: 'complete' },
+          { key: 'assigned', label: 'Assigned', state: 'complete' },
+          { key: 'in_progress', label: 'In progress', state: 'complete' },
+          { key: 'merged', label: 'Merged', state: 'complete' },
+        ],
+      }),
+    }));
+    expect(await screen.findByTestId('status-headline')).toHaveTextContent('Merged');
+    expect(screen.getByText('This request continues on TP-10020.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /See the status of TP-10020/ }))
+      .toHaveAttribute('href', 'https://status.example.com/ticket-status/other');
+    expect(screen.queryByRole('link', { name: /Mark as urgent/ })).not.toBeInTheDocument();
+  });
+
+  test('reopened: says so instead of quoting the old estimate', async () => {
+    renderPage(basePayload({
+      progress: serverProgress({
+        stage: 'in_progress',
+        tone: 'open',
+        headline: 'Reopened',
+        current: 2,
+        assigned: true,
+        reopened: true,
+        steps: [
+          { key: 'received', label: 'Received', state: 'complete' },
+          { key: 'assigned', label: 'Assigned', state: 'complete' },
+          { key: 'in_progress', label: 'In progress', state: 'current' },
+          { key: 'resolved', label: 'Resolved', state: 'upcoming' },
+        ],
+      }),
+    }));
+    expect(await screen.findByTestId('status-headline')).toHaveTextContent('Reopened');
+    expect(screen.getByText('We reopened this request and are looking at it again.')).toBeInTheDocument();
+    expect(screen.queryByText('How we estimate this')).not.toBeInTheDocument();
+  });
+
+  test('parked: On hold with the day it comes back', async () => {
+    renderPage(basePayload({
+      progress: serverProgress({
+        stage: 'waiting',
+        tone: 'waiting',
+        headline: 'On hold',
+        current: 2,
+        assigned: true,
+        resumeAt: '2026-10-20T16:00:00.000Z',
+        steps: [
+          { key: 'received', label: 'Received', state: 'complete' },
+          { key: 'assigned', label: 'Assigned', state: 'complete' },
+          { key: 'waiting', label: 'On hold', state: 'current' },
+          { key: 'resolved', label: 'Resolved', state: 'upcoming' },
+        ],
+      }),
+    }));
+    expect(await screen.findByTestId('status-headline')).toHaveTextContent('On hold');
+    expect(screen.getByText(/We plan to pick it up again by/)).toBeInTheDocument();
+  });
+
+  test('an expired link explains itself and offers no pointless retry', async () => {
+    apiMock.get.mockImplementation(() => Promise.reject(
+      Object.assign(new Error('This ticket status link has expired'), { status: 403 }),
+    ));
+    render(
+      <MemoryRouter initialEntries={['/ticket-status/tok']}>
+        <Routes><Route path="/ticket-status/:token" element={<PublicTicketStatus />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'This link is no longer active' })).toBeInTheDocument();
+    expect(screen.getByText(/will carry a fresh link/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Try again/ })).not.toBeInTheDocument();
   });
 
   test('request summary sits collapsed under "Your request" with links made clickable', async () => {

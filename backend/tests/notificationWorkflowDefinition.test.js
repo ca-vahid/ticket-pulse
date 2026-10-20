@@ -194,9 +194,13 @@ describe('notification workflow definitions', () => {
     expect(paths).toContain('ticket.ccEmails');
     expect(paths).toContain('ticket.replyCcEmails');
     expect(paths).toContain('ticket.publicStatusUrl');
-    expect(paths).toContain('ticket.selfEscalationUrl');
-    expect(paths).toContain('publicStatusUrl');
-    expect(paths).toContain('selfEscalationUrl');
+    expect(paths).toContain('ticket.raiseUrgencyUrl');
+    expect(paths).toContain('ticket.afterHoursEscalationUrl');
+    // Each link is listed once (QA 10-19 #1); the short forms still render.
+    for (const shortcut of ['publicStatusUrl', 'raiseUrgencyUrl', 'selfEscalationUrl', 'afterHoursEscalationUrl', 'feedbackUrl', 'ticket.selfEscalationUrl']) {
+      expect(paths).not.toContain(shortcut);
+    }
+    expect(variables.filter((v) => v.label === 'Raise urgency URL')).toHaveLength(1);
     expect(paths).toContain('availability.isAfterHours');
     expect(paths).toContain('availability.isHoliday');
     expect(paths).toContain('availability.nextBusinessTimeLocal');

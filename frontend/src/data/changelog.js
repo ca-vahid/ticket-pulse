@@ -1,6 +1,21 @@
-export const APP_VERSION = '4.3.04-preview';
+export const APP_VERSION = '4.3.05-preview';
 
 export const changelog = [
+  {
+    version: '4.3.05-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Mail Workflows, reorganised</strong> &mdash; the Workflows page now has a <em>Ticket lifecycle</em> menu on the left (Intake, Ownership, Changes, Requester, Closure) that jumps to each stage. Workflows are grouped by stage and by what triggers them (&ldquo;When Ticket arrived&rdquo;), with variants tucked under their default, and each row shows its mode, routing, version and last run. Tabs at the top count All, Enabled, Shadow, Failing, Off and Archived.' },
+      { type: 'improved', html: '<strong>Open a workflow in a new tab</strong> &mdash; every workflow in the list is a real link, so right-click &rarr; Open in new tab, Ctrl-click and middle-click all work.' },
+      { type: 'improved', html: '<strong>Audit: workflows grouped</strong> &mdash; the workflow picker on the Audit tab is grouped by stage and trigger, with variants under their default, so two workflows with the same name are easy to tell apart.' },
+      { type: 'improved', html: '<strong>Quieter workflow list</strong> &mdash; the &ldquo;Skip noise tickets&rdquo; warning no longer shows on the list. It now appears at the top of the workflow itself, with a button that opens the step.' },
+      { type: 'fixed', html: '<strong>One &ldquo;Raise urgency URL&rdquo; in the variable list</strong> &mdash; the list showed each requester link twice (a long and a short form of the same link). Each now appears once; templates that use the short form keep working.' },
+      { type: 'improved', html: '<strong>Request status page, refreshed</strong> &mdash; the page requesters see has warmer colours: a sky-blue summary card, a different colour for each step of the progress bar, coloured icons for the actions, and a soft illustration behind the summary.' },
+      { type: 'fixed', html: '<strong>Request status page: no more stuck at &ldquo;Received&rdquo;</strong> &mdash; a request closed without ever being assigned showed as Received. The page now goes by the ticket&rsquo;s status first: closed or resolved always reads as done, with steps that never happened marked as skipped. Also covered: parked tickets (On hold, back by a date), reopened tickets, tickets merged into another (&ldquo;This request continues on &hellip;&rdquo;), deleted or spam tickets (shown as Closed), and expired links (the next e-mail carries a fresh one).' },
+      { type: 'fixed', html: '<strong>Replies on a closed duplicate go to the original</strong> &mdash; when a requester replies on a ticket that was closed as a duplicate of (or merged into) another, the reply is copied to the surviving ticket as a note and counts as a reply there. The duplicate stays closed instead of reopening unassigned.' },
+      { type: 'improved', html: '<strong>Faster status changes</strong> &mdash; changing a ticket&rsquo;s status no longer waits for the &ldquo;resolved or closed&rdquo; workflows to draft their e-mails; they run straight after in the background.' },
+    ],
+  },
   {
     version: '4.3.04-preview',
     date: 'October 19, 2026',
