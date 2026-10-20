@@ -57,6 +57,74 @@ const ACTION_TONES = {
   orange: { tile: '#FDEEDC', icon: '#C2620A', hover: 'hover:bg-[#FFF8F1]' },
 };
 const HERO_ART = '/brand/status/hero-network.webp';
+// Whole-page backdrop (gpt-image-2, 20 Oct 2026): a BC glacial river valley
+// drawn over a contour-map grid — BGC's ground, not a stock gradient. The sky
+// fills the top so the cards sit on calm, light colour; PAGE_BG shows if the
+// image fails.
+const PAGE_ART = '/brand/status/page-backdrop.webp';
+
+// Uploaded logos often carry a wide white or transparent margin (the BGC mark
+// is about a quarter padding on every side), which made it read as a speck in
+// the header. Crop to the drawn pixels once in the browser; any failure keeps
+// the original.
+export function trimBounds(pixels, width, height) {
+  let top = height, left = width, right = -1, bottom = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      const a = pixels[i + 3];
+      const blank = a < 16 || (pixels[i] > 244 && pixels[i + 1] > 244 && pixels[i + 2] > 244);
+      if (blank) continue;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+  if (right < 0) return null;
+  return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+}
+
+function useTrimmedLogo(src) {
+  const [trimmed, setTrimmed] = useState(null);
+  useEffect(() => {
+    setTrimmed(null);
+    if (!src || typeof document === 'undefined') return undefined;
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, 512 / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, w, h);
+        const box = trimBounds(ctx.getImageData(0, 0, w, h).data, w, h);
+        // Nothing worth cropping: keep the original file.
+        if (!box || (box.w > w * 0.92 && box.h > h * 0.92)) return;
+        const pad = Math.round(Math.max(box.w, box.h) * 0.02);
+        const x = Math.max(0, box.x - pad);
+        const y = Math.max(0, box.y - pad);
+        const cw = Math.min(w - x, box.w + pad * 2);
+        const ch = Math.min(h - y, box.h + pad * 2);
+        const out = document.createElement('canvas');
+        out.width = cw;
+        out.height = ch;
+        out.getContext('2d').drawImage(canvas, x, y, cw, ch, 0, 0, cw, ch);
+        if (!cancelled) setTrimmed(out.toDataURL('image/png'));
+      } catch {
+        // Tainted or unsupported canvas: the untrimmed logo stays.
+      }
+    };
+    img.src = src;
+    return () => { cancelled = true; };
+  }, [src]);
+  return trimmed || src;
+}
 
 function formatDate(value, options = {}) {
   if (!value) return null;
@@ -586,7 +654,15 @@ function HeroArt() {
 
 function Shell({ children }) {
   return (
-    <main className="tp-light min-h-screen text-slate-900" style={{ backgroundColor: PAGE_BG }}>
+    <main className="tp-light relative isolate min-h-screen text-slate-900" style={{ backgroundColor: PAGE_BG }}>
+      {/* A fixed layer rather than background-attachment: fixed, which iOS
+          Safari ignores. */}
+      <div
+        aria-hidden="true"
+        data-testid="status-page-backdrop"
+        className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-bottom bg-no-repeat"
+        style={{ backgroundImage: `url(${PAGE_ART})` }}
+      />
       {children}
     </main>
   );
@@ -686,37 +762,43 @@ export function StatusView({ data, loading = false, onRefresh }) {
   const requesterName = settings.showRequesterName ? ticket.requester?.name : null;
   const checkedAt = formatTime(data?.refreshedAt);
   const expires = formatDay(data?.link?.expiresAt);
+  const logoSrc = useTrimmedLogo(branding.logoDataUrl || null);
 
   return (
     <Shell>
-      <header className="border-b bg-white" style={{ borderColor: CARD_BORDER }}>
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+      {/* Frosted band over the backdrop, with the workspace accent as a thin
+          rule on top. The logo gets real height (56–64px) now. */}
+      <header className="border-b border-white/70 bg-white/75 shadow-subtle backdrop-blur-md" data-testid="status-header">
+        <div aria-hidden="true" className="h-1" style={{ backgroundColor: accent }} />
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex min-w-0 items-center gap-4">
             {branding.logoDataUrl ? (
               <img
-                src={branding.logoDataUrl}
+                src={logoSrc}
                 alt={branding.logoAltText || brandName}
-                className="h-9 max-w-[10rem] object-contain"
+                className="h-14 max-w-[12rem] shrink-0 object-contain sm:h-16"
+                data-testid="status-logo"
               />
             ) : (
               <span
                 aria-hidden="true"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white"
+                className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-lg font-semibold text-white sm:h-16 sm:w-16"
                 style={{ backgroundColor: accent }}
               >
                 {initials(brandName) || 'TP'}
               </span>
             )}
+            <span aria-hidden="true" className="hidden h-10 w-px shrink-0 bg-slate-300/80 sm:block" />
             <div className="min-w-0 leading-tight">
-              <p className="truncate text-sm font-semibold text-slate-900">{brandName}</p>
-              <p className="text-xs text-slate-600">Request status</p>
+              <p className="truncate text-base font-semibold text-slate-900 sm:text-lg">{brandName}</p>
+              <p className="mt-0.5 text-sm text-slate-600">Request status</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-600 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
+            className="tp-focus-ring inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/90 px-3 text-sm font-medium text-slate-700 shadow-subtle hover:bg-white hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
           >
             {loading
               ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
@@ -729,7 +811,7 @@ export function StatusView({ data, loading = false, onRefresh }) {
       <div className="mx-auto max-w-3xl space-y-4 px-4 py-6 sm:space-y-5 sm:px-6 sm:py-10">
         <section
           aria-labelledby="tp-status-subject"
-          className="relative isolate overflow-hidden rounded-2xl p-5 shadow-subtle sm:p-8"
+          className="relative isolate overflow-hidden rounded-2xl p-5 shadow-soft ring-1 ring-white/80 sm:p-8"
           style={{ backgroundColor: HERO_BG }}
         >
           <HeroArt />
@@ -772,7 +854,8 @@ export function StatusView({ data, loading = false, onRefresh }) {
 
         <RequestCard ticket={ticket} />
 
-        <footer className="space-y-1 px-1 pt-4 text-xs leading-5 text-slate-600">
+        {/* The footer lands on the terrain, so it gets its own frosted plate. */}
+        <footer className="space-y-1 rounded-xl bg-white/80 px-4 py-3 text-xs leading-5 text-slate-600 backdrop-blur-sm">
           <p>{branding.trademarkText || `${brandName} · powered by Ticket Pulse`}</p>
           <p>
             No sign-in needed for this link{expires ? `; it works until ${expires}` : ''}.

@@ -10,7 +10,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 const apiMock = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock('../services/api', () => ({ publicTicketStatusAPI: apiMock }));
 
-import PublicTicketStatus from './PublicTicketStatus';
+import PublicTicketStatus, { trimBounds } from './PublicTicketStatus';
 
 const basePayload = (overrides = {}) => {
   const { ticket = {}, ...rest } = overrides;
@@ -301,5 +301,21 @@ describe('PublicTicketStatus', () => {
     const details = summary.closest('details');
     expect(details).not.toHaveAttribute('open');
     expect(within(details).getByRole('link', { hidden: true })).toHaveAttribute('href', 'https://example.com/dock-help');
+  });
+
+  test('page backdrop and a full-size header logo', async () => {
+    renderPage(basePayload({ branding: { brandName: 'Example IT Help', accentColor: '#2563eb', logoDataUrl: 'data:image/png;base64,AAAA', logoAltText: 'Example' } }));
+    const logo = await screen.findByRole('img', { name: 'Example' });
+    expect(logo).toHaveClass('h-14');
+    expect(screen.getByTestId('status-page-backdrop').style.backgroundImage).toContain('/brand/status/page-backdrop.webp');
+    expect(screen.getByTestId('status-header')).toHaveTextContent('Request status');
+  });
+
+  test('trimBounds finds the drawn pixels inside a white margin', () => {
+    // 4x4 RGBA, white everywhere except a navy 2x1 run at (1,2)-(2,2).
+    const px = new Uint8ClampedArray(4 * 4 * 4).fill(255);
+    for (const x of [1, 2]) { const i = (2 * 4 + x) * 4; px[i] = 3; px[i + 1] = 29; px[i + 2] = 115; }
+    expect(trimBounds(px, 4, 4)).toEqual({ x: 1, y: 2, w: 2, h: 1 });
+    expect(trimBounds(new Uint8ClampedArray(16).fill(255), 2, 2)).toBeNull();
   });
 });
