@@ -2126,15 +2126,13 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('ticket.closedAt', 'Closed at', 'Ticket', 'Ticket closed timestamp.', ''),
     variable('ticket.publicStatusUrl', 'Public status URL', 'Ticket', 'Requester-facing public ticket status link for this ticket.', 'https://ticketpulse.example/ticket-status/sample-token'),
     variable('ticket.raiseUrgencyUrl', 'Raise urgency URL', 'Ticket', 'Requester-facing business-hours link that raises this ticket to Urgent without paging the after-hours roster.', 'https://ticketpulse.example/ticket-urgency/sample-token'),
-    variable('ticket.selfEscalationUrl', 'Immediate support URL', 'Ticket', 'Backward-compatible requester-facing after-hours immediate support link for this ticket.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
     variable('ticket.afterHoursEscalationUrl', 'After-hours immediate support URL', 'Ticket', 'Requester-facing after-hours immediate support link for this ticket.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
     variable('ticket.publicStatusExpiresAt', 'Public status expiry', 'Ticket', 'Expiration timestamp for the public status link, or blank if it never expires.', '2026-07-28T18:42:00.000Z'),
     variable('ticket.feedbackUrl', 'Feedback URL', 'Ticket', 'Requester-facing satisfaction feedback link for this ticket.', 'https://ticketpulse.example/feedback/sample-token'),
-    variable('publicStatusUrl', 'Public status URL', 'Ticket', 'Shortcut to the requester-facing public ticket status link.', 'https://ticketpulse.example/ticket-status/sample-token'),
-    variable('raiseUrgencyUrl', 'Raise urgency URL', 'Ticket', 'Shortcut to the business-hours raise urgency link.', 'https://ticketpulse.example/ticket-urgency/sample-token'),
-    variable('selfEscalationUrl', 'Immediate support URL', 'Ticket', 'Backward-compatible shortcut to the after-hours immediate support link.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
-    variable('afterHoursEscalationUrl', 'After-hours immediate support URL', 'Ticket', 'Shortcut to the after-hours immediate support link.', 'https://ticketpulse.example/ticket-escalation/sample-token'),
-    variable('feedbackUrl', 'Feedback URL', 'Ticket', 'Shortcut to the requester-facing satisfaction feedback link.', 'https://ticketpulse.example/feedback/sample-token'),
+    // The short forms ({{ publicStatusUrl }}, {{ raiseUrgencyUrl }}, {{ feedbackUrl }},
+    // {{ afterHoursEscalationUrl }}) and the older selfEscalationUrl still render in
+    // every template; they are left out of the picker so each link is listed once
+    // (QA 10-19 #1: "why are there 2 raise urgency links?").
     variable('requester.name', 'Requester name', 'Requester', 'Requester display name.', 'Requester Name'),
     variable('requester.email', 'Requester email', 'Requester', 'Requester email address.', 'requester@example.com'),
     variable('requester.department', 'Requester FreshService department/location', 'Requester', 'FreshService requester department_names value. In this workspace it is often an office/location label.', 'Vancouver'),

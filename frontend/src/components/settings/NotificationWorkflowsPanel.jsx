@@ -80,6 +80,7 @@ import WorkflowPreviewPage, {
 } from './workflowRun/WorkflowPreviewPage';
 import { useTheme } from '../../contexts/ThemeContext';
 import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
+import { groupWorkflowsByStage } from '../../utils/workflowStages';
 
 // Inspector width (px) and the minimap choice are remembered per browser.
 const WORKFLOW_INSPECTOR_WIDTH_KEY = 'ticket-pulse-notification-workflow-inspector-w';
@@ -6728,13 +6729,22 @@ export function MockAuditPanel({
   }, [activeRun, detailReady, detailLoading, displayEmail, selectedWorkflow, workflowsById]);
 
   const setFilter = (patch) => onFiltersChange({ ...filters, ...patch });
-  const workflowOptions = [
+  // QA 10-19 #2: grouped by lifecycle stage and trigger (the list's map), the
+  // trigger as the group header, variants indented under their default.
+  const workflowOptions = useMemo(() => [
     ['selected', 'Selected workflow'],
     ['all', 'All workflows'],
-    ...(workflows || [])
-      .filter((workflow) => !workflow.archivedAt || String(workflow.id) === String(filters.workflowId))
-      .map((workflow) => [String(workflow.id), `${workflowDisplayName(workflow)}${workflow.archivedAt ? ' (archived)' : ''}`]),
-  ];
+    ...groupWorkflowsByStage(
+      (workflows || []).filter((workflow) => !workflow.archivedAt || String(workflow.id) === String(filters.workflowId)),
+      EVENT_LABELS,
+    ).flatMap(({ stage, triggers }) => triggers.map((group) => ({
+      group: `${stage.number} ${stage.label} · ${group.label}`,
+      options: group.workflows.map((workflow) => [
+        String(workflow.id),
+        `${group.parent && workflow !== group.parent ? '  ↳ ' : ''}${workflowDisplayName(workflow)}${workflow.archivedAt ? ' (archived)' : ''}`,
+      ]),
+    }))),
+  ], [workflows, filters.workflowId]);
 
   return (
     <section
@@ -7232,6 +7242,21 @@ function writeWorkflowParam(id, { push = false } = {}) {
   } catch { /* the address is a convenience */ }
 }
 
+/**
+ * The address of a workflow's own page (QA 10-19 #5): the current path with
+ * ?wf=<id>, e.g. /workflows?wf=12. List rows are links to it, so right-click
+ * → Open in new tab and Ctrl/⌘-click open the workflow straight away.
+ */
+function workflowPageHref(id) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('wf', String(id));
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return `?wf=${encodeURIComponent(id)}`;
+  }
+}
+
 export default function NotificationWorkflowsPanel({
   controlledTab = null,
   onTabChange = null,
@@ -7412,12 +7437,7 @@ export default function NotificationWorkflowsPanel({
   const archivedWorkflowCount = workflows.filter((workflow) => Boolean(workflow.archivedAt)).length;
   // Archived toggle shows ONLY archived variants (QA 07-08) — mixing them into
   // the live list made them near-impossible to find among active workflows.
-  const visibleWorkflows = useMemo(
-    () => (showArchivedWorkflows
-      ? workflows.filter((workflow) => Boolean(workflow.archivedAt))
-      : workflows.filter((workflow) => !workflow.archivedAt)),
-    [showArchivedWorkflows, workflows],
-  );
+  // WorkflowListPage does that split itself (QA 10-19 #4: its tabs count both).
   const mockAuditHasActiveRuns = useMemo(
     () => mockAuditRuns.some((run) => auditRunIsActive(run)),
     [mockAuditRuns],
@@ -7957,7 +7977,6 @@ export default function NotificationWorkflowsPanel({
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const dismissMessage = useCallback(() => setMessage(null), []);
@@ -11288,6 +11307,12 @@ export default function NotificationWorkflowsPanel({
   }
 
   const healthWarnings = Array.isArray(health?.warnings) ? health.warnings : [];
+  // Workflow watch signals for the open workflow (QA 10-05 #5). The list hides
+  // "Skip noise tickets no longer skips noise" (QA 10-19 #3); its own page
+  // keeps every signal, with a jump to the step it names.
+  const selectedWatchSignals = (selected?.id
+    ? workflows.find((workflow) => String(workflow.id) === String(selected.id))?.watchSignals
+    : null) || [];
   // Sidebar row menu (L2): the same dialogs the header actions open, for the
   // row's own workflow — select it first so the confirms act on it.
   const handleWorkflowRowAction = (workflow, action) => {
@@ -11647,9 +11672,13 @@ export default function NotificationWorkflowsPanel({
 
         {workflowListView && (
           <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
+            {/* The list gets every workflow (live and archived) so its filter
+                tabs can count both; it shows one set at a time. */}
             <WorkflowListPage
-              workflows={visibleWorkflows}
+              workflows={workflows}
               onOpen={openWorkflow}
+              getHref={workflowPageHref}
+              stats={health}
               onCreate={() => setNewWorkflowOpen({})}
               onCreateForTrigger={(triggerType) => setNewWorkflowOpen({ trigger: triggerType })}
               onRowAction={handleWorkflowRowAction}
@@ -11678,6 +11707,27 @@ export default function NotificationWorkflowsPanel({
               <div ref={editorSplitRef} className="flex min-h-0 min-w-0">
                 <div className="min-h-0 min-w-0 flex-1">
                   <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+                    {selectedWatchSignals.length > 0 && (
+                      <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-2 text-xs text-amber-900 dark:text-amber-200" data-testid="workflow-editor-watch-signals">
+                        <ul className="space-y-1">
+                          {selectedWatchSignals.map((signal) => (
+                            <li key={`${signal.code}-${signal.nodeId || ''}`} className="flex items-start gap-2" data-code={signal.code}>
+                              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-200" aria-hidden="true" />
+                              <span className="min-w-0 flex-1">{signal.message}</span>
+                              {signal.nodeId && draft?.nodes?.some((node) => node.id === signal.nodeId) && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setSelectedNodeId(signal.nodeId); setInspectorCollapsed(false); }}
+                                  className="tp-focus-ring shrink-0 rounded font-semibold underline underline-offset-2 hover:no-underline"
+                                >
+                                  Open step
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     {hasBlockingGraphErrors && (
                       <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
                         <div className="flex items-start gap-2">

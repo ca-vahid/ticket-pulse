@@ -180,6 +180,32 @@ describe('Workflow Audit panel (QA 10-15)', () => {
     expect(screen.getByTestId('workflow-audit-list').className).toContain('h-[40vh]');
   });
 
+  // QA 10-19 #2: the "All workflows" picker was one long flat list.
+  test('the workflow picker groups by lifecycle stage and trigger, variants indented', () => {
+    renderPanel({
+      workflows: [
+        { id: 1, name: 'Ticket assigned', triggerType: 'ticket.assigned', isDefaultVariant: true },
+        { id: 2, name: 'Ticket arrived', triggerType: 'ticket.created', isDefaultVariant: true },
+        { id: 3, name: 'Brisbane arrived', triggerType: 'ticket.created' },
+        { id: 4, name: 'Weekly digest', triggerType: 'schedule.time' },
+        { id: 5, name: 'Retired', triggerType: 'ticket.created', archivedAt: '2026-10-01T00:00:00.000Z' },
+      ],
+    });
+    const select = screen.getByLabelText('Filter workflow audit by workflow');
+    const groups = [...select.querySelectorAll('optgroup')];
+    expect(groups.map((g) => g.label)).toEqual([
+      '01 Intake · Ticket arrived',
+      '02 Ownership · Ticket assigned',
+      '06 Other · On a schedule (digest)',
+    ]);
+    const arrived = [...groups[0].querySelectorAll('option')].map((o) => o.textContent);
+    // (The default's friendly name comes from workflowDisplayName.)
+    expect(arrived).toEqual(['Ticket arrived during business hours', '  ↳ Brisbane arrived']);
+    // The two fixed choices stay on top; archived workflows stay out unless picked.
+    expect([...select.options].slice(0, 2).map((o) => o.value)).toEqual(['selected', 'all']);
+    expect(select).not.toHaveTextContent('Retired');
+  });
+
   test('the open run shows the e-mail, issues and the pipeline in the shared run view', async () => {
     renderPanel();
     await waitFor(() => expect(getAuditMock).toHaveBeenCalled());

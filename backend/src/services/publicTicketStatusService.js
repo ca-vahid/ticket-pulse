@@ -239,12 +239,155 @@ export function statusTone(ticketOrStatus) {
   return 'neutral';
 }
 
+// QA 10-19 #6: statuses the registry does not know must still land somewhere
+// sensible on the requester page. Deleted/Spam are terminal for the requester
+// (we never tell them "spam"); an unknown label that plainly says the work is
+// over counts as done; anything else falls back to the stored timestamps.
+const REMOVED_STATUSES = new Set(['deleted', 'spam']);
+const CLOSED_WORD_RE = /\b(cancell?ed|withdrawn)\b/i;
+const RESOLVED_WORD_RE = /\b(completed?|done|solved|fixed)\b/i;
+const IN_PROGRESS_LABEL_RE = /progress|working|investigat/i;
+const WAITS_ON_REQUESTER_RE = /customer|requester|user|you|response|reply|information|info/i;
+
+function isRemovedStatus(status) {
+  return REMOVED_STATUSES.has(String(status ?? '').trim().toLowerCase());
+}
+
+/**
+ * The base the requester page acts on. Status FIRST: the stamped registry
+ * base (custom statuses), then the FS-int/substring heuristic. Only when the
+ * label is unknown do words and the resolved/closed timestamps decide — so a
+ * reopened FS ticket whose stats still carry resolved_at reads as open.
+ */
+export function publicLifecycleBase(ticket) {
+  const status = typeof ticket === 'object' && ticket !== null ? ticket.status : ticket;
+  if (isRemovedStatus(status)) return 'Closed';
+  const base = publicStatusBase(ticket);
+  if (base) return base;
+  const label = String(status ?? '');
+  if (CLOSED_WORD_RE.test(label)) return 'Closed';
+  if (RESOLVED_WORD_RE.test(label)) return 'Resolved';
+  if (typeof ticket === 'object' && ticket !== null) {
+    if (dateOrNull(ticket.closedAt)) return 'Closed';
+    if (dateOrNull(ticket.resolvedAt)) return 'Resolved';
+  }
+  return null;
+}
+
 function isPendingStatus(ticketOrStatus) {
-  return publicStatusBase(ticketOrStatus) === 'Pending';
+  return publicLifecycleBase(ticketOrStatus) === 'Pending';
 }
 
 function isClosedStatus(ticketOrStatus) {
-  return publicStatusBase(ticketOrStatus) === 'Closed';
+  return publicLifecycleBase(ticketOrStatus) === 'Closed';
+}
+
+const STAGE_INDEX = {
+  received: 1,
+  in_progress: 2,
+  waiting: 2,
+  resolved: 4,
+  closed: 4,
+  merged: 4,
+};
+
+/**
+ * "Where is my request" for the requester page, decided once on the server
+ * (QA 10-19 #6). Stage derives from the status FIRST — a ticket closed with
+ * nobody ever assigned is Closed, not Received — and steps that were passed
+ * without happening (no assignee) are marked `skipped`, never left upcoming.
+ *
+ * Stages: received | in_progress | waiting | resolved | closed | merged.
+ * Steps: received → assigned → in_progress (or waiting) → resolved/closed/merged,
+ * each complete | current | upcoming | skipped.
+ */
+export function publicProgress(ticket = {}, { mergedInto = null, now = new Date() } = {}) {
+  const base = publicLifecycleBase(ticket);
+  const status = String(ticket.status ?? '').trim();
+  const assignedNow = Boolean(ticket.assignedTechId || ticket.assignedTech?.id || ticket.assignedTech?.name);
+  const everAssigned = assignedNow || Boolean(lifecycleAssignedAt(ticket));
+  const reopenedAt = dateOrNull(ticket.reopenedAt);
+  const parkedUntil = dateOrNull(ticket.parkedUntil);
+  const parked = Boolean(parkedUntil && parkedUntil.getTime() > now.getTime());
+  const terminal = base === 'Resolved' || base === 'Closed';
+  const mergedAt = dateOrNull(mergedInto?.mergedAt);
+  // A merged ticket continues on its target — unless someone reopened it after the merge.
+  const merged = Boolean(mergedInto) && !(
+    !terminal && reopenedAt && mergedAt && reopenedAt.getTime() > mergedAt.getTime()
+  );
+
+  let stage;
+  let waitingOnRequester = false;
+  if (merged) {
+    stage = 'merged';
+  } else if (terminal) {
+    stage = base === 'Closed' ? 'closed' : 'resolved';
+  } else if (base === 'Pending' || parked) {
+    stage = 'waiting';
+    waitingOnRequester = ticket.parkKind === 'auto_help'
+      || (base === 'Pending' && WAITS_ON_REQUESTER_RE.test(status));
+  } else if (assignedNow || (base === 'Open' && IN_PROGRESS_LABEL_RE.test(status))) {
+    stage = 'in_progress';
+  } else {
+    stage = 'received';
+  }
+
+  const done = STAGE_INDEX[stage] === 4;
+  const reopened = Boolean(reopenedAt) && !done;
+  const current = STAGE_INDEX[stage];
+  const waitingLabel = waitingOnRequester ? 'Waiting on you' : 'On hold';
+
+  let headline;
+  if (stage === 'merged') headline = 'Merged';
+  else if (stage === 'closed') headline = 'Closed';
+  else if (stage === 'resolved') headline = 'Resolved';
+  else if (stage === 'waiting') headline = waitingLabel;
+  else if (reopened) headline = 'Reopened';
+  else if (stage === 'in_progress') headline = 'In progress';
+  // An unknown, non-numeric label (e.g. "Scheduled") is more useful than a guess.
+  else if (base === null && status && !/^\d+$/.test(status)) headline = status;
+  else headline = 'Received';
+
+  const passed = (happened) => (happened ? 'complete' : 'skipped');
+  const steps = [
+    { key: 'received', label: 'Received', state: 'complete' },
+    {
+      key: 'assigned',
+      label: 'Assigned',
+      state: current === 1 ? 'current' : passed(everAssigned),
+    },
+    {
+      key: stage === 'waiting' ? 'waiting' : 'in_progress',
+      label: stage === 'waiting' ? waitingLabel : 'In progress',
+      state: current === 2 ? 'current' : done ? passed(everAssigned) : 'upcoming',
+    },
+    {
+      key: stage === 'merged' ? 'merged' : stage === 'closed' ? 'closed' : 'resolved',
+      label: stage === 'merged' ? 'Merged' : stage === 'closed' ? 'Closed' : 'Resolved',
+      state: done ? 'complete' : 'upcoming',
+    },
+  ];
+
+  let tone = 'open';
+  if (done) tone = 'resolved';
+  else if (stage === 'waiting') tone = 'waiting';
+  else if (base === null) tone = 'neutral';
+
+  return {
+    stage,
+    tone,
+    headline,
+    current,
+    steps,
+    assigned: everAssigned,
+    waitingOnRequester,
+    reopened,
+    // A park the requester can plan around; Auto-help parks wait on them instead.
+    resumeAt: parked && ticket.parkKind !== 'auto_help' ? parkedUntil.toISOString() : null,
+    mergedInto: merged
+      ? { displayRef: mergedInto.displayRef || null, statusUrl: mergedInto.statusUrl || null }
+      : null,
+  };
 }
 
 function secondsLabel(seconds) {
@@ -272,7 +415,8 @@ function isoOrNull(value) {
 }
 
 function isResolvedStatus(ticketOrStatus) {
-  return statusTone(ticketOrStatus) === 'resolved';
+  const base = publicLifecycleBase(ticketOrStatus);
+  return base === 'Resolved' || base === 'Closed';
 }
 
 function lifecycleStartAt(ticket) {
@@ -284,6 +428,10 @@ function lifecycleUpdatedAt(ticket) {
 }
 
 function lifecycleCompletedAt(ticket) {
+  // Status first: an open or pending ticket is not complete, even when an FS
+  // reopen left the old resolved_at/closed_at stats behind (QA 10-19 #6).
+  const base = publicLifecycleBase(ticket);
+  if (base === 'Open' || base === 'Pending') return null;
   const explicit = dateOrNull(ticket?.closedAt) || dateOrNull(ticket?.resolvedAt);
   if (explicit) return explicit;
   if (!isResolvedStatus(ticket)) return null;
@@ -698,7 +846,11 @@ export async function ensurePublicTicketStatusLink({
     where: { workspaceId_ticketId: { workspaceId, ticketId } },
   });
 
-  if (existing && existing.enabled && !existing.revokedAt) {
+  // An expired token is dead everywhere (status, escalation, feedback), so
+  // re-sending it in a new e-mail would hand the requester a link that only
+  // says "no longer active" (QA 10-19 #6). Mint a fresh one instead.
+  const existingExpired = Boolean(existing?.expiresAt && new Date(existing.expiresAt).getTime() <= Date.now());
+  if (existing && existing.enabled && !existing.revokedAt && !existingExpired) {
     return {
       enabled: statusEnabled,
       statusEnabled,
@@ -873,7 +1025,7 @@ async function ticketWithPublicData(where) {
   });
 }
 
-function publicTicket(ticket, settings) {
+function publicTicket(ticket, settings, progress = publicProgress(ticket)) {
   const startedAt = lifecycleStartAt(ticket);
   const assignedAt = lifecycleAssignedAt(ticket);
   const completedAt = lifecycleCompletedAt(ticket);
@@ -888,8 +1040,10 @@ function publicTicket(ticket, settings) {
     freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
     subject: ticket.subject || 'Ticket status',
     summary: settings.showSummary ? summarize(ticket.descriptionText || ticket.description) : null,
-    status: ticket.status,
-    statusTone: statusTone(ticket),
+    // Deleted/Spam never reach the requester verbatim: it reads as Closed.
+    status: isRemovedStatus(ticket.status) ? 'Closed' : ticket.status,
+    // Follows the stage, so a closed-but-unknown label is never "neutral".
+    statusTone: progress.tone,
     priority: settings.showPriority ? priorityLabel(ticket) : null,
     category: settings.showCategory ? {
       ticketPulseCategory: ticket.internalCategory?.name || ticket.tpSkill || null,
@@ -917,12 +1071,12 @@ function publicTicket(ticket, settings) {
   };
 }
 
-function publicTimeline(ticket) {
+function publicTimeline(ticket, progress = publicProgress(ticket)) {
   const startedAt = lifecycleStartAt(ticket);
   const assignedAt = lifecycleAssignedAt(ticket);
   const updatedAt = lifecycleUpdatedAt(ticket);
   const completedAt = lifecycleCompletedAt(ticket);
-  const isClosed = isClosedStatus(ticket);
+  const isClosed = progress.stage === 'closed';
   const timeline = [
     {
       key: 'received',
@@ -953,7 +1107,17 @@ function publicTimeline(ticket) {
     });
   }
 
-  if (isPendingStatus(ticket)) {
+  if (progress.stage === 'merged') {
+    timeline.push({
+      key: 'merged',
+      label: 'Merged',
+      tone: 'emerald',
+      at: isoOrNull(completedAt || updatedAt),
+      detail: progress.mergedInto?.displayRef
+        ? `This request continues on ${progress.mergedInto.displayRef}.`
+        : 'This request continues on another ticket.',
+    });
+  } else if (progress.stage === 'waiting') {
     timeline.push({
       key: 'pending',
       label: 'Pending',
@@ -961,7 +1125,7 @@ function publicTimeline(ticket) {
       at: isoOrNull(updatedAt),
       detail: 'The ticket is waiting on information, access, vendor work, or another dependency.',
     });
-  } else if (completedAt || statusTone(ticket) === 'resolved') {
+  } else if (progress.stage === 'resolved' || progress.stage === 'closed') {
     timeline.push({
       key: isClosed ? 'closed' : 'resolved',
       label: isClosed ? 'Closed' : 'Resolved',
@@ -982,6 +1146,47 @@ function publicTimeline(ticket) {
   return timeline;
 }
 
+/**
+ * The ticket this one was merged into, for the requester page. Only the
+ * target's number is shown; its own status link is offered only when the
+ * same requester owns both tickets and that link is already live (never
+ * minted here, never another person's request).
+ */
+async function publicMergedInto(ticket) {
+  if (!prisma.ticketLink?.findFirst) return null;
+  try {
+    const link = await prisma.ticketLink.findFirst({
+      where: { workspaceId: ticket.workspaceId, ticketId: ticket.id, kind: 'merged_into' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        relatedTicket: {
+          select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requesterId: true },
+        },
+      },
+    });
+    const target = link?.relatedTicket;
+    if (!target) return null;
+    let statusUrl = null;
+    if (ticket.requesterId && target.requesterId === ticket.requesterId) {
+      const targetLink = await prisma.publicTicketStatusLink.findUnique({
+        where: { workspaceId_ticketId: { workspaceId: ticket.workspaceId, ticketId: target.id } },
+        select: { token: true, enabled: true, revokedAt: true, expiresAt: true },
+      }).catch(() => null);
+      const live = targetLink?.token && targetLink.enabled && !targetLink.revokedAt
+        && !(targetLink.expiresAt && new Date(targetLink.expiresAt).getTime() <= Date.now());
+      if (live) statusUrl = buildPublicTicketStatusUrl(targetLink.token);
+    }
+    return {
+      displayRef: ticketDisplayRef(target),
+      statusUrl,
+      mergedAt: link.createdAt || null,
+    };
+  } catch (error) {
+    logger.warn('Public status: merged-into lookup failed', { ticketId: ticket.id, error: error.message });
+    return null;
+  }
+}
+
 async function serializePublicStatus({ link, ticket, settings, token = null }) {
   // Stamp the workspace-registry base ONCE (Phase 8c) — every downstream
   // tone/stage/timeline decision (statusTone, isPendingStatus, ETA pause)
@@ -993,6 +1198,7 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
   } catch {
     ticket.statusBase = null;
   }
+  const progress = publicProgress(ticket, { mergedInto: await publicMergedInto(ticket) });
   const [eta, stats, latestImmediateSupportEvent, latestUrgencyEvent, escalationPolicy] = await Promise.all([
     computeTicketEta(ticket, settings),
     workspaceStats(ticket, settings),
@@ -1030,8 +1236,9 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
       name: ticket.workspace?.name || ticket.workspaceName || 'Ticket Pulse',
       timezone: ticket.workspace?.defaultTimezone || 'America/Vancouver',
     },
-    ticket: publicTicket(ticket, settings),
-    timeline: publicTimeline(ticket),
+    ticket: publicTicket(ticket, settings, progress),
+    timeline: publicTimeline(ticket, progress),
+    progress,
     eta,
     stats,
     branding: {

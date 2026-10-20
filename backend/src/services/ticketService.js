@@ -5009,7 +5009,11 @@ class TicketService {
     // _notifyLifecycle now — single emit path shared with the FS sync, with a
     // stable dedupe stamp instead of the old Date.now() one. The actor rides
     // along so the status-changed webhook can say WHO (Simorgh D3).
-    await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
+    // Not awaited (19 Oct 2026): the "resolved or closed" workflows draft their
+    // e-mail with the AI, which held the person's click for ~5 s. The status is
+    // saved and the FreshService copy is queued before this; the workflows run
+    // on in the background and log their own failures (_notifyLifecycle never throws).
+    this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     // Parked (plans/PARKED_BUILD_PLAN.md): a status change that is not the
     // park's own ends the park — a person, the API, bulk, or a change adopted

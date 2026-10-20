@@ -1057,6 +1057,17 @@ export async function emitTicketEvent(eventType, ticketId, {
     notificationFingerprint: `wf:${ticket.workspaceId}:${eventType}:${stamp}`,
   };
   const statusBase = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status).catch(() => null);
+  // A reply on a ticket closed as a duplicate (or merged) goes to the ticket
+  // that survived, instead of reopening the duplicate (19 Oct 2026).
+  if (eventType === 'ticket.reply_received' && !onlyWorkflowId && (statusBase === 'Resolved' || statusBase === 'Closed')) {
+    const { redirectReplyOnClosedDuplicate } = await import('./duplicateReplyRedirect.js');
+    const moved = await redirectReplyOnClosedDuplicate(ticket, { statusBase, extra, dedupeStamp: stamp }).catch(() => null);
+    if (moved) {
+      if (moved.duplicateEvent) return { status: 'skipped', reason: 'Reply already forwarded', targetTicketId: moved.targetId };
+      const result = await emitTicketEvent('ticket.reply_received', moved.targetId, { source, dedupeStamp: moved.dedupeStamp, extra: moved.extra });
+      return { status: 'redirected', targetTicketId: moved.targetId, result };
+    }
+  }
   const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase, ...(createdVia ? { createdVia } : {}) });
   if (extra) eventContext.event.extra = extra;
   dispatchLifecycleWebhook(eventContext);
