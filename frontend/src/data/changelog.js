@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.05-preview';
+export const APP_VERSION = '4.3.06-preview';
 
 export const changelog = [
+  {
+    version: '4.3.06-preview',
+    date: 'October 19, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Request status page: a backdrop and a proper header</strong> &mdash; the whole page now sits on an illustration of a BC glacial river valley drawn over a contour map, instead of a plain off-white. The header is a frosted band with the team&rsquo;s accent colour along the top, and the logo is shown at full size: white or transparent margins around an uploaded logo are trimmed, so the BGC mark no longer looks like a speck.' },
+    ],
+  },
   {
     version: '4.3.05-preview',
     date: 'October 19, 2026',
