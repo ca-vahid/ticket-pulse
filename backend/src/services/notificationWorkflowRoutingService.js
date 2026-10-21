@@ -67,6 +67,44 @@ function evaluateRoutingRule(rule, context) {
   }
 }
 
+function ruleVars(rule, out = new Set()) {
+  if (Array.isArray(rule)) {
+    for (const part of rule) ruleVars(part, out);
+  } else if (isPlainObject(rule)) {
+    for (const [op, arg] of Object.entries(rule)) {
+      if (op === 'var') {
+        const name = Array.isArray(arg) ? arg[0] : arg;
+        if (typeof name === 'string' && name) out.add(name);
+      } else {
+        ruleVars(arg, out);
+      }
+    }
+  }
+  return out;
+}
+
+function valueAt(context, path) {
+  const value = String(path || '').split('.').reduce((v, key) => (
+    v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, key) ? v[key] : undefined
+  ), context);
+  if (value === undefined || value === null) return null;
+  return typeof value === 'object' ? null : value;
+}
+
+/**
+ * QA 10-20 #8: does this workflow's OWN routing rule match the event? A
+ * default (or a workflow with no rule) has nothing to check: present=false.
+ * `fields` are the values the rule read, so a preview can say
+ * "Requester region is CA-VANCOUVER".
+ */
+export function evaluateOwnRoutingRule(workflow = {}, context = {}) {
+  if (!workflow || workflow.isDefaultVariant === true || !routingRulePresent(workflow)) {
+    return { present: false, matched: null, fields: [] };
+  }
+  const fields = [...ruleVars(workflow.routingRule)].slice(0, 6).map((field) => ({ field, value: valueAt(context, field) }));
+  return { present: true, matched: evaluateRoutingRule(workflow.routingRule, context), fields };
+}
+
 function routeSort(a, b) {
   const priorityDiff = normalizeRoutingPriority(a.routingPriority) - normalizeRoutingPriority(b.routingPriority);
   if (priorityDiff !== 0) return priorityDiff;
@@ -204,4 +242,5 @@ export default {
   normalizeRoutingRule,
   selectWorkflowVariants,
   workflowRoutingSummary,
+  evaluateOwnRoutingRule,
 };

@@ -3509,7 +3509,26 @@ function llmModelFact(llm = []) {
   return [first?.provider, first?.model].filter(Boolean).join(' · ') || null;
 }
 
-function buildPreviewRunModel({ preview, live, running, definition, ticket, startedAt, finishedAt }) {
+/**
+ * QA 10-20 #8: the preview stopped at routing. What the rule wanted, what this
+ * ticket has, and which workflow a live ticket like it goes to instead.
+ */
+function previewSkipForView(preview, { routingText = null } = {}) {
+  if (preview?.status !== 'skipped') return null;
+  const routing = preview.routingPreview || {};
+  const goesTo = (routing.selectedWorkflows || [])
+    .filter((w) => String(w.id) !== String(routing.selectedWorkflowId))
+    .map((w) => workflowDisplayName(w));
+  return {
+    reason: preview.skipped?.reason || 'routing_rule_not_matched',
+    ruleText: routingText,
+    fields: (routing.ownRule?.fields || []).map((f) => ({ label: f.label || f.field, value: f.value })),
+    goesTo: goesTo.length ? goesTo.join(', ') : null,
+  };
+}
+
+function buildPreviewRunModel({ preview, live, running, definition, ticket, startedAt, finishedAt, routingText = null }) {
+  const skipped = running ? null : previewSkipForView(preview, { routingText });
   const finalSteps = preview?.steps || [];
   const records = !running && finalSteps.length ? finalSteps : (live?.steps?.length ? live.steps : finalSteps);
   const steps = runStepsForView(records, { definition, running });
@@ -3518,9 +3537,11 @@ function buildPreviewRunModel({ preview, live, running, definition, ticket, star
   const llmRaw = preview ? llmDiagnosticsFromPreview(preview, finalSteps) : [];
   const llm = llmDiagnosticsForView(llmRaw, definition);
   const expectEmail = steps.some((step) => step.nodeType === 'send_email' || step.nodeType === 'template_render');
-  const issues = preview
-    ? collectPreviewIssues(preview, finalSteps, email, recipients, { expectEmail })
-    : (live?.error ? [{ tone: 'red', title: 'Preview run failed', detail: live.error }] : []);
+  const issues = skipped
+    ? []
+    : preview
+      ? collectPreviewIssues(preview, finalSteps, email, recipients, { expectEmail })
+      : (live?.error ? [{ tone: 'red', title: 'Preview run failed', detail: live.error }] : []);
   const durationMs = live?.durationMs ?? (startedAt ? (finishedAt || Date.now()) - startedAt : null);
   const toCount = (recipients.to || []).length;
   return {
@@ -3548,7 +3569,10 @@ function buildPreviewRunModel({ preview, live, running, definition, ticket, star
     routing: preview?.routingPreview || null,
     warnings: Array.isArray(preview?.warnings) ? preview.warnings : [],
     pendingEmail: running,
-    emptyEmailText: expectEmail ? 'This run did not render an e-mail.' : 'This workflow does not send an e-mail.',
+    skipped,
+    emptyEmailText: skipped
+      ? 'Nothing ran, so there is no e-mail. Use "Preview it anyway" to see what it would send.'
+      : expectEmail ? 'This run did not render an e-mail.' : 'This workflow does not send an e-mail.',
   };
 }
 
@@ -6737,11 +6761,13 @@ export function MockAuditPanel({
     ...groupWorkflowsByStage(
       (workflows || []).filter((workflow) => !workflow.archivedAt || String(workflow.id) === String(filters.workflowId)),
       EVENT_LABELS,
+      // QA 10-20 #5: business hours and after-hours are separate families.
+      { familyOf: (workflow) => (isAfterHoursWorkflow(workflow) ? 'after_hours' : 'standard') },
     ).flatMap(({ stage, triggers }) => triggers.map((group) => ({
       group: `${stage.number} ${stage.label} · ${group.label}`,
       options: group.workflows.map((workflow) => [
         String(workflow.id),
-        `${group.parent && workflow !== group.parent ? '  ↳ ' : ''}${workflowDisplayName(workflow)}${workflow.archivedAt ? ' (archived)' : ''}`,
+        `${group.nested.has(workflow.id) ? '  ↳ ' : ''}${workflowDisplayName(workflow)}${workflow.archivedAt ? ' (archived)' : ''}`,
       ]),
     }))),
   ], [workflows, filters.workflowId]);
@@ -8688,7 +8714,7 @@ export default function NotificationWorkflowsPanel({
     setPreviewModalOpen(false);
   }
 
-  async function runPreview(ticket = selectedPreviewTicket) {
+  async function runPreview(ticket = selectedPreviewTicket, { ignoreRouting = false } = {}) {
     if (!selected || !ticket || previewRunning) return;
     const previewDefinition = previewDefinitionRef.current || draft;
     if (!previewDefinition) return;
@@ -8711,6 +8737,8 @@ export default function NotificationWorkflowsPanel({
         definition: previewDefinition,
         executeLlm: true,
         forceActionLinks: true,
+        // QA 10-20 #8: a ticket the routing rule skips stops there unless asked.
+        ...(ignoreRouting ? { ignoreRouting: true } : {}),
       });
       setPreview(response.data);
     } catch (error) {
@@ -11341,6 +11369,7 @@ export default function NotificationWorkflowsPanel({
       ticket: selectedPreviewTicket,
       startedAt: previewStartedAt,
       finishedAt: previewFinishedAt,
+      routingText: workflowRoutingDescription(selected),
     });
     return (
       <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>

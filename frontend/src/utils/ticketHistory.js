@@ -28,6 +28,12 @@ const NEAR_MS = 3 * 60 * 1000;
 const BURST_GAP_MS = 5 * 60 * 1000;
 
 const humanize = (s) => String(s || '').replace(/_/g, ' ');
+// 'Reason: Duplicate — Combined into TP-10294: …' on a status row (TP-born and FS write-back alike).
+const resolutionDetail = (d) => {
+  if (!d?.resolutionReason) return null;
+  const reason = humanize(d.resolutionReason);
+  return `Reason: ${reason.charAt(0).toUpperCase()}${reason.slice(1)}${d.resolutionNote ? ` — ${d.resolutionNote}` : ''}`;
+};
 
 // Auto-help notes carry machine dates ("closing 2026-10-16", full ISO stamps):
 // shown as a short day ("Fri 16 Oct"). A bare day is a calendar day (no zone
@@ -105,7 +111,7 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     if (t === 'status_changed') {
       const to = d.newStatus || null;
       const reopen = d.oldStatus && to && TERMINAL.has(norm(d.oldStatus)) && !TERMINAL.has(norm(to));
-      item = baseItem({ event: reopen ? 'reopen' : 'status', verb: reopen ? 'reopened' : 'changed status', from: d.oldStatus || null, to, detail: d.resolutionReason ? `Reason: ${humanize(d.resolutionReason)}${d.resolutionNote ? ` — ${d.resolutionNote}` : ''}` : null });
+      item = baseItem({ event: reopen ? 'reopen' : 'status', verb: reopen ? 'reopened' : 'changed status', from: d.oldStatus || null, to, detail: resolutionDetail(d) });
       if (fsName && to) attributed.status.push({ at, to: norm(to) });
     } else if (t === 'assigned' || t === 'reassigned' || t === 'coordinator_assigned') {
       const fromName = d.fromTechId ? techNameById.get(d.fromTechId) || `tech ${d.fromTechId}` : null;
@@ -201,7 +207,8 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         item = baseItem({ event: 'assignment', verb: c.assignee.to ? 'reassigned' : 'unassigned the ticket', from: c.assignee.from || null, to: c.assignee.to || null, machine: false });
         if (c.assignee.to) attributed.assignment.push({ at, to: norm(c.assignee.to) });
       } else if (c.status) {
-        item = baseItem({ event: 'status', verb: 'changed status', from: c.status.from || null, to: c.status.to || null, machine: false });
+        // QA 10-20 #2: a grouping close names the ticket it went into.
+        item = baseItem({ event: 'status', verb: 'changed status', from: c.status.from || null, to: c.status.to || null, detail: resolutionDetail(d), machine: false });
       } else if (c.priority) {
         item = baseItem({ event: 'priority', verb: 'set priority', from: c.priority.from || null, to: c.priority.to || null, machine: false });
       } else {
@@ -223,6 +230,16 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {
       item = baseItem({ event: 'created', verb: 'created the ticket', detail: d.note || null });
+    } else if (t === 'grouped_in') {
+      // QA 10-20 #2: the kept ticket says which ticket was combined into it.
+      item = baseItem({
+        event: 'merge',
+        verb: d.relation === 'update' ? 'combined in a follow-up' : 'combined in a duplicate',
+        to: d.fromRef || null,
+        detail: [d.fromSubject ? `"${d.fromSubject}"` : null, d.reason || null].filter(Boolean).join(' · ') || null,
+        importance: 3,
+        machine: false,
+      });
     } else if (t === 'merged_from' || t === 'merged_into') {
       // 18 Oct 2026: said only "merged from" — now which ticket, and what came over.
       const into = t === 'merged_into';

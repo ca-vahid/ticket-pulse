@@ -25,6 +25,20 @@ import {
  * before, so typing keeps narrowing the queue underneath the panel.
  */
 export const SEARCH_IDLE_MS = 400;
+
+/**
+ * QA 10-20 #1: "View all N in the list" promises N rows, so it lands on the
+ * list with the search alone. Every other filter goes, and the status filter
+ * opens to every status (?status=any), because the count above covers them all.
+ * Plain Enter still keeps the filters you had (applies the text only).
+ */
+export function viewAllSearch(q) {
+  const params = new URLSearchParams();
+  const text = String(q || '').trim();
+  if (text) params.set('q', text);
+  params.set('status', 'any');
+  return params.toString();
+}
 const MIN_QUERY = 2;
 const TICKET_ROWS = 5;
 
@@ -95,6 +109,7 @@ export default function TicketSearchBox({
   value,
   onChange,
   onApply,          // (q) => apply as the list filter
+  onViewAll = null, // (q) => the list with this search and no other filter
   onOpenTicket,     // (ticketId, { newTab }) => open (peek by default)
   onOpenRequester,  // (requester) => navigate
   onOpenAgent,      // (agent) => navigate
@@ -218,13 +233,20 @@ export default function TicketSearchBox({
       out.push({ key: `c-${c.workspaceId || 'w'}-${c.id}`, kind: 'conversation', conversation: c, run: (e) => { setRecent(rememberSearch(q)); openInWorkspace(c, () => onOpenTicket?.(c.ticketId, { newTab: Boolean(e?.metaKey || e?.ctrlKey) })); setOpen(false); } });
     }
     const total = results?.totals?.tickets;
-    if ((s.tickets || []).length > 0) out.push({ key: 'view-all', kind: 'view-all', total, run: () => apply(q) });
+    if ((s.tickets || []).length > 0) {
+      out.push({ key: 'view-all', kind: 'view-all', total, run: () => {
+        if (!onViewAll) { apply(q); return; }
+        setRecent(rememberSearch(q));
+        onViewAll(q);
+        setOpen(false);
+      } });
+    }
     for (const r of (s.requesters || [])) out.push({ key: `r-${r.id}`, kind: 'requester', requester: r, run: () => { setRecent(rememberSearch(q)); onOpenRequester?.(r); setOpen(false); } });
     for (const a of (s.agents || [])) out.push({ key: `a-${a.id}`, kind: 'agent', agent: a, run: () => { onOpenAgent?.(a); setOpen(false); } });
     for (const d of (s.departments || [])) out.push({ key: `d-${d.name}`, kind: 'department', department: d, run: () => { onFilterDepartment?.(d.name); setOpen(false); } });
     for (const task of (s.tasks || [])) out.push({ key: `k-${task.id}`, kind: 'task', task, run: () => { onOpenTask?.(task); setOpen(false); } });
     return out;
-  }, [q, recent, recentTickets, results, apply, onOpenTicket, onOpenRequester, onOpenAgent, onFilterDepartment, onOpenTask, openInWorkspace]);
+  }, [q, recent, recentTickets, results, apply, onViewAll, onOpenTicket, onOpenRequester, onOpenAgent, onFilterDepartment, onOpenTask, openInWorkspace]);
 
   const onKeyDown = (e) => {
     if (e.key === 'Escape') { setOpen(false); inputRef.current?.blur(); return; }

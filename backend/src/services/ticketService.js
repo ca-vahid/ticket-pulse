@@ -4178,7 +4178,7 @@ class TicketService {
    * our row — an FS failure (or silent non-acceptance) changes NOTHING
    * locally, so the two systems can never diverge through this path.
    */
-  async updateFsTicket(ticketId, workspaceId, input, actor, { allowAssignableOnly = false, notifyLifecycle = true } = {}) {
+  async updateFsTicket(ticketId, workspaceId, input, actor, { allowAssignableOnly = false, notifyLifecycle = true, auditDetails = null } = {}) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -4610,6 +4610,8 @@ class TicketService {
       // status until FreshService catches up.
       fsUpdatedAt: fsTicket.updated_at || null,
       ...(fsHandBackEvent ? { handBack: fsHandBackEvent } : {}),
+      // QA 10-20 #2: a system close says why (grouping: "Combined into TP-10294").
+      ...(auditDetails && typeof auditDetails === 'object' && !Array.isArray(auditDetails) ? auditDetails : {}),
     });
     // ticket.fields_updated (TU-5) for the FIELD part of a write-back —
     // status and assignee have their own triggers (status_changed /

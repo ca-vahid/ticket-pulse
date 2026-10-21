@@ -16,7 +16,7 @@ vi.mock('../../services/api', () => apiMock);
 const wsMock = vi.hoisted(() => ({ switchWorkspace: vi.fn() }));
 vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT' }, availableWorkspaces: [{ id: 1, name: 'IT' }, { id: 2, name: 'Accounting' }], switchWorkspace: wsMock.switchWorkspace }) }));
 
-import TicketSearchBox, { SEARCH_IDLE_MS, directRef } from './TicketSearchBox';
+import TicketSearchBox, { SEARCH_IDLE_MS, directRef, viewAllSearch } from './TicketSearchBox';
 import { RECENT_SEARCHES_KEY, RECENT_TICKETS_KEY } from '../../utils/recentSearches';
 
 const sections = {
@@ -194,5 +194,24 @@ describe('TicketSearchBox', () => {
     fireEvent.click(await screen.findByText('VPN in AP'));
     expect(wsMock.switchWorkspace).toHaveBeenCalledWith(2, { landOn: '/tickets/5' });
     expect(onOpenTicket).toHaveBeenCalledTimes(1);
+  });
+
+  // QA 10-20 #1: "View all 18" did nothing for a person whose list was
+  // filtered to Open + their own tickets: it re-applied the same filters.
+  test('"View all N in the list" asks for the list with the search alone', async () => {
+    apiMock.searchAPI.global.mockResolvedValue({ data: { query: 'slope', sections, totals: { tickets: 18 } } });
+    const onApply = vi.fn(); const onViewAll = vi.fn();
+    render(<Harness onApply={onApply} onViewAll={onViewAll} />);
+    const box = screen.getByRole('combobox', { name: 'Search tickets' });
+    fireEvent.change(box, { target: { value: 'Slope/W License' } });
+    fireEvent.click(await screen.findByText('View all 18 in the list', {}, { timeout: SEARCH_IDLE_MS + 2000 }));
+    expect(onViewAll).toHaveBeenCalledWith('Slope/W License');
+    expect(onApply).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY))).toEqual(['Slope/W License']);
+  });
+
+  test('viewAllSearch keeps the text and opens every status, nothing else', () => {
+    expect(viewAllSearch('Slope/W License')).toBe('q=Slope%2FW+License&status=any');
+    expect(viewAllSearch('  ')).toBe('status=any');
   });
 });

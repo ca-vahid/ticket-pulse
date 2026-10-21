@@ -128,3 +128,45 @@ describe('Workflow Preview page (18 Oct 2026)', () => {
     expect(steps).toHaveTextContent('not reached');
   });
 });
+
+// QA 10-20 #8: TP-10019 (Vancouver) previewed on the Brisbane after-hours
+// variant ran as if it matched. The preview now stops at routing.
+describe('a ticket the routing rule does not match (QA 10-20 #8)', () => {
+  const SKIPPED = {
+    ...MODEL,
+    summary: { ...MODEL.summary, status: 'skipped', auditId: null, facts: [] },
+    steps: MODEL.steps.map((step) => ({ ...step, status: 'not_reached' })),
+    pendingEmail: false,
+    skipped: {
+      reason: 'routing_rule_not_matched',
+      ruleText: 'Requester region equals "AU-BRISBANE"',
+      fields: [{ label: 'Requester region', value: 'CA-VANCOUVER' }],
+      goesTo: 'Ticket arrived after-hours / holiday',
+    },
+    routing: { wouldRunSelectedWorkflow: false, ownRule: { present: true, matched: false }, reason: 'No exclusive variant matched; default workflow selected' },
+    emptyEmailText: 'Nothing ran, so there is no e-mail.',
+  };
+
+  test('says Skipped, shows the rule and the value it read, and offers Preview it anyway', () => {
+    const runTicket = TICKETS.items[0];
+    const { onRun } = renderPage({ hasRun: true, runTicket, model: SKIPPED });
+    expect(screen.getByTestId('run-summary')).toHaveTextContent('Skipped by routing');
+    const box = screen.getByTestId('run-skipped');
+    expect(box).toHaveTextContent('Skipped: this ticket does not match the workflow’s routing rule');
+    expect(box).toHaveTextContent('Requester region equals "AU-BRISBANE"');
+    expect(box).toHaveTextContent('Requester region on this ticket');
+    expect(box).toHaveTextContent('CA-VANCOUVER');
+    expect(box).toHaveTextContent('Runs insteadTicket arrived after-hours / holiday');
+    expect(screen.getByText('The routing rule does not match this ticket')).toBeInTheDocument();
+    fireEvent.click(within(box).getByRole('button', { name: 'Preview it anyway' }));
+    expect(onRun).toHaveBeenCalledWith(runTicket, { ignoreRouting: true });
+  });
+
+  test('the subject column no longer takes all the spare width', () => {
+    renderPage();
+    const cols = screen.getByTestId('preview-ticket-table').querySelectorAll('col');
+    expect(cols[3].className).toContain('w-[16%]');
+    expect(cols[4].className).toContain('w-[15%]');
+    expect(cols[7].className).toContain('w-[20%]');
+  });
+});

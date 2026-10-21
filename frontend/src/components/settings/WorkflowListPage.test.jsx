@@ -227,3 +227,36 @@ describe('workflow stage map', () => {
     expect(triggers[0].workflows.map((w) => w.name)).toEqual(['A', 'B']);
   });
 });
+
+// QA 10-20 #5: "Ticket arrived during business hours" hung under the
+// after-hours default because both are defaults of ticket.created.
+describe('two defaults on one trigger (business hours and after-hours)', () => {
+  const ARRIVED = [
+    { id: 2, name: 'Ticket arrived after-hours / holiday', key: 'ticket_created_after_hours', triggerType: 'ticket.created', isDefaultVariant: true, isEnabled: true, mockModeEnabled: true, publishedVersion: 19, runs: [] },
+    { id: 2425, name: 'Ticket arrived after-hours / holiday variant', triggerType: 'ticket.created', routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] }, isEnabled: true, mockModeEnabled: true, publishedVersion: 11, runs: [], afterHours: true },
+    { id: 1, name: 'Ticket arrived during business hours', key: 'ticket_created', triggerType: 'ticket.created', isDefaultVariant: true, isEnabled: true, mockModeEnabled: true, publishedVersion: 6, runs: [] },
+  ];
+  const isAfterHours = (w) => w.key === 'ticket_created_after_hours' || w.afterHours === true;
+
+  test('each default heads its own block; the variant hangs under the after-hours one', () => {
+    const [{ triggers }] = groupWorkflowsByStage(ARRIVED, LABELS, { familyOf: (w) => (isAfterHours(w) ? 'after_hours' : 'standard') });
+    expect(triggers[0].families.map((f) => [f.key, f.parent?.id])).toEqual([['standard', 1], ['after_hours', 2]]);
+    expect(triggers[0].workflows.map((w) => w.id)).toEqual([1, 2, 2425]);
+    expect([...triggers[0].nested]).toEqual([2425]);
+  });
+
+  test('on the page, business hours is not indented and the after-hours block starts with a rule', () => {
+    render(<WorkflowListPage workflows={ARRIVED} onOpen={vi.fn()} eventLabels={LABELS} getVisuals={visuals} isAfterHours={isAfterHours} />);
+    const rows = screen.getAllByTestId('workflow-list-row');
+    expect(rows.map((r) => within(r).getByRole('link').querySelector('span > span').textContent)).toEqual([
+      'Ticket arrived during business hours',
+      'Ticket arrived after-hours / holiday',
+      'Ticket arrived after-hours / holiday variant',
+    ]);
+    expect(rows[0]).not.toHaveAttribute('data-variant');
+    expect(rows[1]).not.toHaveAttribute('data-variant');
+    expect(rows[1]).toHaveAttribute('data-family-start', 'true');
+    expect(screen.getAllByTestId('workflow-list-family').map((li) => li.textContent)).toEqual(['Business hours', 'After hours and holidays']);
+    expect(rows[2]).toHaveAttribute('data-variant', 'true');
+  });
+});

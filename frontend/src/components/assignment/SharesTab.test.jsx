@@ -46,7 +46,7 @@ const DATA = {
     { techId: 2, name: 'Sam Lee', pct: 20, got: 4, gotPct: 40, rulePicked: 2, ruleMatched: 2 },
     { techId: 4, name: 'Kit Moss', pct: 10, got: 1, gotPct: 10, rulePicked: 1, ruleMatched: 0 },
   ],
-  totals: { tickets: 12, toMembers: 10, outside: 1, unassigned: 1, runs: 10, compared: 10, agreed: 6, aiCompared: 10, aiAgreed: 7, noPick: 0 },
+  totals: { tickets: 12, toMembers: 10, outside: 1, unassigned: 1, runs: 10, compared: 10, agreed: 6, aiCompared: 10, aiAgreed: 7, noPick: 0, selfPicked: 9 },
   events: [
     { runId: 9, at: '2026-10-16T15:02:00Z', mode: 'shadow', ticket: { id: 501, displayRef: 'TP-1900', subject: 'New project setup' }, rulePick: 'Jo Park', aiPick: 'Sam Lee', wentTo: 'Jo Park', agreed: true },
   ],
@@ -77,6 +77,9 @@ describe('SharesTab', () => {
     expect(screen.getByTestId('shares-preview')).toHaveTextContent('The next 10 tickets would go to: Alex Doe, Sam Lee, Jo Park, Alex Doe, Alex Doe, Kit Moss');
     expect(screen.getByText(/Out now: Ria Chen \(on leave\)/)).toBeInTheDocument();
     expect(screen.getByTestId('shares-agreement')).toHaveTextContent('The rule’s pick matched who really got the ticket on 6 of 10 tickets (60%). The AI’s first suggestion matched on 7 of 10.');
+    // QA 10-20 #4: who really decided the tickets.
+    expect(screen.getByTestId('shares-self-picked')).toHaveTextContent('9 of 11 assigned tickets were taken by the person themselves, from the queue.');
+    expect(screen.getByTestId('shares-self-picked')).toHaveTextContent('The rule is in Shadow: it writes down its pick and changes nothing.');
   });
 
   test('the report is ordered by share, never by count', async () => {

@@ -74,8 +74,9 @@ jest.unstable_mockModule('../src/services/notificationWorkflowRepository.js', ()
   default: repositoryMock,
 }));
 
+const engineMock = { executePreview: jest.fn() };
 jest.unstable_mockModule('../src/services/notificationWorkflowEngine.js', () => ({
-  default: {},
+  default: engineMock,
   finalizeWorkflowSendEmail: finalizeWorkflowSendEmailMock,
   sanitizeWorkflowAuditPayload: (value) => value,
 }));
@@ -627,6 +628,65 @@ describe('notification workflow routes', () => {
     expect(response.body.data.routingPreview.selectedWorkflows).toEqual([
       expect.objectContaining({ id: 81, name: 'Brisbane variant' }),
     ]);
+  });
+
+  // QA 10-20 #8: a Vancouver ticket previewed on the Brisbane variant ran as if it matched.
+  describe('preview on a real ticket honours the routing rule', () => {
+    const brisbaneVariant = {
+      id: 2425,
+      workspaceId: 1,
+      key: 'ticket_created_brisbane',
+      name: 'Brisbane variant',
+      triggerType: 'ticket.created',
+      routingMode: 'exclusive',
+      routingPriority: 50,
+      routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] },
+      isDefaultVariant: false,
+      archivedAt: null,
+      publishedVersion: 1,
+      draftDefinition: { metadata: { scheduleMode: 'standard' } },
+      publishedDefinition: { metadata: { scheduleMode: 'standard' } },
+    };
+    const theDefault = {
+      id: 7, workspaceId: 1, key: 'ticket_created', name: 'Ticket arrived', triggerType: 'ticket.created',
+      routingMode: 'exclusive', routingPriority: 100, routingRule: null, isDefaultVariant: true, archivedAt: null,
+      draftDefinition: { metadata: { scheduleMode: 'standard' } }, publishedDefinition: { metadata: { scheduleMode: 'standard' } },
+    };
+    const vancouverTicket = {
+      ...sampleTicket,
+      requester: { ...sampleTicket.requester, entraOfficeLocation: 'Vancouver', entraCity: 'Vancouver', entraCountry: 'Canada', entraCountryCode: 'CA' },
+    };
+    beforeEach(() => {
+      engineMock.executePreview.mockReset().mockResolvedValue({ status: 'completed', steps: [{ nodeId: 'trigger', status: 'completed' }], state: {} });
+      repositoryMock.getWorkflow.mockResolvedValueOnce(brisbaneVariant);
+      repositoryMock.listWorkflows.mockResolvedValueOnce([theDefault, brisbaneVariant]);
+      prismaMock.ticket.findFirst.mockResolvedValueOnce(vancouverTicket);
+    });
+
+    test('a ticket the rule does not match is skipped: no run, and the values the rule read', async () => {
+      const response = await request(buildApp())
+        .post('/api/notification-workflows/test')
+        .send({ workflowId: 2425, ticketId: 501, executeLlm: true })
+        .expect(200);
+      expect(engineMock.executePreview).not.toHaveBeenCalled();
+      expect(response.body.data).toEqual(expect.objectContaining({ status: 'skipped', skipped: { reason: 'routing_rule_not_matched' }, steps: [] }));
+      expect(response.body.data.routingPreview.ownRule).toEqual(expect.objectContaining({
+        present: true,
+        matched: false,
+        fields: [expect.objectContaining({ field: 'requester.regionKey', label: 'Requester region' })],
+      }));
+      expect(response.body.data.routingPreview.ownRule.fields[0].value).not.toBe('AU-BRISBANE');
+    });
+
+    test('"Preview anyway" runs it and says routing was ignored', async () => {
+      const response = await request(buildApp())
+        .post('/api/notification-workflows/test')
+        .send({ workflowId: 2425, ticketId: 501, executeLlm: true, ignoreRouting: true })
+        .expect(200);
+      expect(engineMock.executePreview).toHaveBeenCalledTimes(1);
+      expect(response.body.data.status).toBe('completed');
+      expect(response.body.data.routingPreview).toEqual(expect.objectContaining({ ignoredRouting: true, wouldRunSelectedWorkflow: false }));
+    });
   });
 
   test('health exposes duplicate mock delivery groups as a warning', async () => {

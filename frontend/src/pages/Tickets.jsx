@@ -15,7 +15,7 @@ import GroupedTicketsPanel from '../components/tickets/GroupedTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import CreatedWindowControl from '../components/tickets/CreatedWindowControl';
 import { WINDOW_PREF_KEY, isWindowKey, readStoredWindow, resolveCreatedWindow, storeWindow, windowChoice } from '../components/tickets/createdWindow';
-import TicketSearchBox from '../components/tickets/TicketSearchBox';
+import TicketSearchBox, { viewAllSearch } from '../components/tickets/TicketSearchBox';
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
 import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
@@ -2154,6 +2154,7 @@ export default function Tickets() {
                     value={search}
                     onChange={setSearch}
                     onApply={(q) => { setSearch(q); setParams({ q: q || null }); }}
+                    onViewAll={(q) => { setSearch(q); setSearchParams(new URLSearchParams(viewAllSearch(q))); }}
                     onOpenTicket={(id, { newTab } = {}) => { if (newTab) openTicket(id); else openPreview(id); }}
                     onOpenRequester={(r) => navigate(`/requesters/${r.id}`, { state: { from: `${location.pathname}${location.search}` } })}
                     onOpenAgent={(a) => navigate(`/technician/${a.id}`)}
