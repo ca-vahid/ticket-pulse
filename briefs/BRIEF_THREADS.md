@@ -8,9 +8,10 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 16 Oct 2026 PM (weekly Oct 12–16 sent; AP auto-assign recommendation CORRECTED to Travel/Collection Notes only; Azure risk retired; weekly cron re-armed)._
+_Last updated: 21 Oct 2026 (Wed daily — final firing of cron 17fd0826, re-armed after; undeclared remote-access outage Mon 11:28–12:21 PT; BambooHR + CCCS offline over PHP vuln; az still refused → .env.prod)._
 
 ## Probe read rules (do not remove)
+- Oct 20 2026: `az webapp config appsettings list` → AuthorizationFailed for vhaeri (sub 'IT Services'). The probe falls back to backend/scripts/.env.prod PROD_DATABASE_URL automatically; ad-hoc scripts: read PROD_DATABASE_URL from .env.prod. ALWAYS verify the host banner = ticket-pulse-pg. Asked Vahid whether the role change is intended (PIM?).
 - 'No business hours configured for this day' = the WEEKEND queue reason (in use since Apr) — by design, not a regression (checked Oct 5).
 - Oct 2 2026: agentReview urgent lane now requires status Open/Pending (Deleted RTBT tickets had leaked in as urgent_no_action). Read requester customer_reply before escalating anything (laptop false alarm).
 - `sync_logs` failed rows reading "Abandoned — run never completed (stale started row)" = v3.8.70 deploy-hygiene labels — BENIGN when timestamps match deploys; never report as an outage.
@@ -110,12 +111,15 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (o-tail) Vancouver hypervisors + DC follow-ups
 - VAN-HV46 hardware fault #245431 (Mehdi, since Oct 3) = 3rd VAN hypervisor alert in 2 weeks (HV40/41). FDR-DC1 'DC service not answering' #245903 Oct 6 16:31–17:01 PT, auto-resolved — likely planned DC work (stale-DC removal item 2 on #244687, still open); ask Mo one line. AD storm itself EXITED (fixed Oct 2, written up Oct 5).
 ### (p) AP review backlog — RE-OPENED Oct 13
+- Oct 20: 353 → 230; <1d 72, 1–3d 49, 3–7d 109, >7d 0. 199 resolved Mon. Suggest a standing Monday AP review slot + Travel auto-assign.
+- Oct 19: 353; <1d 44, 1–3d 88, 3–7d 198, >7d 23. TP accept/modify decisions by PT day: Oct 14 66, Oct 15 76, Oct 16 0 (reviewers may also assign in FS — decisions undercount). Monday push + Travel/Collection auto-assign decision recommended.
 - Oct 16: slipped 204 → 291 (125 in / 54 resolved Thu); age <1d 107, 1–3d 121, 3–7d 45, >7d 18. Fragile without a holiday too → auto-assign case for weekly. Recommended Fri PM review session (else Mon ~400).
 - Oct 14: 345 → 240; age <1d 97, 1–3d 71, 3–7d 59, >7d 13; 24 h approved 38 / modified 28. Recovery ~48 h after a gap (2nd time). Exit when >7d tail ≤5 two days running.
 - Oct 13: 345 unassigned; age <1d 57, 1–3d 55, 3–7d 171, >7d 62 (pre-holiday tail never cleared). 8 AM drain → 135 pending_review; 2 runs failed on provider error. Third post-gap backlog in two weeks → auto-assign high-acceptance categories is now the structural recommendation (agenda with AP lead).
 - Oct 9: 194 unassigned going into the Thanksgiving 4-day weekend; projection ~350 Tue AM → Tuesday review push recommended. Check the 3–7d tail on Oct 13.
 - 281 (Oct 2 AM) → 269 (Oct 5, 127 aged 3–7d) → 198 → 156 (Oct 7, only 2 aged 3–7d). Lesson for Thanksgiving Oct 12: review step absorbs ~2 days before aging; four-day weekend needs a Tuesday push or auto-assign of high-acceptance categories. Re-open only if 3–7d tail >30 again.
 ### (s) Re-routing ignores hand-back notes — PRODUCT DEFECT (Oct 8)
+- Oct 20: 11 hand-backs/24 h; #247868 SplitDesktop 3 hops (Andrew: no access to SplitDesktop licensing) → 'licensing' skill suggestion.
 - Oct 16: hand-backs 2 (Wed) → 9 (Thu); network/connectivity bounce (#247494 ethernet → Mehdi, #247496 BeyondTrust → Adrian). v4.2.76 allows up to 3 coordinators per group → suggest naming one for Everyone IT.
 - Oct 14: 10 hand-backs in 24 h. #246812 'Claude not connecting to 365' 3 hops → Alexey closed same day (also removed ChatGPT at user request). AI-tool access = unrouted category → suggest 'AI tools' skill for licence owner (Alexey). Dev-thread send STILL awaiting Vahid's go.
 - Oct 9: SYSTEMIC. Oct 8 also: #246299 modeling computer (Andrii→Alexey "This is not to Calgary team"→Mo→Reza fixed: access to BGC-VAN-MODEL2); #246305 N: drive (Soheil→Adrian→Mo→Mehdi +1 TB); #246312 N: drive dup (Mo→Andrii→Andrew→Mehdi, open — likely fixed by the 1 TB); #246331 Pembina Azure restart (Mo→Vahid→Anton rebooted). BGC1392 rebooted by Reza Oct 8. Recommended: (1) hand-back note outranks requester office on re-route, (2) 2nd hand-back → coordinator not a 3rd guess. STILL awaiting Vahid's go to send to TP Continuous Dev thread. No fix in v4.2.24–34.
@@ -127,7 +131,15 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - On/offboarding child tickets park with their family, wake 21/14 days before date, route to the office's IT people. ws1 parked 30 → 44 = the flow, not hiding. Departure notices now carry "Offboarding organised by Ticket Pulse" + child list (Vahid's overdue departure notices are bookkeeping).
 ### (t) ContinuIT meeting → tasks (Oct 8)
 - 13 tasks 08:52 PT from ops meeting + 3 Brisbane via Reza 09:04 (source 105), owned + dated (mostly Nov 7; Brisbane Feb 18). Excluded from per-agent lists while fresh; expect bars +1–2 each (planned work). Review at next ops meeting.
+### (x) Undeclared remote-access outage (Mon Oct 20, 11:28–12:21 PT)
+- GIS remote desktop drop (Lucy Lee #248078 'all GIS remote logins fail', Cambio Susan too), BST stopped (#248084, Mehdi fixed), VPN/RDP drops (Vicky #248086), Surrey 'bumped continuously' (Lina #248095), GWV4 (#248098, Mehdi), new-PC .rdp (#248202, Andrew), Celeste's tower (#248028, Andrew, untouched since Mon AM). Spread over Anton/Mehdi/Andrew, no shared cause written. Ask: Anton writes root cause on #248078, link others, one reply. Product idea: Urgent response rules to bundle ≥3 'kicked off' tickets/hour. Mo #245877 BGC2054 (since Oct 8) possibly related.
+### (y) External security events (Oct 21)
+- BambooHR offline over a security threat (#248183/#248196, Reza; Bryan: 'pretty serious threat'). CCCS threat-intel site offline over newly exploitable PHP vuln (#248224 Neville → Anton, no touch). Asks: PHP exposure inventory (Cambio sites, WordPress, vendor portals); does BambooHR outage affect C&G HR-notice feed; all-staff line.
+### (w) Infra monitor misclassification (Oct 17–19)
+- Oct 20: #247718 bundle CLOSED (Anton). EDM-HV02 #247659 closed (target rebooted). NEW: BGC-CAL-DC1 'DC service not answering' #247863 + 'not monitored (no Azure Arc)' merged (Mehdi, open). VAN-HV41 CMOS #247689 no note. Cambio certs #247798 → Sapu, closed.
+- Sat Oct 17 ~05:00 PT: 'Storage / RAID hardware fault' on 9 servers (VAN-HV32/41/42/43/52, EDM-HV02/03, KAM-HV02, CAL-HV03) bundled into #247718 (TP-10202, Anton) by v4.2.88 burst bundling. Anton Oct 19: trigger = Microsoft-Windows-Time-Service event 129 (same ID as storport reset) — time hierarchy NT5DS + secure channel OK, no bad blocks. Recommend: monitor rule must key on provider+ID. Ask Mo why time-service warned fleet-wide (post DC time remediation). Real item: VAN-HV41 CMOS battery error #247689 (Mehdi). EDM-HV02 2 more RR failures Sat (network) #247659 (Anton).
 ### (r) SSL certificate ownership + Mehdi concentration (Oct 7)
+- Oct 19: NEW [Cert Monitor] tickets #247798/#247799 — cambioearth.com + www expire 2026-11-30 (issuer WE1), → Mehdi; forward to Cambio (Sapu). Our wildcard #240981 still undated.
 - Oct 12: GoDaddy 'SSL Certificate Subscription Renewal' #246689 + 'Your new SSL Certificate is ready' #246690 (unassigned, holiday-held). Now 4 cert tickets (#240981, #245983 Vahid, #246689, #246690), no confirmed install. Ask Tue standup: one owner, merge, install date.
 - Oct 16: COL #246587 CLOSED, no failures in 24 h. Cert: #246690 closed ('already shared it with Sapu'); #240981 Mehdi 'we will need to schedule to install it' — no date. BGC-AZU-DC1 DC-service blip #247459 auto-closed.
 - Oct 15: EDM #246531 CLOSED by Vahid ('resolved by rebooting the server'; cause RPC server unavailable). COL-FILE2 failed 3 more times overnight (timeout 600 s), #246587 still UNASSIGNED day 5. Kamloops firewall #244074 CLOSED ('replaced by Syd'). Brisbane network #246725: Mehdi engaged Smile IT. DigiCert #245983 = SAP Concur forward → Deleted (correct).
