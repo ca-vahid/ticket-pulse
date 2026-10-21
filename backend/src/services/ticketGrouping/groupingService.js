@@ -272,7 +272,7 @@ class TicketGroupingService {
     const sender = ticket.requester?.name || ticket.requester?.email || 'the same sender';
     await this._link(ticket, root);
     await this._note(ticket, `Repeat of ${rootRef}: the same alert from ${sender} while that ticket is still open. Ticket Pulse closed this copy and counted it there. To undo: Tickets, Grouped.`);
-    await this._close(ticket, `Repeat of ${rootRef}`);
+    await this._close(ticket, `Repeat of ${rootRef}`, root);
     await this._markGrouped(ticket, `Grouped: repeat of ${rootRef}`, root);
     const count = (root.occurrenceCount > 0 ? root.occurrenceCount : 1) + 1;
     const lastAt = root.lastOccurrenceAt && root.lastOccurrenceAt > ticket.createdAt ? root.lastOccurrenceAt : ticket.createdAt;
@@ -392,7 +392,10 @@ class TicketGroupingService {
     await this._link(ticket, keeper);
     await this._note(keeper, `${retraction ? 'The requester says this is no longer needed. ' : ''}Ticket Pulse combined ${ref} ("${excerpt(ticket.subject, 120)}") into this ticket: it is ${what}. ${reason}\n\n${who} wrote:\n${excerpt(ticket.descriptionText, 1500) || '(no text)'}`);
     await this._note(ticket, `Combined into ${keeperRef}: ${reason} The conversation continues there. To undo: Tickets, Grouped.`);
-    await this._close(ticket, `Combined into ${keeperRef}`);
+    await this._close(ticket, `Combined into ${keeperRef}`, keeper, { reason });
+    await this._activity(keeper, 'grouped_in', {
+      fromTicketId: ticket.id, fromRef: ref, fromSubject: excerpt(ticket.subject, 200), relation, reason: excerpt(reason, 500),
+    });
     await this._markGrouped(ticket, `Grouped: same request as ${keeperRef}`, keeper);
     await this._supersedeQueuedRuns(ticket.id, `Combined into ${keeperRef}`);
   }
@@ -415,15 +418,44 @@ class TicketGroupingService {
     }
   }
 
-  /** TP-born through the audited status path; FS-born through the FreshService write-back. */
-  async _close(ticket, note) {
+  /**
+   * TP-born through the audited status path; FS-born through the FreshService write-back.
+   * QA 10-20 #2: both rows carry the reason and the ticket it went into, so the
+   * Activity tab reads "resolved the ticket · Duplicate of TP-10294" on either kind.
+   */
+  async _close(ticket, note, target = null, { reason = null } = {}) {
+    const resolutionNote = String(note || '').slice(0, 500);
+    // The judge's reason rides the audit row only: a ticket's own resolution
+    // note feeds Auto-help and solution notes, so it keeps the short line.
+    const auditNote = (reason ? `${note}: ${reason}` : String(note || '')).slice(0, 500);
     try {
       const tickets = await this._tickets();
-      if (ticket.origin === 'ticketpulse') await tickets.changeStatus(ticket.id, ticket.workspaceId, 'Resolved', ACTOR, { resolutionReason: 'duplicate', resolutionNote: note.slice(0, 500) });
-      else await tickets.updateFsTicket(ticket.id, ticket.workspaceId, { status: 'Resolved' }, ACTOR);
+      if (ticket.origin === 'ticketpulse') await tickets.changeStatus(ticket.id, ticket.workspaceId, 'Resolved', ACTOR, { resolutionReason: 'duplicate', resolutionNote });
+      else {
+        await tickets.updateFsTicket(ticket.id, ticket.workspaceId, { status: 'Resolved' }, ACTOR, {
+          auditDetails: {
+            resolutionReason: 'duplicate',
+            resolutionNote: auditNote,
+            ...(target ? { relatedTicketId: target.id, relatedRef: ticketDisplayRef(target) } : {}),
+          },
+        });
+      }
     } catch (err) {
       logger.warn(`Ticket grouping: close of ${ticket.id} failed (non-fatal): ${err.message}`);
     }
+  }
+
+  /** A row on a ticket's Activity tab (QA 10-20 #2: the kept ticket names the one combined into it). */
+  async _activity(ticket, activityType, details) {
+    await soft(() => prisma.ticketActivity.create({
+      data: {
+        ticketId: ticket.id,
+        activityType,
+        performedBy: ACTOR.name,
+        performedAt: new Date(),
+        details: { source: 'ticketpulse_native', actorEmail: ACTOR.email, actorKind: 'system', ...details },
+      },
+    }));
   }
 
   /** Out of the totals (every count in the app leaves is_noise out), and filed like the ticket it joined. */

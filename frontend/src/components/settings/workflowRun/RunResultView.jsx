@@ -636,11 +636,14 @@ function brandingItems(branding) {
 function RoutingLine({ routing }) {
   if (!routing) return null;
   const ok = routing.wouldRunSelectedWorkflow;
+  const ruleMissed = routing.ownRule?.present && routing.ownRule.matched === false;
   const headline = ok
     ? 'This ticket matches this workflow'
-    : routing.fallbackWorkflowId
-      ? 'This ticket falls back to the default variant'
-      : 'This ticket is routed to a different variant';
+    : ruleMissed
+      ? (routing.ignoredRouting ? 'Previewed anyway: the routing rule does not match this ticket' : 'The routing rule does not match this ticket')
+      : routing.fallbackWorkflowId
+        ? 'This ticket falls back to the default variant'
+        : 'This ticket is routed to a different variant';
   return (
     <div className="flex items-start gap-2 text-xs">
       <ToneIcon tone={ok ? 'emerald' : 'amber'} />
@@ -655,6 +658,55 @@ function RoutingLine({ routing }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * QA 10-20 #8: the preview honours the routing rule. A ticket it does not
+ * match stops here, the way a live run would, with what the rule wanted and
+ * what this ticket has; "Preview it anyway" shows the e-mail regardless.
+ */
+function SkippedByRouting({ skipped, onRunAnyway, running }) {
+  return (
+    <section className="border-b border-border/60 px-5 py-4" data-testid="run-skipped" role="status">
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+        <div className="min-w-0 space-y-1.5 text-sm">
+          <p className="font-semibold text-foreground">Skipped: this ticket does not match the workflow&rsquo;s routing rule</p>
+          <p className="text-muted-foreground">A live ticket like this one would not run this workflow, so the preview stops here.</p>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+            {skipped.ruleText && (
+              <>
+                <dt className="text-muted-foreground">Rule</dt>
+                <dd className="font-medium text-foreground/85">{skipped.ruleText}</dd>
+              </>
+            )}
+            {(skipped.fields || []).map((field) => (
+              <React.Fragment key={field.label}>
+                <dt className="text-muted-foreground">{field.label} on this ticket</dt>
+                <dd className="font-mono font-semibold text-foreground/85">{field.value === null || field.value === undefined || field.value === '' ? 'empty' : String(field.value)}</dd>
+              </React.Fragment>
+            ))}
+            {skipped.goesTo && (
+              <>
+                <dt className="text-muted-foreground">Runs instead</dt>
+                <dd className="font-medium text-foreground/85">{skipped.goesTo}</dd>
+              </>
+            )}
+          </dl>
+          {onRunAnyway && (
+            <button
+              type="button"
+              onClick={onRunAnyway}
+              disabled={running}
+              className="tp-focus-ring mt-1 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-semibold text-foreground/85 hover:bg-muted disabled:opacity-50"
+            >
+              Preview it anyway
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -683,6 +735,7 @@ function CopyId({ value }) {
 }
 
 const RUN_STATE_TEXT = {
+  skipped: { state: 'warn', label: 'Skipped by routing' },
   running: { state: 'running', label: 'Running' },
   queued: { state: 'running', label: 'Queued' },
   waiting: { state: 'pending', label: 'Waiting' },
@@ -749,6 +802,8 @@ export default function RunResultView({
   // 'xl' where the view shares the screen (Audit's list beside it).
   wideAt = 'lg',
   className = '',
+  // Preview only: run again with the routing rule ignored (QA 10-20 #8).
+  onRunAnyway = null,
 }) {
   const [openStep, setOpenStep] = useState(null);
   const wideXl = wideAt === 'xl';
@@ -787,7 +842,8 @@ export default function RunResultView({
           'grid min-h-0 flex-1',
           wideXl
             ? 'overflow-y-auto xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] xl:overflow-hidden'
-            : 'overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:overflow-hidden',
+            // QA 10-20 #6: on a wide screen the checks rail takes a fair share instead of 360px.
+            : 'overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:overflow-hidden 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,30%)]',
         )}
       >
         <div className={cls('settings-scrollbar min-w-0', wideXl ? 'xl:min-h-0 xl:overflow-y-auto' : 'lg:min-h-0 lg:overflow-y-auto')} data-testid="run-main">
@@ -797,12 +853,16 @@ export default function RunResultView({
               Loading run details
             </div>
           )}
-          <EmailBlock
-            email={model?.email}
-            recipients={model?.recipients}
-            emptyText={model?.emptyEmailText}
-            pending={running || model?.pendingEmail}
-          />
+          {model?.skipped && <SkippedByRouting skipped={model.skipped} onRunAnyway={onRunAnyway} running={running} />}
+          {/* A run stopped by routing has no e-mail to show. */}
+          {!model?.skipped && (
+            <EmailBlock
+              email={model?.email}
+              recipients={model?.recipients}
+              emptyText={model?.emptyEmailText}
+              pending={running || model?.pendingEmail}
+            />
+          )}
           {(model?.llm || []).map((diagnostic, index) => (
             <LlmOutputBlock key={`${diagnostic.outputKey || diagnostic.nodeId || 'llm'}-${index}`} diagnostic={diagnostic} index={index} total={model.llm.length} />
           ))}

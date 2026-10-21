@@ -23,6 +23,15 @@ import { motionReduced } from '../../utils/motionPreference';
  * QA 10-19 #5: every row is a real link (?wf=<id>), so right-click → Open in
  * new tab and Ctrl/⌘-click work; a plain click still opens it in place.
  *
+ * QA 10-20 #3: more contrast between sections. The list sits on a muted
+ * backdrop so each trigger card stands out; a stage heading is a bold line
+ * with a rule to the right edge; a card's "When …" header has its own tinted
+ * band; variant rows are a shade darker than their default.
+ *
+ * QA 10-20 #5: a trigger with two defaults (business hours and after-hours)
+ * lists them as two blocks, each with its own variants (`isAfterHours` picks
+ * the family).
+ *
  * Columns: name (+ description), mode (dot + word, never a pill), routing
  * (Default / Routed / Variant / Sub-workflow, + after-hours), version and last
  * run. The enable switch stays on the workflow's own page (QA 09-22 #11).
@@ -35,6 +44,9 @@ const FILTERS = [
   { key: 'failing', label: 'Failing' },
   { key: 'off', label: 'Off' },
 ];
+
+/** A trigger with two defaults names its blocks (QA 10-20 #5). */
+const FAMILY_LABELS = { standard: 'Business hours', after_hours: 'After hours and holidays' };
 
 function cx(...parts) {
   return parts.filter(Boolean).join(' ');
@@ -98,7 +110,7 @@ function RowMenu({ workflow, name, onRowAction, onClose }) {
   );
 }
 
-function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, variant = false, lastVariant = false, last = false }) {
+function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, variant = false, lastVariant = false, familyStart = false, last = false }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const state = workflowState(workflow);
   const lastRun = workflow.runs?.[0];
@@ -119,7 +131,13 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
   };
 
   return (
-    <li className="group/row relative" data-testid="workflow-list-row" data-state={state.key} data-variant={variant ? 'true' : undefined}>
+    <li
+      className={cx('group/row relative', variant && 'bg-muted/40')}
+      data-testid="workflow-list-row"
+      data-state={state.key}
+      data-variant={variant ? 'true' : undefined}
+      data-family-start={familyStart ? 'true' : undefined}
+    >
       {/* The elbow: a variant hangs off its default. */}
       {variant && (
         <>
@@ -179,10 +197,17 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
 }
 
 function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOpen, onRowAction, onAdd, isAfterHours }) {
-  const { triggerType, label, parent, workflows } = group;
+  const { triggerType, label, workflows } = group;
   const visuals = getVisuals(triggerType) || {};
   const GroupIcon = visuals.icon;
-  const lastVariantId = parent && workflows.length > 1 ? workflows[workflows.length - 1].id : null;
+  const nested = group.nested || new Set();
+  const lastNested = group.lastNested || new Set();
+  // Two or more defaults (business hours and after-hours): each block gets a label row.
+  const families = group.families || [];
+  const familyHeads = new Map(families.length > 1
+    ? families.map((f) => [(f.parent || f.variants[0])?.id, f.key]).filter(([id]) => id)
+    : []);
+  const familyStarts = new Set(families.slice(1).map((f) => (f.parent || f.variants[0])?.id).filter(Boolean));
   return (
     <section
       ref={cardRef}
@@ -190,10 +215,10 @@ function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOp
       aria-label={label}
       data-testid="workflow-list-group"
       data-trigger={triggerType}
-      className="scroll-mt-3 rounded-xl border border-border/70 bg-card outline-none"
+      className="scroll-mt-3 overflow-hidden rounded-xl border border-border bg-card shadow-subtle outline-none"
     >
-      <div className="flex items-center gap-2 px-4 pb-2 pt-3" data-testid="workflow-list-group-header">
-        {GroupIcon && <GroupIcon className={cx('h-3.5 w-3.5 flex-shrink-0', visuals.icon_ || 'text-primary/80')} aria-hidden="true" />}
+      <div className="flex items-center gap-2 border-b border-border bg-muted/70 px-4 py-2.5" data-testid="workflow-list-group-header">
+        {GroupIcon && <GroupIcon className={cx('h-4 w-4 flex-shrink-0', visuals.icon_ || 'text-primary')} aria-hidden="true" />}
         <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">When</span>
         <h4 className="min-w-0 truncate text-sm font-semibold text-foreground">{label}</h4>
         <span className="text-xs font-medium tabular-nums text-muted-foreground">{workflows.length}</span>
@@ -208,8 +233,17 @@ function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOp
           </button>
         )}
       </div>
-      <ul className="divide-y divide-border/60 border-t border-border/60">
-        {workflows.map((workflow, index) => (
+      <ul className="divide-y divide-border/70">
+        {workflows.flatMap((workflow, index) => [
+          familyHeads.has(workflow.id) && (
+            <li
+              key={`family-${familyHeads.get(workflow.id)}`}
+              className="bg-muted/70 px-4 py-1 text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
+              data-testid="workflow-list-family"
+            >
+              {FAMILY_LABELS[familyHeads.get(workflow.id)] || familyHeads.get(workflow.id)}
+            </li>
+          ),
           <ListRow
             key={workflow.id}
             workflow={workflow}
@@ -218,11 +252,12 @@ function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOp
             onOpen={onOpen}
             onRowAction={onRowAction}
             isAfterHours={isAfterHours}
-            variant={Boolean(parent) && workflow !== parent}
-            lastVariant={workflow.id === lastVariantId}
+            variant={nested.has(workflow.id)}
+            lastVariant={lastNested.has(workflow.id)}
+            familyStart={familyStarts.has(workflow.id)}
             last={index === workflows.length - 1}
-          />
-        ))}
+          />,
+        ].filter(Boolean))}
       </ul>
     </section>
   );
@@ -321,7 +356,10 @@ export default function WorkflowListPage({
     && (!q || [getDisplayName(w), w.name, w.description, eventLabels[w.triggerType], stageForTrigger(w.triggerType).label]
       .filter(Boolean).join(' ').toLowerCase().includes(q))
   )), [active, archived, archivedOn, filter, q, getDisplayName, eventLabels]);
-  const stages = useMemo(() => groupWorkflowsByStage(shown, eventLabels), [shown, eventLabels]);
+  const stages = useMemo(
+    () => groupWorkflowsByStage(shown, eventLabels, { familyOf: (w) => (isAfterHours(w) ? 'after_hours' : 'standard') }),
+    [shown, eventLabels, isAfterHours],
+  );
   const order = useMemo(() => stages.flatMap((entry) => entry.triggers.map((t) => t.triggerType)), [stages]);
 
   // ---- scroll-spy: the navigation follows the list ----
@@ -440,20 +478,21 @@ export default function WorkflowListPage({
           </div>
         </header>
 
-        <div ref={scrollRef} onScroll={updateActive} className="settings-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-10 sm:px-5" data-testid="workflow-list-scroll">
+        <div ref={scrollRef} onScroll={updateActive} className="settings-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/70 px-3 pb-10 sm:px-5" data-testid="workflow-list-scroll">
           {stages.length === 0 && (
             <p className="px-4 py-12 text-center text-sm text-muted-foreground">
               {q || filter !== 'all' || archivedOn ? 'No workflows match.' : 'No workflows yet. Start with New workflow or a template.'}
             </p>
           )}
-          {stages.map(({ stage, triggers }) => (
-            <section key={stage.key} aria-labelledby={`wf-stage-${stage.key}`} data-testid="workflow-stage" data-stage={stage.key} className="pt-5">
-              <h3 id={`wf-stage-${stage.key}`} className="flex flex-wrap items-baseline gap-x-2 px-1 text-sm">
-                <span className="text-xs font-semibold tabular-nums text-muted-foreground/75">{stage.number}</span>
-                <span className="font-semibold text-foreground">{stage.label}</span>
-                <span className="text-muted-foreground">— {stage.blurb}</span>
+          {stages.map(({ stage, triggers }, stageIndex) => (
+            <section key={stage.key} aria-labelledby={`wf-stage-${stage.key}`} data-testid="workflow-stage" data-stage={stage.key} className={stageIndex === 0 ? 'pt-5' : 'pt-8'}>
+              <h3 id={`wf-stage-${stage.key}`} className="flex items-center gap-x-2.5 px-1">
+                <span className="text-sm font-bold tabular-nums text-primary">{stage.number}</span>
+                <span className="text-base font-bold text-foreground">{stage.label}</span>
+                <span className="hidden text-sm text-muted-foreground sm:inline">— {stage.blurb}</span>
+                <span aria-hidden="true" className="ml-1 h-px min-w-[1.5rem] flex-1 bg-border" />
               </h3>
-              <div className="mt-2 space-y-3">
+              <div className="mt-3 space-y-4">
                 {triggers.map((group) => (
                   <TriggerCard
                     key={group.triggerType}

@@ -15,7 +15,7 @@ const prismaMock = {
   ticketGroupingSender: model('findUnique', 'findFirst', 'findMany', 'create', 'update'),
   ticketLink: model('findMany', 'findFirst'),
   ticketThreadEntry: model('findFirst', 'findMany'),
-  ticketActivity: model('findFirst'),
+  ticketActivity: model('findFirst', 'create'),
   assignmentPipelineRun: model('updateMany', 'create'),
   requester: model('findMany'),
   workspace: model('findMany'),
@@ -152,7 +152,7 @@ describe('a repeat of an open alert', () => {
     expect(out).toMatchObject({ handled: true, skipAi: true, kind: 'repeat', targetId: 10, targetRef: '#246525', count: 2 });
     expect(gateway.sendJson).not.toHaveBeenCalled();
     expect(links.link).toHaveBeenCalledWith(11, 1, { relatedTicketId: 10, kind: 'duplicate_of' }, expect.objectContaining({ role: 'system' }));
-    expect(tickets.updateFsTicket).toHaveBeenCalledWith(11, 1, { status: 'Resolved' }, expect.anything());
+    expect(tickets.updateFsTicket).toHaveBeenCalledWith(11, 1, { status: 'Resolved' }, expect.anything(), expect.objectContaining({ auditDetails: expect.objectContaining({ resolutionReason: 'duplicate' }) }));
     expect(prismaMock.ticket.update).toHaveBeenCalledWith({ where: { id: 11 }, data: { isNoise: true, noiseRuleMatched: 'Grouped: repeat of #246525', internalCategoryId: 3, internalSubcategoryId: 31 } });
     expect(prismaMock.ticket.update).toHaveBeenCalledWith({ where: { id: 10 }, data: expect.objectContaining({ occurrenceCount: 2, lastOccurrenceAt: repeat.createdAt }) });
     // The first repeat puts one note on the open ticket; the copy always gets its pointer.
@@ -256,7 +256,9 @@ describe('the same request from a person', () => {
     expect(gateway.sendJson.mock.calls[0][0].userMessage).toContain('relaying a chat message from: Tyler Southam');
     expect(tickets.addPrivateNote.mock.calls[0][0]).toBe(60892);
     expect(tickets.addPrivateNote.mock.calls[0][2].bodyText).toContain('combined #244718');
-    expect(tickets.updateFsTicket).toHaveBeenCalledWith(60893, 1, { status: 'Resolved' }, expect.anything());
+    expect(tickets.updateFsTicket).toHaveBeenCalledWith(60893, 1, { status: 'Resolved' }, expect.anything(), expect.objectContaining({ auditDetails: expect.objectContaining({ resolutionReason: 'duplicate', relatedRef: '#244717', resolutionNote: expect.stringMatching(/^Combined into #244717: Both ask IT/) }) }));
+    // QA 10-20 #2: the kept ticket's Activity names the ticket combined into it.
+    expect(prismaMock.ticketActivity.create).toHaveBeenCalledWith({ data: expect.objectContaining({ ticketId: 60892, activityType: 'grouped_in', details: expect.objectContaining({ fromRef: '#244718', relation: 'same_request' }) }) });
     expect(prismaMock.ticket.update).toHaveBeenCalledWith({ where: { id: 60893 }, data: expect.objectContaining({ isNoise: true, noiseRuleMatched: 'Grouped: same request as #244717' }) });
     expect(prismaMock.ticketGroupingEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ kind: 'duplicate', state: 'applied', details: expect.objectContaining({ via: 'relay', samePerson: true, relay: 'Tyler Southam' }) }) });
   });
@@ -348,7 +350,7 @@ describe('review', () => {
     prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => ticket({ id: where.id, freshserviceTicketId: BigInt(where.id) }));
     expect((await grouping.accept(55, 1, actor)).changed).toBe(true);
     expect(links.link).toHaveBeenCalledWith(11, 1, { relatedTicketId: 10, kind: 'duplicate_of' }, expect.anything());
-    expect(tickets.updateFsTicket).toHaveBeenCalledWith(11, 1, { status: 'Resolved' }, expect.anything());
+    expect(tickets.updateFsTicket).toHaveBeenCalledWith(11, 1, { status: 'Resolved' }, expect.anything(), expect.objectContaining({ auditDetails: expect.objectContaining({ resolutionReason: 'duplicate' }) }));
     expect(prismaMock.ticketGroupingEvent.update.mock.calls[0][0].data).toMatchObject({ state: 'applied', decidedBy: actor.email });
 
     jest.clearAllMocks();

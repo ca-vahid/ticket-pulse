@@ -1,6 +1,6 @@
 import {
   UNIT, applyPatch, buildLedger, categoryMatches, decide, normalizeSettings, onLeaveAt, periodOf, pickNext,
-  previewSequence, promoteSuggestion, splitCredit, summarizeReport, toStored, validateDraft,
+  previewSequence, promoteSuggestion, splitCredit, summarizeReport, toStored, validateDraft, workingAt,
 } from '../src/services/assignmentShares/rules.js';
 
 /**
@@ -212,5 +212,64 @@ describe('the Shadow report', () => {
     expect(rows.find((r) => r.techId === S)).toMatchObject({ pct: 20, got: 3, gotPct: 75, rulePicked: 1, ruleMatched: 1 });
     expect(rows.find((r) => r.techId === A)).toMatchObject({ got: 1, gotPct: 25, rulePicked: 2, ruleMatched: 1 });
     expect(totals).toMatchObject({ tickets: 6, toMembers: 4, outside: 1, unassigned: 1, compared: 3, agreed: 2, aiCompared: 3, aiAgreed: 2 });
+  });
+});
+
+// QA 10-20 #4: people in three time zones. Invented people again:
+// Alex (50%) and Kit (10%) in Vancouver, Sam (20%) in Halifax (starts 05:00
+// Pacific), Jo (20%) in Calgary (starts 08:00 Pacific).
+describe('working hours (QA 10-20 #4)', () => {
+  const PEOPLE = new Map([
+    [A, { timezone: 'America/Vancouver' }],
+    [S, { timezone: 'America/Halifax' }],
+    [J, { timezone: 'America/Edmonton' }],
+    [K, { timezone: 'America/Vancouver' }],
+  ]);
+  const notWorkingAt = (at) => new Map(MEMBERS
+    .filter((m) => !workingAt(PEOPLE.get(m.techId), at, TZ))
+    .map((m) => [m.techId, 'outside working hours']));
+  // Pacific wall time in October (PDT = UTC-7); minutes may run past 60.
+  const pacific = (dateStr, hh, mm = 0) => new Date(Date.parse(`${dateStr}T00:00:00Z`) + (hh + 7) * 3600e3 + mm * 60e3);
+
+  test('workingAt reads the person’s own zone, 09:00–17:00 by default, weekdays only', () => {
+    expect(workingAt(PEOPLE.get(S), pacific('2026-10-21', 6), TZ)).toBe(true); // 10:00 in Halifax
+    expect(workingAt(PEOPLE.get(J), pacific('2026-10-21', 6), TZ)).toBe(false); // 07:00 in Calgary
+    expect(workingAt(PEOPLE.get(A), pacific('2026-10-21', 6), TZ)).toBe(false);
+    expect(workingAt(PEOPLE.get(S), pacific('2026-10-21', 14), TZ)).toBe(false); // 18:00 in Halifax
+    expect(workingAt({ timezone: 'America/Vancouver', workStartTime: '07:00', workEndTime: '15:00' }, pacific('2026-10-21', 7, 30), TZ)).toBe(true);
+    expect(workingAt(PEOPLE.get(A), pacific('2026-10-24', 11), TZ)).toBe(false); // Saturday
+    expect(workingAt({ timezone: 'America/Vancouver', workStartTime: '22:00', workEndTime: '06:00' }, pacific('2026-10-21', 23), TZ)).toBe(true);
+  });
+
+  test('a 06:00 Pacific ticket goes to the one person working; nobody working ignores hours', () => {
+    const early = pacific('2026-10-21', 6);
+    const { techId } = pickNext({ members: MEMBERS, ledger: new Map(), notWorking: notWorkingAt(early) });
+    expect(techId).toBe(S);
+    const night = pacific('2026-10-21', 3);
+    expect(notWorkingAt(night).size).toBe(4);
+    expect(pickNext({ members: MEMBERS, ledger: new Map(), notWorking: notWorkingAt(night) }).techId).toBe(A);
+  });
+
+  test('the early tickets are paid back: a week lands within one ticket of every share', () => {
+    // 5 days × 20 tickets: 4 before 08:00 Pacific (only Sam is working), 16 in the day.
+    const instants = [];
+    for (const d of ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23']) {
+      for (let i = 0; i < 4; i += 1) instants.push(pacific(d, 5, 30 + i * 5));
+      for (let i = 0; i < 16; i += 1) instants.push(pacific(d, 9, i * 20));
+    }
+    const tickets = [];
+    const last = new Map();
+    const picks = [];
+    for (const at of instants) {
+      const ledger = buildLedger({ members: MEMBERS, tickets, timeZone: TZ });
+      const { techId } = pickNext({ members: MEMBERS, ledger, notWorking: notWorkingAt(at), lastAssignedAt: last });
+      picks.push({ techId, at });
+      tickets.push({ holderId: techId, at });
+      last.set(techId, at.getTime());
+    }
+    // Every ticket before 08:00 Pacific went to Sam.
+    expect(picks.filter((p) => p.at.getUTCHours() < 15).every((p) => p.techId === S)).toBe(true);
+    const counts = countOf(picks.map((p) => p.techId));
+    for (const m of MEMBERS) expect(Math.abs((counts.get(m.techId) || 0) - m.pct)).toBeLessThanOrEqual(1);
   });
 });

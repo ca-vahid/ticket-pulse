@@ -33,6 +33,7 @@ import {
 } from '../services/notificationWorkflowPolicyService.js';
 import {
   selectWorkflowVariants,
+  evaluateOwnRoutingRule,
 } from '../services/notificationWorkflowRoutingService.js';
 import {
   buildNotificationLlmContext,
@@ -674,9 +675,15 @@ async function buildWorkflowRoutingPreview({ workspaceId, workflow, eventContext
       isDefaultVariant: candidate.isDefaultVariant === true,
     } : { id };
   };
+  const ownRule = evaluateOwnRoutingRule(candidateById.get(selectedId) || workflow, eventContext);
   return {
     selectedWorkflowId: selectedId,
     wouldRunSelectedWorkflow: (variants.selectedWorkflowIds || []).includes(selectedId),
+    // QA 10-20 #8: this workflow's own rule against this ticket, with the values it read.
+    ownRule: {
+      ...ownRule,
+      fields: ownRule.fields.map((f) => ({ ...f, label: ROUTING_FIELD_LOOKUP.get(f.field)?.label || f.field })),
+    },
     timingMode: timing.mode || null,
     timingReason: timing.reason || null,
     selectedWorkflowIds: variants.selectedWorkflowIds || [],
@@ -2219,6 +2226,28 @@ router.post(
       if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
       eventContext = await buildPreviewEventContext({ ticket, triggerType: workflow.triggerType });
     }
+    const routingPreview = await buildWorkflowRoutingPreview({
+      workspaceId: req.workspaceId,
+      workflow,
+      eventContext,
+    });
+    // QA 10-20 #8: a preview on a real ticket honours the workflow's routing
+    // rule. When the ticket does not match, nothing runs (no LLM call, no
+    // audit row) and the page says why; `ignoreRouting` previews it anyway.
+    if (req.body.ticketId && routingPreview?.ownRule?.present && routingPreview.ownRule.matched === false && req.body.ignoreRouting !== true) {
+      res.json({
+        success: true,
+        data: {
+          status: 'skipped',
+          skipped: { reason: 'routing_rule_not_matched' },
+          steps: [],
+          state: {},
+          warnings: [],
+          routingPreview,
+        },
+      });
+      return;
+    }
     const result = await notificationWorkflowEngine.executePreview({
       workflow,
       definition: req.body.definition || workflow.draftDefinition,
@@ -2226,12 +2255,7 @@ router.post(
       executeLlm: req.body.executeLlm === true,
       forceActionLinks: req.body.forceActionLinks === true,
     });
-    const routingPreview = await buildWorkflowRoutingPreview({
-      workspaceId: req.workspaceId,
-      workflow,
-      eventContext,
-    });
-    res.json({ success: true, data: { ...result, routingPreview } });
+    res.json({ success: true, data: { ...result, routingPreview: { ...routingPreview, ignoredRouting: req.body.ignoreRouting === true } } });
   }),
 );
 

@@ -247,3 +247,27 @@ describe('merge rows say which ticket and what came over (18 Oct 2026)', () => {
     expect(flat[0].detail).toContain('The conversation continues there');
   });
 });
+
+describe('a grouping close names both tickets (QA 10-20 #2, #248018 into TP-10294)', () => {
+  test('the closed copy reads "Reason: Duplicate — Combined into TP-10294: …"', () => {
+    const items = buildHistoryItems({
+      activities: [
+        { id: 1, activityType: 'fs_write_back', performedBy: 'Ticket Pulse grouping', performedAt: '2026-10-20T15:10:05.000Z', details: { source: 'ticketpulse_native', actorKind: 'system', changes: { status: { from: 'Open', to: 'Resolved' } }, resolutionReason: 'duplicate', resolutionNote: 'Combined into TP-10294: the same request.', relatedRef: 'TP-10294', relatedTicketId: 64185 } },
+      ],
+    });
+    const flat = items.flatMap((i) => (i.items ? i.items : [i]));
+    const status = flat.find((i) => i.event === 'status');
+    expect(status).toMatchObject({ from: 'Open', to: 'Resolved', detail: 'Reason: Duplicate — Combined into TP-10294: the same request.' });
+  });
+
+  test('the kept ticket reads "combined in a duplicate #248018"', () => {
+    const items = buildHistoryItems({
+      activities: [
+        { id: 2, activityType: 'grouped_in', performedBy: 'Ticket Pulse grouping', performedAt: '2026-10-20T15:10:06.000Z', details: { actorKind: 'system', fromTicketId: 64193, fromRef: '#248018', fromSubject: 'Re: URGENT HELP NEEDED', relation: 'same_request', reason: 'The same request.' } },
+      ],
+    });
+    const flat = items.flatMap((i) => (i.items ? i.items : [i]));
+    expect(flat[0]).toMatchObject({ event: 'merge', verb: 'combined in a duplicate', to: '#248018', machine: false });
+    expect(flat[0].detail).toBe('"Re: URGENT HELP NEEDED" · The same request.');
+  });
+});

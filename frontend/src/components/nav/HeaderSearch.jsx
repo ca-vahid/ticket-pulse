@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import TicketSearchBox from '../tickets/TicketSearchBox';
+import TicketSearchBox, { viewAllSearch } from '../tickets/TicketSearchBox';
 
 // The all-in-one search in the app header (16 Sep 2026) — Vahid wanted it on
 // every page, not only above the queue. Same box as before; here the results
 // navigate instead of peeking, and "apply as filter" lands on the Tickets list
-// (keeping the other filters when you are already there).
+// (keeping the other filters when you are already there). "View all N in the
+// list" is the exception (QA 10-20 #1): it drops every other filter, so the N
+// it promised are all there.
 export default function HeaderSearch({ className = '' }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -26,6 +28,7 @@ export default function HeaderSearch({ className = '' }) {
       navigate(`/tickets?q=${encodeURIComponent(text)}`);
     }
   };
+  const viewAll = (q) => navigate(`/tickets?${viewAllSearch(q)}`);
   const openTicket = (id, { newTab } = {}) => {
     const path = `/tickets/${id}`;
     if (newTab) window.open(path, '_blank', 'noopener');
@@ -39,6 +42,7 @@ export default function HeaderSearch({ className = '' }) {
       value={value}
       onChange={setValue}
       onApply={applyQuery}
+      onViewAll={viewAll}
       onOpenTicket={openTicket}
       onOpenRequester={(r) => navigate(`/requesters/${r.id}`, { state: { from: `${location.pathname}${location.search}` } })}
       onOpenAgent={(a) => navigate(`/technician/${a.id}`)}

@@ -18,6 +18,13 @@ import { addDaysStr, safeZone, toDateStr } from '../urgentResponse/rules.js';
  * Nobody away: exactly QA's formula (share × (N+1) − count). Someone away:
  * they earn nothing for those days, so there is no catch-up when they return.
  *
+ * Working hours (QA 10-20 #4): a ticket never goes to someone whose working
+ * day has not started (or has ended) while a teammate on the list is working.
+ * They still earn their share of it, so they catch up once they start: Maria
+ * in Fredericton takes the 06:00 Pacific tickets, and Josh in Calgary gets the
+ * next ones when his day begins. Over the week the shares still line up.
+ * Nobody on the list working (a 03:00 ticket): hours are ignored, as before.
+ *
  * Whole numbers only: 10,000 units = one ticket, so ties are exact (floating
  * point changes tie results, plan S1b).
  *
@@ -228,6 +235,34 @@ export function onLeaveAt(leaves, at, timeZone = 'America/Vancouver') {
   });
 }
 
+// ---- working hours -----------------------------------------------------------
+
+const DEFAULT_START = 9 * 60;
+const DEFAULT_END = 17 * 60;
+
+function minutesOf(hhmm, fallback) {
+  const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return fallback;
+  const minutes = Number(m[1]) * 60 + Number(m[2]);
+  return minutes >= 0 && minutes < 24 * 60 ? minutes : fallback;
+}
+
+/**
+ * Is this person inside their working day at an instant? Their own time
+ * zone and hours (09:00–17:00 when not set, the same default the assignment
+ * AI uses), Monday to Friday. An end before the start is an overnight shift.
+ */
+export function workingAt(person = {}, at = new Date(), fallbackZone = 'America/Vancouver') {
+  const tz = safeZone(person?.timezone || fallbackZone);
+  const [isoDay, hh, mm] = formatInTimeZone(at, tz, 'i HH mm').split(' ');
+  if (Number(isoDay) >= 6) return false;
+  const now = Number(hh) * 60 + Number(mm);
+  const start = minutesOf(person?.workStartTime, DEFAULT_START);
+  const end = minutesOf(person?.workEndTime, DEFAULT_END);
+  if (end <= start) return now >= start || now < end;
+  return now >= start && now < end;
+}
+
 // ---- the ledger --------------------------------------------------------------
 
 /**
@@ -284,10 +319,11 @@ export function buildLedger({ members = [], tickets = [], leavesByTech = new Map
  * @param {Array<{techId, pct, name?}>} p.members
  * @param {Map} p.ledger           buildLedger()
  * @param {Map<number,string>} p.out  techId → why they cannot take it now (on leave, not active, handed it back)
+ * @param {Map<number,string>} p.notWorking  techId → outside their working hours now: they earn, but do not take it
  * @param {Map<number, number>} p.lastAssignedAt  techId → ms of their latest assignment in the workspace (missing = never)
  * @returns {{ techId:number|null, scores: Array<{techId, pct, score, earnedNext, count, out:string|null}> }}
  */
-export function pickNext({ members = [], ledger = new Map(), out = new Map(), lastAssignedAt = new Map() } = {}) {
+export function pickNext({ members = [], ledger = new Map(), out = new Map(), notWorking = new Map(), lastAssignedAt = new Map() } = {}) {
   const eligible = members.filter((m) => !out.has(m.techId));
   const credit = splitCredit(eligible);
   const scores = members.map((m) => {
@@ -300,9 +336,13 @@ export function pickNext({ members = [], ledger = new Map(), out = new Map(), la
       earnedNext: row.earned + add,
       score: row.earned + add - UNIT * row.count,
       out: out.get(m.techId) || null,
+      notWorking: out.has(m.techId) ? null : (notWorking.get(m.techId) || null),
     };
   });
-  const candidates = scores.filter((s) => !s.out);
+  const available = scores.filter((s) => !s.out);
+  // People outside their hours wait while someone on the list is working.
+  const working = available.filter((s) => !s.notWorking);
+  const candidates = working.length ? working : available;
   if (!candidates.length) return { techId: null, scores };
   const last = (id) => (lastAssignedAt.has(id) ? lastAssignedAt.get(id) : -Infinity);
   candidates.sort((a, b) => b.score - a.score
@@ -317,7 +357,7 @@ export function pickNext({ members = [], ledger = new Map(), out = new Map(), la
  * each one counted before the next (the same people out throughout).
  * @returns {number[]} techIds (shorter when nobody is in)
  */
-export function previewSequence({ members = [], ledger = new Map(), out = new Map(), lastAssignedAt = new Map(), count = 10, now = new Date() } = {}) {
+export function previewSequence({ members = [], ledger = new Map(), out = new Map(), notWorking = new Map(), lastAssignedAt = new Map(), count = 10, now = new Date() } = {}) {
   const work = new Map([...ledger].map(([id, row]) => [id, { ...row }]));
   for (const m of members) if (!work.has(m.techId)) work.set(m.techId, { earned: 0, count: 0 });
   const last = new Map(lastAssignedAt);
@@ -325,7 +365,7 @@ export function previewSequence({ members = [], ledger = new Map(), out = new Ma
   const eligible = members.filter((m) => !out.has(m.techId));
   const credit = splitCredit(eligible);
   for (let i = 0; i < count; i += 1) {
-    const { techId } = pickNext({ members, ledger: work, out, lastAssignedAt: last });
+    const { techId } = pickNext({ members, ledger: work, out, notWorking, lastAssignedAt: last });
     if (!techId) break;
     picks.push(techId);
     for (const [id, units] of credit) work.get(id).earned += units;
@@ -344,9 +384,9 @@ const periodWord = (period) => (period === 'month' ? 'this month' : 'this week')
  * The sentences never list everyone's counts (agents can see suggestions);
  * the counts ride in the record, which only reviewers see.
  */
-export function decide({ settings, ledger, out = new Map(), lastAssignedAt = new Map(), names = new Map(), aiPick = null } = {}) {
+export function decide({ settings, ledger, out = new Map(), notWorking = new Map(), lastAssignedAt = new Map(), names = new Map(), aiPick = null } = {}) {
   const members = settings?.members || [];
-  const { techId, scores } = pickNext({ members, ledger, out, lastAssignedAt });
+  const { techId, scores } = pickNext({ members, ledger, out, notWorking, lastAssignedAt });
   const people = scores.map((s) => ({
     techId: s.techId,
     name: nameOf(names, s.techId),
@@ -354,6 +394,7 @@ export function decide({ settings, ledger, out = new Map(), lastAssignedAt = new
     count: s.count,
     target: oneDecimal(s.earnedNext),
     out: s.out,
+    ...(s.notWorking ? { notWorking: s.notWorking } : {}),
   }));
   const aiId = Number(aiPick?.techId) || null;
   const when = periodWord(settings?.period);
@@ -480,5 +521,5 @@ export function summarizeReport({ members = [], tickets = [], runs = [], names =
 export default {
   UNIT, MODES, PERIODS, SETTING_FIELDS,
   defaultSettings, normalizeSettings, validateDraft, applyPatch, toStored, totalPct, categoryMatches,
-  periodOf, onLeaveAt, splitCredit, buildLedger, pickNext, previewSequence, decide, recordFor, promoteSuggestion, summarizeReport,
+  periodOf, onLeaveAt, workingAt, splitCredit, buildLedger, pickNext, previewSequence, decide, recordFor, promoteSuggestion, summarizeReport,
 };

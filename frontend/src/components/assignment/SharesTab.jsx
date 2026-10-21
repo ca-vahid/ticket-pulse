@@ -441,6 +441,13 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
               {totals.outside ? ` ${totals.outside} went to people not on the list.` : ''}
               {totals.unassigned ? ` ${totals.unassigned} not assigned yet.` : ''}
             </p>
+            {/* QA 10-20 #4: say who really decided these tickets. */}
+            {Number.isFinite(totals.selfPicked) && totals.selfPicked > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="shares-self-picked">
+                {`${totals.selfPicked} of ${plural(totals.toMembers + totals.outside, 'assigned ticket')} were taken by the person themselves, from the queue. Neither the rule nor the AI decides those, so the split follows who picks them up.`}
+                {settings?.mode === 'shadow' ? ' The rule is in Shadow: it writes down its pick and changes nothing.' : ''}
+              </p>
+            )}
           </div>
         )}
       </section>

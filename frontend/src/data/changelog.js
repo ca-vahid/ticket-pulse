@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.3.07-preview';
+export const APP_VERSION = '4.3.08-preview';
 
 export const changelog = [
+  {
+    version: '4.3.08-preview',
+    date: 'October 20, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>&ldquo;View all N in the list&rdquo; shows all N</strong> &mdash; the link under the search results re-applied whatever filters the list already had (Open only, your own tickets), so for some people it did nothing. It now opens the list with just the search, every status included, so the count it promised is what you see. Pressing Enter in the search box still keeps your filters.' },
+      { type: 'improved', html: '<strong>Grouping says which ticket went where</strong> &mdash; when Ticket Pulse closes a ticket as a duplicate, its Activity row now reads &ldquo;Reason: Duplicate &mdash; Combined into TP-&hellip;&rdquo; with the reason, for FreshService tickets as well as Ticket Pulse ones. The ticket that was kept gets a row too: &ldquo;combined in a duplicate #&hellip;&rdquo; with the other ticket&rsquo;s subject.' },
+      { type: 'improved', html: '<strong>Mail Workflows: sections stand apart</strong> &mdash; the list sits on a light grey background so each &ldquo;When &hellip;&rdquo; card stands out, each card has a shaded header, each stage heading is bold with a rule across the page, and variants are a shade darker than their default.' },
+      { type: 'fixed', html: '<strong>Business hours and after-hours are separate blocks</strong> &mdash; &ldquo;Ticket arrived during business hours&rdquo; was listed as a variant of the after-hours workflow, on the Workflows list and in the Audit picker. A trigger with two defaults now shows two labelled blocks, Business hours and After hours and holidays, each with its own variants.' },
+      { type: 'improved', html: '<strong>Workflow Preview uses the whole width</strong> &mdash; the ticket table gave all spare room to the subject and squeezed requester, owner and category on the right. The columns now share the width, and on a wide screen the checks panel beside a run is wider too.' },
+      { type: 'fixed', html: '<strong>Preview respects the routing rule</strong> &mdash; previewing a variant on a ticket its routing rule does not match ran it anyway. The preview now stops at routing, the way a live ticket would: it shows the rule, the value this ticket has (for example its requester region) and which workflow runs instead. &ldquo;Preview it anyway&rdquo; still shows the e-mail.' },
+      { type: 'improved', html: '<strong>Ticket shares follow working hours</strong> &mdash; the share rule no longer picks someone whose working day has not started, or has ended, while a teammate on the list is working. That person still earns their share of the ticket, so they catch up when they start and the week evens out. Hours are each person&rsquo;s own (09:00 to 17:00 in their time zone unless set). The Shares report also says how many tickets people took themselves from the queue, which no rule steers.' },
+    ],
+  },
   {
     version: '4.3.07-preview',
     date: 'October 19, 2026',

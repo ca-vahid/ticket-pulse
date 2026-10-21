@@ -92,17 +92,32 @@ function orderVariants(list) {
   ));
 }
 
+/** Business-hours family first, then the rest (after-hours) by key. */
+function familyRank(key) {
+  return key === 'standard' ? 0 : 1;
+}
+
 /**
- * Group workflows into stages → triggers → parent + variants.
+ * Group workflows into stages → triggers → families → parent + variants.
  *
  * Returns only the stages and triggers that have workflows, in lifecycle
  * order:
- *   [{ stage, triggers: [{ triggerType, label, parent, variants, workflows, count }], count }]
- * `parent` is the trigger's default workflow (null when it has none — then
- * every workflow is listed at the top level, none indented); `workflows` is
- * the flat order to render: parent first, then its variants.
+ *   [{ stage, triggers: [{ triggerType, label, parent, variants, families, workflows, nested, lastNested, count }], count }]
+ *
+ * QA 10-20 #5: a trigger can hold more than one default. "Ticket arrived"
+ * has the business-hours default and the after-hours default, and each has
+ * its own variants. `familyOf(workflow)` names the family ('standard' or
+ * 'after_hours'); each family's default heads its own block, so "Ticket
+ * arrived during business hours" no longer hangs under the after-hours one.
+ * Without `familyOf` every workflow of a trigger is one family, as before.
+ *
+ * `families`: [{ key, parent, variants }] — a family with no default lists
+ * its workflows at the top level, none indented. `workflows` is the flat
+ * order to render; `nested` (Set of ids) marks the indented variants and
+ * `lastNested` the last one of each family (the elbow ends there). `parent`
+ * and `variants` describe the first family (kept for older callers).
  */
-export function groupWorkflowsByStage(workflows = [], eventLabels = {}) {
+export function groupWorkflowsByStage(workflows = [], eventLabels = {}, { familyOf = null } = {}) {
   const byTrigger = new Map();
   for (const workflow of workflows || []) {
     const key = workflow?.triggerType || 'other';
@@ -113,15 +128,39 @@ export function groupWorkflowsByStage(workflows = [], eventLabels = {}) {
   const stages = new Map();
   for (const [triggerType, list] of byTrigger) {
     const stage = stageForTrigger(triggerType);
-    const parent = list.find((w) => w.isDefaultVariant && !w.archivedAt) || list.find((w) => w.isDefaultVariant) || null;
-    const variants = orderVariants(list.filter((w) => w !== parent));
+    const byFamily = new Map();
+    for (const workflow of list) {
+      const key = (familyOf && familyOf(workflow)) || 'standard';
+      if (!byFamily.has(key)) byFamily.set(key, []);
+      byFamily.get(key).push(workflow);
+    }
+    const families = [...byFamily.entries()]
+      .sort(([a], [b]) => familyRank(a) - familyRank(b) || String(a).localeCompare(String(b)))
+      .map(([key, members]) => {
+        const parent = members.find((w) => w.isDefaultVariant && !w.archivedAt) || members.find((w) => w.isDefaultVariant) || null;
+        return { key, parent, variants: orderVariants(members.filter((w) => w !== parent)) };
+      });
+    const nested = new Set();
+    const lastNested = new Set();
+    const flat = [];
+    for (const family of families) {
+      if (family.parent) {
+        flat.push(family.parent);
+        for (const variant of family.variants) nested.add(variant.id);
+        if (family.variants.length) lastNested.add(family.variants[family.variants.length - 1].id);
+      }
+      flat.push(...family.variants);
+    }
     if (!stages.has(stage.key)) stages.set(stage.key, []);
     stages.get(stage.key).push({
       triggerType,
       label: labelOf(triggerType),
-      parent,
-      variants,
-      workflows: parent ? [parent, ...variants] : variants,
+      parent: families[0]?.parent || null,
+      variants: families[0]?.variants || [],
+      families,
+      workflows: flat,
+      nested,
+      lastNested,
       count: list.length,
     });
   }

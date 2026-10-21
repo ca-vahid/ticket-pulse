@@ -5,7 +5,7 @@ import logger from '../../utils/logger.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
 import {
   applyPatch, buildLedger, categoryMatches, decide, normalizeSettings, periodOf, previewSequence,
-  promoteSuggestion, recordFor, summarizeReport, toStored, validateDraft, onLeaveAt,
+  promoteSuggestion, recordFor, summarizeReport, toStored, validateDraft, onLeaveAt, workingAt,
 } from './rules.js';
 
 /**
@@ -175,7 +175,7 @@ class AssignmentSharesService {
 
     const techs = memberIds.length ? await soft(() => prisma.technician.findMany({
       where: { id: { in: memberIds }, workspaceId: ws },
-      select: { id: true, name: true, isActive: true, assignableOnly: true },
+      select: { id: true, name: true, isActive: true, assignableOnly: true, timezone: true, workStartTime: true, workEndTime: true },
       take: 100,
     }), []) : [];
     const names = new Map((techs || []).map((t) => [t.id, t.name]));
@@ -270,8 +270,16 @@ class AssignmentSharesService {
       else if (handedBack.includes(m.techId)) out.set(m.techId, 'handed this ticket back');
     }
 
+    // QA 10-20 #4: outside their working hours now (their zone, their hours).
+    const techById = new Map((techs || []).map((t) => [t.id, t]));
+    const notWorking = new Map();
+    for (const m of members) {
+      if (out.has(m.techId)) continue;
+      if (!workingAt(techById.get(m.techId), now, timeZone)) notWorking.set(m.techId, 'outside working hours');
+    }
+
     const ledger = buildLedger({ members, tickets: tickets.map((t) => ({ holderId: t.holderId, at: t.at })), leavesByTech, timeZone });
-    return { timeZone, period, names, out, ledger, lastAssignedAt, counted: tickets.length };
+    return { timeZone, period, names, out, notWorking, ledger, lastAssignedAt, counted: tickets.length };
   }
 
   // ---- the pipeline step -----------------------------------------------------
@@ -314,7 +322,7 @@ class AssignmentSharesService {
         const state = await this._state(ws, {
           settings, now, reserve: live, excludeTicketId: Number(ticketId), handedBack: (handed || []).map((h) => Number(h.technicianId)),
         });
-        const result = decide({ settings, ledger: state.ledger, out: state.out, lastAssignedAt: state.lastAssignedAt, names: state.names, aiPick });
+        const result = decide({ settings, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, names: state.names, aiPick });
         const applied = live && Boolean(result.techId);
         const techName = result.techId ? state.names.get(result.techId) || null : null;
         const aiName = aiPick?.techName || null;
@@ -373,14 +381,14 @@ class AssignmentSharesService {
     if (draft && validateDraft({ ...settings, mode: 'off' }).length) return { picks: [], out: [], counts: [], period: null, ready: false };
     if (!settings.members?.length || !settings.categoryIds?.length) return { picks: [], out: [], counts: [], period: null, ready: false };
     const state = await this._state(ws, { settings, now, reserve: settings.mode === 'live' });
-    const picks = previewSequence({ members: settings.members, ledger: state.ledger, out: state.out, lastAssignedAt: state.lastAssignedAt, count, now });
+    const picks = previewSequence({ members: settings.members, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, count, now });
     const name = (id) => state.names.get(id) || `Technician ${id}`;
-    const result = decide({ settings, ledger: state.ledger, out: state.out, lastAssignedAt: state.lastAssignedAt, names: state.names });
+    const result = decide({ settings, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, names: state.names });
     return {
       ready: true,
       period: { kind: settings.period, key: state.period.key, start: state.period.start.toISOString() },
       picks: picks.map((id) => ({ techId: id, name: name(id) })),
-      out: [...state.out].map(([techId, why]) => ({ techId, name: name(techId), why })),
+      out: [...state.out, ...state.notWorking].map(([techId, why]) => ({ techId, name: name(techId), why })),
       counts: result.people.map((p) => ({ techId: p.techId, name: p.name, pct: p.pct, count: p.count, target: p.target })),
       counted: state.counted,
     };
@@ -407,10 +415,13 @@ class AssignmentSharesService {
         status: { not: 'Deleted' },
         OR: [{ internalCategoryId: { in: cats } }, { internalSubcategoryId: { in: cats } }],
       },
-      select: { id: true, assignedTechId: true },
+      select: { id: true, assignedTechId: true, assignedBy: true, assignedTech: { select: { name: true } } },
       take: REPORT_ROWS,
     }), []);
     const ticketHolder = new Map((tickets || []).map((t) => [t.id, t.assignedTechId]));
+    // QA 10-20 #4: how many the person took themselves (picked from the queue).
+    // No rule and no AI decides those, so no formula can steer them.
+    const selfPicked = (tickets || []).filter((t) => t.assignedTechId && t.assignedBy && t.assignedTech?.name && t.assignedBy === t.assignedTech.name).length;
 
     // Only the small `share` object leaves the database, never the whole recommendation.
     const runs = await soft(() => prisma.$queryRaw(Prisma.sql`
@@ -457,7 +468,7 @@ class AssignmentSharesService {
       };
     });
 
-    return { ...empty, ...summary, events };
+    return { ...empty, ...summary, totals: summary.totals ? { ...summary.totals, selfPicked } : summary.totals, events };
   }
 }
 

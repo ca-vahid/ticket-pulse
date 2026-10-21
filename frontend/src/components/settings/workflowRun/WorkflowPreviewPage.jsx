@@ -169,6 +169,10 @@ function ticketCategory(ticket) {
   ].filter(Boolean).join(' › ');
 }
 
+// QA 10-20 #6: the columns grow with the window. The subject used to take every
+// spare pixel (a wide empty middle on a big screen) while requester, owner and
+// category stayed at fixed widths and cut their text short. Now the text
+// columns share the width in proportion; only the small ones stay fixed.
 function TicketTable({ items, loading, runningTicketId, lastTicketId, running, onRun }) {
   return (
     <div className="settings-scrollbar min-h-0 flex-1 overflow-auto" data-testid="preview-ticket-table">
@@ -176,12 +180,12 @@ function TicketTable({ items, loading, runningTicketId, lastTicketId, running, o
         <colgroup>
           <col className="w-[64px]" />
           <col className="w-[92px]" />
-          <col />
-          <col className="hidden w-[170px] md:table-column" />
-          <col className="w-[150px]" />
+          <col data-testid="preview-col-subject" />
+          <col className="hidden w-[16%] md:table-column" />
+          <col className="w-[15%]" />
           <col className="w-[84px]" />
-          <col className="w-[84px]" />
-          <col className="hidden w-[190px] xl:table-column" />
+          <col className="w-[9%]" />
+          <col className="hidden w-[20%] xl:table-column" />
           <col className="w-[56px]" />
         </colgroup>
         <thead className="sticky top-0 z-10 bg-card">
@@ -483,6 +487,7 @@ export default function WorkflowPreviewPage({
         <RunResultView
           model={model}
           running={running}
+          onRunAnyway={runTicket ? () => onRun(runTicket, { ignoreRouting: true }) : null}
           onSendTest={onSendTest}
           testSending={testSending}
           testResult={testResult}
