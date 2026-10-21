@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, FileText, File as FileIcon, Loader2, Maximize2, Minus, Plus, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Expand, FileText, File as FileIcon, Loader2, Maximize2, Minus, Plus, Shrink, X } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { ticketsAPI } from '../../services/api';
 import { formatBytes } from './ticketUi';
@@ -9,6 +9,21 @@ const MAX_ZOOM = 6;
 const ZOOM_STEP = 0.35;
 const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024; // beyond this, offer download only
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const FULL_KEY = 'tp.attachmentPreview.full';
+
+const readFull = () => {
+  try { return localStorage.getItem(FULL_KEY) === '1'; } catch { return false; }
+};
+
+/**
+ * Zoom change for one wheel event. A mouse notch (deltaY ≈ 100 px, or 3 lines
+ * in Firefox) is one ZOOM_STEP; a trackpad's many small deltas add up smoothly
+ * instead of each one jumping a full step.
+ */
+export function wheelZoomDelta(e) {
+  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  return clamp(-dy * (ZOOM_STEP / 100), -ZOOM_STEP, ZOOM_STEP);
+}
 
 const ext = (name) => {
   const idx = String(name || '').lastIndexOf('.');
@@ -57,7 +72,16 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
   const [error, setError] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [full, setFull] = useState(readFull);
   const dragRef = useRef(null);
+  const rootRef = useRef(null);
+
+  const toggleFull = useCallback(() => {
+    setFull((f) => {
+      try { localStorage.setItem(FULL_KEY, f ? '0' : '1'); } catch { /* per-viewer convenience only */ }
+      return !f;
+    });
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -103,7 +127,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
 
   const zoomBy = useCallback((delta) => {
     setZoom((z) => {
-      const next = clamp(Number((z + delta).toFixed(2)), MIN_ZOOM, MAX_ZOOM);
+      const next = clamp(Math.round((z + delta) * 1000) / 1000, MIN_ZOOM, MAX_ZOOM);
       if (next === MIN_ZOOM) setOffset({ x: 0, y: 0 });
       return next;
     });
@@ -117,15 +141,30 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
       else if (kind === 'image' && (e.key === '+' || e.key === '=')) zoomBy(ZOOM_STEP);
       else if (kind === 'image' && (e.key === '-' || e.key === '_')) zoomBy(-ZOOM_STEP);
       else if (kind === 'image' && e.key === '0') resetView();
+      else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest?.('input, textarea, [contenteditable="true"]')) toggleFull();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose, zoomBy, resetView, kind, prev, next, onNavigate]);
+  }, [onClose, zoomBy, resetView, toggleFull, kind, prev, next, onNavigate]);
 
-  const onWheel = (e) => {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
-  };
+  // The wheel never reaches the ticket behind the preview (21 Oct 2026: zooming
+  // also scrolled the page). React's onWheel is passive and cannot cancel the
+  // scroll, so this is a native non-passive listener on the whole overlay. A
+  // pane that scrolls on its own (text, Word, sheet) keeps its native scroll,
+  // and overscroll-contain stops it chaining to the page at either end.
+  const zoomable = kind === 'image' && Boolean(url) && !error;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const onWheel = (e) => {
+      const pane = e.target.closest?.('[data-preview-scroll]');
+      if (pane && pane.scrollHeight > pane.clientHeight) return;
+      e.preventDefault();
+      if (zoomable && e.target.closest?.('[data-preview-stage]')) zoomBy(wheelZoomDelta(e));
+    };
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
+  }, [zoomable, zoomBy]);
   const onPointerDown = (e) => {
     if (zoom <= 1) return;
     dragRef.current = { startX: e.clientX, startY: e.clientY, ox: offset.x, oy: offset.y };
@@ -171,13 +210,13 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
     }
     if (!ready) return <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/75" aria-hidden="true" />;
     if (kind === 'pdf') {
-      return <iframe src={url} title={attachment.fileName} className="h-[78vh] w-[min(92vw,960px)] rounded-lg bg-card shadow-subtle" />;
+      return <iframe src={url} title={attachment.fileName} className={`${full ? 'h-full w-full' : 'h-[78vh] w-[min(92vw,960px)]'} rounded-lg bg-card shadow-subtle`} />;
     }
     if (kind === 'audio') return <audio controls src={url} className="w-[min(80vw,480px)]" aria-label={attachment.fileName} />;
-    if (kind === 'video') return <video controls src={url} className="max-h-[74vh] max-w-full rounded-lg shadow-subtle" aria-label={attachment.fileName} />;
+    if (kind === 'video') return <video controls src={url} className={`${full ? 'max-h-full' : 'max-h-[80vh]'} max-w-full rounded-lg shadow-subtle`} aria-label={attachment.fileName} />;
     if (kind === 'text') {
       return (
-        <pre className="settings-scrollbar h-[72vh] w-[min(92vw,880px)] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-card p-4 text-xs leading-relaxed text-foreground/85 shadow-subtle">
+        <pre data-preview-scroll className={`settings-scrollbar ${full ? 'h-full w-full' : 'h-[72vh] w-[min(92vw,880px)]'} overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-lg bg-card p-4 text-xs leading-relaxed text-foreground/85 shadow-subtle`}>
           {rich.text}
         </pre>
       );
@@ -185,21 +224,23 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
     if (kind === 'docx') {
       return (
         <div
-          className="tp-doc-preview settings-scrollbar h-[76vh] w-[min(92vw,820px)] overflow-auto rounded-lg px-8 py-6 text-sm leading-relaxed shadow-subtle"
+          data-preview-scroll
+          className={`tp-doc-preview settings-scrollbar ${full ? 'h-full w-full' : 'h-[76vh] w-[min(92vw,820px)]'} overflow-auto overscroll-contain rounded-lg px-8 py-6 text-sm leading-relaxed shadow-subtle`}
           dangerouslySetInnerHTML={{ __html: rich.html }}
         />
       );
     }
     if (kind === 'sheet') {
       return (
-        <div className="flex h-[76vh] w-[min(92vw,960px)] flex-col overflow-hidden rounded-lg bg-card shadow-subtle">
+        <div className={`flex ${full ? 'h-full w-full' : 'h-[76vh] w-[min(92vw,960px)]'} flex-col overflow-hidden rounded-lg bg-card shadow-subtle`}>
           {rich.sheetCount > 1 && (
             <p className="border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
               Showing sheet “{rich.sheetName}” (1 of {rich.sheetCount}) — download for the full workbook
             </p>
           )}
           <div
-            className="tp-sheet-preview settings-scrollbar flex-1 overflow-auto p-2 text-xs text-foreground/85"
+            data-preview-scroll
+            className="tp-sheet-preview settings-scrollbar flex-1 overflow-auto overscroll-contain p-2 text-xs text-foreground/85"
             dangerouslySetInnerHTML={{ __html: rich.html }}
           />
         </div>
@@ -222,15 +263,21 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
           transition: dragRef.current ? 'none' : 'transform 0.12s ease-out',
           touchAction: 'none',
         }}
-        className="max-w-full max-h-[74vh] rounded-lg shadow-subtle bg-card object-contain select-none"
+        className={`max-w-full ${full ? 'max-h-full' : 'max-h-[80vh]'} rounded-lg shadow-subtle bg-card object-contain select-none`}
       />
     );
   };
 
+  // Maximized (21 Oct 2026): the card fills the window less an 8 px margin and
+  // the picture or document fills the card. The choice is remembered.
+  const cardSize = full
+    ? 'h-full w-full'
+    : `${wide ? 'max-w-5xl' : 'max-w-[min(94vw,1280px)]'} max-h-[94vh]`;
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-label={`Preview ${attachment.fileName}`}>
+    <div ref={rootRef} className={`fixed inset-0 z-[60] flex items-center justify-center ${full ? 'p-2' : 'p-4'} overscroll-contain animate-fadeIn`} role="dialog" aria-modal="true" aria-label={`Preview ${attachment.fileName}`}>
       <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
-      <div className={`relative tp-card rounded-2xl shadow-soft ${wide ? 'max-w-5xl' : 'max-w-4xl'} max-h-[92vh] flex flex-col animate-scaleIn`}>
+      <div data-testid="attachment-preview-card" className={`relative tp-card rounded-2xl shadow-soft ${cardSize} flex flex-col animate-scaleIn`}>
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border/60">
           <span className="min-w-0 text-sm font-semibold text-foreground truncate">
             <FileText className="mr-1.5 inline h-4 w-4 align-[-2px] text-muted-foreground/75" aria-hidden="true" />
@@ -281,14 +328,24 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
             >
               <Download className="w-4 h-4" aria-hidden="true" /> <span className="hidden sm:inline">Download</span>
             </button>
+            <button
+              type="button"
+              onClick={toggleFull}
+              aria-label={full ? 'Restore size' : 'Maximize'}
+              aria-pressed={full}
+              title={full ? 'Restore size (F)' : 'Maximize (F)'}
+              className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
+            >
+              {full ? <Shrink className="w-4 h-4" aria-hidden="true" /> : <Expand className="w-4 h-4" aria-hidden="true" />}
+            </button>
             <button type="button" onClick={onClose} aria-label="Close preview" className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted">
               <X className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
         </div>
         <div
-          className="relative flex-1 overflow-hidden settings-scrollbar bg-muted/70 flex items-center justify-center p-4 min-h-[240px] min-w-[320px]"
-          onWheel={kind === 'image' && url ? onWheel : undefined}
+          data-preview-stage
+          className={`relative flex-1 overflow-hidden settings-scrollbar bg-muted/70 flex items-center justify-center ${full ? 'p-2' : 'p-4'} min-h-[240px] min-w-[min(320px,100%)] rounded-b-2xl`}
         >
           {body()}
           {prev && (
@@ -313,7 +370,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
               <ChevronRight className="h-5 w-5" aria-hidden="true" />
             </button>
           )}
-          {kind === 'image' && url && !error && (
+          {zoomable && (
             <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-slate-900/55 px-2.5 py-1 text-[10px] font-medium text-white/90 dark:bg-slate-950/75 dark:ring-1 dark:ring-white/10">
               <Maximize2 className="w-3 h-3" aria-hidden="true" />
               Scroll or +/− to zoom · double-click to {zoomed ? 'reset' : 'zoom'}{zoomed ? ' · drag to pan' : ''}
