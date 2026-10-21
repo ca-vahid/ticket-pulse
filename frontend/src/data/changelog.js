@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.08-preview';
+export const APP_VERSION = '4.3.09-preview';
 
 export const changelog = [
+  {
+    version: '4.3.09-preview',
+    date: 'October 21, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Zooming a picture no longer scrolls the ticket behind it</strong> &mdash; in the picture preview the mouse wheel zoomed the picture and scrolled the ticket underneath at the same time. The wheel now only zooms, and a trackpad zooms smoothly instead of in big jumps. In a text, Word or spreadsheet preview the wheel scrolls the file and stops at its end.' },
+      { type: 'improved', html: '<strong>Maximize the file preview</strong> &mdash; a new button next to Download (or the F key) makes the preview fill the window, so a screenshot of a terminal or a wide spreadsheet is readable without zooming. The preview remembers your choice. The normal size is also larger than before.' },
+    ],
+  },
   {
     version: '4.3.08-preview',
     date: 'October 20, 2026',
