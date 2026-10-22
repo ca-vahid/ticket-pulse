@@ -204,6 +204,55 @@ describe('notification workflow LLM pipeline service', () => {
     ]));
   });
 
+  test('repairs generated action URLs in final email tool output', async () => {
+    runToolTurnMock.mockResolvedValueOnce(toolTurn([
+      {
+        type: 'tool_use',
+        id: 'toolu_submit',
+        name: 'submit_notification_email',
+        input: {
+          subject: 'Ticket update',
+          html: [
+            '<p>We are reviewing your request.</p>',
+            '<p>Raise Urgency: https://ticketpulse.example/ticket-urgency/sample-token</p>',
+            '<p><a href="https://ticketpulse.example/ticket-status/sample-token">Ticket Status</a></p>',
+          ].join(''),
+          text: [
+            'We are reviewing your request.',
+            'Raise Urgency: https://ticketpulse.example/ticket-urgency/sample-token',
+            'Ticket Status: https://ticketpulse.example/ticket-status/sample-token',
+          ].join('\n\n'),
+        },
+      },
+    ]));
+
+    const result = await runNotificationWorkflowLlmPipeline({
+      workflow,
+      node,
+      eventContext: { event: { type: 'ticket.assigned' } },
+      state: {},
+      policy: basePolicy,
+      contextBundle,
+      systemPrompt: 'Write an email.',
+      userMessage: 'Generate.',
+      maxTokens: 1000,
+      guardOptions: {
+        repairGuardrails: ['generated_public_links'],
+      },
+    });
+
+    expect(result.email.html).toContain('We are reviewing your request');
+    expect(result.email.html).not.toContain('ticketpulse.example');
+    expect(result.email.html).not.toContain('<a ');
+    expect(result.email.text).not.toContain('ticketpulse.example');
+    expect(result.llm.guard.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'generated_public_links',
+        action: 'repaired',
+      }),
+    ]));
+  });
+
   test('disabled tools are not executed even if the model asks for them', async () => {
     runToolTurnMock
       .mockResolvedValueOnce(toolTurn([
