@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Hand, CheckSquare, Star, ExternalLink } from 'lucide-react';
+import { Hand, CheckSquare, Star, ExternalLink, PenLine } from 'lucide-react';
 import { getTicketCategoryLabel } from '../utils/ticketFilter';
+import { takenKind } from '../utils/assignerKind';
 
 const PRIORITY_DOT_COLORS = {
   1: 'bg-blue-400',
@@ -37,6 +38,30 @@ function formatTicketTime(date, includeDate) {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+/** "Self" (picked from the queue) or "Logged" (wrote it and took it). */
+function TakenBadge({ kind }) {
+  if (kind === 'logged') {
+    return (
+      <span
+        className="bg-teal-50 dark:bg-teal-500/15 text-teal-700 dark:text-teal-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5"
+        title="Logged: they wrote this ticket themselves (+ New ticket) and took it, so it never reached the queue"
+      >
+        <PenLine className="w-2 h-2" aria-hidden="true" />
+        Logged
+      </span>
+    );
+  }
+  if (kind === 'self') {
+    return (
+      <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5" title="Self: picked up from the queue">
+        <Star className="w-2 h-2 fill-purple-600" />
+        Self
+      </span>
+    );
+  }
+  return null;
+}
+
 function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', narrow = false }) {
   const location = useLocation();
   // Return address so /tickets/:id's Back control comes back to this page
@@ -44,7 +69,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
   const linkState = { from: `${location.pathname}${location.search}` };
   const priorityDot = PRIORITY_DOT_COLORS[ticket.priority] || 'bg-muted-foreground/60';
   const statusClass = STATUS_COLORS[ticket.status] || 'bg-muted text-muted-foreground';
-  const isSelf = ticket.isSelfPicked || ticket.assignedBy === techName;
+  const taken = takenKind(ticket, techName);
   const isClosed = ticket.status === 'Closed' || ticket.status === 'Resolved';
   const categoryLabel = getTicketCategoryLabel(ticket);
 
@@ -142,12 +167,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
               {categoryLabel}
             </span>
           )}
-          {isSelf && (
-            <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
-              <Star className="w-2 h-2 fill-purple-600" />
-              Self
-            </span>
-          )}
+          <TakenBadge kind={taken} />
           {ticket.requesterName && (
             <span
               className="text-muted-foreground/75 text-[9px] min-w-0 flex-1 truncate"
@@ -180,12 +200,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
           {categoryLabel}
         </span>
       )}
-      {isSelf && (
-        <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
-          <Star className="w-2 h-2 fill-purple-600" />
-          Self
-        </span>
-      )}
+      <TakenBadge kind={taken} />
 
       {ticket.requesterName && (
         <span

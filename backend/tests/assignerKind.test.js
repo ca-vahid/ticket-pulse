@@ -1,7 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 import { assignerKind, assignerNamesOf, countAssignerKinds } from '../src/utils/assignerKind.js';
 import { calculateTechnicianWeeklyStats, calculateWeeklyDashboard } from '../src/services/statsCalculator.js';
-import { assignmentSource } from '../src/services/analyticsService.js';
+import { assignmentSource, isLoggedByAssignee } from '../src/services/analyticsService.js';
 
 /** 21 Oct 2026: the IT week behind the 62 % gauge, by assigner shape. */
 const names = { serviceAccountNames: ['Ticket Pulse'], automationNames: ['ContinuIT'] };
@@ -32,7 +32,7 @@ describe('assignerKind', () => {
       { assignedBy: 'Ticket Pulse' }, { assignedBy: 'Ticket Pulse' }, { assignedBy: 'ContinuIT' },
       { assignedBy: 'Vahid Haeri' }, { isSelfPicked: true },
     ];
-    expect(countAssignerKinds(tickets, 'Anton Kuzmychev', names)).toEqual({ self: 1, ai: 2, automation: 1, person: 1, app: 3, routed: 4 });
+    expect(countAssignerKinds(tickets, 'Anton Kuzmychev', names)).toEqual({ logged: 0, self: 1, ai: 2, automation: 1, person: 1, app: 3, routed: 4 });
   });
 });
 
@@ -83,5 +83,61 @@ describe('Analytics assignmentSource', () => {
     expect(assignmentSource(t('Vahid Haeri'), names)).toBe('coordinatorAssigned');
     // The old array argument still works.
     expect(assignmentSource(t('Ticket Pulse'), ['ticket pulse'])).toBe('appAssigned');
+  });
+});
+
+/** 22 Oct 2026 (Vahid): a ticket a technician wrote and took is Logged, not Self. */
+describe('Logged: written by the technician who took it', () => {
+  const mine = { isSelfPicked: true, assignedBy: 'Gaby Tonnova', assignedTechId: 20, createdByTechId: 20 };
+
+  test('own ticket assigned at creation is logged; a queue pick stays self', () => {
+    expect(assignerKind(mine, 'Gaby Tonnova', names)).toBe('logged');
+    // Created unassigned, then "Assign to me" a few seconds later.
+    expect(assignerKind({ ...mine, isSelfPicked: false }, 'Gaby Tonnova', names)).toBe('logged');
+    // Mail ticket picked from the queue: no creator.
+    expect(assignerKind({ ...mine, createdByTechId: null }, 'Gaby Tonnova', names)).toBe('self');
+  });
+
+  test('only when the creator is the assignee and they took it', () => {
+    // Someone else wrote it and Gaby picked it up.
+    expect(assignerKind({ ...mine, createdByTechId: 7 }, 'Gaby Tonnova', names)).toBe('self');
+    // Gaby wrote it unassigned and the AI gave it back to her.
+    expect(assignerKind({ ...mine, isSelfPicked: false, assignedBy: 'Ticket Pulse' }, 'Gaby Tonnova', names)).toBe('ai');
+    // Gaby wrote it and a coordinator assigned it to her.
+    expect(assignerKind({ ...mine, isSelfPicked: false, assignedBy: 'Marcus Blackstock' }, 'Gaby Tonnova', names)).toBe('person');
+  });
+
+  test('logged is its own count and leaves the gauge denominator', () => {
+    const c = countAssignerKinds([
+      mine,
+      { ...mine, createdByTechId: null },
+      { assignedBy: 'Ticket Pulse' },
+      { assignedBy: 'Marcus Blackstock' },
+    ], 'Gaby Tonnova', names);
+    expect(c).toMatchObject({ logged: 1, self: 1, ai: 1, person: 1, routed: 3 });
+  });
+
+  test('weekly stats split Self and Logged', () => {
+    const at = '2026-10-21T16:00:00Z';
+    const tech = {
+      id: 20,
+      name: 'Gaby Tonnova',
+      tickets: [
+        { status: 'Open', createdAt: at, firstAssignedAt: at, ...mine },
+        { status: 'Open', createdAt: at, firstAssignedAt: at, ...mine, createdByTechId: null },
+        { status: 'Open', createdAt: at, firstAssignedAt: at, assignedBy: 'Ticket Pulse', assignedTechId: 20 },
+      ],
+    };
+    const s = calculateTechnicianWeeklyStats(tech, new Date('2026-10-19T12:00:00Z'), new Date('2026-10-25T12:00:00Z'), 'America/Vancouver', names);
+    expect(s).toMatchObject({ weeklyTotalCreated: 3, weeklySelfPicked: 1, weeklyLogged: 1, weeklyAppAssigned: 1 });
+    const day = s.dailyBreakdown.find((d) => d.date === '2026-10-21');
+    expect(day).toMatchObject({ total: 3, self: 1, logged: 1 });
+  });
+
+  test('Analytics keeps logged under selfPicked; Team Balance splits it out', () => {
+    const t = { ...mine, assignedTech: { name: 'Gaby Tonnova' } };
+    expect(assignmentSource(t, names)).toBe('selfPicked');
+    expect(isLoggedByAssignee(t, names)).toBe(true);
+    expect(isLoggedByAssignee({ ...t, createdByTechId: null }, names)).toBe(false);
   });
 });

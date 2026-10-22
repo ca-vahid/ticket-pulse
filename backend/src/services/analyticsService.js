@@ -93,6 +93,8 @@ const CATEGORY_TICKET_SELECT = {
   assignedBy: true,
   assignedTechId: true,
   isSelfPicked: true,
+  // Logged vs self-picked (utils/assignerKind.js).
+  createdByTechId: true,
   // QA 08-25 #2: assignmentSource() splits actor-less assignments into
   // "assigned at creation / workflow" (activities were synced cleanly and
   // simply contain no assign event) vs "source unavailable" (never synced /
@@ -1157,7 +1159,9 @@ async function getAssignerNamesFor(workspaceId) {
 /**
  * Who put this ticket on its technician (the rule is utils/assignerKind.js).
  *   selfPicked          — is_self_picked, or the assigner IS the assignee
- *                         ("<name> (in FreshService)" included)
+ *                         ("<name> (in FreshService)" included). Includes
+ *                         tickets they logged themselves; Team Balance
+ *                         counts those as selfLogged (isLoggedByAssignee).
  *   appAssigned         — the Ticket Pulse service account: the AI pipeline
  *   coordinatorAssigned — any other named assigner (a person)
  *   workflowAssigned    — routed by a rule, not picked: another Ticket Pulse
@@ -1176,12 +1180,17 @@ async function getAssignerNamesFor(workspaceId) {
  */
 export function assignmentSource(ticket, assignerNames = []) {
   const kind = assignerKind(ticket, ticket.assignedTech?.name, assignerNames);
-  if (kind === 'self') return 'selfPicked';
+  if (kind === 'self' || kind === 'logged') return 'selfPicked';
   if (kind === 'ai') return 'appAssigned';
   if (kind === 'automation') return 'workflowAssigned';
   if (String(ticket.assignedBy || '').trim()) return 'coordinatorAssigned';
   if (ticket.activitiesSyncedAt && !ticket.activitiesSyncError) return 'workflowAssigned';
   return 'unknown';
+}
+
+/** The technician wrote this ticket in + New ticket and took it (utils/assignerKind.js). */
+export function isLoggedByAssignee(ticket, assignerNames = []) {
+  return assignerKind(ticket, ticket.assignedTech?.name, assignerNames) === 'logged';
 }
 
 // One analytics page load fires seven endpoints with identical params, and
@@ -1713,6 +1722,8 @@ export async function getTeamBalance(workspaceId, query = {}) {
       photoUrl: t.photoUrl,
       assigned: 0,
       selfPicked: 0,
+      // Wrote it themselves (+ New ticket) and took it; not in selfPicked.
+      selfLogged: 0,
       coordinatorAssigned: 0,
       appAssigned: 0,
       workflowAssigned: 0,
@@ -1756,6 +1767,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
           assigned: 0,
           closed: 0,
           selfPicked: 0,
+          selfLogged: 0,
           coordinatorAssigned: 0,
           appAssigned: 0,
           workflowAssigned: 0,
@@ -1792,7 +1804,11 @@ export async function getTeamBalance(workspaceId, query = {}) {
       }
       const row = byTech.get(ticket.assignedTechId);
       row.assigned += 1;
-      const source = assignmentSource(ticket, serviceAccountNames);
+      // A ticket they wrote and took themselves counts as Logged, not Self.
+      const assignedSource = assignmentSource(ticket, serviceAccountNames);
+      const source = assignedSource === 'selfPicked' && isLoggedByAssignee(ticket, serviceAccountNames)
+        ? 'selfLogged'
+        : assignedSource;
       row[source] += 1;
       const period = groupKey(assignedAt(ticket), rangeInfo);
       const timelineRow = ensureTimelineRow(ticket.assignedTechId, period);
@@ -1894,8 +1910,9 @@ export async function getTeamBalance(workspaceId, query = {}) {
       row.closeRatePct = agentCloseRatePct(row.closed, row.assigned, autoHelpClosedByTech.get(row.technicianId) || 0);
       row.selfPickRatePct = row.assigned ? Number(((row.selfPicked / row.assigned) * 100).toFixed(1)) : 0;
       // AI share (21 Oct 2026): of this person's tickets that needed an owner
-      // picked (self, coordinator or AI; rule-routed and unattributed left
-      // out), how many the AI picked. How work reached them, not a score.
+      // picked (self, coordinator or AI; rule-routed, unattributed and their
+      // own logged tickets left out), how many the AI picked. How work
+      // reached them, not a score.
       row.aiPickable = row.selfPicked + row.coordinatorAssigned + row.appAssigned;
       row.aiSharePct = row.aiPickable >= AI_SHARE_MIN_SAMPLE
         ? Math.round((row.appAssigned / row.aiPickable) * 100)

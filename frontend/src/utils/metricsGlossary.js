@@ -172,7 +172,12 @@ export const METRICS_GLOSSARY = {
   },
   agentSelfPicked: {
     label: 'Self-picked',
-    definition: 'Range tickets this technician picked up themselves (the assigner and assignee are the same person).',
+    definition: 'Range tickets this technician picked up themselves from the queue (the assigner and assignee are the same person). Tickets they wrote themselves are under Logged.',
+  },
+  agentSelfLogged: {
+    label: 'Logged',
+    definition: 'Range tickets this technician wrote themselves (+ New ticket) and took. Usually work logged after the fact, so the ticket never reached the queue and the AI never had a chance to assign it.',
+    caveats: 'Left out of AI share. Tickets written in FreshService are not told apart yet and still count as Self.',
   },
   agentCoordinatorAssigned: {
     label: 'Coordinator-assigned',
@@ -184,7 +189,7 @@ export const METRICS_GLOSSARY = {
   },
   agentAiShare: {
     label: 'AI share',
-    definition: 'Of this technician’s range tickets that needed an owner picked (self-picked, coordinator-assigned or AI-assigned), the share the AI picked. Rule-routed and unattributed tickets are left out. Hover a value for the counts.',
+    definition: 'Of this technician’s range tickets that needed an owner picked (self-picked, coordinator-assigned or AI-assigned), the share the AI picked. Rule-routed, unattributed and logged tickets are left out. Hover a value for the counts.',
     formula: 'AI-assigned ÷ (self + coordinator + AI)',
     caveats: 'Shows how work reached each person, not how well they work. A low share often means someone picks up tickets themselves or is a category’s named owner. Hidden below 5 tickets.',
   },

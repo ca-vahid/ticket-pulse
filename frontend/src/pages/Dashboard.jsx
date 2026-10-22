@@ -883,6 +883,7 @@ export default function Dashboard() {
     const kindOf = (t) => assignerKind(t, tech.name, assignerNames);
     const isApp = (t) => kindOf(t) === 'ai' || kindOf(t) === 'automation';
     const selfPicked = filteredTickets.filter(t => kindOf(t) === 'self');
+    const loggedCount = filteredTickets.filter(t => kindOf(t) === 'logged').length;
     const appAssignedTickets = filteredTickets.filter(isApp);
     const aiAssignedCount = filteredTickets.filter(t => kindOf(t) === 'ai').length;
     const automationAssignedCount = appAssignedTickets.length - aiAssignedCount;
@@ -917,6 +918,7 @@ export default function Dashboard() {
 
         // Calculate counts for this day
         const daySelf = dayTickets.filter(t => kindOf(t) === 'self').length;
+        const dayLogged = dayTickets.filter(t => kindOf(t) === 'logged').length;
         const dayAppAssigned = dayTickets.filter(isApp).length;
         const dayAssigned = dayTickets.filter(t => kindOf(t) === 'person').length;
         const dayClosed = filteredTickets.filter(ticket => {
@@ -930,6 +932,7 @@ export default function Dashboard() {
           date: day.date,
           total: dayTickets.length,
           self: daySelf,
+          logged: dayLogged,
           appAssigned: dayAppAssigned,
           assigned: dayAssigned,
           closed: dayClosed,
@@ -944,6 +947,7 @@ export default function Dashboard() {
       pendingCount,
       totalTicketsToday: filteredTickets.length,
       selfPickedToday: selfPicked.length,
+      loggedToday: loggedCount,
       appAssignedToday: appAssignedTickets.length,
       aiAssignedToday: aiAssignedCount,
       automationAssignedToday: automationAssignedCount,
@@ -953,6 +957,7 @@ export default function Dashboard() {
       // Weekly stats (if in weekly mode)
       weeklyTotalCreated: filteredTickets.length,
       weeklySelfPicked: selfPicked.length,
+      weeklyLogged: loggedCount,
       weeklyAppAssigned: appAssignedTickets.length,
       weeklyAiAssigned: aiAssignedCount,
       weeklyAutomationAssigned: automationAssignedCount,
@@ -1020,7 +1025,7 @@ export default function Dashboard() {
   const displayStats = (searchTerm || hasActiveCategoryFilter) ? (() => {
     // Collect all filtered tickets, each with who assigned it (needs the tech's name)
     const allFilteredTickets = filteredTechnicians.flatMap(tech => getTechTickets(tech));
-    const kinds = { self: 0, ai: 0, automation: 0, person: 0 };
+    const kinds = { logged: 0, self: 0, ai: 0, automation: 0, person: 0 };
     filteredTechnicians.forEach((tech) => getTechTickets(tech).forEach((t) => { kinds[assignerKind(t, tech.name, assignerNames)] += 1; }));
     const appCount = kinds.ai + kinds.automation;
 
@@ -1036,6 +1041,7 @@ export default function Dashboard() {
       closedTicketsToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status) && t.resolvedByKind !== 'auto_help').length,
       autoHelpResolvedToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status) && t.resolvedByKind === 'auto_help').length,
       selfPickedToday: kinds.self,
+      loggedToday: kinds.logged,
       appAssignedToday: appCount,
       aiAssignedToday: kinds.ai,
       automationAssignedToday: kinds.automation,
@@ -1044,6 +1050,7 @@ export default function Dashboard() {
       weeklyTotalCreated: allFilteredTickets.length,
       weeklyClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
       weeklySelfPicked: kinds.self,
+      weeklyLogged: kinds.logged,
       weeklyAppAssigned: appCount,
       weeklyAiAssigned: kinds.ai,
       weeklyAutomationAssigned: kinds.automation,
@@ -1053,6 +1060,7 @@ export default function Dashboard() {
       monthTotalCreated: allFilteredTickets.length,
       monthClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
       monthSelfPicked: kinds.self,
+      monthLogged: kinds.logged,
       monthAppAssigned: appCount,
       monthAiAssigned: kinds.ai,
       monthAutomationAssigned: kinds.automation,
@@ -1226,13 +1234,21 @@ export default function Dashboard() {
   const pick = (daily, weekly, monthly) => (viewMode === 'monthly' ? monthly : viewMode === 'weekly' ? weekly : daily) || 0;
   const aiAssignedTotal = pick(displayStats.aiAssignedToday, displayStats.weeklyAiAssigned, displayStats.monthAiAssigned);
   const ruleAssignedTotal = pick(displayStats.automationAssignedToday, displayStats.weeklyAutomationAssigned, displayStats.monthAutomationAssigned);
+  // 22 Oct 2026: tickets a technician wrote and took themselves (Logged) were
+  // never the AI's to pick either, so they leave the gauge too.
+  const loggedTotal = pick(displayStats.loggedToday, displayStats.weeklyLogged, displayStats.monthLogged);
   const { routed: aiRoutedTotal, pct: aiAssignedPercentage } = aiAssignedShare({
     total: totalTicketsToday,
     ai: aiAssignedTotal,
     automation: ruleAssignedTotal,
+    logged: loggedTotal,
   });
+  const leftOut = [
+    ruleAssignedTotal > 0 ? `${ruleAssignedTotal} routed by a rule or an integration (alert bundling, onboarding, ContinuIT…)` : null,
+    loggedTotal > 0 ? `${loggedTotal} logged by technicians for themselves (+ New ticket)` : null,
+  ].filter(Boolean);
   const aiAssignedTitle = `AI-assigned: ${aiAssignedTotal} of the ${aiRoutedTotal} tickets that needed an owner picked (goal ${AI_ASSIGNED_GOAL}%).`
-    + (ruleAssignedTotal > 0 ? ` ${ruleAssignedTotal} more were routed by a rule or an integration (alert bundling, onboarding, ContinuIT…) and are left out.` : '');
+    + (leftOut.length ? ` Left out: ${leftOut.join('; ')}.` : '');
   // ---- Stats band (flat typographic redesign) ----------------------------
   // One list drives the desktop stat row, the mobile sheet grid, and their
   // ordering. `dot` is the identity tick used on the light sheet cells.
@@ -1269,6 +1285,12 @@ export default function Dashboard() {
       value: selfPickedToday,
       dot: 'bg-purple-500',
     },
+    ...(loggedTotal > 0 ? [{
+      key: 'logged',
+      label: 'Logged',
+      value: loggedTotal,
+      dot: 'bg-teal-500',
+    }] : []),
     ...(appAssignedTotal > 0 ? [{
       key: 'app',
       label: 'App',
