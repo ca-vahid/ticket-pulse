@@ -36,7 +36,6 @@ const HERO_BG = '#E6F6FD';
 const CARD_BORDER = '#F0EBE4';
 const STEP_COLOR = {
   received: '#2F8ADB',
-  assigned: '#9672E3',
   in_progress: '#C27806',
   waiting: '#C27806',
   resolved: '#1E9A66',
@@ -177,6 +176,25 @@ function humanDuration(seconds) {
   return `${Math.round(days / 7)} weeks`;
 }
 
+/** "22 minutes", "3 hours", "2 days": how long a finished request took, in words. */
+export function elapsedWords(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const minutes = Math.max(1, Math.round(value / 60));
+  if (minutes < 60) return plural(minutes, 'minute');
+  if (minutes < 5 * 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m >= 5 ? `${plural(h, 'hour')} ${plural(m, 'minute')}` : plural(h, 'hour');
+  }
+  const hours = Math.round(value / 3600);
+  if (hours < 24) return plural(hours, 'hour');
+  const days = Math.round(value / 86400);
+  if (days < 14) return plural(days, 'day');
+  return plural(Math.round(days / 7), 'week');
+}
+
 /** A Pending-type status that is waiting on the requester (vs. a vendor, approval, …). */
 function waitsOnRequester(status) {
   return /customer|requester|user|you|response|reply|information|info/i.test(String(status || ''));
@@ -208,30 +226,29 @@ function legacyProgress(data) {
   if (resolved) {
     stage = closed ? 'closed' : 'resolved';
     headline = closed ? 'Closed' : 'Resolved';
-    current = 4;
+    current = 3;
   } else if (waiting) {
     stage = 'waiting';
     headline = waitingOnYou ? 'Waiting on you' : 'On hold';
-    current = 2;
+    current = 1;
   } else if (assigned) {
     stage = 'in_progress';
     headline = 'In progress';
-    current = 2;
+    current = 1;
   } else {
     stage = 'received';
     headline = tone === 'neutral' && status && !/^\d+$/.test(status) ? status : 'Received';
-    current = 1;
+    current = 0;
   }
 
-  const keys = ['received', 'assigned', waiting ? 'waiting' : 'in_progress', closed ? 'closed' : 'resolved'];
+  const keys = ['received', waiting ? 'waiting' : 'in_progress', closed ? 'closed' : 'resolved'];
   const steps = [
     'Received',
-    'Assigned',
     waiting ? (waitingOnYou ? 'Waiting on you' : 'On hold') : 'In progress',
     closed ? 'Closed' : 'Resolved',
   ].map((label, index) => {
     let state = index < current ? 'complete' : index === current ? 'current' : 'upcoming';
-    if (state === 'complete' && !assigned && (index === 1 || (index === 2 && resolved))) state = 'skipped';
+    if (state === 'complete' && !assigned && index === 1 && resolved) state = 'skipped';
     return { key: keys[index], label, state };
   });
 
@@ -243,12 +260,14 @@ function legacyProgress(data) {
 
 /**
  * The page's single source of truth for "where is my request": headline word,
- * tone, and the four-step progress (Received → Assigned → In progress/Waiting
- * → Resolved). `current` is the index of the active step; 4 = all done.
+ * tone, and the three-step progress (Received → In progress/Waiting →
+ * Resolved). There is no Assigned step (QA 10-21 #6); a server still sending
+ * one (mid-deploy) has it dropped here.
  */
 function deriveProgress(data) {
   const server = data?.progress;
-  if (!server || !Array.isArray(server.steps) || server.steps.length !== 4 || !server.stage) {
+  const serverSteps = Array.isArray(server?.steps) ? server.steps.filter(step => step?.key !== 'assigned') : [];
+  if (!server || serverSteps.length !== 3 || !server.stage) {
     return legacyProgress(data);
   }
   const stage = server.stage;
@@ -265,8 +284,7 @@ function deriveProgress(data) {
     resumeAt: server.resumeAt || null,
     mergedInto: server.mergedInto || null,
     headline: server.headline || 'Received',
-    current: Number(server.current) || 1,
-    steps: server.steps.map(step => ({ key: step.key, label: step.label, state: step.state })),
+    steps: serverSteps.map(step => ({ key: step.key, label: step.label, state: step.state })),
   };
 }
 
@@ -306,7 +324,7 @@ const STATE_NOTE = {
 
 function Stepper({ steps }) {
   return (
-    <ol aria-label="Progress" className="mt-6 grid grid-cols-4 gap-2 sm:gap-3">
+    <ol aria-label="Progress" className="mt-6 grid grid-cols-3 gap-2 sm:gap-3">
       {steps.map((step, index) => {
         const isCurrent = step.state === 'current';
         const isComplete = step.state === 'complete';
@@ -426,9 +444,10 @@ function nextStep(eta, progress, ticket) {
   if (progress.resolved) {
     const word = progress.closed ? 'Closed' : 'Resolved';
     const when = formatDate(ticket.closedAt || ticket.resolvedAt || ticket.completedAt);
+    const took = elapsedWords(eta.actualResolutionSeconds);
     return {
-      sentence: eta.actualResolutionLabel ? `${word} in ${eta.actualResolutionLabel}.` : `This request is ${word.toLowerCase()}.`,
-      detail: when ? `${word} ${when}.` : null,
+      sentence: took ? `${word} in ${took}.` : `This request is ${word.toLowerCase()}.`,
+      detail: when ? `${word} ${when}. Nothing more is needed from you.` : 'Nothing more is needed from you.',
     };
   }
   if (progress.waiting) {
@@ -476,7 +495,7 @@ function NextCard({ eta, progress, ticket }) {
     && Number(eta.sampleSize) > 0 && eta.estimatedResolutionLabel;
   const expected = !progress.resolved && !progress.waiting && eta.state === 'on_track' ? formatDate(eta.expectedAt) : null;
   return (
-    <Card title="What happens next" titleId="tp-status-next" titleColor={LABEL_GREEN}>
+    <Card title="Where it stands" titleId="tp-status-next" titleColor={LABEL_GREEN}>
       <p className="mt-4 text-base font-semibold text-slate-900">{sentence}</p>
       {detail && <p className="mt-1 text-sm text-slate-600">{detail}</p>}
       {link && (

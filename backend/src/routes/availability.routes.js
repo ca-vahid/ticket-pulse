@@ -160,6 +160,15 @@ router.post('/admin/people/sync', asyncHandler(async (req, res) => {
   await availabilityService.assertAdmin(user);
   ok(res, await availabilityService.syncPeople());
 }));
+// QA 10-21 #1: look up any person's requests, past and present.
+router.get('/admin/requests', asyncHandler(async (req, res) => ok(res, await availabilityService.requestHistory(me(req), {
+  email: req.query.email ? String(req.query.email) : null,
+  status: req.query.status ? String(req.query.status) : null,
+  leaveTypeId: req.query.leaveTypeId ? Number(req.query.leaveTypeId) : null,
+  from: req.query.from ? String(req.query.from) : null,
+  to: req.query.to ? String(req.query.to) : null,
+  workspaceId: wsOf(req),
+}))));
 router.get('/admin/balances', asyncHandler(async (req, res) => ok(res, await availabilityService.balanceReport(me(req), { year: req.query.year ? Number(req.query.year) : null, workspaceId: wsOf(req) }))));
 router.post('/admin/balances/adjust', asyncHandler(async (req, res) => ok(res, await availabilityService.adjustBalance(req.body || {}, me(req)))));
 router.post('/admin/balances/import', asyncHandler(async (req, res) => ok(res, await availabilityService.importBalancesCsv(me(req), req.body || {}))));

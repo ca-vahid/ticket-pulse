@@ -2248,14 +2248,22 @@ router.post(
       });
       return;
     }
+    const previewDefinition = req.body.definition || workflow.draftDefinition;
     const result = await notificationWorkflowEngine.executePreview({
       workflow,
-      definition: req.body.definition || workflow.draftDefinition,
+      definition: previewDefinition,
       eventContext,
       executeLlm: req.body.executeLlm === true,
       forceActionLinks: req.body.forceActionLinks === true,
     });
-    res.json({ success: true, data: { ...result, routingPreview: { ...routingPreview, ignoredRouting: req.body.ignoreRouting === true } } });
+    // QA 10-21 #10: a name that is not a variable prints nothing; say so on the run.
+    const variableWarnings = await import('../services/notificationWorkflowWatchService.js')
+      .then(({ lintWorkflowDefinition }) => lintWorkflowDefinition(previewDefinition)
+        .filter((finding) => finding.code === 'unknown_variable')
+        .map((finding) => ({ type: 'Unknown variable', message: finding.message, nodeId: finding.nodeId })))
+      .catch(() => []);
+    const warnings = [...(Array.isArray(result?.warnings) ? result.warnings : []), ...variableWarnings];
+    res.json({ success: true, data: { ...result, warnings, routingPreview: { ...routingPreview, ignoredRouting: req.body.ignoreRouting === true } } });
   }),
 );
 

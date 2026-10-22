@@ -18,7 +18,7 @@ const EVENT_WORD = {
   assigned: 'Assigned to you', requester_replied: 'Requester replied', teammate_update: 'New note or reply',
   status_changed: 'Status changed', reopened: 'Reopened', park_woke: 'Parked ticket woke up',
   unassigned_from_me: 'Reassigned away', sla_pre_breach: 'SLA about to breach', sla_breach: 'SLA breached',
-  approval_waiting: 'Approval waiting', group_unassigned: 'New unassigned ticket', test: 'Test message', digest: 'Daily digest', agent_alert: 'My alert',
+  approval_waiting: 'Approval waiting', survey_response: 'Survey response', group_unassigned: 'New unassigned ticket', test: 'Test message', digest: 'Daily digest', agent_alert: 'My alert',
   av_submitted: 'Time away booked', av_decided: 'Time away decided', av_reminder: 'Time away reminder', av_approval_waiting: 'Time-away approval waiting',
 };
 const PRIORITIES = [{ v: 4, l: 'Urgent only' }, { v: 3, l: 'High and above' }, { v: 2, l: 'Medium and above' }, { v: 1, l: 'Any priority' }];

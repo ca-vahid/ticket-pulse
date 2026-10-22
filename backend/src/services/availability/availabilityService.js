@@ -853,6 +853,44 @@ class AvailabilityService {
   }
 
   /**
+   * Request history for admins (QA 10-21 #1): every request of the people in
+   * the workspace on screen (or one person), any status, newest first, with
+   * how it reached Vacation Tracker and its event trail. Filters: person,
+   * status, leave type and a date window the request overlaps.
+   */
+  async requestHistory(user, { email = null, status = null, leaveTypeId = null, from = null, to = null, workspaceId = null, limit = 200 } = {}) {
+    await this.assertAdmin(user);
+    let emails;
+    if (email) {
+      if (!(await this.canManagePerson(user, email))) throw new AuthorizationError('You can look up people in the workspaces you administer', 'availability_not_your_team');
+      emails = [lc(email)];
+    } else {
+      emails = [...(await this.rosterFor(user, workspaceId))].map(lc);
+    }
+    if (!emails.length) return { requests: [], truncated: false };
+    const where = { email: { in: emails, mode: 'insensitive' } };
+    if (status && ['approved', 'pending', 'denied', 'cancelled'].includes(status)) where.status = status;
+    if (Number(leaveTypeId) > 0) where.leaveTypeId = Number(leaveTypeId);
+    if (from) where.endDate = { gte: toDay(from) };
+    if (to) where.startDate = { lte: toDay(to) };
+    const take = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const rows = await prisma.avRequest.findMany({
+      where,
+      include: { events: { orderBy: { createdAt: 'asc' }, take: 40 } },
+      orderBy: [{ startDate: 'desc' }, { id: 'desc' }],
+      take: take + 1,
+    });
+    const truncated = rows.length > take;
+    const shown = rows.slice(0, take);
+    const people = await prisma.avPerson.findMany({ where: { email: { in: [...new Set(shown.map((r) => r.email))] } }, select: { email: true, name: true } });
+    const nameOf = new Map(people.map((p) => [lc(p.email), p.name]));
+    return {
+      requests: shown.map((r) => ({ ...serializeRequest(r), name: nameOf.get(lc(r.email)) || null, vacationTracker: vacationTrackerState(r) })),
+      truncated,
+    };
+  }
+
+  /**
    * Pending requests this person may decide. `mine` marks the ones they are a
    * named approver for; a super admin also gets the rest (they can step in),
    * each with who it is waiting on and the person's team, so a request from
@@ -1427,6 +1465,28 @@ function guessAvailability(name) {
   if (/home|remote|wfh/.test(name)) return 'WFH';
   if (/site|field|travel|trip/.test(name)) return 'ONSITE';
   return 'OFF';
+}
+
+/**
+ * Where a request stands with Vacation Tracker, in words (QA 10-21 #1):
+ * imported from it, written to it, or why not.
+ */
+export function vacationTrackerState(r) {
+  if (r.source === 'vacation_tracker') return { state: 'imported', label: 'Came from Vacation Tracker' };
+  const vt = (r.events || []).filter((e) => String(e.kind || '').startsWith('vt_'));
+  const last = vt[vt.length - 1] || null;
+  if (last?.kind === 'vt_cancelled') return { state: 'cancelled', label: 'Cancelled in Vacation Tracker too' };
+  if (isVtExternalId(r.externalId) || last?.kind === 'vt_written') return { state: 'written', label: 'Added to Vacation Tracker' };
+  if (last?.kind === 'vt_write_skipped') {
+    const reason = String(last.details?.reason || '');
+    const type = /matches "([^"]+)"/.exec(reason)?.[1];
+    if (type) return { state: 'skipped', label: `Not in Vacation Tracker: it has no "${type}" leave type` };
+    if (/not a vacation tracker user/i.test(reason)) return { state: 'skipped', label: 'Not in Vacation Tracker: this person is not a user there' };
+    return { state: 'skipped', label: `Not in Vacation Tracker${reason ? `: ${reason}` : ''}` };
+  }
+  if (last?.kind === 'vt_write_failed') return { state: 'failed', label: `Vacation Tracker refused it: ${String(last.details?.error || 'unknown error').slice(0, 160)}` };
+  if (r.status !== 'approved') return { state: 'not_sent', label: 'Only approved requests go to Vacation Tracker' };
+  return { state: 'waiting', label: 'Not sent to Vacation Tracker yet' };
 }
 
 export function serializeRequest(r) {

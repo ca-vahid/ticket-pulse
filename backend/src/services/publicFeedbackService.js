@@ -316,6 +316,7 @@ export async function submitTicketFeedback(token, { score, comment, ip, userAgen
     userAgent: String(userAgent || '').slice(0, 500) || null,
   };
 
+  const updated = Boolean(link.feedback);
   await prisma.ticketFeedback.upsert({
     where: { linkId: link.id },
     update: {
@@ -331,6 +332,16 @@ export async function submitTicketFeedback(token, { score, comment, ip, userAgen
 
   logger.info('Ticket feedback submitted', { workspaceId, ticketId: link.ticket.id, score: parsedScore });
   invalidateAnalyticsCache(workspaceId);
+  // QA 10-21 #2: the agent hears about it in Teams. Fire-and-forget.
+  const labels = [settings.label1, settings.label2, settings.label3, settings.label4, settings.label5];
+  import('./ticketLifecycleNotificationService.js')
+    .then(({ notifyTicketFeedback }) => notifyTicketFeedback(link.ticket.id, {
+      score: parsedScore,
+      label: labels[parsedScore - 1] || null,
+      comment: cleanedComment,
+      updated,
+    }))
+    .catch((err) => logger.warn(`Survey response notice skipped for ticket ${link.ticket.id}: ${err.message}`));
 
   return {
     status: 'submitted',

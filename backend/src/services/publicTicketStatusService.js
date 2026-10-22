@@ -282,13 +282,14 @@ function isClosedStatus(ticketOrStatus) {
   return publicLifecycleBase(ticketOrStatus) === 'Closed';
 }
 
+// Index of the current step in the three-step bar; 3 = every step done.
 const STAGE_INDEX = {
-  received: 1,
-  in_progress: 2,
-  waiting: 2,
-  resolved: 4,
-  closed: 4,
-  merged: 4,
+  received: 0,
+  in_progress: 1,
+  waiting: 1,
+  resolved: 3,
+  closed: 3,
+  merged: 3,
 };
 
 /**
@@ -298,8 +299,9 @@ const STAGE_INDEX = {
  * without happening (no assignee) are marked `skipped`, never left upcoming.
  *
  * Stages: received | in_progress | waiting | resolved | closed | merged.
- * Steps: received → assigned → in_progress (or waiting) → resolved/closed/merged,
- * each complete | current | upcoming | skipped.
+ * Steps: received → in_progress (or waiting) → resolved/closed/merged, each
+ * complete | current | upcoming | skipped. There is no Assigned step (QA 10-21
+ * #6): who has it shows in "Who is helping you", and three bars read cleaner.
  */
 export function publicProgress(ticket = {}, { mergedInto = null, now = new Date() } = {}) {
   const base = publicLifecycleBase(ticket);
@@ -332,7 +334,7 @@ export function publicProgress(ticket = {}, { mergedInto = null, now = new Date(
     stage = 'received';
   }
 
-  const done = STAGE_INDEX[stage] === 4;
+  const done = STAGE_INDEX[stage] === 3;
   const reopened = Boolean(reopenedAt) && !done;
   const current = STAGE_INDEX[stage];
   const waitingLabel = waitingOnRequester ? 'Waiting on you' : 'On hold';
@@ -350,16 +352,11 @@ export function publicProgress(ticket = {}, { mergedInto = null, now = new Date(
 
   const passed = (happened) => (happened ? 'complete' : 'skipped');
   const steps = [
-    { key: 'received', label: 'Received', state: 'complete' },
-    {
-      key: 'assigned',
-      label: 'Assigned',
-      state: current === 1 ? 'current' : passed(everAssigned),
-    },
+    { key: 'received', label: 'Received', state: current === 0 ? 'current' : 'complete' },
     {
       key: stage === 'waiting' ? 'waiting' : 'in_progress',
       label: stage === 'waiting' ? waitingLabel : 'In progress',
-      state: current === 2 ? 'current' : done ? passed(everAssigned) : 'upcoming',
+      state: current === 1 ? 'current' : done ? passed(everAssigned) : 'upcoming',
     },
     {
       key: stage === 'merged' ? 'merged' : stage === 'closed' ? 'closed' : 'resolved',

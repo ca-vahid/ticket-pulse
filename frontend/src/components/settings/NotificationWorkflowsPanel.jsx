@@ -11360,7 +11360,9 @@ export default function NotificationWorkflowsPanel({
     );
   }
 
-  if (previewModalOpen && selected) {
+  // The preview is part of the Workflows tab: another tab (Email branding, LLM
+  // context, Audit) shows over it, and Workflows brings the preview back (QA 10-21 #9).
+  if (previewModalOpen && selected && workflowTabActive) {
     const previewModel = buildPreviewRunModel({
       preview,
       live: previewLive,

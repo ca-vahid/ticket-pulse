@@ -30,6 +30,8 @@ export const EVENTS = [
   { key: 'teammate_update', label: 'Someone else adds a note or reply on my ticket', group: 'My tickets', mode: 'teams' },
   { key: 'status_changed', label: 'Someone else changes the status of my ticket', group: 'My tickets', mode: 'off' },
   { key: 'reopened', label: 'My ticket is reopened', group: 'My tickets', mode: 'teams' },
+  // QA 10-21 #2: the requester's answer to the "How did we do?" survey.
+  { key: 'survey_response', label: 'The requester rates my ticket in the survey', group: 'My tickets', mode: 'teams' },
   { key: 'park_woke', label: 'A parked ticket of mine wakes up', group: 'My tickets', mode: 'teams' },
   { key: 'unassigned_from_me', label: 'My ticket is reassigned to someone else', group: 'My tickets', mode: 'teams' },
   { key: 'sla_pre_breach', label: 'SLA about to breach on my ticket', group: 'Deadlines', mode: 'teams' },
@@ -71,6 +73,8 @@ export const EVENT_MAP = {
   'ticket.sla_pre_breach': [['sla_pre_breach', 'assignee']],
   'ticket.sla_breach': [['sla_breach', 'assignee']],
   'ticket.created': [['group_unassigned', 'group']],
+  // Not a workflow trigger: sent by notifyTicketFeedback() when a survey is answered.
+  'ticket.feedback_received': [['survey_response', 'assignee']],
 };
 
 const COALESCE_MS = 45_000;
@@ -145,6 +149,13 @@ function eventText(eventKey, ctx) {
     return t.dueBy ? `Due ${fmtDue(t.dueBy, ctx.workspace?.timezone)}.` : 'Due soon.';
   case 'sla_breach':
     return t.dueBy ? `Was due ${fmtDue(t.dueBy, ctx.workspace?.timezone)}.` : 'Past due.';
+  case 'survey_response': {
+    const score = Number(x.score);
+    const rated = Number.isFinite(score) ? `${x.updated ? 'Changed the rating to' : 'Rated it'} ${x.label ? `${x.label} (${score} of 5)` : `${score} of 5`}` : 'Answered the survey';
+    const by = ctx.requester?.name ? `${ctx.requester.name}: ` : '';
+    const comment = String(x.comment || '').trim();
+    return `${by}${rated}${comment ? ` — "${comment.slice(0, 400)}"` : '.'}`;
+  }
   default:
     return '';
   }
@@ -473,7 +484,8 @@ class TeamsNotificationService {
 
     if (mode === 'digest') { await this._record({ ...base, status: 'digest', summary: `${summary} — ${eventText(eventKey, ctx)}` }); return; }
 
-    const urgent = eventKey === 'sla_breach' || Number(ctx.ticket.priority || 0) >= 4;
+    // A survey answer is never urgent, whatever the ticket's priority (QA 10-21 #2).
+    const urgent = eventKey !== 'survey_response' && (eventKey === 'sla_breach' || Number(ctx.ticket.priority || 0) >= 4);
     if (prefs.options.respectAway && !urgent) {
       const away = await this._awayReason(tech, ctx.workspace.id);
       if (away) { await this._record({ ...base, status: 'skipped', reason: away, summary }); return; }

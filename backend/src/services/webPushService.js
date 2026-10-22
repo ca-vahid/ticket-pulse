@@ -189,7 +189,7 @@ class WebPushService {
       for (const tech of people) {
         if (!(await this.hasDevices(tech.email))) continue;
         if (!(await this._allowed(teams, tech, eventKey, ctx, ws, actor))) continue;
-        const urgent = eventKey === 'sla_breach' || Number(ctx.ticket.priority || 0) >= 4;
+        const urgent = eventKey !== 'survey_response' && (eventKey === 'sla_breach' || Number(ctx.ticket.priority || 0) >= 4);
         const heading = EVENT_META[eventKey]?.heading || 'Update';
         const line = eventKey === 'requester_replied'
           ? (x.bodyText || (ctx.requester?.name ? `${ctx.requester.name} replied.` : ''))

@@ -1,6 +1,24 @@
-export const APP_VERSION = '4.3.09-preview';
+export const APP_VERSION = '4.3.10-preview';
 
 export const changelog = [
+  {
+    version: '4.3.10-preview',
+    date: 'October 21, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Availability &rarr; History</strong> &mdash; admins can look up anyone&rsquo;s time-away requests in their team, past and present, in any status, by person, status, type and dates. Each request says how it reached Vacation Tracker, or why not (for example &ldquo;it has no Banked time leave type&rdquo;), and opens to its whole trail: who booked it, who approved it and every Vacation Tracker attempt.' },
+      { type: 'fixed', html: '<strong>Time away reaches Vacation Tracker once it can</strong> &mdash; a request whose type Vacation Tracker did not have (Banked time, Appointment) was skipped once and never tried again. It is now tried again every hour, so once that type exists in Vacation Tracker the upcoming days go over by themselves.' },
+      { type: 'new', html: '<strong>Survey answers in Teams</strong> &mdash; when a requester answers &ldquo;How did we do?&rdquo;, the agent on the ticket gets a Teams card with the rating and the comment (and a phone notice where that is set up). It is a new row in Teams &rarr; &ldquo;What am I told about&rdquo;, on unless you turn it off.' },
+      { type: 'improved', html: '<strong>Hide the quick filter cards</strong> &mdash; the arrow on the cards above the Tickets list folds them into one line of counts, and &ldquo;Show the cards&rdquo; brings them back, with the same motion both ways. Your choice is remembered. Phones start with the line, so the list is on the first screen.' },
+      { type: 'new', html: '<strong>{{ requester.firstName }} in Mail Workflows</strong> &mdash; &ldquo;Requester first name&rdquo; is in the variable list, for a greeting like &ldquo;Hi Sam,&rdquo;. It is the first name from the requester&rsquo;s display name, and blank when there is none.' },
+      { type: 'improved', html: '<strong>Field Equipment categories</strong> &mdash; the subcategory descriptions now use the Field Equipment team&rsquo;s own wording, which also guides how new tickets are categorized.' },
+      { type: 'improved', html: '<strong>Request status page: three steps</strong> &mdash; the progress bar is Received, In progress, Closed. The Assigned step is gone; who has the request still shows under &ldquo;Who is helping you&rdquo;.' },
+      { type: 'fixed', html: '<strong>Survey page: no confusing line under the faces</strong> &mdash; &ldquo;We carried over your pick from the email&rdquo; is gone. The pick from the e-mail is still selected.' },
+      { type: 'improved', html: '<strong>Request status page: &ldquo;Where it stands&rdquo;</strong> &mdash; the card was called &ldquo;What happens next&rdquo; even on a closed request. It now has a heading that fits every stage, says how long a finished request took in words (&ldquo;Closed in 22 minutes&rdquo;) and that nothing more is needed.' },
+      { type: 'fixed', html: '<strong>Workflow Preview: the tabs work</strong> &mdash; while a preview was open, Email branding, LLM context and Audit did nothing. They now open over the preview, and Workflows brings the preview back.' },
+      { type: 'fixed', html: '<strong>Preview and the inbox use the same font</strong> &mdash; text a template leaves without a font showed in Times in Preview and in the mail program&rsquo;s own font in the inbox. Every workflow e-mail now falls back to Arial, so they match; a template&rsquo;s own font still wins.' },
+      { type: 'new', html: '<strong>A misspelt variable is pointed out</strong> &mdash; a template that prints a name Ticket Pulse does not have, such as {{ agent.name }}, comes out blank. Preview and the Workflows list now say so and suggest the right one ({{ assignedAgent.name }}).' },
+    ],
+  },
   {
     version: '4.3.09-preview',
     date: 'October 21, 2026',
