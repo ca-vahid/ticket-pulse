@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { aiAssignedShare, appColumnTitle, assignerKind, assignerNamesOf } from './assignerKind';
+import { aiAssignedShare, appColumnTitle, assignerKind, assignerNamesOf, takenKind } from './assignerKind';
 
 /** 21 Oct 2026: same rule as backend/src/utils/assignerKind.js. */
 describe('assignerKind (frontend twin)', () => {
@@ -20,6 +20,22 @@ describe('assignerKind (frontend twin)', () => {
     // 204 tickets: 125 AI, 28 rule or integration, the rest people.
     expect(aiAssignedShare({ total: 204, ai: 125, automation: 28 })).toEqual({ routed: 176, pct: 71 });
     expect(aiAssignedShare({ total: 0, ai: 0, automation: 0 })).toEqual({ routed: 0, pct: 0 });
+  });
+
+  test('a ticket the technician wrote and took is Logged, not Self (22 Oct 2026)', () => {
+    const mine = { isSelfPicked: true, assignedBy: 'Gaby Tonnova', assignedTechId: 20, createdByTechId: 20 };
+    expect(assignerKind(mine, 'Gaby Tonnova', names)).toBe('logged');
+    expect(assignerKind({ ...mine, createdByTechId: null }, 'Gaby Tonnova', names)).toBe('self');
+    expect(assignerKind({ ...mine, isSelfPicked: false, assignedBy: 'Ticket Pulse' }, 'Gaby Tonnova', names)).toBe('ai');
+    // Row badges: no names needed.
+    expect(takenKind(mine, 'Gaby Tonnova')).toBe('logged');
+    expect(takenKind({ ...mine, createdByTechId: 7 }, 'Gaby Tonnova')).toBe('self');
+    expect(takenKind({ isSelfPicked: false, assignedBy: 'Gaby Tonnova (in FreshService)' }, 'Gaby Tonnova')).toBe('self');
+    expect(takenKind({ assignedBy: 'Ticket Pulse' }, 'Gaby Tonnova')).toBeNull();
+  });
+
+  test('the gauge leaves logged tickets out too', () => {
+    expect(aiAssignedShare({ total: 201, ai: 125, automation: 28, logged: 11 })).toEqual({ routed: 162, pct: 77 });
   });
 
   test('App hover text splits the AI from rules and integrations', () => {

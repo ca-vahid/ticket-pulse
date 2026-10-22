@@ -1453,6 +1453,11 @@ model Ticket {
   // Assignment tracking
   isSelfPicked Boolean @default(false) @map("is_self_picked")
   assignedBy   String? @map("assigned_by") @db.VarChar(255) // Name or ID
+  // The technician who wrote the ticket in Ticket Pulse (+ New ticket), TP-born
+  // only; null for mail, the API and FS-born tickets. Equal to assignedTechId
+  // on a self-assigned ticket = "Logged" (utils/assignerKind.js): written after
+  // the fact by the person working it, so the AI never had a chance to assign it.
+  createdByTechId Int? @map("created_by_tech_id")
 
   // Additional metadata
   source                           Int? // 1=Email, 2=Portal, 3=Phone, etc.

@@ -3748,6 +3748,9 @@ class TicketService {
         ...(actor?.trustedIntake === true ? { triageMode: 'trusted' } : {}),
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
+        // Who wrote it (utils/assignerKind.js: a technician's own ticket
+        // assigned to themselves counts as Logged, not Self).
+        ...(actor?.technicianId ? { createdByTechId: actor.technicianId } : {}),
         // Cc visibility (QA 08-05 #3): carbon-copy addresses live on the
         // Ticket row itself — the same ccEmails column FS sync fills for
         // FS-born tickets — so the UI renders To/Cc for both origins from one

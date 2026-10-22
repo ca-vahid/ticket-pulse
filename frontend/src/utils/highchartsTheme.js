@@ -195,6 +195,7 @@ export function chartPalette(dark = isDocumentDark()) {
     treemap: dark ? TREEMAP_DARK : TREEMAP_LIGHT,
     assignmentSource: {
       selfPicked: series.amber,
+      selfLogged: series.teal,
       coordinatorAssigned: series.green,
       appAssigned: series.blue,
       workflowAssigned: series.steel,

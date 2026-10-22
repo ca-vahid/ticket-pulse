@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.11-preview';
+export const APP_VERSION = '4.3.12-preview';
 
 export const changelog = [
+  {
+    version: '4.3.12-preview',
+    date: 'October 22, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Logged is its own kind of assignment</strong> &mdash; a ticket a technician writes in + New ticket and takes (assigned to themselves at creation, or a moment later) is now <em>Logged</em>, not <em>Self</em>. It is usually work written up after the fact, so it never reached the queue. The dashboard has a Logged column with a pen icon, each ticket row reads &ldquo;Logged&rdquo; or &ldquo;Self&rdquo;, and Self now means picked up from the queue. Earlier Ticket Pulse tickets are sorted the same way from their history.' },
+      { type: 'fixed', html: '<strong>The AI-assigned gauge leaves logged tickets out</strong> &mdash; the AI never had a chance to assign them, so they no longer count against it. Hover the gauge for the counts.' },
+      { type: 'new', html: '<strong>Logged in Analytics</strong> &mdash; Team Balance has a Logged column and a Logged series in Assignment Source by Agent, and AI share leaves logged tickets out. Tickets written in FreshService are not told apart yet and still count as Self.' },
+    ],
+  },
   {
     version: '4.3.11-preview',
     date: 'October 21, 2026',

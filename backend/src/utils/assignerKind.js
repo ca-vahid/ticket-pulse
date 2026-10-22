@@ -3,6 +3,9 @@
  * AI-assigned gauge read low). One rule for the dashboard, Analytics and the
  * frontend's filter re-count (frontend/src/utils/assignerKind.js is its twin):
  *
+ *   logged      the technician wrote the ticket in + New ticket and took it
+ *               (created_by_tech_id = the assignee). After the fact: the AI
+ *               never had a chance to assign it (22 Oct 2026, Vahid)
  *   self        the technician took it: is_self_picked, or the assigner is the
  *               assignee ("Mehdi Abbaspour (in FreshService)" counts as Mehdi)
  *   ai          the Ticket Pulse service account, i.e. the AI assignment
@@ -41,13 +44,19 @@ export function assignerNamesOf(input) {
   };
 }
 
-/** @returns {'self'|'ai'|'automation'|'person'} */
+/** A self-assigned ticket its technician wrote: Logged rather than Self. */
+function selfKind(ticket) {
+  const creator = ticket?.createdByTechId;
+  return creator && creator === ticket?.assignedTechId ? 'logged' : 'self';
+}
+
+/** @returns {'logged'|'self'|'ai'|'automation'|'person'} */
 export function assignerKind(ticket, techName, names) {
-  if (ticket?.isSelfPicked) return 'self';
+  if (ticket?.isSelfPicked) return selfKind(ticket);
   const by = String(ticket?.assignedBy || '').trim();
   if (!by) return 'person';
   const plain = plainName(by);
-  if (techName && plain === plainName(techName)) return 'self';
+  if (techName && plain === plainName(techName)) return selfKind(ticket);
   const { ai, automation } = names?.ai ? names : assignerNamesOf(names);
   const lower = by.toLowerCase();
   if (ai.includes(lower)) return 'ai';
@@ -58,11 +67,11 @@ export function assignerKind(ticket, techName, names) {
 /**
  * Counts by kind. `app` = ai + automation (the dashboard's App column: not a
  * person). `routed` = the tickets that needed an owner picked (everything but
- * automation), the AI-assigned gauge's denominator.
+ * automation and logged), the AI-assigned gauge's denominator.
  */
 export function countAssignerKinds(tickets, techName, names) {
   const resolved = names?.ai ? names : assignerNamesOf(names);
-  const out = { self: 0, ai: 0, automation: 0, person: 0 };
+  const out = { logged: 0, self: 0, ai: 0, automation: 0, person: 0 };
   for (const t of tickets || []) out[assignerKind(t, techName, resolved)] += 1;
   return { ...out, app: out.ai + out.automation, routed: out.self + out.ai + out.person };
 }

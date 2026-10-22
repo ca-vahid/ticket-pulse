@@ -84,6 +84,7 @@ const HEADER_LEGACY_FILTER_CONTROL_CLASS = '[&>div>button]:h-10 [&>div>button]:r
 // are unattributed volume, never a person metric (QA 08-25 #2).
 export const ASSIGNMENT_SOURCE_COLORS = {
   selfPicked: '#f59e0b',
+  selfLogged: '#0f766e',
   coordinatorAssigned: '#059669',
   appAssigned: '#2563eb',
   workflowAssigned: '#7c93c4',
@@ -106,7 +107,7 @@ const ASSIGNMENT_MIX_LABELS = {
   selfPicked: {
     label: 'Self-picked by technician',
     shortLabel: 'Self-picked',
-    description: 'Picked up by the technician assigned to the ticket.',
+    description: 'Picked up by the technician assigned to the ticket, including tickets they wrote themselves (+ New ticket) and took.',
     color: ASSIGNMENT_SOURCE_COLORS.selfPicked,
   },
   workflowAssigned: {
@@ -127,6 +128,7 @@ const TEAM_TIMELINE_METRICS = [
   { key: 'assigned', label: 'Assigned tickets' },
   { key: 'closed', label: 'Closed / resolved' },
   { key: 'selfPicked', label: 'Self-picked' },
+  { key: 'selfLogged', label: 'Logged themselves' },
   { key: 'coordinatorAssigned', label: 'Coordinator-assigned' },
   { key: 'appAssigned', label: 'Ticket Pulse-assigned' },
   { key: 'workflowAssigned', label: 'Rule, integration or workflow' },
@@ -175,6 +177,7 @@ const TEAM_TABLE_COLUMNS = [
   ['pendingNow', 'Pending Now', 'agentPendingNow'],
   ['parkedNow', 'Parked Now', null],
   ['selfPicked', 'Self', 'agentSelfPicked'],
+  ['selfLogged', 'Logged', 'agentSelfLogged'],
   ['coordinatorAssigned', 'Coordinator', 'agentCoordinatorAssigned'],
   ['appAssigned', 'App', 'agentAppAssigned'],
   ['aiSharePct', 'AI share', 'agentAiShare'],
@@ -428,9 +431,10 @@ function chartBase(type = 'column') {
 }
 
 // Team Balance → "Assignment Source by Agent" stacked bars. Exported so the
-// series contract (5 buckets, muted actor-less pair last) is unit-testable.
+// series contract (6 buckets, muted actor-less pair last) is unit-testable.
 export const ASSIGNMENT_SOURCE_SERIES = [
   { key: 'selfPicked', name: 'Self-picked' },
+  { key: 'selfLogged', name: 'Logged themselves' },
   { key: 'coordinatorAssigned', name: 'Coordinator' },
   { key: 'appAssigned', name: 'Ticket Pulse' },
   { key: 'workflowAssigned', name: 'Assigned at creation / workflow' },
@@ -3520,6 +3524,7 @@ export default function Analytics({ view = 'standard' }) {
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                 {[
                   ['Self', row.selfPicked, 'agentSelfPicked'],
+                  ['Logged', row.selfLogged || 0, 'agentSelfLogged'],
                   ['Coord.', row.coordinatorAssigned, 'agentCoordinatorAssigned'],
                   ['App', row.appAssigned, 'agentAppAssigned'],
                   ['AI share', aiShareText(row), 'agentAiShare'],

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Bot, RotateCcw, ChevronDown, Ticket as TicketIcon } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Bot, RotateCcw, ChevronDown, PenLine, Ticket as TicketIcon } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
@@ -216,6 +216,16 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
     : viewMode === 'monthly'
       ? (technician.monthlySelfPicked || 0)
       : (technician.selfPickedToday || 0);
+  // Logged (22 Oct 2026): tickets they wrote themselves (+ New ticket) and
+  // took. Not a queue pick, and never the AI's to assign.
+  const logged = viewMode === 'weekly'
+    ? (technician.weeklyLogged || 0)
+    : viewMode === 'monthly'
+      ? (technician.monthlyLogged || 0)
+      : (technician.loggedToday || 0);
+  const loggedTitle = logged > 0
+    ? `Logged: ${logged} ticket${logged === 1 ? '' : 's'} they wrote themselves (+ New ticket) and took. These never reached the queue, so they are not self-picks and are left out of the AI-assigned gauge.`
+    : 'No tickets logged by themselves';
   const appAssigned = viewMode === 'weekly'
     ? (technician.weeklyAppAssigned || 0)
     : viewMode === 'monthly'
@@ -595,6 +605,10 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 <div className={`text-base font-semibold ${selfPicked > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{selfPicked}</div>
                 <div className="text-[10px] text-muted-foreground/75 max-sm:text-muted-foreground leading-tight">Picked up themselves</div>
               </div>
+              <div className="flex flex-col items-center text-center" title={loggedTitle}>
+                <div className={`text-base font-semibold ${logged > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{logged}</div>
+                <div className="text-[10px] text-muted-foreground/75 max-sm:text-muted-foreground leading-tight">Logged themselves</div>
+              </div>
               <div className="flex flex-col items-center text-center">
                 <div className={`text-base font-semibold ${appAssigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{appAssigned}</div>
                 <div className="text-[10px] text-muted-foreground/75 max-sm:text-muted-foreground leading-tight">Sent by the app</div>
@@ -657,8 +671,9 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                   </span>
                 </span>
               </div>
-              <div className="grid grid-cols-6">
-                <MobileStat icon={Hand} value={selfPicked} label="Self" iconClass="text-purple-600 dark:text-purple-300" numClass="text-purple-900 dark:text-purple-200" muted={selfPicked === 0} title="Picked up themselves" />
+              <div className="grid grid-cols-7">
+                <MobileStat icon={Hand} value={selfPicked} label="Self" iconClass="text-purple-600 dark:text-purple-300" numClass="text-purple-900 dark:text-purple-200" muted={selfPicked === 0} title="Picked up themselves from the queue" />
+                <MobileStat icon={PenLine} value={logged} label="Log" iconClass="text-teal-600 dark:text-teal-300" numClass="text-teal-800 dark:text-teal-200" muted={logged === 0} title={loggedTitle} />
                 <MobileStat
                   icon={Bot}
                   value={appAssigned}
@@ -740,15 +755,29 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             </div>
 
             {/* Metrics Grid - Icons + Numbers (sm+ / desktop Cards view) */}
-            {/* Fixed 6-column layout so all techs align vertically. Optional metrics
-            (App, Rej, CSAT) render as muted placeholders when count is 0. */}
-            <div className="hidden gap-2 mb-2 sm:grid sm:grid-cols-6">
+            {/* Fixed 7-column layout so all techs align vertically. Optional metrics
+            (Logged, App, Rej, CSAT) render as muted placeholders when count is 0. */}
+            <div className="hidden gap-2 mb-2 sm:grid sm:grid-cols-7">
 
               {/* Self - always primary */}
               <div className="flex flex-col items-center p-2 bg-purple-100 dark:bg-purple-500/20 rounded-lg shadow-sm border border-purple-200 dark:border-purple-500/30">
                 <Hand className="w-5 h-5 text-purple-700 dark:text-purple-200 mb-1" />
                 <div className="text-lg font-bold text-purple-900 dark:text-purple-200">{selfPicked}</div>
                 <div className="text-[9px] text-purple-700 dark:text-purple-200 uppercase font-bold">Self</div>
+              </div>
+
+              {/* Logged - wrote it themselves and took it; muted when 0 */}
+              <div
+                className={`flex flex-col items-center p-2 rounded-lg shadow-sm border ${
+                  logged > 0
+                    ? 'bg-teal-50 dark:bg-teal-500/15 border-teal-200 dark:border-teal-500/30'
+                    : 'bg-muted/25 border-border/60 opacity-50'
+                }`}
+                title={loggedTitle}
+              >
+                <PenLine className={`w-5 h-5 mb-1 ${logged > 0 ? 'text-teal-600 dark:text-teal-300' : 'text-muted-foreground/50'}`} />
+                <div className={`text-lg font-bold ${logged > 0 ? 'text-teal-800 dark:text-teal-200' : 'text-muted-foreground/50'}`}>{logged}</div>
+                <div className={`text-[9px] uppercase font-bold ${logged > 0 ? 'text-teal-600 dark:text-teal-300' : 'text-muted-foreground/50'}`}>Logged</div>
               </div>
 
               {/* App Assigned - muted when 0 to keep alignment */}

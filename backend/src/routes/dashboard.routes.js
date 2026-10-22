@@ -85,6 +85,12 @@ async function getRejectionCounts(workspaceId, periodStart = null, periodEnd = n
  * @param {Object} ticket - Ticket with nested requester object
  * @returns {Object} Ticket with flattened requester fields
  */
+/** The technician took it: a self-pick or a ticket they logged themselves. */
+const tookItself = (ticket, techName, names) => {
+  const kind = assignerKind(ticket, techName, names);
+  return kind === 'self' || kind === 'logged';
+};
+
 const transformTicket = (ticket, workspaceId) => {
   if (!ticket) return ticket;
 
@@ -676,14 +682,11 @@ router.get(
       return assignDate >= weekStartRange.start && assignDate <= weekEndRange.end;
     });
 
-    // Categorize weekly tickets
-    const selfPickedTickets = weeklyTickets.filter(ticket =>
-      assignerKind(ticket, technician.name, assignerNames) === 'self',
-    );
+    // Categorize weekly tickets. Self includes their own logged tickets (the
+    // row badge tells them apart).
+    const selfPickedTickets = weeklyTickets.filter((ticket) => tookItself(ticket, technician.name, assignerNames));
 
-    const assignedTickets = weeklyTickets.filter(ticket =>
-      assignerKind(ticket, technician.name, assignerNames) !== 'self',
-    );
+    const assignedTickets = weeklyTickets.filter((ticket) => !tookItself(ticket, technician.name, assignerNames));
 
     // Closed tickets = tickets ASSIGNED during the week that are now closed
     // Note: Filter by assignment date + status (not close date) because closedAt/resolvedAt may be null
@@ -820,12 +823,8 @@ router.get(
       return assignDate >= monthStartRange.start && assignDate <= monthEndRange.end;
     });
 
-    const selfPickedTickets = monthlyTickets.filter(ticket =>
-      assignerKind(ticket, technician.name, assignerNames) === 'self',
-    );
-    const assignedTickets = monthlyTickets.filter(ticket =>
-      assignerKind(ticket, technician.name, assignerNames) !== 'self',
-    );
+    const selfPickedTickets = monthlyTickets.filter((ticket) => tookItself(ticket, technician.name, assignerNames));
+    const assignedTickets = monthlyTickets.filter((ticket) => !tookItself(ticket, technician.name, assignerNames));
     const closedTickets = monthlyTickets.filter(ticket =>
       statusSets.terminal.has(ticket.status) && !isAutoHelpResolved(ticket),
     );

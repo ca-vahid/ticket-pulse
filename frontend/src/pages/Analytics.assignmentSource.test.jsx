@@ -35,16 +35,17 @@ const rows = [
 ];
 
 describe('Assignment Source by Agent — series contract', () => {
-  test('five buckets in order, the actor-less pair last with muted colours', () => {
-    expect(ASSIGNMENT_SOURCE_SERIES.map((s) => s.key)).toEqual(['selfPicked', 'coordinatorAssigned', 'appAssigned', 'workflowAssigned', 'unknown']);
+  test('six buckets in order, the actor-less pair last with muted colours', () => {
+    expect(ASSIGNMENT_SOURCE_SERIES.map((s) => s.key)).toEqual(['selfPicked', 'selfLogged', 'coordinatorAssigned', 'appAssigned', 'workflowAssigned', 'unknown']);
     const series = buildAssignmentSourceSeries(rows);
-    expect(series.map((s) => s.name)).toEqual(['Self-picked', 'Coordinator', 'Ticket Pulse', 'Assigned at creation / workflow', 'Source unavailable']);
-    expect(series[3].color).toBe(ASSIGNMENT_SOURCE_COLORS.workflowAssigned);
-    expect(series[4].color).toBe(ASSIGNMENT_SOURCE_COLORS.unknown);
-    expect(series[3].data).toEqual([{ y: 3, technicianId: 1 }, { y: 0, technicianId: 2 }]);
-    expect(series[4].data).toEqual([{ y: 1, technicianId: 1 }, { y: 0, technicianId: 2 }]);
-    // Rows from an older backend (no workflowAssigned) still render as zeros.
-    expect(buildAssignmentSourceSeries([{ technicianId: 9, selfPicked: 1 }])[3].data).toEqual([{ y: 0, technicianId: 9 }]);
+    expect(series.map((s) => s.name)).toEqual(['Self-picked', 'Logged themselves', 'Coordinator', 'Ticket Pulse', 'Assigned at creation / workflow', 'Source unavailable']);
+    expect(series[4].color).toBe(ASSIGNMENT_SOURCE_COLORS.workflowAssigned);
+    expect(series[5].color).toBe(ASSIGNMENT_SOURCE_COLORS.unknown);
+    expect(series[4].data).toEqual([{ y: 3, technicianId: 1 }, { y: 0, technicianId: 2 }]);
+    expect(series[5].data).toEqual([{ y: 1, technicianId: 1 }, { y: 0, technicianId: 2 }]);
+    // Rows from an older backend (no selfLogged / workflowAssigned) still render as zeros.
+    expect(buildAssignmentSourceSeries([{ technicianId: 9, selfPicked: 1 }])[1].data).toEqual([{ y: 0, technicianId: 9 }]);
+    expect(buildAssignmentSourceSeries([{ technicianId: 9, selfPicked: 1 }])[4].data).toEqual([{ y: 0, technicianId: 9 }]);
   });
 
   test('tooltip: per-series lines + total, footnotes only when the unattributed points are > 0', () => {
