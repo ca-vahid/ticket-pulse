@@ -74,6 +74,18 @@ describe('resolveCategoryNames', () => {
     await expect(resolveCategoryNames(2, 'Project Setup', 'Proposal Setup')).rejects.toThrow(/Unknown subcategory/);
   });
 
+  test('each miss carries its own machine code + field (ContinuIT retries with the category alone)', async () => {
+    await expect(resolveCategoryNames(2, 'Hardware', null)).rejects.toMatchObject({ code: 'unknown_category', statusCode: 400, details: [{ field: 'category', code: 'unknown_category' }] });
+    await expect(resolveCategoryNames(2, 'Proposal Setup', 'Quebec')).rejects.toMatchObject({ code: 'unknown_subcategory', details: [{ field: 'subcategory', code: 'unknown_subcategory' }] });
+    await expect(resolveCategoryNames(2, '', 'Quebec')).rejects.toMatchObject({ code: 'subcategory_requires_category' });
+  });
+
+  test('the public API problem keeps the code', async () => {
+    const { toProblem } = await import('../src/utils/apiProblem.js');
+    const err = await resolveCategoryNames(2, 'Proposal Setup', 'Quebec').catch((e) => e);
+    expect(toProblem(err)).toMatchObject({ status: 400, code: 'unknown_subcategory', errors: [{ field: 'subcategory', code: 'unknown_subcategory' }] });
+  });
+
   test('subcategory without a category is rejected', async () => {
     await expect(resolveCategoryNames(2, '', 'Quebec'))
       .rejects.toThrow(/subcategory name requires its parent category/i);

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.12-preview';
+export const APP_VERSION = '4.3.13-preview';
 
 export const changelog = [
+  {
+    version: '4.3.13-preview',
+    date: 'October 22, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Clearer category errors for integrations</strong> — when an integration sends a category and subcategory by name, the error now says which one didn’t match (<code>unknown_category</code>, <code>unknown_subcategory</code>), so it can retry with just the category instead of losing both.' },
+    ],
+  },
   {
     version: '4.3.12-preview',
     date: 'October 22, 2026',

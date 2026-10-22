@@ -17,6 +17,16 @@ import { ValidationError } from '../utils/errors.js';
  * - Inactive (retired) taxonomy rows never match; they're not offered either.
  */
 
+// Machine codes (ContinuIT taxonomy move, 22 Oct 2026): an integration that
+// sends both names needs to know WHICH one missed, so it can retry with the
+// category alone instead of dropping both. The public API echoes `code` and
+// the field in `errors[]` (problem+json); in-app callers still read the message.
+function taxonomyError(message, code, field) {
+  const err = new ValidationError(message, [{ field, code }]);
+  err.code = code;
+  return err;
+}
+
 // Keep validation errors readable on large taxonomies: name the first N
 // values and summarize the rest.
 const MAX_LISTED_NAMES = 30;
@@ -41,7 +51,7 @@ export async function resolveCategoryNames(workspaceId, categoryName, subcategor
   const subKey = String(subcategoryName ?? '').trim().toLowerCase();
 
   if (!catKey && subKey) {
-    throw new ValidationError('A subcategory name requires its parent category name');
+    throw taxonomyError('A subcategory name requires its parent category name', 'subcategory_requires_category', 'category');
   }
   if (!catKey) {
     return { categoryId: null, subcategoryId: null, categoryName: null, subcategoryName: null };
@@ -53,8 +63,9 @@ export async function resolveCategoryNames(workspaceId, categoryName, subcategor
   const tops = rows.filter((r) => r.parentId === null);
   const category = tops.find((r) => r.name.trim().toLowerCase() === catKey);
   if (!category) {
-    throw new ValidationError(
+    throw taxonomyError(
       `Unknown category "${String(categoryName).trim()}" for this workspace. Valid categories: ${formatAllowedValues(tops.map((t) => t.name))}`,
+      'unknown_category', 'category',
     );
   }
 
@@ -65,8 +76,9 @@ export async function resolveCategoryNames(workspaceId, categoryName, subcategor
   const children = rows.filter((r) => r.parentId === category.id);
   const subcategory = children.find((r) => r.name.trim().toLowerCase() === subKey);
   if (!subcategory) {
-    throw new ValidationError(
+    throw taxonomyError(
       `Unknown subcategory "${String(subcategoryName).trim()}" under "${category.name}". Valid subcategories: ${formatAllowedValues(children.map((c) => c.name))}`,
+      'unknown_subcategory', 'subcategory',
     );
   }
 
