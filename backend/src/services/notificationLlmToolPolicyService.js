@@ -75,7 +75,7 @@ export const DEFAULT_NOTIFICATION_LLM_TOOL_POLICY = {
   toolSettings: DEFAULT_NOTIFICATION_LLM_TOOL_SETTINGS,
   maxTurns: 4,
   maxToolCalls: 6,
-  totalTimeoutMs: 20000,
+  totalTimeoutMs: 60000,
   perToolTimeoutMs: 3000,
   // Policy decision 2026-07-07 (gap plan P5): internal notes ARE allowed as
   // evidence — they enter the bundle quoteAllowed=false and the output guard's
