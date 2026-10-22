@@ -180,13 +180,19 @@ export const METRICS_GLOSSARY = {
   },
   agentAppAssigned: {
     label: 'App-assigned',
-    definition: 'Range tickets assigned by Ticket Pulse’s automation (the app service account) — the AI routing pipeline.',
+    definition: 'Range tickets the AI routing pipeline assigned (the Ticket Pulse service account). Tickets a Ticket Pulse rule (alert bundling, onboarding) or an integration (ContinuIT) routed count under Workflow, not here.',
+  },
+  agentAiShare: {
+    label: 'AI share',
+    definition: 'Of this technician’s range tickets that needed an owner picked (self-picked, coordinator-assigned or AI-assigned), the share the AI picked. Rule-routed and unattributed tickets are left out. Hover a value for the counts.',
+    formula: 'AI-assigned ÷ (self + coordinator + AI)',
+    caveats: 'Shows how work reached each person, not how well they work. A low share often means someone picks up tickets themselves or is a category’s named owner. Hidden below 5 tickets.',
   },
   // QA 08-25 #2: the two actor-less buckets. Structural, not a cutoff —
   // never "pre-dates X" framing, and never a person metric.
   agentWorkflowAssigned: {
-    label: 'Assigned at creation / workflow',
-    definition: 'Range tickets that landed on this technician with no recorded assigning person: FreshService set the owner when the ticket was created (a workflow, automator rule, email rule or API call). The activity history was synced and simply contains no "assigned" event.',
+    label: 'Rule, integration or workflow',
+    definition: 'Range tickets routed to this technician by a rule rather than picked: a Ticket Pulse rule (alert bundling, onboarding), an integration writing through its API key (ContinuIT), or FreshService setting the owner when the ticket was created (a workflow, automator rule, email rule or API call).',
     caveats: 'Unattributed volume, not a behaviour signal — excluded from self-pick and coordinator reads.',
   },
   agentSourceUnavailable: {

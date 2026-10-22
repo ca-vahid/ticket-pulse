@@ -68,6 +68,7 @@ const TEAM_FIXTURE = {
     {
       technicianId: 2, name: 'Bob Baker', assigned: 55, closed: 44, closeRatePct: 80,
       openNow: 8, pendingNow: 2, selfPicked: 30, coordinatorAssigned: 15, appAssigned: 10,
+      aiPickable: 55, aiSharePct: 18,
       availableDays: 16.5, assignedPerAvailableDay: 3.3, leaveDays: 4.5, wfhDays: 0, leaveTypes: [],
       csatAverage: null, csatCount: 0,
     },
@@ -263,6 +264,24 @@ describe('Analytics Team Balance charts (Phase TB regression)', () => {
     expect(chartLog.mounts).toHaveLength(2);
     expect(chartLog.mounts[1].options.chart.type).toBe('bar');
     expect(chartLog.mounts[1].options.colorAxis).toEqual([]);
+  });
+
+  test('every table header has its own cell, and AI share sits under its heading (21 Oct 2026)', async () => {
+    const { container } = renderAnalytics('team');
+    await screen.findByText('Workload by Agent');
+    const table = container.querySelector('table');
+    const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    const bobRow = [...table.querySelectorAll('tbody tr')].find((tr) => tr.textContent.includes('Bob Baker'));
+    const cells = [...bobRow.querySelectorAll('td')];
+    // Before: 3 columns had a header and no cell, so values sat under the wrong heading.
+    expect(cells).toHaveLength(headers.length);
+    const at = (label) => cells[headers.findIndex((h) => h.startsWith(label))].textContent.trim();
+    expect(at('AI share')).toBe('18%');
+    expect(at('App')).toBe('10');
+    expect(at('Coordinator')).toBe('15');
+    // Too few tickets to say: a dash, not 0 %.
+    const caraRow = [...table.querySelectorAll('tbody tr')].find((tr) => tr.textContent.includes('Cara Cruz'));
+    expect(caraRow.querySelectorAll('td')[headers.findIndex((h) => h.startsWith('AI share'))].textContent.trim()).toBe('—');
   });
 
   test('table headers still re-sort deliberately after the alphabetical default', async () => {

@@ -289,6 +289,27 @@ class SettingsRepository {
   }
 
   /**
+   * Names for utils/assignerKind.js: the service accounts (the AI) plus every
+   * integration in the workspace, by API key or OAuth client name (ContinuIT
+   * is an OAuth client). Revoked ones included: their past assignments still
+   * carry the name.
+   */
+  async getAssignerNames(workspaceId) {
+    const namesOf = (read) => (workspaceId
+      ? Promise.resolve().then(read).catch((error) => {
+        logger.error('Error fetching integration names:', error);
+        return [];
+      })
+      : Promise.resolve([]));
+    const [serviceAccountNames, keys, clients] = await Promise.all([
+      this.getServiceAccountNames(),
+      namesOf(() => prisma.apiKey.findMany({ where: { workspaceId }, select: { name: true } })),
+      namesOf(() => prisma.oAuthClient.findMany({ where: { workspaceId }, select: { name: true } })),
+    ]);
+    return { serviceAccountNames, automationNames: [...new Set([...keys, ...clients].map((k) => k.name).filter(Boolean))] };
+  }
+
+  /**
    * Get global Twilio notification provider configuration.
    * app_settings wins; environment variables are a deployment fallback.
    */
