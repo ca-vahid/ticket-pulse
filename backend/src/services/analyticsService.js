@@ -7,6 +7,7 @@ import { getTodayRange } from '../utils/timezone.js';
 import { ticketSourceLabel, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
 import { computePickAccuracy, fetchPickInputs, pickAccuracyExportRows } from './aiPickAccuracy.js';
+import { assignerKind } from '../utils/assignerKind.js';
 
 const DEFAULT_TIMEZONE = 'America/Vancouver';
 // Canonical fallbacks. Since Phase 8b every per-workspace site resolves the
@@ -1139,12 +1140,30 @@ async function getServiceAccountNames() {
     .filter(Boolean);
 }
 
+/** Below this many pickable tickets a person's AI share is not shown. */
+const AI_SHARE_MIN_SAMPLE = 5;
+
+/** Service accounts plus the workspace's integration names, API keys and OAuth clients (utils/assignerKind.js). */
+async function getAssignerNamesFor(workspaceId) {
+  const namesOf = (read) => Promise.resolve().then(read).catch(() => []);
+  const [serviceAccountNames, keys, clients] = await Promise.all([
+    getServiceAccountNames(),
+    namesOf(() => prisma.apiKey.findMany({ where: { workspaceId }, select: { name: true } })),
+    namesOf(() => prisma.oAuthClient.findMany({ where: { workspaceId }, select: { name: true } })),
+  ]);
+  return { serviceAccountNames, automationNames: [...(keys || []), ...(clients || [])].map((k) => k.name) };
+}
+
 /**
- * Who put this ticket on its technician.
+ * Who put this ticket on its technician (the rule is utils/assignerKind.js).
  *   selfPicked          — is_self_picked, or the assigner IS the assignee
- *   appAssigned         — assigner is a Ticket Pulse service account
- *   coordinatorAssigned — any other named assigner
- *   workflowAssigned    — no assigner recorded, but the FreshService activity
+ *                         ("<name> (in FreshService)" included)
+ *   appAssigned         — the Ticket Pulse service account: the AI pipeline
+ *   coordinatorAssigned — any other named assigner (a person)
+ *   workflowAssigned    — routed by a rule, not picked: another Ticket Pulse
+ *                         actor (alert bundling, Onboarding) or an
+ *                         integration's API key (ContinuIT); or no assigner
+ *                         recorded, but the FreshService activity
  *                         history WAS synced cleanly and contains no
  *                         "assigned" event: FreshService set the owner at
  *                         creation (workflow / automator / email rule /
@@ -1155,11 +1174,12 @@ async function getServiceAccountNames() {
  * Neither actor-less bucket is a technician metric; the UI must keep them
  * out of self-pick / coordinator reads.
  */
-export function assignmentSource(ticket, serviceAccountNames = []) {
-  const assignedBy = String(ticket.assignedBy || '').trim();
-  if (ticket.isSelfPicked || (assignedBy && assignedBy === ticket.assignedTech?.name)) return 'selfPicked';
-  if (assignedBy && serviceAccountNames.includes(assignedBy.toLowerCase())) return 'appAssigned';
-  if (assignedBy) return 'coordinatorAssigned';
+export function assignmentSource(ticket, assignerNames = []) {
+  const kind = assignerKind(ticket, ticket.assignedTech?.name, assignerNames);
+  if (kind === 'self') return 'selfPicked';
+  if (kind === 'ai') return 'appAssigned';
+  if (kind === 'automation') return 'workflowAssigned';
+  if (String(ticket.assignedBy || '').trim()) return 'coordinatorAssigned';
   if (ticket.activitiesSyncedAt && !ticket.activitiesSyncError) return 'workflowAssigned';
   return 'unknown';
 }
@@ -1282,7 +1302,7 @@ export async function getOverview(workspaceId, query = {}) {
       rangeInfo.compare === 'none' ? Promise.resolve(null) : periodCounts(workspaceId, rangeInfo, excludeNoise, 'previous', categoryFilter.where),
       fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
       fetchOpenTickets(workspaceId, excludeNoise, categoryFilter.where),
-      getServiceAccountNames(),
+      getAssignerNamesFor(workspaceId),
     ]);
     const categoryCoverage = categoryBreakdownFromTickets(rangeTickets, 10, workspaceId).coverage;
 
@@ -1615,7 +1635,7 @@ export async function getCategoryIntelligence(workspaceId, query = {}) {
           ticket: { select: CATEGORY_TICKET_SELECT },
         },
       }),
-      getServiceAccountNames(),
+      getAssignerNamesFor(workspaceId),
       getTechnicianPhotoMap(workspaceId),
     ]);
 
@@ -1683,7 +1703,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
           halfDayPart: true,
         },
       }).catch(() => []),
-      getServiceAccountNames(),
+      getAssignerNamesFor(workspaceId),
     ]);
 
     const byTech = new Map(technicians.map((t) => [t.id, {
@@ -1873,6 +1893,13 @@ export async function getTeamBalance(workspaceId, query = {}) {
         : null;
       row.closeRatePct = agentCloseRatePct(row.closed, row.assigned, autoHelpClosedByTech.get(row.technicianId) || 0);
       row.selfPickRatePct = row.assigned ? Number(((row.selfPicked / row.assigned) * 100).toFixed(1)) : 0;
+      // AI share (21 Oct 2026): of this person's tickets that needed an owner
+      // picked (self, coordinator or AI; rule-routed and unattributed left
+      // out), how many the AI picked. How work reached them, not a score.
+      row.aiPickable = row.selfPicked + row.coordinatorAssigned + row.appAssigned;
+      row.aiSharePct = row.aiPickable >= AI_SHARE_MIN_SAMPLE
+        ? Math.round((row.appAssigned / row.aiPickable) * 100)
+        : null;
       row.rejectionRatePct = row.assigned ? Number(((row.rejected / row.assigned) * 100).toFixed(1)) : 0;
       row.topCategories = Object.entries(row.topCategories)
         .map(([name, count]) => ({ name, count }))

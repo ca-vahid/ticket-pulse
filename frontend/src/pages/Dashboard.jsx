@@ -20,6 +20,7 @@ import { filterTickets, getTicketCategoryLabel, hasCategoryFilters } from '../ut
 import { getHolidayTooltip, getHolidayInfo, registerDynamicHolidays } from '../utils/holidays';
 import api from '../services/api';
 import { usePrefetch } from '../hooks/usePrefetch';
+import { aiAssignedShare, assignerKind, assignerNamesOf } from '../utils/assignerKind';
 import {
   CheckCircle,
   XCircle,
@@ -831,12 +832,13 @@ export default function Dashboard() {
     };
   const hasActiveCategoryFilter = hasCategoryFilters(activeCategoryFilter);
 
-  // Service account names for identifying app-made assignments (from API response)
-  const serviceAccountNames = (
-    viewMode === 'weekly' ? weeklyData?.serviceAccountNames
-      : viewMode === 'monthly' ? monthlyData?.serviceAccountNames
-        : dashboardData?.serviceAccountNames
-  ) || [];
+  // Who assigned each ticket, for the filter re-count (utils/assignerKind.js,
+  // the same rule the server counts with). Names come with the API response.
+  const viewData = viewMode === 'weekly' ? weeklyData : viewMode === 'monthly' ? monthlyData : dashboardData;
+  const assignerNames = assignerNamesOf({
+    serviceAccountNames: viewData?.serviceAccountNames,
+    automationNames: viewData?.automationAssignerNames,
+  });
 
   // Filter technicians based on hidden state
   const visibleTechnicians = technicians.filter(tech => !hiddenTechIds.includes(tech.id));
@@ -878,18 +880,13 @@ export default function Dashboard() {
     const openTickets = filteredTickets.filter(t => ['Open', 'Pending'].includes(t.status));
     const openOnlyCount = filteredTickets.filter(t => t.status === 'Open').length;
     const pendingCount = filteredTickets.filter(t => t.status === 'Pending').length;
-    const selfPicked = filteredTickets.filter(t => t.isSelfPicked || t.assignedBy === tech.name);
-
-    // Helper to check if assigned by the app (service account)
-    const isAppAssignment = (t) =>
-      serviceAccountNames.length > 0 &&
-      t.assignedBy &&
-      serviceAccountNames.some(name => name.toLowerCase() === t.assignedBy.toLowerCase());
-
-    const appAssignedTickets = filteredTickets.filter(t =>
-      !t.isSelfPicked && t.assignedBy !== tech.name && isAppAssignment(t));
-    const assigned = filteredTickets.filter(t =>
-      !t.isSelfPicked && t.assignedBy !== tech.name && !isAppAssignment(t));
+    const kindOf = (t) => assignerKind(t, tech.name, assignerNames);
+    const isApp = (t) => kindOf(t) === 'ai' || kindOf(t) === 'automation';
+    const selfPicked = filteredTickets.filter(t => kindOf(t) === 'self');
+    const appAssignedTickets = filteredTickets.filter(isApp);
+    const aiAssignedCount = filteredTickets.filter(t => kindOf(t) === 'ai').length;
+    const automationAssignedCount = appAssignedTickets.length - aiAssignedCount;
+    const assigned = filteredTickets.filter(t => kindOf(t) === 'person');
     const closed = filteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status));
 
     // Calculate assigners (who assigned tickets to this tech), excluding service accounts
@@ -919,9 +916,9 @@ export default function Dashboard() {
         });
 
         // Calculate counts for this day
-        const daySelf = dayTickets.filter(t => t.isSelfPicked || t.assignedBy === tech.name).length;
-        const dayAppAssigned = dayTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name && isAppAssignment(t)).length;
-        const dayAssigned = dayTickets.filter(t => !t.isSelfPicked && t.assignedBy !== tech.name && !isAppAssignment(t)).length;
+        const daySelf = dayTickets.filter(t => kindOf(t) === 'self').length;
+        const dayAppAssigned = dayTickets.filter(isApp).length;
+        const dayAssigned = dayTickets.filter(t => kindOf(t) === 'person').length;
         const dayClosed = filteredTickets.filter(ticket => {
           const closeDate = ticket.closedAt || ticket.resolvedAt;
           if (!closeDate) return false;
@@ -948,6 +945,8 @@ export default function Dashboard() {
       totalTicketsToday: filteredTickets.length,
       selfPickedToday: selfPicked.length,
       appAssignedToday: appAssignedTickets.length,
+      aiAssignedToday: aiAssignedCount,
+      automationAssignedToday: automationAssignedCount,
       assignedToday: assigned.length,
       closedToday: closed.length,
 
@@ -955,6 +954,8 @@ export default function Dashboard() {
       weeklyTotalCreated: filteredTickets.length,
       weeklySelfPicked: selfPicked.length,
       weeklyAppAssigned: appAssignedTickets.length,
+      weeklyAiAssigned: aiAssignedCount,
+      weeklyAutomationAssigned: automationAssignedCount,
       weeklyAssigned: assigned.length,
       weeklyClosed: closed.length,
       assigners, // List of who assigned tickets (for weekly view)
@@ -1017,14 +1018,11 @@ export default function Dashboard() {
 
   // Recalculate stats based on filtered tickets (if filters are active)
   const displayStats = (searchTerm || hasActiveCategoryFilter) ? (() => {
-    // Collect all filtered tickets
+    // Collect all filtered tickets, each with who assigned it (needs the tech's name)
     const allFilteredTickets = filteredTechnicians.flatMap(tech => getTechTickets(tech));
-
-    // Helper to check if assigned by the app (service account)
-    const isAppAsgn = (t) =>
-      serviceAccountNames.length > 0 &&
-      t.assignedBy &&
-      serviceAccountNames.some(name => name.toLowerCase() === t.assignedBy.toLowerCase());
+    const kinds = { self: 0, ai: 0, automation: 0, person: 0 };
+    filteredTechnicians.forEach((tech) => getTechTickets(tech).forEach((t) => { kinds[assignerKind(t, tech.name, assignerNames)] += 1; }));
+    const appCount = kinds.ai + kinds.automation;
 
     // Calculate filtered stats based on view mode
     const filteredStats = {
@@ -1037,22 +1035,28 @@ export default function Dashboard() {
       // Auto-help resolutions are not an agent's close (their own team line).
       closedTicketsToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status) && t.resolvedByKind !== 'auto_help').length,
       autoHelpResolvedToday: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status) && t.resolvedByKind === 'auto_help').length,
-      selfPickedToday: allFilteredTickets.filter(t => t.isSelfPicked).length,
-      appAssignedToday: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
+      selfPickedToday: kinds.self,
+      appAssignedToday: appCount,
+      aiAssignedToday: kinds.ai,
+      automationAssignedToday: kinds.automation,
 
       // Weekly view stats
       weeklyTotalCreated: allFilteredTickets.length,
       weeklyClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
-      weeklySelfPicked: allFilteredTickets.filter(t => t.isSelfPicked).length,
-      weeklyAppAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
-      weeklyAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && !isAppAsgn(t)).length,
+      weeklySelfPicked: kinds.self,
+      weeklyAppAssigned: appCount,
+      weeklyAiAssigned: kinds.ai,
+      weeklyAutomationAssigned: kinds.automation,
+      weeklyAssigned: kinds.person,
 
       // Monthly view stats
       monthTotalCreated: allFilteredTickets.length,
       monthClosed: allFilteredTickets.filter(t => ['Closed', 'Resolved'].includes(t.status)).length,
-      monthSelfPicked: allFilteredTickets.filter(t => t.isSelfPicked).length,
-      monthAppAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && isAppAsgn(t)).length,
-      monthAssigned: allFilteredTickets.filter(t => !t.isSelfPicked && !isAppAsgn(t)).length,
+      monthSelfPicked: kinds.self,
+      monthAppAssigned: appCount,
+      monthAiAssigned: kinds.ai,
+      monthAutomationAssigned: kinds.automation,
+      monthAssigned: kinds.person,
 
       // Load level counts (only meaningful in daily view with current open tickets)
       lightLoad: filteredTechnicians.filter(t => t.loadLevel === 'light').length,
@@ -1213,12 +1217,22 @@ export default function Dashboard() {
       ? (displayStats.weeklyAppAssigned || 0)
       : (displayStats.appAssignedToday || 0);
   // 2 Oct 2026 (Vahid): the band used to push self-pick (goal 70%), from
-  // before AI assignment. The goal now runs the other way: AI-assigned share
-  // ("App" = assigned by the Ticket Pulse service account), goal 90%.
+  // before AI assignment. The goal now runs the other way: AI-assigned share,
+  // goal 90%. 21 Oct 2026: "App" also holds tickets a rule or an integration
+  // routed (alert bundling, Onboarding, ContinuIT); those were never the AI's
+  // to pick, so the gauge is the AI's share of the rest. Before, they sat in
+  // the denominator (and ContinuIT's under Asgn), and the gauge read 62 %, not 71 %.
   const AI_ASSIGNED_GOAL = 90;
-  const aiAssignedPercentage = totalTicketsToday > 0
-    ? Math.round((appAssignedTotal / totalTicketsToday) * 100)
-    : 0;
+  const pick = (daily, weekly, monthly) => (viewMode === 'monthly' ? monthly : viewMode === 'weekly' ? weekly : daily) || 0;
+  const aiAssignedTotal = pick(displayStats.aiAssignedToday, displayStats.weeklyAiAssigned, displayStats.monthAiAssigned);
+  const ruleAssignedTotal = pick(displayStats.automationAssignedToday, displayStats.weeklyAutomationAssigned, displayStats.monthAutomationAssigned);
+  const { routed: aiRoutedTotal, pct: aiAssignedPercentage } = aiAssignedShare({
+    total: totalTicketsToday,
+    ai: aiAssignedTotal,
+    automation: ruleAssignedTotal,
+  });
+  const aiAssignedTitle = `AI-assigned: ${aiAssignedTotal} of the ${aiRoutedTotal} tickets that needed an owner picked (goal ${AI_ASSIGNED_GOAL}%).`
+    + (ruleAssignedTotal > 0 ? ` ${ruleAssignedTotal} more were routed by a rule or an integration (alert bundling, onboarding, ContinuIT…) and are left out.` : '');
   // ---- Stats band (flat typographic redesign) ----------------------------
   // One list drives the desktop stat row, the mobile sheet grid, and their
   // ordering. `dot` is the identity tick used on the light sheet cells.
@@ -1275,8 +1289,8 @@ export default function Dashboard() {
   const aiSheetBarClass = { good: 'bg-green-500', near: 'bg-yellow-500', low: 'bg-red-500' }[aiTier];
   const aiRingStroke = { good: '#4ade80', near: '#facc15', low: '#fca5a5' }[aiTier];
   const loadMixTitle = isToday
-    ? `Techs by load — light: ${displayStats.lightLoad || 0} · medium: ${displayStats.mediumLoad || 0} · heavy: ${displayStats.heavyLoad || 0}`
-    : `AI-assigned: ${appAssignedTotal} of ${totalTicketsToday} tickets this period (goal ${AI_ASSIGNED_GOAL}%)`;
+    ? `${aiAssignedTitle}\nTechs by load — light: ${displayStats.lightLoad || 0} · medium: ${displayStats.mediumLoad || 0} · heavy: ${displayStats.heavyLoad || 0}`
+    : aiAssignedTitle;
   const bandRangeLabel = viewMode === 'daily'
     ? selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     : viewMode === 'weekly'
@@ -1682,7 +1696,7 @@ export default function Dashboard() {
                   </span>
                 ))}
               </span>
-              <span className="relative h-10 w-10 flex-none" aria-label={`AI-assigned ${aiAssignedPercentage}% (goal ${AI_ASSIGNED_GOAL}%)`}>
+              <span className="relative h-10 w-10 flex-none" title={aiAssignedTitle} aria-label={`AI-assigned ${aiAssignedPercentage}% (goal ${AI_ASSIGNED_GOAL}%)`}>
                 <svg viewBox="0 0 40 40" className="h-10 w-10 -rotate-90" aria-hidden="true">
                   <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="5" />
                   <circle

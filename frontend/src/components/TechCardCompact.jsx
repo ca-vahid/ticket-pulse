@@ -7,6 +7,7 @@ import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 import { getCompactGridTemplate } from './compactLayout';
 import AgentStatusPill from './AgentStatusPill';
+import { appColumnTitle } from '../utils/assignerKind';
 
 /**
  * Deep-link URL for the Bounced tab with a date range matching the current
@@ -174,6 +175,11 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
     : viewMode === 'monthly'
       ? (technician.monthlyAppAssigned || 0)
       : (technician.appAssignedToday || 0);
+  const appTitle = appColumnTitle(appAssigned, viewMode === 'weekly'
+    ? technician.weeklyAiAssigned
+    : viewMode === 'monthly'
+      ? technician.monthlyAiAssigned
+      : technician.aiAssignedToday);
   const assigned = viewMode === 'weekly'
     ? (technician.weeklyAssigned || 0)
     : viewMode === 'monthly'
@@ -535,7 +541,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         {/* Col 6: App */}
         <div className="flex items-center justify-center">
           {simple ? (
-            <span className={`text-base font-semibold ${appAssigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title="Assigned by the app (AI)">{appAssigned}</span>
+            <span className={`text-base font-semibold ${appAssigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title={appTitle}>{appAssigned}</span>
           ) : (
             <div
               className={`flex items-center justify-center w-11 h-11 rounded-md border ${
@@ -543,7 +549,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                   ? 'bg-sky-50 dark:bg-sky-500/15 border-sky-200 dark:border-sky-500/30'
                   : 'bg-muted/25 border-border/60 opacity-50'
               }`}
-              title={appAssigned > 0 ? 'App-assigned tickets' : 'No app-assigned tickets'}
+              title={appTitle}
             >
               <div className="flex flex-col items-center leading-none">
                 <Bot className={`w-3.5 h-3.5 mb-0.5 ${appAssigned > 0 ? 'text-sky-600 dark:text-sky-300' : 'text-muted-foreground/50'}`} />

@@ -6,6 +6,7 @@ import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getL
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 import AgentStatusPill from './AgentStatusPill';
+import { appColumnTitle } from '../utils/assignerKind';
 
 /**
  * Build a deep-link URL to the Bounced tab with a date range matching the
@@ -220,6 +221,11 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
     : viewMode === 'monthly'
       ? (technician.monthlyAppAssigned || 0)
       : (technician.appAssignedToday || 0);
+  const appTitle = appColumnTitle(appAssigned, viewMode === 'weekly'
+    ? technician.weeklyAiAssigned
+    : viewMode === 'monthly'
+      ? technician.monthlyAiAssigned
+      : technician.aiAssignedToday);
   const assigned = viewMode === 'weekly'
     ? (technician.weeklyAssigned || 0)
     : viewMode === 'monthly'
@@ -660,7 +666,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                   iconClass="text-sky-600 dark:text-sky-300"
                   numClass="text-sky-800 dark:text-sky-200"
                   muted={appAssigned === 0}
-                  title={appAssigned > 0 ? 'App-assigned tickets (by Ticket Pulse service account)' : 'No app-assigned tickets'}
+                  title={appTitle}
                 />
                 <MobileStat icon={Send} value={assigned} label="Coord" iconClass="text-orange-600 dark:text-orange-300" numClass="text-orange-800 dark:text-orange-200" muted={assigned === 0} title={`Coordinator-assigned: ${assigned}`} />
                 <MobileStat icon={CheckSquare} value={closed} label="Done" iconClass="text-green-600 dark:text-green-300" numClass="text-green-800 dark:text-green-200" muted={closed === 0} title={`Closed: ${closed}`} />
@@ -752,7 +758,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                     ? 'bg-sky-50 dark:bg-sky-500/15 border-sky-200 dark:border-sky-500/30'
                     : 'bg-muted/25 border-border/60 opacity-50'
                 }`}
-                title={appAssigned > 0 ? 'App-assigned tickets (by Ticket Pulse service account)' : 'No app-assigned tickets'}
+                title={appTitle}
               >
                 <Bot className={`w-5 h-5 mb-1 ${appAssigned > 0 ? 'text-sky-600 dark:text-sky-300' : 'text-muted-foreground/50'}`} />
                 <div className={`text-lg font-bold ${appAssigned > 0 ? 'text-sky-800 dark:text-sky-200' : 'text-muted-foreground/50'}`}>{appAssigned}</div>

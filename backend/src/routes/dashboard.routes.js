@@ -7,6 +7,7 @@ import prisma from '../services/prisma.js';
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import logger from '../utils/logger.js';
 import { isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
+import { assignerKind } from '../utils/assignerKind.js';
 import { calculateWeeklyDashboard, calculateDailyDashboard, calculateTechnicianDetail, calculateTechnicianWeeklyStats, calculateTechnicianMonthlyStats, calculateMonthlyDashboard } from '../services/statsCalculator.js';
 import { readCache } from '../services/dashboardReadCache.js';
 import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
@@ -234,9 +235,9 @@ router.get(
     // Fetch active technicians, service account names and the workspace's
     // status registry (Phase 8b — resolved ONCE per request; the per-ticket
     // loops in statsCalculator test the resulting Sets synchronously).
-    const [technicians, serviceAccountNames, statusSets] = await Promise.all([
+    const [technicians, assignerNames, statusSets] = await Promise.all([
       technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise, workspaceId: req.workspaceId }),
-      settingsRepository.getServiceAccountNames(),
+      settingsRepository.getAssignerNames(req.workspaceId),
       statusService.baseStatusSets(req.workspaceId),
     ]);
 
@@ -245,7 +246,7 @@ router.get(
 
     // Run stats calculation (sync), avoidance analysis, and leave info in parallel
     const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
-      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday, serviceAccountNames, statusSets)),
+      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday, assignerNames, statusSets)),
       computeDashboardAvoidance(technicians, todayStart, todayEnd, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for daily dashboard:', err);
         return {};
@@ -287,7 +288,8 @@ router.get(
         technicians: techsWithTransformedTickets,
         statistics: dashboardData.statistics,
         categoryMode: getCategoryMode(req.workspaceId),
-        serviceAccountNames,
+        serviceAccountNames: assignerNames.serviceAccountNames,
+        automationAssignerNames: assignerNames.automationNames,
         timestamp: new Date().toISOString(),
       },
     });
@@ -436,9 +438,9 @@ router.get(
 
     // Fetch active technicians, service account names and status registry in
     // parallel (statusSets resolved once per request — Phase 8b).
-    const [technicians, serviceAccountNames, statusSets] = await Promise.all([
+    const [technicians, assignerNames, statusSets] = await Promise.all([
       technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise, workspaceId: req.workspaceId }),
-      settingsRepository.getServiceAccountNames(),
+      settingsRepository.getAssignerNames(req.workspaceId),
       statusService.baseStatusSets(req.workspaceId),
     ]);
 
@@ -447,7 +449,7 @@ router.get(
 
     // Run stats calculation (sync), avoidance analysis, and leave info in parallel
     const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
-      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone, serviceAccountNames, statusSets)),
+      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone, assignerNames, statusSets)),
       computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for weekly dashboard:', err);
         return {};
@@ -482,7 +484,8 @@ router.get(
         technicians: techsWithTickets,
         statistics: dashboardData.statistics,
         categoryMode: getCategoryMode(req.workspaceId),
-        serviceAccountNames,
+        serviceAccountNames: assignerNames.serviceAccountNames,
+        automationAssignerNames: assignerNames.automationNames,
         timestamp: new Date().toISOString(),
       },
     });
@@ -527,9 +530,9 @@ router.get(
     // statusSets: Phase 8b — resolved once per request so custom statuses
     // count under their base. Needed BEFORE the ticket load: the scoped query
     // pulls the open-like backlog by these names.
-    const [statusSets, serviceAccountNames] = await Promise.all([
+    const [statusSets, assignerNames] = await Promise.all([
       statusService.baseStatusSets(req.workspaceId),
-      settingsRepository.getServiceAccountNames(),
+      settingsRepository.getAssignerNames(req.workspaceId),
     ]);
 
     // Only the day's tickets + the open backlog (+ the day's CSAT) — not
@@ -548,7 +551,7 @@ router.get(
       todayStart,
       todayEnd,
       isViewingToday,
-      serviceAccountNames,
+      assignerNames,
       statusSets,
     );
 
@@ -639,9 +642,9 @@ router.get(
 
     // statusSets: Phase 8b, once per request — resolved before the load so the
     // scoped query can pull the open-like backlog by name.
-    const [statusSets, serviceAccountNames] = await Promise.all([
+    const [statusSets, assignerNames] = await Promise.all([
       statusService.baseStatusSets(req.workspaceId),
-      settingsRepository.getServiceAccountNames(),
+      settingsRepository.getAssignerNames(req.workspaceId),
     ]);
 
     // The week's tickets + open backlog + the week's CSAT only (QA 09-25).
@@ -659,7 +662,7 @@ router.get(
       weekStartDate,
       weekEndDate,
       timezone,
-      serviceAccountNames,
+      assignerNames,
       statusSets,
     );
 
@@ -675,11 +678,11 @@ router.get(
 
     // Categorize weekly tickets
     const selfPickedTickets = weeklyTickets.filter(ticket =>
-      ticket.isSelfPicked || ticket.assignedBy === technician.name,
+      assignerKind(ticket, technician.name, assignerNames) === 'self',
     );
 
     const assignedTickets = weeklyTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
+      assignerKind(ticket, technician.name, assignerNames) !== 'self',
     );
 
     // Closed tickets = tickets ASSIGNED during the week that are now closed
@@ -784,9 +787,9 @@ router.get(
     const monthEndDate = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0, 12, 0, 0);
 
     // statusSets: Phase 8b, once per request — before the scoped load.
-    const [statusSets, serviceAccountNames] = await Promise.all([
+    const [statusSets, assignerNames] = await Promise.all([
       statusService.baseStatusSets(req.workspaceId),
-      settingsRepository.getServiceAccountNames(),
+      settingsRepository.getAssignerNames(req.workspaceId),
     ]);
 
     // The month's tickets + open backlog + the month's CSAT only (QA 09-25).
@@ -803,7 +806,7 @@ router.get(
       monthStartDate,
       monthEndDate,
       timezone,
-      serviceAccountNames,
+      assignerNames,
       statusSets,
     );
 
@@ -818,10 +821,10 @@ router.get(
     });
 
     const selfPickedTickets = monthlyTickets.filter(ticket =>
-      ticket.isSelfPicked || ticket.assignedBy === technician.name,
+      assignerKind(ticket, technician.name, assignerNames) === 'self',
     );
     const assignedTickets = monthlyTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
+      assignerKind(ticket, technician.name, assignerNames) !== 'self',
     );
     const closedTickets = monthlyTickets.filter(ticket =>
       statusSets.terminal.has(ticket.status) && !isAutoHelpResolved(ticket),
@@ -1073,9 +1076,9 @@ router.get(
 
     // Fetch active technicians, service account names and status registry in
     // parallel (statusSets resolved once per request — Phase 8b).
-    const [technicians, serviceAccountNames, statusSets] = await Promise.all([
+    const [technicians, assignerNames, statusSets] = await Promise.all([
       technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise, workspaceId: req.workspaceId }),
-      settingsRepository.getServiceAccountNames(),
+      settingsRepository.getAssignerNames(req.workspaceId),
       statusService.baseStatusSets(req.workspaceId),
     ]);
 
@@ -1085,7 +1088,7 @@ router.get(
       monthStartDate,
       monthEndDate,
       timezone,
-      serviceAccountNames,
+      assignerNames,
       statusSets,
     );
 
@@ -1148,7 +1151,8 @@ router.get(
       data: {
         ...monthlyData,
         technicians: techniciansWithMonthTickets,
-        serviceAccountNames,
+        serviceAccountNames: assignerNames.serviceAccountNames,
+        automationAssignerNames: assignerNames.automationNames,
         timestamp: new Date().toISOString(),
       },
     });

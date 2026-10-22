@@ -110,9 +110,9 @@ const ASSIGNMENT_MIX_LABELS = {
     color: ASSIGNMENT_SOURCE_COLORS.selfPicked,
   },
   workflowAssigned: {
-    label: 'Assigned at creation / workflow',
+    label: 'Rule, integration or workflow',
     shortLabel: 'Workflow',
-    description: 'FreshService set the owner when the ticket was created (workflow, automator, email rule or API) — no person assigned it.',
+    description: 'Routed by a rule, not picked: a Ticket Pulse rule (alert bundling, onboarding), an integration such as ContinuIT, or FreshService setting the owner at creation — no person or AI picked.',
     color: ASSIGNMENT_SOURCE_COLORS.workflowAssigned,
   },
   unknown: {
@@ -129,12 +129,42 @@ const TEAM_TIMELINE_METRICS = [
   { key: 'selfPicked', label: 'Self-picked' },
   { key: 'coordinatorAssigned', label: 'Coordinator-assigned' },
   { key: 'appAssigned', label: 'Ticket Pulse-assigned' },
-  { key: 'workflowAssigned', label: 'Assigned at creation / workflow' },
+  { key: 'workflowAssigned', label: 'Rule, integration or workflow' },
   { key: 'unknown', label: 'Source unavailable' },
   { key: 'rejected', label: 'Rejected assignments' },
   { key: 'leaveDays', label: 'Leave days' },
   { key: 'wfhDays', label: 'WFH days' },
 ];
+
+// Cell text for a Team-Safe Distribution column (the desktop table renders
+// one cell per TEAM_TABLE_COLUMNS entry, so header and cell cannot drift).
+function aiShareText(row) {
+  return row.aiSharePct === null || row.aiSharePct === undefined ? '—' : `${row.aiSharePct}%`;
+}
+function teamCell(row, key) {
+  switch (key) {
+  case 'pendingNow': return row.pendingNow || 0;
+  case 'parkedNow': return row.parkedNow || 0;
+  case 'wfhDays': return row.wfhDays || 0;
+  case 'closeRatePct': return `${row.closeRatePct}%`;
+  case 'avgResolutionHours': return row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`;
+  case 'csatAverage': return row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`;
+  case 'assignedPerAvailableDay': return row.assignedPerAvailableDay ?? '—';
+  case 'aiSharePct':
+    return (
+      <span title={row.aiPickable ? `${row.appAssigned} of ${row.aiPickable} tickets that needed an owner picked` : ''}>
+        {aiShareText(row)}
+      </span>
+    );
+  case 'leaveDays':
+    return (
+      <span title={row.leaveTypes?.map((leave) => `${leave.name}: ${leave.days}`).join('\n') || ''}>
+        {row.leaveDays}
+      </span>
+    );
+  default: return row[key] ?? 0;
+  }
+}
 
 // Team-Safe Distribution columns: [sortKey, header label, metricsGlossary key].
 // The glossary key drives the header's ⓘ hint (QA 08-17 #5).
@@ -147,6 +177,7 @@ const TEAM_TABLE_COLUMNS = [
   ['selfPicked', 'Self', 'agentSelfPicked'],
   ['coordinatorAssigned', 'Coordinator', 'agentCoordinatorAssigned'],
   ['appAssigned', 'App', 'agentAppAssigned'],
+  ['aiSharePct', 'AI share', 'agentAiShare'],
   ['workflowAssigned', 'Workflow', 'agentWorkflowAssigned'],
   ['unknown', 'Unattrib.', 'agentSourceUnavailable'],
   ['closed', 'Closed', 'agentClosed'],
@@ -3491,6 +3522,7 @@ export default function Analytics({ view = 'standard' }) {
                   ['Self', row.selfPicked, 'agentSelfPicked'],
                   ['Coord.', row.coordinatorAssigned, 'agentCoordinatorAssigned'],
                   ['App', row.appAssigned, 'agentAppAssigned'],
+                  ['AI share', aiShareText(row), 'agentAiShare'],
                   ['CSAT', row.csatAverage === null ? '—' : row.csatAverage, 'agentCsat'],
                   ['Leave', row.leaveDays, 'agentLeaveDays'],
                   ['WFH', row.wfhDays || 0, 'agentWfhDays'],
@@ -3533,26 +3565,11 @@ export default function Analytics({ view = 'standard' }) {
             <tbody className="divide-y divide-border/60 bg-card">
               {teamRows.map((row) => (
                 <tr key={row.technicianId} className="hover:bg-muted/50">
-                  <td className="px-3 py-2 font-semibold text-foreground">{row.name}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.assigned}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.openNow}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.pendingNow || 0}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.selfPicked}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.coordinatorAssigned}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.appAssigned}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.closed}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.closeRatePct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.rejected}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.availableDays}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.assignedPerAvailableDay ?? '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">
-                    <span title={row.leaveTypes?.map((leave) => `${leave.name}: ${leave.days}`).join('\n') || ''}>
-                      {row.leaveDays}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.wfhDays || 0}</td>
+                  {TEAM_TABLE_COLUMNS.map(([key]) => (
+                    key === 'name'
+                      ? <td key={key} className="px-3 py-2 font-semibold text-foreground">{row.name}</td>
+                      : <td key={key} className="px-3 py-2 text-right tabular-nums text-foreground/85">{teamCell(row, key)}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>

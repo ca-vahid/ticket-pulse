@@ -9,6 +9,7 @@
 import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import { getLoadLevel } from '../config/constants.js';
 import { AUTO_HELP_RESOLVED_KIND, isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
+import { assignerKind, assignerNamesOf } from '../utils/assignerKind.js';
 
 /**
  * Per-workspace status registry support (Phase 8b, QA 08-04 #12).
@@ -94,27 +95,15 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     return assignDate >= rangeStart && assignDate <= rangeEnd;
   });
 
-  // Self-picked tickets today
-  // IMPORTANT: Also treat tickets as self-picked if assignedBy equals the technician's name
-  const selfPickedToday = ticketsToday.filter(ticket =>
-    ticket.isSelfPicked || ticket.assignedBy === tech.name,
-  ).length;
-
-  // Helper to check if a ticket was assigned by the app (service account)
-  const isAppAssignment = (ticket) =>
-    serviceAccountNames.length > 0 &&
-    ticket.assignedBy &&
-    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
-
-  // App-assigned tickets today (assigned by Ticket Pulse service account)
-  const appAssignedToday = ticketsToday.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
-  ).length;
-
-  // Assigned tickets today (by human coordinators, not self-picked and not app-assigned)
-  const assignedTicketsToday = ticketsToday.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
-  );
+  // Who assigned each ticket (utils/assignerKind.js). App = the AI plus
+  // rules and integrations (not a person); Assigned = a person.
+  const names = assignerNamesOf(serviceAccountNames);
+  const kindOf = (ticket) => assignerKind(ticket, tech.name, names);
+  const selfPickedToday = ticketsToday.filter((t) => kindOf(t) === 'self').length;
+  const aiAssignedToday = ticketsToday.filter((t) => kindOf(t) === 'ai').length;
+  const automationAssignedToday = ticketsToday.filter((t) => kindOf(t) === 'automation').length;
+  const appAssignedToday = aiAssignedToday + automationAssignedToday;
+  const assignedTicketsToday = ticketsToday.filter((t) => kindOf(t) === 'person');
   const assignedToday = assignedTicketsToday.length;
 
   // Get list of coordinators who assigned tickets (with counts), excluding service accounts
@@ -177,6 +166,8 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     totalTicketsToday: ticketsToday.length,
     selfPickedToday,
     appAssignedToday,
+    aiAssignedToday,
+    automationAssignedToday,
     assignedToday,
     assigners,
     closedToday,
@@ -223,26 +214,14 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     return assignDate >= tzWeekStart && assignDate <= tzWeekEnd;
   });
 
-  // Self-picked tickets created this week
-  const weeklySelfPicked = weeklyTickets.filter(ticket =>
-    ticket.isSelfPicked || ticket.assignedBy === tech.name,
-  ).length;
-
-  // Helper to check if a ticket was assigned by the app (service account)
-  const isAppAssignment = (ticket) =>
-    serviceAccountNames.length > 0 &&
-    ticket.assignedBy &&
-    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
-
-  // App-assigned tickets this week
-  const weeklyAppAssigned = weeklyTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
-  ).length;
-
-  // Assigned tickets created this week (coordinator-only, excluding app)
-  const assignedTicketsThisWeek = weeklyTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
-  );
+  // Who assigned each ticket (utils/assignerKind.js), as in the daily stats.
+  const names = assignerNamesOf(serviceAccountNames);
+  const kindOf = (ticket) => assignerKind(ticket, tech.name, names);
+  const weeklySelfPicked = weeklyTickets.filter((t) => kindOf(t) === 'self').length;
+  const weeklyAiAssigned = weeklyTickets.filter((t) => kindOf(t) === 'ai').length;
+  const weeklyAutomationAssigned = weeklyTickets.filter((t) => kindOf(t) === 'automation').length;
+  const weeklyAppAssigned = weeklyAiAssigned + weeklyAutomationAssigned;
+  const assignedTicketsThisWeek = weeklyTickets.filter((t) => kindOf(t) === 'person');
   const weeklyAssigned = assignedTicketsThisWeek.length;
 
   // Get list of coordinators who assigned tickets this week (with counts), excluding service accounts
@@ -295,17 +274,9 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
       return assignDate >= dayStart && assignDate <= dayEnd;
     });
 
-    const daySelf = dayTickets.filter(ticket =>
-      ticket.isSelfPicked || ticket.assignedBy === tech.name,
-    ).length;
-
-    const dayAppAssigned = dayTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
-    ).length;
-
-    const dayAssigned = dayTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
-    ).length;
+    const daySelf = dayTickets.filter((t) => kindOf(t) === 'self').length;
+    const dayAppAssigned = dayTickets.filter((t) => kindOf(t) === 'ai' || kindOf(t) === 'automation').length;
+    const dayAssigned = dayTickets.filter((t) => kindOf(t) === 'person').length;
 
     const dayClosed = dayTickets.filter(ticket =>
       isAgentClose(sets, ticket),
@@ -354,6 +325,8 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     weeklyTotalCreated,
     weeklySelfPicked,
     weeklyAppAssigned,
+    weeklyAiAssigned,
+    weeklyAutomationAssigned,
     weeklyAssigned,
     weeklyClosed,
     weeklyAutoHelpResolved,
@@ -416,23 +389,13 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     return assignDate >= tzMonthStart && assignDate <= tzMonthEnd;
   });
 
-  const monthlySelfPicked = monthlyTickets.filter(ticket =>
-    ticket.isSelfPicked || ticket.assignedBy === tech.name,
-  ).length;
-
-  // Helper to check if a ticket was assigned by the app (service account)
-  const isAppAssignment = (ticket) =>
-    serviceAccountNames.length > 0 &&
-    ticket.assignedBy &&
-    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
-
-  const monthlyAppAssigned = monthlyTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
-  ).length;
-
-  const assignedTicketsThisMonth = monthlyTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
-  );
+  const names = assignerNamesOf(serviceAccountNames);
+  const kindOf = (ticket) => assignerKind(ticket, tech.name, names);
+  const monthlySelfPicked = monthlyTickets.filter((t) => kindOf(t) === 'self').length;
+  const monthlyAiAssigned = monthlyTickets.filter((t) => kindOf(t) === 'ai').length;
+  const monthlyAutomationAssigned = monthlyTickets.filter((t) => kindOf(t) === 'automation').length;
+  const monthlyAppAssigned = monthlyAiAssigned + monthlyAutomationAssigned;
+  const assignedTicketsThisMonth = monthlyTickets.filter((t) => kindOf(t) === 'person');
   const monthlyAssigned = assignedTicketsThisMonth.length;
 
   const assignerCounts = {};
@@ -483,17 +446,9 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
       return assignDate >= dayStart && assignDate <= dayEnd;
     });
 
-    const daySelf = dayTickets.filter(ticket =>
-      ticket.isSelfPicked || ticket.assignedBy === tech.name,
-    ).length;
-
-    const dayAppAssigned = dayTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && isAppAssignment(ticket),
-    ).length;
-
-    const dayAssigned = dayTickets.filter(ticket =>
-      !ticket.isSelfPicked && ticket.assignedBy !== tech.name && !isAppAssignment(ticket),
-    ).length;
+    const daySelf = dayTickets.filter((t) => kindOf(t) === 'self').length;
+    const dayAppAssigned = dayTickets.filter((t) => kindOf(t) === 'ai' || kindOf(t) === 'automation').length;
+    const dayAssigned = dayTickets.filter((t) => kindOf(t) === 'person').length;
 
     const dayClosed = dayTickets.filter(ticket =>
       isAgentClose(sets, ticket),
@@ -533,6 +488,8 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     monthlyTotalCreated,
     monthlySelfPicked,
     monthlyAppAssigned,
+    monthlyAiAssigned,
+    monthlyAutomationAssigned,
     monthlyAssigned,
     monthlyClosed,
     monthlyAutoHelpResolved,
@@ -600,6 +557,8 @@ export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewi
     autoHelpResolvedToday: techsWithLoad.reduce((sum, t) => sum + (t.autoHelpResolvedToday || 0), 0),
     selfPickedToday: techsWithLoad.reduce((sum, t) => sum + t.selfPickedToday, 0),
     appAssignedToday: techsWithLoad.reduce((sum, t) => sum + t.appAssignedToday, 0),
+    aiAssignedToday: techsWithLoad.reduce((sum, t) => sum + (t.aiAssignedToday || 0), 0),
+    automationAssignedToday: techsWithLoad.reduce((sum, t) => sum + (t.automationAssignedToday || 0), 0),
     lightLoad: techsWithLoad.filter(t => t.loadLevel === 'light').length,
     mediumLoad: techsWithLoad.filter(t => t.loadLevel === 'medium').length,
     heavyLoad: techsWithLoad.filter(t => t.loadLevel === 'heavy').length,
@@ -653,6 +612,8 @@ export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezo
     weeklyAutoHelpResolved: techsWithWeeklyStats.reduce((sum, t) => sum + (t.weeklyAutoHelpResolved || 0), 0),
     weeklySelfPicked: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklySelfPicked, 0),
     weeklyAppAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyAppAssigned, 0),
+    weeklyAiAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + (t.weeklyAiAssigned || 0), 0),
+    weeklyAutomationAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + (t.weeklyAutomationAssigned || 0), 0),
     weeklyAssigned: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyAssigned, 0),
     weeklyNetChange: techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyNetChange, 0),
     avgTicketsPerTech: parseFloat((techsWithWeeklyStats.reduce((sum, t) => sum + t.weeklyTotalCreated, 0) / techsWithWeeklyStats.length).toFixed(1)),
@@ -699,30 +660,19 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
   const closedTicketsOnDate = ticketsOnDate.filter(ticket => isAgentClose(sets, ticket));
   const autoHelpResolvedTicketsOnDate = ticketsOnDate.filter(ticket => isAutoHelpClose(sets, ticket));
 
-  // Helper to check if a ticket was assigned by the app (service account)
-  const isAppAssignment = (ticket) =>
-    serviceAccountNames.length > 0 &&
-    ticket.assignedBy &&
-    serviceAccountNames.some(name => name.toLowerCase() === ticket.assignedBy.toLowerCase());
+  const names = assignerNamesOf(serviceAccountNames);
+  const kindOf = (ticket) => assignerKind(ticket, technician.name, names);
 
   // Self-picked tickets assigned on the selected date (open + closed)
-  const selfPickedTicketsToday = ticketsOnDate.filter(ticket =>
-    ticket.isSelfPicked || ticket.assignedBy === technician.name,
-  );
+  const selfPickedTicketsToday = ticketsOnDate.filter((t) => kindOf(t) === 'self');
 
-  // Assigned tickets (by coordinator) on the selected date (open + closed)
-  const assignedTicketsToday = ticketsOnDate.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== technician.name && !isAppAssignment(ticket),
-  );
+  // Assigned by a person on the selected date (open + closed)
+  const assignedTicketsToday = ticketsOnDate.filter((t) => kindOf(t) === 'person');
 
   // Currently open tickets separated by type
-  const selfPickedOpenTickets = openTickets.filter(ticket =>
-    ticket.isSelfPicked || ticket.assignedBy === technician.name,
-  );
+  const selfPickedOpenTickets = openTickets.filter((t) => kindOf(t) === 'self');
 
-  const assignedOpenTickets = openTickets.filter(ticket =>
-    !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
-  );
+  const assignedOpenTickets = openTickets.filter((t) => kindOf(t) !== 'self');
 
   return {
     // Basic info
@@ -742,6 +692,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
     autoHelpResolvedOnDateCount: autoHelpResolvedTicketsOnDate.length,
     selfPickedOnDate: stats.selfPickedToday,
     appAssignedOnDate: stats.appAssignedToday,
+    aiAssignedOnDate: stats.aiAssignedToday,
     assignedOnDate: stats.assignedToday,
     loadLevel: stats.loadLevel,
 
@@ -776,6 +727,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
   let monthTotal = 0;
   let monthSelfPicked = 0;
   let monthAppAssigned = 0;
+  let monthAiAssigned = 0;
+  let monthAutomationAssigned = 0;
   let monthAssigned = 0;
   let monthClosed = 0;
   let monthAutoHelpResolved = 0;
@@ -791,6 +744,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     let dayTotal = 0;
     let daySelf = 0;
     let dayAppAssigned = 0;
+    let dayAiAssigned = 0;
+    let dayAutomationAssigned = 0;
     let dayAssigned = 0;
     let dayClosed = 0;
     let dayAutoHelpResolved = 0;
@@ -817,6 +772,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
       dayTotal += stats.totalTicketsToday;
       daySelf += stats.selfPickedToday;
       dayAppAssigned += stats.appAssignedToday;
+      dayAiAssigned += stats.aiAssignedToday;
+      dayAutomationAssigned += stats.automationAssignedToday;
       dayAssigned += stats.assignedToday;
       dayClosed += stats.closedToday;
       dayAutoHelpResolved += stats.autoHelpResolvedToday || 0;
@@ -826,6 +783,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     monthTotal += dayTotal;
     monthSelfPicked += daySelf;
     monthAppAssigned += dayAppAssigned;
+    monthAiAssigned += dayAiAssigned;
+    monthAutomationAssigned += dayAutomationAssigned;
     monthAssigned += dayAssigned;
     monthClosed += dayClosed;
     monthAutoHelpResolved += dayAutoHelpResolved;
@@ -838,6 +797,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
       total: dayTotal,
       selfPicked: daySelf,
       appAssigned: dayAppAssigned,
+      aiAssigned: dayAiAssigned,
+      automationAssigned: dayAutomationAssigned,
       assigned: dayAssigned,
       closed: dayClosed,
       autoHelpResolved: dayAutoHelpResolved,
@@ -850,6 +811,8 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     monthTotal,
     monthSelfPicked,
     monthAppAssigned,
+    monthAiAssigned,
+    monthAutomationAssigned,
     monthAssigned,
     monthClosed,
     // Team line, never per person (Auto-help P1).

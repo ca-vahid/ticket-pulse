@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.10-preview';
+export const APP_VERSION = '4.3.11-preview';
 
 export const changelog = [
+  {
+    version: '4.3.11-preview',
+    date: 'October 21, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The AI-assigned gauge counts what the AI could have picked</strong> &mdash; tickets that a rule or an integration routes (alert bundling, onboarding, ContinuIT) were counted against the AI, and ContinuIT&rsquo;s were even counted as assigned by a person. They are now left out of the gauge, so this week in IT reads 72&nbsp;%, not 62&nbsp;%. Hover the gauge for the counts. On each technician&rsquo;s row, App now means &ldquo;not assigned by a person&rdquo;, and its hover splits the AI from rules and integrations.' },
+      { type: 'fixed', html: '<strong>Self-picks made in FreshService count as self-picks</strong> &mdash; a ticket a technician took in FreshService (&ldquo;Mehdi Abbaspour (in FreshService)&rdquo;) was counted as assigned to them by someone else.' },
+      { type: 'new', html: '<strong>AI share per person in Analytics</strong> &mdash; Team Balance has a new AI share column: of each person&rsquo;s tickets that needed an owner picked, the share the AI picked. It shows how work reached each person, not how well they work, and is hidden below 5 tickets. Rules and integrations now count under Workflow, not Coordinator.' },
+      { type: 'fixed', html: '<strong>Team Balance table lines up again</strong> &mdash; on wide screens three columns (Parked Now, Workflow, Unattrib.) had headers but no values, so every number from Parked Now on sat under the wrong heading.' },
+    ],
+  },
   {
     version: '4.3.10-preview',
     date: 'October 21, 2026',
