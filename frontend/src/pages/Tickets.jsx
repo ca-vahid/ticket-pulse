@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide,
-  ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox,
+  ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight, Inbox,
   AlignJustify, CheckCheck, Columns3, Hand, ListChecks, ListFilter, Loader2, MailQuestion, Plus, Rows4, Settings2, ShieldCheck, Sparkles, UserRound, X,
   Focus as FocusIcon,
 } from 'lucide-react';
@@ -69,6 +69,11 @@ const BULK_DELETE_MAX = 25;
 
 // Desktop-sized window: the Tickets page becomes a fixed working area.
 const DOCKED_QUERY = '(min-width: 1024px) and (min-height: 600px)';
+// QA 10-21 #3: the six quick filter cards, or one slim line of counts. A
+// personal choice (local mirror + the queue.cards preference); before anyone
+// chooses, phones get the line and wider screens the cards.
+const PHONE_QUERY = '(max-width: 639px)';
+const CARDS_CHOICES = ['cards', 'line'];
 
 // Folds its child away (height and fade together, both ways) while `folded`;
 // a no-op off the docked layout. `padded` leaves space for the cards' shadows
@@ -656,6 +661,33 @@ export default function Tickets() {
     return () => { cancelled = true; };
   }, [workspaceId]);
   const effectivePageSize = boardMode ? 50 : pageSizePref;
+
+  const [cardsPref, setCardsPref] = useState(() => {
+    try {
+      const v = localStorage.getItem('tp_queue_cards');
+      return CARDS_CHOICES.includes(v) ? v : null;
+    } catch { return null; }
+  });
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference('queue.cards')
+      .then((res) => {
+        const value = res?.data?.value;
+        if (cancelled || !CARDS_CHOICES.includes(value)) return;
+        setCardsPref(value);
+        try { localStorage.setItem('tp_queue_cards', value); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+  const phone = useMediaQuery(PHONE_QUERY);
+  const cardsHidden = (cardsPref || (phone ? 'line' : 'cards')) === 'line';
+  const toggleCards = () => {
+    const next = cardsHidden ? 'cards' : 'line';
+    setCardsPref(next);
+    try { localStorage.setItem('tp_queue_cards', next); } catch { /* no-op */ }
+    ticketsAPI.setQueuePreference('queue.cards', next).catch(() => { /* local mirror still applies */ });
+  };
 
   // FR 09-09: which URL params make up each filter group the relief endpoint
   // can name. Kept beside queryParams so the two never drift.
@@ -1781,6 +1813,8 @@ export default function Tickets() {
   // floor stop a short list from flickering between the two.
   const [cardsFolded, setCardsFolded] = useState(false);
   useEffect(() => { if (!docked) setCardsFolded(false); }, [docked]);
+  // QA 10-21 #3: the slim line shows when the person chose it, or while scrolled.
+  const cardsLineShown = cardsHidden || (docked && cardsFolded);
   // A new filter, sort or page starts the list at its top (the page used to
   // scroll back up; now the list pane does). Opening the side preview does not.
   const listViewKey = queueSearchToKeep(location.search);
@@ -2016,29 +2050,41 @@ export default function Tickets() {
                 The set comes from meta.queueCards (admin-configurable, Phase
                 FC); the hover gear deep-links admins to the configurator. */}
             {/* Phone (12 Oct 2026): one line you swipe sideways, not a wall of six
-                cards that pushed the list off the first screen. */}
-            {docked && (
-              <Fold on folded={!cardsFolded}><div className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 px-1" role="group" aria-label="Quick segments" data-testid="cards-folded">
-                {queueCards.map((key) => {
-                  const seg = QUEUE_CARD_REGISTRY[key];
-                  const active = cardIsActive(key);
-                  const count = stats?.[seg.countKey];
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => pickCard(key)}
-                      aria-pressed={active}
-                      className={`tp-focus-ring inline-flex items-baseline gap-1.5 rounded-md py-0.5 text-sm transition-colors ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                      <span className={`font-bold tabular-nums ${seg.num}`}>{count == null ? '–' : count.toLocaleString()}</span>
-                      <span className={active ? 'font-semibold underline decoration-blue-500 decoration-2 underline-offset-4' : ''}>{seg.label}{cardWindowNote(seg)}</span>
-                    </button>
-                  );
-                })}
-              </div></Fold>
-            )}
-            <Fold on={docked} folded={cardsFolded} padded><div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
+                cards that pushed the list off the first screen. QA 10-21 #3:
+                the same slim line is also a choice ("Hide the cards"), on any
+                screen, and it folds in and out with the same motion. */}
+            <Fold on folded={!cardsLineShown}><div className="tp-swipe-row -mx-4 mb-3 flex flex-nowrap items-baseline gap-x-5 gap-y-1 overflow-x-auto px-5 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-1" role="group" aria-label="Quick segments" data-testid="cards-folded">
+              {queueCards.map((key) => {
+                const seg = QUEUE_CARD_REGISTRY[key];
+                const active = cardIsActive(key);
+                const count = stats?.[seg.countKey];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => pickCard(key)}
+                    aria-pressed={active}
+                    className={`tp-focus-ring inline-flex items-baseline gap-1.5 rounded-md py-0.5 text-sm transition-colors ${active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <span className={`font-bold tabular-nums ${seg.num}`}>{count == null ? '–' : count.toLocaleString()}</span>
+                    <span className={`whitespace-nowrap ${active ? 'font-semibold underline decoration-blue-500 decoration-2 underline-offset-4' : ''}`}>{seg.label}{cardWindowNote(seg)}</span>
+                  </button>
+                );
+              })}
+              {cardsHidden && (
+                <button
+                  type="button"
+                  onClick={toggleCards}
+                  aria-expanded="false"
+                  data-testid="cards-show"
+                  className="tp-focus-ring inline-flex flex-shrink-0 items-center gap-1 self-center rounded-md py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                    Show the cards
+                </button>
+              )}
+            </div></Fold>
+            <Fold on folded={cardsLineShown} padded><div className="relative group/cards tp-swipe-row -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 mb-3 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 sm:mb-4 lg:grid-cols-6" role="group" aria-label="Quick segments">
               {queueCards.map((key, cardIndex) => {
                 const seg = QUEUE_CARD_REGISTRY[key];
                 // Phone: "Mine" sits second — the rail's My open view, one tap
@@ -2100,11 +2146,23 @@ export default function Tickets() {
                   to="/settings#ticket-ops"
                   aria-label="Customize quick filter cards"
                   title="Customize which six cards show here (Settings → Ticket Ops)"
-                  className="tp-focus-ring absolute -top-2 -right-2 z-10 p-1.5 rounded-full bg-card border border-border shadow-subtle text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-500/30 opacity-0 group-hover/cards:opacity-100 focus:opacity-100 transition-opacity"
+                  className="tp-focus-ring absolute -top-2 right-6 z-10 hidden p-1.5 rounded-full bg-card border border-border shadow-subtle text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-500/30 opacity-0 group-hover/cards:opacity-100 focus:opacity-100 transition-opacity sm:block"
                 >
                   <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
                 </Link>
               )}
+              {/* QA 10-21 #3: fold the cards into the slim line, remembered per person. */}
+              <button
+                type="button"
+                onClick={toggleCards}
+                aria-expanded="true"
+                aria-label="Hide the cards"
+                title="Hide the cards (show one line of counts)"
+                data-testid="cards-hide"
+                className="tp-focus-ring flex flex-shrink-0 snap-start items-center justify-center rounded-xl border border-border/60 bg-card px-2.5 text-muted-foreground shadow-subtle hover:text-foreground sm:absolute sm:-top-2 sm:-right-2 sm:z-10 sm:rounded-full sm:p-1.5 sm:opacity-60 sm:hover:opacity-100 sm:focus:opacity-100"
+              >
+                <ChevronUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
+              </button>
             </div></Fold>
 
             {/* Unmatched replies (Phase RL, RL-4): the button sits in the

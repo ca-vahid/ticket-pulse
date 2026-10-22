@@ -81,6 +81,8 @@ const cardRow = () => screen.getByRole('group', { name: 'Quick segments' });
 // The docked layout also mounts the folded one-line strip (aria-hidden until
 // the list scrolls), so card text is looked up inside the visible card row.
 const inCards = () => within(cardRow());
+// The card buttons (aria-pressed), not the hide toggle beside them.
+const cardButtons = () => [...cardRow().querySelectorAll('button[aria-pressed]')];
 
 function mount(initialEntry = '/tickets') {
   return render(<Tickets />, {
@@ -92,8 +94,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   roleRef.value = 'viewer';
+  // A desktop: docked, and not the phone query (QA 10-21 #3 shows phones the line).
   window.matchMedia = vi.fn().mockImplementation((query) => ({
-    matches: true,
+    matches: !String(query).includes('max-width: 639px'),
     media: query,
     addListener: vi.fn(),
     removeListener: vi.fn(),
@@ -114,7 +117,7 @@ describe('Quick filter cards (Phase FC)', () => {
   test('no meta.queueCards → today\'s exact classic six render, in order', async () => {
     mount();
     await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
-    const labels = [...cardRow().querySelectorAll('button')].map((b) => b.textContent);
+    const labels = cardButtons().map((b) => b.textContent);
     expect(labels).toEqual(DEFAULT_QUEUE_CARDS.map((k) => `${STATS[QUEUE_CARD_REGISTRY[k].countKey].toLocaleString()}${QUEUE_CARD_REGISTRY[k].label}`));
   });
 
@@ -123,7 +126,7 @@ describe('Quick filter cards (Phase FC)', () => {
     mount();
     await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
     expect(inCards().getByText('Due today')).toBeInTheDocument();
-    expect(cardRow().querySelectorAll('button')).toHaveLength(6);
+    expect(cardButtons()).toHaveLength(6);
   });
 
   test('a configured set renders the created-period card with its real count', async () => {
@@ -194,5 +197,43 @@ describe('Quick filter cards (Phase FC)', () => {
     mount();
     await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
     expect(screen.queryByRole('link', { name: 'Customize quick filter cards' })).not.toBeInTheDocument();
+  });
+
+  // QA 10-21 #3: the cards fold into one line of counts and back, remembered.
+  test('Hide the cards folds them into the line, remembered; Show the cards brings them back', async () => {
+    mount();
+    await waitFor(() => expect(inCards().getByText('All tickets')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the cards' }));
+    await waitFor(() => expect(screen.getByTestId('cards-folded').closest('.tp-fold')).toHaveAttribute('data-folded', 'false'));
+    expect(screen.getByTestId('cards-hide').closest('.tp-fold')).toHaveAttribute('data-folded', 'true');
+    expect(setPrefSpy).toHaveBeenCalledWith('queue.cards', 'line');
+    expect(localStorage.getItem('tp_queue_cards')).toBe('line');
+    // The line still filters: its counts are buttons too.
+    expect(within(screen.getByTestId('cards-folded')).getByText('Awaiting reply')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('cards-show'));
+    await waitFor(() => expect(screen.getByTestId('cards-hide').closest('.tp-fold')).toHaveAttribute('data-folded', 'false'));
+    expect(setPrefSpy).toHaveBeenLastCalledWith('queue.cards', 'cards');
+  });
+
+  test('a phone starts with the line until the person chooses the cards', async () => {
+    window.matchMedia = vi.fn().mockImplementation((query) => ({
+      matches: String(query).includes('max-width: 639px'),
+      media: query,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    mount();
+    await waitFor(() => expect(within(screen.getByTestId('cards-folded')).getByText('All tickets')).toBeInTheDocument());
+    expect(screen.getByTestId('cards-folded').closest('.tp-fold')).toHaveAttribute('data-folded', 'false');
+    expect(screen.getByTestId('cards-show')).toBeInTheDocument();
+  });
+
+  test('a saved choice of the line wins on a desktop', async () => {
+    getPrefSpy.mockImplementation((key) => Promise.resolve({ data: { key, value: key === 'queue.cards' ? 'line' : null } }));
+    mount();
+    await waitFor(() => expect(screen.getByTestId('cards-folded').closest('.tp-fold')).toHaveAttribute('data-folded', 'false'));
   });
 });

@@ -26,6 +26,7 @@ export const EVENT_META = {
   sla_pre_breach: { icon: '⏳', word: 'Due soon', heading: 'SLA about to breach', banner: 'warning' },
   sla_breach: { icon: '🔥', word: 'Overdue', heading: 'SLA breached', banner: 'attention' },
   approval_waiting: { icon: '✅', word: 'Approval', heading: 'Approval waiting for you', banner: 'accent' },
+  survey_response: { icon: '⭐', word: 'Survey', heading: 'Survey response', banner: 'accent' },
   group_unassigned: { icon: '🆕', word: 'New', heading: 'New unassigned ticket', banner: 'accent' },
   test: { icon: '👋', word: 'Test', heading: 'Test message', banner: 'accent' },
   av_submitted: { icon: '🗓️', word: 'Availability', heading: 'Time away', banner: 'accent' },

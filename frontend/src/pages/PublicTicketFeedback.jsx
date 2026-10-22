@@ -458,12 +458,6 @@ export default function PublicTicketFeedback() {
           ))}
         </div>
 
-        {urlScore && selected === urlScore && (
-          <p className="mt-2.5 text-center text-xs font-medium" style={{ color: accent }}>
-            We carried over your pick from the email — adjust if you like, then send.
-          </p>
-        )}
-
         {page.commentEnabled !== false && (
           <div className="mt-5">
             <label htmlFor="tp-feedback-comment" className="sr-only">{page.commentPrompt || 'Additional comments'}</label>

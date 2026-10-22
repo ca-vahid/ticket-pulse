@@ -135,6 +135,15 @@ class VtWriteBack {
     await prisma.avRequest.update({ where: { id: requestId }, data: { ...data, events: { create: { kind, actor: 'vacation_tracker', details } } } });
   }
 
+  /** A skip is noted once: the hourly retry does not add the same line again. */
+  async _skip(requestId, reason) {
+    const last = await Promise.resolve()
+      .then(() => prisma.avRequestEvent.findFirst({ where: { requestId, kind: { startsWith: 'vt_' } }, orderBy: { id: 'desc' }, select: { kind: true, details: true } }))
+      .catch(() => null);
+    if (last?.kind === 'vt_write_skipped' && last.details?.reason === reason) return;
+    await this._event(requestId, 'vt_write_skipped', { reason });
+  }
+
   /** An approved leave already in Vacation Tracker with the same person, type and dates. */
   async _findExisting(client, body) {
     const leaves = await client.listLeaves({ startDate: body.startDate, endDate: body.endDate, status: 'APPROVED' });
@@ -175,7 +184,7 @@ class VtWriteBack {
       const found = await this._locate(request.email);
       if (found.reason === 'no_key') return { skipped: 'no_key' };
       if (found.reason === 'no_user') {
-        await this._event(request.id, 'vt_write_skipped', { reason: 'Not a Vacation Tracker user' });
+        await this._skip(request.id, 'Not a Vacation Tracker user');
         return { skipped: 'no_user' };
       }
       const { account, client, vtUser, types } = found;
@@ -183,7 +192,7 @@ class VtWriteBack {
       const type = allTypes.find((t) => t.id === request.leaveTypeId);
       const vtType = type ? vtTypeForAvType(type, types, allTypes) : null;
       if (!vtType) {
-        await this._event(request.id, 'vt_write_skipped', { reason: `No Vacation Tracker leave type matches "${type?.name || request.leaveTypeId}"` });
+        await this._skip(request.id, `No Vacation Tracker leave type matches "${type?.name || request.leaveTypeId}"`);
         return { skipped: 'no_type' };
       }
       const body = leaveBodyFor(request, { vtUserId: vtUser.id, vtLeaveTypeId: vtType.id });
@@ -270,7 +279,10 @@ class VtWriteBack {
         where: { status: 'approved', source: 'app', externalId: null, endDate: { gte: toDay(today) } },
         include: { events }, orderBy: { startDate: 'asc' }, take: 500,
       });
-      for (const r of owed.filter((x) => !settled(x, ['vt_written', 'vt_write_skipped'], 'vt_write_failed')).slice(0, limit)) {
+      // QA 10-21 #1: a skip (no matching type, or not a user there yet) is
+      // tried again each hour, so once Vacation Tracker has a "Banked time"
+      // type the upcoming banked days go over without anyone re-booking them.
+      for (const r of owed.filter((x) => !settled(x, ['vt_written'], 'vt_write_failed')).slice(0, limit)) {
         const res = await this.pushApproved(r.id);
         if (res.ok) out.written += 1; else if (res.failed) out.failed += 1;
       }

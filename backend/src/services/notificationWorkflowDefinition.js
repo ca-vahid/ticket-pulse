@@ -2134,6 +2134,7 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     // every template; they are left out of the picker so each link is listed once
     // (QA 10-19 #1: "why are there 2 raise urgency links?").
     variable('requester.name', 'Requester name', 'Requester', 'Requester display name.', 'Requester Name'),
+    variable('requester.firstName', 'Requester first name', 'Requester', 'The first name from the requester\'s display name ("Sam" for "Sam Khadem" or "Khadem, Sam"). Blank when the name is missing.', 'Sam'),
     variable('requester.email', 'Requester email', 'Requester', 'Requester email address.', 'requester@example.com'),
     variable('requester.department', 'Requester FreshService department/location', 'Requester', 'FreshService requester department_names value. In this workspace it is often an office/location label.', 'Vancouver'),
     variable('requester.freshserviceDepartment', 'Requester FreshService department/location', 'Requester', 'Explicit alias for the FreshService requester department/location label.', 'Vancouver'),

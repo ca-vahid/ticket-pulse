@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { CalendarDays, CalendarRange, Inbox, LayoutDashboard, Rows3, Settings2 } from 'lucide-react';
+import { CalendarDays, CalendarRange, History, Inbox, LayoutDashboard, Rows3, Settings2 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import LightTabBar from '../components/common/LightTabBar';
@@ -13,6 +13,7 @@ import MonthCalendarPanel from '../components/availability/MonthCalendarPanel';
 import OverviewPanel from '../components/availability/OverviewPanel';
 import ApprovalsPanel from '../components/availability/ApprovalsPanel';
 import AdminSettingsPanel from '../components/availability/AdminSettingsPanel';
+import RequestHistoryPanel from '../components/availability/RequestHistoryPanel';
 
 /**
  * Availability — the native Vacation Tracker replacement.
@@ -22,6 +23,7 @@ import AdminSettingsPanel from '../components/availability/AdminSettingsPanel';
  *   /availability/month      the month with named bars
  *   /availability/my-time    balances, book time away (live verdict), my requests
  *   /availability/approvals  pending requests I may decide (approvers / admins)
+ *   /availability/history    anyone's requests, past and present (admins, QA 10-21 #1)
  *   /availability/settings   types, groups, rules, offices, people, balances, import
  *
  * Open to every signed-in person, agents included — booking your own time is
@@ -29,7 +31,7 @@ import AdminSettingsPanel from '../components/availability/AdminSettingsPanel';
  * waiting (or admins); Settings only to Availability admins.
  */
 
-const TAB_IDS = ['overview', 'calendar', 'month', 'my-time', 'approvals', 'settings'];
+const TAB_IDS = ['overview', 'calendar', 'month', 'my-time', 'approvals', 'history', 'settings'];
 
 export default function Availability() {
   const { tab } = useParams();
@@ -68,6 +70,7 @@ export default function Availability() {
       { id: 'my-time', label: 'My time', icon: CalendarDays },
     ];
     if (me && (pending > 0 || Number(me.otherApprovals) > 0 || me.isAdmin)) list.push({ id: 'approvals', label: 'Approvals', icon: Inbox, badge: pending, badgeLabel: 'waiting' });
+    if (me?.isAdmin) list.push({ id: 'history', label: 'History', icon: History });
     if (me?.isAdmin) list.push({ id: 'settings', label: 'Settings', icon: Settings2 });
     return list;
   }, [me, pending]);
@@ -88,6 +91,7 @@ export default function Availability() {
         {tab === 'month' && <MonthCalendarPanel me={me} />}
         {tab === 'my-time' && <MyTimePanel me={me} onChanged={loadMe} toast={toast.show} />}
         {tab === 'approvals' && <ApprovalsPanel me={me} nameByEmail={nameByEmail} toast={toast.show} onChanged={loadMe} />}
+        {tab === 'history' && <RequestHistoryPanel me={me} config={config} />}
         {tab === 'settings' && <AdminSettingsPanel config={config} error={configError} reload={reloadAdmin} toast={toast.show} />}
       </section>
     );

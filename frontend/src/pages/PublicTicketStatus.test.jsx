@@ -104,7 +104,10 @@ describe('PublicTicketStatus', () => {
   test('open and assigned: In progress, helper named, human ETA, jargon tucked away', async () => {
     const { container } = renderPage(basePayload());
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('In progress');
-    expect(stepStates()).toEqual(['complete', 'complete', 'current', 'upcoming']);
+    expect(stepStates()).toEqual(['complete', 'current', 'upcoming']);
+    // QA 10-21 #6: three bars, no Assigned step.
+    expect(within(screen.getByRole('list', { name: 'Progress' })).queryByText('Assigned')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Where it stands' })).toBeInTheDocument();
     expect(screen.getByText('Sam Okafor')).toBeInTheDocument();
     expect(screen.getByText('Most requests like this are done within about a day.')).toBeInTheDocument();
     // Percentile/sample size only inside the disclosure; no stats tiles or confidence badge.
@@ -120,7 +123,7 @@ describe('PublicTicketStatus', () => {
       timeline: [{ key: 'received', label: 'Received' }, { key: 'active', label: 'In progress' }],
     }));
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('Received');
-    expect(stepStates()).toEqual(['complete', 'current', 'upcoming', 'upcoming']);
+    expect(stepStates()).toEqual(['current', 'upcoming', 'upcoming']);
     expect(screen.getByText('Not assigned yet')).toBeInTheDocument();
     expect(screen.getByText('We will pick someone shortly.')).toBeInTheDocument();
   });
@@ -131,7 +134,7 @@ describe('PublicTicketStatus', () => {
       eta: { state: 'paused', paused: true, sampleSize: 0 },
     }));
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('Waiting on you');
-    expect(stepStates()).toEqual(['complete', 'complete', 'current', 'upcoming']);
+    expect(stepStates()).toEqual(['complete', 'current', 'upcoming']);
     expect(screen.getByText('We need something from you before we can continue.')).toBeInTheDocument();
   });
 
@@ -139,11 +142,15 @@ describe('PublicTicketStatus', () => {
     renderPage(basePayload({
       ticket: { status: 'Closed', statusTone: 'resolved', closedAt: '2026-10-14T17:20:00.000Z' },
       timeline: [{ key: 'received' }, { key: 'assigned' }, { key: 'closed', label: 'Closed' }],
-      eta: { state: 'resolved', isComplete: true, actualResolutionLabel: '1h 20m', sampleSize: 0 },
+      eta: { state: 'resolved', isComplete: true, actualResolutionLabel: '1h 20m', actualResolutionSeconds: 4800, sampleSize: 0 },
     }));
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('Closed');
-    expect(stepStates()).toEqual(['complete', 'complete', 'complete', 'complete']);
-    expect(screen.getByText('Closed in 1h 20m.')).toBeInTheDocument();
+    expect(stepStates()).toEqual(['complete', 'complete', 'complete']);
+    // QA 10-21 #8: a heading that fits a closed ticket, the time in words.
+    expect(screen.getByRole('heading', { name: 'Where it stands' })).toBeInTheDocument();
+    expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
+    expect(screen.getByText('Closed in 1 hour 20 minutes.')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing more is needed from you\./)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Mark as urgent/ })).not.toBeInTheDocument();
     expect(screen.getByText('Still not right?')).toBeInTheDocument();
   });
@@ -176,7 +183,7 @@ describe('PublicTicketStatus', () => {
     stage: 'closed',
     tone: 'resolved',
     headline: 'Closed',
-    current: 4,
+    current: 3,
     assigned: false,
     waitingOnRequester: false,
     reopened: false,
@@ -184,7 +191,6 @@ describe('PublicTicketStatus', () => {
     mergedInto: null,
     steps: [
       { key: 'received', label: 'Received', state: 'complete' },
-      { key: 'assigned', label: 'Assigned', state: 'skipped' },
       { key: 'in_progress', label: 'In progress', state: 'skipped' },
       { key: 'closed', label: 'Closed', state: 'complete' },
     ],
@@ -199,8 +205,8 @@ describe('PublicTicketStatus', () => {
       progress: serverProgress(),
     }));
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('Closed');
-    expect(stepStates()).toEqual(['complete', 'skipped', 'skipped', 'complete']);
-    expect(screen.getByText('Assigned', { exact: false }).textContent).toMatch(/skipped/);
+    expect(stepStates()).toEqual(['complete', 'skipped', 'complete']);
+    expect(screen.getByText('In progress', { exact: false }).textContent).toMatch(/skipped/);
     expect(screen.getByText('This request is closed.')).toBeInTheDocument();
     expect(screen.queryByText('Not assigned yet')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Mark as urgent/ })).not.toBeInTheDocument();
@@ -213,7 +219,7 @@ describe('PublicTicketStatus', () => {
       eta: { state: 'resolved', sampleSize: 0 },
     }));
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('Closed');
-    expect(stepStates()).toEqual(['complete', 'skipped', 'skipped', 'complete']);
+    expect(stepStates()).toEqual(['complete', 'skipped', 'complete']);
   });
 
   test('merged: says where the request continues and links there', async () => {
@@ -232,6 +238,8 @@ describe('PublicTicketStatus', () => {
       }),
     }));
     expect(await screen.findByTestId('status-headline')).toHaveTextContent('Merged');
+    // A server still sending four steps (mid-deploy): the Assigned one is dropped.
+    expect(stepStates()).toEqual(['complete', 'complete', 'complete']);
     expect(screen.getByText('This request continues on TP-10020.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /See the status of TP-10020/ }))
       .toHaveAttribute('href', 'https://status.example.com/ticket-status/other');
@@ -244,12 +252,11 @@ describe('PublicTicketStatus', () => {
         stage: 'in_progress',
         tone: 'open',
         headline: 'Reopened',
-        current: 2,
+        current: 1,
         assigned: true,
         reopened: true,
         steps: [
           { key: 'received', label: 'Received', state: 'complete' },
-          { key: 'assigned', label: 'Assigned', state: 'complete' },
           { key: 'in_progress', label: 'In progress', state: 'current' },
           { key: 'resolved', label: 'Resolved', state: 'upcoming' },
         ],
@@ -266,12 +273,11 @@ describe('PublicTicketStatus', () => {
         stage: 'waiting',
         tone: 'waiting',
         headline: 'On hold',
-        current: 2,
+        current: 1,
         assigned: true,
         resumeAt: '2026-10-20T16:00:00.000Z',
         steps: [
           { key: 'received', label: 'Received', state: 'complete' },
-          { key: 'assigned', label: 'Assigned', state: 'complete' },
           { key: 'waiting', label: 'On hold', state: 'current' },
           { key: 'resolved', label: 'Resolved', state: 'upcoming' },
         ],

@@ -71,7 +71,7 @@ import {
   registerWorkflowConditionOps,
 } from './notificationConditionModel.js';
 import { AUTO_HELP_THANKS_VERDICTS, conditionSwitchStop } from './conditionRuleShared.js';
-import { bulletproofButtons } from '../utils/emailHtmlHardening.js';
+import { bulletproofButtons, withBaseFont } from '../utils/emailHtmlHardening.js';
 
 const liquid = new Liquid({
   strictFilters: false,
@@ -3274,8 +3274,9 @@ async function executeNode({
     state.email = email;
     const subject = email.subject || node.data?.subject || 'Ticket Pulse notification';
     // Padded-anchor "buttons" become table-cell buttons for classic Outlook
-    // (QA 09-22 #3) — every template, at send time.
-    const htmlBody = bulletproofButtons(email.html) || null;
+    // (QA 09-22 #3) — every template, at send time. One base font, so Preview
+    // and every inbox show the same letters (QA 10-21 #10).
+    const htmlBody = email.html ? bulletproofButtons(withBaseFont(email.html)) : null;
     const textBody = email.text || stripHtml(htmlBody);
     const actionLinks = compactActionLinkDiagnostics(email.actionLinks || {});
     const branding = email.branding || {

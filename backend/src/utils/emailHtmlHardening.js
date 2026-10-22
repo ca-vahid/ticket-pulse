@@ -76,4 +76,30 @@ export function bulletproofButtons(html) {
   });
 }
 
-export default { bulletproofButtons };
+// The font every workflow e-mail falls back to (the engine's own blocks use it).
+export const EMAIL_BASE_FONT = 'Arial,Helvetica,sans-serif';
+const BASE_FONT_MARK = 'data-tp-base-font';
+
+/**
+ * Text a template leaves without a font-family gets the client's default:
+ * Times in a browser (the Preview page) and classic Outlook, Aptos or Segoe UI
+ * in new Outlook. So one e-mail looked different in Preview and in the inbox
+ * (QA 10-21 #10). Wrapping the body in one font makes them agree; a template's
+ * own font-family still wins. Idempotent.
+ */
+export function withBaseFont(html) {
+  const input = String(html || '');
+  if (!input.trim() || input.includes(BASE_FONT_MARK)) return input;
+  const bodyTag = /<body\b([^>]*)>/i.exec(input);
+  if (bodyTag) {
+    const attrs = bodyTag[1] || '';
+    const styled = /\sstyle\s*=\s*"([^"]*)"/i.exec(attrs);
+    const nextAttrs = styled
+      ? (/font-family\s*:/i.test(styled[1]) ? attrs : attrs.replace(styled[0], ` style="font-family:${EMAIL_BASE_FONT};${styled[1]}"`))
+      : `${attrs} style="font-family:${EMAIL_BASE_FONT};"`;
+    return input.replace(bodyTag[0], `<body${nextAttrs} ${BASE_FONT_MARK}="1">`);
+  }
+  return `<div ${BASE_FONT_MARK}="1" style="font-family:${EMAIL_BASE_FONT};">${input}</div>`;
+}
+
+export default { bulletproofButtons, withBaseFont };

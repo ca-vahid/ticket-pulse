@@ -2245,6 +2245,8 @@ export const availabilityAPI = {
   decide: (id, action, note) => api.post(`/availability/requests/${id}/decision`, { action, note }),
 
   adminConfig: () => api.get('/availability/admin/config'),
+  // QA 10-21 #1: anyone's requests, past and present (admins).
+  requestHistory: (params = {}) => api.get('/availability/admin/requests', { params }),
   updateSettings: (data) => api.patch('/availability/admin/settings', data),
   saveOffice: (data) => api.post('/availability/admin/offices', data),
   saveLeaveType: (data) => api.post('/availability/admin/leave-types', data),

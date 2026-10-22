@@ -11,6 +11,7 @@ const prismaMock = {
   vacationTrackerConfig: { findMany: jest.fn() },
   avLeaveType: { findMany: jest.fn() },
   avRequest: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  avRequestEvent: { findFirst: jest.fn() },
   technicianLeave: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
 };
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -206,8 +207,9 @@ describe('sweep', () => {
     prismaMock.avRequest.findMany.mockResolvedValueOnce(owed).mockResolvedValueOnce([]);
     const pushed = [];
     wb.pushApproved = jest.fn(async (id) => { pushed.push(id); return { ok: true }; });
-    expect(await wb.sweep({ today: day('2026-10-13') })).toEqual({ written: 2, cancelled: 0, failed: 0 });
-    expect(pushed).toEqual([1, 2]);
+    expect(await wb.sweep({ today: day('2026-10-13') })).toEqual({ written: 3, cancelled: 0, failed: 0 });
+    // QA 10-21 #1: a skip (no matching type in Vacation Tracker) is tried again.
+    expect(pushed).toEqual([1, 2, 4]);
     expect(prismaMock.avRequest.findMany.mock.calls[0][0].where).toMatchObject({ status: 'approved', source: 'app', externalId: null, endDate: { gte: day('2026-10-13') } });
   });
 
@@ -226,5 +228,18 @@ describe('sweep', () => {
     prismaMock.avSettings.findUnique.mockResolvedValue({ id: 1, vtWriteBackEnabled: false });
     expect(await wb.sweep()).toEqual({ skipped: 'off' });
     expect(prismaMock.avRequest.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('a skip is noted once (QA 10-21 #1)', () => {
+  test('the hourly retry does not add the same skipped line again', async () => {
+    prismaMock.avRequestEvent.findFirst.mockResolvedValue({ kind: 'vt_write_skipped', details: { reason: 'Not a Vacation Tracker user' } });
+    prismaMock.avRequest.update.mockClear();
+    await wb._skip(161, 'Not a Vacation Tracker user');
+    expect(prismaMock.avRequest.update).not.toHaveBeenCalled();
+    prismaMock.avRequestEvent.findFirst.mockResolvedValue({ kind: 'vt_write_skipped', details: { reason: 'something else' } });
+    await wb._skip(161, 'Not a Vacation Tracker user');
+    expect(prismaMock.avRequest.update).toHaveBeenCalledTimes(1);
+    expect(prismaMock.avRequest.update.mock.calls[0][0].data.events.create).toMatchObject({ kind: 'vt_write_skipped', details: { reason: 'Not a Vacation Tracker user' } });
   });
 });

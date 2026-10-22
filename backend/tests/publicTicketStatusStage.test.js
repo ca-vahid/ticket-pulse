@@ -92,8 +92,8 @@ describe('public status stage: closed or resolved without an assignee', () => {
     expect(progress.stage).toBe('closed');
     expect(progress.headline).toBe('Closed');
     expect(progress.tone).toBe('resolved');
-    expect(states(progress)).toEqual(['complete', 'skipped', 'skipped', 'complete']);
-    expect(labels(progress)).toEqual(['Received', 'Assigned', 'In progress', 'Closed']);
+    expect(states(progress)).toEqual(['complete', 'skipped', 'complete']);
+    expect(labels(progress)).toEqual(['Received', 'In progress', 'Closed']);
   });
 
   test('closed even when the closed_at timestamp is missing (status decides, not timestamps)', () => {
@@ -104,12 +104,12 @@ describe('public status stage: closed or resolved without an assignee', () => {
   test('resolved after an assignment: every step complete', () => {
     const progress = publicProgress(ticketRow({ ...assignee, status: 'Resolved', assignedAt: new Date('2026-10-14T16:10:00Z') }));
     expect(progress.stage).toBe('resolved');
-    expect(states(progress)).toEqual(['complete', 'complete', 'complete', 'complete']);
+    expect(states(progress)).toEqual(['complete', 'complete', 'complete']);
   });
 
   test('a past assignment still counts after the agent was cleared', () => {
     const progress = publicProgress(ticketRow({ status: 'Resolved', firstAssignedAt: new Date('2026-10-14T16:10:00Z') }));
-    expect(states(progress)).toEqual(['complete', 'complete', 'complete', 'complete']);
+    expect(states(progress)).toEqual(['complete', 'complete', 'complete']);
   });
 
   test('preview payload of a closed, never-assigned ticket says Closed end to end', async () => {
@@ -135,7 +135,7 @@ describe('public status stage: custom statuses through the registry', () => {
     const payload = await previewPublicTicketStatus(71, 501);
     expect(payload.progress.stage).toBe('resolved');
     expect(payload.progress.headline).toBe('Resolved');
-    expect(states(payload.progress)).toEqual(['complete', 'skipped', 'skipped', 'complete']);
+    expect(states(payload.progress)).toEqual(['complete', 'skipped', 'complete']);
     expect(payload.ticket.statusTone).toBe('resolved');
   });
 
@@ -173,18 +173,18 @@ describe('public status stage: reopened', () => {
     expect(progress.stage).toBe('in_progress');
     expect(progress.headline).toBe('Reopened');
     expect(progress.reopened).toBe(true);
-    expect(states(progress)).toEqual(['complete', 'complete', 'current', 'upcoming']);
+    expect(states(progress)).toEqual(['complete', 'current', 'upcoming']);
 
     const eta = await computeTicketEta(reopened);
     expect(eta.isComplete).toBe(false);
     expect(eta.completedAt).toBeNull();
   });
 
-  test('reopened and still unassigned stays at Assigned', () => {
+  test('reopened and still unassigned is back at Received', () => {
     const progress = publicProgress(ticketRow({ status: 'Open', reopenedAt: new Date('2026-10-16T09:00:00Z') }));
     expect(progress.stage).toBe('received');
     expect(progress.headline).toBe('Reopened');
-    expect(states(progress)).toEqual(['complete', 'current', 'upcoming', 'upcoming']);
+    expect(states(progress)).toEqual(['current', 'upcoming', 'upcoming']);
   });
 
   test('a reopen in the past does not haunt a ticket that is closed again', () => {
@@ -213,7 +213,7 @@ describe('public status stage: merged', () => {
     expect(payload.progress.headline).toBe('Merged');
     expect(payload.progress.mergedInto.displayRef).toBe('TP-10020');
     expect(payload.progress.mergedInto.statusUrl).toMatch(/\/ticket-status\/target-token$/);
-    expect(states(payload.progress)).toEqual(['complete', 'skipped', 'skipped', 'complete']);
+    expect(states(payload.progress)).toEqual(['complete', 'skipped', 'complete']);
     expect(payload.timeline.at(-1).key).toBe('merged');
   });
 
@@ -244,20 +244,20 @@ describe('public status stage: merged', () => {
 describe('public status stage: pending, on hold and parked', () => {
   beforeEach(resetMocks);
 
-  test('Pending with an agent is On hold at the third step', () => {
+  test('Pending with an agent is On hold at the middle step', () => {
     const progress = publicProgress(ticketRow({ ...assignee, status: 'Pending' }));
     expect(progress.stage).toBe('waiting');
     expect(progress.headline).toBe('On hold');
     expect(progress.tone).toBe('waiting');
-    expect(states(progress)).toEqual(['complete', 'complete', 'current', 'upcoming']);
+    expect(states(progress)).toEqual(['complete', 'current', 'upcoming']);
   });
 
-  test('Pending Response with nobody assigned waits on the requester; Assigned is skipped', () => {
+  test('Pending Response with nobody assigned waits on the requester', () => {
     const progress = publicProgress(ticketRow({ status: 'Pending Response' }));
     expect(progress.headline).toBe('Waiting on you');
     expect(progress.waitingOnRequester).toBe(true);
-    expect(labels(progress)[2]).toBe('Waiting on you');
-    expect(states(progress)).toEqual(['complete', 'skipped', 'current', 'upcoming']);
+    expect(labels(progress)[1]).toBe('Waiting on you');
+    expect(states(progress)).toEqual(['complete', 'current', 'upcoming']);
   });
 
   test('a parked open ticket is On hold with the date it comes back', () => {
@@ -285,9 +285,10 @@ describe('public status stage: the remaining gaps', () => {
 
   test('open and unassigned is Received; an unassigned "In Progress" label is in progress', () => {
     expect(publicProgress(ticketRow()).headline).toBe('Received');
+    expect(states(publicProgress(ticketRow()))).toEqual(['current', 'upcoming', 'upcoming']);
     const progress = publicProgress(ticketRow({ status: 'In Progress', statusBase: 'Open' }));
     expect(progress.stage).toBe('in_progress');
-    expect(states(progress)).toEqual(['complete', 'skipped', 'current', 'upcoming']);
+    expect(states(progress)).toEqual(['complete', 'current', 'upcoming']);
   });
 
   test('Deleted and Spam read as Closed and never show the raw word', async () => {

@@ -298,6 +298,27 @@ export async function refreshRequesterEntraProfile(requester) {
   }
 }
 
+/**
+ * "Sam" from "Sam Khadem", "Khadem, Sam", "Sam Khadem (Contractor)" or
+ * "sam.khadem@example.com" (QA 10-21 #4: a {{ requester.firstName }} variable).
+ * Null when there is nothing name-like to use.
+ */
+export function requesterFirstName(requester) {
+  const explicit = cleanString(requester?.firstName);
+  if (explicit) return explicit;
+  let name = String(requester?.name || '').replace(/\([^)]*\)/g, ' ').trim();
+  if (!name && requester?.email) name = String(requester.email);
+  if (!name) return null;
+  if (name.includes('@')) {
+    const local = name.split('@')[0].split(/[._-]+/).find((part) => /[a-z]/i.test(part));
+    if (!local) return null;
+    return local.charAt(0).toUpperCase() + local.slice(1).toLowerCase();
+  }
+  if (name.includes(',')) name = name.split(',').slice(1).join(' ').trim() || name.split(',')[0];
+  const first = name.split(/\s+/).find(Boolean);
+  return first || null;
+}
+
 export function requesterContextFromSource(requester, ticket = null) {
   if (!requester) return null;
 
@@ -336,6 +357,7 @@ export function requesterContextFromSource(requester, ticket = null) {
   return {
     id: requester.id || null,
     name: requester.name || null,
+    firstName: requesterFirstName(requester),
     email: requester.email || null,
     phone: requester.phone || null,
     mobile: requester.mobile || null,
@@ -369,7 +391,10 @@ export async function enrichEventContextWithRequesterProfile(eventContext) {
   if (!requester) return eventContext;
 
   if (requester.locationKey || requester.regionKey || requester.locationSource || requester.freshserviceDepartment) {
-    return eventContext;
+    // Already enriched (maybe before firstName existed): only fill the first name.
+    return requester.firstName || !requester.name
+      ? eventContext
+      : { ...eventContext, requester: { ...requester, firstName: requesterFirstName(requester) } };
   }
 
   if (!requester.id || !prisma.requester?.findUnique) {

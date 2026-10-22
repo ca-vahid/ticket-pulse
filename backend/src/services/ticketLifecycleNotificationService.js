@@ -1033,6 +1033,34 @@ export async function emitTicketLifecycleNotifications({
 }
 
 /**
+ * The requester answered the "How did we do?" survey (QA 10-21 #2): tell the
+ * ticket's agent in Teams (and on their phone) under "The requester rates my
+ * ticket in the survey". Only the personal notices: no workflow trigger and no
+ * webhook. Never throws.
+ */
+export async function notifyTicketFeedback(ticketId, { score, label = null, comment = null, updated = false, requesterEmail = null } = {}) {
+  try {
+    const ticket = await hydrateTicket(ticketId);
+    if (!ticket) return { status: 'skipped', reason: 'Ticket not found' };
+    const stamp = `feedback:${ticket.id}:${Date.now()}`;
+    const eventContext = buildEventContext({
+      event: { type: 'ticket.feedback_received', occurredAt: new Date().toISOString(), dedupeStamp: stamp },
+      ticket,
+      previousAgent: null,
+      source: 'public_feedback',
+    });
+    // byEmail is the requester: "never about your own action" keeps an agent
+    // who answers their own survey from being told about it.
+    eventContext.event.extra = { score, label, comment, updated, byEmail: requesterEmail || ticket.requester?.email || null };
+    await dispatchTeamsNotifications(eventContext);
+    return { status: 'dispatched' };
+  } catch (err) {
+    logger.warn(`Survey response notice skipped for ticket ${ticketId}: ${err.message}`);
+    return { status: 'skipped', reason: err.message };
+  }
+}
+
+/**
  * Fire a single registered workflow event for a ticket (Phase 5 events like
  * ticket.reply_received / ticket.note_added / ticket.status_changed).
  * Pass a stable dedupeStamp (e.g. "reply:<entryId>") so retries don't

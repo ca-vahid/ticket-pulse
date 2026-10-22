@@ -11,6 +11,8 @@
  *     (A Stop step's fixed note is not a signal: several built-in workflows
  *     share one "Noise ticket skipped" stop for all their guards, and the run
  *     report now names the condition that really stopped the run.)
+ *     - unknown_variable (QA 10-21 #10): a template prints {{ agent.name }} or
+ *       another name that is not a Ticket Pulse variable, so it prints nothing.
  *
  *  2. Went quiet (run history)
  *     A live workflow that sent at least QUIET_MIN_PRIOR e-mails in the seven
@@ -23,6 +25,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ruleVarPaths } from './notificationConditionModel.js';
+import { notificationVariableCatalog } from './notificationWorkflowDefinition.js';
 
 export const QUIET_MIN_PRIOR = 7;
 export const QUIET_MIN_RUNS = 3;
@@ -34,11 +37,82 @@ const isGroup = (entry) => entry && typeof entry === 'object' && Array.isArray(e
 const groupReadsNoise = (group) => isGroup(group) && group.conditions.some((entry) => (isGroup(entry) ? groupReadsNoise(entry) : entry?.field === 'ticket.isNoise'));
 const ruleReadsNoise = (rule) => Boolean(rule && typeof rule === 'object') && ruleVarPaths(rule).includes('ticket.isNoise');
 
+// Top-level names a template may print: every catalog root, plus the links and
+// flags the engine adds to each run's context and Liquid's own loop object.
+const CONTEXT_ROOTS = [
+  'feedbackUrl', 'feedbackTheme', 'publicStatusUrl', 'raiseUrgencyUrl', 'selfEscalationUrl',
+  'afterHoursEscalationUrl', 'hasRequester', 'hasAssignedAgent', 'notificationPolicy',
+  'approval', 'approvals', 'actionLinks', 'links', 'llm', 'forloop',
+];
+let knownRoots = null;
+let catalogPaths = null;
+function variableCatalog() {
+  if (!knownRoots) {
+    let paths = [];
+    try { paths = notificationVariableCatalog().map((v) => v.path); } catch { paths = []; }
+    catalogPaths = paths;
+    knownRoots = new Set([...paths.map((path) => path.split('.')[0]), ...CONTEXT_ROOTS]);
+  }
+  return { knownRoots, catalogPaths };
+}
+
+const OUTPUT_TAG_RE = /\{\{-?\s*([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*)*)/g;
+const LOCAL_TAG_RE = /\{%-?\s*(?:assign|capture|for|increment|decrement)\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+
+function templateStrings(value, out = []) {
+  if (typeof value === 'string') { if (value.includes('{{')) out.push(value); }
+  else if (Array.isArray(value)) value.forEach((item) => templateStrings(item, out));
+  else if (value && typeof value === 'object') Object.values(value).forEach((item) => templateStrings(item, out));
+  return out;
+}
+
+/** The catalog variable a mistyped one most likely meant: {{ agent.name }} → assignedAgent.name. */
+export function suggestVariable(root, rest, paths = variableCatalog().catalogPaths) {
+  const low = root.toLowerCase();
+  const tail = rest || '';
+  const sameTail = paths.filter((path) => tail && path.slice(path.indexOf('.')) === tail);
+  return sameTail.find((path) => path.split('.')[0].toLowerCase().includes(low))
+    || sameTail.find((path) => low.includes(path.split('.')[0].toLowerCase()))
+    || null;
+}
+
+/** {{ names }} that are not Ticket Pulse variables in one node: [{ token, suggestion }]. */
+export function unknownVariablesInNode(node) {
+  const { knownRoots: roots } = variableCatalog();
+  const texts = templateStrings(node?.data || {});
+  if (!texts.length) return [];
+  const locals = new Set();
+  for (const text of texts) for (const m of text.matchAll(LOCAL_TAG_RE)) locals.add(m[1]);
+  const seen = new Map();
+  for (const text of texts) {
+    for (const m of text.matchAll(OUTPUT_TAG_RE)) {
+      const [, root, rest] = m;
+      if (roots.has(root) || locals.has(root)) continue;
+      // Liquid literals, not variables.
+      if (['true', 'false', 'nil', 'null', 'empty', 'blank'].includes(root)) continue;
+      const token = `${root}${rest}`;
+      if (!seen.has(token)) seen.set(token, { token, suggestion: suggestVariable(root, rest) });
+    }
+  }
+  return [...seen.values()];
+}
+
 /** Lint one workflow definition. Returns [{ code, nodeId, label, message }]. */
 export function lintWorkflowDefinition(definition) {
   const out = [];
   const nodes = Array.isArray(definition?.nodes) ? definition.nodes : [];
   for (const node of nodes) {
+    for (const { token, suggestion } of unknownVariablesInNode(node)) {
+      const label = node.data?.label || node.id;
+      out.push({
+        code: 'unknown_variable',
+        nodeId: node.id,
+        label,
+        variable: token,
+        suggestion,
+        message: `Step "${label}" prints {{ ${token} }}, which is not a Ticket Pulse variable, so it comes out blank.${suggestion ? ` Did you mean {{ ${suggestion} }}?` : ''}`,
+      });
+    }
     if (node.type !== 'condition') continue;
     const label = node.data?.label || node.id;
     // QA 10-06 #2: a step with the Skip noise tickets switch set (either way)
