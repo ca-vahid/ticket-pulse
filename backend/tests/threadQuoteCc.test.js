@@ -62,7 +62,7 @@ describe('the original request lists who was Cc’d', () => {
     const quote = await ticketService._lastInboundQuote(1, null);
     const header = headerOf(quote.html, 'Original request');
     expect(header).toContain('Cc:</span>');
-    expect(header).toContain('Jo Parinas</span> &lt;jparinas@bgcengineering.ca&gt;');
+    expect(header).toContain('Jo Parinas &lt;jparinas@bgcengineering.ca&gt;');
     expect(header).toContain('lkassab@bgcengineering.ca');
     expect(quote.text).toContain('> Cc: Jo Parinas <jparinas@bgcengineering.ca>; lkassab@bgcengineering.ca');
   });
@@ -109,8 +109,10 @@ describe('each quoted message lists its own Cc', () => {
     findUnique.mockResolvedValue(ticketRow({ ccEmails: ['someoneelse@bgcengineering.ca'] }));
     findMany.mockResolvedValue([entry({ rawPayload: { cc_emails: ['Jo Parinas <jparinas@bgcengineering.ca>', 'bgcengineeringcait@efusion.freshservice.com'] } })]);
     const quote = await ticketService._lastInboundQuote(1, null);
-    const message = headerOf(quote.html, 'Earlier in this conversation');
-    expect(message).toContain('Jo Parinas</span> &lt;jparinas@bgcengineering.ca&gt;');
+    // The first quoted message's header (the history has one heading; 23 Oct 2026).
+    const first = quote.html.indexOf('class="tp-quoted"');
+    const message = quote.html.slice(first, quote.html.indexOf('<blockquote', first));
+    expect(message).toContain('Jo Parinas &lt;jparinas@bgcengineering.ca&gt;');
     expect(message).not.toContain('someoneelse@');
     expect(headerOf(quote.html, 'Original request')).toContain('someoneelse@bgcengineering.ca');
   });

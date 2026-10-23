@@ -61,17 +61,19 @@ class AzureAdService {
    * @param {string} email - User email address
    * @returns {Promise<string|null>} Base64 encoded photo or null if not found
    */
-  async getUserPhoto(email) {
+  async getUserPhoto(email, { size = null } = {}) {
     if (!email) {
       logger.warn('No email provided for photo fetch');
       return null;
     }
 
+    // `size` ('96x96', …) asks Entra for a small copy: e-mail avatars do not need the full photo.
+    const photoPath = size ? `photos/${size}/$value` : 'photo/$value';
     try {
       const token = await this.getAccessToken();
 
       // Get user photo
-      const photoUrl = `${this.graphApiUrl}/users/${encodeURIComponent(email)}/photo/$value`;
+      const photoUrl = `${this.graphApiUrl}/users/${encodeURIComponent(email)}/${photoPath}`;
 
       const response = await axios.get(photoUrl, {
         headers: {
@@ -91,7 +93,7 @@ class AzureAdService {
         // Direct /users/{email} only resolves when the address IS the UPN.
         // Alias domains (bgcengineering.com / .com.ca) and external guests
         // (cambioearth.com) need a directory search first (QA 07-10).
-        const viaSearch = await this._getPhotoByDirectorySearch(email).catch(() => null);
+        const viaSearch = await this._getPhotoByDirectorySearch(email, photoPath).catch(() => null);
         if (viaSearch) return viaSearch;
         logger.info(`No photo found for ${email}`);
         return null;
@@ -109,7 +111,7 @@ class AzureAdService {
    * Resolve a user whose email is not their UPN: match on `mail`, then on any
    * proxyAddress (covers alias domains), and fetch the photo by object id.
    */
-  async _getPhotoByDirectorySearch(email) {
+  async _getPhotoByDirectorySearch(email, photoPath = 'photo/$value') {
     const token = await this.getAccessToken();
     const headers = { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' };
     const safe = email.replace(/'/g, "''");
@@ -125,7 +127,7 @@ class AzureAdService {
         );
         const userId = lookup.data?.value?.[0]?.id;
         if (!userId) continue;
-        const response = await axios.get(`${this.graphApiUrl}/users/${userId}/photo/$value`, {
+        const response = await axios.get(`${this.graphApiUrl}/users/${userId}/${photoPath}`, {
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'arraybuffer',
         });

@@ -83,7 +83,7 @@ describe('the whole conversation, newest first', () => {
     const quote = await ticketService._lastInboundQuote(1);
     // HTML: a mail-client style header — name on its own line, full date under it.
     expect(quote.html).toContain('>Alvina Chen</span>');
-    expect(quote.html).toMatch(/September 10, 2026/);
+    expect(quote.html).toContain('Sent:</span> Thu 10 Sep 2026, 8:11 AM');
     // Plain text keeps the line replyQuoteStripper keys on.
     expect(quote.text).toMatch(/On .+, Alvina Chen wrote:/);
   });
