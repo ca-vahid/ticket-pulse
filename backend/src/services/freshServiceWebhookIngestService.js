@@ -156,7 +156,9 @@ class FreshServiceWebhookIngestService {
       // A bounded queue wait: congestion becomes a retry, not a hang.
       queueTimeoutMs: 15000,
     });
-    const fsTicket = await client.fetchTicketSnapshot(freshserviceTicketId);
+    // QA 10-22 #2: a tag-sync workspace reads the ticket's tags too.
+    const { fsTicketInclude } = await import('./fsTagSyncService.js');
+    const fsTicket = await client.fetchTicketSnapshot(freshserviceTicketId, { include: fsTicketInclude(workspace.id) });
 
     const actualWorkspaceId = getFreshServiceWorkspaceId(fsTicket);
     if (!sameFreshServiceWorkspace(workspace.freshserviceWorkspaceId, actualWorkspaceId)) {

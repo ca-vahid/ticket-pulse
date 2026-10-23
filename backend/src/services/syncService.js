@@ -1,3 +1,4 @@
+import { fsTicketInclude } from './fsTagSyncService.js';
 import { RECONCILE_MIN_GAP_MS, reconcileShouldYield, reconcileSlot } from '../utils/fsBackgroundPace.js';
 import { findInFlightCopy } from '../utils/mirrorInFlight.js';
 import { createFreshServiceClient, FORBIDDEN_TICKET } from '../integrations/freshservice.js';
@@ -2035,7 +2036,8 @@ class SyncService {
     } = params;
 
     const filters = {
-      include: 'requester,stats',
+      // QA 10-22 #2: a tag-sync workspace also asks for the tags.
+      include: fsTicketInclude(workspaceId),
     };
 
     // Add FreshService workspace_id so we only get tickets from this workspace
@@ -2411,7 +2413,7 @@ class SyncService {
       source: 'assignment-fast-sync',
     });
     const filters = {
-      include: 'requester,stats',
+      include: fsTicketInclude(workspaceId),
       updated_since: cutoff.toISOString(),
     };
     if (wsConfig.workspaceId) {
@@ -4132,7 +4134,63 @@ class SyncService {
    * need Ticket Pulse taxonomy. This starts classification-only runs for
    * recent assigned tickets that have not received internal categories yet.
    */
+  /**
+   * Classification sweep: open tickets with no Ticket Pulse category get a
+   * classification-only pipeline run; then (QA 10-22 #1) tickets that arrived
+   * or were closed before the sweep reached them get the light, Ticket
+   * Pulse-only reclassification (never a FreshService write, never a full run
+   * on a closed ticket).
+   */
   async _classifyAssignedTicketsMissingCategories(workspaceId, opts = {}) {
+    const result = await this._classifyOpenTicketsMissingCategories(workspaceId, opts);
+    if (result?.skipped && result.reason === 'assignment_pipeline_disabled') return result;
+    const closed = await this._classifyClosedTicketsMissingCategories(workspaceId, opts).catch((err) => {
+      logger.warn('Closed-ticket classification sweep failed', { workspaceId, error: err.message });
+      return null;
+    });
+    return closed ? { ...result, closed } : result;
+  }
+
+  async _classifyClosedTicketsMissingCategories(workspaceId, opts = {}) {
+    const { default: reclassification, classifyClosedWorkspaceIds } = await import('./ticketReclassificationService.js');
+    if (!classifyClosedWorkspaceIds().has(Number(workspaceId))) return null;
+    if (!this._closedClassifyTried) this._closedClassifyTried = new Map();
+    const tried = this._closedClassifyTried;
+    const now = Date.now();
+    for (const [id, at] of tried) if (now - at > 7 * 86400e3) tried.delete(id);
+    const gapMs = opts.prevSyncCompletedAt ? now - new Date(opts.prevSyncCompletedAt).getTime() : 0;
+    const lookbackMs = Math.min(Math.max(48 * 3600e3, gapMs + 3600e3), 7 * 86400e3);
+    const cutoff = opts.cutoffOverride instanceof Date ? opts.cutoffOverride : new Date(now - lookbackMs);
+    const rows = await prisma.ticket.findMany({
+      where: {
+        workspaceId,
+        internalCategoryId: null,
+        isNoise: false,
+        status: { in: ['Closed', 'Resolved'] },
+        createdAt: { gte: cutoff },
+        triageMode: { not: 'trusted' },
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const ids = (rows || []).map((r) => r.id).filter((id) => !tried.has(id)).slice(0, 10);
+    if (!ids.length) return null;
+    for (const id of ids) tried.set(id, now);
+    const run = await reclassification.run(workspaceId, {
+      apply: true,
+      ticketIds: ids,
+      days: 8,
+      limit: ids.length,
+      onlyNeedsReview: false,
+      unclassifiedOnly: true,
+      actorEmail: 'Ticket Pulse (closed-ticket sweep)',
+    }, { allowNonCanonical: true });
+    logger.info('Closed tickets without a category classified', { workspaceId, runId: run?.id, scanned: run?.scanned, classified: run?.classified, failed: run?.failed });
+    return { runId: run?.id || null, scanned: run?.scanned || 0, classified: run?.classified || 0, failed: run?.failed || 0 };
+  }
+
+  async _classifyOpenTicketsMissingCategories(workspaceId, opts = {}) {
     const config = await assignmentRepository.getConfig(workspaceId);
     if (!config?.isEnabled) {
       return { skipped: true, reason: 'assignment_pipeline_disabled', candidates: 0, triggered: 0 };

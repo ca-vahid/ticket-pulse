@@ -520,10 +520,10 @@ class FreshServiceClient {
     }
   }
 
-  async fetchTicketSnapshot(ticketId) {
+  async fetchTicketSnapshot(ticketId, { include = 'requester,stats' } = {}) {
     try {
       const response = await this._fetchWithRetry('/tickets/' + encodeURIComponent(ticketId), {
-        params: { include: 'requester,stats' },
+        params: { include },
       });
       return response.data.ticket;
     } catch (error) {

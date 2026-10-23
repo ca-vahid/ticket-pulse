@@ -481,7 +481,7 @@ export default function ApprovalComposer({
                 placeholder={PLACEHOLDER[tab] || PLACEHOLDER.approved}
                 ariaLabel={tab === 'question' ? 'Your question' : tab === 'condition' ? 'Condition' : tab === 'rejected' ? 'Reason for rejecting' : 'Decision note'}
                 minHeight={compact ? Math.min(minHeight, 160) : minHeight}
-                className="border-input bg-background"
+                className="border-input bg-card shadow-subtle"
               />
 
               {isDecision && signatureHtml && (

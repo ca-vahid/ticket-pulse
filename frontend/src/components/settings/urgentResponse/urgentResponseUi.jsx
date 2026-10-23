@@ -54,7 +54,7 @@ export function InlineNumber({ value, onChange, label, min = 0, max = 480, disab
       disabled={disabled}
       aria-label={label}
       onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-      className="tp-focus-ring mx-0.5 h-7 w-14 rounded-md border border-input bg-background px-1.5 text-center text-sm font-medium text-foreground disabled:opacity-50"
+      className="tp-focus-ring mx-0.5 h-7 w-14 rounded-md border border-input bg-card shadow-subtle px-1.5 text-center text-sm font-medium text-foreground disabled:opacity-50"
     />
   );
 }
@@ -154,5 +154,5 @@ export function Field({ label, hint = null, children }) {
   );
 }
 
-export const INPUT_CLASS = 'tp-focus-ring h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground';
+export const INPUT_CLASS = 'tp-focus-ring h-9 w-full rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground';
 export const CARD_CLASS = 'rounded-xl border border-border bg-card p-4 shadow-subtle';

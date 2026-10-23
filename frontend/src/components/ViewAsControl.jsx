@@ -141,7 +141,7 @@ export function ViewAsDialog({ open, onClose }) {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search people in this workspace"
                 aria-label="Search people"
-                className="tp-focus-ring h-9 w-full rounded-md border border-input bg-background pl-8 pr-2.5 text-sm text-foreground"
+                className="tp-focus-ring h-9 w-full rounded-md border border-input bg-card shadow-subtle pl-8 pr-2.5 text-sm text-foreground"
               />
             </label>
             <ul className="settings-scrollbar mt-2 max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border" aria-label="People">

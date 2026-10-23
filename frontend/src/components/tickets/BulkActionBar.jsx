@@ -82,7 +82,7 @@ export function MenuButton({ label, ariaLabel, icon: Icon, options, onPick, sear
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Type to filter…"
                   aria-label={`Filter ${label.toLowerCase()} options`}
-                  className="tp-focus-ring w-full rounded-md border border-input bg-background py-1.5 pl-7 pr-2 text-xs text-foreground"
+                  className="tp-focus-ring w-full rounded-md border border-input bg-card shadow-subtle py-1.5 pl-7 pr-2 text-xs text-foreground"
                 />
               </div>
             </div>

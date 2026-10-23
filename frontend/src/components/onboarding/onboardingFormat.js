@@ -83,6 +83,9 @@ export function changeFieldLabel(field, { templateLabels = {}, templates = {}, i
   let m = field.match(/^(leave|officeChange)\.(assigneeTechId|park)$/);
   if (m) return `${SIDE_LABEL[m[1]]} — ${m[2] === 'park' ? 'park until the date' : 'assignee'}`;
   if (field === 'officeRouting.fallbackTechIds') return 'New hires — any other office: people';
+  if (field === 'wake.leadDays') return 'Onboarding wakes — days before the start';
+  if (field === 'wake.holidayAware') return 'Onboarding wakes — add the holidays in between';
+  if (field === 'wake.rules') return 'Onboarding wakes — job-title rules';
   m = field.match(/^officeRouting\[([\w-]+)\](?:\.(\w+))?$/);
   if (m) {
     const name = item?.label || m[1].replace(/_/g, ' ');
@@ -116,7 +119,14 @@ export function changeValueLabel(field, value, { techById = new Map(), groupById
   if (/assigneeTechId$/.test(field)) return techById.get(Number(value))?.name || `Technician ${value}`;
   if (/groupId$/.test(field)) return groupById.get(Number(value))?.name || `Group ${value}`;
   if (field === 'mode') return MODE_INFO[value]?.label || value;
-  if (/\.park$/.test(field)) return value ? 'yes' : 'no';
+  if (/\.park$/.test(field) || field === 'wake.holidayAware') return value ? 'yes' : 'no';
+  if (field === 'wake.leadDays') return `${value} days`;
+  if (field === 'wake.rules') {
+    const list = Array.isArray(value) ? value : [];
+    return list.length
+      ? list.map((r) => `${(r.titleMatch || []).join(' / ') || 'everyone'}${(r.items || []).length ? ` · ${r.items.join(', ')}` : ''}: ${r.leadDays} days`).join('; ')
+      : 'none';
+  }
   if (/dueOffsetDays$/.test(field)) return `${value >= 0 ? '+' : ''}${value} days`;
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'object') return value.title ? `${value.title} (${value.dueOffsetDays >= 0 ? '+' : ''}${value.dueOffsetDays ?? 0} days)` : JSON.stringify(value);

@@ -124,7 +124,7 @@ describe('freshServiceWebhookIngestService', () => {
       priority: 'high',
       queueTimeoutMs: 15000,
     }));
-    expect(clientMock.fetchTicketSnapshot).toHaveBeenCalledWith('224183');
+    expect(clientMock.fetchTicketSnapshot).toHaveBeenCalledWith('224183', { include: 'requester,stats' });
     expect(syncServiceMock.syncFreshServiceTicketSnapshot).toHaveBeenCalledWith(2, expect.objectContaining({ id: 224183 }), expect.objectContaining({
       source: 'freshservice_webhook',
       clearReadCache: true,

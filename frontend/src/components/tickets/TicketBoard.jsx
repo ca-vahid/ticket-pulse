@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor,
@@ -32,6 +32,10 @@ import ErrorBoundary from '../ErrorBoundary';
  *  - FS-born with an FS id          → drop opens the same FreshService
  *                                     write-back confirm the StatusPicker uses.
  *  - anything else                  → card is not draggable (lock hint).
+ *
+ * QA 10-22 #4: a TP-born card dropped into Closed asks first ("Close
+ * TP-10477?"). FS-born drops already go through the FreshService confirm, so
+ * they are not asked twice. Esc or Cancel leaves the card where it was.
  */
 const BOARD_COLUMNS = [
   {
@@ -212,6 +216,58 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, 
   );
 }
 
+/** True when a drop needs the close confirmation (TP-born → Closed). */
+export const needsCloseConfirm = (ticket, nextStatus) => (
+  Boolean(ticket) && nextStatus === 'Closed' && ticket.origin === 'ticketpulse'
+);
+
+export function CloseConfirm({ ticket, onConfirm, onCancel }) {
+  const confirmRef = useRef(null);
+  useEffect(() => {
+    confirmRef.current?.focus();
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="board-close-title"
+        aria-describedby="board-close-body"
+        className="tp-card w-full max-w-sm rounded-xl p-5 shadow-soft animate-scaleIn"
+        data-testid="board-close-confirm"
+      >
+        <h3 id="board-close-title" className="flex items-center gap-2 text-base font-semibold text-foreground">
+          <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+          Close {ticket.displayRef}?
+        </h3>
+        <p id="board-close-body" className="mt-2 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{ticket.subject || '(no subject)'}</span> moves to Closed. You can undo it from the message that follows.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="tp-focus-ring rounded-md border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground/85 hover:bg-muted"
+          >
+            Cancel
+          </button>
+          <button
+            ref={confirmRef}
+            type="button"
+            onClick={onConfirm}
+            className="tp-focus-ring rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            Close ticket
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.key });
   const highlight = isOver && activeBucket && activeBucket !== column.key;
@@ -260,6 +316,8 @@ function TicketBoardInner({
   slaCalendarAware = false, // Phase SLA: business-hours tooltip on due chips
 }) {
   const [activeId, setActiveId] = useState(null);
+  const [pendingClose, setPendingClose] = useState(null);
+  const cancelClose = useCallback(() => setPendingClose(null), []);
   // Return address for the card anchors (QA 08-07 #7) — the same state the
   // queue's openTicket sends, so Back from a new-tab-less full open works.
   const location = useLocation();
@@ -298,7 +356,9 @@ function TicketBoardInner({
     if (!over) return;
     const ticket = byId.get(String(active.id));
     const nextStatus = planStatusDrop(ticket, over.id, statusDefs);
-    if (nextStatus) onStatusDrop?.(ticket, nextStatus);
+    if (!nextStatus) return;
+    if (needsCloseConfirm(ticket, nextStatus)) { setPendingClose(ticket); return; }
+    onStatusDrop?.(ticket, nextStatus);
   };
 
   return (
@@ -355,6 +415,13 @@ function TicketBoardInner({
           </div>
         ) : null}
       </DragOverlay>
+      {pendingClose && (
+        <CloseConfirm
+          ticket={pendingClose}
+          onCancel={cancelClose}
+          onConfirm={() => { const ticket = pendingClose; setPendingClose(null); onStatusDrop?.(ticket, 'Closed'); }}
+        />
+      )}
     </DndContext>
   );
 }

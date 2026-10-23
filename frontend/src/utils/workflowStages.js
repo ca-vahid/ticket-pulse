@@ -92,6 +92,12 @@ function orderVariants(list) {
   ));
 }
 
+/** A non-default workflow that runs alongside the default instead of replacing it. */
+export function runsInAddition(workflow) {
+  return Boolean(workflow) && !workflow.isDefaultVariant && workflow.triggerType !== 'manual'
+    && String(workflow.routingMode || '').toLowerCase() === 'additive';
+}
+
 /** Business-hours family first, then the rest (after-hours) by key. */
 function familyRank(key) {
   return key === 'standard' ? 0 : 1;
@@ -111,7 +117,10 @@ function familyRank(key) {
  * arrived during business hours" no longer hangs under the after-hours one.
  * Without `familyOf` every workflow of a trigger is one family, as before.
  *
- * `families`: [{ key, parent, variants }] — a family with no default lists
+ * QA 10-22 #8: `alongside` holds a family's "Runs in addition" workflows;
+ * they follow the variants at the top level, never indented.
+ *
+ * `families`: [{ key, parent, variants, alongside }] — a family with no default lists
  * its workflows at the top level, none indented. `workflows` is the flat
  * order to render; `nested` (Set of ids) marks the indented variants and
  * `lastNested` the last one of each family (the elbow ends there). `parent`
@@ -138,7 +147,12 @@ export function groupWorkflowsByStage(workflows = [], eventLabels = {}, { family
       .sort(([a], [b]) => familyRank(a) - familyRank(b) || String(a).localeCompare(String(b)))
       .map(([key, members]) => {
         const parent = members.find((w) => w.isDefaultVariant && !w.archivedAt) || members.find((w) => w.isDefaultVariant) || null;
-        return { key, parent, variants: orderVariants(members.filter((w) => w !== parent)) };
+        const rest = orderVariants(members.filter((w) => w !== parent));
+        // QA 10-22 #8: only a variant that can replace the default hangs off it.
+        // A "Runs in addition" workflow is its own automation and stands alone.
+        const variants = parent ? rest.filter((w) => !runsInAddition(w)) : rest;
+        const alongside = parent ? rest.filter(runsInAddition) : [];
+        return { key, parent, variants, alongside };
       });
     const nested = new Set();
     const lastNested = new Set();
@@ -149,7 +163,7 @@ export function groupWorkflowsByStage(workflows = [], eventLabels = {}, { family
         for (const variant of family.variants) nested.add(variant.id);
         if (family.variants.length) lastNested.add(family.variants[family.variants.length - 1].id);
       }
-      flat.push(...family.variants);
+      flat.push(...family.variants, ...family.alongside);
     }
     if (!stages.has(stage.key)) stages.set(stage.key, []);
     stages.get(stage.key).push({

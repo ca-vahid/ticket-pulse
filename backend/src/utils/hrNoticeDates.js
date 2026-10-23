@@ -148,9 +148,15 @@ export function readHrNoticeDate({ subject = '', text = '', createdAt = new Date
  *   transfer                 2 business days before the effective date
  * A wake that lands on a non-business day moves back to the business day
  * before it. `isBusinessDay(iso)` defaults to Monday–Friday.
+ *
+ * QA 10-22 #6/#7: a workspace can set the new-hire lead (`leadDays`, 21 by
+ * default; per job title and child in Onboarding → Settings). With
+ * `holidayAware`, every holiday (`isHoliday(iso)`) on a weekday between the
+ * wake and the start adds a day, so a January start wakes before the
+ * Christmas closure instead of inside it.
  * @returns {string} YYYY-MM-DD
  */
-export function hrWakeDate(kind, dateIso, { isBusinessDay = null } = {}) {
+export function hrWakeDate(kind, dateIso, { isBusinessDay = null, leadDays = null, holidayAware = false, isHoliday = null } = {}) {
   const biz = typeof isBusinessDay === 'function'
     ? isBusinessDay
     : (iso) => { const d = new Date(`${iso}T00:00:00Z`).getUTCDay(); return d >= 1 && d <= 5; };
@@ -161,7 +167,23 @@ export function hrWakeDate(kind, dateIso, { isBusinessDay = null } = {}) {
   };
   let wake = dateIso;
   if (kind === 'new_hire' || kind === 'start_change') {
-    wake = shift(dateIso, -21);
+    const lead = Number.isInteger(Number(leadDays)) && Number(leadDays) > 0 ? Number(leadDays) : 21;
+    wake = shift(dateIso, -lead);
+    if (holidayAware && typeof isHoliday === 'function') {
+      // Each weekday holiday inside the window pushes the wake back a day; the
+      // wider window may hold more, so count again until it settles.
+      let extra = 0;
+      for (let pass = 0; pass < 6; pass++) {
+        let n = 0;
+        for (let d = shift(dateIso, -(lead + extra)); d < dateIso; d = shift(d, 1)) {
+          const dow = new Date(`${d}T00:00:00Z`).getUTCDay();
+          if (dow >= 1 && dow <= 5 && isHoliday(d)) n += 1;
+        }
+        if (n === extra) break;
+        extra = n;
+      }
+      wake = shift(dateIso, -(lead + extra));
+    }
   } else if (kind === 'departure') {
     wake = shift(dateIso, -14);
   } else if (kind === 'leave') {
