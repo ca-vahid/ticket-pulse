@@ -87,6 +87,17 @@ describe('it refuses to destroy a reply', () => {
     }
   });
 
+  test('Outlook on the web without its ids: a rule, then a bold "From:" (23 Oct 2026)', () => {
+    const html = '<div><p>Hi Jordan,</p><p>It does what Alex needs.</p></div><div><br></div>'
+      + '<hr style="display:inline-block; width:98%"><div style="font-family:Calibri"><b>From:</b> Jordan &lt;j@example.com&gt;<br><b>Sent:</b> Friday</div><p>Older message</p>';
+    const out = stripQuotedHtml(html);
+    expect(out).toContain('It does what Alex needs.');
+    expect(out).not.toContain('Older message');
+    // A rule followed by ordinary bold text is not a quote header.
+    const keep = '<p>Steps:</p><hr><p><b>Fromage</b> order list</p><br><b>From:</b>';
+    expect(stripQuotedHtml(keep)).toBe(keep);
+  });
+
   test('the word "wrote" in ordinary prose does not truncate the reply', () => {
     const text = 'I wrote to the vendor yesterday and they confirmed the part is in stock.';
     expect(stripQuotedText(text)).toBe(text);

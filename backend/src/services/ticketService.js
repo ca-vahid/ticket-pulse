@@ -40,7 +40,9 @@ import { createdWindowDays, createdWindowStart } from '../utils/createdWindow.js
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { decodeBasicEntities, looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
-import { appendSignatureToEmail, getEnabledSignatureForSend, signatureAsSent } from './userSignatureService.js';
+import { appendSignatureToEmail, getEnabledSignatureForSend, signatureAsSent, trimTrailingBlankHtml, closeLastParagraphTight } from './userSignatureService.js';
+import { createInlineBudget, inlinePictures, faceFor, inlineAttachments } from './replyEmailPictures.js';
+import { stripQuotedHtml } from '../utils/replyQuoteStripper.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
@@ -5978,18 +5980,23 @@ class TicketService {
    *    single earlier reply was enough to lose it.
    * `reply` is the message being sent: { text, authorName, authorEmail }.
    */
-  async _lastInboundQuote(ticketId, excludeEntryId = null, { reply = null } = {}) {
-    // The HTML header of a quoted message reads like a mail client's own reply
-    // header (Vahid, 18 Sep 2026): who, on its own line with the address, then
-    // the full date on the next — not one grey sentence. The PLAIN-TEXT twin
-    // keeps "On <date>, <name> wrote:", which replyQuoteStripper keys on.
-    const formatQuoteDateLong = (value, timeZone) => {
-      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  async _lastInboundQuote(ticketId, excludeEntryId = null, { reply = null, budget = null } = {}) {
+    // The history reads like Outlook's own reply header (Vahid, 23 Oct 2026):
+    // one "Earlier in this conversation" heading for the whole history, then
+    // per message a photo and From / Sent / Cc lines. It was a blue label, a
+    // name and a long date over every message. The PLAIN-TEXT twin keeps
+    // "On <date>, <name> wrote:", which replyQuoteStripper keys on.
+    // "Thu 22 Oct 2026, 4:33 PM", in the workspace's zone.
+    const formatQuoteDateShort = (value, timeZone) => {
+      const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
+      let parts;
       try {
-        return new Date(value).toLocaleString('en-CA', timeZone ? { ...options, timeZone, timeZoneName: 'short' } : options);
+        parts = new Intl.DateTimeFormat('en-US', timeZone ? { ...options, timeZone } : options).formatToParts(new Date(value));
       } catch {
-        return new Date(value).toLocaleString('en-CA', options);
+        parts = new Intl.DateTimeFormat('en-US', options).formatToParts(new Date(value));
       }
+      const p = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return `${p.weekday} ${p.day} ${p.month} ${p.year}, ${p.hour}:${p.minute} ${String(p.dayPeriod || '').toUpperCase()}`.trim();
     };
     const initialsOf = (name) => {
       const parts = String(name || '').replace(/[^\p{L}\p{N}\s.'-]/gu, ' ').trim().split(/\s+/).filter(Boolean);
@@ -5999,26 +6006,33 @@ class TicketService {
       return `${first}${last}`.toUpperCase();
     };
     const FONT = '\'Segoe UI\',Arial,sans-serif';
-    const quoteHeaderHtml = ({ label, name, email, whenLong, cc = [] }) => {
+    const LABEL = 'font-weight:600;color:#0f172a;';
+    // The person's Entra photo when the e-mail carries one (faceCid), else their initials.
+    const messageHeaderHtml = ({ tag = null, name, email, when, cc = [], faceCid = null }) => {
       const initials = initialsOf(name || email);
       const who = name
-        ? `<span style="font-size:15px;font-weight:600;color:#0f172a;">${escapeHtml(name)}</span>`
-          + (email ? ` <span style="font-size:13px;color:#64748b;">&lt;${escapeHtml(email)}&gt;</span>` : '')
-        : `<span style="font-size:15px;font-weight:600;color:#0f172a;">${escapeHtml(email || 'The requester')}</span>`;
-      const avatar = initials
-        ? '<td width="40" valign="top" style="padding:2px 12px 0 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
-          + `<td width="40" height="40" align="center" valign="middle" bgcolor="#e0e7ff" style="background-color:#e0e7ff;border-radius:20px;font-family:${FONT};font-size:14px;font-weight:600;color:#3730a3;">${escapeHtml(initials)}</td>`
-          + '</tr></table></td>'
-        : '';
-      return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 12px;"><tr>'
+        ? `<span style="${LABEL}">${escapeHtml(name)}</span>${email ? ` &lt;${escapeHtml(email)}&gt;` : ''}`
+        : `<span style="${LABEL}">${escapeHtml(email || 'The requester')}</span>`;
+      let avatar = '';
+      if (faceCid) {
+        avatar = '<td width="36" valign="top" style="padding:2px 12px 0 0;">'
+          + `<img src="cid:${faceCid}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border:0;border-radius:18px;">`
+          + '</td>';
+      } else if (initials) {
+        avatar = '<td width="36" valign="top" style="padding:2px 12px 0 0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
+          + `<td width="36" height="36" align="center" valign="middle" bgcolor="#e0e7ff" style="background-color:#e0e7ff;border-radius:18px;font-family:${FONT};font-size:13px;font-weight:600;color:#3730a3;">${escapeHtml(initials)}</td>`
+          + '</tr></table></td>';
+      }
+      const line = (label, value) => `<div style="margin:0;"><span style="${LABEL}">${label}</span> ${value}</div>`;
+      return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 10px;"><tr>'
         + avatar
-        + `<td valign="top" style="font-family:${FONT};line-height:1.45;">`
-        + `<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;margin:0 0 3px;">${escapeHtml(label)}</div>`
-        + `<div style="margin:0 0 2px;">${who}</div>`
-        + (whenLong ? `<div style="font-size:13px;color:#64748b;">${escapeHtml(whenLong)}</div>` : '')
-        + (cc.length ? `<div style="font-size:13px;color:#64748b;margin:3px 0 0;"><span style="font-weight:600;color:#475569;">Cc:</span> ${cc.map((person) => (person.name
-          ? `<span style="color:#0f172a;">${escapeHtml(person.name)}</span> &lt;${escapeHtml(person.email)}&gt;`
-          : escapeHtml(person.email))).join('; ')}${cc.more ? ` and ${cc.more} more` : ''}</div>` : '')
+        + `<td valign="top" style="font-family:${FONT};font-size:13px;line-height:1.5;color:#475569;">`
+        + (tag ? `<div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b;margin:0 0 2px;">${escapeHtml(tag)}</div>` : '')
+        + line('From:', who)
+        + (when ? line('Sent:', escapeHtml(when)) : '')
+        + (cc.length ? line('Cc:', `${cc.map((person) => (person.name
+          ? `${escapeHtml(person.name)} &lt;${escapeHtml(person.email)}&gt;`
+          : escapeHtml(person.email))).join('; ')}${cc.more ? ` and ${cc.more} more` : ''}`) : '')
         + '</td></tr></table>';
     };
     // An unknown zone name must cost the zone, never the e-mail.
@@ -6057,7 +6071,7 @@ class TicketService {
       orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
       take: MAX_QUOTED_MESSAGES + 1,
       select: {
-        bodyHtml: true, bodyText: true, content: true, actorName: true,
+        id: true, source: true, bodyHtml: true, bodyText: true, content: true, actorName: true,
         actorEmail: true, occurredAt: true, isPrivate: true, eventType: true, rawPayload: true,
       },
     });
@@ -6217,20 +6231,49 @@ class TicketService {
     const truncated = quotable.length > MAX_QUOTED_MESSAGES;
     const messages = quotable.slice(0, MAX_QUOTED_MESSAGES);
 
+    // ── Our own replies, signed as they were sent (Vahid, 23 Oct 2026) ───
+    // The signature joins the outgoing mail only; the entry keeps the agent's
+    // words and, since 4.2.70, the signature that was added (sentSignature).
+    // Quoting the body alone made a signed reply look unsigned. Replies from
+    // before 4.2.70 get the agent's signature as it is today. A later reply
+    // without one was sent unsigned on purpose (an Auto-help answer carries its own).
+    const SENT_SIGNATURE_SINCE = new Date('2026-10-14T02:00:00Z').getTime();
+    const currentSignatures = new Map();
+    const signatureFor = async (row) => {
+      const stored = row?.rawPayload?.sentSignature;
+      if (stored && (stored.html || stored.text)) return stored;
+      if (row.source !== 'ticketpulse_user' || row.eventType !== 'reply' || !row.actorEmail || !quoteWorkspaceId) return null;
+      if (!row.occurredAt || new Date(row.occurredAt).getTime() >= SENT_SIGNATURE_SINCE) return null;
+      const key = String(row.actorEmail).toLowerCase();
+      if (!currentSignatures.has(key)) {
+        const now = await getEnabledSignatureForSend(quoteWorkspaceId, key).catch(() => null);
+        currentSignatures.set(key, now ? signatureAsSent(now) : null);
+      }
+      return currentSignatures.get(key);
+    };
+
     const blocks = [];
     const textBlocks = [];
     let used = 0;
     // `capped:false` is the original request: it sits below the omitted-messages
     // marker and is never itself crowded out by the total cap.
-    const renderRow = (row, { capped = true } = {}) => {
+    const renderRow = async (row, { capped = true } = {}) => {
       // FR 09-11 #3 (review): the same double-spacing the conversation had.
       // Forwarded originals arrive text-only with a blank line after every
       // line; one <br/> per newline reproduced each blank line in the email
       // the requester receives. textToHtml treats a blank line as a paragraph
       // and a single newline as a line break — mail-client behaviour.
-      const rawHtml = row.bodyHtml
+      let rawHtml = row.bodyHtml
         || (row.bodyText || row.content ? textToHtml(row.bodyText || row.content) : '');
       if (!rawHtml.trim()) return true;
+      // Each message is quoted on its own, so the copy of the thread its mail client
+      // added is cut here too: a reply stored before the stripper knew its client's
+      // format would otherwise bring the earlier messages a second time.
+      if (row.source === 'email_inbound' && row.bodyHtml) rawHtml = stripQuotedHtml(rawHtml);
+      const signature = await signatureFor(row);
+      if (signature) {
+        rawHtml = `${closeLastParagraphTight(trimTrailingBlankHtml(rawHtml.trim()))}<br>${signature.html || textToHtml(signature.text)}`;
+      }
       let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
       if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
       if (capped && used + quotedHtml.length > TOTAL_CAP) { blocks.push(OMITTED_MARKER_HTML); textBlocks.push(OMITTED_MARKER_TEXT); return false; }
@@ -6243,18 +6286,25 @@ class TicketService {
       const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
       const bareEmail = String(row.actorEmail || '').match(/[^\s<>"]+@[^\s<>"]+/);
       const cc = ccPeople(row);
-      const headerHtml = quoteHeaderHtml({
-        label: row.eventType === 'original_request' ? 'Original request' : 'Earlier in this conversation',
+      // Pictures the message names ("[Image: …]") travel inside the e-mail.
+      const isDescription = row.eventType === 'original_request';
+      const plainSource = quotedHtml;
+      quotedHtml = await inlinePictures(quotedHtml, {
+        budget, ticketId, entryId: isDescription ? null : (row.id ?? null), at: row.occurredAt, maxWidth: 480,
+      });
+      const headerHtml = messageHeaderHtml({
+        tag: isDescription ? 'Original request' : null,
         name: row.actorName || null,
         email: bareEmail ? bareEmail[0] : null,
-        whenLong: row.occurredAt ? formatQuoteDateLong(row.occurredAt, quoteTimeZone) : '',
+        when: row.occurredAt ? formatQuoteDateShort(row.occurredAt, quoteTimeZone) : '',
         cc,
+        faceCid: bareEmail ? await faceFor(budget, bareEmail[0]) : null,
       });
       blocks.push(
-        `<div class="tp-quoted" style="margin:0 0 26px;">${headerHtml}`
+        `<div class="tp-quoted" style="margin:0;">${headerHtml}`
         + `<blockquote style="margin:0;padding:2px 0 2px 16px;border-left:3px solid #c7d2fe;color:#374151;">${quotedHtml}</blockquote></div>`,
       );
-      const plain = (row.bodyText || row.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
+      const plain = (row.bodyText || row.content || stripHtml(plainSource) || '').trim().slice(0, QUOTE_CAP);
       const ccText = cc.length
         ? `> Cc: ${cc.map((person) => (person.name ? `${person.name} <${person.email}>` : person.email)).join('; ')}${cc.more ? ` and ${cc.more} more` : ''}\n>\n`
         : '';
@@ -6263,19 +6313,24 @@ class TicketService {
       return true;
     };
     for (const row of messages) {
-      if (!renderRow(row)) break;
+      if (!(await renderRow(row))) break;
     }
     if (truncated && blocks.length > 0 && blocks[blocks.length - 1] !== OMITTED_MARKER_HTML) {
       blocks.push(OMITTED_MARKER_HTML);
       textBlocks.push(OMITTED_MARKER_TEXT);
     }
-    if (originalRequest) renderRow(originalRequest, { capped: false });
+    if (originalRequest) await renderRow(originalRequest, { capped: false });
     if (blocks.length === 0) return null;
 
     // gmail_quote gives Gmail its best chance of collapsing the history behind
-    // "…"; Outlook shows it inline, which is the expected email convention.
+    // "…" (and replyQuoteStripper cuts a requester's reply there); Outlook
+    // shows it inline, which is the expected email convention.
+    const count = blocks.filter((b) => b !== OMITTED_MARKER_HTML).length;
+    const heading = `<div style="font-family:${FONT};font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;margin:0 0 14px;">`
+      + `Earlier in this conversation${count > 1 ? ` &middot; ${count} messages` : ''}</div>`;
+    const between = '<hr style="border:none;border-top:1px dashed #d0d5dd;margin:20px 0;" />';
     const html = '<hr style="border:none;border-top:1px solid #d0d5dd;margin:28px 0 22px;" />'
-      + `<div class="gmail_quote">${blocks.join('')}</div>`;
+      + `<div class="gmail_quote">${heading}${blocks.join(between)}</div>`;
     const text = `\n\n${textBlocks.join('\n\n')}`;
     return { html, text };
   }
@@ -6302,6 +6357,14 @@ class TicketService {
     // entry.bodyHtml (the stored thread entry) intentionally stays clean.
     let html = entry.bodyHtml || textToReplyHtml(entry.bodyText);
     let text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
+    // A picture pasted into the reply shows in place (23 Oct 2026), not as "[Image: …]"
+    // with the file attached below. One budget covers it and the quoted history.
+    const budget = createInlineBudget();
+    try {
+      html = await inlinePictures(html, { budget, ticketId: ticket.id, entryId: entry.id, at: entry.occurredAt, own: attachments, maxWidth: 600 });
+    } catch (err) {
+      logger.debug(`Reply pictures skipped for ticket ${ticket.id}: ${err.message}`);
+    }
     if (signature) ({ html, text } = appendSignatureToEmail({ html, text }, signature));
     // Phase RL (RL-8): quote the last inbound message under the reply so the
     // requester sees what is being answered (Outlook shows a bare reply with
@@ -6311,6 +6374,7 @@ class TicketService {
     try {
       const quote = await this._lastInboundQuote(ticket.id, entry.id, {
         reply: { text: entry.bodyText || stripHtml(entry.bodyHtml || ''), authorName: entry.actorName, authorEmail: entry.actorEmail },
+        budget,
       });
       if (quote) {
         html = `${html}${quote.html}`;
@@ -6333,13 +6397,20 @@ class TicketService {
     // Graph simple attach tops out at ~3 MB per file; bigger ones stay
     // download-only in Ticket Pulse (the thread still lists them). The same
     // per-file cap applies on the SendGrid/SMTP path (30 MB message total).
+    // A file of this reply shown in the body goes once, inline (contentId); the
+    // pictures and photos of the quoted history follow it.
     const mailableAttachments = attachments
       .filter((a) => a.buffer && a.buffer.length <= 3 * 1024 * 1024)
-      .map((a) => ({
-        name: a.attachment.fileName,
-        contentType: a.attachment.contentType,
-        contentBytes: a.buffer.toString('base64'),
-      }));
+      .map((a) => {
+        const contentId = budget.reused.get(a.attachment?.id);
+        return {
+          name: a.attachment.fileName,
+          contentType: a.attachment.contentType,
+          contentBytes: a.buffer.toString('base64'),
+          ...(contentId ? { contentId } : {}),
+        };
+      })
+      .concat(inlineAttachments(budget));
 
     // Threading anchors (Mega 08-31 Phase MB-1b): In-Reply-To = the newest
     // stored Message-ID on this ticket (the requester's last inbound mail or

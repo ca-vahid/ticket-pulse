@@ -8,16 +8,20 @@ const photoCache = new Map(); // email -> { photo, at }
 const PHOTO_TTL_MS = 12 * 60 * 60 * 1000;
 const PHOTO_CACHE_MAX = 500;
 
-/** Entra photo as a data URI (or null), memoised for 12h per address. */
-export async function getCachedUserPhoto(email) {
-  const key = String(email || '').trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(key)) return null;
+/**
+ * Entra photo as a data URI (or null), memoised for 12h per address. `size` ('96x96', …)
+ * asks for Entra's small copy and is cached on its own.
+ */
+export async function getCachedUserPhoto(email, { size = null } = {}) {
+  const address = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) return null;
+  const key = size ? `${address}|${size}` : address;
   const cached = photoCache.get(key);
   if (cached && Date.now() - cached.at < PHOTO_TTL_MS) return cached.photo;
   let photo = null;
   try {
     const { default: azureAdService } = await import('./azureAdService.js');
-    photo = await azureAdService.getUserPhoto(key); // data URI or null
+    photo = await (size ? azureAdService.getUserPhoto(address, { size }) : azureAdService.getUserPhoto(address)); // data URI or null
   } catch { /* Entra unconfigured/unreachable — cache the null */ }
   if (photoCache.size >= PHOTO_CACHE_MAX) {
     photoCache.delete(photoCache.keys().next().value);
@@ -41,9 +45,9 @@ const EXT = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'imag
  * picture travels inside the message, so it renders with images-off policies
  * and never depends on a URL. Null when the person has no photo.
  */
-export async function inlinePhotoAttachment(email, contentId) {
+export async function inlinePhotoAttachment(email, contentId, { size = null } = {}) {
   try {
-    const decoded = decodePhotoDataUri(await getCachedUserPhoto(email));
+    const decoded = decodePhotoDataUri(await (size ? getCachedUserPhoto(email, { size }) : getCachedUserPhoto(email)));
     if (!decoded) return null;
     return {
       name: `${contentId}.${EXT[decoded.contentType] || 'jpg'}`,

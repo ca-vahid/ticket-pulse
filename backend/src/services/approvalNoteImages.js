@@ -89,6 +89,17 @@ export function noteHtmlWithImages(noteHtml, noteText, images = [], { srcFor, wi
   });
 }
 
+/**
+ * Replace each "[Image: name]" marker (with its <i>/<em> wrapper) by what `replacer(name)` returns;
+ * a null return keeps the marker. `name` is cleaned and lower-cased, as noteImageNames gives it.
+ */
+export function replaceImageMarkers(html, replacer) {
+  return String(html || '').replace(WRAPPED_RE, (whole, _tag, rawName) => {
+    const out = replacer(clean(rawName));
+    return out === null || out === undefined ? whole : out;
+  });
+}
+
 /** Plain text for previews (Teams, phone): each marker becomes "(picture)". */
 export function noteTextForPreview(text) {
   const out = String(text || '').replace(PLAIN_RE, '(picture)').replace(/[ \t]{2,}/g, ' ').trim();
@@ -134,6 +145,6 @@ export function imagePixelWidth(buffer) {
 }
 
 export default {
-  noteImageNames, findNoteImages, noteHtmlWithImages, noteTextForPreview, noteTextWithoutMarkers,
+  noteImageNames, findNoteImages, noteHtmlWithImages, replaceImageMarkers, noteTextForPreview, noteTextWithoutMarkers,
   noteImagePath, tokenFromDecisionUrl, imagePixelWidth, MAX_NOTE_IMAGES,
 };

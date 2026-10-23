@@ -148,7 +148,7 @@ describe('quoted dates are in the workspace timezone, not the server\'s', () => 
   test('TP-1285: 14:38 UTC reads 7:38 a.m. in Vancouver', async () => {
     findMany.mockResolvedValue([entry({ bodyText: 'We will look at it Monday.', occurredAt: new Date('2026-09-17T14:38:03Z') })]);
     const quote = await ticketService._lastInboundQuote(1, null);
-    expect(quote.html).toMatch(/Thursday, September 17, 2026.*7:38 a\.m\..*PDT/);
+    expect(quote.html).toContain('Thu 17 Sep 2026, 7:38 AM');
     expect(quote.text).toContain('On Sep 17, 2026, 7:38 a.m., Someone wrote:');
   });
 

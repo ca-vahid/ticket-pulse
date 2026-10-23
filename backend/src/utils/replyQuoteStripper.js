@@ -22,6 +22,9 @@ const HTML_QUOTE_CONTAINERS = [
   // Outlook desktop's "From: / Sent:" block: a div with a thin grey top rule
   // and no id (QA 10-16, #245244: a "Thank you" carried the whole thread).
   /<div[^>]*style="[^"]*border-top:\s*solid\s+#(?:E1E1E1|B5C4DF)[^"]*"[\s\S]*$/i,
+  // Outlook on the web / new Outlook once its ids are gone: a rule, then a bold
+  // "From:" (23 Oct 2026, TP-10501: a reply carried two earlier messages again).
+  /<hr(?:\s[^>]*)?>\s*(?:<(?:div|p|span|font)(?:\s[^>]*)?>\s*){0,3}<(?:b|strong)(?:\s[^>]*)?>\s*From:\s*<\/(?:b|strong)>[\s\S]*$/i,
 ];
 
 const TEXT_QUOTE_MARKERS = [

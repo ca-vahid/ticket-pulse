@@ -2,6 +2,16 @@ export const APP_VERSION = '4.3.15-preview';
 
 export const changelog = [
   {
+    version: '4.3.16-preview',
+    date: 'October 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Pictures show in reply e-mails</strong> &mdash; a screenshot pasted into a reply, and a logo in a quoted signature, reached the requester as &ldquo;[Image: pasted-image-1.png]&rdquo;. They now show in place, carried inside the e-mail so Outlook displays them without asking. A pasted picture is no longer attached a second time.' },
+      { type: 'improved', html: '<strong>The conversation under a reply reads like Outlook</strong> &mdash; one &ldquo;Earlier in this conversation&rdquo; heading for the whole history instead of one per message, then for each message the person&rsquo;s photo and From, Sent and Cc lines, with a short date (&ldquo;Thu 22 Oct 2026, 4:33 PM&rdquo;).' },
+      { type: 'fixed', html: '<strong>Our quoted replies keep their signature</strong> &mdash; a technician&rsquo;s earlier reply quoted under a new one lost its signature. It now shows the signature it was sent with.' },
+      { type: 'fixed', html: '<strong>No more repeated history from Outlook on the web</strong> &mdash; a reply written in Outlook on the web brought its own copy of the earlier messages, so they appeared twice under the next reply. That copy is now trimmed.' },
+    ],
+  },
+  {
     version: '4.3.15-preview',
     date: 'October 23, 2026',
     entries: [
