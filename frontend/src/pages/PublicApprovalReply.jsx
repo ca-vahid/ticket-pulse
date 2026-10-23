@@ -185,7 +185,7 @@ export default function PublicApprovalReply() {
               placeholder={`Answer ${asker.split(' ')[0]} here — it lands on the approval request and everyone on it is told.`}
               ariaLabel="Your answer"
               minHeight={260}
-              className="border-input bg-background"
+              className="border-input bg-card shadow-subtle"
             />
             {error && (
               <p role="alert" className="mt-2.5 flex items-start gap-1.5 text-sm text-red-700 dark:text-red-200"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span>{error}</span></p>

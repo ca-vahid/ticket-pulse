@@ -42,6 +42,8 @@ const aiRun = (id, over = {}) => ({
 beforeEach(() => {
   jest.clearAllMocks();
   settings.clear();
+  // Super admins come from ADMIN_EMAILS when the setting is empty; a local .env must not add recipients.
+  delete process.env.ADMIN_EMAILS;
   prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([]);
   prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'Admin@BGC.ca' }]);
   prismaMock.assignmentConfig.findMany.mockResolvedValue([{ workspaceId: 1, workspace: { name: 'IT', isActive: true } }]);

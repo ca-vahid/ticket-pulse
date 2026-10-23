@@ -156,6 +156,8 @@ export function transformTicket(fsTicket, {
       fwdEmails: normalizeEmailList(fsTicket.fwd_emails),
       category: fsTicket.category || null,
       subCategory: fsTicket.sub_category || null,
+      // QA 10-22 #2: FreshService tags (undefined when the payload has none, so nothing is cleared).
+      fsTags: Array.isArray(fsTicket.tags) ? fsTicket.tags : undefined,
       ticketCategory: fsTicket.custom_fields?.[categoryCustomField] || null,
       tpSkill: normalizeCustomFieldValue(fsTicket.custom_fields?.[tpSkillCustomField], tpSkillLookupMap),
       tpSubskill: normalizeCustomFieldValue(fsTicket.custom_fields?.[tpSubskillCustomField], tpSubskillLookupMap),

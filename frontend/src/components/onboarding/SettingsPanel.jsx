@@ -7,8 +7,9 @@ import { SectionTitle, StatusDot } from './onboardingUi';
 import { MAX_PEOPLE, MODE_INFO, changeFieldLabel, changeValueLabel, fmtWhen, peopleOf } from './onboardingFormat';
 
 /**
- * Settings → mode, parent assignee, the three child lists, leave / transfer
- * handling, the detection rules (read-only) and the change history. Every
+ * Settings → mode, parent assignee, the three child lists, when onboarding
+ * tickets wake (QA 10-22 #6/#7), leave / transfer handling, the detection
+ * rules (read-only) and the change history. Every
  * save is audited server-side (who, when, before → after) and the history
  * below shows it — "full transparency" (plans/HR_LIFECYCLE_PLAN.md).
  */
@@ -20,6 +21,19 @@ const pick = (s) => ({
   leave: s.leave,
   officeChange: s.officeChange,
   officeRouting: s.officeRouting || { offices: [], fallbackTechIds: [] },
+  wake: s.wake || { leadDays: 21, holidayAware: false, rules: [] },
+});
+
+/** What is sent for the wake rules: blank job-title words dropped, numbers as numbers. */
+const cleanWake = (w = {}) => ({
+  leadDays: Number(w.leadDays) || 21,
+  holidayAware: w.holidayAware === true,
+  rules: (w.rules || []).map((r) => ({
+    key: r.key || '',
+    titleMatch: (Array.isArray(r.titleMatch) ? r.titleMatch : []).map((m) => String(m).trim()).filter(Boolean),
+    items: Array.isArray(r.items) ? r.items : [],
+    leadDays: Number(r.leadDays) || 0,
+  })),
 });
 
 const assigneeValue = (item) => (item.assigneeTechId ? `t:${item.assigneeTechId}` : item.groupId ? `g:${item.groupId}` : '');
@@ -99,7 +113,7 @@ function OfficeRouting({ routing, onChange, techOptions }) {
               value={o.label}
               onChange={(e) => setOffice(i, { label: e.target.value })}
               aria-label={`Office team ${i + 1} name`}
-              className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
+              className="tp-focus-ring h-9 rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground"
             />
             <input
               type="text"
@@ -107,7 +121,7 @@ function OfficeRouting({ routing, onChange, techOptions }) {
               onChange={(e) => setOffice(i, { match: e.target.value.split(',').map((m) => m.replace(/^\s+/, '')) })}
               aria-label={`${o.label || `Office team ${i + 1}`}: offices it covers`}
               placeholder="Vancouver, Kamloops"
-              className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
+              className="tp-focus-ring h-9 rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground"
             />
             <PeopleList ids={o.assigneeTechIds || []} onChange={(ids) => setOffice(i, { assigneeTechIds: ids })} techOptions={techOptions} what={o.label || `Office team ${i + 1}`} />
             <button
@@ -132,6 +146,109 @@ function OfficeRouting({ routing, onChange, techOptions }) {
         <span className="text-sm font-medium text-foreground">Any other office</span>
         <span className="text-xs text-muted-foreground">Offices no team covers: these people take turns. Nobody listed means AI routing.</span>
         <PeopleList ids={routing.fallbackTechIds || []} onChange={(ids) => onChange({ ...routing, fallbackTechIds: ids })} techOptions={techOptions} what="Any other office" max={20} />
+      </div>
+    </section>
+  );
+}
+
+const NUMBER = 'tp-focus-ring h-9 w-20 rounded-md border border-input bg-card px-2.5 text-sm text-foreground shadow-subtle';
+
+/**
+ * When onboarding wakes (QA 10-22 #6/#7): the lead before a start date, the
+ * holiday option, and rules by job title and child ("CAD" → Laptop 35 days).
+ */
+function WakeSettings({ wake, onChange, childItems = [] }) {
+  const rules = wake.rules || [];
+  const setRule = (i, patch) => onChange({ ...wake, rules: rules.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+  const toggleItem = (i, key) => {
+    const items = rules[i].items || [];
+    setRule(i, { items: items.includes(key) ? items.filter((k) => k !== key) : [...items, key] });
+  };
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 shadow-subtle" aria-label="When onboarding wakes">
+      <SectionTitle hint="A new hire's tickets sleep with no owner and wake this long before the start date; the owner is chosen when they wake.">
+        When onboarding wakes
+      </SectionTitle>
+      <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+        <span>Wake</span>
+        <input
+          type="number"
+          min={1}
+          max={120}
+          value={wake.leadDays}
+          onChange={(e) => onChange({ ...wake, leadDays: e.target.value === '' ? '' : Number(e.target.value) })}
+          aria-label="Days before the start date"
+          className={NUMBER}
+        />
+        <span>days before the start date</span>
+      </div>
+      <label className="mt-3 flex items-start gap-2 text-sm text-foreground/85">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={wake.holidayAware === true}
+          onChange={(e) => onChange({ ...wake, holidayAware: e.target.checked })}
+        />
+        <span>
+          Add the holidays in between
+          <span className="block text-xs text-muted-foreground">
+            Each holiday from Settings → Business Hours &amp; Holidays that falls between the wake and the start adds a day, so a January start wakes before the Christmas closure. Add the closure days there as holidays.
+          </span>
+        </span>
+      </label>
+
+      <div className="mt-4 border-t border-border pt-3">
+        <p className="text-sm font-medium text-foreground">By job title</p>
+        <p className="text-xs text-muted-foreground">When the job title on the BambooHR notice contains one of the words, the ticked children wake earlier; tick none for the whole family. The longest lead that applies wins.</p>
+        <ul className="mt-2 space-y-2">
+          {rules.map((rule, i) => (
+            <li key={i} className="grid grid-cols-1 gap-2 rounded-lg border border-border p-2.5 sm:grid-cols-[minmax(0,1fr)_auto_auto_2rem] sm:items-center" data-testid="wake-rule">
+              <input
+                type="text"
+                value={(rule.titleMatch || []).join(', ')}
+                onChange={(e) => setRule(i, { titleMatch: e.target.value.split(',').map((m) => m.replace(/^\s+/, '')) })}
+                aria-label={`Wake rule ${i + 1}: job title contains`}
+                placeholder="Job title contains, e.g. CAD, Drafter"
+                className="tp-focus-ring h-9 rounded-md border border-input bg-card px-2.5 text-sm text-foreground shadow-subtle"
+              />
+              <span className="flex flex-wrap gap-x-3 gap-y-1">
+                {childItems.map((child) => (
+                  <label key={child.key} className="inline-flex items-center gap-1.5 text-sm text-foreground/85">
+                    <input type="checkbox" checked={(rule.items || []).includes(child.key)} onChange={() => toggleItem(i, child.key)} />
+                    {child.title}
+                  </label>
+                ))}
+              </span>
+              <span className="flex items-center gap-1.5 text-sm text-foreground">
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={rule.leadDays}
+                  onChange={(e) => setRule(i, { leadDays: e.target.value === '' ? '' : Number(e.target.value) })}
+                  aria-label={`Wake rule ${i + 1}: days before the start date`}
+                  className={NUMBER}
+                />
+                days
+              </span>
+              <button
+                type="button"
+                onClick={() => onChange({ ...wake, rules: rules.filter((_, j) => j !== i) })}
+                aria-label={`Remove wake rule ${i + 1}`}
+                className="tp-focus-ring justify-self-start rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-red-600 dark:hover:text-red-300"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          onClick={() => onChange({ ...wake, rules: [...rules, { key: '', titleMatch: [], items: [], leadDays: Math.max(Number(wake.leadDays) || 21, 21) + 14 }] })}
+          className="tp-focus-ring mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-primary hover:bg-muted"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" /> Add a job-title rule
+        </button>
       </div>
     </section>
   );
@@ -212,7 +329,7 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOp
               value={item.title}
               onChange={(e) => update(i, { title: e.target.value })}
               aria-label={`${label}: child ${i + 1} title`}
-              className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
+              className="tp-focus-ring h-9 rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground"
             />
             <input
               type="number"
@@ -221,7 +338,7 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOp
               value={item.dueOffsetDays}
               onChange={(e) => update(i, { dueOffsetDays: e.target.value === '' ? 0 : Number(e.target.value) })}
               aria-label={`${label}: ${item.title || `child ${i + 1}`} due offset (days)`}
-              className="tp-focus-ring h-9 rounded-md border border-input bg-background px-2.5 text-sm text-foreground"
+              className="tp-focus-ring h-9 rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground"
             />
             <AssigneeCell
               item={item}
@@ -279,7 +396,7 @@ export default function SettingsPanel({ data, onSaved }) {
   }, []);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const cleaned = (d) => ({ ...d, templates: cleanTemplates(d.templates), officeRouting: cleanRouting(d.officeRouting) });
+  const cleaned = (d) => ({ ...d, templates: cleanTemplates(d.templates), officeRouting: cleanRouting(d.officeRouting), wake: cleanWake(d.wake) });
   const dirty = JSON.stringify(cleaned(draft)) !== JSON.stringify(cleaned(saved));
 
   const save = async () => {
@@ -352,6 +469,12 @@ export default function SettingsPanel({ data, onSaved }) {
       ))}
 
       <OfficeRouting routing={draft.officeRouting} onChange={(officeRouting) => setDraft((d) => ({ ...d, officeRouting }))} techOptions={techOptions} />
+
+      <WakeSettings
+        wake={draft.wake}
+        onChange={(wake) => setDraft((d) => ({ ...d, wake }))}
+        childItems={(draft.templates?.onboarding || []).filter((i) => i.key)}
+      />
 
       <section className="rounded-xl border border-border bg-card p-4 shadow-subtle">
         <SectionTitle hint="No new ticket: the notice itself is assigned, given a due date and parked until its lead time.">Leave and transfer notices</SectionTitle>

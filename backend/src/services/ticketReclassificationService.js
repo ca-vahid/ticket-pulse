@@ -107,9 +107,25 @@ function snapshotTicketClassification(ticket) {
   };
 }
 
+/**
+ * QA 10-22 #1: workspaces whose tickets that arrive already closed still get
+ * a Ticket Pulse category (the sync's sweep, below). Field Equipment logs
+ * most of its tickets closed, so the classification sweep, which only looks
+ * at open tickets, never reached them. CLASSIFY_CLOSED_WORKSPACE_IDS, default "4".
+ */
+export function classifyClosedWorkspaceIds() {
+  const raw = process.env.CLASSIFY_CLOSED_WORKSPACE_IDS ?? '4';
+  return new Set(String(raw).split(',').map((v) => Number(v.trim())).filter((n) => Number.isInteger(n) && n > 0));
+}
+
 class TicketReclassificationService {
-  async run(workspaceId, options = {}) {
-    if (!isCanonicalCategoryWorkspace(workspaceId)) {
+  /**
+   * `internal.allowNonCanonical` is for in-process callers only (the closed
+   * sweep, ops scripts): the admin route passes the request body as `options`,
+   * never a third argument.
+   */
+  async run(workspaceId, options = {}, internal = {}) {
+    if (!internal.allowNonCanonical && !isCanonicalCategoryWorkspace(workspaceId)) {
       throw new ValidationError('Ticket reclassification is enabled only for canonical-category workspaces');
     }
     const apply = options.apply === true;

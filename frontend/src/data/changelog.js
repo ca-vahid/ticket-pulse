@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.3.13-preview';
+export const APP_VERSION = '4.3.14-preview';
 
 export const changelog = [
+  {
+    version: '4.3.14-preview',
+    date: 'October 22, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Field Equipment tickets get a category</strong> &mdash; tickets that arrive already closed (most Field Equipment tickets) were never categorized, because only open tickets were. They now are, from the category descriptions, in Ticket Pulse only. The 737 Field Equipment tickets that had none were categorized tonight; 2 could not be placed.' },
+      { type: 'new', html: '<strong>FreshService tags on Field Equipment tickets</strong> &mdash; the tags the team sets in FreshService now show on the Ticket Pulse copy and can be filtered on. Existing tickets were brought over tonight. A tag removed in FreshService goes away here too; a tag added in Ticket Pulse stays.' },
+      { type: 'improved', html: '<strong>Drop-down menus and fields stand out</strong> &mdash; fields and drop-down menus have a clearer border, and the filters on Availability, Onboarding and Urgent response sit on white, so they no longer blend into the page.' },
+      { type: 'improved', html: '<strong>Board view asks before closing</strong> &mdash; dragging a card into Closed asks &ldquo;Close TP-10477?&rdquo; first. Cancel or Esc leaves it where it was.' },
+      { type: 'new', html: '<strong>When onboarding wakes</strong> &mdash; Onboarding &rarr; Settings sets how long before the start date a new hire&rsquo;s tickets wake (21 days, as before), can add the holidays in between so a January start wakes before the Christmas closure, and can wake some children earlier by job title (for example a CAD hire&rsquo;s laptop).' },
+      { type: 'fixed', html: '<strong>Workflows that run in addition stand on their own</strong> &mdash; in Mail Workflows, a workflow that runs alongside the default (such as Phone Ticket Closed) is no longer drawn as one of its variants, and reads &ldquo;Runs in addition&rdquo;. Variant rows are no longer greyed.' },
+    ],
+  },
   {
     version: '4.3.13-preview',
     date: 'October 22, 2026',

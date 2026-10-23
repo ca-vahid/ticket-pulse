@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronRight, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { relativeTime, runFailed, workflowState } from './WorkflowIndex';
-import { WORKFLOW_STAGES, groupWorkflowsByStage, listWatchSignals, stageForTrigger } from '../../utils/workflowStages';
+import { WORKFLOW_STAGES, groupWorkflowsByStage, listWatchSignals, runsInAddition, stageForTrigger } from '../../utils/workflowStages';
 import { motionReduced } from '../../utils/motionPreference';
 
 /**
@@ -26,7 +26,8 @@ import { motionReduced } from '../../utils/motionPreference';
  * QA 10-20 #3: more contrast between sections. The list sits on a muted
  * backdrop so each trigger card stands out; a stage heading is a bold line
  * with a rule to the right edge; a card's "When …" header has its own tinted
- * band; variant rows are a shade darker than their default.
+ * band. (QA 10-22 #8: variant rows are no longer tinted; the elbow and the
+ * indent mark them, and a "Runs in addition" workflow is not nested at all.)
  *
  * QA 10-20 #5: a trigger with two defaults (business hours and after-hours)
  * lists them as two blocks, each with its own variants (`isAfterHours` picks
@@ -65,7 +66,9 @@ function workflowHref(id) {
 export function workflowKind(workflow, { isAfterHours = () => false } = {}) {
   const kind = workflow.isDefaultVariant
     ? 'Default'
-    : workflow.triggerType === 'manual' ? 'Sub-workflow' : workflow.routingRule ? 'Routed' : 'Variant';
+    : workflow.triggerType === 'manual' ? 'Sub-workflow'
+      : runsInAddition(workflow) ? (workflow.routingRule ? 'Routed · in addition' : 'Runs in addition')
+        : workflow.routingRule ? 'Routed' : 'Variant';
   return isAfterHours(workflow) ? `${kind} · after-hours` : kind;
 }
 
@@ -132,7 +135,7 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
 
   return (
     <li
-      className={cx('group/row relative', variant && 'bg-muted/40')}
+      className="group/row relative"
       data-testid="workflow-list-row"
       data-state={state.key}
       data-variant={variant ? 'true' : undefined}

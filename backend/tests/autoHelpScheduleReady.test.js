@@ -37,6 +37,8 @@ let spies = [];
 beforeEach(() => {
   jest.clearAllMocks();
   ticketReady._usesCache.clear();
+  // Super admins come from ADMIN_EMAILS when the setting is empty; a local .env must not add recipients.
+  delete process.env.ADMIN_EMAILS;
   playbooks._afterHoursCache.clear();
   playbooks._readinessCache.clear();
   prismaMock.notificationWorkflow.findMany.mockResolvedValue([{ workspaceId: 1, enabledAt: ENABLED_AT, lastPublishedAt: null, createdAt: ENABLED_AT }]);

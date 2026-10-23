@@ -90,6 +90,11 @@ const DEFAULT_OFFICE_ROUTING = Object.freeze([
   { key: 'halifax', label: 'Halifax', match: ['Halifax'], hints: ['Sam Khadem'] },
 ]);
 const ROUTING_KEY = '__officeRouting'; // lives inside the templates JSON (no migration)
+// QA 10-22 #6/#7: when onboarding tickets wake (also inside the templates JSON).
+const WAKE_KEY = '__wakeRules';
+const DEFAULT_LEAD_DAYS = 21;
+const MAX_LEAD_DAYS = 120;
+const MAX_WAKE_RULES = 20;
 const MAX_OFFICES = 20;
 const MAX_FALLBACK = 20;
 
@@ -138,6 +143,44 @@ function normalizeRouting(v) {
     })).filter((o) => o.key && o.label),
     fallbackTechIds: idList(v.fallbackTechIds),
   };
+}
+
+const leadOrNull = (v) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= MAX_LEAD_DAYS ? n : null;
+};
+
+/** Stored wake settings → clean shape, or null when nothing usable is stored. */
+function normalizeWake(v) {
+  if (!v || typeof v !== 'object') return null;
+  return {
+    leadDays: leadOrNull(v.leadDays) || DEFAULT_LEAD_DAYS,
+    holidayAware: v.holidayAware === true,
+    rules: (Array.isArray(v.rules) ? v.rules : []).map((r) => ({
+      key: String(r?.key || ''),
+      titleMatch: (Array.isArray(r?.titleMatch) ? r.titleMatch : []).map((m) => String(m).trim()).filter(Boolean),
+      items: (Array.isArray(r?.items) ? r.items : []).map(String).filter(Boolean),
+      leadDays: leadOrNull(r?.leadDays),
+    })).filter((r) => r.key && r.leadDays),
+  };
+}
+
+/**
+ * Days before the start an onboarding ticket wakes (QA 10-22 #7): the
+ * workspace lead, or the longest lead of every rule that matches the hire's
+ * job title (blank = everyone) and this child (no children listed = all of
+ * the family, the HR notice too).
+ */
+export function onboardingLeadDays(wake, { title = null, templateKey = null } = {}) {
+  const w = normalizeWake(wake) || { leadDays: DEFAULT_LEAD_DAYS, rules: [] };
+  const jobTitle = String(title || '').toLowerCase();
+  let lead = w.leadDays;
+  for (const rule of w.rules) {
+    const titleOk = !rule.titleMatch.length || rule.titleMatch.some((m) => jobTitle.includes(m.toLowerCase()));
+    const itemOk = !rule.items.length || (templateKey && rule.items.includes(templateKey));
+    if (titleOk && itemOk) lead = Math.max(lead, rule.leadDays);
+  }
+  return lead;
 }
 
 const soft = (fn, fallback = null) => Promise.resolve().then(fn).catch((err) => {
@@ -244,6 +287,7 @@ class HrLifecycleService {
       templates,
       leave: { assigneeTechId: null, park: true },
       officeChange: { assigneeTechId: null, park: true },
+      wake: { leadDays: DEFAULT_LEAD_DAYS, holidayAware: false, rules: [] },
     };
   }
 
@@ -270,6 +314,7 @@ class HrLifecycleService {
       templates,
       leave: side(row?.leave, defaults.leave),
       officeChange: side(row?.officeChange, defaults.officeChange),
+      wake: normalizeWake(stored[WAKE_KEY]) || defaults.wake,
     };
   }
 
@@ -317,6 +362,7 @@ class HrLifecycleService {
     const next = JSON.parse(JSON.stringify({
       mode: current.mode, parentAssigneeTechId: current.parentAssigneeTechId, templates: current.templates, leave: current.leave, officeChange: current.officeChange,
       officeRouting: current.officeRouting,
+      wake: current.wake || { leadDays: DEFAULT_LEAD_DAYS, holidayAware: false, rules: [] },
     }));
     if (input.officeRouting !== undefined) {
       const r = input.officeRouting || {};
@@ -381,6 +427,34 @@ class HrLifecycleService {
         });
       }
     }
+    if (input.wake !== undefined) {
+      const w = input.wake || {};
+      const lead = (v, where) => {
+        const n = leadOrNull(v);
+        if (!n) throw new ValidationError(`${where}: a whole number of days from 1 to ${MAX_LEAD_DAYS}`);
+        return n;
+      };
+      const rules = Array.isArray(w.rules) ? w.rules : [];
+      if (rules.length > MAX_WAKE_RULES) throw new ValidationError(`Wake rules: at most ${MAX_WAKE_RULES}`);
+      const childKeys = new Set((next.templates.onboarding || []).map((i) => i.key));
+      const seenKeys = new Set();
+      next.wake = {
+        leadDays: w.leadDays !== undefined ? lead(w.leadDays, 'Onboarding wakes') : next.wake.leadDays,
+        holidayAware: w.holidayAware !== undefined ? w.holidayAware === true : next.wake.holidayAware,
+        rules: rules.map((r, i) => {
+          const titleMatch = [...new Set((Array.isArray(r?.titleMatch) ? r.titleMatch : String(r?.titleMatch || '').split(',')).map((m) => String(m).replace(/\s+/g, ' ').trim()).filter(Boolean))];
+          if (titleMatch.length > 12 || titleMatch.some((m) => m.length > 40)) throw new ValidationError(`Wake rule #${i + 1}: at most 12 job-title words of up to 40 characters`);
+          const items = [...new Set((Array.isArray(r?.items) ? r.items : []).map(String))];
+          const unknown = items.find((k) => !childKeys.has(k));
+          if (unknown) throw new ValidationError(`Wake rule #${i + 1}: "${unknown}" is not an onboarding child`);
+          if (!titleMatch.length && !items.length) throw new ValidationError(`Wake rule #${i + 1}: give a job title or pick a child (the lead for everyone is set above)`);
+          let key = /^[a-z0-9_]{1,40}$/.test(String(r?.key || '')) ? String(r.key) : slugKey(`${titleMatch.join('_') || 'all'}_${items.join('_') || 'family'}`);
+          while (seenKeys.has(key)) key = `${key}_2`.slice(0, 40);
+          seenKeys.add(key);
+          return { key, titleMatch, items, leadDays: lead(r?.leadDays, `Wake rule #${i + 1}`) };
+        }),
+      };
+    }
     for (const side of ['leave', 'officeChange']) {
       if (input[side] === undefined) continue;
       const v = input[side] || {};
@@ -415,6 +489,9 @@ class HrLifecycleService {
       for (const f of ['label', 'match', 'assigneeTechIds']) push(`officeRouting[${o.key}].${f}`, prev[f], o[f]);
     }
     push('officeRouting.fallbackTechIds', ra.fallbackTechIds, rb.fallbackTechIds);
+    push('wake.leadDays', before.wake?.leadDays, after.wake?.leadDays);
+    push('wake.holidayAware', before.wake?.holidayAware, after.wake?.holidayAware);
+    push('wake.rules', before.wake?.rules || [], after.wake?.rules || []);
     for (const name of TEMPLATE_NAMES) {
       const a = before.templates?.[name] || [];
       const b = after.templates?.[name] || [];
@@ -448,7 +525,7 @@ class HrLifecycleService {
     const data = {
       mode: next.mode,
       parentAssigneeTechId: next.parentAssigneeTechId,
-      templates: { ...next.templates, [ROUTING_KEY]: next.officeRouting },
+      templates: { ...next.templates, [ROUTING_KEY]: next.officeRouting, [WAKE_KEY]: next.wake },
       leave: next.leave,
       officeChange: next.officeChange,
       updatedBy: who,
@@ -482,7 +559,7 @@ class HrLifecycleService {
       recency: `Only tickets created in the last ${RECENT_DAYS} days are handled (history backfills never start a family).`,
       passwords: 'Lines that carry a password are removed from anything written into child descriptions or notes.',
       sharing: 'A child with several people goes to one of them: they take turns, and anyone off that day is skipped.',
-      parking: 'Children sleep with no owner until the lead time before the date (new hire: 21 days; departure: 14 days). When they wake, the owner is chosen from who is here that day: the people of the ticket, the office team, or AI routing. A date change from HR moves the due dates and the parks together; a cancellation closes the family.',
+      parking: 'Children sleep with no owner until the lead time before the date (new hire: 21 days unless Settings → When onboarding wakes says otherwise, per job title and child; departure: 14 days). When they wake, the owner is chosen from who is here that day: the people of the ticket, the office team, or AI routing. A date change from HR moves the due dates and the parks together; a cancellation closes the family.',
       offices: 'A new hire\'s children with no default assignee go to one person from the list of the hire\'s office (both to the same person, in turn); an office with no list uses "Any other office"; no list at all means AI routing.',
     };
   }
@@ -574,11 +651,12 @@ class HrLifecycleService {
    * when the wake is two weeks or more away). When the lead time has already
    * begun a parked ticket is woken. Returns 'parked' | 'moved' | 'woken' | null.
    */
-  async _parkUntilNeeded(t, familyKind, dateIso, out, { whenAwake = 'always', release = false } = {}) {
+  async _parkUntilNeeded(t, familyKind, dateIso, out, { whenAwake = 'always', release = false, hint = null } = {}) {
     if (!dateIso || !t) return null;
     try {
       const parks = await this._parkService();
-      const s = await parks.hrWakeFor(t.workspaceId, familyKind === 'onboarding' ? 'new_hire' : 'departure', dateIso);
+      const wakeOpts = await this._wakeOptions(t.workspaceId, familyKind, t.id, hint);
+      const s = await parks.hrWakeFor(t.workspaceId, familyKind === 'onboarding' ? 'new_hire' : 'departure', dateIso, wakeOpts);
       if (!s) return null;
       const parked = Boolean(t.parkedUntil);
       if (s.started || !s.holdUntil) {
@@ -614,6 +692,30 @@ class HrLifecycleService {
       out?.warnings?.push(`Park of ${ticketDisplayRef(t)} skipped: ${err.message}`);
       return null;
     }
+  }
+
+  /**
+   * QA 10-22 #6/#7: the onboarding lead for one ticket (its child key and the
+   * hire's job title, looked up when the caller does not know them) and the
+   * holiday option. Offboarding keeps its fixed lead.
+   */
+  async _wakeOptions(workspaceId, familyKind, ticketId, hint = null) {
+    if (familyKind !== 'onboarding') return {};
+    const settings = await soft(() => this.getSettings(workspaceId, { withTechs: false }));
+    const wake = settings?.wake;
+    if (!wake) return {};
+    let templateKey = hint?.templateKey ?? null;
+    let title = hint?.title ?? null;
+    if (!hint && ticketId) {
+      const member = await soft(() => prisma.hrLifecycleFamilyMember.findFirst({ where: { ticketId: Number(ticketId), workspaceId: Number(workspaceId) }, orderBy: { id: 'desc' }, select: { familyId: true, role: true, templateKey: true } }));
+      if (member?.role === 'child') templateKey = member.templateKey || null;
+      const family = await soft(() => prisma.hrLifecycleFamily.findFirst({
+        where: member ? { id: member.familyId } : { parentTicketId: Number(ticketId), workspaceId: Number(workspaceId) },
+        select: { details: true },
+      }));
+      title = family?.details?.title || null;
+    }
+    return { leadDays: onboardingLeadDays(wake, { title, templateKey }), holidayAware: wake.holidayAware === true };
   }
 
   // ------------------------------------------------------------ families
@@ -1190,11 +1292,13 @@ class HrLifecycleService {
     const lines = [];
     // Work that is not due to start yet sleeps with NO owner: who gets it is
     // decided when it wakes, from who is here then (Vahid, 8 Oct 2026).
-    let defer = null;
-    if (!plan.afterTheFact && plan.effectiveDate) {
-      const wake = await Promise.resolve().then(async () => (await this._parkService()).hrWakeFor(ws, plan.familyKind === 'onboarding' ? 'new_hire' : 'departure', plan.effectiveDate)).catch(() => null);
-      if (wake && !wake.started && wake.holdUntil) defer = wake;
-    }
+    // QA 10-22 #7: each child has its own lead (job-title rules), so its own wake.
+    const deferFor = async (templateKey) => {
+      if (plan.afterTheFact || !plan.effectiveDate) return null;
+      const opts = await this._wakeOptions(ws, plan.familyKind, null, { templateKey, title: c.title || null });
+      const wake = await Promise.resolve().then(async () => (await this._parkService()).hrWakeFor(ws, plan.familyKind === 'onboarding' ? 'new_hire' : 'departure', plan.effectiveDate, opts)).catch(() => null);
+      return wake && !wake.started && wake.holdUntil ? wake : null;
+    };
     for (const child of plan.children) {
       if (child.adoptTicketId) {
         try {
@@ -1210,6 +1314,7 @@ class HrLifecycleService {
         }
         continue;
       }
+      const defer = await deferFor(child.key);
       const intro = CHILD_INTRO[child.key]?.[plan.familyKind] || `${child.title} for the following ${plan.familyKind === 'onboarding' ? 'new hire' : 'user'}.`;
       const html = [
         `<p>${esc(intro)}</p>`,
@@ -1246,7 +1351,7 @@ class HrLifecycleService {
         const ref = created.displayRef || ticketDisplayRef(created);
         // Nobody has to look at it until the lead time before the date.
         if (!plan.afterTheFact && plan.effectiveDate) {
-          await this._parkUntilNeeded({ id: created.id, workspaceId: ws, origin: 'ticketpulse', nativeNumber: created.nativeNumber, parkedUntil: null }, plan.familyKind, plan.effectiveDate, out);
+          await this._parkUntilNeeded({ id: created.id, workspaceId: ws, origin: 'ticketpulse', nativeNumber: created.nativeNumber, parkedUntil: null }, plan.familyKind, plan.effectiveDate, out, { hint: { templateKey: child.key, title: c.title || null } });
         }
         out.created.push({ ticketId: created.id, ref, key: child.key, title: child.title });
         lines.push(`<li>${esc(ref)} — ${esc(child.title)}${child.dueDate ? `, due ${esc(fmtDay(child.dueDate))}` : ''}${defer ? `, asleep until ${esc(fmtDay(defer.wakeDate))} (assigned then)` : ''}</li>`);
@@ -1262,7 +1367,7 @@ class HrLifecycleService {
 
     // A fresh notice sleeps with its children (an older one keeps whatever its owner did).
     if (!plan.adopt && !plan.afterTheFact && plan.effectiveDate && !ticket.parkedUntil) {
-      await this._parkUntilNeeded(ticket, plan.familyKind, plan.effectiveDate, out);
+      await this._parkUntilNeeded(ticket, plan.familyKind, plan.effectiveDate, out, { hint: { templateKey: null, title: c.title || null } });
     }
 
     // Onboarding: NH automation tickets that arrived before the notice join now.

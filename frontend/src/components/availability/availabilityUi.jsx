@@ -159,8 +159,8 @@ export function SectionTitle({ children, hint = null, action = null, as: Tag = '
 }
 
 export const CARD = 'rounded-xl border border-border bg-card p-4 shadow-subtle';
-export const INPUT = 'tp-focus-ring h-9 w-full min-w-0 rounded-md border border-input bg-background px-2.5 text-sm text-foreground disabled:opacity-50';
-export const TEXTAREA = 'tp-focus-ring w-full rounded-md border border-input bg-background px-2.5 py-2 text-sm text-foreground';
+export const INPUT = 'tp-focus-ring h-9 w-full min-w-0 rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground disabled:opacity-50';
+export const TEXTAREA = 'tp-focus-ring w-full rounded-md border border-input bg-card shadow-subtle px-2.5 py-2 text-sm text-foreground';
 export const BTN_PRIMARY = 'tp-focus-ring inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40';
 export const BTN_QUIET = 'tp-focus-ring inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
 export const BTN_LINK = 'tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-primary hover:bg-muted disabled:opacity-40';

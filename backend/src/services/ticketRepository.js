@@ -261,7 +261,24 @@ class TicketRepository {
    * @param {Object} data - Ticket data
    * @returns {Promise<Object>} Created or updated ticket
    */
+  /**
+   * Upsert one FreshService ticket, then (QA 10-22 #2) copy its FreshService
+   * tags onto the Ticket Pulse tags when the payload carries them.
+   */
   async upsert(rawData) {
+    const row = await this._upsertRow(rawData);
+    if (Array.isArray(rawData?.fsTags) && row?.id && row.origin === TICKET_ORIGIN.FRESHSERVICE) {
+      try {
+        const { reconcileFsTags, isFsTagSyncWorkspace } = await import('./fsTagSyncService.js');
+        if (isFsTagSyncWorkspace(row.workspaceId)) await reconcileFsTags(row, rawData.fsTags);
+      } catch (err) {
+        logger.warn(`FS tags: ticket ${row.id} not synced: ${err.message}`);
+      }
+    }
+    return row;
+  }
+
+  async _upsertRow(rawData) {
     try {
       // A NUL anywhere in FreshService's text fails the whole row in Postgres
       // (22021) — and a ticket that cannot be inserted silently never exists.

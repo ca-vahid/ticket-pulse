@@ -26,6 +26,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214 28% 82%;
     --input: 214 32% 88%;
+    --field-border: 215 16% 64%; /* QA 10-22 #3: form controls stand out from the page */
     --ring: 221 83% 53%;
     --success: 158 64% 40%;
     --warning: 38 92% 50%;
@@ -74,6 +75,7 @@
     --destructive-foreground: 0 0% 100%;
     --border: 216 24% 32%;
     --input: 216 26% 28%;
+    --field-border: 216 20% 42%;
     --ring: 217 91% 60%;
     --success: 158 64% 48%;
     --warning: 38 92% 55%;
@@ -88,6 +90,7 @@
     .dark {
       --border: 216 26% 38%;
       --input: 216 26% 42%;
+      --field-border: 216 22% 52%;
       --muted-foreground: 215 20% 80%;
     }
   }
@@ -115,6 +118,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214 28% 82%;
     --input: 214 32% 88%;
+    --field-border: 215 16% 64%; /* QA 10-22 #3: form controls stand out from the page */
     --ring: 221 83% 53%;
     --success: 158 64% 40%;
     --warning: 38 92% 50%;
@@ -193,6 +197,15 @@ code {
 }
 
 @layer components {
+
+  /* QA 10-22 #3: drop-down menus and fields blended into the page. A native
+     control drawn with border-input gets a firmer border (one class plus the
+     element beats the bare utility; hover and focus colours still win). */
+  input.border-input,
+  select.border-input,
+  textarea.border-input {
+    border-color: hsl(var(--field-border));
+  }
 
   /* Signature preview spacing (QA 09-08). The email itself gets INLINE margins
      (mail clients strip <style>), so these rules exist only to make the in-app

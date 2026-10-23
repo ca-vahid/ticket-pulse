@@ -532,15 +532,20 @@ class TicketParkService {
    * calendar). usable = in the future and within what a park can hold;
    * started = the lead time has already begun.
    */
-  async hrWakeFor(workspaceId, kind, dateIso) {
+  async hrWakeFor(workspaceId, kind, dateIso, { leadDays = null, holidayAware = false } = {}) {
     if (!dateIso) return null;
     let isBusinessDay = null;
+    let isHoliday = null;
     try {
       const { default: businessCalendarService } = await import('./businessCalendarService.js');
       const cal = await businessCalendarService.loadCalendar(Number(workspaceId));
-      if (cal) isBusinessDay = (iso) => cal.byDay.has(new Date(`${iso}T00:00:00Z`).getUTCDay()) && !cal.isHolidayDate(iso);
+      if (cal) {
+        isBusinessDay = (iso) => cal.byDay.has(new Date(`${iso}T00:00:00Z`).getUTCDay()) && !cal.isHolidayDate(iso);
+        isHoliday = (iso) => cal.isHolidayDate(iso);
+      }
     } catch { /* Monday–Friday */ }
-    const wakeDate = hrWakeDate(kind, dateIso, { isBusinessDay });
+    // QA 10-22 #6/#7: the onboarding lead and holiday option (hrLifecycleService._wakeOptions).
+    const wakeDate = hrWakeDate(kind, dateIso, { isBusinessDay, leadDays, holidayAware, isHoliday });
     const until = new Date(`${wakeDate}T15:00:00.000Z`);
     const now = Date.now();
     const started = until.getTime() <= now + 3600e3;
@@ -566,17 +571,21 @@ class TicketParkService {
     if (!read) return null;
     // Lead time (25 Sep 2026): wake ahead of the notice's date — see hrWakeDate.
     // If the lead window has already begun, the ticket needs work now: not usable.
-    let isBusinessDay = null;
-    try {
-      const { default: businessCalendarService } = await import('./businessCalendarService.js');
-      const cal = await businessCalendarService.loadCalendar(Number(workspaceId));
-      if (cal) isBusinessDay = (iso) => cal.byDay.has(new Date(`${iso}T00:00:00Z`).getUTCDay()) && !cal.isHolidayDate(iso);
-    } catch { /* Monday–Friday */ }
-    const wakeDate = hrWakeDate(read.kind, read.date, { isBusinessDay });
-    const until = new Date(`${wakeDate}T15:00:00.000Z`);
+    // QA 10-22 #6/#7: a new hire follows Onboarding → Settings → When onboarding wakes.
+    let lead = {};
+    if (read.kind === 'new_hire' || read.kind === 'start_change') {
+      try {
+        const { default: hrLifecycleService, onboardingLeadDays } = await import('./hrLifecycleService.js');
+        const settings = await hrLifecycleService.getSettings(Number(workspaceId), { withTechs: false });
+        if (settings?.wake) lead = { leadDays: onboardingLeadDays(settings.wake, {}), holidayAware: settings.wake.holidayAware === true };
+      } catch { /* the fixed 21 days */ }
+    }
+    const s = await this.hrWakeFor(workspaceId, read.kind, read.date, lead);
+    if (!s) return null;
     const now = Date.now();
-    const usable = until.getTime() > now + 3600e3 && until.getTime() <= now + MAX_PARK_DAYS * 86400e3;
-    return { ...read, wakeDate, until: until.toISOString(), usable };
+    const untilMs = new Date(s.until).getTime();
+    const usable = untilMs > now + 3600e3 && untilMs <= now + MAX_PARK_DAYS * 86400e3;
+    return { ...read, wakeDate: s.wakeDate, until: s.until, usable };
   }
 
   async hrAutoParkEnabled(workspaceId) {
