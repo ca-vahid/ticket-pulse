@@ -65,7 +65,7 @@ export default function LegendPopover({ showOpen = false }) {
             )}
             <li><span className="font-semibold text-blue-600 dark:text-blue-300">Today</span> <span className="text-muted-foreground">— total today</span></li>
             <li><span className="font-semibold text-purple-600 dark:text-purple-300">Self</span> <span className="text-muted-foreground">— picked up from the queue</span></li>
-            <li><span className="font-semibold text-teal-700 dark:text-teal-300">Logged</span> <span className="text-muted-foreground">— wrote it themselves and took it</span></li>
+            <li><span className="font-semibold text-teal-700 dark:text-teal-300">Logged</span> <span className="text-muted-foreground">— wrote it themselves and took it; shares the Self column as the teal pen half (5 | ✎2)</span></li>
             <li><span className="font-semibold text-sky-600 dark:text-sky-300">App</span> <span className="text-muted-foreground">— app assigned</span></li>
             <li><span className="font-semibold text-orange-600 dark:text-orange-300">Asgn</span> <span className="text-muted-foreground">— coordinator assigned</span></li>
             <li><span className="font-semibold text-green-600 dark:text-green-300">Done</span> <span className="text-muted-foreground">— closed</span></li>

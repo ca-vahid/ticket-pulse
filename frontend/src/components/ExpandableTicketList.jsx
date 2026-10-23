@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Hand, CheckSquare, Star, ExternalLink, PenLine } from 'lucide-react';
+import { Hand, CheckSquare, ExternalLink } from 'lucide-react';
 import { getTicketCategoryLabel } from '../utils/ticketFilter';
 import { takenKind } from '../utils/assignerKind';
+import { TakenBadge } from './SelfLogged';
 
 const PRIORITY_DOT_COLORS = {
   1: 'bg-blue-400',
@@ -39,29 +40,6 @@ function formatTicketTime(date, includeDate) {
 }
 
 /** "Self" (picked from the queue) or "Logged" (wrote it and took it). */
-function TakenBadge({ kind }) {
-  if (kind === 'logged') {
-    return (
-      <span
-        className="bg-teal-50 dark:bg-teal-500/15 text-teal-700 dark:text-teal-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5"
-        title="Logged: they wrote this ticket themselves (+ New ticket) and took it, so it never reached the queue"
-      >
-        <PenLine className="w-2 h-2" aria-hidden="true" />
-        Logged
-      </span>
-    );
-  }
-  if (kind === 'self') {
-    return (
-      <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5" title="Self: picked up from the queue">
-        <Star className="w-2 h-2 fill-purple-600" />
-        Self
-      </span>
-    );
-  }
-  return null;
-}
-
 function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', narrow = false }) {
   const location = useLocation();
   // Return address so /tickets/:id's Back control comes back to this page

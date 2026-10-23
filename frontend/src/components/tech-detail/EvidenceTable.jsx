@@ -9,6 +9,8 @@ import {
   TicketRefLink, StatusPill, TypePill, PersonAvatar, PriorityDot, StateChip,
   ticketCategoryLabels, formatDayTime, timeAgo, PRIORITY_STRIP_COLORS,
 } from '../tickets/ticketUi';
+import { TakenBadge } from '../SelfLogged';
+import { takenKind } from '../../utils/assignerKind';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EvidenceTable — ONE ticket table showing the set behind the active stat chip
@@ -90,7 +92,7 @@ function fmtTime(ms) {
 
 const columnHelper = createColumnHelper();
 
-export default function EvidenceTable({ tickets = [], chipKey = 'handled', title = '' }) {
+export default function EvidenceTable({ tickets = [], chipKey = 'handled', title = '', techName = '' }) {
   const [sorting, setSorting] = useState([]);
   const [expanded, setExpanded] = useState({});
   const location = useLocation();
@@ -147,6 +149,8 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                   </span>
                 )}
                 <StateChip state={r.stateChip} />
+                {/* Took it themselves: Logged (wrote it) vs Self (from the queue) */}
+                <TakenBadge kind={takenKind(r, techName)} size="sm" />
               </span>
               {/* Meta line: mono ref · requester · age */}
               <span className="mt-0.5 flex min-w-0 items-center gap-1.5 pl-4 text-[11px] text-muted-foreground/75">
@@ -239,7 +243,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
         },
       }),
     ];
-  }, [chipKey, fromPath]);
+  }, [chipKey, fromPath, techName]);
 
   const table = useReactTable({
     data,

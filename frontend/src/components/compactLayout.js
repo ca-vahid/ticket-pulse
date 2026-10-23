@@ -3,8 +3,11 @@
 // pixel-perfectly. Update both views together when adding/removing columns.
 //
 // Column order:
-//   weekly:  [expand] [name+badges] [week heatmap]    [Total] [Self] [Logged] [App] [Asgn] [Done] [Rej] [CSAT]
-//   daily:   [expand] [name+badges] [Open]            [Total] [Self] [Logged] [App] [Asgn] [Done] [Rej] [CSAT]
+//   weekly:  [expand] [name+badges] [week heatmap]    [Total] [Self] [App] [Asgn] [Done] [Rej] [CSAT]
+//   daily:   [expand] [name+badges] [Open]            [Total] [Self] [App] [Asgn] [Done] [Rej] [CSAT]
+//
+// Self holds two numbers (23 Oct 2026): picked up from the queue, and logged
+// (wrote it themselves and took it). See SelfLogged.jsx.
 
 // Weekly: name column stays a flexible minmax so long names can use extra
 // space; week heatmap column is also flexible so it stretches across the
@@ -45,7 +48,6 @@ export const COMPACT_COLUMNS_WEEKLY = [
   { key: 'week', label: 'This Week (Mon–Sun)', sortable: false, align: 'center' },
   { key: 'total', label: 'Total', sortable: true, align: 'center' },
   { key: 'self', label: 'Self', sortable: true, align: 'center' },
-  { key: 'logged', label: 'Logged', sortable: true, align: 'center' },
   { key: 'app', label: 'App', sortable: true, align: 'center' },
   { key: 'asgn', label: 'Asgn', sortable: true, align: 'center' },
   { key: 'done', label: 'Done', sortable: true, align: 'center' },
@@ -59,7 +61,6 @@ export const COMPACT_COLUMNS_DAILY = [
   { key: 'open', label: 'Open', sortable: true, align: 'center' },
   { key: 'total', label: 'Today', sortable: true, align: 'center' },
   { key: 'self', label: 'Self', sortable: true, align: 'center' },
-  { key: 'logged', label: 'Logged', sortable: true, align: 'center' },
   { key: 'app', label: 'App', sortable: true, align: 'center' },
   { key: 'asgn', label: 'Asgn', sortable: true, align: 'center' },
   { key: 'done', label: 'Done', sortable: true, align: 'center' },
@@ -74,8 +75,7 @@ const SIMPLE_LABELS = {
   week: 'Tickets each day',
   open: 'Open now',
   total: 'Total',
-  self: 'Picked up themselves',
-  logged: 'Logged themselves',
+  self: 'Picked up + logged',
   app: 'Sent by the app',
   asgn: 'Sent by a coordinator',
   done: 'Resolved',
@@ -91,15 +91,15 @@ export function getCompactColumns(viewMode, simple = false) {
 
 // Minimum content width (px) for the compact table in the tablet band
 // (640–1100px — where index.css's ≤1536px track values apply): the sum of the
-// fixed grid tracks + 10 column gaps (gap-3 = 12px × 10) + the row's horizontal
+// fixed grid tracks + 9 column gaps (gap-3 = 12px × 9) + the row's horizontal
 // padding (px-3). The Dashboard wraps header + rows in ONE horizontally
 // scrolling container (QA 08-04 #3: iPad portrait pushed the trailing columns
 // past the right edge with no way to reach them) and pins this as the inner
 // min-width so header and rows scroll together, perfectly aligned.
 // Monthly shares the daily template (see getCompactGridTemplate).
 export function getCompactMinWidth(viewMode, simple = false) {
-  if (viewMode === 'weekly') return simple ? 1176 : 980;
-  return simple ? 996 : 822;
+  if (viewMode === 'weekly') return simple ? 1088 : 930;
+  return simple ? 908 : 768;
 }
 
 // Resolve the actual numeric value to sort by for a given column + viewMode.
@@ -120,18 +120,20 @@ export function getSortValue(tech, sortKey, viewMode) {
       : isWeekly
         ? (tech.weeklyTotalCreated || 0)
         : (tech.totalTicketsToday || 0);
-  case 'self':
-    return isMonthly
+  case 'self': {
+    // Everything they took themselves; queue picks break ties.
+    const self = isMonthly
       ? (tech.monthlySelfPicked || 0)
       : isWeekly
         ? (tech.weeklySelfPicked || 0)
         : (tech.selfPickedToday || 0);
-  case 'logged':
-    return isMonthly
+    const logged = isMonthly
       ? (tech.monthlyLogged || 0)
       : isWeekly
         ? (tech.weeklyLogged || 0)
         : (tech.loggedToday || 0);
+    return (self + logged) * 1000 + self;
+  }
   case 'app':
     return isMonthly
       ? (tech.monthlyAppAssigned || 0)
