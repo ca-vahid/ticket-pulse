@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Bot, RotateCcw, ChevronDown, PenLine, Ticket as TicketIcon } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Bot, RotateCcw, ChevronDown, Ticket as TicketIcon } from 'lucide-react';
+import { LoggedPlus, SelfLoggedPlain, SelfLoggedTile, selfLoggedTitle } from './SelfLogged';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
@@ -73,7 +74,7 @@ const getLoadTextClass = (open) => {
  * under it — the phone-scale answer to the desktop icon tiles, which read
  * gigantic on a 390px card (QA 08-08). Interactive cells keep a ≥44px hit box.
  */
-function MobileStat({ icon: Icon, value, label, iconClass = '', numClass = '', suffix = null, muted = false, title, onClick }) {
+function MobileStat({ icon: Icon, value, label, iconClass = '', numClass = '', suffix = null, extra = null, muted = false, title, onClick }) {
   const body = (
     <>
       <span className="flex items-center gap-1 leading-none">
@@ -82,6 +83,7 @@ function MobileStat({ icon: Icon, value, label, iconClass = '', numClass = '', s
           {value}
           {suffix && !muted && <span className="ml-0.5 text-[9px] font-semibold text-muted-foreground/75">{suffix}</span>}
         </span>
+        {extra}
       </span>
       <span className={`max-w-full truncate text-[9px] font-semibold uppercase tracking-wide leading-none ${muted ? 'text-muted-foreground/50' : 'text-muted-foreground'}`}>
         {label}
@@ -223,9 +225,6 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
     : viewMode === 'monthly'
       ? (technician.monthlyLogged || 0)
       : (technician.loggedToday || 0);
-  const loggedTitle = logged > 0
-    ? `Logged: ${logged} ticket${logged === 1 ? '' : 's'} they wrote themselves (+ New ticket) and took. These never reached the queue, so they are not self-picks and are left out of the AI-assigned gauge.`
-    : 'No tickets logged by themselves';
   const appAssigned = viewMode === 'weekly'
     ? (technician.weeklyAppAssigned || 0)
     : viewMode === 'monthly'
@@ -602,12 +601,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
             <div className="mb-2 grid grid-cols-3 gap-x-2 gap-y-3">
               <div className="flex flex-col items-center text-center">
-                <div className={`text-base font-semibold ${selfPicked > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{selfPicked}</div>
-                <div className="text-[10px] text-muted-foreground/75 max-sm:text-muted-foreground leading-tight">Picked up themselves</div>
-              </div>
-              <div className="flex flex-col items-center text-center" title={loggedTitle}>
-                <div className={`text-base font-semibold ${logged > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{logged}</div>
-                <div className="text-[10px] text-muted-foreground/75 max-sm:text-muted-foreground leading-tight">Logged themselves</div>
+                <SelfLoggedPlain self={selfPicked} logged={logged} />
+                <div className="text-[10px] text-muted-foreground/75 max-sm:text-muted-foreground leading-tight">{logged > 0 ? 'Picked up + logged' : 'Picked up themselves'}</div>
               </div>
               <div className="flex flex-col items-center text-center">
                 <div className={`text-base font-semibold ${appAssigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{appAssigned}</div>
@@ -671,9 +666,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                   </span>
                 </span>
               </div>
-              <div className="grid grid-cols-7">
-                <MobileStat icon={Hand} value={selfPicked} label="Self" iconClass="text-purple-600 dark:text-purple-300" numClass="text-purple-900 dark:text-purple-200" muted={selfPicked === 0} title="Picked up themselves from the queue" />
-                <MobileStat icon={PenLine} value={logged} label="Log" iconClass="text-teal-600 dark:text-teal-300" numClass="text-teal-800 dark:text-teal-200" muted={logged === 0} title={loggedTitle} />
+              <div className="grid grid-cols-6">
+                <MobileStat icon={Hand} value={selfPicked} extra={<LoggedPlus n={logged} className="text-[10px]" />} label="Self" iconClass="text-purple-600 dark:text-purple-300" numClass="text-purple-900 dark:text-purple-200" muted={selfPicked === 0 && logged === 0} title={selfLoggedTitle(selfPicked, logged)} />
                 <MobileStat
                   icon={Bot}
                   value={appAssigned}
@@ -755,29 +749,14 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             </div>
 
             {/* Metrics Grid - Icons + Numbers (sm+ / desktop Cards view) */}
-            {/* Fixed 7-column layout so all techs align vertically. Optional metrics
-            (Logged, App, Rej, CSAT) render as muted placeholders when count is 0. */}
+            {/* Fixed 7-track layout so all techs align vertically: Self spans two
+            (it splits into Self | Logged when they logged any). Optional metrics
+            (App, Rej, CSAT) render as muted placeholders when count is 0. */}
             <div className="hidden gap-2 mb-2 sm:grid sm:grid-cols-7">
 
-              {/* Self - always primary */}
-              <div className="flex flex-col items-center p-2 bg-purple-100 dark:bg-purple-500/20 rounded-lg shadow-sm border border-purple-200 dark:border-purple-500/30">
-                <Hand className="w-5 h-5 text-purple-700 dark:text-purple-200 mb-1" />
-                <div className="text-lg font-bold text-purple-900 dark:text-purple-200">{selfPicked}</div>
-                <div className="text-[9px] text-purple-700 dark:text-purple-200 uppercase font-bold">Self</div>
-              </div>
-
-              {/* Logged - wrote it themselves and took it; muted when 0 */}
-              <div
-                className={`flex flex-col items-center p-2 rounded-lg shadow-sm border ${
-                  logged > 0
-                    ? 'bg-teal-50 dark:bg-teal-500/15 border-teal-200 dark:border-teal-500/30'
-                    : 'bg-muted/25 border-border/60 opacity-50'
-                }`}
-                title={loggedTitle}
-              >
-                <PenLine className={`w-5 h-5 mb-1 ${logged > 0 ? 'text-teal-600 dark:text-teal-300' : 'text-muted-foreground/50'}`} />
-                <div className={`text-lg font-bold ${logged > 0 ? 'text-teal-800 dark:text-teal-200' : 'text-muted-foreground/50'}`}>{logged}</div>
-                <div className={`text-[9px] uppercase font-bold ${logged > 0 ? 'text-teal-600 dark:text-teal-300' : 'text-muted-foreground/50'}`}>Logged</div>
+              {/* Self - always primary; teal pen half for logged */}
+              <div className="col-span-2 flex">
+                <SelfLoggedTile self={selfPicked} logged={logged} size="lg" />
               </div>
 
               {/* App Assigned - muted when 0 to keep alignment */}

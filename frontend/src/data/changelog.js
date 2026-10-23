@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.14-preview';
+export const APP_VERSION = '4.3.15-preview';
 
 export const changelog = [
+  {
+    version: '4.3.15-preview',
+    date: 'October 23, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Self and Logged share one column</strong> &mdash; the dashboard no longer has a separate Logged column. The Self tile splits in two when a technician logged any tickets: the purple hand half is what they picked up from the queue, the teal pen half is what they wrote themselves and took. The plain-number style reads &ldquo;3 + &#9998;11&rdquo;. Sorting by Self counts both.' },
+      { type: 'new', html: '<strong>Logged tickets on the technician page</strong> &mdash; the Self-picked number now carries a teal &ldquo;+&#9998;2&rdquo; for logged tickets, the Handled line splits self, logged and routed, and every ticket in the list reads &ldquo;Logged&rdquo; or &ldquo;Self&rdquo; when they took it themselves.' },
+    ],
+  },
   {
     version: '4.3.14-preview',
     date: 'October 22, 2026',

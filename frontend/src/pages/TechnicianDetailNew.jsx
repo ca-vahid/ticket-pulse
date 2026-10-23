@@ -12,6 +12,8 @@ import TechDetailHeader from '../components/tech-detail/TechDetailHeader';
 import ActivityHeatmap from '../components/tech-detail/ActivityHeatmap';
 import DayEventStrip from '../components/tech-detail/DayEventStrip';
 import EvidenceTable from '../components/tech-detail/EvidenceTable';
+import { LoggedPlus } from '../components/SelfLogged';
+import { takenKind } from '../utils/assignerKind';
 import SatisfactionPanel, { mergeSatisfaction } from '../components/tech-detail/SatisfactionPanel';
 import BouncedTab from '../components/tech-detail/BouncedTab';
 import PageLoadProgress from '../components/PageLoadProgress';
@@ -483,6 +485,15 @@ export default function TechnicianDetailNew() {
     : viewMode === 'monthly'
       ? (technician.monthlySelfPicked ?? selfPickedTickets.length)
       : (technician.selfPickedOnDate ?? selfPickedTickets.length);
+  // Logged: they wrote it themselves (+ New ticket) and took it. The Self list
+  // carries both; the count splits them (fallback: tell them apart by row).
+  const loggedCount = viewMode === 'weekly'
+    ? technician.weeklyLogged
+    : viewMode === 'monthly'
+      ? technician.monthlyLogged
+      : technician.loggedOnDate;
+  const loggedN = loggedCount ?? selfPickedTickets.filter((t) => takenKind(t, technician.name) === 'logged').length;
+  const tookCount = selfPickedCount + loggedN;
   const bouncedCount = technician.rejectedThisPeriod || 0;
   const bouncedLifetime = technician.rejectedLifetime || 0;
 
@@ -516,7 +527,7 @@ export default function TechnicianDetailNew() {
     {
       key: 'handled', label: `Handled · ${viewMode === 'daily' ? (isToday ? 'today' : periodLabel) : periodLabel}`,
       value: handledCount, tone: 'text-indigo-600 dark:text-indigo-300', Icon: Layers,
-      sub: `${selfPickedCount} self · ${handledCount - selfPickedCount} routed`,
+      sub: `${selfPickedCount} self${loggedN > 0 ? ` · ${loggedN} logged` : ''} · ${Math.max(0, handledCount - tookCount)} routed`,
     },
     {
       key: 'closed', label: 'Closed',
@@ -530,9 +541,11 @@ export default function TechnicianDetailNew() {
       sub: 'live snapshot, not period-scoped',
     },
     {
-      key: 'self', label: 'Self-picked',
+      key: 'self', label: loggedN > 0 ? 'Self-picked + logged' : 'Self-picked',
       value: selfPickedCount, tone: 'text-violet-600 dark:text-violet-300', Icon: Hand,
-      sub: handledCount > 0 ? `${Math.round((selfPickedCount / handledCount) * 100)}% of handled` : null,
+      valueExtra: loggedN > 0 ? <LoggedPlus n={loggedN} className="ml-1 text-xs" /> : null,
+      ariaExtra: loggedN > 0 ? `plus ${loggedN} logged` : null,
+      sub: handledCount > 0 ? `${Math.round((tookCount / handledCount) * 100)}% of handled` : null,
     },
     {
       key: 'bounced', label: 'Bounced',
@@ -553,7 +566,7 @@ export default function TechnicianDetailNew() {
     handled: { tickets: handledTickets, verb: 'Handled' },
     closed: { tickets: closedTickets, verb: 'Closed' },
     open: { tickets: openTickets, verb: 'Open right now' },
-    self: { tickets: selfPickedTickets, verb: 'Self-picked' },
+    self: { tickets: selfPickedTickets, verb: loggedN > 0 ? 'Self-picked + logged' : 'Self-picked' },
     satisfaction: { tickets: handledTickets, verb: 'Handled' },
   }[activeChip === 'bounced' ? 'handled' : activeChip] || { tickets: handledTickets, verb: 'Handled' };
 
@@ -659,7 +672,7 @@ export default function TechnicianDetailNew() {
               {periodLabel}
             </div>
             <div className="space-y-0.5">
-              {chips.map(({ key, label, value: rawValue, valueSuffix: rawSuffix, sub: rawSub, tone, Icon }) => {
+              {chips.map(({ key, label, value: rawValue, valueSuffix: rawSuffix, valueExtra, ariaExtra, sub: rawSub, tone, Icon }) => {
                 const active = activeChip === key;
                 // Satisfaction has its own requests; every other chip waits on the period payload.
                 const pending = key === 'satisfaction' ? (csatLoading || feedbackLoading) : !ready;
@@ -672,7 +685,7 @@ export default function TechnicianDetailNew() {
                     type="button"
                     onClick={() => handleChipClick(key)}
                     aria-pressed={active}
-                    aria-label={`${label}: ${value}${valueSuffix ? ` ${valueSuffix}` : ''}`}
+                    aria-label={`${label}: ${value}${valueSuffix ? ` ${valueSuffix}` : ''}${!pending && ariaExtra ? `, ${ariaExtra}` : ''}`}
                     className={`tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
                       active ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-200 dark:ring-blue-500/30' : 'hover:bg-muted/50'
                     }`}
@@ -685,6 +698,7 @@ export default function TechnicianDetailNew() {
                     <span className={`flex-shrink-0 text-lg font-extrabold tabular-nums ${tone}`}>
                       {value}
                       {valueSuffix && <span className="ml-0.5 text-[10px] font-semibold text-muted-foreground/75">{valueSuffix}</span>}
+                      {!pending && valueExtra}
                     </span>
                   </button>
                 );
@@ -796,6 +810,7 @@ export default function TechnicianDetailNew() {
               tickets={evidence.tickets}
               chipKey={activeChip === 'satisfaction' ? 'handled' : activeChip}
               title={evidenceTitle}
+              techName={technician.name}
             />
           )}
 

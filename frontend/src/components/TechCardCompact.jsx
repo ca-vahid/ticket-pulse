@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, ChevronDown, ChevronUp, Bot, RotateCcw, PenLine } from 'lucide-react';
+import { EyeOff, Trophy, Star, Send, CheckSquare, ChevronDown, ChevronUp, Bot, RotateCcw } from 'lucide-react';
+import { SelfLoggedPlain, SelfLoggedTile } from './SelfLogged';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
@@ -171,15 +172,13 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       ? (technician.monthlySelfPicked || 0)
       : (technician.selfPickedToday || 0);
   // Logged (22 Oct 2026): tickets they wrote themselves (+ New ticket) and
-  // took. Not a queue pick, and never the AI's to assign.
+  // took. Not a queue pick, and never the AI's to assign. Shares the Self
+  // column (SelfLogged.jsx).
   const logged = viewMode === 'weekly'
     ? (technician.weeklyLogged || 0)
     : viewMode === 'monthly'
       ? (technician.monthlyLogged || 0)
       : (technician.loggedToday || 0);
-  const loggedTitle = logged > 0
-    ? `Logged: ${logged} ticket${logged === 1 ? '' : 's'} they wrote themselves (+ New ticket) and took. These never reached the queue, so they are not self-picks and are left out of the AI-assigned gauge.`
-    : 'No tickets logged by themselves';
   const appAssigned = viewMode === 'weekly'
     ? (technician.weeklyAppAssigned || 0)
     : viewMode === 'monthly'
@@ -534,42 +533,14 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-300 leading-none">{totalTickets}</span>
         </div>
 
-        {/* Col 5: Self */}
+        {/* Col 5: Self — picked up, plus a teal pen half for logged */}
         <div className="flex items-center justify-center">
-          {simple ? (
-            <span className={`text-base font-semibold ${selfPicked > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title="Picked up themselves from the queue">{selfPicked}</span>
-          ) : (
-            <div className="flex items-center justify-center w-11 h-11 rounded-md bg-purple-50 dark:bg-purple-500/15 border border-purple-200 dark:border-purple-500/30" title="Self: picked up from the queue">
-              <div className="flex flex-col items-center leading-none">
-                <Hand className="w-3.5 h-3.5 text-purple-600 dark:text-purple-300 mb-0.5" />
-                <span className="text-base font-bold text-purple-800 dark:text-purple-200">{selfPicked}</span>
-              </div>
-            </div>
-          )}
+          {simple
+            ? <SelfLoggedPlain self={selfPicked} logged={logged} />
+            : <SelfLoggedTile self={selfPicked} logged={logged} />}
         </div>
 
-        {/* Col 6: Logged — muted when 0 to keep alignment */}
-        <div className="flex items-center justify-center">
-          {simple ? (
-            <span className={`text-base font-semibold ${logged > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title={loggedTitle}>{logged}</span>
-          ) : (
-            <div
-              className={`flex items-center justify-center w-11 h-11 rounded-md border ${
-                logged > 0
-                  ? 'bg-teal-50 dark:bg-teal-500/15 border-teal-200 dark:border-teal-500/30'
-                  : 'bg-muted/25 border-border/60 opacity-50'
-              }`}
-              title={loggedTitle}
-            >
-              <div className="flex flex-col items-center leading-none">
-                <PenLine className={`w-3.5 h-3.5 mb-0.5 ${logged > 0 ? 'text-teal-600 dark:text-teal-300' : 'text-muted-foreground/50'}`} />
-                <span className={`text-base font-bold ${logged > 0 ? 'text-teal-800 dark:text-teal-200' : 'text-muted-foreground/50'}`}>{logged}</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Col 7: App */}
+        {/* Col 6: App */}
         <div className="flex items-center justify-center">
           {simple ? (
             <span className={`text-base font-semibold ${appAssigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title={appTitle}>{appAssigned}</span>
@@ -590,7 +561,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </div>
 
-        {/* Col 8: Asgn */}
+        {/* Col 7: Asgn */}
         <div className="flex items-center justify-center">
           {simple ? (
             <span className={`text-base font-semibold ${assigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title="Assigned by a coordinator">{assigned}</span>
@@ -602,7 +573,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </div>
 
-        {/* Col 9: Done */}
+        {/* Col 8: Done */}
         <div className="flex items-center justify-center">
           {simple ? (
             <span className={`text-base font-semibold ${closed > 0 ? 'text-green-700 dark:text-green-200' : 'text-muted-foreground/50'}`} title="Resolved">{closed}</span>
@@ -614,7 +585,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </div>
 
-        {/* Col 10: Rejected (clickable when > 0) */}
+        {/* Col 9: Rejected (clickable when > 0) */}
         <div className="flex items-center justify-center">
           {rejectedDisplay > 0 ? (
             <button
@@ -648,7 +619,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </div>
 
-        {/* Col 11: CSAT — the AVERAGE on the /5 scale, not the response count
+        {/* Col 10: CSAT — the AVERAGE on the /5 scale, not the response count
             (QA 07-30 #5: "2" next to a star read as a 2/4 score). */}
         <div className="flex items-center justify-center">
           {hasCSAT ? (
