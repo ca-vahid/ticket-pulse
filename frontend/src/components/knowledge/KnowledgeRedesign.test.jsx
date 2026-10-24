@@ -55,7 +55,9 @@ const growthApi = {
   fsFolders: vi.fn(() => Promise.resolve({ success: true, data: { categories: [] } })),
 };
 const ticketsMeta = vi.hoisted(() => vi.fn(async () => ({ data: { technicians: [], groups: [] } })));
-vi.mock('../../services/api', () => ({ get knowledgeAPI() { return api; }, get knowledgeGrowthAPI() { return growthApi; }, ticketsAPI: { meta: ticketsMeta } }));
+// The Confluence card (Settings) only needs to load quietly here.
+const confluenceApi = { get: vi.fn(async () => ({ data: null })), runs: vi.fn(async () => ({ data: [] })) };
+vi.mock('../../services/api', () => ({ get knowledgeAPI() { return api; }, get knowledgeGrowthAPI() { return growthApi; }, get knowledgeConfluenceAPI() { return confluenceApi; }, ticketsAPI: { meta: ticketsMeta } }));
 vi.mock('../AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../nav/MobileTabBar', () => ({ default: () => null }));
 

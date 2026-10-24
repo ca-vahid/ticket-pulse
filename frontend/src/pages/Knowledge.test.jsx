@@ -118,7 +118,9 @@ const growthApi = {
   updateSettings: vi.fn((patch) => Promise.resolve({ success: true, data: { fsImportEnabled: false, fsFolderIds: ['7'], reviewDigestEnabled: true, fsCallsAllowed: false, ...patch } })),
   fsFolders: vi.fn(() => Promise.resolve({ success: true, data: { categories: [{ id: '3', name: 'IT how-tos', folders: [{ id: '7', name: 'VPN', description: null }] }] } })),
 };
-vi.mock('../services/api', () => ({ get knowledgeAPI() { return api; }, get knowledgeGrowthAPI() { return growthApi; }, ticketsAPI: { meta: ticketsMeta } }));
+// The Confluence card (Settings, QA 10-23 #4) only needs to load quietly here.
+const confluenceApi = { get: vi.fn(async () => ({ data: null })), runs: vi.fn(async () => ({ data: [] })) };
+vi.mock('../services/api', () => ({ get knowledgeAPI() { return api; }, get knowledgeGrowthAPI() { return growthApi; }, get knowledgeConfluenceAPI() { return confluenceApi; }, ticketsAPI: { meta: ticketsMeta } }));
 vi.mock('../components/AppHeader', () => ({ default: () => <div>AppHeader</div> }));
 vi.mock('../components/nav/MobileTabBar', () => ({ default: () => null }));
 vi.mock('../components/tickets/RichTextEditor', () => ({

@@ -34,7 +34,7 @@ import { containsWord } from '../utils/wordMatch.js';
 import { htmlToText, splitArticleSections } from '../utils/articleSections.js';
 
 export const ARTICLE_STATUSES = Object.freeze(['draft', 'published', 'archived']);
-export const ARTICLE_SOURCES = Object.freeze(['tp', 'fs_solution', 'verified_ticket']);
+export const ARTICLE_SOURCES = Object.freeze(['tp', 'fs_solution', 'verified_ticket', 'confluence']);
 /**
  * How far an article can be trusted (plans/KNOWLEDGE_SIMPLIFY_PLAN.md section 7):
  *   not_checked  written, not yet confirmed by someone with the skill
@@ -55,6 +55,7 @@ const VERSIONS_KEPT = 200;
 export const SOURCE_LABELS = Object.freeze({
   drafted: 'Drafted from tickets',
   fs_solution: 'FreshService solution',
+  confluence: 'Confluence page',
   verified_ticket: 'Verified solution',
   tp: 'Written in Ticket Pulse',
 });
@@ -254,6 +255,7 @@ const isLegacyDraftedTag = (tag) => String(tag || '').trim().toLowerCase() === L
 export function sourceLabelOf(row) {
   if (row?.source === 'fs_solution') return SOURCE_LABELS.fs_solution;
   if (row?.source === 'verified_ticket') return SOURCE_LABELS.verified_ticket;
+  if (row?.source === 'confluence') return SOURCE_LABELS.confluence;
   const drafted = Boolean(row?.sourceMeta && typeof row.sourceMeta === 'object' && row.sourceMeta.draftedFrom)
     || (Array.isArray(row?.tags) && row.tags.some(isLegacyDraftedTag));
   return drafted ? SOURCE_LABELS.drafted : SOURCE_LABELS.tp;
@@ -891,7 +893,8 @@ class KnowledgeArticleService {
           updatedBy: actor?.email || actor?.name || null,
           // An imported FreshService article archived here stays archived:
           // the nightly import does not bring it back.
-          ...(existing.source === 'fs_solution'
+          // Same for a Confluence page: the nightly sync never proposes it again.
+          ...(existing.source === 'fs_solution' || existing.source === 'confluence'
             ? { sourceMeta: { ...(existing.sourceMeta && typeof existing.sourceMeta === 'object' ? existing.sourceMeta : {}), archivedInTp: true } }
             : {}),
         },

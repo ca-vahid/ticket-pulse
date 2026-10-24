@@ -16,12 +16,7 @@ import {
   hashPublicStatusToken,
 } from './publicTicketStatusService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
-import {
-  defaultRotationAnchorDate,
-  normalizeAfterHoursContactMode,
-  normalizeRotationOrder,
-  resolveAfterHoursActiveContact,
-} from './urgentEscalationContactService.js';
+import { resolveAfterHoursActiveContact } from './urgentEscalationContactService.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import config from '../config/index.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
@@ -79,17 +74,6 @@ function normalizeCooldown(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return 60;
   return Math.max(5, Math.min(1440, parsed));
-}
-
-function normalizeOptionalId(value) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function normalizeDate(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function cleanText(value, max = 4000) {
@@ -209,10 +193,6 @@ function normalizePolicy(row = {}) {
     confirmationBody: cleanText(row?.confirmationBody) || DEFAULT_CONFIRMATION_BODY,
     afterHoursResponseCopy: normalizeResponseCopy(row?.afterHoursResponseCopy),
     afterHoursResponseTable: normalizeResponseTable(row?.afterHoursResponseTable),
-    afterHoursContactMode: normalizeAfterHoursContactMode(row?.afterHoursContactMode),
-    afterHoursManualTechnicianId: normalizeOptionalId(row?.afterHoursManualTechnicianId),
-    afterHoursRotationOrder: normalizeRotationOrder(row?.afterHoursRotationOrder),
-    afterHoursRotationAnchorDate: row?.afterHoursRotationAnchorDate?.toISOString?.() || row?.afterHoursRotationAnchorDate || null,
     showAfterHoursPhoneInEmail: row?.showAfterHoursPhoneInEmail !== false,
     disabledChannels: normalizeDisabledChannels(row?.disabledChannels),
     legacyChannels: normalizeList(row?.legacyChannels).filter((channel) => ESCALATION_CHANNELS.includes(channel)),
@@ -524,16 +504,12 @@ class AfterHoursUrgentEscalationService {
 
   async updatePolicy(workspaceId, input = {}, actor = null) {
     const current = await this.getPolicy(workspaceId);
-    const requestedContactMode = normalizeAfterHoursContactMode(input.afterHoursContactMode ?? current.afterHoursContactMode);
-    const requestedManualContactId = normalizeOptionalId(input.afterHoursManualTechnicianId ?? current.afterHoursManualTechnicianId);
-    const requestedRotationOrder = normalizeRotationOrder(input.afterHoursRotationOrder ?? current.afterHoursRotationOrder);
+    // QA 10-23 #2: the after-hours contact in e-mails is the on-call person
+    // (Urgent response → On-call). The old manual contact and weekly rotation
+    // are no longer read or written; their columns stay as they were.
     const baseRecipientIds = await validateTechnicians(
       workspaceId,
-      normalizeIdList([
-        ...normalizeIdList(input.baseRecipientIds ?? current.baseRecipientIds),
-        ...(requestedManualContactId ? [requestedManualContactId] : []),
-        ...requestedRotationOrder,
-      ]),
+      normalizeIdList(input.baseRecipientIds ?? current.baseRecipientIds),
     );
     const selfExtraRecipientIds = await validateTechnicians(
       workspaceId,
@@ -543,16 +519,6 @@ class AfterHoursUrgentEscalationService {
       workspaceId,
       normalizeIdList(input.businessSupervisorRecipientIds ?? current.businessSupervisorRecipientIds),
     );
-    const baseSet = new Set(baseRecipientIds);
-    const afterHoursManualTechnicianId = requestedManualContactId && baseSet.has(requestedManualContactId)
-      ? requestedManualContactId
-      : null;
-    const afterHoursRotationOrder = requestedRotationOrder.filter((id) => baseSet.has(id));
-    const rotationAnchor = normalizeDate(
-      input.afterHoursRotationAnchorDate
-      ?? current.afterHoursRotationAnchorDate
-      ?? defaultRotationAnchorDate('America/Vancouver'),
-    ) || defaultRotationAnchorDate('America/Vancouver');
 
     const actorEmail = String(actor?.email || actor?.username || '').trim() || null;
     const data = {
@@ -566,10 +532,6 @@ class AfterHoursUrgentEscalationService {
       confirmationBody: cleanText(input.confirmationBody) || current.confirmationBody,
       afterHoursResponseCopy: safeJson(normalizeResponseCopy(input.afterHoursResponseCopy ?? current.afterHoursResponseCopy)),
       afterHoursResponseTable: safeJson(normalizeResponseTable(input.afterHoursResponseTable ?? current.afterHoursResponseTable)),
-      afterHoursContactMode: requestedContactMode,
-      afterHoursManualTechnicianId,
-      afterHoursRotationOrder,
-      afterHoursRotationAnchorDate: rotationAnchor,
       showAfterHoursPhoneInEmail: input.showAfterHoursPhoneInEmail !== undefined
         ? !!input.showAfterHoursPhoneInEmail
         : current.showAfterHoursPhoneInEmail !== false,

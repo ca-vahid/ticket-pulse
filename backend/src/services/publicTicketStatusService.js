@@ -420,6 +420,23 @@ function lifecycleStartAt(ticket) {
   return dateOrNull(ticket?.createdAt);
 }
 
+/**
+ * QA 10-23 #1: after-hours help is offered only on a request that came in
+ * outside business hours (or on a holiday). Unknown (no date, or the calendar
+ * can't be read) keeps it offered, so a real emergency never loses the button.
+ */
+async function receivedAfterHours(ticket, timezone) {
+  const at = lifecycleStartAt(ticket);
+  if (!at) return true;
+  try {
+    const { default: availabilityService } = await import('./availabilityService.js');
+    const check = await availabilityService.isBusinessHours(at, timezone || 'America/Vancouver', ticket.workspaceId ?? null);
+    return check?.isBusinessHours !== true;
+  } catch {
+    return true;
+  }
+}
+
 function lifecycleUpdatedAt(ticket) {
   return dateOrNull(ticket?.freshserviceUpdatedAt);
 }
@@ -1196,7 +1213,7 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
     ticket.statusBase = null;
   }
   const progress = publicProgress(ticket, { mergedInto: await publicMergedInto(ticket) });
-  const [eta, stats, latestImmediateSupportEvent, latestUrgencyEvent, escalationPolicy] = await Promise.all([
+  const [eta, stats, latestImmediateSupportEvent, latestUrgencyEvent, escalationPolicy, afterHoursRequest] = await Promise.all([
     computeTicketEta(ticket, settings),
     workspaceStats(ticket, settings),
     prisma.urgentEscalationEvent.findFirst({
@@ -1227,6 +1244,7 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
         select: { selfServiceEnabled: true, businessUrgencyEnabled: true },
       }).catch(() => null)
       : null,
+    receivedAfterHours(ticket, ticket.workspace?.defaultTimezone),
   ]);
   return {
     workspace: {
@@ -1261,7 +1279,8 @@ async function serializePublicStatus({ link, ticket, settings, token = null }) {
       urgencyRaisedAt: latestUrgencyEvent?.createdAt?.toISOString?.() || null,
       urgencyStatus: latestUrgencyEvent?.status || null,
       raiseUrgencyAvailable: escalationPolicy?.businessUrgencyEnabled !== false,
-      immediateSupportAvailable: escalationPolicy?.selfServiceEnabled === true,
+      immediateSupportAvailable: escalationPolicy?.selfServiceEnabled === true && afterHoursRequest === true,
+      receivedAfterHours: afterHoursRequest === true,
     },
     settings: {
       showRequesterName: settings.showRequesterName,

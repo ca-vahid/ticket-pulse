@@ -1316,7 +1316,10 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
       // the tel: link. QA 10-06 #1: and in its own cell (emailIconCell).
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:#fff6f5;border:1px solid #f0c7c2;border-radius:12px;"><tr>',
       emailGlyphCell('&#9742;&#xFE0E;', '10px 0 10px 14px'),
-      `<td valign="middle" style="padding:12px 0 12px 12px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
+      // QA 10-23 #2: same paddings as the row above plus a right cell as wide as its arrow,
+      // so the number centres under "Request immediate support" instead of 21px to the right.
+      `<td valign="middle" align="center" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;text-align:center;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
+      '<td width="42" style="width:42px;padding-right:16px;font-size:1px;line-height:1px;">&nbsp;</td>',
       '</tr></table>',
     ].join('');
   }
@@ -1581,7 +1584,10 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
   const support = context?.afterHoursSupport || {};
   const activeContact = support.activeContact || null;
   const contactPhone = String(activeContact?.phone || '').trim();
-  const hasVerifiedContact = Boolean(contactPhone || support.phoneVerified === true || support.hasActiveContact === true);
+  // QA 10-23 #2: someone on call (Urgent response → On-call) is enough for the button, which
+  // pages them; their number is printed only when verified and the workspace shows numbers.
+  const onCallPerson = activeContact?.source === 'on_call' && Boolean(activeContact?.technicianId);
+  const hasVerifiedContact = Boolean(contactPhone || onCallPerson || support.phoneVerified === true || support.hasActiveContact === true);
   const missingPhoneReason = hasVerifiedContact
     ? null
     : 'No active after-hours contact phone is available for requester emails.';
@@ -1592,9 +1598,12 @@ function appendAfterHoursSupportLinkToEmail(email = {}, context = {}, enabled = 
       actionLinkRenderMode: effectiveOptions.actionLinkRenderMode,
     });
   }
-  const redactedContactWarning = !contactPhone && hasVerifiedContact
-    ? 'After-hours contact details are redacted in audit context; rendering immediate-support CTA without a displayed phone.'
-    : null;
+  let redactedContactWarning = null;
+  if (!contactPhone && hasVerifiedContact) {
+    redactedContactWarning = onCallPerson
+      ? 'The on-call person has no verified phone, or numbers are hidden: the immediate-support button is shown without a number.'
+      : 'After-hours contact details are redacted in audit context; rendering immediate-support CTA without a displayed phone.';
+  }
 
   return recordAppliedActionLink(
     email,

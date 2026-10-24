@@ -24,7 +24,8 @@ const { default: UrgentResponsePanel } = await import('./UrgentResponsePanel');
 const { default: UrgentEscalationPanel } = await import('../UrgentEscalationPanel');
 
 const POLICY = {
-  automaticEnabled: false, selfServiceEnabled: true, afterHoursContactMode: 'weekly_rotation', afterHoursRotationOrder: [1, 2],
+  automaticEnabled: false, selfServiceEnabled: true, showAfterHoursPhoneInEmail: true,
+  afterHoursActiveContact: { technicianId: 1, name: 'David Zapata', phone: '+16045550101', source: 'on_call', rotationLabel: 'On call this week', until: '2026-10-26T16:00:00.000Z', warnings: [] },
   baseRecipientIds: [1, 2], selfExtraRecipientIds: [], businessSupervisorRecipientIds: [], disabledChannels: [], dependencies: {},
 };
 const CANDIDATES = { candidates: [{ id: 1, name: 'David Zapata', channels: {} }, { id: 2, name: 'Andrew Fong', channels: {} }], providerStatus: {} };
@@ -83,11 +84,10 @@ describe('Urgent response panel', () => {
     setup({ initialTab: 'escalation' });
     expect(tab('Requester escalation')).toHaveAttribute('aria-selected', 'true');
     await waitFor(() => expect(settingsApi.getUrgentEscalationPolicy).toHaveBeenCalled());
-    // The new order is in use, so the old order list gives way to one sentence.
-    const moved = await screen.findByTestId('rotation-order-moved');
-    expect(moved).toHaveTextContent('The order, the handover time and any cover are set on the On-call tab.');
-    expect(screen.queryByRole('button', { name: 'Up' })).not.toBeInTheDocument();
-    fireEvent.click(within(moved).getByRole('button', { name: 'On-call tab' }));
+    // QA 10-23 #2: the number in e-mails is the on-call person's; the card points to the On-call tab.
+    const card = await screen.findByTestId('after-hours-number');
+    expect(card).toHaveTextContent('After-hours e-mails show the number of whoever is on call');
+    fireEvent.click(within(card).getByRole('button', { name: 'On-call tab' }));
     expect(tab('On-call')).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -164,17 +164,35 @@ describe('Urgent response panel', () => {
   });
 });
 
-describe('Requester escalation panel: rotation order', () => {
-  test('keeps its own Up / Down list while the new order is not in use', async () => {
+describe('Requester escalation panel: the number in after-hours e-mails (QA 10-23 #2)', () => {
+  test('shows who is on call now and their number; the old manual and rotation editors are gone', async () => {
     render(<UrgentEscalationPanel />);
-    expect(await screen.findAllByRole('button', { name: 'Up' })).toHaveLength(2);
-    expect(screen.queryByTestId('rotation-order-moved')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('after-hours-number-name')).toHaveTextContent('David Zapata');
+    expect(screen.getByTestId('after-hours-number')).toHaveTextContent('+16045550101');
+    expect(screen.queryByText('Manual contact')).not.toBeInTheDocument();
+    expect(screen.queryByText('Weekly rotation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rotation anchor date')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Up' })).not.toBeInTheDocument();
   });
 
-  test('points to the On-call tab when the new order is in use', async () => {
-    render(<UrgentEscalationPanel onCallOrderInUse />);
-    expect(await screen.findByTestId('rotation-order-moved')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Up' })).not.toBeInTheDocument();
-    expect(screen.getByText('Rotation anchor date')).toBeInTheDocument();
+  test('an unverified on-call phone says what the e-mail does instead', async () => {
+    settingsApi.getUrgentEscalationPolicy.mockResolvedValue(ok({
+      ...POLICY,
+      afterHoursActiveContact: { technicianId: 2, name: 'Andrew Fong', phone: null, source: 'on_call', rotationLabel: 'On call this week', warnings: ['on_call_phone_not_verified'] },
+    }));
+    render(<UrgentEscalationPanel />);
+    expect(await screen.findByTestId('after-hours-number-note')).toHaveTextContent('Andrew Fong has no verified phone yet');
+  });
+
+  test('the switch saves showAfterHoursPhoneInEmail and nothing about the old contact modes', async () => {
+    render(<UrgentEscalationPanel />);
+    const toggle = await screen.findByRole('checkbox', { name: /Show the on-call number/ });
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(settingsApi.updateUrgentEscalationPolicy).toHaveBeenCalled());
+    const sent = settingsApi.updateUrgentEscalationPolicy.mock.calls[0][0];
+    expect(sent.showAfterHoursPhoneInEmail).toBe(false);
+    expect(sent).not.toHaveProperty('afterHoursContactMode');
+    expect(sent).not.toHaveProperty('afterHoursRotationOrder');
   });
 });

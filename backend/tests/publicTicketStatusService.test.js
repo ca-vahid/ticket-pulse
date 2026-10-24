@@ -39,6 +39,10 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
+// Business hours for "did this request come in after hours?" (QA 10-23 #1).
+const availabilityMock = { isBusinessHours: jest.fn() };
+jest.unstable_mockModule('../src/services/availabilityService.js', () => ({ default: availabilityMock }));
+
 const {
   buildPublicTicketStatusUrl,
   computeTicketEta,
@@ -50,6 +54,7 @@ const {
 describe('public ticket status service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    availabilityMock.isBusinessHours.mockResolvedValue({ isBusinessHours: false });
     prismaMock.publicTicketStatusSettings.upsert.mockResolvedValue({
       enabled: true,
       expiryDays: 60,
@@ -355,6 +360,26 @@ describe('public status payload: display number and actions (QA 10-15 #7)', () =
     });
     payload = await previewPublicTicketStatus(1, 501);
     expect(payload.publicActions.raiseUrgencyAvailable).toBe(false);
+    expect(payload.publicActions.immediateSupportAvailable).toBe(true);
+  });
+
+  test('after-hours help is offered only on a request that came in after hours (QA 10-23 #1)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...baseTicket, origin: 'freshservice', freshserviceTicketId: 1n });
+    prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue({ selfServiceEnabled: true, businessUrgencyEnabled: true });
+
+    availabilityMock.isBusinessHours.mockResolvedValue({ isBusinessHours: true });
+    let payload = await previewPublicTicketStatus(1, 501);
+    expect(payload.publicActions.immediateSupportAvailable).toBe(false);
+    expect(payload.publicActions.receivedAfterHours).toBe(false);
+    expect(availabilityMock.isBusinessHours).toHaveBeenCalledWith(new Date(baseTicket.createdAt), expect.any(String), baseTicket.workspaceId ?? null);
+
+    availabilityMock.isBusinessHours.mockResolvedValue({ isBusinessHours: false, reason: 'Holiday: Thanksgiving' });
+    payload = await previewPublicTicketStatus(1, 501);
+    expect(payload.publicActions.immediateSupportAvailable).toBe(true);
+
+    // The calendar cannot be read: keep the button rather than lose it in an emergency.
+    availabilityMock.isBusinessHours.mockRejectedValue(new Error('down'));
+    payload = await previewPublicTicketStatus(1, 501);
     expect(payload.publicActions.immediateSupportAvailable).toBe(true);
   });
 

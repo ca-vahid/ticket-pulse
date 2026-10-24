@@ -117,6 +117,26 @@ describe('PublicTicketStatus', () => {
     expect(screen.queryByRole('link', { name: /after-hours help/ })).not.toBeInTheDocument();
   });
 
+  test('QA 10-23 #1: past the usual time it says nothing about the progress, and there is no "Add information" row', async () => {
+    const { container } = renderPage(basePayload({
+      eta: { state: 'overdue', overdue: true, sampleSize: 156, percentile: 75, lookbackDays: 180, estimatedResolutionLabel: '15h 55m' },
+    }));
+    await screen.findByTestId('status-headline');
+    expect(screen.getByText('Your request is being worked on.')).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/longer than usual|taking longer|behind/i);
+    expect(screen.queryByText('How we estimate this')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add information')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reply to any e-mail we sent you/)).not.toBeInTheDocument();
+  });
+
+  test('QA 10-23 #1: nothing to offer leaves no empty "Need something?" card', async () => {
+    renderPage(basePayload({
+      publicActions: { raiseUrgencyAvailable: false, immediateSupportAvailable: false },
+    }));
+    await screen.findByTestId('status-headline');
+    expect(screen.queryByText('Need something?')).not.toBeInTheDocument();
+  });
+
   test('open and not assigned yet', async () => {
     renderPage(basePayload({
       ticket: { assignedAgent: { name: null, photoUrl: null }, assignedAt: null },

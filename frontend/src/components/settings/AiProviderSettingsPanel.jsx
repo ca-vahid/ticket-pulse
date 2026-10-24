@@ -23,6 +23,9 @@ const AI_OPERATION_OPTIONS = [
   { value: 'auto_help', label: 'Auto-help' },
   // Ticket Ops → When a requester replies: is a reply to a closed ticket only a thank-you?
   { value: 'requester_reply_check', label: 'Reply Reading' },
+  // Knowledge -> Settings -> Confluence: nightly sync + hierarchy check, and the one-time import (higher effort).
+  { value: 'knowledge_confluence', label: 'Confluence Sync' },
+  { value: 'knowledge_confluence_import', label: 'Confluence Import' },
 ];
 
 function ConfigToggle({ label, description, checked, onChange }) {

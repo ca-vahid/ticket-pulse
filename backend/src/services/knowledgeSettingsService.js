@@ -20,6 +20,17 @@ export const DEFAULT_KNOWLEDGE_SETTINGS = Object.freeze({
 
 /** The skill levels a workspace can require for writing and for checking. */
 export const CONTRIBUTION_LEVELS = Object.freeze(['basic', 'intermediate', 'advanced', 'expert']);
+/**
+ * The columns this service reads and returns, named one by one: a column
+ * added later (the Confluence ones, QA 10-23 #4) that is not migrated yet
+ * then never breaks these reads. confluenceKnowledgeService reads its own
+ * columns separately, and confluence_auth never leaves the server.
+ */
+export const SETTINGS_SELECT = Object.freeze({
+  workspaceId: true, fsImportEnabled: true, fsFolderIds: true, fsImportState: true, fsImportedAt: true,
+  reviewDigestEnabled: true, reviewDigestSentAt: true, publishLevel: true, checkLevel: true, askAtClose: true,
+  askDailyCap: true, stewardEnabled: true, stewardState: true, inboxWeeklyCap: true, updatedBy: true, updatedAt: true,
+});
 const CONTRIBUTION_DEFAULTS = Object.freeze({ publishLevel: 'intermediate', checkLevel: 'advanced', askAtClose: false, askDailyCap: 1, inboxWeeklyCap: 5, stewardEnabled: false });
 
 function view(row, workspaceId) {
@@ -63,7 +74,7 @@ export function cleanFolderIds(list) {
 class KnowledgeSettingsService {
   async get(workspaceId) {
     const row = await Promise.resolve()
-      .then(() => prisma.knowledgeSettings.findUnique({ where: { workspaceId: Number(workspaceId) } }))
+      .then(() => prisma.knowledgeSettings.findUnique({ where: { workspaceId: Number(workspaceId) }, select: SETTINGS_SELECT }))
       .catch((err) => { logger.warn(`Knowledge settings unavailable (ws ${workspaceId}): ${err.message}`); return null; });
     return view(row, workspaceId);
   }
@@ -103,6 +114,7 @@ class KnowledgeSettingsService {
         where: { workspaceId: Number(workspaceId) },
         create: { workspaceId: Number(workspaceId), ...data, updatedBy: by },
         update: { ...data, updatedBy: by },
+        select: SETTINGS_SELECT,
       });
       return view(row, workspaceId);
     } catch (err) {
@@ -118,6 +130,7 @@ class KnowledgeSettingsService {
         where: { workspaceId: Number(workspaceId) },
         create: { workspaceId: Number(workspaceId), ...data },
         update: data,
+        select: { workspaceId: true },
       }))
       .catch((err) => { logger.warn(`Knowledge settings bookkeeping failed (ws ${workspaceId}): ${err.message}`); return null; });
   }
@@ -125,7 +138,7 @@ class KnowledgeSettingsService {
   /** Workspaces with a switch on (bounded). */
   async enabledWorkspaces(field) {
     const rows = await Promise.resolve()
-      .then(() => prisma.knowledgeSettings.findMany({ where: { [field]: true }, take: 100 }))
+      .then(() => prisma.knowledgeSettings.findMany({ where: { [field]: true }, select: SETTINGS_SELECT, take: 100 }))
       .catch(() => []);
     return (rows || []).map((r) => view(r, r.workspaceId));
   }

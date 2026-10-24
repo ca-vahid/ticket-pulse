@@ -13,6 +13,7 @@ import { toolCatalog } from '../services/autoHelpTools.js';
 import autoHelpPreviewService from '../services/autoHelpPreviewService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
 import knowledgeGrowthRoutes from './knowledgeGrowth.routes.js';
+import knowledgeConfluenceRoutes from './knowledgeConfluence.routes.js';
 import knowledgeAnswerPolicy from '../services/knowledgeAnswerPolicy.js';
 import knowledgeRights, { rightsIn as skillRights } from '../services/knowledgeRights.js';
 import knowledgeSignals from '../services/knowledgeSignals.js';
@@ -822,5 +823,8 @@ router.get('/home', asyncHandler(async (req, res) => {
 // Knowledge that grows (P1): gaps, drafts from tickets, FreshService import,
 // review digest, backtests — behind the same role gates as everything above.
 router.use(knowledgeGrowthRoutes({ requireKnowledgeManager, requireKnowledgeReviewer, requireKnowledgeWriter, sessionUser, actorOf }));
+
+// Confluence -> Knowledge (QA 10-23 #4): connection, hierarchy, import, nightly sync, run history.
+router.use(knowledgeConfluenceRoutes({ requireKnowledgeManager, isKnowledgeManager: (req) => canManageKnowledge(sessionUser(req), req.workspaceId), actorOf }));
 
 export default router;

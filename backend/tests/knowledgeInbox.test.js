@@ -191,6 +191,33 @@ describe('suggestions', () => {
     expect(answered.decisionNote).toBe('Yes, still CAD only.');
   });
 
+  test('Confluence suggestions keep the page link: a new page is created as a Confluence article, an accepted change records the page version', async () => {
+    prismaMock.knowledgeArticle.update = jest.fn(async ({ data }) => data);
+    prismaMock.knowledgeArticle.findFirst.mockResolvedValue({ sourceMeta: { url: 'https://example.atlassian.net/wiki/x', pageVersion: 1 }, contentHash: 'after' });
+    articleMock.create.mockResolvedValue({ id: 31, contentHash: 'after' });
+    prismaMock.knowledgeSuggestion.findFirst.mockResolvedValue(OPEN({
+      kind: 'new_article', articleId: null, source: 'confluence',
+      proposed: { title: 'Map a printer', bodyHtml: '<p>Steps</p>', source: 'confluence', externalId: '44', sourceMeta: { pageVersion: 2, importHash: 'p' } },
+    }));
+    await suggestions.accept(1, 5, MID);
+    expect(articleMock.create.mock.calls[0][1]).toMatchObject({ source: 'confluence', externalId: '44', status: 'published' });
+    expect(articleMock.create.mock.calls[0][3]).toMatchObject({ sourceMeta: { pageVersion: 2, importHash: 'p' }, canCheck: false });
+    expect(prismaMock.knowledgeArticle.update.mock.calls[0][0].data.sourceMeta.articleHash).toBe('after');
+
+    articleMock.update.mockResolvedValue({ id: 7, version: 3, contentHash: 'after' });
+    prismaMock.knowledgeSuggestion.findFirst.mockResolvedValue(OPEN({ source: 'confluence', proposed: { bodyHtml: '<p>New</p>', confluence: { pageId: '44', pageVersion: 5, importHash: 'p5' } } }));
+    await suggestions.accept(1, 5, MID);
+    expect(articleMock.update.mock.calls.at(-1)[2]).toEqual({ bodyHtml: '<p>New</p>' });
+    expect(prismaMock.knowledgeArticle.update.mock.calls.at(-1)[0].data.sourceMeta).toMatchObject({ pageVersion: 5, importHash: 'p5', articleHash: 'after', url: 'https://example.atlassian.net/wiki/x' });
+
+    // A steward suggestion never touches source bookkeeping.
+    prismaMock.knowledgeArticle.update.mockClear();
+    prismaMock.knowledgeSuggestion.findFirst.mockResolvedValue(OPEN({ proposed: { bodyHtml: '<p>X</p>', confluence: { pageVersion: 9 } } }));
+    await suggestions.accept(1, 5, MID);
+    expect(prismaMock.knowledgeArticle.update).not.toHaveBeenCalled();
+    delete prismaMock.knowledgeArticle.update;
+  });
+
   test('a merge with no merged text archives nothing unless the person says the kept article already covers it', async () => {
     prismaMock.knowledgeSuggestion.findFirst.mockResolvedValue(OPEN({ kind: 'merge', otherArticleId: 8, proposed: null }));
     await expect(suggestions.accept(1, 5, EXPERT)).rejects.toThrow(/Move what is still needed into the kept article first/);

@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.15-preview';
+export const APP_VERSION = '4.3.17-preview';
 
 export const changelog = [
+  {
+    version: '4.3.17-preview',
+    date: 'October 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The status page sticks to the facts</strong> &mdash; a request past its usual time no longer reads &ldquo;This one is taking longer than usual&rdquo;; it says it is being worked on. The &ldquo;Add information&rdquo; row is gone, and &ldquo;Get after-hours help&rdquo; appears only on a request that came in outside business hours or on a holiday.' },
+      { type: 'fixed', html: '<strong>The after-hours number is whoever is on call</strong> &mdash; the &ldquo;Can&rsquo;t wait until morning?&rdquo; card printed the same person&rsquo;s number every week. It now shows the on-call person from Urgent response &rarr; On-call, following the handover time and any cover, and only a verified number. The number is centred under &ldquo;Request immediate support&rdquo;. Requester escalation keeps one switch, &ldquo;Show the on-call number&rdquo;, and shows who is on call now; the old manual contact and weekly rotation are gone.' },
+      { type: 'fixed', html: '<strong>Field Equipment and Health &amp; Safety category maps</strong> &mdash; Analytics showed every ticket in these workspaces as &ldquo;Uncategorized&rdquo; because it read the empty FreshService category. It now reads the Ticket Pulse categories the tickets carry. Field Equipment moves fully to the Ticket Pulse category system.' },
+      { type: 'new', html: '<strong>Confluence in Knowledge</strong> &mdash; Knowledge &rarr; Settings &rarr; Confluence connects a read-only Confluence account, shows each space as a tree with page and word counts (and an optional AI suggestion of what to bring in or skip), and imports the ticked sections once into the library as Not checked yet articles. A nightly check, off by default, turns changed, new and deleted pages into Inbox suggestions that wait for approval. Every run is listed with what it did. Off until a Confluence token is added.' },
+    ],
+  },
   {
     version: '4.3.16-preview',
     date: 'October 23, 2026',

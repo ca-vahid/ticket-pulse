@@ -1486,6 +1486,22 @@ export const knowledgeGrowthAPI = {
   backtestResults: (playbookId) => api.get(`/knowledge/playbooks/${playbookId}/backtest-results`),
 };
 
+/** Knowledge -> Settings -> Confluence (QA 10-23 #4). The API never returns the token. */
+export const knowledgeConfluenceAPI = {
+  get: () => api.get('/knowledge/confluence'),
+  runs: () => api.get('/knowledge/confluence/runs'),
+  saveConnection: (data) => api.put('/knowledge/confluence/connection', data),
+  clearConnection: () => api.delete('/knowledge/confluence/connection'),
+  test: () => apiLongTimeout.post('/knowledge/confluence/test', {}, { timeout: 60000 }),
+  spaces: () => apiLongTimeout.get('/knowledge/confluence/spaces', { timeout: 60000 }),
+  // Reads whole page trees (and, with withModel, one model call per space): give it time.
+  analyze: (data) => apiLongTimeout.post('/knowledge/confluence/analyze', data, { timeout: 300000 }),
+  saveSelection: (data) => api.put('/knowledge/confluence/selection', data),
+  setNightly: (enabled) => api.put('/knowledge/confluence/nightly', { enabled }),
+  importNow: () => api.post('/knowledge/confluence/import', {}),
+  importStatus: () => api.get('/knowledge/confluence/import/status'),
+};
+
 export const uiPreferencesAPI = {
   get: (key) => api.get(`/tickets/preferences/${encodeURIComponent(key)}`, { _speculative: true }),
   set: (key, value) => api.put(`/tickets/preferences/${encodeURIComponent(key)}`, { value }, { _speculative: true }),

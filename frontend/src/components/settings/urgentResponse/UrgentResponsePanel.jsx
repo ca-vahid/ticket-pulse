@@ -134,7 +134,6 @@ export default function UrgentResponsePanel({ initialTab = 'rules', previewDelay
   const techById = useMemo(() => new Map(technicians.map((t) => [t.id, t])), [technicians]);
   const timezone = data?.timezone || onCall?.timezone || null;
   const orderSuggested = isSuggested(data);
-  const newOrderInUse = (data?.settings?.onCallOrder || []).length > 0 && !orderSuggested;
 
   return (
     <div data-testid="urgent-response-panel">
@@ -158,7 +157,7 @@ export default function UrgentResponsePanel({ initialTab = 'rules', previewDelay
       {TABS.filter((t) => opened.has(t.id)).map((t) => (
         <div key={t.id} role="tabpanel" id={`urgent-panel-${t.id}`} aria-labelledby={`urgent-tab-${t.id}`} hidden={tab !== t.id}>
           {t.id === 'escalation' ? (
-            <UrgentEscalationPanel onCallOrderInUse={newOrderInUse} onOpenOnCall={() => selectTab('oncall')} />
+            <UrgentEscalationPanel onOpenOnCall={() => selectTab('oncall')} />
           ) : (
             <div className="px-4 pb-8 pt-5 sm:px-6">
               {loadError && (

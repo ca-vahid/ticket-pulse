@@ -7,6 +7,10 @@
  *   FreshService import   nightly, quiet hours, once per 20 h, workspaces with
  *                         the import on; production only (the service itself
  *                         refuses to call FreshService elsewhere)
+ *   Confluence sync       nightly, quiet hours, once per 20 h, workspaces with
+ *                         the Confluence sync on (and connected, and imported
+ *                         once); suggestions only (confluenceKnowledgeService);
+ *                         production only, like the FreshService import
  *   review digest         Monday 08:00 Pacific, opted-in workspaces, once a
  *                         week each (knowledgeReviewDigestService.tick)
  *
@@ -34,7 +38,7 @@ class KnowledgeGrowthWorker {
       this.tick().catch((err) => logger.warn(`Knowledge growth tick failed (non-fatal): ${err.message}`));
     }, TICK_MS);
     this.timer.unref?.();
-    logger.info('Knowledge growth worker started (solution embeddings + FreshService import in quiet hours, review digest Mondays 08:00 PT)');
+    logger.info('Knowledge growth worker started (solution embeddings + FreshService import + Confluence sync in quiet hours, review digest Mondays 08:00 PT)');
   }
 
   stop() {
@@ -77,6 +81,13 @@ class KnowledgeGrowthWorker {
           done.fsImport = await fsSolutionImportService.runAll().catch((err) => ({ error: err.message }));
           state.fsImportAt = now.toISOString();
         }
+        // Confluence (QA 10-23 #4): changed / new / deleted pages become
+        // inbox suggestions; nothing goes live without a person.
+        if (this._due(state.confluenceAt, now)) {
+          const { default: confluenceKnowledgeService } = await import('./confluenceKnowledgeService.js');
+          done.confluence = await confluenceKnowledgeService.runAll({ now }).catch((err) => ({ error: err.message }));
+          state.confluenceAt = now.toISOString();
+        }
         // The nightly Knowledge review (workspaces with it switched on):
         // suggestions for people, never an edit of a published article.
         if (this._due(state.stewardAt, now)) {
@@ -87,7 +98,7 @@ class KnowledgeGrowthWorker {
       }
       const { default: digest } = await import('./knowledgeReviewDigestService.js');
       done.digest = await digest.tick(now).catch((err) => ({ error: err.message }));
-      if (done.solutions || done.fsImport || done.steward) await this._save(state);
+      if (done.solutions || done.fsImport || done.confluence || done.steward) await this._save(state);
       return done;
     } finally {
       this.running = false;

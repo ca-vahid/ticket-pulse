@@ -1,14 +1,13 @@
 import { jest } from '@jest/globals';
 
 /**
- * The after-hours contact shown to requesters (weekly_rotation mode) follows
- * the Urgent response on-call rotation — handover time and covers — once an
- * order is saved there. With no order, or on any failure, the legacy weekly
- * rotation answers exactly as before.
+ * QA 10-23 #2: the after-hours contact shown to requesters is the on-call
+ * person of Urgent response → On-call (handover time and covers). The old
+ * manual contact, weekly rotation, first-roster-phone and legacy-phone
+ * fallbacks are gone: they printed one person's number every week.
  */
 const prismaMock = {
   urgentEscalationPolicy: { findUnique: jest.fn() },
-  workspace: { findUnique: jest.fn() },
   technician: { findFirst: jest.fn() },
 };
 const onCallMock = { current: jest.fn() };
@@ -18,72 +17,84 @@ jest.unstable_mockModule('../src/services/urgentResponse/onCallService.js', () =
 
 const { resolveAfterHoursActiveContact } = await import('../src/services/urgentEscalationContactService.js');
 
-const pref = (phone) => ({ phoneOverride: phone, phoneVerifiedAt: phone ? new Date('2026-01-01T00:00:00Z') : null });
-const recipient = (id, name, phone) => ({ technicianId: id, technician: { id, name, email: `${id}@example.com`, photoUrl: null, notificationPreference: pref(phone) } });
-const POLICY = {
-  workspaceId: 1, afterHoursContactMode: 'weekly_rotation', afterHoursRotationOrder: [11, 22], afterHoursRotationAnchorDate: new Date('2026-10-05T07:00:00Z'),
-  showAfterHoursPhoneInEmail: true, legacyPhones: [], recipients: [recipient(11, 'Andrew Fong', '+16045550111'), recipient(22, 'Maria Lee', '+16045550122')],
-};
-// Wednesday 14 Oct 2026: week 2 of the legacy rotation → Maria (22).
+const pref = (phone, verified = true) => ({ phoneOverride: phone, phoneVerifiedAt: phone && verified ? new Date('2026-01-01T00:00:00Z') : null });
+const person = (id, name, phone, verified) => ({ id, name, email: `${id}@example.com`, notificationPreference: pref(phone, verified) });
 const AT = new Date('2026-10-14T16:00:00Z');
-const notConfigured = { configured: false, technician: null, scheduled: null, cover: null, until: null };
+const UNTIL = new Date('2026-10-19T16:00:00Z');
+const onCall = (id, name, extra = {}) => ({ configured: true, technician: { id, name }, scheduled: { id, name }, cover: null, until: UNTIL, onLeaveNoCover: false, ...extra });
 
 beforeEach(() => {
   jest.clearAllMocks();
-  prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue({ ...POLICY });
-  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
+  prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue({ showAfterHoursPhoneInEmail: true });
   prismaMock.technician.findFirst.mockResolvedValue(null);
-  onCallMock.current.mockResolvedValue(notConfigured);
+  onCallMock.current.mockResolvedValue({ configured: false, technician: null });
 });
 
-test('no on-call order saved: the legacy weekly rotation, unchanged', async () => {
+test('the on-call person and their verified phone', async () => {
+  onCallMock.current.mockResolvedValue(onCall(11, 'Alex Fong'));
+  prismaMock.technician.findFirst.mockResolvedValue(person(11, 'Alex Fong', '+16045550111'));
   const contact = await resolveAfterHoursActiveContact(1, { at: AT });
-  expect(contact).toMatchObject({ technicianId: 22, name: 'Maria Lee', phone: '+16045550122', source: 'weekly_rotation', rotationLabel: 'Weekly rotation 2 of 2' });
+  expect(contact).toMatchObject({
+    technicianId: 11, name: 'Alex Fong', phone: '+16045550111', phoneVerified: true, source: 'on_call',
+    rotationLabel: 'On call this week', until: UNTIL.toISOString(), photoUrl: null, warnings: [],
+  });
   expect(onCallMock.current).toHaveBeenCalledWith(1, AT);
-});
-
-test('an order is saved: the on-call person of the new rotation', async () => {
-  onCallMock.current.mockResolvedValue({ configured: true, technician: { id: 11, name: 'Andrew Fong' }, scheduled: { id: 11, name: 'Andrew Fong' }, cover: null });
-  const contact = await resolveAfterHoursActiveContact(1, { at: AT });
-  expect(contact).toMatchObject({ technicianId: 11, name: 'Andrew Fong', phone: '+16045550111', source: 'weekly_rotation', rotationLabel: 'On call this week', phoneVerified: true });
-});
-
-test('a cover is followed, even when the cover is not on the escalation roster (read without the photo)', async () => {
-  onCallMock.current.mockResolvedValue({ configured: true, technician: { id: 33, name: 'David Zapata' }, scheduled: { id: 11, name: 'Andrew Fong' }, cover: { id: 7 } });
-  prismaMock.technician.findFirst.mockResolvedValue({ id: 33, name: 'David Zapata', email: 'dz@example.com', notificationPreference: pref('+16045550133') });
-  const contact = await resolveAfterHoursActiveContact(1, { at: AT });
-  expect(contact).toMatchObject({ technicianId: 33, name: 'David Zapata', phone: '+16045550133', photoUrl: null, rotationLabel: 'On call (covering for Andrew Fong)' });
+  // Never the photo.
   expect(prismaMock.technician.findFirst).toHaveBeenCalledWith({
-    where: { id: 33, workspaceId: 1, isActive: true },
+    where: { id: 11, workspaceId: 1, isActive: true },
     select: { id: true, name: true, email: true, notificationPreference: true },
   });
 });
 
-test('the on-call person has no verified phone: the roster fallback still applies', async () => {
-  onCallMock.current.mockResolvedValue({ configured: true, technician: { id: 33, name: 'David Zapata' }, scheduled: { id: 33, name: 'David Zapata' }, cover: null });
-  prismaMock.technician.findFirst.mockResolvedValue({ id: 33, name: 'David Zapata', email: 'dz@example.com', notificationPreference: pref(null) });
+test('a cover is followed', async () => {
+  onCallMock.current.mockResolvedValue(onCall(33, 'Jordan Lee', { scheduled: { id: 11, name: 'Alex Fong' }, cover: { id: 7 } }));
+  prismaMock.technician.findFirst.mockResolvedValue(person(33, 'Jordan Lee', '+16045550133'));
   const contact = await resolveAfterHoursActiveContact(1, { at: AT });
-  expect(contact).toMatchObject({ technicianId: 11, source: 'roster_fallback', phone: '+16045550111' });
+  expect(contact).toMatchObject({ technicianId: 33, phone: '+16045550133', rotationLabel: 'On call (covering for Alex Fong)' });
+});
+
+test('an unverified phone is never printed, and nobody else stands in', async () => {
+  onCallMock.current.mockResolvedValue(onCall(42, 'Pat Moore'));
+  prismaMock.technician.findFirst.mockResolvedValue(person(42, 'Pat Moore', '+16045550142', false));
+  const contact = await resolveAfterHoursActiveContact(1, { at: AT });
+  expect(contact).toMatchObject({ technicianId: 42, name: 'Pat Moore', phone: null, phoneVerified: false, source: 'on_call', warnings: ['on_call_phone_not_verified'] });
+});
+
+test('numbers hidden for the workspace: the person, no number', async () => {
+  prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue({ showAfterHoursPhoneInEmail: false });
+  onCallMock.current.mockResolvedValue(onCall(11, 'Alex Fong'));
+  prismaMock.technician.findFirst.mockResolvedValue(person(11, 'Alex Fong', '+16045550111'));
+  const contact = await resolveAfterHoursActiveContact(1, { at: AT });
+  expect(contact).toMatchObject({ technicianId: 11, phone: null, phoneHidden: true, warnings: ['phone_hidden_by_workspace_setting'] });
+});
+
+test('away all day with nobody covering: no number printed', async () => {
+  onCallMock.current.mockResolvedValue(onCall(11, 'Alex Fong', { onLeaveNoCover: true }));
+  prismaMock.technician.findFirst.mockResolvedValue(person(11, 'Alex Fong', '+16045550111'));
+  const contact = await resolveAfterHoursActiveContact(1, { at: AT });
+  expect(contact).toMatchObject({ technicianId: 11, phone: null, warnings: ['on_call_person_away_no_cover'] });
 });
 
 test.each([
-  ['the on-call service throws', () => onCallMock.current.mockRejectedValue(new Error('relation does not exist'))],
-  ['the on-call person cannot be read', () => {
-    onCallMock.current.mockResolvedValue({ configured: true, technician: { id: 99, name: 'Ghost' }, scheduled: { id: 99, name: 'Ghost' }, cover: null });
-    prismaMock.technician.findFirst.mockRejectedValue(new Error('down'));
-  }],
-  ['the on-call person is not an active technician any more', () => {
-    onCallMock.current.mockResolvedValue({ configured: true, technician: { id: 99, name: 'Ghost' }, scheduled: { id: 99, name: 'Ghost' }, cover: null });
-  }],
-])('%s: the legacy rotation answers', async (_label, arrange) => {
+  ['no on-call order saved', () => {}, 'on_call_not_configured'],
+  ['the on-call service throws', () => onCallMock.current.mockRejectedValue(new Error('relation does not exist')), 'on_call_not_configured'],
+  ['an order, but nobody holds it now', () => onCallMock.current.mockResolvedValue({ configured: true, technician: null }), 'no_one_on_call'],
+])('%s: no contact and no fallback number', async (_label, arrange, warning) => {
   arrange();
   const contact = await resolveAfterHoursActiveContact(1, { at: AT });
-  expect(contact).toMatchObject({ technicianId: 22, name: 'Maria Lee', rotationLabel: 'Weekly rotation 2 of 2' });
+  expect(contact).toMatchObject({ technicianId: null, phone: null, source: 'none', warnings: [warning] });
 });
 
-test('manual mode never asks the on-call service', async () => {
-  prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue({ ...POLICY, afterHoursContactMode: 'manual', afterHoursManualTechnicianId: 11 });
+test('the on-call person cannot be read: named, no number', async () => {
+  onCallMock.current.mockResolvedValue(onCall(99, 'Alex Fong'));
+  prismaMock.technician.findFirst.mockRejectedValue(new Error('down'));
   const contact = await resolveAfterHoursActiveContact(1, { at: AT });
-  expect(contact).toMatchObject({ technicianId: 11, source: 'manual' });
+  expect(contact).toMatchObject({ technicianId: null, name: 'Alex Fong', phone: null, warnings: ['on_call_person_not_found'] });
+});
+
+test('no escalation policy or no workspace', async () => {
+  prismaMock.urgentEscalationPolicy.findUnique.mockResolvedValue(null);
+  expect(await resolveAfterHoursActiveContact(1)).toMatchObject({ source: 'none', warnings: ['policy_missing'] });
+  expect(await resolveAfterHoursActiveContact(null)).toMatchObject({ source: 'none', warnings: ['missing_workspace'] });
   expect(onCallMock.current).not.toHaveBeenCalled();
 });
