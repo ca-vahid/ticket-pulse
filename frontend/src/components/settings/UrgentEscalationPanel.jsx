@@ -46,7 +46,7 @@ function friendlyProviderWarning(missing = []) {
 }
 
 const RECIPIENT_BUCKET_HELP = {
-  roster: 'Escalation roster: the core after-hours list. These users are alerted for automatic after-hours urgent detections AND when a requester clicks the after-hours immediate-support button. The after-hours phone rotation is also drawn from this list.',
+  roster: 'Escalation roster: the core after-hours list. These users are alerted for automatic after-hours urgent detections AND when a requester clicks the after-hours immediate-support button. The phone number shown in after-hours e-mails is the on-call person\'s, from the On-call tab.',
   self: 'Extra self-escalation recipients: alerted ONLY when a requester clicks the after-hours immediate-support button. They are added on top of the roster for those requester-initiated escalations, and are never paged by automatic detection.',
   supervisor: 'Business-hours supervisors: alerted ONLY when a requester raises a ticket to Urgent from the public ticket page during business hours. They are never paged after hours.',
 };
@@ -239,16 +239,88 @@ const DEFAULT_RESPONSE_TABLE = {
   ],
 };
 
+const CONTACT_NOTES = {
+  on_call_phone_not_verified: (name) => `${name || 'The on-call person'} has no verified phone yet, so e-mails show the Request immediate support button without a number. A number can be verified in their notification preferences.`,
+  on_call_person_away_no_cover: (name) => `${name || 'The on-call person'} is away today with nobody covering, so no number is printed. Add a cover on the On-call tab.`,
+  on_call_not_configured: () => 'Nobody is on call yet. Set the order on the On-call tab; until then after-hours e-mails show no number.',
+  no_one_on_call: () => 'Nobody holds on-call right now, so after-hours e-mails show no number.',
+  on_call_person_not_found: (name) => `${name || 'The on-call person'} is not an active member of this workspace, so no number is printed.`,
+  phone_hidden_by_workspace_setting: () => 'Numbers are hidden: e-mails show the Request immediate support button only.',
+};
+
+function formatUntil(iso) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * QA 10-23 #2: the "Can't wait until morning?" card prints the on-call
+ * person's number. One switch (print it or not) and who that is right now.
+ */
+function AfterHoursNumberCard({ contact, showPhone, onShowPhone, onOpenOnCall }) {
+  const warnings = contact?.warnings || [];
+  const note = warnings.map((code) => CONTACT_NOTES[code]?.(contact?.name)).find(Boolean) || null;
+  const until = formatUntil(contact?.until);
+  const onCallLink = onOpenOnCall
+    ? <button type="button" onClick={onOpenOnCall} className="tp-focus-ring rounded font-medium text-primary hover:underline">On-call tab</button>
+    : 'On-call tab';
+  return (
+    <div className="rounded-xl border border-border bg-card p-4" data-testid="after-hours-number">
+      <h3 className="text-base font-semibold text-foreground">Phone number in after-hours e-mails</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        After-hours e-mails show the number of whoever is on call, from the {onCallLink}. It follows the handover time and any cover, and only a verified number is printed.
+      </p>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.6fr)]">
+        <label className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
+          <input
+            type="checkbox"
+            checked={showPhone}
+            onChange={(event) => onShowPhone(event.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-input text-red-600 dark:text-red-300 focus:ring-red-500"
+          />
+          <span>
+            <span className="block text-sm font-semibold text-foreground">Show the on-call number</span>
+            <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">When off, e-mails keep the Request immediate support button, which pages whoever is on call, without printing a number.</span>
+          </span>
+        </label>
+        <div className="rounded-lg border border-border p-4">
+          <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+            <PhoneCall className="h-4 w-4" aria-hidden="true" />
+            On call now
+          </div>
+          <div className="mt-2 text-base font-semibold text-foreground" data-testid="after-hours-number-name">
+            {contact?.name || 'Nobody'}
+          </div>
+          {contact?.phone && (
+            <div className="mt-0.5 text-sm font-semibold text-red-800 dark:text-red-200">{contact.phone}</div>
+          )}
+          {(contact?.rotationLabel || until) && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              {[contact?.technicianId ? contact.rotationLabel : null, until ? `until ${until}` : null].filter(Boolean).join(', ')}
+            </div>
+          )}
+          {note && (
+            <p className="mt-3 text-xs leading-5 text-amber-800 dark:text-amber-200" data-testid="after-hours-number-note">{note}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function unwrapApiData(response) {
   return response?.data?.data ?? response?.data ?? response ?? {};
 }
 
 /**
- * `onCallOrderInUse`: Settings → Urgent Response → On-call owns the rotation
- * order (handover time, covers). The order list here is then replaced by one
- * sentence pointing there; `onOpenOnCall` opens that tab.
+ * QA 10-23 #2: the after-hours contact in e-mails is the on-call person of
+ * Settings → Urgent Response → On-call (handover time, covers). This page only
+ * says who that is now and whether their number is printed; `onOpenOnCall`
+ * opens the On-call tab.
  */
-export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpenOnCall = null } = {}) {
+export default function UrgentEscalationPanel({ onOpenOnCall = null } = {}) {
   const [policy, setPolicy] = useState(null);
   const [draft, setDraft] = useState(null);
   const [candidates, setCandidates] = useState([]);
@@ -279,10 +351,6 @@ export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpen
         confirmationBody: nextPolicy.confirmationBody || '',
         afterHoursResponseCopy: nextPolicy.afterHoursResponseCopy || DEFAULT_RESPONSE_COPY,
         afterHoursResponseTable: nextPolicy.afterHoursResponseTable || DEFAULT_RESPONSE_TABLE,
-        afterHoursContactMode: nextPolicy.afterHoursContactMode || 'manual',
-        afterHoursManualTechnicianId: nextPolicy.afterHoursManualTechnicianId || '',
-        afterHoursRotationOrder: nextPolicy.afterHoursRotationOrder || [],
-        afterHoursRotationAnchorDate: nextPolicy.afterHoursRotationAnchorDate || '',
         showAfterHoursPhoneInEmail: nextPolicy.showAfterHoursPhoneInEmail !== false,
         disabledChannels: nextPolicy.disabledChannels || [],
         baseRecipientIds: nextPolicy.baseRecipientIds || [],
@@ -328,9 +396,6 @@ export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpen
   const selectedBaseUsers = candidates.filter((candidate) => selectedBase.has(candidate.id));
   const selectedSelfUsers = candidates.filter((candidate) => selectedSelfExtra.has(candidate.id));
   const selectedBusinessSupervisorUsers = candidates.filter((candidate) => selectedBusinessSupervisor.has(candidate.id));
-  const rotationOrderUsers = (draft?.afterHoursRotationOrder || [])
-    .map((id) => candidates.find((candidate) => candidate.id === id))
-    .filter(Boolean);
   const pausedChannels = useMemo(() => new Set(draft?.disabledChannels || []), [draft?.disabledChannels]);
   const providerWarnings = Object.entries(providerStatus || {})
     .filter(([channel, value]) => value?.configured !== true && !pausedChannels.has(channel))
@@ -346,30 +411,6 @@ export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpen
   };
 
   const updateDraft = (patch) => setDraft((current) => ({ ...(current || {}), ...patch }));
-
-  const verifiedPhoneForCandidate = (candidate) => {
-    const phoneChannels = ['sms', 'whatsapp', 'phone_call'];
-    for (const channel of phoneChannels) {
-      const readiness = candidate?.channels?.[channel];
-      if (readiness?.phoneVerified && readiness?.recipient) return readiness.recipient;
-    }
-    return null;
-  };
-
-  const setRosterOrder = () => {
-    updateDraft({ afterHoursRotationOrder: selectedBaseUsers.map((candidate) => candidate.id) });
-  };
-
-  const moveRotationUser = (id, direction) => {
-    setDraft((current) => {
-      const order = [...(current?.afterHoursRotationOrder || [])];
-      const index = order.indexOf(id);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return current;
-      [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
-      return { ...(current || {}), afterHoursRotationOrder: order };
-    });
-  };
 
   const updateResponseCopy = (field, value) => {
     setDraft((current) => ({
@@ -400,14 +441,7 @@ export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpen
       const set = new Set(current?.[field] || []);
       if (set.has(id)) set.delete(id);
       else set.add(id);
-      const next = { ...(current || {}), [field]: [...set] };
-      if (field === 'baseRecipientIds' && !set.has(id)) {
-        next.afterHoursRotationOrder = (current?.afterHoursRotationOrder || []).filter((candidateId) => candidateId !== id);
-        if (Number(current?.afterHoursManualTechnicianId) === id) {
-          next.afterHoursManualTechnicianId = '';
-        }
-      }
-      return next;
+      return { ...(current || {}), [field]: [...set] };
     });
   };
 
@@ -424,10 +458,6 @@ export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpen
         baseRecipientIds: nextPolicy.baseRecipientIds || [],
         selfExtraRecipientIds: nextPolicy.selfExtraRecipientIds || [],
         businessSupervisorRecipientIds: nextPolicy.businessSupervisorRecipientIds || [],
-        afterHoursContactMode: nextPolicy.afterHoursContactMode || current?.afterHoursContactMode || 'manual',
-        afterHoursManualTechnicianId: nextPolicy.afterHoursManualTechnicianId || current?.afterHoursManualTechnicianId || '',
-        afterHoursRotationOrder: nextPolicy.afterHoursRotationOrder || current?.afterHoursRotationOrder || [],
-        afterHoursRotationAnchorDate: nextPolicy.afterHoursRotationAnchorDate || current?.afterHoursRotationAnchorDate || '',
         showAfterHoursPhoneInEmail: nextPolicy.showAfterHoursPhoneInEmail !== false,
         disabledChannels: nextPolicy.disabledChannels || [],
       }));
@@ -758,170 +788,12 @@ export default function UrgentEscalationPanel({ onCallOrderInUse = false, onOpen
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">After-hours contact shown in emails</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              The immediate-support action block uses this contact phone. Phone numbers are shown only when verified in the selected user&apos;s notification preferences.
-            </p>
-          </div>
-          <span className="rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-700 dark:text-red-200">
-            Requester-facing
-          </span>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
-          <div className="space-y-3">
-            <div className="inline-flex rounded-lg border border-border bg-muted/50 p-1">
-              {[
-                ['manual', 'Manual contact'],
-                ['weekly_rotation', 'Weekly rotation'],
-              ].map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => updateDraft({ afterHoursContactMode: mode })}
-                  className={cn(
-                    'rounded-md px-3 py-1.5 text-xs font-semibold transition',
-                    draft?.afterHoursContactMode === mode
-                      ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <label className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
-              <input
-                type="checkbox"
-                checked={draft?.showAfterHoursPhoneInEmail !== false}
-                onChange={(event) => updateDraft({ showAfterHoursPhoneInEmail: event.target.checked })}
-                className="mt-1 h-4 w-4 rounded border-input text-red-600 dark:text-red-300 focus:ring-red-500"
-              />
-              <span>
-                <span className="block text-sm font-semibold text-foreground">Show active phone number in requester emails</span>
-                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">When off, the immediate-support button can still appear, but no phone number is printed in email.</span>
-              </span>
-            </label>
-
-            {draft?.afterHoursContactMode === 'manual' ? (
-              <div className="rounded-lg border border-border p-3">
-                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current after-hours contact</label>
-                <select
-                  value={draft?.afterHoursManualTechnicianId || ''}
-                  onChange={(event) => updateDraft({ afterHoursManualTechnicianId: event.target.value ? Number(event.target.value) : '' })}
-                  className="mt-2 w-full rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
-                >
-                  <option value="">Use first ready roster phone</option>
-                  {selectedBaseUsers.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.name}{verifiedPhoneForCandidate(candidate) ? ` - ${verifiedPhoneForCandidate(candidate)}` : ' - no verified phone'}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Select from the escalation roster. If the selected user has no verified phone, Ticket Pulse falls back to the first roster user with a verified phone.
-                </p>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border p-3">
-                {onCallOrderInUse ? (
-                  <div data-testid="rotation-order-moved">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Weekly rotation order</div>
-                    <p className="mt-1 text-sm text-foreground/85">
-                      The order, the handover time and any cover are set on the{' '}
-                      {onOpenOnCall
-                        ? <button type="button" onClick={onOpenOnCall} className="tp-focus-ring rounded font-medium text-primary hover:underline">On-call tab</button>
-                        : 'On-call tab'}
-                      . The phone number shown to requesters follows it.
-                    </p>
-                  </div>
-                ) : (<>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Weekly rotation order</div>
-                      <p className="mt-1 text-xs text-muted-foreground">Rotation starts Monday at 00:00 in the workspace timezone.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={setRosterOrder}
-                      className="rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground/85 hover:bg-muted/50"
-                    >
-                    Use roster order
-                    </button>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {rotationOrderUsers.length === 0 && (
-                      <div className="rounded-md border border-dashed border-input px-3 py-4 text-center text-xs text-muted-foreground">
-                      Add roster users, then click Use roster order.
-                      </div>
-                    )}
-                    {rotationOrderUsers.map((candidate, index) => (
-                      <div key={candidate.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/50 px-3 py-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-foreground">{index + 1}. {candidate.name}</div>
-                          <div className="truncate text-xs text-muted-foreground">{verifiedPhoneForCandidate(candidate) || 'No verified phone'}</div>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => moveRotationUser(candidate.id, -1)}
-                            disabled={index === 0}
-                            className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
-                          >
-                          Up
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moveRotationUser(candidate.id, 1)}
-                            disabled={index === rotationOrderUsers.length - 1}
-                            className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
-                          >
-                          Down
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>)}
-                <label className="mt-3 block">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rotation anchor date</span>
-                  <input
-                    type="date"
-                    value={draft?.afterHoursRotationAnchorDate ? String(draft.afterHoursRotationAnchorDate).slice(0, 10) : ''}
-                    onChange={(event) => updateDraft({ afterHoursRotationAnchorDate: event.target.value })}
-                    className="mt-1 w-full rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-4">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-red-700 dark:text-red-200">
-              <PhoneCall className="h-4 w-4" />
-              Current resolved contact
-            </div>
-            <div className="mt-3 text-lg font-semibold text-foreground">
-              {policy?.afterHoursActiveContact?.name || 'No contact selected'}
-            </div>
-            <div className="mt-1 text-sm font-semibold text-red-800 dark:text-red-200">
-              {policy?.afterHoursActiveContact?.phone || 'No verified phone resolved'}
-            </div>
-            <div className="mt-2 text-xs leading-5 text-muted-foreground">
-              {policy?.afterHoursActiveContact?.rotationLabel || 'Save settings to refresh the resolved contact.'}
-            </div>
-            {(policy?.afterHoursActiveContact?.warnings || []).length > 0 && (
-              <div className="mt-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-                {policy.afterHoursActiveContact.warnings.join(', ')}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <AfterHoursNumberCard
+        contact={policy?.afterHoursActiveContact}
+        showPhone={draft?.showAfterHoursPhoneInEmail !== false}
+        onShowPhone={(value) => updateDraft({ showAfterHoursPhoneInEmail: value })}
+        onOpenOnCall={onOpenOnCall}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-border bg-card p-4">

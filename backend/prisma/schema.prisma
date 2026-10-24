@@ -3968,7 +3968,7 @@ model TeamForward {
 model KnowledgeArticle {
   id            Int      @id @default(autoincrement())
   workspaceId   Int      @map("workspace_id")
-  source        String   @default("tp") @db.VarChar(20) // tp | fs_solution | verified_ticket
+  source        String   @default("tp") @db.VarChar(20) // tp | fs_solution | verified_ticket | confluence
   externalId    String?  @map("external_id") @db.VarChar(100)
   title         String   @db.VarChar(300)
   bodyHtml      String   @default("") @map("body_html") @db.Text
@@ -4124,10 +4124,41 @@ model KnowledgeSettings {
   stewardEnabled      Boolean   @default(false) @map("steward_enabled")
   stewardState        Json?     @map("steward_state")
   inboxWeeklyCap      Int       @default(5) @map("inbox_weekly_cap")
+  // Confluence -> Knowledge (QA 10-23 #4, confluenceKnowledgeService.js).
+  // confluenceEnabled is the NIGHTLY sync (suggestions only); the one-time
+  // import runs on demand. confluenceAuth holds { siteUrl, email, apiToken }
+  // and is never returned to the browser.
+  confluenceEnabled   Boolean   @default(false) @map("confluence_enabled")
+  confluenceAuth      Json?     @map("confluence_auth")
+  confluenceSelection Json?     @map("confluence_selection")
+  confluenceState     Json?     @map("confluence_state")
+  confluenceSyncedAt  DateTime? @map("confluence_synced_at") @db.Timestamptz(6)
   updatedBy           String?   @map("updated_by") @db.VarChar(255)
   updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("knowledge_settings")
+}
+
+/// Audit of Knowledge source runs (QA 10-23 #4): one row per Confluence
+/// analyze, one-time import or nightly sync, with its counts and errors.
+model KnowledgeSourceRun {
+  id           Int       @id @default(autoincrement())
+  workspaceId  Int       @map("workspace_id")
+  source       String    @default("confluence") @db.VarChar(30)
+  kind         String    @db.VarChar(20) // analyze | import | nightly
+  status       String    @default("running") @db.VarChar(20) // running | done | failed | skipped
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
+  triggeredBy  String?   @map("triggered_by") @db.VarChar(255)
+  counts       Json?
+  error        String?   @db.Text
+  model        String?   @db.VarChar(100)
+  inputTokens  Int?      @map("input_tokens")
+  outputTokens Int?      @map("output_tokens")
+  costUsd      Float?    @map("cost_usd")
+
+  @@index([workspaceId, source, startedAt], map: "idx_knowledge_source_runs_ws_source")
+  @@map("knowledge_source_runs")
 }
 
 model AutoHelpPlaybook {

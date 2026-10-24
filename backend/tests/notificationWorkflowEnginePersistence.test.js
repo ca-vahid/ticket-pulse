@@ -124,6 +124,7 @@ const {
   sanitizeWorkflowAuditPayload,
 } = await import('../src/services/notificationWorkflowEngine.js');
 const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
+const publicStatusMock = await import('../src/services/publicTicketStatusService.js');
 
 const workflow = {
   id: 7,
@@ -975,6 +976,38 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).toContain(publicStatusUrl);
     expect(result.state.email.html).toContain(immediateSupportUrl);
     expect(result.state.email.html).not.toContain('Raise urgency');
+  });
+
+  test('QA 10-23 #2: the number row centres under the request row (same width on both sides)', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created', { scheduleMode: 'after_hours' });
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendAfterHoursSupportLink = true;
+    const result = await executeDefinition({ workflow, definition, eventContext, dryRun: true, triggerSource: 'test' });
+    const html = result.state.email.html;
+    const phoneRow = html.slice(html.indexOf('604-555-1234') - 900, html.indexOf('Emergency number') + 200);
+    expect(phoneRow).toContain('align="center"');
+    expect(phoneRow).toContain('<td width="42" style="width:42px;padding-right:16px;');
+  });
+
+  test('QA 10-23 #2: on call without a verified phone keeps the button and prints no number', async () => {
+    publicStatusMock.enrichEventContextWithPublicStatusUrl.mockImplementationOnce(async (context) => ({
+      ...context,
+      selfEscalationUrl: immediateSupportUrl,
+      afterHoursEscalationUrl: immediateSupportUrl,
+      ticket: { ...(context.ticket || {}), selfEscalationUrl: immediateSupportUrl, afterHoursEscalationUrl: immediateSupportUrl },
+      afterHoursSupport: {
+        selfEscalationUrl: immediateSupportUrl,
+        immediateSupportUrl,
+        activeContact: { technicianId: 42, name: 'Pat Moore', phone: null, source: 'on_call', rotationLabel: 'On call this week', warnings: ['on_call_phone_not_verified'] },
+      },
+    }));
+    const definition = buildDefaultWorkflowDefinition('ticket.created', { scheduleMode: 'after_hours' });
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendAfterHoursSupportLink = true;
+    const result = await executeDefinition({ workflow, definition, eventContext, dryRun: true, triggerSource: 'test' });
+    expect(result.state.email.actionLinks.afterHoursSupport.applied).toBe(true);
+    expect(result.state.email.html).toContain('Request immediate support');
+    expect(result.state.email.html).not.toContain('Emergency number');
   });
 
   test('after-hours workflow uses the emergency layout even when run during business hours', async () => {

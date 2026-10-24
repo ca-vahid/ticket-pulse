@@ -32,6 +32,12 @@ export const AI_OPERATIONS = [
   // only say thanks? One short classification per reply the keyword fast path
   // misses — cheap tier, its own monthly limit (requesterReplyReopenService).
   'requester_reply_check',
+  // Confluence -> Knowledge (QA 10-23 #4): the nightly sync files new pages
+  // into the library and the hierarchy check labels page trees (Sonnet), the
+  // one-time import runs at higher effort (Opus by default) because its
+  // articles go straight into the library. Their own cost lines.
+  'knowledge_confluence',
+  'knowledge_confluence_import',
 ];
 
 // Sonnet 5.5 (released 28 Sep 2026: same $2/$10 price as Sonnet 5, >30%
@@ -287,7 +293,7 @@ export function defaultModelForProvider(provider, operation = null) {
   if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment' || operation === 'ticket_grouping' || operation === 'requester_reply_check') {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }
-  if (operation === 'daily_review_consolidation') {
+  if (operation === 'daily_review_consolidation' || operation === 'knowledge_confluence_import') {
     return DEFAULT_OPUS_MODEL;
   }
   return DEFAULT_ANTHROPIC_MODEL;

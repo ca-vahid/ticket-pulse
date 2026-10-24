@@ -5,6 +5,7 @@ import { Switch } from '../ui';
 import { usd } from './autoHelpWords';
 import { SettingsRow as Row, SettingsSection, inputClass } from './knowledgeUi';
 import { KnowledgeSources } from './KnowledgeSourcesSettings';
+import { ConfluenceSettings } from './ConfluenceSettings';
 import { StayQuietList } from './StayQuietEditor';
 import AutoHelpSignatureSettings from './AutoHelpSignatureSettings';
 import AutoHelpPromptsSettings from './AutoHelpPromptsSettings';
@@ -24,6 +25,8 @@ import ContributionSettings from './ContributionSettings';
  *   Prompts                 versioned guidance for the three prompts (30 Sep 2026)
  *   Knowledge sources       FreshService solution import (KnowledgeSourcesSettings)
  *   Reviews                 the Monday review e-mail (KnowledgeSourcesSettings)
+ *   Confluence              connection, page picking, one-time import, nightly
+ *                           check and run history (ConfluenceSettings, QA 10-23)
  * People who can't manage Knowledge see the same cards read-only.
  */
 
@@ -394,6 +397,7 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
       {!error && saved && <p className="px-1 text-xs text-muted-foreground" aria-hidden="true">Saved.</p>}
 
       <KnowledgeSources canManage={canManage} />
+      <ConfluenceSettings canManage={canManage} />
     </div>
   );
 }

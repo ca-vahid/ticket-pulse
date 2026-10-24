@@ -74,6 +74,27 @@ export function isFsTaxonomySyncWorkspace(workspaceId) {
 }
 
 /**
+ * Category-analytics workspace (QA 10-23 #3): analytics and dashboards read
+ * the internal category tree (internalCategoryId/internalSubcategoryId), not
+ * the FreshService category string. Every canonical workspace, plus the ones
+ * in CATEGORY_ANALYTICS_WORKSPACE_IDS: workspaces whose tickets carry Ticket
+ * Pulse categories while their competency and assignment rules are still on
+ * the flat set (Health & Safety's tree has almost no subcategories, and the
+ * canonical competency rules work on subcategories). Unset → no extras.
+ */
+export function isCategoryAnalyticsWorkspace(workspaceId) {
+  if (isCanonicalCategoryWorkspace(workspaceId)) return true;
+  const raw = process.env.CATEGORY_ANALYTICS_WORKSPACE_IDS ?? '';
+  const key = `CATEGORY_ANALYTICS_WORKSPACE_IDS|${raw}`;
+  let set = cache.get(key);
+  if (!set) {
+    set = new Set(String(raw).split(',').map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0));
+    cache.set(key, set);
+  }
+  return set.has(Number(workspaceId));
+}
+
+/**
  * @deprecated Overloaded pre-split gate — kept only for external callers
  * (ops scripts / older tests). Aliases the FS-taxonomy-sync set, which is the
  * stricter of the two and identical to the historical behavior while the new

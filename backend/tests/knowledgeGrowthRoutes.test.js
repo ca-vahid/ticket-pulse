@@ -28,6 +28,13 @@ const backtestMock = {
   estimate: jest.fn(async () => ({ count: 3, totalUsd: 0.1 })), start: jest.fn(async () => ({ status: 'running' })),
   status: jest.fn(() => null), cancel: jest.fn(() => null), results: jest.fn(async () => ({ counts: {}, runs: [] })),
 };
+const confluenceMock = {
+  view: jest.fn(async (ws, { canManage }) => ({ configured: true, siteUrl: 'https://example.atlassian.net', email: canManage ? 'svc@example.com' : null, tokenSet: true })),
+  runs: jest.fn(async () => [{ id: 1, kind: 'nightly', status: 'done' }]),
+  saveConnection: jest.fn(async () => ({ configured: true })), clearConnection: jest.fn(), testConnection: jest.fn(async () => ({ ok: true })),
+  listSpaces: jest.fn(), analyze: jest.fn(async () => ({ spaces: [] })), saveSelection: jest.fn(), setNightly: jest.fn(async (ws, on) => ({ enabled: on })),
+  startImport: jest.fn(async () => ({ jobId: 'cfi-1', status: 'queued' })), importStatus: jest.fn(),
+};
 const refMock = { resolveTicketRefOrThrow: jest.fn(async (ref) => ({ id: Number(String(ref).replace(/\D/g, '')) })) };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -40,6 +47,7 @@ jest.unstable_mockModule('../src/services/fsSolutionImportService.js', () => ({ 
 jest.unstable_mockModule('../src/services/knowledgeReviewDigestService.js', () => ({ default: digestMock }));
 jest.unstable_mockModule('../src/services/autoHelpBacktestService.js', () => ({ default: backtestMock, MAX_N: 50 }));
 jest.unstable_mockModule('../src/services/ticketRefResolver.js', () => refMock);
+jest.unstable_mockModule('../src/services/confluenceKnowledgeService.js', () => ({ default: confluenceMock }));
 jest.unstable_mockModule('../src/services/ticketEmbeddingService.js', () => ({
   isEmbeddingConfigured: () => false, embedQueryTexts: jest.fn(async () => null), cosineSimilarity: () => 0,
   nearestVerifiedSolutions: jest.fn(async () => ({ cosById: new Map(), topIds: [] })),
@@ -176,4 +184,40 @@ test('backtest status and cancel are awaited (they read the shared lease)', asyn
   expect((await request(app(MEMBER)).get('/api/knowledge/backtest')).body.data).toEqual({ status: 'running', done: 1, total: 3 });
   backtestMock.cancel.mockResolvedValueOnce({ status: 'running', cancelling: true });
   expect((await request(app(ADMIN)).delete('/api/knowledge/backtest')).body.data).toEqual({ status: 'running', cancelling: true });
+});
+
+test('Confluence: members read the card (no e-mail) and the run history; everything else is manager-only', async () => {
+  const m = request(app(MEMBER));
+  const card = await m.get('/api/knowledge/confluence');
+  expect(card.status).toBe(200);
+  expect(card.body.data).toMatchObject({ canManage: false, email: null, tokenSet: true });
+  expect((await m.get('/api/knowledge/confluence/runs')).body.data).toHaveLength(1);
+  const calls = [
+    m.put('/api/knowledge/confluence/connection').send({ siteUrl: 'https://example.atlassian.net', email: 'a@example.com', apiToken: 'x' }),
+    m.delete('/api/knowledge/confluence/connection'),
+    m.post('/api/knowledge/confluence/test'),
+    m.get('/api/knowledge/confluence/spaces'),
+    m.post('/api/knowledge/confluence/analyze').send({ spaceIds: ['9'] }),
+    m.put('/api/knowledge/confluence/selection').send({}),
+    m.put('/api/knowledge/confluence/nightly').send({ enabled: true }),
+    m.post('/api/knowledge/confluence/import'),
+    m.get('/api/knowledge/confluence/import/status'),
+  ];
+  for (const res of await Promise.all(calls)) expect(res.status).toBe(403);
+  expect(confluenceMock.saveConnection).not.toHaveBeenCalled();
+  expect(confluenceMock.startImport).not.toHaveBeenCalled();
+});
+
+test('Confluence: a manager connects, switches the nightly check and starts the import (202)', async () => {
+  const a = request(app(ADMIN));
+  expect((await a.get('/api/knowledge/confluence')).body.data).toMatchObject({ canManage: true, email: 'svc@example.com' });
+  await a.put('/api/knowledge/confluence/connection').send({ siteUrl: 'https://example.atlassian.net', email: 'svc@example.com', apiToken: 'tok', extra: 'ignored' });
+  expect(confluenceMock.saveConnection).toHaveBeenCalledWith(1, { siteUrl: 'https://example.atlassian.net', email: 'svc@example.com', apiToken: 'tok' }, { email: ADMIN.email, name: ADMIN.name });
+  expect((await a.put('/api/knowledge/confluence/nightly').send({ enabled: 'yes' })).status).toBe(400);
+  expect((await a.put('/api/knowledge/confluence/nightly').send({ enabled: true })).body.data).toEqual({ enabled: true });
+  const started = await a.post('/api/knowledge/confluence/import');
+  expect(started.status).toBe(202);
+  expect(started.body.data.jobId).toBe('cfi-1');
+  await a.post('/api/knowledge/confluence/analyze').send({ spaceIds: ['9'], withModel: true });
+  expect(confluenceMock.analyze).toHaveBeenCalledWith(1, { spaceIds: ['9'], withModel: true, actor: { email: ADMIN.email, name: ADMIN.name } });
 });

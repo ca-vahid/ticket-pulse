@@ -270,10 +270,15 @@ class KnowledgeSuggestionService {
         resultArticleId = article.id;
       } else {
         if (!proposed.title || !proposed.bodyHtml) throw new ValidationError('This suggestion has no text to publish');
+        // A new Confluence page keeps its link to the page, so the nightly
+        // sync follows it from here on (confluenceKnowledgeService).
+        const fromConfluence = row.source === 'confluence' && proposed.source === 'confluence' && proposed.externalId;
         const article = await knowledgeArticleService.create(workspaceId, {
           title: proposed.title, bodyHtml: proposed.bodyHtml, status: 'published',
           categoryId: proposed.categoryId ?? row.categoryId, subcategoryId: proposed.subcategoryId ?? row.subcategoryId, tags: proposed.tags || [],
-        }, actor, opts);
+          ...(fromConfluence ? { source: 'confluence', externalId: String(proposed.externalId) } : {}),
+        }, actor, { ...opts, ...(fromConfluence && proposed.sourceMeta && typeof proposed.sourceMeta === 'object' ? { sourceMeta: proposed.sourceMeta } : {}) });
+        if (fromConfluence) await stampConfluence(article, proposed.sourceMeta || {});
         resultArticleId = article.id;
       }
     } else if (row.kind === 'add_section') {
@@ -283,10 +288,14 @@ class KnowledgeSuggestionService {
       await knowledgeArticleService.update(workspaceId, article.id, { bodyHtml: `${article.bodyHtml || ''}${section}` }, actor, opts);
     } else if (row.kind === 'edit') {
       if (!proposed.bodyHtml && !proposed.title) throw new ValidationError('This suggestion has no change to apply');
-      await knowledgeArticleService.update(workspaceId, row.articleId, {
+      const updated = await knowledgeArticleService.update(workspaceId, row.articleId, {
         ...(proposed.title ? { title: proposed.title } : {}),
         ...(proposed.bodyHtml ? { bodyHtml: proposed.bodyHtml } : {}),
       }, actor, opts);
+      // A Confluence change taken in: the article is in step with that page version again.
+      if (row.source === 'confluence' && proposed.confluence && typeof proposed.confluence === 'object') {
+        await stampConfluence(updated, { pageVersion: proposed.confluence.pageVersion, importHash: proposed.confluence.importHash });
+      }
     } else if (row.kind === 'merge') {
       if (!row.articleId || !row.otherArticleId) throw new ValidationError('A merge needs two articles');
       // Nothing is archived on a guess: without a merged text the person
@@ -345,6 +354,32 @@ class KnowledgeSuggestionService {
       .catch(() => []);
     return (rows || []).map((r) => suggestionView(r, { withProposal: false }));
   }
+}
+
+/**
+ * After a Confluence suggestion is accepted: remember which page version the
+ * article now matches and its text hash, so the nightly sync can tell a later
+ * Ticket Pulse edit from the accepted text. Never throws.
+ */
+async function stampConfluence(article, patch = {}) {
+  if (!article?.id) return;
+  const current = await Promise.resolve()
+    .then(() => prisma.knowledgeArticle.findFirst({ where: { id: Number(article.id) }, select: { sourceMeta: true, contentHash: true } }))
+    .catch(() => null);
+  const meta = current?.sourceMeta && typeof current.sourceMeta === 'object' ? current.sourceMeta : {};
+  await Promise.resolve()
+    .then(() => prisma.knowledgeArticle.update({
+      where: { id: Number(article.id) },
+      data: {
+        sourceMeta: {
+          ...meta,
+          ...(patch.pageVersion ? { pageVersion: Number(patch.pageVersion) } : {}),
+          ...(patch.importHash ? { importHash: String(patch.importHash) } : {}),
+          articleHash: current?.contentHash || article.contentHash || null,
+        },
+      },
+    }))
+    .catch((err) => logger.warn(`Knowledge article ${article.id}: Confluence version not recorded (${err.message})`));
 }
 
 /** What a profile may do with a suggestion (its category). */

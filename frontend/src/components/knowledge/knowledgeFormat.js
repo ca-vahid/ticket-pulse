@@ -76,6 +76,7 @@ export function articleSourceLabel(article) {
   if (!article) return null;
   if (article.sourceLabel) return article.sourceLabel;
   if (article.source === 'fs_solution') return 'FreshService';
+  if (article.source === 'confluence') return 'Confluence';
   const legacy = (article.tags || []).find((t) => isSystemTag(t));
   return legacy ? tagLabel(legacy) : null;
 }

@@ -432,6 +432,10 @@ function HelperCard({ ticket, progress }) {
   );
 }
 
+function isPastEstimate(eta) {
+  return eta.state === 'overdue' || eta.overdue === true;
+}
+
 function nextStep(eta, progress, ticket) {
   if (progress.merged) {
     const ref = progress.mergedInto?.displayRef;
@@ -469,10 +473,12 @@ function nextStep(eta, progress, ticket) {
       detail: 'We will e-mail you when there is news.',
     };
   }
-  if (eta.state === 'overdue' || eta.overdue) {
+  // QA 10-23 #1: no judgement on the progress of a request ("taking longer than usual").
+  // Past the usual time it simply says it is being worked on.
+  if (isPastEstimate(eta)) {
     return {
-      sentence: 'This one is taking longer than usual.',
-      detail: 'It is still being worked on, and we will e-mail you with any news.',
+      sentence: 'Your request is being worked on.',
+      detail: 'We will e-mail you when there is news.',
     };
   }
   const about = humanDuration(eta.estimatedSeconds);
@@ -490,8 +496,9 @@ function nextStep(eta, progress, ticket) {
 
 function NextCard({ eta, progress, ticket }) {
   const { sentence, detail, link } = nextStep(eta, progress, ticket);
-  // The method only explains an estimate that is still in play.
-  const showMethod = !progress.resolved && !progress.waiting && !progress.reopened
+  // The method only explains an estimate that is still in play: past it, the
+  // numbers would only invite the comparison the page no longer makes.
+  const showMethod = !progress.resolved && !progress.waiting && !progress.reopened && !isPastEstimate(eta)
     && Number(eta.sampleSize) > 0 && eta.estimatedResolutionLabel;
   const expected = !progress.resolved && !progress.waiting && eta.state === 'on_track' ? formatDate(eta.expectedAt) : null;
   return (
@@ -575,12 +582,10 @@ function ActionsCard({ data, progress }) {
   const open = !progress.resolved;
   const canRaise = open && link.raiseUrgencyUrl && actions.raiseUrgencyAvailable !== false && !actions.urgencyRaised;
   const canGetHelp = open && link.immediateSupportUrl && actions.immediateSupportAvailable === true && !actions.immediateSupportRequested;
-  const addInfoTitle = open || progress.merged ? 'Add information' : 'Still not right?';
-  const addInfoDetail = open
-    ? 'Reply to any e-mail we sent you about this request.'
-    : progress.merged
-      ? 'Reply to our last e-mail about this request.'
-      : 'Reply to our last e-mail about this request and we will take another look.';
+  // QA 10-23 #1: the "Add information" row is gone; replying to our e-mail is
+  // self-evident. A resolved request still says how to reopen it.
+  const showReopenHint = !open && !progress.merged;
+  if (!notices.length && !canRaise && !canGetHelp && !showReopenHint) return null;
 
   return (
     <Card title="Need something?" titleId="tp-status-actions">
@@ -593,13 +598,15 @@ function ActionsCard({ data, progress }) {
         </div>
       )}
       <ul className="mt-3 space-y-1">
-        <li className="flex items-center gap-4 px-2 py-3">
-          <ActionTile Icon={Mail} tone={ACTION_TONES.blue} />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold text-slate-900">{addInfoTitle}</span>
-            <span className="block text-sm text-slate-600">{addInfoDetail}</span>
-          </span>
-        </li>
+        {showReopenHint && (
+          <li className="flex items-center gap-4 px-2 py-3">
+            <ActionTile Icon={Mail} tone={ACTION_TONES.blue} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-slate-900">Still not right?</span>
+              <span className="block text-sm text-slate-600">Reply to our last e-mail about this request and we will take another look.</span>
+            </span>
+          </li>
+        )}
         {canRaise && (
           <ActionRow
             href={link.raiseUrgencyUrl}
