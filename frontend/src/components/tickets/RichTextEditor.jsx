@@ -1,10 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { Bold, Heading2, Heading3, Italic, Link2, List, ListOrdered, Pilcrow, RemoveFormatting, Underline } from 'lucide-react';
+import { Bold, Code, Heading2, Heading3, Italic, Link2, List, ListOrdered, Maximize2, Minimize2, Pilcrow, RemoveFormatting, SquareCode, TextQuote, Underline } from 'lucide-react';
 
 const ALLOWED = {
   ALLOWED_TAGS: [
     'b', 'strong', 'i', 'em', 'u', 'p', 'br', 'div', 'ul', 'ol', 'li', 'a',
+    // Code and quotes (25 Oct 2026): a pasted script lost its block and every
+    // line break, so a PowerShell fix became one long paragraph. The server's
+    // allowlist (sanitize-html defaults) already keeps these.
+    'pre', 'code', 'blockquote', 'hr', 's',
     // Rich paste (QA 08-14 #1/#2): Excel ranges + Outlook signatures arrive as
     // tables/spans/imgs — keep the structure. Mirrors backend htmlContent.js's
     // table vocabulary and the server's EMAIL_SANITIZE_OPTIONS.
@@ -75,6 +79,11 @@ purifier.addHook('afterSanitizeAttributes', (node) => {
   }
   if (node.tagName === 'IMG' && !/^(?:https:|data:image\/)/i.test(node.getAttribute('src') || '')) {
     node.remove();
+  }
+  // Code keeps our own look: a source's dark theme or syntax colours would be
+  // light text on our light block (and on the requester's white mail).
+  if ((node.tagName === 'PRE' || node.tagName === 'CODE' || node.closest?.('pre')) && node.hasAttribute?.('style')) {
+    node.removeAttribute('style');
   }
 });
 
@@ -164,8 +173,26 @@ export function cleanPastedHtml(html) {
 
   // DOM passes only when the clipboard actually carries tables or CSS —
   // plain-ish pastes keep the cheap string-only path.
-  if (typeof DOMParser !== 'undefined' && /<(?:table|style)\b/i.test(out)) {
+  if (typeof DOMParser !== 'undefined' && /<(?:table|style)\b|white-space\s*:\s*pre/i.test(out)) {
     const doc = new DOMParser().parseFromString(out, 'text/html');
+
+    // Code editors (VS Code, Visual Studio) copy a dark <div style="white-space: pre">
+    // with one <div> per line and coloured spans. That style does not survive
+    // sanitising, so the indentation collapsed: rebuild it as a plain code block.
+    for (const el of Array.from(doc.body.querySelectorAll('[style]'))) {
+      // Monospaced too: an e-mail paragraph with pre-wrap is prose, not code.
+      const style = el.getAttribute('style') || '';
+      if (!/white-space\s*:\s*pre/i.test(style) || !/font-family\s*:[^;]*(?:mono|consolas|courier|menlo|cascadia)/i.test(style) || el.closest('pre')) continue;
+      if (!el.isConnected || el.parentElement?.closest('[style*="white-space"]')) continue;
+      const lines = Array.from(el.children).every((c) => /^(?:DIV|P)$/.test(c.tagName)) && el.children.length > 0
+        ? Array.from(el.children).map((c) => c.textContent)
+        : [el.textContent];
+      const pre = doc.createElement('pre');
+      const code = doc.createElement('code');
+      code.textContent = lines.join('\n');
+      pre.appendChild(code);
+      el.replaceWith(pre);
+    }
 
     // Fold simple `.class { … }` / `td.class { … }` rules into inline styles.
     // Naive on purpose: Excel/Word emit flat single-class selectors; anything
@@ -204,7 +231,7 @@ export function cleanPastedHtml(html) {
 
 /** True when the html carries formatting worth sending as bodyHtml. */
 export function isRichContent(html) {
-  return /<(b|strong|i|em|u|ul|ol|li|a|table|img)\b/i.test(String(html || ''));
+  return /<(b|strong|i|em|u|ul|ol|li|a|table|img|pre|code|blockquote|hr|s)\b/i.test(String(html || ''));
 }
 
 const BLOCK_TAGS = /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE|TR|SECTION|ARTICLE)$/;
@@ -284,6 +311,10 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   // Read-only content shown inside the frame, straight under the editable area
   // (the reply composer's signature). Never part of the emitted html.
   footer = null,
+  // Full-screen writing (25 Oct 2026): the host owns the state and the overlay;
+  // the editor grows to fill it and shows the toggle when onToggleExpand is given.
+  expanded = false,
+  onToggleExpand = null,
 }, ref) {
   const editorRef = useRef(null);
   const lastEmittedRef = useRef(null);
@@ -386,6 +417,188 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     setBlock(next);
   };
 
+  // ── Code blocks, inline code, quotes (25 Oct 2026) ──
+  const escapeText = (text) => {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  };
+  // The nearest <tag> around the caret, inside this editor only.
+  const caretWithin = (tagName) => {
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) return null;
+    let node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    while (node && node !== el) {
+      if (node.tagName === tagName) return node;
+      node = node.parentElement;
+    }
+    return null;
+  };
+  // A code block's text with its <br>s as line breaks.
+  const codeText = (node) => {
+    const copy = node.cloneNode(true);
+    copy.querySelectorAll?.('br').forEach((br) => br.replaceWith('\n'));
+    return copy.textContent;
+  };
+  const caretTo = (node, atEnd = true) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(!atEnd);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  };
+  // A block at the very end leaves nowhere to type after it: keep a paragraph there.
+  const ensureTrailingParagraph = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    if (/^(?:PRE|BLOCKQUOTE)$/.test(el.lastElementChild?.tagName || '')) {
+      const p = document.createElement('p');
+      p.appendChild(document.createElement('br'));
+      el.appendChild(p);
+    }
+  };
+
+  // Focus the editor without losing what the agent had selected in it.
+  const focusKeepingSelection = (el) => {
+    const sel = window.getSelection();
+    const saved = sel && sel.rangeCount > 0 && el.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+    el.focus();
+    if (saved) {
+      sel.removeAllRanges();
+      sel.addRange(saved);
+    }
+  };
+
+  // Chrome's insertHTML stamps the editor's own text colour on what it inserts
+  // (style="color: rgb(15, 23, 41)"). That is the theme's colour, not the
+  // author's: pasted in light mode it reads near-black in dark mode, and the
+  // other way round. Drop exactly that colour; a real author colour stays.
+  const dropEchoedColor = () => {
+    const el = editorRef.current;
+    if (!el || typeof window.getComputedStyle !== 'function') return;
+    const own = window.getComputedStyle(el).color;
+    if (!own) return;
+    el.querySelectorAll('[style*="color"]').forEach((node) => {
+      if (node.style.color && node.style.color.replace(/\s+/g, '') === own.replace(/\s+/g, '')) {
+        node.style.removeProperty('color');
+        if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+        if (node.tagName === 'SPAN' && node.attributes.length === 0) node.replaceWith(...node.childNodes);
+      }
+    });
+  };
+
+  const toggleCodeBlock = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    focusKeepingSelection(el);
+    const pre = caretWithin('PRE');
+    if (pre) {
+      // Out of the block: each line becomes a paragraph again.
+      const lines = codeText(pre).replace(/\n$/, '').split('\n');
+      const frag = document.createDocumentFragment();
+      lines.forEach((line) => {
+        const p = document.createElement('p');
+        if (line) p.textContent = line; else p.appendChild(document.createElement('br'));
+        frag.appendChild(p);
+      });
+      const first = frag.firstChild;
+      pre.replaceWith(frag);
+      if (first) caretTo(first);
+      emit();
+      return;
+    }
+    const sel = window.getSelection();
+    let text = '';
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && el.contains(sel.anchorNode)) {
+      const holder = document.createElement('div');
+      holder.appendChild(sel.getRangeAt(0).cloneContents());
+      text = htmlToPlainText(holder.innerHTML);
+    }
+    document.execCommand('insertHTML', false, `<pre data-tp-new="1"><code>${text ? escapeText(text) : '<br>'}</code></pre><p><br></p>`);
+    const added = el.querySelector('pre[data-tp-new]');
+    if (added) {
+      added.removeAttribute('data-tp-new');
+      caretTo(added.querySelector('code') || added);
+    }
+    ensureTrailingParagraph();
+    emit();
+  };
+
+  const toggleInlineCode = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    focusKeepingSelection(el);
+    const code = caretWithin('CODE');
+    if (code && !code.closest('pre')) {
+      const text = document.createTextNode(code.textContent);
+      code.replaceWith(text);
+      caretTo(text);
+      emit();
+      return;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const text = sel.isCollapsed ? '' : sel.toString();
+    // Nothing selected: insert a placeholder word, selected, so typing replaces it.
+    document.execCommand('insertHTML', false, `<code data-tp-new="1">${escapeText(text || 'code')}</code>&nbsp;`);
+    const added = el.querySelector('code[data-tp-new]');
+    if (added) {
+      added.removeAttribute('data-tp-new');
+      if (!text) {
+        const range = document.createRange();
+        range.selectNodeContents(added);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+    emit();
+  };
+
+  const toggleQuote = () => {
+    exec('formatBlock', caretWithin('BLOCKQUOTE') ? '<p>' : '<blockquote>');
+    ensureTrailingParagraph();
+  };
+
+  // Keys inside a code block: Tab indents, and Enter on an empty last line leaves the block.
+  const onCodeKey = (e, pre) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      document.execCommand('insertText', false, '  ');
+      emit();
+      return;
+    }
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+    const caret = sel.getRangeAt(0);
+    const after = document.createRange();
+    after.selectNodeContents(pre);
+    after.setStart(caret.endContainer, caret.endOffset);
+    const before = document.createRange();
+    before.selectNodeContents(pre);
+    before.setEnd(caret.startContainer, caret.startOffset);
+    const holder = document.createElement('div');
+    holder.appendChild(before.cloneContents());
+    const textBefore = codeText(holder);
+    if (after.toString() !== '' || !/\n$/.test(textBefore)) return;
+    // Second Enter at the end: drop the empty line and move below the block.
+    e.preventDefault();
+    const host = pre.querySelector('code') || pre;
+    const last = host.lastChild;
+    if (last?.nodeName === 'BR') last.remove();
+    else if (last?.nodeType === 3) last.nodeValue = last.nodeValue.replace(/\n$/, '');
+    let next = pre.nextElementSibling;
+    if (!next) {
+      next = document.createElement('p');
+      next.appendChild(document.createElement('br'));
+      pre.after(next);
+    }
+    caretTo(next, false);
+    emit();
+  };
+
   const openLink = () => {
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
@@ -430,7 +643,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   const blockOn = 'bg-muted text-foreground';
 
   return (
-    <div className={`border rounded-lg transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/30 ${className}`}>
+    <div className={`${expanded ? 'flex flex-col flex-1 min-h-0 ' : ''}border rounded-lg transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/30 ${className}`}>
       <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-border/60 relative" role="toolbar" aria-label="Formatting">
         {headings && (
           <>
@@ -447,8 +660,24 @@ const RichTextEditor = forwardRef(function RichTextEditor({
         <button type="button" onClick={() => exec('insertUnorderedList')} title="Bulleted list" aria-label="Bulleted list" className={toolBtn}><List className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('insertOrderedList')} title="Numbered list" aria-label="Numbered list" className={toolBtn}><ListOrdered className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <span className="w-px h-4 bg-secondary mx-1" aria-hidden="true" />
+        <button type="button" onClick={toggleQuote} title="Quote" aria-label="Quote" className={toolBtn}><TextQuote className="w-3.5 h-3.5" aria-hidden="true" /></button>
+        <button type="button" onClick={toggleInlineCode} title="Inline code" aria-label="Inline code" className={toolBtn}><Code className="w-3.5 h-3.5" aria-hidden="true" /></button>
+        <button type="button" onClick={toggleCodeBlock} title="Code block (Enter twice on an empty last line to leave it)" aria-label="Code block" className={toolBtn}><SquareCode className="w-3.5 h-3.5" aria-hidden="true" /></button>
+        <span className="w-px h-4 bg-secondary mx-1" aria-hidden="true" />
         <button type="button" onClick={openLink} title="Insert link" aria-label="Insert link" className={toolBtn}><Link2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('removeFormat')} title="Clear formatting" aria-label="Clear formatting" className={`${toolBtn} ml-auto`}><RemoveFormatting className="w-3.5 h-3.5" aria-hidden="true" /></button>
+        {onToggleExpand && (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            title={expanded ? 'Exit full screen (Esc)' : 'Full screen'}
+            aria-label={expanded ? 'Exit full screen' : 'Full screen'}
+            aria-pressed={expanded}
+            className={toolBtn}
+          >
+            {expanded ? <Minimize2 className="w-3.5 h-3.5" aria-hidden="true" /> : <Maximize2 className="w-3.5 h-3.5" aria-hidden="true" />}
+          </button>
+        )}
 
         {linkOpen && (
           <div className="absolute left-2 top-full mt-1 z-30 tp-card rounded-lg shadow-soft p-2 flex items-center gap-1.5 w-72">
@@ -458,7 +687,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
               onChange={(e) => setLinkUrl(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
-                if (e.key === 'Escape') setLinkOpen(false);
+                if (e.key === 'Escape') { e.stopPropagation(); setLinkOpen(false); }
               }}
               placeholder="https://…"
               aria-label="Link URL"
@@ -471,7 +700,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
         )}
       </div>
 
-      <div className="relative">
+      <div className={expanded ? 'relative flex flex-col flex-1 min-h-0' : 'relative'}>
         {isEmpty && (
           <span aria-hidden="true" className="absolute left-3 top-2.5 text-sm text-muted-foreground/75 pointer-events-none select-none">
             {placeholder}
@@ -481,8 +710,8 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             content) when a footer comes or goes; it only takes over the
             height and the scrolling while there is one. */}
         <div
-          className={footer ? 'flex flex-col cursor-text overflow-y-auto settings-scrollbar rounded-b-lg' : undefined}
-          style={footer ? { minHeight, maxHeight: 460 } : undefined}
+          className={footer ? `flex flex-col cursor-text overflow-y-auto settings-scrollbar rounded-b-lg${expanded ? ' flex-1 min-h-0' : ''}` : (expanded ? 'flex flex-col flex-1 min-h-0' : undefined)}
+          style={footer ? { minHeight, maxHeight: expanded ? 'none' : 460 } : undefined}
           onMouseDown={footer ? (e) => { if (e.target === e.currentTarget) { e.preventDefault(); focusEnd(); } } : undefined}
         >
           <div
@@ -501,7 +730,9 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             onInput={emit}
             onBlur={emit}
             onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); }
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); return; }
+              const pre = caretWithin('PRE');
+              if (pre) onCodeKey(e, pre);
             }}
             onPaste={(e) => {
             // Pasted images (e.g. a screenshot) become staged attachments rather
@@ -512,11 +743,19 @@ const RichTextEditor = forwardRef(function RichTextEditor({
                 .filter(Boolean);
               const htmlData = e.clipboardData.getData('text/html');
               const textData = e.clipboardData.getData('text/plain');
+              // Inside a code block, a paste is code: plain text, every space and line kept.
+              if (!images.length && textData && caretWithin('PRE')) {
+                e.preventDefault();
+                document.execCommand('insertText', false, textData.replace(/\r\n?/g, '\n'));
+                emit();
+                return;
+              }
               if (images.length && onImagePaste) {
                 e.preventDefault();
                 // Keep any text the clipboard also carried, first.
                 const insert = htmlData ? sanitize(cleanPastedHtml(htmlData)) : textToHtml(textData);
                 if (insert) document.execCommand('insertHTML', false, insert);
+                dropEchoedColor();
                 // Stage each image and drop a lightweight reference at the caret so
                 // the tech can anchor where the picture belongs in their write-up.
                 // onImagePaste returns the staged filename (or nothing for older hosts).
@@ -550,10 +789,12 @@ const RichTextEditor = forwardRef(function RichTextEditor({
                 insert = textToHtml(textData);
               }
               document.execCommand('insertHTML', false, insert);
+              dropEchoedColor();
+              ensureTrailingParagraph();
               emit();
             }}
-            className={`tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 outline-none ${footer ? 'min-h-[5.5rem] only:flex-1' : 'rounded-b-lg overflow-y-auto settings-scrollbar'} [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0`}
-            style={footer ? undefined : { minHeight, maxHeight: 460 }}
+            className={`tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 outline-none ${footer ? 'min-h-[5.5rem] only:flex-1' : `rounded-b-lg overflow-y-auto settings-scrollbar${expanded ? ' flex-1' : ''}`} [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0`}
+            style={footer ? undefined : { minHeight, maxHeight: expanded ? 'none' : 460 }}
           />
           {footer}
         </div>

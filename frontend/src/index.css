@@ -521,6 +521,52 @@ code {
     overflow-x: auto;
     white-space: pre-wrap;
   }
+  /* Code blocks, inline code and quotes (25 Oct 2026), in the composer and in
+     the thread. A translucent slate tint, not a token, so the block reads on
+     every ground a body can sit on: the card, the dark theme and the dimmed
+     paper panel. */
+  .tp-rich-body pre,
+  .tp-rich-editor pre {
+    margin: 0.5rem 0;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid rgb(100 116 139 / 0.28);
+    border-radius: 0.5rem;
+    background: rgb(100 116 139 / 0.1);
+    font-family: ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+  }
+  .tp-rich-body pre code,
+  .tp-rich-editor pre code {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+  }
+  .tp-rich-body code,
+  .tp-rich-editor code {
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.3rem;
+    background: rgb(100 116 139 / 0.14);
+    font-family: ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
+    font-size: 0.9em;
+  }
+  /* The thread already styles blockquote (SafeHtml); the composer matches it. */
+  .tp-rich-editor blockquote {
+    margin: 0.5rem 0;
+    padding-left: 0.75rem;
+    border-left: 2px solid hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+  .tp-rich-editor hr,
+  .tp-rich-body hr {
+    margin: 0.75rem 0;
+    border: 0;
+    border-top: 1px solid rgb(100 116 139 / 0.3);
+  }
   /* Headings (Knowledge articles split on them; mail bodies carry them too):
      Preflight flattens h1-h4 to body text, so give them a quiet hierarchy.
      Inline author styles still win. */
