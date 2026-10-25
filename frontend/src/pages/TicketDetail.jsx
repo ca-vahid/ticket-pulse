@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
@@ -920,6 +921,23 @@ export default function TicketDetail() {
 
   const [composerMode, setComposerMode] = useState('note'); // default to internal note
   const [composerBody, setComposerBody] = useState(''); // sanitized html from the editor
+  // Full-screen composer (25 Oct 2026): room for a long write-up such as a verified solution.
+  const [composerExpanded, setComposerExpanded] = useState(false);
+  useEffect(() => {
+    if (!composerExpanded) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [composerExpanded]);
+  const inComposerPortal = (node) => (composerExpanded && typeof document !== 'undefined'
+    ? createPortal(
+      <>
+        <div className="fixed inset-0 z-40 bg-slate-950/45" aria-hidden="true" onClick={() => setComposerExpanded(false)} />
+        {node}
+      </>,
+      document.body,
+    )
+    : node);
   const [composerText, setComposerText] = useState(''); // plain-text mirror for guards/sending
   const [composerCc, setComposerCc] = useState([]);
   const [composerFiles, setComposerFiles] = useState([]);
@@ -2182,6 +2200,7 @@ export default function TicketDetail() {
         setComposerBody('');
         setComposerText('');
         setForwardTo([]);
+        setComposerExpanded(false);
         try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
         await fetchTicket({ silent: true });
         showToast('emerald', `Thread forwarded to ${forwardTo.join(', ')}`);
@@ -2232,6 +2251,7 @@ export default function TicketDetail() {
       setComposerFiles([]);
       setComposerSubject('');
       setSubjectOpen(false);
+      setComposerExpanded(false);
       try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
       await fetchTicket({ silent: true });
       const ccNote = composerMode === 'reply' && composerCc.length ? ` (+${composerCc.length} Cc)` : '';
@@ -3266,9 +3286,21 @@ export default function TicketDetail() {
                       />
                     )}
 
-                    {/* Composer */}
-                    {canConverse ? (
-                      <section ref={composerSectionRef} className="tp-card rounded-xl p-3.5 print-hide scroll-mb-32" aria-label="Reply composer">
+                    {/* Composer. Full screen moves it into a portal on <body>, so no
+                        transformed ancestor can trap the fixed panel. */}
+                    {canConverse ? inComposerPortal(
+                      <section
+                        ref={composerSectionRef}
+                        className={composerExpanded
+                          ? 'tp-card fixed inset-0 sm:inset-y-4 sm:inset-x-4 lg:inset-x-[max(1.5rem,calc(50vw_-_40rem))] z-50 flex flex-col overflow-y-auto settings-scrollbar sm:rounded-xl p-3.5 sm:p-5 shadow-soft print-hide'
+                          : 'tp-card rounded-xl p-3.5 print-hide scroll-mb-32'}
+                        aria-label="Reply composer"
+                        aria-modal={composerExpanded || undefined}
+                        role={composerExpanded ? 'dialog' : undefined}
+                        onKeyDown={composerExpanded ? (e) => {
+                          if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setComposerExpanded(false); }
+                        } : undefined}
+                      >
                         {/* QA 07-06 #10: wraps + compact labels under sm so nothing
                             (Templates, Quick notes) ever exceeds a phone viewport. */}
                         <div role="group" aria-label="Composer mode" className="flex flex-wrap items-center gap-1.5 mb-2.5">
@@ -3570,6 +3602,11 @@ export default function TicketDetail() {
                           footer={composerMode === 'reply' && Boolean(meta?.actor?.technicianId)
                             ? <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
                             : null}
+                          expanded={composerExpanded}
+                          onToggleExpand={() => {
+                            setComposerExpanded((v) => !v);
+                            setTimeout(() => composerRef.current?.focus(), 0);
+                          }}
                         />
                         {composerFiles.length > 0 && (
                           <ul className="mt-2 flex flex-wrap gap-2 items-start" aria-label="Files to attach">
@@ -3623,7 +3660,7 @@ export default function TicketDetail() {
                             {composerMode === 'reply' ? 'Send reply' : composerMode === 'forward' ? 'Forward thread' : 'Add note'}
                           </button>
                         </div>
-                      </section>
+                      </section>,
                     ) : isNative ? (
                       <div className="tp-surface rounded-xl p-4 text-center text-sm text-muted-foreground">
                     Native ticketing is disabled for this workspace, so the conversation is read-only.

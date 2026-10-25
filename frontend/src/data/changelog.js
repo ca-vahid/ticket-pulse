@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.17-preview';
+export const APP_VERSION = '4.3.18-preview';
 
 export const changelog = [
+  {
+    version: '4.3.18-preview',
+    date: 'October 25, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Code blocks, inline code and quotes in replies and notes</strong> &mdash; a script pasted into a note lost its block and every line break, so a PowerShell fix turned into one long paragraph. The composer now keeps code: a pasted code block (from a web page, a chat answer or VS Code) stays a code block with its indentation, and the toolbar adds Quote, Inline code and Code block. In a code block, Tab indents and Enter twice on an empty last line leaves it.' },
+      { type: 'new', html: '<strong>Full-screen composer</strong> &mdash; the new button at the right of the formatting bar opens the reply and note composer full screen, with its tabs, attachments and Send button, for a long write-up such as a verified solution. Esc or the same button brings it back; sending closes it.' },
+      { type: 'fixed', html: '<strong>Pasted text keeps the theme&rsquo;s colour</strong> &mdash; text pasted in light mode was stamped near-black and became hard to read in dark mode (and the other way round). The editor no longer copies its own text colour into what is pasted.' },
+    ],
+  },
   {
     version: '4.3.17-preview',
     date: 'October 23, 2026',
