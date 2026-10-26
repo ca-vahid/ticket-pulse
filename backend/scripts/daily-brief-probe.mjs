@@ -121,7 +121,7 @@ for (const ws of wss) {
         GROUP BY e.ticket_id
       ), lastnote AS (
         SELECT DISTINCT ON (e.ticket_id) e.ticket_id, e.occurred_at,
-          left(regexp_replace(COALESCE(e.body_text,''), '\s+', ' ', 'g'), 140) AS snippet
+          left(regexp_replace(COALESCE(e.body_text,''), '\\s+', ' ', 'g'), 140) AS snippet
         FROM ticket_thread_entries e
         WHERE e.event_type IN ('note','private_note','reply','public_reply')
         ORDER BY e.ticket_id, e.occurred_at DESC
