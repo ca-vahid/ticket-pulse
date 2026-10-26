@@ -43,7 +43,7 @@ describe('who may decide an approval row', () => {
     expect((await screen.findAllByText('Neville Vyland')).length).toBeGreaterThan(0);
     expect(screen.getByTestId('approval-waiting-on')).toHaveTextContent(/Waiting on Neville Vyland — only they can decide/);
     expect(screen.queryByRole('tab', { name: /^Approve$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /Reject/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Not approved/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Ask a question/ })).not.toBeInTheDocument();
     // 23 Sep 2026: Forward stays folded — nothing opens or takes focus on arrival.
     expect(screen.queryByRole('tab', { name: /Forward/ })).not.toBeInTheDocument();
@@ -85,7 +85,7 @@ describe('who may decide an approval row', () => {
   test('the named approver gets the full composer', async () => {
     mount({ email: 'nvyland@x.io', kind: 'admin', workspaceRole: 'admin' });
     expect(await screen.findByRole('tab', { name: /^Approve$/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Reject/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Not approved/ })).toBeInTheDocument();
     expect(screen.queryByTestId('approval-waiting-on')).not.toBeInTheDocument();
   });
 

@@ -5,20 +5,25 @@ import {
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { HandoffPanel } from './ApprovalHandoff';
 import { SafeHtml, formatDay } from './ticketUi';
+import { ConditionsEditor, ConditionsReview, conditionsWaitingOn, readConditions } from './ApprovalConditions';
 
 /**
  * Approvals v3 — the one composer every approver surface uses (magic-link
  * page, the ticket's Approvals tab, the Approvals inbox). Mail-client sized
  * (260 px editor by default) with tabs:
  *
- *   Approve · Approve with condition · Ask a question · Reject · Escalate · Forward
+ *   Approve · Approve with conditions · Ask a question · Not approved · Escalate · Forward
+ *
+ * 26 Oct 2026: approving with conditions sends them to the technician to
+ * answer one by one; the request comes back here with the answers and is
+ * only approved when the approver accepts them (ApprovalConditions.jsx).
  *
  * "Ask a question" has two audiences — the requester (To requester, Cc agent
  * + approver chain) or the approvers/agent only (never the requester) — and
  * every recipient is a chip the approver can untick.
  *
  * Callbacks return promises; the parent updates its own state on success.
- *   onDecide(decision, note, noteHtml, { conditionNote, conditionNoteHtml, notifyRequester })
+ *   onDecide(decision, note, noteHtml, { conditionNote, conditionNoteHtml, conditions, notifyRequester })
  *
  * QA 09-18 #1: the ticket requester is NOT on the decision e-mail unless the
  * approver ticks the large "Also e-mail the requester" box - a rejection note
@@ -42,18 +47,18 @@ function Kbd({ children, onSolid = false }) {
 
 const TABS = [
   { key: 'approved', label: 'Approve', Icon: Check, tone: 'text-emerald-700 dark:text-emerald-200', active: 'border-emerald-500 text-emerald-700 dark:text-emerald-200' },
-  { key: 'condition', label: 'Approve with condition', Icon: PenLine, tone: 'text-emerald-700 dark:text-emerald-200', active: 'border-emerald-500 text-emerald-700 dark:text-emerald-200' },
+  { key: 'condition', label: 'Approve with conditions', Icon: PenLine, tone: 'text-emerald-700 dark:text-emerald-200', active: 'border-emerald-500 text-emerald-700 dark:text-emerald-200' },
   { key: 'question', label: 'Ask a question', Icon: MessageCircleQuestion, tone: 'text-violet-700 dark:text-violet-200', active: 'border-violet-500 text-violet-700 dark:text-violet-200' },
-  { key: 'rejected', label: 'Reject', Icon: X, tone: 'text-red-700 dark:text-red-200', active: 'border-red-500 text-red-700 dark:text-red-200' },
+  { key: 'rejected', label: 'Not approved', Icon: X, tone: 'text-red-700 dark:text-red-200', active: 'border-red-500 text-red-700 dark:text-red-200' },
   { key: 'escalate', label: 'Escalate', Icon: ArrowUpRight, tone: 'text-amber-700 dark:text-amber-200', active: 'border-amber-500 text-amber-700 dark:text-amber-200' },
   { key: 'forward', label: 'Forward', Icon: Forward, tone: 'text-foreground', active: 'border-primary text-primary' },
 ];
 
 const PLACEHOLDER = {
   approved: 'Optional note — the agent and the other approvers read it in the decision e-mail (the requester too, only if you tick the box below).',
-  condition: 'The condition — required. e.g. “Approved for UAT only; production needs a separate review.”',
+  condition: 'Optional note for the technician, e.g. why these conditions matter.',
   question: 'Your question…',
-  rejected: 'The reason — required. The agents read it; the requester only if you tick the box below.',
+  rejected: 'Why not — required. The agents read it; the requester only if you tick the box below.',
 };
 
 /**
@@ -69,22 +74,28 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel]);
   if (!pending) return null;
-  const { decision, note, conditionNote, amountLabel, notifyRequester } = pending;
+  const { decision, note, conditionNote, conditions, amountLabel, notifyRequester } = pending;
+  const agentName = approval?.requestedByName || approval?.agentName || 'the technician';
+  const answered = conditionsWaitingOn(approval?.conditions, approval?.status) === 'approver';
   const requesterWho = approval?.requesterName ? `the requester (${approval.requesterName})` : 'the requester';
   const ref = approval?.ticketRef || '';
   const forWhom = approval?.requesterName ? ` for ${approval.requesterName}` : '';
   const verbs = {
-    approved: { title: conditionNote ? 'Approve with this condition?' : 'Approve this request?', cta: conditionNote ? 'Yes, approve with condition' : 'Yes, approve', tone: 'bg-emerald-600 hover:bg-emerald-700', Icon: Check },
-    rejected: { title: 'Reject this request?', cta: 'Yes, reject', tone: 'bg-red-600 hover:bg-red-700', Icon: X },
+    approved: conditions?.length
+      ? { title: `Send ${conditions.length === 1 ? 'this condition' : `these ${conditions.length} conditions`} to ${agentName}?`, cta: 'Yes, send the conditions', tone: 'bg-emerald-600 hover:bg-emerald-700', Icon: PenLine }
+      : { title: answered ? 'Approve, accepting these answers?' : conditionNote ? 'Approve with this condition?' : 'Approve this request?', cta: answered ? 'Yes, approve' : conditionNote ? 'Yes, approve with condition' : 'Yes, approve', tone: 'bg-emerald-600 hover:bg-emerald-700', Icon: Check },
+    rejected: { title: 'Mark this request as not approved?', cta: 'Yes, not approved', tone: 'bg-red-600 hover:bg-red-700', Icon: X },
     escalate: { title: `Escalate to ${approval?.nextTier?.name || 'the next tier'}?`, cta: 'Yes, escalate', tone: 'bg-amber-600 hover:bg-amber-700', Icon: ArrowUpRight },
     forward: { title: `Forward to ${pending.toName || pending.toEmail || 'this person'}?`, cta: 'Yes, forward', tone: 'bg-primary hover:bg-blue-700', Icon: Forward },
   };
   const v = verbs[decision] || verbs.approved;
   let consequence;
-  if (decision === 'approved') {
+  if (decision === 'approved' && conditions?.length) {
+    consequence = `It is not approved yet. ${agentName} answers each condition, can or can't be met and how, and the answers come back to you to decide. Nothing goes to the requester.`;
+  } else if (decision === 'approved') {
     consequence = approval?.autoEscalates
       ? `${amountLabel || 'The amount'} is over your ${approval.tierName || 'tier'} limit${approval.amountLimitLabel ? ` (${approval.amountLimitLabel})` : ''}. Your approval is recorded and the request moves on to ${approval.nextTier?.approverNames?.join(', ') || approval.nextTier?.name || 'the next tier'} automatically.`
-      : `This ends the request — the agent and the other approvers get the decision by e-mail${conditionNote ? ', with your condition' : ''}${notifyRequester ? `, and so does ${requesterWho}` : `. ${requesterWho[0].toUpperCase()}${requesterWho.slice(1)} is not e-mailed`}. You can change your mind later only from inside the app.`;
+      : `This ends the request — the agent and the other approvers get the decision by e-mail${answered ? ', with the agreed conditions' : conditionNote ? ', with your condition' : ''}${notifyRequester ? `, and so does ${requesterWho}` : `. ${requesterWho[0].toUpperCase()}${requesterWho.slice(1)} is not e-mailed`}. You can change your mind later only from inside the app.`;
   } else if (decision === 'rejected') {
     consequence = notifyRequester
       ? `This ends the request with your reason. The agent, the other approvers and ${requesterWho} are notified right away.`
@@ -105,11 +116,15 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
           <div className="min-w-0 flex-1">
             <h4 id="confirm-title" className="text-base font-bold text-foreground">{v.title}</h4>
             <p className="mt-1 text-sm text-muted-foreground">
-              You are about to <span className="font-semibold text-foreground">{decision === 'approved' ? 'approve' : decision === 'rejected' ? 'reject' : decision}</span>{' '}
+              You are about to <span className="font-semibold text-foreground">{decision === 'approved' ? (conditions?.length ? 'approve on conditions' : 'approve') : decision === 'rejected' ? 'mark as not approved' : decision}</span>{' '}
               <span className="font-mono font-semibold text-foreground">{ref}</span>{forWhom}{amountLabel ? <> · <span className="font-semibold text-foreground">{amountLabel}</span></> : null}.
             </p>
             <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{consequence}</p>
-            {conditionNote && (
+            {conditions?.length ? (
+              <ol className="mt-2 list-decimal space-y-1 rounded-lg border border-amber-200 bg-amber-50/70 py-2 pl-8 pr-3 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="confirm-conditions">
+                {conditions.map((c, i) => <li key={i}>{c}</li>)}
+              </ol>
+            ) : conditionNote && (
               <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
                 <span className="font-semibold">Condition:</span> {conditionNote}
               </p>
@@ -236,6 +251,11 @@ export default function ApprovalComposer({
   // QA 09-18 #1: off by default — the requester hears the verdict from the agent.
   const [notifyRequester, setNotifyRequester] = useState(false);
   const [showSignature, setShowSignature] = useState(false);
+  // 26 Oct 2026: conditions are a list. Changing them starts from the current ones.
+  const currentConditions = readConditions(approval?.conditions);
+  const answersIn = conditionsWaitingOn(approval?.conditions, approval?.status) === 'approver';
+  const [conds, setConds] = useState(() => (currentConditions ? currentConditions.items.map((i) => i.text) : ['']));
+  const condList = conds.map((c) => c.trim()).filter(Boolean);
   const editorRef = useRef(null);
   const text = note.trim();
   const hasNote = text.length > 0;
@@ -243,7 +263,9 @@ export default function ApprovalComposer({
   const canEscalate = Boolean(approval?.canEscalate) && typeof onHandoff === 'function';
   const canForward = typeof onHandoff === 'function';
   const canAsk = typeof onAsk === 'function';
-  const tabs = useMemo(() => TABS.filter((t) => (t.key === 'escalate' ? canEscalate : t.key === 'forward' ? canForward : t.key === 'question' ? canAsk : canDecide)), [canEscalate, canForward, canAsk, canDecide]);
+  const tabs = useMemo(() => TABS
+    .filter((t) => (t.key === 'escalate' ? canEscalate : t.key === 'forward' ? canForward : t.key === 'question' ? canAsk : canDecide))
+    .map((t) => (t.key === 'condition' && currentConditions ? { ...t, label: 'Change conditions' } : t)), [canEscalate, canForward, canAsk, canDecide, currentConditions]);
 
   // Decline and Ask from the e-mail need words, so the editor is ready for them.
   useEffect(() => {
@@ -258,28 +280,27 @@ export default function ApprovalComposer({
     if (busy) return;
     if (!canDecide && ['approved', 'rejected', 'condition'].includes(decision)) return;
     if (decision === 'rejected' && !text) {
-      setError('Add a reason for rejecting — the agents read it and pass it on.');
+      setError('Add the reason — the agents read it and pass it on.');
       setTab('rejected');
       editorRef.current?.focus();
       return;
     }
-    if (decision === 'condition' && !text) {
-      setError('Type the condition first — it goes out with the approval.');
-      editorRef.current?.focus();
+    if (decision === 'condition' && !condList.length) {
+      setError('Write at least one condition — each one is answered by the technician.');
       return;
     }
     setError(null);
     if (decision === 'condition') {
-      setPending({ decision: 'approved', note: null, noteHtml: null, conditionNote: text, conditionNoteHtml: rich(), amountLabel: approval?.amountLabel || null, notifyRequester });
+      setPending({ decision: 'approved', note: text || null, noteHtml: rich(), conditions: condList, conditionNote: condList.join('\n'), conditionNoteHtml: null, amountLabel: approval?.amountLabel || null, notifyRequester: false });
       return;
     }
     setPending({ decision, note: text || null, noteHtml: rich(), conditionNote: null, amountLabel: approval?.amountLabel || null, notifyRequester });
-  }, [busy, text, noteHtml, approval, canDecide, notifyRequester]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [busy, text, noteHtml, approval, canDecide, notifyRequester, conds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runDecision = useCallback(async (p) => {
     setSubmitting(p.decision);
     try {
-      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, notifyRequester: p.notifyRequester === true });
+      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, ...(p.conditions ? { conditions: p.conditions } : {}), notifyRequester: p.notifyRequester === true });
       setPending(null);
       clear();
     } catch (err) {
@@ -352,7 +373,7 @@ export default function ApprovalComposer({
       else if (key === 'r') {
         event.preventDefault();
         if (hasNote) { setTab('rejected'); stage('rejected'); }
-        else { setTab('rejected'); setError('Add a reason for rejecting — the agents read it and pass it on.'); editorRef.current?.focus(); }
+        else { setTab('rejected'); setError('Add the reason — the agents read it and pass it on.'); editorRef.current?.focus(); }
       }
     };
     window.addEventListener('keydown', onKey);
@@ -468,10 +489,21 @@ export default function ApprovalComposer({
                 </div>
               )}
 
+              {answersIn && tab !== 'condition' && (
+                <ConditionsReview conditions={approval.conditions} className="mb-3" />
+              )}
+              {answersIn && tab === 'approved' && (
+                <p className="mb-2 text-[12.5px] text-muted-foreground">Approving accepts these answers. The agreed conditions go out with your approval.</p>
+              )}
+
               {tab === 'condition' && (
-                <p className="mb-2 text-[12.5px] text-muted-foreground">
-                  The request is <span className="font-semibold text-emerald-700 dark:text-emerald-200">approved</span> and your condition travels with it — in the decision e-mail, on the ticket and in the API.
-                </p>
+                <div className="mb-3">
+                  <p className="mb-2 text-[12.5px] text-muted-foreground">
+                    Not approved yet: {approval?.requestedByName || 'the technician'} answers each condition, can or can&apos;t be met and how, and the answers come back to you to decide.
+                    {currentConditions ? ' Edit, add or remove conditions; unchanged ones keep their answers.' : ''}
+                  </p>
+                  <ConditionsEditor value={conds} onChange={(v) => { setConds(v); if (error) setError(null); }} disabled={busy} autoFocus={tabChosen} />
+                </div>
               )}
 
               <RichTextEditor
@@ -479,8 +511,8 @@ export default function ApprovalComposer({
                 value={noteHtml}
                 onChange={({ html, text: t }) => { setNoteHtml(html); setNote(t); if (error) setError(null); }}
                 placeholder={PLACEHOLDER[tab] || PLACEHOLDER.approved}
-                ariaLabel={tab === 'question' ? 'Your question' : tab === 'condition' ? 'Condition' : tab === 'rejected' ? 'Reason for rejecting' : 'Decision note'}
-                minHeight={compact ? Math.min(minHeight, 160) : minHeight}
+                ariaLabel={tab === 'question' ? 'Your question' : tab === 'condition' ? 'Note for the technician' : tab === 'rejected' ? 'Reason it is not approved' : 'Decision note'}
+                minHeight={tab === 'condition' ? 96 : compact ? Math.min(minHeight, 160) : minHeight}
                 className="border-input bg-card shadow-subtle"
               />
 
@@ -504,7 +536,7 @@ export default function ApprovalComposer({
                 </div>
               )}
 
-              {isDecision && (
+              {isDecision && tab !== 'condition' && (
                 <label
                   data-testid="notify-requester"
                   className={`mt-3 flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors ${notifyRequester ? 'border-primary/50 bg-primary/5 dark:bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/50'}`}
@@ -546,15 +578,15 @@ export default function ApprovalComposer({
                   </button>
                 )}
                 {tab === 'condition' && (
-                  <button type="button" onClick={() => stage('condition')} disabled={busy || !hasNote} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-[10px] bg-emerald-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
+                  <button type="button" onClick={() => stage('condition')} disabled={busy || !condList.length} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-[10px] bg-emerald-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
                     {submitting === 'approved' ? <Activity className="h-4 w-4 animate-spin" aria-hidden="true" /> : <PenLine className="h-4 w-4" aria-hidden="true" />}
-                    {submitting === 'approved' ? 'Approving…' : 'Approve with condition'}
+                    {submitting === 'approved' ? 'Sending…' : `Send ${condList.length === 1 ? 'the condition' : 'the conditions'} to ${approval?.requestedByName || 'the technician'}`}
                   </button>
                 )}
                 {tab === 'rejected' && (
                   <button type="button" onClick={() => stage('rejected')} disabled={busy || !hasNote} aria-keyshortcuts={showShortcuts ? 'r' : undefined} aria-describedby={!hasNote ? 'reject-helper' : undefined} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-[10px] bg-red-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-red-700 disabled:opacity-60">
                     {submitting === 'rejected' ? <Activity className="h-4 w-4 animate-spin" aria-hidden="true" /> : <X className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />}
-                    {submitting === 'rejected' ? 'Rejecting…' : 'Reject'}
+                    {submitting === 'rejected' ? 'Saving…' : 'Not approved'}
                     {showShortcuts && submitting !== 'rejected' && <Kbd onSolid>R</Kbd>}
                   </button>
                 )}
@@ -564,8 +596,8 @@ export default function ApprovalComposer({
                     {submitting === 'question' ? 'Sending…' : askMode === 'requester' ? 'Send to the requester' : 'Send to the approvers / agent'}
                   </button>
                 )}
-                {tab === 'rejected' && !hasNote && <span id="reject-helper" className="text-xs text-muted-foreground">Add a reason to reject</span>}
-                {tab === 'condition' && !hasNote && <span className="text-xs text-muted-foreground">Type the condition to continue</span>}
+                {tab === 'rejected' && !hasNote && <span id="reject-helper" className="text-xs text-muted-foreground">Add the reason to continue</span>}
+                {tab === 'condition' && !condList.length && <span className="text-xs text-muted-foreground">Write at least one condition</span>}
               </div>
             </>
           )}

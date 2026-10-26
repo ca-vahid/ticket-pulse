@@ -6,6 +6,7 @@ import {
 import { BrandArt, PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 import { AmountChip, TierChip, handoffSentence } from './ApprovalHandoff';
 import ApprovalComposer from './ApprovalComposer';
+import { ConditionsAnswerForm, ConditionsReview, conditionsWaitingOn, readConditions } from './ApprovalConditions';
 import ApprovalThread, { WaitingOnApproverChip } from './ApprovalThread';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { ticketsAPI } from '../../services/api';
@@ -97,6 +98,8 @@ export default function ApprovalTimeline({
   onEscalate, onForward,
   // Approvals v3
   ticketId = null, requester = null, onAsk, onAnswer,
+  // 26 Oct 2026: IT answers an approver's conditions ({ answers, submit }).
+  onAnswerConditions = null,
   // Assetron (24 Sep 2026)
   canChangeHardware = () => false, onChangeHardware = null,
 }) {
@@ -243,7 +246,9 @@ export default function ApprovalTimeline({
                   ) : head.requestNote && (
                     <p className="mt-4 text-sm leading-relaxed text-muted-foreground italic border-l-2 border-border pl-3.5" data-testid="timeline-request-note">“{cleanNoteText(head.requestNote)}”</p>
                   )}
-                  {decider?.conditionNote && verdict === 'approved' && (
+                  {readConditions(decider?.conditions) && verdict === 'approved' ? (
+                    <ConditionsReview conditions={decider.conditions} variant="agreed" className="mt-4" />
+                  ) : decider?.conditionNote && verdict === 'approved' && (
                     <div className="mt-4 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3.5" data-testid="timeline-condition">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Condition</p>
                       <p className="mt-1 text-[15px] leading-relaxed text-foreground/85">{decider.conditionNote}</p>
@@ -356,11 +361,15 @@ export default function ApprovalTimeline({
                               <span className="text-[11px] text-muted-foreground/75" title={new Date(ap.decidedAt).toLocaleString()}>{formatDayTime(ap.decidedAt)} · {timeAgo(ap.decidedAt)}</span>
                             )}
                           </div>
-                          {ap.status === 'info_requested'
-                            ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
-                            : (ap.status === 'escalated' || ap.status === 'forwarded')
-                              ? (() => { const last = named([...(ap.escalationLog || [])].reverse()[0]); return last ? <p className={`text-xs mt-0.5 ${sm.text}`}>{handoffSentence({ ...last, byName: null, byEmail: null }).replace(/^An approver /, '').replace(/^\w/, (c) => c.toUpperCase())}</p> : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>; })()
-                              : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
+                          {conditionsWaitingOn(ap.conditions, ap.status) === 'it'
+                            ? <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-300" data-testid="conditions-waiting">Approved on {readConditions(ap.conditions).items.length === 1 ? 'a condition' : `${readConditions(ap.conditions).items.length} conditions`} — not approved until {head.requestedByName || 'the technician'} answers {readConditions(ap.conditions).items.length === 1 ? 'it' : 'them'}</p>
+                            : conditionsWaitingOn(ap.conditions, ap.status) === 'approver'
+                              ? <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-300">Answers to the conditions are in — waiting on {approverLabel} to decide</p>
+                              : ap.status === 'info_requested'
+                                ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
+                                : (ap.status === 'escalated' || ap.status === 'forwarded')
+                                  ? (() => { const last = named([...(ap.escalationLog || [])].reverse()[0]); return last ? <p className={`text-xs mt-0.5 ${sm.text}`}>{handoffSentence({ ...last, byName: null, byEmail: null }).replace(/^An approver /, '').replace(/^\w/, (c) => c.toUpperCase())}</p> : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>; })()
+                                  : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
                           {/* How this row came to exist (escalated / forwarded / auto over-limit) — only on the receiving row. */}
                           {ap.status === 'pending' && Array.isArray(ap.escalationLog) && ap.escalationLog.length > 0 && (() => {
                             const last = ap.escalationLog[ap.escalationLog.length - 1];
@@ -395,7 +404,9 @@ export default function ApprovalTimeline({
                                   else await onEscalate?.(ap.id, note);
                                 } : undefined}
                                 disabled={busy}
-                                footer={ap.status === 'info_requested' ? 'A question is out — you can still decide, or wait for the answer below.' : 'Decisions ask you to confirm first.'}
+                                footer={conditionsWaitingOn(ap.conditions, ap.status) === 'it'
+                                  ? `Waiting for ${head.requestedByName || 'the technician'} to answer your conditions — you can still decide now.`
+                                  : ap.status === 'info_requested' ? 'A question is out — you can still decide, or wait for the answer below.' : 'Decisions ask you to confirm first.'}
                               />
                             </div>
                           )}
@@ -450,9 +461,32 @@ export default function ApprovalTimeline({
                             </div>
                           )}
 
+                          {/* 26 Oct 2026: the answers are in and back with the approver. */}
+                          {conditionsWaitingOn(ap.conditions, ap.status) === 'approver' && !isApprover && (
+                            <ConditionsReview conditions={ap.conditions} className="mt-2" />
+                          )}
+                          {/* IT answers the approver's conditions, one by one. */}
+                          {conditionsWaitingOn(ap.conditions, ap.status) === 'it' && !isApprover && (
+                            onAnswerConditions ? (
+                              <ConditionsAnswerForm
+                                key={`${ap.id}-${readConditions(ap.conditions).round || 1}`}
+                                conditions={ap.conditions}
+                                approverName={approverLabel}
+                                requesterName={requester?.name || null}
+                                busy={busy}
+                                onSave={(answers) => onAnswerConditions(ap.id, { answers, submit: false })}
+                                onSubmit={(answers) => onAnswerConditions(ap.id, { answers, submit: true })}
+                                onAskRequester={onAsk && requester?.email ? async (q) => {
+                                  await onAsk(ap.id, { kind: 'question', mode: 'requester', to: [String(requester.email).toLowerCase()], cc: [], bodyText: q, bodyHtml: null });
+                                  await loadMessages();
+                                } : null}
+                              />
+                            ) : <ConditionsReview conditions={ap.conditions} className="mt-2" />
+                          )}
+
                           {/* Requester actions: type the requested info right here,
                               it travels with the resubmit (QA 07-14 #1). */}
-                          {ap.status === 'info_requested' && isRequester && (
+                          {ap.status === 'info_requested' && isRequester && conditionsWaitingOn(ap.conditions, ap.status) !== 'it' && (
                             <div className="mt-2 space-y-1.5">
                               <textarea
                                 rows={2}

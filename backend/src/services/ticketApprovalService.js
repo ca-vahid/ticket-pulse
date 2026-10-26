@@ -8,6 +8,9 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { decodeBasicEntities } from '../utils/htmlContent.js';
 import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
 import { categoryTiers } from '../utils/approvalTiers.js';
+import {
+  readConditions, conditionItems, sameConditions, splitConditionText, mergeAnswers, isAnswered, waitingOn, agreedSummary, conditionsText, countCantMeet,
+} from './approvalConditions.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
@@ -81,6 +84,10 @@ export function cleanPlainNote(value) {
     .replace(/ +([,.;:!?])/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
   return clean || null;
 }
+
+// Agreed conditions (a numbered list) read plural; a one-line condition stays singular.
+const withConditionWords = (conditionNote) => (/\n/.test(String(conditionNote || '')) ? 'Approved with conditions' : 'Approved with condition');
+const escapeNote = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function sanitizeNoteHtml(html) {
   const clean = sanitizeHtml(String(html || ''), NOTE_SANITIZE_OPTIONS).trim();
@@ -174,7 +181,7 @@ class TicketApprovalService {
         requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
         decidedAt: true, decidedVia: true, expiresAt: true, createdAt: true,
         tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
-        conditionNote: true, conditionNoteHtml: true,
+        conditionNote: true, conditionNoteHtml: true, conditions: true,
       },
     });
     return this._fillApproverNames(rows);
@@ -677,6 +684,9 @@ class TicketApprovalService {
         // Approvals v3
         conditionNote: approval.conditionNote || null,
         conditionNoteHtml: approval.conditionNoteHtml || null,
+        // 26 Oct 2026: approve with conditions is a conversation — the items, IT's answers, and who it waits on.
+        conditions: readConditions(approval.conditions),
+        conditionsWaitingOn: waitingOn(readConditions(approval.conditions), approval.status),
         signatureHtml: approval.signatureHtml || null,
         signaturePreview,
         awaitingApprover,
@@ -962,7 +972,7 @@ class TicketApprovalService {
     // Phase AP: a rejection from the link must say why — the requester reads
     // it in the verdict email and on the ticket.
     if (String(decision || '').toLowerCase() === 'rejected' && !String(note || '').trim()) {
-      throw new ValidationError('Add a reason for rejecting');
+      throw new ValidationError('Add a reason for not approving');
     }
     return this._decide(approval, decision, note, {
       via: 'link',
@@ -971,6 +981,7 @@ class TicketApprovalService {
       noteHtml,
       conditionNote: extra?.conditionNote || null,
       conditionNoteHtml: extra?.conditionNoteHtml || null,
+      conditions: Array.isArray(extra?.conditions) ? extra.conditions : null,
       notifyRequester: extra?.notifyRequester === true,
     });
   }
@@ -993,6 +1004,7 @@ class TicketApprovalService {
       noteHtml,
       conditionNote: extra?.conditionNote || null,
       conditionNoteHtml: extra?.conditionNoteHtml || null,
+      conditions: Array.isArray(extra?.conditions) ? extra.conditions : null,
       notifyRequester: extra?.notifyRequester === true,
     });
   }
@@ -1095,6 +1107,9 @@ class TicketApprovalService {
     if (approval.status !== 'info_requested') {
       throw new ValidationError('This approval is not awaiting more info');
     }
+    if (waitingOn(readConditions(approval.conditions), approval.status) === 'it') {
+      throw new ValidationError('Answer each condition on the ticket — the answers go back to the approver');
+    }
 
     const answer = String(note || '').trim().slice(0, 4000) || null;
     const question = approval.decisionNote || null;
@@ -1184,6 +1199,202 @@ class TicketApprovalService {
     return updated;
   }
 
+  // ------------------------------------------------------------ conditions
+  // Approve with conditions as a conversation (26 Oct 2026, Vahid). See
+  // approvalConditions.js for the shape and the rules.
+
+  /** The approver sets (or changes) conditions: the request waits on IT's answers. */
+  async _setConditions(approval, items, { note = null, actorLabel, actorEmail, via = 'app', prior = null }) {
+    const now = new Date();
+    const state = {
+      round: prior ? prior.round + 1 : 1,
+      setBy: String(actorEmail || approval.approverEmail).toLowerCase(),
+      setByName: actorLabel,
+      setAt: now.toISOString(),
+      note: note || null,
+      items,
+      submittedAt: null, submittedBy: null, submittedByName: null,
+    };
+    const list = conditionsText(items);
+    const updated = await prisma.ticketApproval.update({
+      where: { id: approval.id },
+      data: {
+        status: 'info_requested',
+        conditions: state,
+        // The plain list keeps older surfaces (Teams, API, exports) honest while it is open.
+        conditionNote: list,
+        conditionNoteHtml: null,
+        decisionNote: null,
+        approverName: approval.approverName || actorLabel,
+      },
+    });
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: approval.ticketId },
+      select: {
+        id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, status: true,
+        requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, entraOfficeLocation: true, entraCity: true } },
+      },
+    });
+    const technician = String(approval.requestedBy || '').toLowerCase();
+    const technicianName = (await this._resolvePersonName(technician).catch(() => null)) || prettifyLocalPart(technician);
+    const header = `Approved with ${items.length === 1 ? 'a condition' : `${items.length} conditions`} by ${actorLabel}${prior ? ' (changed)' : ''} — not approved until ${technicianName || 'the technician'} answers ${items.length === 1 ? 'it' : 'each one'}:`;
+    const body = `${header}\n${list}${note ? `\n\nNote: ${note}` : ''}`;
+
+    await ticketActivityRepository.create({
+      ticketId: approval.ticketId,
+      activityType: 'approval_conditions_set',
+      performedBy: actorLabel,
+      performedAt: now,
+      details: { approvalId: approval.id, via, round: state.round, conditions: items.map((i) => i.text) },
+    }).catch(() => {});
+
+    try {
+      const { default: conversation } = await import('./approvalConversationService.js');
+      const message = await prisma.approvalMessage.create({
+        data: {
+          workspaceId: approval.workspaceId, ticketId: approval.ticketId, approvalId: approval.id,
+          requestGroupId: approval.requestGroupId || `single-${approval.id}`,
+          kind: 'comment', audience: 'internal',
+          authorEmail: state.setBy, authorName: actorLabel, authorRole: 'approver',
+          bodyText: body, via, toEmails: technician ? [technician] : [], ccEmails: [],
+        },
+      });
+      const html = `<p>${escapeNote(header)}</p><ol>${items.map((i) => `<li>${escapeNote(i.text)}</li>`).join('')}</ol>${note ? `<p><b>Note:</b> ${escapeNote(note)}</p>` : ''}`;
+      await conversation._ticketNote(approval, { actorName: actorLabel, actorEmail: state.setBy, body, html, event: 'conditions', messageId: message.id });
+    } catch (err) {
+      logger.warn(`Approval conditions note failed (non-fatal): ${err.message}`);
+    }
+
+    if (ticket) {
+      try {
+        await this._emailConditions(ticket, { ...approval, ...updated }, state, { technician, technicianName });
+      } catch (err) {
+        logger.warn(`Approval conditions e-mail failed (non-fatal): ${err.message}`);
+      }
+      this._broadcast(ticket, 'approval');
+    }
+    logger.info(`Approval ${approval.id} on ticket ${approval.ticketId}: ${items.length} condition(s) set by ${actorLabel} (round ${state.round}) → ${technician}`);
+    this._syncTeamsCards(approval.ticketId);
+    return updated;
+  }
+
+  /**
+   * IT answers the conditions: each one "can be met" (+ how) or "can't be met
+   * as asked" (+ why). `submit` sends them straight back to the approver with
+   * a fresh link; without it the answers are saved as a draft.
+   */
+  async answerConditions(ticketId, workspaceId, approvalId, { answers = [], submit = false } = {}, actor = {}) {
+    const approval = await prisma.ticketApproval.findFirst({ where: { id: approvalId, ticketId, workspaceId } });
+    if (!approval) throw new NotFoundError('Approval not found');
+    const state = readConditions(approval.conditions);
+    if (!state) throw new ValidationError('This approval has no conditions to answer');
+    if (waitingOn(state, approval.status) !== 'it') {
+      throw new ValidationError(state.submittedAt ? 'The answers were already sent back to the approver' : `This approval is ${approval.status}`);
+    }
+    const email = String(actor?.email || '').toLowerCase();
+    if (!email) throw new ValidationError('Sign in to answer');
+    if (email === String(approval.approverEmail).toLowerCase()) {
+      throw new ValidationError('You set these conditions — the technician answers them');
+    }
+    const name = actor?.name || (await this._resolvePersonName(email).catch(() => null)) || prettifyLocalPart(email);
+    const items = mergeAnswers(state.items, answers, { email, name });
+    if (submit) {
+      const open = items.filter((i) => !isAnswered(i)).length;
+      if (open) throw new ValidationError(`Answer every condition first — ${open} still ${open === 1 ? 'needs' : 'need'} an answer (and a reason when one can't be met)`);
+    }
+    const now = new Date();
+    const next = submit
+      ? { ...state, items, submittedAt: now.toISOString(), submittedBy: email, submittedByName: name }
+      : { ...state, items };
+    const token = submit ? newToken() : null;
+    const updated = await prisma.ticketApproval.update({
+      where: { id: approval.id },
+      data: submit
+        ? { conditions: next, status: 'pending', decisionNote: null, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000) }
+        : { conditions: next },
+    });
+    if (!submit) return updated;
+
+    const cantMeet = countCantMeet(next);
+    const lines = items.map((i, n) => `${n + 1}. ${i.text}\n   ${i.response === 'cant_meet' ? "Can't be met as asked" : 'Can be met'}${i.answer ? `: ${i.answer}` : '.'}`).join('\n');
+    const header = `${name} answered the conditions from ${state.setByName || 'the approver'}${cantMeet ? ` — ${cantMeet} can't be met as asked` : ''}. Back with ${state.setByName || 'the approver'} to decide:`;
+    const body = `${header}\n${lines}`;
+
+    await ticketActivityRepository.create({
+      ticketId, activityType: 'approval_conditions_answered', performedBy: name, performedAt: now,
+      details: { approvalId: approval.id, round: next.round, cantMeet },
+    }).catch(() => {});
+
+    try {
+      const { default: conversation } = await import('./approvalConversationService.js');
+      const message = await prisma.approvalMessage.create({
+        data: {
+          workspaceId, ticketId, approvalId: approval.id,
+          requestGroupId: approval.requestGroupId || `single-${approval.id}`,
+          kind: 'answer', audience: 'internal', authorEmail: email, authorName: name, authorRole: 'agent',
+          bodyText: body, via: 'app', toEmails: [String(approval.approverEmail).toLowerCase()], ccEmails: [],
+        },
+      });
+      const html = `<p>${escapeNote(header)}</p><ol>${items.map((i) => `<li>${escapeNote(i.text)}<br><b>${i.response === 'cant_meet' ? "Can't be met as asked" : 'Can be met'}</b>${i.answer ? `: ${escapeNote(i.answer)}` : ''}</li>`).join('')}</ol>`;
+      await conversation._ticketNote(approval, { actorName: name, actorEmail: email, body, html, event: 'condition_answers', messageId: message.id });
+    } catch (err) {
+      logger.warn(`Approval condition answers note failed (non-fatal): ${err.message}`);
+    }
+
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      include: {
+        requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, department: true, entraDepartment: true, entraOfficeLocation: true, entraCity: true } },
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+        workspace: { select: { name: true } },
+      },
+    });
+    if (ticket) {
+      const categoryName = await this._approvalCategoryName(approval).catch(() => null);
+      const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
+      try {
+        await this._emailApprover(ticket, { ...approval, ...updated }, decisionUrl, categoryName, null, { conditions: next });
+      } catch (err) {
+        logger.warn(`Condition answers e-mail failed (non-fatal): ${err.message}`);
+      }
+      this._broadcast(ticket, 'approval');
+    }
+    logger.info(`Approval ${approval.id} on ticket ${ticketId}: conditions answered by ${name} (${cantMeet} can't be met) → ${approval.approverEmail}`);
+    this._syncTeamsCards(ticketId);
+    return updated;
+  }
+
+  /** The technician hears the conditions: what to answer, and where. */
+  async _emailConditions(ticket, approval, state, { technician, technicianName }) {
+    if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return;
+    if (!technician || !looksLikeEmail(technician)) return;
+    const { renderConditionsEmail } = await import('./approvalEmailTemplate.js');
+    const categoryName = await this._approvalCategoryName(approval).catch(() => null);
+    const html = renderConditionsEmail({
+      workspaceName: await this._workspaceName(ticket),
+      categoryName,
+      ticket: this._emailTicketFacts(ticket),
+      approverName: state.setByName,
+      technicianName,
+      requester: { name: ticket.requester?.name || null },
+      items: state.items,
+      note: state.note,
+      changed: state.round > 1,
+    });
+    const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
+    const ref = ticketDisplayRef(ticket);
+    await deliverTransactionalEmail({
+      workspaceId: ticket.workspaceId,
+      to: [technician],
+      subject: `Conditions to answer: ${categoryName ? `${categoryName} — ` : ''}${ticket.subject || 'ticket'} [${ref}]`,
+      html,
+      label: 'approval conditions',
+      fromName: `${state.setByName || 'Approver'} via Ticket Pulse`,
+    });
+  }
+
   // ---------------------------------------------------------------- inbox
   // Cross-ticket lists for the Approvals page. Scoped to the actor's email.
 
@@ -1254,6 +1465,7 @@ class TicketApprovalService {
       requestNote: a.requestNote,
       decisionNote: a.decisionNote,
       conditionNote: a.conditionNote || null,
+      conditions: readConditions(a.conditions),
       decidedAt: a.decidedAt,
       decidedVia: a.decidedVia,
       createdAt: a.createdAt,
@@ -1526,9 +1738,9 @@ class TicketApprovalService {
   // QA 09-18 #1: the ticket requester is NOT on the verdict e-mail unless the
   // approver ticks "also e-mail the requester" - an approver's rejection note
   // written for the agents reached the end user (ticket 242909, 18 Sep 2026).
-  async _decide(approval, decision, rawNote, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote: rawCondition = null, conditionNoteHtml = null, notifyRequester = false }) {
+  async _decide(approval, decision, rawNote, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote: rawCondition = null, conditionNoteHtml = null, conditions: rawConditions = null, notifyRequester = false }) {
     const note = cleanPlainNote(rawNote);
-    const conditionNote = cleanPlainNote(rawCondition);
+    let conditionNote = cleanPlainNote(rawCondition);
     notifyRequester = notifyRequester === true;
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
@@ -1561,6 +1773,25 @@ class TicketApprovalService {
     }
     if (!actorLabel) actorLabel = approval.approverEmail;
 
+    // 26 Oct 2026 (Vahid): approving with conditions no longer ends the
+    // request. New or changed conditions go to the technician to answer one
+    // by one; the request stays open with this approver. Approving again with
+    // nothing new accepts the answers, and the agreed list becomes the
+    // condition the verdict carries. A decision change keeps the old meaning.
+    let priorConditions = readConditions(approval.conditions);
+    if (normalized === 'approved' && !changedFrom) {
+      const split = rawConditions ? null : splitConditionText(rawCondition);
+      const wanted = conditionItems(rawConditions, split ? split.items.join('\n') : null, priorConditions);
+      if (wanted.length && !(priorConditions && sameConditions(priorConditions.items, wanted))) {
+        return this._setConditions(approval, wanted, {
+          note: note || split?.lead || null, actorLabel, actorEmail: actorEmail || approval.approverEmail, via, prior: priorConditions,
+        });
+      }
+      if (priorConditions) conditionNote = agreedSummary(priorConditions);
+    } else if (normalized === 'rejected') {
+      priorConditions = null;
+    }
+
     // Approvals v2: approving an amount above this tier's limit does not end
     // the request — it moves on to the next tier automatically (the approval
     // is recorded on this row as 'escalated' with the note). Rejections end it.
@@ -1580,7 +1811,7 @@ class TicketApprovalService {
     // Approvals v3: "approve with condition" + the approver's signature as it
     // will appear in the decision e-mail (saved signature, else Entra card).
     const cleanCondition = normalized === 'approved' ? String(conditionNote || '').trim() || null : null;
-    const cleanConditionHtml = cleanCondition && conditionNoteHtml ? sanitizeNoteHtml(conditionNoteHtml) : null;
+    const cleanConditionHtml = cleanCondition && conditionNoteHtml && !priorConditions ? sanitizeNoteHtml(conditionNoteHtml) : null;
     let signatureHtml = null;
     try {
       const { default: conversation } = await import('./approvalConversationService.js');
@@ -1636,7 +1867,7 @@ class TicketApprovalService {
     // Audit trail on the conversation only. Approvals are TP-only, so the note
     // is NEVER mirrored to the FreshService fallback copy (mirrorState: null).
     if (ticket) {
-      const verdict = normalized === 'approved' ? (cleanCondition ? 'APPROVED WITH CONDITION ✔' : 'APPROVED ✔') : 'REJECTED ✘';
+      const verdict = normalized === 'approved' ? (cleanCondition ? (priorConditions ? 'APPROVED WITH CONDITIONS ✔' : 'APPROVED WITH CONDITION ✔') : 'APPROVED ✔') : 'NOT APPROVED ✘';
       // The verdict card quotes what was asked for, so "Approved by X" is never
       // read without the requester's own words (long notes are trimmed).
       const askedFor = String(approval.requestNote || '').trim();
@@ -1645,7 +1876,7 @@ class TicketApprovalService {
         : '';
       const noteBody = (changedFrom
         ? `Approval CHANGED to ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`
-        : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`) + (cleanCondition ? ` · Condition: "${cleanCondition}"` : '') + askedForLabel;
+        : `Approval ${verdict} by ${actorLabel}${note ? ` — "${note.trim()}"` : ''}`) + (cleanCondition ? ` · ${priorConditions ? 'Agreed conditions' : 'Condition'}: "${cleanCondition}"` : '') + askedForLabel;
       const decisionNote = await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
@@ -1676,6 +1907,7 @@ class TicketApprovalService {
               actorName: actorLabel,
               note: note ? note.trim() : null,
               condition: cleanCondition || null,
+              ...(priorConditions ? { conditions: priorConditions.items } : {}),
               requestedBy: approval.requestedBy || null,
               requestedByName: looksLikeEmail(approval.requestedBy)
                 ? ((await this._resolvePersonName(approval.requestedBy).catch(() => null)) || prettifyLocalPart(approval.requestedBy))
@@ -1769,7 +2001,7 @@ class TicketApprovalService {
     }
   }
 
-  async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null, { handoff = null } = {}) {
+  async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null, { handoff = null, conditions = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.approverEmail}`);
       return { sent: false, reason: 'suppressed' };
@@ -1883,10 +2115,11 @@ class TicketApprovalService {
       approverName: approval.approverName || null,
       noteHtml,
       clarification: clarification?.answer ? clarification : null,
+      conditions: conditions || null,
       otherApprovers,
       decisionUrl,
       expiresAt: approval.expiresAt || null,
-      reRequest: !!clarification?.answer,
+      reRequest: !!clarification?.answer || !!conditions,
       laptops: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [],
     });
 
@@ -1923,7 +2156,7 @@ class TicketApprovalService {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
     const isSelf = to.toLowerCase() === String(actorEmail || '').trim().toLowerCase();
     const approved = decision === 'approved';
-    const verdictLabel = approved ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved';
+    const verdictLabel = approved ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     // Subject prefix stays identical for the self variant — inbox filters and
@@ -1973,7 +2206,7 @@ class TicketApprovalService {
         workspaceId: approval.workspaceId, ticketId: approval.ticketId, approvalId: approval.id, requestGroupId: groupId,
         kind: 'decision', audience: includeRequester ? 'requester' : 'internal', authorEmail: deciderEmail,
         authorName: actorLabel || approval.approverName || null, authorRole: 'approver',
-        bodyText: [decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved', conditionNote ? `Condition: ${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
+        bodyText: [decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved', conditionNote ? `${/\n/.test(conditionNote) ? 'Agreed conditions:\n' : 'Condition: '}${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
         bodyHtml: null, via: 'app',
         toEmails: [...new Set([includeRequester ? parts.requester?.email : null, parts.agent?.email, ...parts.approvers.map((a) => a.email), ...involved.map((a) => a.email)].filter(Boolean))],
       },
@@ -1991,7 +2224,7 @@ class TicketApprovalService {
     const workspaceName = await this._workspaceName(ticket);
     const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    const verdictLabel = decision === 'approved' ? (conditionNote ? 'Approved with condition' : 'Approved') : 'Not approved';
+    const verdictLabel = decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
     let sent = 0;
     for (const r of recipients) {
       const thread = await conversation.listForGroup(groupId, { audience: r.audience });

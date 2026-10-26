@@ -166,7 +166,7 @@ describe('POST /api/ticket-approvals/public/:token/decide', () => {
     approvalServiceMock.decideByToken.mockResolvedValue({ status: 'approved', decidedAt: '2026-09-02T01:00:00.000Z', approverName: 'Bob Builder', tokenHash: 'never' });
     const res = await request(buildApp()).post(`/api/ticket-approvals/public/${TOKEN}/decide`).send({ decision: 'approved' }).expect(200);
     expect(approvalServiceMock.decideByToken).toHaveBeenCalledWith(TOKEN, 'approved', null, null, { conditionNote: null, conditionNoteHtml: null, notifyRequester: false });
-    expect(res.body.data).toEqual({ status: 'approved', decidedAt: '2026-09-02T01:00:00.000Z', approverName: 'Bob Builder' });
+    expect(res.body.data).toEqual({ status: 'approved', decidedAt: '2026-09-02T01:00:00.000Z', approverName: 'Bob Builder', conditions: null, conditionNote: null });
   });
 
   test('a rejection without a reason surfaces the service 400', async () => {

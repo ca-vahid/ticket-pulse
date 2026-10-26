@@ -65,7 +65,7 @@ import PublicApprovalDecisionPage from './PublicApprovalDecision';
 const noteBox = () => screen.getByRole('textbox', { name: 'Decision note' });
 // Approvals v3: the composer has tabs; Reject / Ask / Condition each have their own editor label.
 const tab = (name) => screen.getByRole('tab', { name });
-const typeReason = (text) => { fireEvent.click(tab('Reject')); fireEvent.change(screen.getByRole('textbox', { name: 'Reason for rejecting' }), { target: { value: text } }); };
+const typeReason = (text) => { fireEvent.click(tab('Not approved')); fireEvent.change(screen.getByRole('textbox', { name: 'Reason it is not approved' }), { target: { value: text } }); };
 // Every decision confirms first — this finds and clicks the sheet's CTA.
 const confirmSheet = async (cta) => fireEvent.click(await screen.findByRole('button', { name: cta }));
 // QA 09-18 #1: the requester is not e-mailed unless the box is ticked.
@@ -126,7 +126,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
 
     // Composer: tabs, mail-sized editor, approve enabled, reject behind its tab
     expect(screen.getByTestId('approval-composer')).toBeInTheDocument();
-    expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['ApproveA', 'Approve with condition', 'Ask a question', 'RejectR', 'Forward']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['ApproveA', 'Approve with conditions', 'Ask a question', 'Not approvedR', 'Forward']);
     expect(noteBox()).toHaveAttribute('placeholder', expect.stringMatching(/Optional note/));
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
     expect(screen.getByText(/Sent to ingrid\.manager@bgcengineering\.ca · link expires Oct 1/)).toBeInTheDocument();
@@ -136,18 +136,18 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockReturnValue(ok({ status: 'rejected', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Reject' }));
-    const reject = screen.getByRole('button', { name: 'Reject' });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Not approved' }));
+    const reject = screen.getByRole('button', { name: 'Not approved' });
     expect(reject).toBeDisabled();
-    expect(screen.getByText('Add a reason to reject')).toBeInTheDocument();
+    expect(screen.getByText('Add the reason to continue')).toBeInTheDocument();
 
     typeReason('Budget frozen until Q4.');
     expect(reject).toBeEnabled();
-    expect(screen.queryByText('Add a reason to reject')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add the reason to continue')).not.toBeInTheDocument();
     fireEvent.click(reject);
-    expect(await screen.findByRole('dialog')).toHaveTextContent(/You are about to reject #239934 for Ingrid Berru Garcia/);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/You are about to mark as not approved #239934 for Ingrid Berru Garcia/);
     expect(apiMock.decide).not.toHaveBeenCalled();
-    await confirmSheet(/Yes, reject/);
+    await confirmSheet(/Yes, not approved/);
 
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'Budget frozen until Q4.', null, NO_CONDITION));
     expect(await screen.findByText(/You did not approve this on Sep 2/)).toBeInTheDocument();
@@ -161,8 +161,8 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     Element.prototype.scrollIntoView = vi.fn();
     apiMock.get.mockReturnValue(ok(pendingFixture));
     renderPage('tok-1', '?intent=reject');
-    expect(await screen.findByRole('tab', { name: 'Reject' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('textbox', { name: 'Reason for rejecting' })).toHaveFocus();
+    expect(await screen.findByRole('tab', { name: 'Not approved' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('textbox', { name: 'Reason it is not approved' })).toHaveFocus();
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
     expect(apiMock.decide).not.toHaveBeenCalled();
     cleanup();
@@ -190,32 +190,42 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(within(rail).getAllByRole('listitem')[0]).toHaveTextContent(/approved/);
   });
 
-  test('approve with condition: the condition is required, confirmed, posted and shown on the banner', async () => {
+  test('approve with conditions: the list is required, confirmed, posted, and the banner says it waits on the technician', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
-    apiMock.decide.mockReturnValue(ok({ status: 'approved', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
+    apiMock.decide.mockReturnValue(ok({
+      status: 'info_requested', decidedAt: null, approverName: 'Dana Whitfield',
+      conditions: { round: 1, items: [{ id: 1, text: 'UAT only — production needs a second review.' }, { id: 2, text: 'Licensed seats only' }], submittedAt: null },
+    }));
     renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Approve with condition' }));
-    const cta = screen.getByRole('button', { name: 'Approve with condition' });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Approve with conditions' }));
+    const cta = screen.getByRole('button', { name: /^Send the condition/ });
     expect(cta).toBeDisabled();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Condition' }), { target: { value: 'UAT only — production needs a second review.' } });
-    expect(cta).toBeEnabled();
-    fireEvent.click(cta);
-    expect(await screen.findByRole('dialog')).toHaveTextContent(/Approve with this condition\?/);
-    expect(screen.getByRole('dialog')).toHaveTextContent(/Condition: UAT only/);
-    await confirmSheet(/Yes, approve with condition/);
-    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, { conditionNote: 'UAT only — production needs a second review.', conditionNoteHtml: null, notifyRequester: false }));
-    expect(await screen.findByText(/You approved this with a condition on Sep 2/)).toBeInTheDocument();
-    expect(screen.getByTestId('decision-condition')).toHaveTextContent('UAT only — production needs a second review.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Condition 1' }), { target: { value: 'UAT only — production needs a second review.' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add a condition/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Condition 2' }), { target: { value: 'Licensed seats only' } });
+    const send = screen.getByRole('button', { name: /^Send the conditions/ });
+    expect(send).toBeEnabled();
+    fireEvent.click(send);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Send these 2 conditions to/);
+    expect(screen.getByRole('dialog')).toHaveTextContent(/It is not approved yet/);
+    expect(screen.getByTestId('confirm-conditions')).toHaveTextContent('Licensed seats only');
+    await confirmSheet(/Yes, send the conditions/);
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'approved', null, null, {
+      conditionNote: 'UAT only — production needs a second review.\nLicensed seats only', conditionNoteHtml: null,
+      conditions: ['UAT only — production needs a second review.', 'Licensed seats only'], notifyRequester: false,
+    }));
+    expect(await screen.findByText(/You approved on 2 conditions — waiting for/)).toBeInTheDocument();
+    expect(screen.getAllByTestId('conditions-review')[0]).toHaveTextContent('Licensed seats only');
   });
 
   test('a server error stays inline — the page never blanks', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockImplementation(() => fail({ status: 400, data: { message: 'Add a reason for rejecting' } }));
     renderPage();
-    await screen.findByRole('tab', { name: 'Reject' });
+    await screen.findByRole('tab', { name: 'Not approved' });
     typeReason('x');
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
-    await confirmSheet(/Yes, reject/);
+    fireEvent.click(screen.getByRole('button', { name: 'Not approved' }));
+    await confirmSheet(/Yes, not approved/);
     expect(await screen.findByRole('alert')).toHaveTextContent('Add a reason for rejecting');
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Approve' })).toBeEnabled();
@@ -319,10 +329,10 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     await screen.findByRole('button', { name: 'Approve' });
 
     fireEvent.keyDown(document.body, { key: 'r' });
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Add a reason/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Add the reason/);
     expect(apiMock.decide).not.toHaveBeenCalled();
-    // R switched to the Reject tab; typing "a" in its editor must not approve
-    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Reason for rejecting' }), { key: 'a' });
+    // R switched to the Not approved tab; typing "a" in its editor must not approve
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Reason it is not approved' }), { key: 'a' });
     expect(apiMock.decide).not.toHaveBeenCalled();
 
     fireEvent.keyDown(document.body, { key: 'a' });
@@ -398,10 +408,10 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockReturnValue(ok({ status: 'rejected', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
     renderPage();
-    await screen.findByRole('tab', { name: 'Reject' });
+    await screen.findByRole('tab', { name: 'Not approved' });
     typeReason('No budget.');
     fireEvent.keyDown(document.body, { key: 'R' });
-    await confirmSheet(/Yes, reject/);
+    await confirmSheet(/Yes, not approved/);
     await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'rejected', 'No budget.', null, NO_CONDITION));
   });
 

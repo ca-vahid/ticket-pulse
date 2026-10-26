@@ -362,10 +362,22 @@ export function renderApproverRequestEmail(ctx) {
   const title = ctx.categoryName || t.subject || 'Approval request';
   const sub = ctx.categoryName ? escapeHtml(t.subject || '') : '';
   rows.push(pad(
-    (ctx.reRequest ? apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};margin-bottom:3px;`, 'Re-requested with the answer you asked for') : '')
+    (ctx.reRequest ? apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};margin-bottom:3px;`, ctx.conditions ? 'The answers to your conditions are in' : 'Re-requested with the answer you asked for') : '')
     + apText('ap-h1 ap-ink', `font-size:19px;line-height:25px;font-weight:bold;color:${AP.ink};`, escapeHtml(title))
     + ((refLink || sub) ? apText('ap-muted', `font-size:14px;line-height:21px;color:${AP.muted};margin-top:4px;`, `${refLink}${sub}`) : ''),
     '22px 28px 0'));
+
+  // 26 Oct 2026: the answers to the approver's conditions, one by one.
+  if (ctx.conditions && Array.isArray(ctx.conditions.items) && ctx.conditions.items.length) {
+    rows.push(pad(conditionsBlock(ctx.conditions, {
+      label: `Your conditions and ${firstName(ctx.conditions.submittedByName) || agentName}'s answers`,
+    }), '20px 28px 0'));
+    const cant = ctx.conditions.items.filter((i) => i.response === 'cant_meet').length;
+    rows.push(pad(apText('ap-ink2', `font-size:14px;line-height:21px;color:${AP.ink2};`,
+      cant
+        ? `<b>${cant} of ${ctx.conditions.items.length}</b> can't be met as asked. Approve if you accept that, ask ${escapeHtml(firstName(ctx.conditions.submittedByName) || 'them')} or the requester about it, or choose Not approved.`
+        : 'Approve to accept these answers. The agreed conditions go out with your approval.'), '12px 28px 0'));
+  }
 
   // The answer the approver asked for comes first on a re-request.
   if (ctx.clarification?.answer) {
@@ -437,7 +449,7 @@ export function renderApproverRequestEmail(ctx) {
   // The decision — at the end, filling the row: Approve half, Decline and Ask a quarter each.
   rows.push(apActions([
     { kind: 'go', label: 'Approve', href: decisionIntentUrl(ctx.decisionUrl, 'approve'), width: '50%' },
-    { kind: 'no', label: 'Decline', href: decisionIntentUrl(ctx.decisionUrl, 'reject'), width: '25%' },
+    { kind: 'no', label: 'Not approved', href: decisionIntentUrl(ctx.decisionUrl, 'reject'), width: '25%' },
     { kind: 'ask', label: 'Ask', href: decisionIntentUrl(ctx.decisionUrl, 'ask'), width: '25%' },
   ], 'Each button opens the approval page with that choice picked. Add a note if you like, then confirm.'));
 
@@ -538,7 +550,24 @@ function apDocument({ headerRight = 'Approval', rows, footerHtml, preheader = ''
   ].join('');
 }
 
-const verdictWordOf = (approved, conditionNote) => (!approved ? 'Not approved' : conditionNote ? 'Approved with condition' : 'Approved');
+const verdictWordOf = (approved, conditionNote) => (!approved ? 'Not approved' : conditionNote ? (/\n/.test(conditionNote) ? 'Approved with conditions' : 'Approved with condition') : 'Approved');
+// Agreed conditions (several lines) read as a list; a one-line condition stays a sentence.
+const conditionLabel = (conditionNote) => (/\n/.test(String(conditionNote || '')) ? 'Agreed conditions' : 'Condition');
+
+const RESPONSE_WORD = { can_meet: 'Can be met', cant_meet: "Can't be met as asked" };
+
+/** The conditions as a numbered list, with the answer under each when there is one. */
+function conditionsBlock(state, { label = 'Conditions', answers = true } = {}) {
+  const items = (state?.items || []).map((i, n) => {
+    const tone = i.response === 'cant_meet' ? 'no' : 'go';
+    const answer = answers && i.response
+      ? `<div style="margin-top:3px;">${apWord(RESPONSE_WORD[i.response] || '', tone)}${i.answer ? ` <span class="ap-ink2" style="color:${AP.ink2};">— ${escapeHtml(i.answer).replace(/\n/g, '<br>')}</span>` : ''}</div>`
+      : '';
+    return `<tr><td valign="top" class="ap-muted" style="width:22px;padding:0 0 10px;font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.muted};">${n + 1}.</td>`
+      + `<td valign="top" style="padding:0 0 10px;"><div class="ap-ink" style="font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.ink};">${escapeHtml(i.text).replace(/\n/g, '<br>')}</div>${answer}</td></tr>`;
+  }).join('');
+  return apRuled(label, `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:2px;">${items}</table>`);
+}
 const apWord = (text, tone) => `<span class="ap-s-${tone}" style="color:${AP_STATUS[tone].color};font-weight:bold;">${escapeHtml(text)}</span>`;
 const workspaceFooter = (ctx, tail = '') => `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.${tail}`;
 
@@ -570,12 +599,12 @@ export function renderRequesterDecisionEmail(ctx) {
   if (ctx.requester?.name) {
     rows.push(apRow(apPerson({ label: 'Requested for', name: ctx.requester.name, sub: [ctx.requester.title, ctx.requester.location].filter(Boolean).join(' · '), photoCid: ctx.requester.photoCid || null, tint: 'amber' })));
   }
-  if (ctx.conditionNote) rows.push(apRow(apRuled('Condition', escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>'))));
+  if (ctx.conditionNote) rows.push(apRow(apRuled(conditionLabel(ctx.conditionNote), escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>'))));
   if (ctx.note) rows.push(apRow(apRuled(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`, escapeHtml(ctx.note).replace(/\r?\n/g, '<br>'))));
   if (ctx.signatureHtml) rows.push(apRow(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13px;line-height:18px;color:${AP.ink2};">${ctx.signatureHtml}</div>`, 14));
   rows.push(apActions(
     [t.appUrl ? { kind: approved ? 'go' : 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null],
-    approved ? 'The approval is recorded on the ticket — you can proceed.' : 'The rejection and the reason are recorded on the ticket.',
+    approved ? 'The approval is recorded on the ticket — you can proceed.' : 'The decision and the reason are recorded on the ticket.',
   ));
   return apDocument({
     rows,
@@ -702,7 +731,7 @@ export function renderDecisionThreadEmail(ctx) {
       + (ctx.tierLabel ? apFact('Approval tier', escapeHtml(ctx.tierLabel)) : '')
       + '</tr></table>', 6));
   }
-  if (ctx.conditionNote) rows.push(apRow(apRuled('Condition', escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')), 14));
+  if (ctx.conditionNote) rows.push(apRow(apRuled(conditionLabel(ctx.conditionNote), escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')), 14));
   if (ctx.note) rows.push(apRow(apSentence(escapeHtml(ctx.note).replace(/\n/g, '<br>')), 14));
   if (ctx.signatureHtml) rows.push(apRow(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13px;line-height:18px;color:${AP.ink2};">${ctx.signatureHtml}</div>`, 14));
   // History — quoted like a reply thread, newest first.
@@ -727,7 +756,39 @@ export function renderDecisionThreadEmail(ctx) {
   });
 }
 
+/**
+ * The technician (the agent who asked): the approver approved WITH conditions,
+ * and nothing is approved until each one is answered (26 Oct 2026). ctx:
+ *  { workspaceName, categoryName, ticket:{ref, subject, appUrl}, approverName, technicianName,
+ *    requester:{name}, items:[{text}], note, changed }
+ */
+export function renderConditionsEmail(ctx) {
+  const t = ctx.ticket || {};
+  const by = escapeHtml(ctx.approverName || 'The approver');
+  const n = (ctx.items || []).length;
+  const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
+  const rows = [];
+  rows.push(apHero({ status: ctx.changed ? 'Conditions changed — your answers needed' : 'Approved with conditions — your answers needed', statusTone: 'amber', categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
+  rows.push(apRow(apSentence(`<b>${by}</b> ${ctx.changed ? 'changed the conditions on' : 'will approve'} the request${forWhom} ${ctx.changed ? '' : `on ${n === 1 ? 'one condition' : `${n} conditions`}`}. `
+    + `It is <b>not approved yet</b>: answer ${n === 1 ? 'it' : 'each one'} and the answers go straight back to ${by}.`)));
+  rows.push(apRow(conditionsBlock({ items: ctx.items }, { label: n === 1 ? 'The condition' : 'The conditions', answers: false }), 14));
+  if (ctx.note) rows.push(apRow(apRuled(`Note from ${ctx.approverName || 'the approver'}`, escapeHtml(ctx.note).replace(/\n/g, '<br>')), 14));
+  rows.push(apRow(apText('ap-ink2', `font-size:14px;line-height:21px;color:${AP.ink2};`,
+    'For each one, say whether it can be met and how, or that it can\'t be met as asked and why. '
+    + 'If only the requester knows, ask them from the ticket first; their answer lands on the request.'), 14));
+  rows.push(apActions(
+    [t.appUrl ? { kind: 'ask', label: 'Answer on the ticket', href: t.appUrl, width: '100%' } : null],
+    `${by} decides once your answers are in. You will hear the decision by e-mail.`,
+  ));
+  return apDocument({
+    rows,
+    footerHtml: workspaceFooter(ctx, ' The full approval trail is on the ticket.'),
+    preheader: `${ctx.approverName || 'The approver'} set ${n === 1 ? 'a condition' : `${n} conditions`} — answer ${n === 1 ? 'it' : 'them'} to get this approved`,
+  });
+}
+
 export default {
+  renderConditionsEmail,
   renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail,
   renderApprovalMessageEmail, renderDecisionThreadEmail, descriptionHtmlForEmail,
   normalizeNoteHtmlForEmail, dropEmptyTableColumns, textExcerpt, escapeHtml, initialsOf, emailShell,

@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Forward,
   Link2Off,
+  ListChecks,
   MessageCircleQuestion,
   Moon,
   Sun,
@@ -20,6 +21,7 @@ import {
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer from '../components/tickets/ApprovalComposer';
 import ApprovalThread from '../components/tickets/ApprovalThread';
+import { ConditionsReview, conditionsWaitingOn, readConditions } from '../components/tickets/ApprovalConditions';
 import { publicApprovalAPI } from '../services/api';
 import { SafeHtml, formatDay, formatDayTime } from '../components/tickets/ticketUi';
 import ApprovalRail from './publicApproval/ApprovalRail';
@@ -187,11 +189,14 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     title = decidedInApp
       ? `${passive} by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''} in the app`
       : `You ${verb} this${when ? ` on ${when}` : ''}`;
-    title = approval.conditionNote && status === 'approved' ? title.replace(/^You approved this/, 'You approved this with a condition').replace(/^Approved by/, 'Approved with a condition by') : title;
+    const agreed = status === 'approved' && readConditions(approval.conditions);
+    title = approval.conditionNote && status === 'approved' ? title.replace(/^You approved this/, agreed ? 'You approved this with the agreed conditions' : 'You approved this with a condition').replace(/^Approved by/, agreed ? 'Approved with conditions by' : 'Approved with a condition by') : title;
     body = (approval.decisionNoteHtml || approval.decisionNote || approval.conditionNote)
       ? (
         <div className="mt-2 space-y-2">
-          {approval.conditionNote && (
+          {agreed ? (
+            <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-2.5 text-foreground"><ConditionsReview conditions={approval.conditions} variant="agreed" /></div>
+          ) : approval.conditionNote && (
             <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="decision-condition">
               <span className="font-semibold">Condition:</span> {approval.conditionNoteHtml ? <SafeHtml html={approval.conditionNoteHtml} isDark={isDark} preferThemed /> : approval.conditionNote}
             </div>
@@ -252,6 +257,19 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
       title = 'This request was cancelled';
       body = <p className="mt-1 text-sm opacity-80">{approval.cancelledReason || 'The agent withdrew the request — nothing is needed from you.'}</p>;
     }
+  } else if (status === 'info_requested' && conditionsWaitingOn(approval.conditions, status) === 'it') {
+    // 26 Oct 2026: approved on conditions — the technician answers each one first.
+    tone = 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-500/10 dark:text-amber-50 dark:border-amber-500/25';
+    disc = 'bg-amber-200/70 text-amber-900 dark:bg-amber-500/25 dark:text-amber-100';
+    Icon = ListChecks;
+    const n = approval.conditions.items.length;
+    title = `You approved on ${n === 1 ? 'a condition' : `${n} conditions`} — waiting for ${approval.requestedByName || 'the technician'} to answer`;
+    body = (
+      <div className="mt-2 space-y-2">
+        <p className="text-sm opacity-80">It is not approved yet. {approval.requestedByName || 'The technician'} answers each condition and you get the answers by e-mail with a fresh link. You can still decide now.</p>
+        <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-2.5 text-foreground"><ConditionsReview conditions={approval.conditions} /></div>
+      </div>
+    );
   } else if (status === 'info_requested') {
     tone = 'bg-violet-50 text-violet-900 border-violet-200 dark:bg-violet-500/10 dark:text-violet-100 dark:border-violet-500/25';
     disc = 'bg-violet-200/70 text-violet-900 dark:bg-violet-500/25 dark:text-violet-100';
@@ -410,7 +428,7 @@ export default function PublicApprovalDecision() {
 
   const onDecide = useCallback(async (decision, note, noteHtml, extra = {}) => {
     const conditionNote = extra?.conditionNote || null;
-    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, notifyRequester: extra?.notifyRequester === true })) || {};
+    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, ...(Array.isArray(extra?.conditions) ? { conditions: extra.conditions } : {}), notifyRequester: extra?.notifyRequester === true })) || {};
     focusBannerRef.current = true;
     setDecidedByYou(true);
     setData((prev) => {
@@ -430,10 +448,11 @@ export default function PublicApprovalDecision() {
           status,
           decidedAt: now,
           decidedVia: 'link',
-          decisionNote: note,
-          decisionNoteHtml: noteHtml,
-          conditionNote,
+          decisionNote: status === 'info_requested' ? null : note,
+          decisionNoteHtml: status === 'info_requested' ? null : noteHtml,
+          conditionNote: body.conditionNote !== undefined ? body.conditionNote : conditionNote,
           conditionNoteHtml: extra?.conditionNoteHtml || null,
+          conditions: body.conditions !== undefined ? body.conditions : prev.approval.conditions,
           approverName: body.approverName || prev.approval.approverName,
           escalationLog: autoEntry ? [...(prev.approval.escalationLog || []), autoEntry] : prev.approval.escalationLog,
         },

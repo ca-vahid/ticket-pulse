@@ -2365,7 +2365,19 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
     req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
-    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, notifyRequester: req.body?.notifyRequester === true },
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true },
+  );
+  res.json({ success: true, data: approval });
+}));
+
+// 26 Oct 2026: IT answers an approver's conditions one by one. `submit: true`
+// sends them straight back to the approver; without it they are a draft.
+router.post('/:id/approvals/:approvalId/conditions', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const approval = await ticketApprovalService.answerConditions(
+    parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
+    { answers: Array.isArray(req.body?.answers) ? req.body.answers : [], submit: req.body?.submit === true },
+    req.ticketActor,
   );
   res.json({ success: true, data: approval });
 }));
@@ -2387,7 +2399,12 @@ router.post('/:id/approvals/:approvalId/messages', asyncHandler(async (req, res)
   const a = req.ticketActor;
   const isApprover = a?.email && approval.approverEmail === String(a.email).toLowerCase();
   const isAdmin = a?.role === 'admin' || a?.workspaceRole === 'admin';
-  if (!isApprover && !isAdmin) throw new ValidationError('Only the requested approver (or an admin) can write on this approval');
+  // 26 Oct 2026: while conditions wait on IT, the technician may loop in the
+  // requester (a question to them) before answering.
+  const { readConditions, waitingOn } = await import('../services/approvalConditions.js');
+  const loopIn = !isApprover && waitingOn(readConditions(approval.conditions), approval.status) === 'it'
+    && (req.body?.mode || 'requester') === 'requester' && a?.email;
+  if (!isApprover && !isAdmin && !loopIn) throw new ValidationError('Only the requested approver (or an admin) can write on this approval');
   const data = await conversation.postMessage(approval, {
     kind: req.body?.kind || 'question', mode: req.body?.mode || 'requester', to: req.body?.to, cc: req.body?.cc,
     bodyText: req.body?.bodyText || null, bodyHtml: req.body?.bodyHtml || null, via: 'app', author: { email: a?.email, name: a?.name },
@@ -2626,11 +2643,12 @@ ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) 
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideByToken(
     req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
-    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, notifyRequester: req.body?.notifyRequester === true },
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true },
   );
+  const { readConditions } = await import('../services/approvalConditions.js');
   res.json({
     success: true,
-    data: { status: approval.status, decidedAt: approval.decidedAt || null, approverName: approval.approverName || null },
+    data: { status: approval.status, decidedAt: approval.decidedAt || null, approverName: approval.approverName || null, conditions: readConditions(approval.conditions), conditionNote: approval.conditionNote || null },
   });
 }));
 

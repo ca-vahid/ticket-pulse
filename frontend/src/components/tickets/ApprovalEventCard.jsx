@@ -1,4 +1,5 @@
 import { CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
+import { ConditionsReview } from './ApprovalConditions';
 import { PersonAvatar, SafeHtml, timeAgo } from './ticketUi';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 import { cleanNoteText } from '../../utils/noteText';
@@ -30,7 +31,7 @@ const unquote = (s) => String(s || '').trim().replace(/^["“]/, '').replace(/["
 /** "Approval APPROVED WITH CONDITION ✔ by Name — "note" · Condition: "…" · Requested by x: "…"" → parts. */
 export function parseApprovalSentence(text) {
   const t = String(text || '').trim();
-  const m = t.match(/^Approval (CHANGED to )?(APPROVED WITH CONDITION|APPROVED|REJECTED)\s*[✔✓✘✗]?\s*by\s+([\s\S]+)$/i);
+  const m = t.match(/^Approval (CHANGED to )?(APPROVED WITH CONDITIONS?|APPROVED|NOT APPROVED|REJECTED)\s*[✔✓✘✗]?\s*by\s+([\s\S]+)$/i);
   if (!m) return null;
   let rest = m[3];
   const take = (re) => {
@@ -41,10 +42,10 @@ export function parseApprovalSentence(text) {
   };
   // Peel from the END: the asked-for quote, then the condition, then the note.
   const asked = take(/\s·\sRequested by\s+([^:]+):\s*([\s\S]+)$/);
-  const condition = take(/\s·\sCondition:\s*([\s\S]+)$/);
+  const condition = take(/\s·\s(?:Agreed conditions|Condition):\s*([\s\S]+)$/);
   const note = take(/\s—\s([\s\S]+)$/);
   return {
-    verdict: /REJECTED/i.test(m[2]) ? 'rejected' : 'approved',
+    verdict: /REJECTED|NOT APPROVED/i.test(m[2]) ? 'rejected' : 'approved',
     changed: Boolean(m[1]),
     actorName: rest.trim(),
     note: note ? unquote(note[1]) : null,
@@ -182,7 +183,7 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
 
   const verdictWords = structured.verdict === 'rejected'
     ? 'Not approved'
-    : structured.condition ? 'Approved with a condition' : 'Approved';
+    : Array.isArray(structured.conditions) && structured.conditions.length ? 'Approved with the agreed conditions' : structured.condition ? 'Approved with a condition' : 'Approved';
   const askedBy = structured.requestedByName || prettyFromEmail(structured.requestedBy) || 'the agent';
   return (
     <li className="flex justify-center">
@@ -206,7 +207,9 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
             </div>
             <p className="text-xs text-muted-foreground/75 mt-0.5">Approval decision</p>
 
-            {structured.condition && (
+            {Array.isArray(structured.conditions) && structured.conditions.length ? (
+              <ConditionsReview conditions={{ items: structured.conditions }} variant="agreed" className="mt-3.5" />
+            ) : structured.condition && (
               <Block label="Condition" labelClass="text-amber-700 dark:text-amber-300">
                 {structured.conditionHtml ? <SafeHtml html={structured.conditionHtml} className="!text-[15px] text-foreground/85" /> : structured.condition}
               </Block>
