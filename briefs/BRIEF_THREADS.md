@@ -8,9 +8,12 @@ state survives Claude session restarts. Keep it terse and factual. Dates are Pac
 probe read rules). Memory keeps lessons, plumbing history and cron ids only; when the two disagree on a
 thread, this file wins.
 
-_Last updated: 23 Oct 2026 PM (weekly Oct 19–23 sent; cert #240981 closed as 'ready and saved' — install unconfirmed; VDV1 permanently internal; weekly cron re-armed)._
+_Last updated: 26 Oct 2026 AM (Mon daily sent 2:15 AM PT — scheduler fell back to UTC after the Oct 24 reboot; crons re-timed to UTC; AP 359 with >7d 44; AI-tool licence demand thread opened; KAM-FILE2 recurring)._
 
 ## Probe read rules (do not remove)
+- Oct 26 2026: SCHEDULER CLOCK — after the Oct 24 reboot Windows reports zone "British Columbia Standard Time", which Node's ICU doesn't know → Intl tz undefined, cron times read as UTC (the 8:45 daily fired 02:15 PT). Crons re-armed UTC-shifted: daily `15 15 * * 1-5` (5ce444f7), weekly `32 20 * * 5` (cbe6fb08), each + ~30 min per-job offset. If Intl resolves America/Vancouver again, go back to local times.
+- Oct 26 2026: DB timestamps (created_at, resolved_at, occurred_at) are UTC WITHOUT time zone → PT = `(col AT TIME ZONE 'UTC') AT TIME ZONE 'America/Vancouver'`; a single AT TIME ZONE shifts +14 h.
+- Oct 26 2026: probe last-note snippets dropped every letter 's' (`'\s+'` inside a JS template string became `'s+'`); fixed to `'\\s+'` in daily-brief-probe.mjs (commit with the thread file).
 - Oct 23 2026: az app-settings lookup WORKS again (refused Oct 20–22). Keep the .env.prod fallback.
 - Oct 20 2026: `az webapp config appsettings list` → AuthorizationFailed for vhaeri (sub 'IT Services'). The probe falls back to backend/scripts/.env.prod PROD_DATABASE_URL automatically; ad-hoc scripts: read PROD_DATABASE_URL from .env.prod. ALWAYS verify the host banner = ticket-pulse-pg. Asked Vahid whether the role change is intended (PIM?).
 - 'No business hours configured for this day' = the WEEKEND queue reason (in use since Apr) — by design, not a regression (checked Oct 5).
@@ -36,6 +39,12 @@ _Last updated: 23 Oct 2026 PM (weekly Oct 19–23 sent; cert #240981 closed as '
 - Sep 30 holiday held-for-Thursday IT tickets worth a same-day look: #244717 'Disable or locate computer' (P3, security-ish), #244718 'Tyler Southam sent a message' (P4). Check Thu they were handled. New: #244687 DC baseline remediation (Mo) no first note; KAM-DC2 #244103 quiet since Sep 24.
 
 ## Active threads
+### (z) AI-tool licence demand (new Oct 26)
+- ~50 AI-tool tickets in 30 days (Claude, Copilot, ChatGPT, Cursor; ~2/day), 7 on Fri Oct 23. Routing gets them to Alexey/Soheil first time; each needs Vahid's approval + manual seat. Recommended: a standard (standard seat pre-approved, higher tier needs approval, one request form) + monthly seat/spend list; owner Alexey. USD receipts stream (#247412) = cost visibility.
+### (aa) KAM-FILE2 Rapid Recovery (new Oct 26)
+- 24 failure tickets in 30 days (19 on Oct 7–8, Oct 22, Oct 25 'Outgoing replication failed' to BGC-VAN-SS2, timeout — #248809 unassigned over weekend). Self-closing alerts → nobody owns the pattern. Ask: one owner; is the KAM→VAN link timing out at night (Kamloops firewall replaced mid-Oct)? Same backup-owner ask as EDM/COL Oct 13.
+### (ab) Vahid's own queue (Oct 26)
+- #248687 Defender quarantine question (handed back by Mehdi, no reply since Fri 10:31) · #248725 'Intern' title fix (handed back by Soheil; HR/Entra) · #248756 Apple Developer (pre-approved) · #242774 Ring camera closable. Vahid closed CRbasic field-urgent (Sun, verified solution in Knowledge) + PC App Store adware (Sun).
 ### (a) Security
 - Oct 8: Cambio (Sapu, Oct 7) — swamped this week, will take BGC-AZU-DBPRD1 next week; the OTHER SQL hosts in #241754 are NOT Cambio's → need an owner on our side (Mo has context; Anton freed by ROPC). Raised at Oct 8 standup.
 - Pentest HIGHs: #241753 ROPC CLOSED Oct 2 (Anton, after 7-day sign-in review). #241754 TLS/SSL (Mo) Pending on Cambio sprint planning since Sep 16 — ask for a date.
@@ -112,6 +121,7 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (o-tail) Vancouver hypervisors + DC follow-ups
 - VAN-HV46 hardware fault #245431 (Mehdi, since Oct 3) = 3rd VAN hypervisor alert in 2 weeks (HV40/41). FDR-DC1 'DC service not answering' #245903 Oct 6 16:31–17:01 PT, auto-resolved — likely planned DC work (stale-DC removal item 2 on #244687, still open); ask Mo one line. AD storm itself EXITED (fixed Oct 2, written up Oct 5).
 ### (p) AP review backlog — RE-OPENED Oct 13
+- Oct 26 (Mon): 359; <1d 28, 1–3d 91, 3–7d 196, >7d 44 (7 Fri). Weekend 138 new / 49 resolved. Third Monday ~350; >7d tail growing (23 → 44 Monday-to-Monday). Asked: Monday push aimed at >7d first; Travel+Collection auto-assign as AP-lead agenda.
 - Oct 23: 277 (Fri creep again); <1d 88, 1–3d 94, 3–7d 88, >7d 7. 129 resolved Thu.
 - Oct 20: 353 → 230; <1d 72, 1–3d 49, 3–7d 109, >7d 0. 199 resolved Mon. Suggest a standing Monday AP review slot + Travel auto-assign.
 - Oct 19: 353; <1d 44, 1–3d 88, 3–7d 198, >7d 23. TP accept/modify decisions by PT day: Oct 14 66, Oct 15 76, Oct 16 0 (reviewers may also assign in FS — decisions undercount). Monday push + Travel/Collection auto-assign decision recommended.
@@ -134,16 +144,19 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 ### (t) ContinuIT meeting → tasks (Oct 8)
 - 13 tasks 08:52 PT from ops meeting + 3 Brisbane via Reza 09:04 (source 105), owned + dated (mostly Nov 7; Brisbane Feb 18). Excluded from per-agent lists while fresh; expect bars +1–2 each (planned work). Review at next ops meeting.
 ### (x) Undeclared remote-access outage (Mon Oct 20, 11:28–12:21 PT)
+- Oct 26: #248078 (GIS, Anton) still open, no reply to Lucy since Oct 20. Weekend: 3 remote-access tickets over 48 h (#248757 BST11 can't resolve bstapp2 — Soheil, no note; #248793 network-connect app gone; #248832 VPN wrong account after password change) — not a cluster; watch Mon AM for ≥3 'can't connect' before 10.
 - Oct 23: Anton closed #248086 + #248095; #248078 (GIS) still open.
 - Oct 22: cause = 'DC1 domain controller', fixed (Mehdi #248098). Andrew closed #248028/#248202 via PIN→email/password RDP workaround. Anton's #248078/#248086/#248095 still open, no note — users not told. Mo #245877 (BGC2054) may be same cause → retest.
 - GIS remote desktop drop (Lucy Lee #248078 'all GIS remote logins fail', Cambio Susan too), BST stopped (#248084, Mehdi fixed), VPN/RDP drops (Vicky #248086), Surrey 'bumped continuously' (Lina #248095), GWV4 (#248098, Mehdi), new-PC .rdp (#248202, Andrew), Celeste's tower (#248028, Andrew, untouched since Mon AM). Spread over Anton/Mehdi/Andrew, no shared cause written. Ask: Anton writes root cause on #248078, link others, one reply. Product idea: Urgent response rules to bundle ≥3 'kicked off' tickets/hour. Mo #245877 BGC2054 (since Oct 8) possibly related.
 ### (y) External security events (Oct 21)
+- Oct 26: EXITED — #248391 VDV1 closed Oct 23 (external access blocked permanently, Mehdi). #248451 closed.
 - Oct 22: RESPONSE DONE. #248224 (Anton table): BGC-VAN-VDV1 (Vista Data Vision) PHP 8.1.14 EOL, public 443 any source, ~3,500 public IPs/30 d → Mehdi paused firewall forward, verified unreachable; BGC-VAN-WEBSVR1 PHP 7.0.9 + 5.3.28 in IIS, public 443, no PHP use in 90 d → Vahid disabled PHP in IIS; BGC-VAN-GEOINT1 PHP 8.2.28 (inventoried). Bryan → Melissa → WordZite to patch WordPress (bgcengineering.ca). BambooHR back online Oct 21 11:00 PT. Open: #248391 VDV1 decision (upgrade vs internal-only, Mehdi). Exit after VDV1 decided.
 - BambooHR offline over a security threat (#248183/#248196, Reza; Bryan: 'pretty serious threat'). CCCS threat-intel site offline over newly exploitable PHP vuln (#248224 Neville → Anton, no touch). Asks: PHP exposure inventory (Cambio sites, WordPress, vendor portals); does BambooHR outage affect C&G HR-notice feed; all-staff line.
 ### (w) Infra monitor misclassification (Oct 17–19)
 - Oct 20: #247718 bundle CLOSED (Anton). EDM-HV02 #247659 closed (target rebooted). NEW: BGC-CAL-DC1 'DC service not answering' #247863 + 'not monitored (no Azure Arc)' merged (Mehdi, open). VAN-HV41 CMOS #247689 no note. Cambio certs #247798 → Sapu, closed.
 - Sat Oct 17 ~05:00 PT: 'Storage / RAID hardware fault' on 9 servers (VAN-HV32/41/42/43/52, EDM-HV02/03, KAM-HV02, CAL-HV03) bundled into #247718 (TP-10202, Anton) by v4.2.88 burst bundling. Anton Oct 19: trigger = Microsoft-Windows-Time-Service event 129 (same ID as storport reset) — time hierarchy NT5DS + secure channel OK, no bad blocks. Recommend: monitor rule must key on provider+ID. Ask Mo why time-service warned fleet-wide (post DC time remediation). Real item: VAN-HV41 CMOS battery error #247689 (Mehdi). EDM-HV02 2 more RR failures Sat (network) #247659 (Anton).
 ### (r) SSL certificate ownership + Mehdi concentration (Oct 7)
+- Oct 26: pentest #241754 (Mo) — Mo asked Cambio Oct 9 to patch the 'other' SQL hosts; no answer 17 days → decision: ours or Cambio's. FS-ticket safety-net run #31649 (ws4 #248794) queued since Sat noon — check it drained after 8 AM.
 - Oct 19: NEW [Cert Monitor] tickets #247798/#247799 — cambioearth.com + www expire 2026-11-30 (issuer WE1), → Mehdi; forward to Cambio (Sapu). Our wildcard #240981 still undated.
 - Oct 12: GoDaddy 'SSL Certificate Subscription Renewal' #246689 + 'Your new SSL Certificate is ready' #246690 (unassigned, holiday-held). Now 4 cert tickets (#240981, #245983 Vahid, #246689, #246690), no confirmed install. Ask Tue standup: one owner, merge, install date.
 - Oct 16: COL #246587 CLOSED, no failures in 24 h. Cert: #246690 closed ('already shared it with Sapu'); #240981 Mehdi 'we will need to schedule to install it' — no date. BGC-AZU-DC1 DC-service blip #247459 auto-closed.
@@ -157,6 +170,7 @@ Bora Yoo #241114 (Muhammad) · Fredericton #241534 (Pending, carrier decision) �
 - Mehdi concentration: #245867 W: drive access (UNASSIGNED after first agent lacked security-tab rights), #245961 BST prebill/invoicing/bank recs (Accounting month-end, 2 reboots failed), TP-1766 (day 5 no note), HV46. Coaching/structural: second person with file-share security-group rights.
 - #245974 Teams search bounced 2x (Soheil now) — wanderer watch.
 ### (q) Small loose ends (Oct 6)
+- Oct 26: #246387 REFRAMED — Oct 13 was the change deadline; renewal itself is Nov 12, 100 seats (auto-note). Ask = seat count + payment, not 'past the lock date'. Earlier briefs over-stated urgency (owned in the Oct 26 IT memo).
 - Oct 16: #246387 moved to Pending, still no note.
 - Oct 15: #246387 1Password Enterprise renewal (Alexey) — subject 'Renewal locks on 13 October 2026', no note; TP due Oct 30 → check renewal status. #241861 Teams lockdown CLOSED. Vahid queue down to 1 (#174096).
 - Oct 7: MikroTik serial (#245402) still not posted.
