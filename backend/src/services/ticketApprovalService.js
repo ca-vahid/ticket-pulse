@@ -9,7 +9,7 @@ import { decodeBasicEntities } from '../utils/htmlContent.js';
 import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
 import { categoryTiers } from '../utils/approvalTiers.js';
 import {
-  readConditions, conditionItems, sameConditions, splitConditionText, mergeAnswers, isAnswered, waitingOn, agreedSummary, conditionsText, countCantMeet,
+  readConditions, conditionItems, sameConditions, splitConditionText, earlierConditionsFor, mergeAnswers, isAnswered, waitingOn, agreedSummary, conditionsText, countCantMeet,
 } from './approvalConditions.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
@@ -184,7 +184,32 @@ class TicketApprovalService {
         conditionNote: true, conditionNoteHtml: true, conditions: true,
       },
     });
-    return this._fillApproverNames(rows);
+    return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list.map((r) => ({ ...r, ticketId }))));
+  }
+
+  /**
+   * Neville, 26 Oct 2026: a request that comes back to an approver after an
+   * earlier "approved with condition" (undone, re-requested or escalated)
+   * starts from those conditions instead of an empty list. Open rows without
+   * a conditions list get `earlierConditions` = the newest earlier row on the
+   * same ticket that carried a condition: its items, lead-in and who set them.
+   */
+  async _withEarlierConditions(rows) {
+    const open = rows.filter((r) => r && ['pending', 'info_requested'].includes(r.status) && !readConditions(r.conditions) && r.ticketId);
+    if (!open.length) return rows;
+    const earlier = await Promise.resolve().then(() => prisma.ticketApproval.findMany({
+      where: { ticketId: { in: [...new Set(open.map((r) => r.ticketId))] }, conditionNote: { not: null } },
+      orderBy: { id: 'desc' },
+      take: 200,
+      select: { id: true, ticketId: true, conditionNote: true, conditions: true, approverEmail: true, approverName: true, decidedAt: true, updatedAt: true },
+    })).catch(() => []);
+    if (!earlier?.length) return rows;
+    return rows.map((r) => {
+      if (!open.includes(r)) return r;
+      const found = earlierConditionsFor(r, earlier.filter((e) => e.ticketId === r.ticketId));
+      if (!found) return r;
+      return { ...r, earlierConditions: { ...found, setByName: found.setByName || prettifyLocalPart(found.setByEmail) } };
+    });
   }
 
   /**
@@ -687,6 +712,7 @@ class TicketApprovalService {
         // 26 Oct 2026: approve with conditions is a conversation — the items, IT's answers, and who it waits on.
         conditions: readConditions(approval.conditions),
         conditionsWaitingOn: waitingOn(readConditions(approval.conditions), approval.status),
+        earlierConditions: (await this._withEarlierConditions([approval]))[0]?.earlierConditions || null,
         signatureHtml: approval.signatureHtml || null,
         signaturePreview,
         awaitingApprover,
@@ -1409,7 +1435,7 @@ class TicketApprovalService {
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
       },
     });
-    return this._fillApproverNames(rows).then((list) => list.map((a) => this._inboxRow(a)));
+    return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list)).then((list) => list.map((a) => this._inboxRow(a)));
   }
 
   async inboxCountFor(workspaceId, actor) {
@@ -1429,7 +1455,7 @@ class TicketApprovalService {
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
       },
     });
-    return this._fillApproverNames(rows).then((list) => list.map((a) => this._inboxRow(a)));
+    return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list)).then((list) => list.map((a) => this._inboxRow(a)));
   }
 
   _inboxRow(a) {
@@ -1466,6 +1492,7 @@ class TicketApprovalService {
       decisionNote: a.decisionNote,
       conditionNote: a.conditionNote || null,
       conditions: readConditions(a.conditions),
+      earlierConditions: a.earlierConditions || null,
       decidedAt: a.decidedAt,
       decidedVia: a.decidedVia,
       createdAt: a.createdAt,

@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.19-preview';
+export const APP_VERSION = '4.3.20-preview';
 
 export const changelog = [
+  {
+    version: '4.3.20-preview',
+    date: 'October 26, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The confirmation fits a long list of conditions</strong> &mdash; with long conditions and a long note, the confirmation pushed its Yes button off the bottom of the screen and could not be scrolled. It is now wider, its text scrolls, and the buttons stay in view.' },
+      { type: 'improved', html: '<strong>Earlier conditions are filled in</strong> &mdash; when a request comes back to the approver after an earlier &ldquo;approved with condition&rdquo; (undone, escalated or asked again), Approve with conditions now starts from those conditions, one per line, instead of an empty list. Remove or change any that no longer apply. A request that already has its own conditions is never changed.' },
+      { type: 'improved', html: '<strong>Your conditions and the answers, side by side</strong> &mdash; once the technician has answered, the approver sees each condition with its answer on every choice, including while changing the conditions. Approve reads <em>Accept the answers</em> and <em>Accept and approve</em> at that point, so it is clear what approving means.' },
+    ],
+  },
   {
     version: '4.3.19-preview',
     date: 'October 26, 2026',
