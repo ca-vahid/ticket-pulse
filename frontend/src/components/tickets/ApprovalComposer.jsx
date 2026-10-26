@@ -108,8 +108,10 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 min-[800px]:items-center" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div className="absolute inset-0 bg-slate-900/55 backdrop-blur-[2px]" onClick={busy ? undefined : onCancel} aria-hidden="true" />
-      <div className="relative w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-soft motion-on:animate-scaleIn">
-        <div className="flex items-start gap-3">
+      {/* Neville, 26 Oct 2026: a long list of conditions pushed the buttons off the
+          screen and the sheet could not scroll. The body scrolls; the buttons stay. */}
+      <div className={`relative flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-2xl ${conditions?.length || String(note || conditionNote || '').length > 300 ? 'max-w-2xl' : 'max-w-md'} border border-border bg-card shadow-soft motion-on:animate-scaleIn`}>
+        <div className="settings-scrollbar flex min-h-0 flex-1 items-start gap-3 overflow-y-auto overscroll-contain p-5 pb-3" data-testid="confirm-body">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100">
             <ShieldAlert className="h-5 w-5" aria-hidden="true" />
           </span>
@@ -122,7 +124,7 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
             <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{consequence}</p>
             {conditions?.length ? (
               <ol className="mt-2 list-decimal space-y-1 rounded-lg border border-amber-200 bg-amber-50/70 py-2 pl-8 pr-3 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" data-testid="confirm-conditions">
-                {conditions.map((c, i) => <li key={i}>{c}</li>)}
+                {conditions.map((c, i) => <li key={i} className="whitespace-pre-wrap">{c}</li>)}
               </ol>
             ) : conditionNote && (
               <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
@@ -130,13 +132,13 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
               </p>
             )}
             {note && (
-              <p className="mt-2 rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-[13px] text-foreground/85">
+              <p className="mt-2 whitespace-pre-wrap rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-[13px] text-foreground/85">
                 <span className="font-semibold">Your note:</span> {note}
               </p>
             )}
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border/70 px-5 py-3">
           <button type="button" onClick={onCancel} disabled={busy} className="tp-focus-ring rounded-[10px] border border-border bg-card px-3.5 py-2 text-[13px] font-semibold text-foreground hover:bg-muted">Go back</button>
           <button
             ref={first}
@@ -254,7 +256,10 @@ export default function ApprovalComposer({
   // 26 Oct 2026: conditions are a list. Changing them starts from the current ones.
   const currentConditions = readConditions(approval?.conditions);
   const answersIn = conditionsWaitingOn(approval?.conditions, approval?.status) === 'approver';
-  const [conds, setConds] = useState(() => (currentConditions ? currentConditions.items.map((i) => i.text) : ['']));
+  // Neville, 26 Oct 2026: a request that comes back after an earlier "approved
+  // with condition" starts from those conditions, not an empty list.
+  const earlier = !currentConditions && approval?.earlierConditions?.items?.length ? approval.earlierConditions : null;
+  const [conds, setConds] = useState(() => (currentConditions ? currentConditions.items.map((i) => i.text) : earlier ? [...earlier.items] : ['']));
   const condList = conds.map((c) => c.trim()).filter(Boolean);
   const editorRef = useRef(null);
   const text = note.trim();
@@ -265,7 +270,11 @@ export default function ApprovalComposer({
   const canAsk = typeof onAsk === 'function';
   const tabs = useMemo(() => TABS
     .filter((t) => (t.key === 'escalate' ? canEscalate : t.key === 'forward' ? canForward : t.key === 'question' ? canAsk : canDecide))
-    .map((t) => (t.key === 'condition' && currentConditions ? { ...t, label: 'Change conditions' } : t)), [canEscalate, canForward, canAsk, canDecide, currentConditions]);
+    .map((t) => {
+      if (t.key === 'condition' && currentConditions) return { ...t, label: 'Change conditions' };
+      if (t.key === 'approved' && answersIn) return { ...t, label: 'Accept the answers' };
+      return t;
+    }), [canEscalate, canForward, canAsk, canDecide, currentConditions, answersIn]);
 
   // Decline and Ask from the e-mail need words, so the editor is ready for them.
   useEffect(() => {
@@ -489,7 +498,7 @@ export default function ApprovalComposer({
                 </div>
               )}
 
-              {answersIn && tab !== 'condition' && (
+              {answersIn && tab !== 'question' && (
                 <ConditionsReview conditions={approval.conditions} className="mb-3" />
               )}
               {answersIn && tab === 'approved' && (
@@ -502,6 +511,14 @@ export default function ApprovalComposer({
                     Not approved yet: {approval?.requestedByName || 'the technician'} answers each condition, can or can&apos;t be met and how, and the answers come back to you to decide.
                     {currentConditions ? ' Edit, add or remove conditions; unchanged ones keep their answers.' : ''}
                   </p>
+                  {earlier && (
+                    <div className="mb-2 border-l-2 border-amber-400 pl-3 text-[12.5px] text-muted-foreground dark:border-amber-500/60" data-testid="earlier-conditions">
+                      <p>
+                        Filled in from the conditions {earlier.setByName || 'the approver'} set{earlier.setAt ? ` on ${formatDay(earlier.setAt)}` : ''}. Edit or remove any that no longer apply.
+                      </p>
+                      {earlier.lead && <p className="mt-1 italic">“{earlier.lead}”</p>}
+                    </div>
+                  )}
                   <ConditionsEditor value={conds} onChange={(v) => { setConds(v); if (error) setError(null); }} disabled={busy} autoFocus={tabChosen} />
                 </div>
               )}
@@ -573,7 +590,7 @@ export default function ApprovalComposer({
                 {tab === 'approved' && (
                   <button type="button" onClick={() => stage('approved')} disabled={busy} aria-keyshortcuts={showShortcuts ? 'a' : undefined} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-[10px] bg-emerald-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
                     {submitting === 'approved' ? <Activity className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Check className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />}
-                    {submitting === 'approved' ? 'Approving…' : 'Approve'}
+                    {submitting === 'approved' ? 'Approving…' : answersIn ? 'Accept and approve' : 'Approve'}
                     {showShortcuts && submitting !== 'approved' && <Kbd onSolid>A</Kbd>}
                   </button>
                 )}

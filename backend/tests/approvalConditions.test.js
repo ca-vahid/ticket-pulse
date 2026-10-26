@@ -101,6 +101,27 @@ describe('helpers', () => {
     expect(helpers.splitConditions('UAT only')).toEqual(['UAT only']);
   });
 
+  test('a marker on its own line takes the text below it; a paragraph after the list is its own condition', () => {
+    const text = 'Could someone please confirm the below\n\n-\nWhich workspaces are in scope?\n\n-\nOnly Public/Internal data.\n\nAdditionally, look at the local folder method.';
+    expect(helpers.splitConditionText(text)).toEqual({
+      lead: 'Could someone please confirm the below',
+      items: ['Which workspaces are in scope?', 'Only Public/Internal data.', 'Additionally, look at the local folder method.'],
+    });
+  });
+
+  test('an open request with no conditions starts from the newest earlier row that had one', () => {
+    const rows = [
+      { id: 172, status: 'pending', conditions: null, conditionNote: null },
+      { id: 169, status: 'escalated', conditionNote: null },
+      { id: 166, status: 'approved', approverName: 'Dana', decidedAt: '2026-10-24T00:03:38.937Z', conditionNote: 'Please confirm\n- A\n- B' },
+      { id: 100, status: 'approved', conditionNote: '- Old' },
+    ];
+    expect(helpers.earlierConditionsFor(rows[0], rows)).toEqual({ approvalId: 166, items: ['A', 'B'], lead: 'Please confirm', setByName: 'Dana', setByEmail: null, setAt: '2026-10-24T00:03:38.937Z' });
+    // Its own list wins, and decided rows get nothing.
+    expect(helpers.earlierConditionsFor({ ...rows[0], conditions: { items: [{ id: 1, text: 'X' }] } }, rows)).toBeNull();
+    expect(helpers.earlierConditionsFor(rows[2], rows)).toBeNull();
+  });
+
   test('unchanged conditions keep their answers; duplicates and blanks are dropped', () => {
     const prior = { items: [{ id: 1, text: 'A', response: 'can_meet', answer: 'yes' }] };
     const items = helpers.conditionItems(['a ', 'B', '', 'B'], null, prior);

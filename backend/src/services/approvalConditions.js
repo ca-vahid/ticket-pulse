@@ -30,16 +30,26 @@ const key = (text) => clean(text, MAX_TEXT).toLowerCase().replace(/\s+/g, ' ');
  * list markers at all is one condition per non-empty line.
  */
 export function splitConditionText(text) {
-  const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
+  const raw = String(text ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim());
+  const lines = raw.filter(Boolean);
   if (!lines.length) return { lead: null, items: [] };
   const MARK = /^(?:[-*•▪◦·]|\d{1,2}[.)]|[a-z][.)])\s+/i;
-  if (!lines.some((l) => MARK.test(l))) return { lead: null, items: lines.slice(0, MAX_CONDITIONS) };
+  // A marker on a line of its own ("-" then the text below it), as Outlook pastes lists.
+  const BARE = /^(?:[-*•▪◦·]|\d{1,2}[.)])$/;
+  if (!lines.some((l) => MARK.test(l) || BARE.test(l))) return { lead: null, items: lines.slice(0, MAX_CONDITIONS) };
   const items = [];
   const lead = [];
-  for (const line of lines) {
-    if (MARK.test(line)) items.push(line.replace(MARK, '').trim());
-    else if (items.length) items[items.length - 1] = `${items[items.length - 1]} ${line}`;
+  let gap = false;
+  for (const line of raw) {
+    if (!line) { gap = true; continue; }
+    if (BARE.test(line)) items.push('');
+    else if (MARK.test(line)) items.push(line.replace(MARK, '').trim());
+    else if (items.length && items[items.length - 1] === '') items[items.length - 1] = line;
+    else if (items.length && !gap) items[items.length - 1] = `${items[items.length - 1]} ${line}`;
+    // A paragraph after a blank line below the list is a request of its own.
+    else if (items.length) items.push(line);
     else lead.push(line);
+    gap = false;
   }
   // Words before the first bullet introduce the list; they stay the approver's note.
   return { lead: lead.join(' ') || null, items: items.filter(Boolean).slice(0, MAX_CONDITIONS) };
@@ -47,6 +57,31 @@ export function splitConditionText(text) {
 
 export function splitConditions(text) {
   return splitConditionText(text).items;
+}
+
+/**
+ * The conditions an earlier approval on the same ticket carried, for an open
+ * row that has none of its own (Neville, 26 Oct 2026: after an undo or a
+ * re-request the approver had to type them all again). `rows` are the
+ * ticket's approvals; the newest one before `row` with a condition wins.
+ */
+export function earlierConditionsFor(row, rows) {
+  if (!row || !['pending', 'info_requested'].includes(row.status) || readConditions(row.conditions)) return null;
+  const prior = (rows || [])
+    .filter((e) => e && e.id < row.id && String(e.conditionNote || '').trim())
+    .sort((a, b) => b.id - a.id)[0];
+  if (!prior) return null;
+  const structured = readConditions(prior.conditions);
+  const split = structured ? { lead: structured.note, items: structured.items.map((i) => i.text) } : splitConditionText(prior.conditionNote);
+  if (!split.items.length) return null;
+  return {
+    approvalId: prior.id,
+    items: split.items,
+    lead: split.lead || null,
+    setByName: prior.approverName || null,
+    setByEmail: prior.approverEmail || null,
+    setAt: prior.decidedAt || prior.updatedAt || null,
+  };
 }
 
 /** The stored state, or null when the row has no conditions. */

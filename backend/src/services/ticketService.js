@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import { categoryTiers } from '../utils/approvalTiers.js';
+import { earlierConditionsFor } from './approvalConditions.js';
 import logger from '../utils/logger.js';
 import { textToHtml } from '../utils/forwardedMailParser.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
@@ -2715,7 +2716,7 @@ class TicketService {
       // read-time heuristic for legacy rows) so the History tab can chip +
       // filter without re-deriving.
       activities: (activities || []).map((a) => ({ ...a, actorKind: deriveActorKind(a) })),
-      approvals,
+      approvals: (approvals || []).map((a) => { const e = earlierConditionsFor(a, approvals); return e ? { ...a, earlierConditions: e } : a; }),
       attachments,
       pinnedCards,
       latestPipelineRun: ticket.pipelineRuns?.[0] || null,

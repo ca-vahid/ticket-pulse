@@ -218,6 +218,26 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(screen.getAllByTestId('conditions-review')[0]).toHaveTextContent('Licensed seats only');
   });
 
+  test('earlier conditions on the ticket fill the list; the confirm sheet scrolls and keeps its buttons', async () => {
+    apiMock.get.mockReturnValue(ok({
+      ...pendingFixture,
+      approval: {
+        ...pendingFixture.approval,
+        earlierConditions: { approvalId: 9, items: ['Which workspaces are in scope?', 'Licensed Claude only'], lead: 'Please confirm the below', setByName: 'Dana Whitfield', setAt: '2026-10-23T18:00:00.000Z' },
+      },
+    }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Approve with conditions' }));
+    expect(screen.getByRole('textbox', { name: 'Condition 1' })).toHaveValue('Which workspaces are in scope?');
+    expect(screen.getByRole('textbox', { name: 'Condition 2' })).toHaveValue('Licensed Claude only');
+    expect(screen.getByTestId('earlier-conditions')).toHaveTextContent(/Filled in from the conditions Dana Whitfield set on Oct 23/);
+    expect(screen.getByTestId('earlier-conditions')).toHaveTextContent('Please confirm the below');
+    fireEvent.click(screen.getByRole('button', { name: /^Send the conditions/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByTestId('confirm-body')).toHaveClass('overflow-y-auto');
+    expect(within(dialog).getByTestId('confirm-body')).not.toContainElement(within(dialog).getByRole('button', { name: /Yes, send the conditions/ }));
+  });
+
   test('a server error stays inline — the page never blanks', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.decide.mockImplementation(() => fail({ status: 400, data: { message: 'Add a reason for rejecting' } }));
