@@ -10,6 +10,7 @@ import { pickIngestMailbox } from './mailboxPicker.js';
 import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { readConditions, waitingOn } from './approvalConditions.js';
 
 const escapeNoteHtml = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -174,7 +175,7 @@ class ApprovalConversationService {
     const parts = await this.participants(approval);
     const authorEmail = lc(author?.email || approval.approverEmail);
     const authorName = author?.name || approval.approverName || (await resolvePersonName(authorEmail)) || authorEmail.split('@')[0];
-    const authorRole = this.roleOf(parts, authorEmail) || 'approver';
+    const authorRole = this.roleOf(parts, authorEmail) || (lc(approval.approverEmail) === authorEmail ? 'approver' : 'agent');
     const defaults = this.defaultRecipients(parts, mode, authorEmail);
     const known = new Map([parts.requester, parts.agent, ...parts.approvers].filter(Boolean).map((p) => [p.email, p]));
     const pick = (list, fallback) => {
@@ -206,7 +207,10 @@ class ApprovalConversationService {
 
     // A question to the requester parks the request (existing semantics);
     // an internal question leaves it with the approver.
-    if (kind === 'question' && audience === 'requester') {
+    // While conditions wait on IT the row is already parked; a question to the
+    // requester (the technician looping them in) leaves it as it is.
+    const conditionsOpen = waitingOn(readConditions(approval.conditions), approval.status) === 'it';
+    if (kind === 'question' && audience === 'requester' && !conditionsOpen) {
       const priorLog = Array.isArray(approval.clarificationLog) ? approval.clarificationLog : [];
       await prisma.ticketApproval.update({
         where: { id: approval.id },
@@ -294,6 +298,9 @@ class ApprovalConversationService {
     if (target.kind === 'question' && target.audience === 'requester') {
       const openRows = await prisma.ticketApproval.findMany({ where: { requestGroupId: target.requestGroupId, status: 'info_requested' } });
       for (const row of openRows) {
+        // Conditions still wait on IT's answers: the requester's answer helps
+        // the technician; it does not hand the request back to the approver.
+        if (waitingOn(readConditions(row.conditions), row.status) === 'it') continue;
         const log = Array.isArray(row.clarificationLog) ? [...row.clarificationLog] : [];
         const idx = log.findIndex((c) => c && c.messageId === target.id && !c.answer);
         const stamped = { answer: cleanText, answeredBy: email, answeredAt: new Date().toISOString() };
@@ -438,6 +445,7 @@ class ApprovalConversationService {
     const notified = new Set();
     for (const row of openRows) {
       if (lc(row.approverEmail) === lc(answer.authorEmail)) continue;
+      if (waitingOn(readConditions(row.conditions), row.status) === 'it') continue; // the technician is the asker; they hear it below
       notified.add(lc(row.approverEmail));
       try {
         await ticketApprovalService.reissueLinkWithAnswer(row, { question: question.bodyText, answer: answer.bodyText, answeredBy: name });

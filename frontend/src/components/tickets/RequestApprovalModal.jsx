@@ -382,7 +382,7 @@ export default function RequestApprovalModal({
                     </span>
                     <span className="block text-[11px] text-muted-foreground leading-relaxed mt-0.5">
                       {notifyApprover
-                        ? 'Each approver gets a personal email link to approve, reject, ask a question, escalate or forward — no sign-in needed.'
+                        ? 'Each approver gets a personal email link to approve, not approve, ask a question, escalate or forward — no sign-in needed.'
                         : 'No email — approvers will only see the request in-app under Approvals.'}
                     </span>
                   </span>

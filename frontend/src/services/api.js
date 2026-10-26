@@ -1247,6 +1247,11 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/decide`, { decision, note, ...extra });
   },
 
+  // 26 Oct 2026: IT answers an approver's conditions; submit sends them back to the approver.
+  answerApprovalConditions: async (id, approvalId, { answers, submit = false }) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/conditions`, { answers, submit });
+  },
+
   // Approvals v3: the conversation on a request (questions / answers / comments / decisions).
   approvalMessages: async (id) => {
     return await api.get(`/tickets/${id}/approvals/messages`);

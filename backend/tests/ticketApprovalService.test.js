@@ -257,7 +257,7 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
     expect(noteRawPayload()).toMatchObject({ kind: 'approval_event', v: 2, event: 'rejected' });
     expect(noteRawPayload().parts).toMatchObject({ changed: false, verdict: 'rejected' });
     expect(Object.keys(noteRawPayload().parts).sort()).toEqual(['actorName', 'changed', 'condition', 'conditionHtml', 'note', 'noteHtml', 'requestNote', 'requestNoteHtml', 'requestedBy', 'requestedByName', 'requesterNotified', 'verdict']);
-    expect(noteBody()).toContain('REJECTED');
+    expect(noteBody()).toContain('NOT APPROVED');
   });
 
   test('changed decision note → event: changed', async () => {
@@ -651,7 +651,7 @@ describe('decideByToken (Phase AP: reject needs a reason, decisions show a perso
 
   test('rejecting without a note is refused (400) and nothing is written', async () => {
     prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
-    await expect(ticketApprovalService.decideByToken(TOKEN, 'rejected', '   ')).rejects.toThrow(/Add a reason for rejecting/);
+    await expect(ticketApprovalService.decideByToken(TOKEN, 'rejected', '   ')).rejects.toThrow(/Add a reason for not approving/);
     expect(prismaMock.ticketApproval.update).not.toHaveBeenCalled();
   });
 

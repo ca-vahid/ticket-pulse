@@ -310,25 +310,33 @@ describe('request() by a tier-1 approver on their own category', () => {
   });
 });
 
+const ANSWERED = {
+  round: 1, setBy: 'neville@x.io', setByName: 'Neville', setAt: '2026-10-26T16:00:00.000Z', note: null,
+  items: [{ id: 1, text: 'UAT only', response: 'can_meet', answer: 'Test environment first', answeredBy: 'req@x.io', answeredByName: 'Mehdi Agent', answeredAt: '2026-10-26T17:00:00.000Z' }],
+  submittedAt: '2026-10-26T17:00:00.000Z', submittedBy: 'req@x.io', submittedByName: 'Mehdi Agent',
+};
+const AGREED = '1. UAT only\n   Can be met: Test environment first';
+
 describe('decide with a condition', () => {
-  test('stores the condition + signature, records a decision message, and e-mails the requester and the other approvers with their own history', async () => {
-    prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
+  test('accepting the answered conditions approves with the agreed list + signature, records a decision message, and e-mails the requester and the other approvers with their own history', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ conditions: ANSWERED }));
     prismaMock.approvalMessage.findMany.mockImplementation(({ where }) => Promise.resolve([
       { id: 1, kind: 'question', audience: 'internal', authorEmail: 'neville@x.io', authorName: 'Neville', bodyText: 'Budget?', requestGroupId: 'grp-1', createdAt: new Date() },
       { id: 2, kind: 'question', audience: 'requester', authorEmail: 'neville@x.io', authorName: 'Neville', bodyText: 'Which env?', requestGroupId: 'grp-1', createdAt: new Date() },
     ].filter((m) => !where.audience || m.audience === where.audience)));
     signatureMock.getEnabledSignatureForSend.mockResolvedValue({ html: '<p><b>Neville</b> · CISO</p>' });
 
-    const updated = await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'Go ahead', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { conditionNote: 'UAT only', conditionNoteHtml: '<p>UAT <b>only</b></p>' });
+    const updated = await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'Go ahead', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, {});
     expect(updated.status).toBe('approved');
     const data = prismaMock.ticketApproval.update.mock.calls[0][0].data;
-    expect(data).toMatchObject({ conditionNote: 'UAT only', signatureHtml: '<p><b>Neville</b> · CISO</p>' });
-    expect(data.conditionNoteHtml).toContain('UAT <b>only</b>');
-    // ticket note names the condition
-    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyText).toMatch(/APPROVED WITH CONDITION ✔ by Neville — "Go ahead" · Condition: "UAT only"/);
+    expect(data).toMatchObject({ conditionNote: AGREED, signatureHtml: '<p><b>Neville</b> · CISO</p>' });
+    expect(data.conditionNoteHtml).toBeNull();
+    // ticket note names the agreed conditions, and its parts carry them as a list
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyText).toMatch(/APPROVED WITH CONDITIONS ✔ by Neville — "Go ahead" · Agreed conditions: "1\. UAT only/);
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload.parts.conditions).toEqual(ANSWERED.items);
     // decision message — QA 09-18 #1: internal by default, the requester was not on it
     const decision = prismaMock.approvalMessage.create.mock.calls.find((c) => c[0].data.kind === 'decision');
-    expect(decision[0].data).toMatchObject({ audience: 'internal', authorEmail: 'neville@x.io', bodyText: 'Approved with condition\nCondition: UAT only\nGo ahead' });
+    expect(decision[0].data).toMatchObject({ audience: 'internal', authorEmail: 'neville@x.io', bodyText: `Approved with conditions\nAgreed conditions:\n${AGREED}\nGo ahead` });
     expect(decision[0].data.toEmails).not.toContain('rita@x.io');
     // e-mails: the agent (existing lane) + Vahid (the other approver); the requester only when asked
     let sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
@@ -339,8 +347,8 @@ describe('decide with a condition', () => {
     mailMock.sendTransactionalEmail.mockClear();
     prismaMock.approvalMessage.create.mockClear();
     prismaMock.ticketThreadEntry.create.mockClear();
-    prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
-    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'Go ahead', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { conditionNote: 'UAT only', conditionNoteHtml: '<p>UAT <b>only</b></p>', notifyRequester: true });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ conditions: ANSWERED }));
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'Go ahead', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { notifyRequester: true });
     const decision2 = prismaMock.approvalMessage.create.mock.calls.find((c) => c[0].data.kind === 'decision');
     expect(decision2[0].data).toMatchObject({ audience: 'requester' });
     expect(decision2[0].data.toEmails).toContain('rita@x.io');
@@ -355,11 +363,11 @@ describe('decide with a condition', () => {
       expect(s).toHaveProperty('threadEntryId');
     }
     const agent = sends.find((s) => s.to === 'req@x.io');
-    expect(agent.subject).toMatch(/^Approved with condition: your approval request/);
+    expect(agent.subject).toMatch(/^Approved with conditions: your approval request/);
     expect(agent.html).toContain('UAT only');
     expect(agent.html).toContain('CISO');
     const rita = sends.find((s) => s.to === 'rita@x.io');
-    expect(rita.subject).toBe('Approved with condition: New laptop [TP-1234]');
+    expect(rita.subject).toBe('Approved with conditions: New laptop [TP-1234]');
     expect(rita.html).toContain('Hi Rita,');
     expect(rita.html).toContain('Which env?');
     expect(rita.html).not.toContain('Budget?'); // internal history never reaches the requester

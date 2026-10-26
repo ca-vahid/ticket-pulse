@@ -755,6 +755,9 @@ model TicketApproval {
   // signature as rendered into the decision e-mail.
   conditionNote      String?           @map("condition_note") @db.Text
   conditionNoteHtml  String?           @map("condition_note_html") @db.Text
+  // Approve with conditions as a conversation (26 Oct 2026): the items the
+  // technician answers before the approver accepts. See approvalConditions.js.
+  conditions         Json?             @map("conditions")
   signatureHtml      String?           @map("signature_html") @db.Text
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")

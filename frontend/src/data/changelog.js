@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.18-preview';
+export const APP_VERSION = '4.3.19-preview';
 
 export const changelog = [
+  {
+    version: '4.3.19-preview',
+    date: 'October 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approve with conditions is now a conversation</strong> &mdash; approving with conditions used to close the request, even when a condition could not be met, and someone had to start a new request to get the answers back in front of the approver. Now the conditions are a list, one item each. The request stays open and goes to the technician who asked, who answers every condition: <em>Can be met</em> (and how) or <em>Can&rsquo;t be met as asked</em> (and why). The answers go straight back to the approver with a fresh link. The approver then approves (accepting the answers), changes the conditions, asks the technician or the requester, or chooses Not approved. Only then is it approved, and the agreed conditions travel with the approval on the ticket and in every e-mail.' },
+      { type: 'new', html: '<strong>Answer the conditions on the ticket</strong> &mdash; the Approvals tab shows the technician each condition with Can be met / Can&rsquo;t be met as asked and a box for the how or why, a Save for later, and Send answers to the approver. When only the requester knows, &ldquo;Need the requester to answer something first?&rdquo; asks them by e-mail; their answer lands on the request and the approver is not asked to decide until the technician sends the answers. The Approvals page lists these under Needs your info with an Answer the conditions link.' },
+      { type: 'improved', html: '<strong>&ldquo;Not approved&rdquo; instead of &ldquo;Reject&rdquo;</strong> &mdash; the approver&rsquo;s button, the e-mail button (it read Decline), the confirmation and the ticket note now say Not approved.' },
+    ],
+  },
   {
     version: '4.3.18-preview',
     date: 'October 25, 2026',

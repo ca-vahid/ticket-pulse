@@ -197,7 +197,7 @@ export function approvalEventMeta(entry) {
   }
   const t = String(entry.bodyText || entry.content || '');
   if (/^Approval (CHANGED to )?APPROVED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
-  if (/^Approval (CHANGED to )?REJECTED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Not approved (changed)' : 'Not approved', ...APPROVAL_EVENT_STYLES.rejected };
+  if (/^Approval (CHANGED to )?(REJECTED|NOT APPROVED)/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Not approved (changed)' : 'Not approved', ...APPROVAL_EVENT_STYLES.rejected };
   if (/^Clarification requested/i.test(t)) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
   if (/^Approval requested/i.test(t)) return { label: 'Requested', ...APPROVAL_EVENT_STYLES.requested };
   return null;
@@ -3694,6 +3694,10 @@ export default function TicketDetail() {
                         onDecide={(apId, decision, note = null, extra = {}) => applyChange(`approval-${apId}`, () => ticketsAPI.decideApproval(ticketId, apId, decision, note, extra))}
                         onAsk={(apId, payload) => applyChange(`approval-${apId}`, () => ticketsAPI.askApproval(ticketId, apId, payload))}
                         onAnswer={(messageId, payload) => applyChange(`approval-answer-${messageId}`, () => ticketsAPI.answerApprovalMessage(ticketId, messageId, payload))}
+                        onAnswerConditions={async (apId, payload) => {
+                          const ok = await applyChange(`approval-${apId}`, () => ticketsAPI.answerApprovalConditions(ticketId, apId, payload), { label: payload.submit ? 'Answers sent to the approver' : 'Answers saved' });
+                          if (!ok) throw new Error('Not saved — see the message above.');
+                        }}
                         onResubmit={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.resubmitApproval(ticketId, apId, { note }))}
                         onCancel={(apId) => applyChange(`approval-${apId}`, () => ticketsAPI.cancelApproval(ticketId, apId))}
                         onEscalate={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.escalateApproval(ticketId, apId, { note }))}
@@ -4652,7 +4656,7 @@ export default function TicketDetail() {
                 <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
                   This permanently removes the
                   {deleteApprovalTarget.approvalCategory?.name ? <> <span className="font-semibold">{deleteApprovalTarget.approvalCategory.name}</span></> : null} approval
-                  {' '}and its decision history from this ticket. <span className="font-medium text-red-600 dark:text-red-300">Any approved/rejected status will be lost</span> and can&apos;t be recovered.
+                  {' '}and its decision history from this ticket. <span className="font-medium text-red-600 dark:text-red-300">Any approved/not approved status will be lost</span> and can&apos;t be recovered.
                   {' '}To keep the record instead, use <span className="font-medium">Cancel</span>.
                 </p>
               </div>

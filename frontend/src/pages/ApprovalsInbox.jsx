@@ -990,18 +990,28 @@ export default function ApprovalsInbox() {
                             </div>
                             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300">
                               <InlinePerson name={a.approverName} email={a.approverEmail} />
-                              <span className="text-muted-foreground/75">asks</span>
-                              {a.decisionNote && <RowNote note={a.decisionNote} open={expanded.has(a.id)} onToggle={() => toggleExpanded(a.id)} />}
+                              {a.conditions && !a.conditions.submittedAt ? (
+                                <span className="text-amber-700 dark:text-amber-300">approved on {a.conditions.items.length === 1 ? 'a condition' : `${a.conditions.items.length} conditions`} — answer {a.conditions.items.length === 1 ? 'it' : 'each one'} on the ticket</span>
+                              ) : (
+                                <>
+                                  <span className="text-muted-foreground/75">asks</span>
+                                  {a.decisionNote && <RowNote note={a.decisionNote} open={expanded.has(a.id)} onToggle={() => toggleExpanded(a.id)} />}
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
                         <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 xl:flex-col xl:items-end xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
                           <When at={a.createdAt} />
                           <span className="flex items-center gap-1">
-                            <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info →</Link>
-                            <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
-                              {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Resubmit
-                            </button>
+                            {a.conditions && !a.conditions.submittedAt ? (
+                              <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-blue-700">Answer the conditions →</Link>
+                            ) : (<>
+                              <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info →</Link>
+                              <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
+                                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Resubmit
+                              </button>
+                            </>)}
                           </span>
                         </div>
                       </div>
