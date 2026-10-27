@@ -7,14 +7,12 @@ const settingsRepoMock = {
   set: jest.fn(async (k, v) => { store.set(k, v); }),
 };
 const solutionsMock = { runAll: jest.fn(async () => ({ workspaces: [] })) };
-const fsImportMock = { runAll: jest.fn(async () => []) };
 const digestMock = { tick: jest.fn(async () => ({ skipped: 'not_monday_8am' })) };
 const confluenceMock = { runAll: jest.fn(async () => []) };
 const stewardMock = { runAll: jest.fn(async () => []) };
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: settingsRepoMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } }));
 jest.unstable_mockModule('../src/services/solutionEmbeddingService.js', () => ({ default: solutionsMock }));
-jest.unstable_mockModule('../src/services/fsSolutionImportService.js', () => ({ default: fsImportMock }));
 jest.unstable_mockModule('../src/services/knowledgeReviewDigestService.js', () => ({ default: digestMock }));
 jest.unstable_mockModule('../src/services/confluenceKnowledgeService.js', () => ({ default: confluenceMock }));
 jest.unstable_mockModule('../src/services/knowledgeStewardService.js', () => ({ default: stewardMock }));
@@ -34,19 +32,21 @@ test('working hours: no nightly job, the digest check still runs', async () => {
   const w = new KnowledgeGrowthWorker();
   const out = await w.tick(WORKDAY_NOON);
   expect(solutionsMock.runAll).not.toHaveBeenCalled();
-  expect(fsImportMock.runAll).not.toHaveBeenCalled();
   expect(confluenceMock.runAll).not.toHaveBeenCalled();
   expect(digestMock.tick).toHaveBeenCalledWith(WORKDAY_NOON);
   expect(out.digest).toEqual({ skipped: 'not_monday_8am' });
 });
 
-test('quiet hours: both nightly jobs once, not again the same night, again the next night', async () => {
+test('quiet hours: the nightly jobs once, not again the same night, again the next night', async () => {
+  // A state saved before the FreshService import was removed (QA 10-26 #7) drops its stamp.
+  store.set('knowledge_growth_state', JSON.stringify({ fsImportAt: '2026-09-28T05:00:00.000Z' }));
   const w = new KnowledgeGrowthWorker();
   await w.tick(TUE_NIGHT);
   await w.tick(new Date(TUE_NIGHT.getTime() + 3600e3));
   expect(solutionsMock.runAll).toHaveBeenCalledTimes(1);
-  expect(fsImportMock.runAll).toHaveBeenCalledTimes(1);
   expect(confluenceMock.runAll).toHaveBeenCalledTimes(1);
+  expect(stewardMock.runAll).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(store.get('knowledge_growth_state'))).not.toHaveProperty('fsImportAt');
   // a restart reads the saved state
   await new KnowledgeGrowthWorker().tick(new Date(TUE_NIGHT.getTime() + 2 * 3600e3));
   expect(solutionsMock.runAll).toHaveBeenCalledTimes(1);
@@ -59,5 +59,5 @@ test('a failing job never breaks the tick', async () => {
   solutionsMock.runAll.mockRejectedValueOnce(new Error('boom'));
   const out = await new KnowledgeGrowthWorker().tick(TUE_NIGHT);
   expect(out.solutions).toEqual({ error: 'boom' });
-  expect(fsImportMock.runAll).toHaveBeenCalled();
+  expect(confluenceMock.runAll).toHaveBeenCalled();
 });

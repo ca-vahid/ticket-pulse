@@ -1,12 +1,14 @@
 /**
- * Approval e-mail templates (MEGA-0901 AP-2): Outlook-safe shell, pasted-table
- * normalization, description excerpt, and the load-bearing sentence shapes.
+ * Approval e-mail templates (MEGA-0901 AP-2): pasted-table normalization,
+ * description excerpt, and — since 26 Oct 2026 — the reply format every
+ * approval e-mail shares: the sender's words, one grey hint, one plain link,
+ * no card, no buttons, no painted surfaces.
  */
 import { describe, expect, test } from '@jest/globals';
 import {
   dropEmptyTableColumns, normalizeNoteHtmlForEmail, textExcerpt, initialsOf,
   renderApproverRequestEmail, decisionIntentUrl, renderRequesterDecisionEmail, renderRequesterClarificationEmail,
-  renderRequesterHandoffEmail, renderDecisionThreadEmail, renderApprovalMessageEmail,
+  renderRequesterHandoffEmail, renderDecisionThreadEmail, renderApprovalMessageEmail, renderConditionsEmail,
 } from '../src/services/approvalEmailTemplate.js';
 
 const PASTE = '<table width="1400" style="width:1400px"><tr>'
@@ -67,97 +69,95 @@ describe('textExcerpt', () => {
     expect(textExcerpt('')).toEqual({ text: '', truncated: false });
   });
   test('initials', () => {
-    expect(initialsOf('Ingrid Berru Garcia')).toBe('IG');
-    expect(initialsOf('Reza')).toBe('R');
+    expect(initialsOf('Rita Ann Requester')).toBe('RR');
+    expect(initialsOf('Pat')).toBe('P');
     expect(initialsOf('')).toBe('?');
   });
 });
 
+/** What no reply-format e-mail may carry: card chrome, buttons, painted surfaces, pictograms. */
+function expectPlainMessage(html) {
+  expect(html).not.toMatch(/<!DOCTYPE|<html|<body/i);
+  expect(html).not.toMatch(/background(-color)?:/i);
+  expect(html).not.toMatch(/bgcolor=/i);
+  expect(html).not.toContain('gradient');
+  expect(html).not.toContain('cid:tp-');
+  expect(html).not.toContain('Sent by Ticket Pulse');
+  expect(html).not.toContain('&#9679;'); // no status dots
+  expect(html).not.toContain('border-radius:7px'); // no buttons
+}
+
 const baseCtx = () => ({
-  workspaceName: 'IT',
   categoryName: 'New Computer Upgrade',
-  ticket: { ref: '#239934', subject: 'Laptop <b>fails</b>', createdAt: '2026-08-31T18:00:00Z', dueBy: '2026-09-04T22:00:00Z', priorityLabel: 'Medium', typeLabel: 'Incident', categoryPath: 'Devices › Laptops', statusLabel: 'Pending', description: '<p>It shuts down.</p>', appUrl: 'https://app/tickets/1' },
-  requester: { name: 'Ingrid Berru Garcia', title: 'Engineer', department: 'Vancouver', location: 'Vancouver' },
-  requestedByName: 'Marcus Blackstock',
+  ticket: { ref: '#239934', subject: 'Laptop <b>fails</b>', appUrl: 'https://app/tickets/1' },
+  requester: { name: 'Rita Requester', title: 'Engineer', department: 'Vancouver', location: 'Vancouver' },
+  requestedByName: 'Mia Agent',
+  approverName: 'Pat Approver',
   noteHtml: '<p>Quote below</p>',
-  otherApprovers: [{ name: 'Reza Zaim', status: 'pending' }],
+  otherApprovers: [{ name: 'Lee Second', status: 'pending' }],
   decisionUrl: 'https://app/approval/tok',
   expiresAt: '2026-10-02T17:37:00Z',
 });
 
-describe('renderApproverRequestEmail', () => {
-  // 29 Sep 2026 redesign (mockups C1 + D3): category title, linked ticket ref,
-  // decision row at the end with ?intent= links, surfaces never painted.
-  test('carries every fact the page shows, escapes user text, and ends with the decision row', () => {
-    const html = renderApproverRequestEmail(baseCtx());
-    // Title is the category; the ticket ref links to the ticket, subject beside it.
-    expect(html).toContain('>New Computer Upgrade<');
-    expect(html).toContain('href="https://app/tickets/1"');
-    expect(html).toContain('#239934&nbsp;&#8599;');
-    expect(html).toContain('Laptop &lt;b&gt;fails&lt;/b&gt;');
-    // No greeting / "asks you to approve" sentence — the people row names them.
-    expect(html).not.toContain('asks you to approve');
-    expect(html).not.toContain('Your decision is needed');
-    expect(html).toContain('Requested for');
-    expect(html).toContain('Ingrid Berru Garcia');
-    expect(html).toContain('>IG<');
-    // Title and place on one line; department == location → printed once.
-    expect(html).toContain('Engineer · Vancouver');
-    expect(html).not.toContain('Vancouver · Vancouver');
-    expect(html).toContain('Asked by');
-    expect(html).toContain('Marcus Blackstock');
-    expect(html).toContain('Devices › Laptops');
-    expect(html).toContain('Sep 4'); // due
-    expect(html).toContain('Why Marcus is asking');
-    expect(html).toContain('What Ingrid wrote');
-    expect(html).toContain('It shuts down.');
-    expect(html).toContain('Also asked to approve');
-    expect(html).toContain('Reza Zaim');
-    // Decision row: Approve half, Decline and Ask a quarter; each pre-picks its choice.
-    expect(html).toContain('href="https://app/approval/tok?intent=approve"');
-    expect(html).toContain('href="https://app/approval/tok?intent=reject"');
-    expect(html).toContain('href="https://app/approval/tok?intent=ask"');
-    expect(html.indexOf('intent=approve')).toBeGreaterThan(html.indexOf('It shuts down.'));
-    expect(html).toContain('<td width="50%" valign="top" style="padding:0 4px 0 0px;">');
-    expect(html).toContain('expires on October 2, 2026');
-    expect(html).toContain('IT workspace');
-    // No raw e-mail addresses, no data URIs, no painted page/card background.
-    expect(html).not.toMatch(/@[a-z]+\.[a-z]+/);
-    expect(html).not.toContain('data:image');
-    expect(html).not.toContain('background:#f1f5f9');
-    expect(html).toContain('<meta name="color-scheme" content="light dark">');
+describe('renderApproverRequestEmail — the agent\'s message to the approver', () => {
+  test('greeting, one sentence of what is asked, the note as written, facts, one decide link and the hint', () => {
+    const html = renderApproverRequestEmail({ ...baseCtx(), amountLabel: 'CAD 2,400.00', tierLabel: 'Tier 2', signatureHtml: '<p>Mia Agent · IT</p>' });
+    expectPlainMessage(html);
+    expect(html).toContain('Hi Pat,');
+    // Title and place once (department == location), the ref linked to the ticket.
+    expect(html).toContain('Mia Agent asks you to approve New Computer Upgrade for Rita Requester (Engineer, Vancouver) on <a href="https://app/tickets/1"');
+    expect(html).not.toContain('Vancouver, Vancouver');
+    expect(html).toContain('<p>Quote below</p>');
+    expect(html).toContain('Amount:</span> CAD 2,400.00');
+    expect(html).toContain('Approval tier:</span> Tier 2');
+    expect(html).toContain('Also asked:</span> Lee Second. The first decision closes the request for everyone.');
+    expect(html).toContain('Mia Agent · IT');
+    // ONE decision link (the page has approve / conditions / ask / no), after the signature.
+    expect(html.match(/href="https:\/\/app\/approval\/tok"/g)).toHaveLength(1);
+    expect(html).toContain('Decide on this request&nbsp;&rarr;');
+    expect(html).not.toContain('intent=');
+    expect(html.indexOf('Decide on this request')).toBeGreaterThan(html.indexOf('Mia Agent · IT'));
+    expect(html).toContain('Approve, approve with conditions, ask a question or say no on that page. The link is yours alone and works until October 2, 2026.');
+    expect(html).toContain('color:#6b7280');
+    // User text is escaped; no addresses or photos up top.
+    expect(renderApproverRequestEmail({ ...baseCtx(), categoryName: null })).toContain('&ldquo;Laptop &lt;b&gt;fails&lt;/b&gt;&rdquo;');
+    expect(html).not.toContain('cid:');
   });
-  test('re-request shows the Q&A first', () => {
-    const html = renderApproverRequestEmail({ ...baseCtx(), reRequest: true, clarification: { question: 'Refurb ok?', answer: 'No stock.' } });
-    expect(html).toContain('Re-requested with the answer you asked for');
-    expect(html).toContain('<b>You asked:</b> Refurb ok?');
-    expect(html).toContain('<b>Marcus Blackstock replied:</b> No stock.');
-    expect(html.indexOf('Refurb ok?')).toBeLessThan(html.indexOf('Why Marcus is asking'));
+
+  test('the history is appended after the message', () => {
+    const html = renderApproverRequestEmail({ ...baseCtx(), quoteHtml: '<p>Earlier in this conversation</p>' });
+    expect(html.indexOf('Earlier in this conversation')).toBeGreaterThan(html.indexOf('Decide on this request'));
   });
-  test('renders inline (cid:) photos when attachments exist, initials otherwise', () => {
-    const ctx = baseCtx();
-    ctx.requester.photoCid = 'requester-photo';
-    ctx.requestedByPhotoCid = 'requested-by-photo';
-    const html = renderApproverRequestEmail(ctx);
-    expect(html).toContain('<img src="cid:requester-photo" width="38" height="38" alt="IG"');
-    expect(html).toContain('<img src="cid:requested-by-photo" width="38" height="38" alt="MB"');
-    expect(html).not.toContain('>IG<');
-    expect(html).not.toMatch(/src="https?:/);
-    const plain = renderApproverRequestEmail(baseCtx());
-    expect(plain).not.toContain('cid:requester-photo');
-    expect(plain).not.toContain('cid:requested-by-photo');
-    expect(plain).toContain('>IG<');
+
+  test('a re-request leads with the answer the approver asked for', () => {
+    const html = renderApproverRequestEmail({ ...baseCtx(), clarification: { question: 'Refurb ok?', answer: 'No stock.', answeredBy: 'Rita Requester' } });
+    expect(html).toContain('Here is the answer you asked for.');
+    expect(html).toContain('You asked:</span> Refurb ok?');
+    expect(html).toContain('Rita Requester replied:</span> No stock.');
+    expect(html.indexOf('Refurb ok?')).toBeLessThan(html.indexOf('Quote below'));
   });
+
+  test('hand-off lines say why it is with this approver, with their note', () => {
+    const esc = renderApproverRequestEmail({ ...baseCtx(), handoff: { kind: 'escalated', byName: 'Lee Second', fromTierName: 'Tier 1', toTierName: 'Tier 2', note: 'Over my limit' } });
+    expect(esc).toContain('Lee Second escalated this request from Tier 1 to you (Tier 2).');
+    expect(esc).toContain('Their note:</span> Over my limit');
+    expect(renderApproverRequestEmail({ ...baseCtx(), handoff: { kind: 'forwarded', byName: 'Lee' } })).toContain('forwarded this request to you as the final approver');
+    expect(renderApproverRequestEmail({ ...baseCtx(), handoff: { kind: 'auto_start', toTierName: 'Tier 2', note: 'Mia is a Tier 1 approver' } })).toContain('comes to you at <b>Tier 2</b> directly: Mia is a Tier 1 approver.');
+  });
+
+  test('reserved devices are a fact line', () => {
+    const html = renderApproverRequestEmail({ ...baseCtx(), laptops: [{ asset: { make: 'Dell', model: 'Latitude 7450', assetTag: 'TAG-1', cpu: 'i7', ram: '32 GB' }, recipient: { name: 'Rita Requester' } }] });
+    expect(html).toContain('Device reserved:</span> Dell Latitude 7450 (TAG-1), i7 · 32 GB; goes to Rita Requester on approval');
+  });
+
   test('degrades without optional data', () => {
     const html = renderApproverRequestEmail({ ticket: { ref: 'TP-9', subject: 'x' }, decisionUrl: 'https://app/a', noteHtml: '', otherApprovers: [] });
-    // No category → the subject is the title; the ref falls back to the approval page.
-    expect(html).toContain('>x<');
-    expect(html).toContain('href="https://app/a"');
-    expect(html).not.toContain('is asking');
-    expect(html).not.toContain(' wrote<');
+    expect(html).toContain('Hello,');
+    expect(html).toContain('The service desk asks you to approve &ldquo;x&rdquo; on TP-9.');
     expect(html).not.toContain('Also asked');
-    expect(html).toContain('href="https://app/a?intent=approve"');
+    expect(html).toContain('href="https://app/a"');
   });
+
   test('decisionIntentUrl keeps an existing query string', () => {
     expect(decisionIntentUrl('https://app/a', 'ask')).toBe('https://app/a?intent=ask');
     expect(decisionIntentUrl('https://app/a?x=1', 'reject')).toBe('https://app/a?x=1&intent=reject');
@@ -165,56 +165,89 @@ describe('renderApproverRequestEmail', () => {
   });
 });
 
-describe('renderRequesterDecisionEmail / renderRequesterClarificationEmail', () => {
+describe('the verdict, as the approver\'s message', () => {
   const t = { ref: '#1', subject: 'S', appUrl: 'https://app/tickets/1' };
-  test('sentence shapes are preserved', () => {
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, approverName: 'Boss', requester: { name: 'Rita' } }))
-      .toContain('Boss decided your approval request for <b>Rita</b>: <span class="ap-s-go" style="color:#0f7a4f;font-weight:bold;">approved</span>');
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, approverName: 'Boss', changedFrom: 'approved' }))
-      .toContain('Boss changed the decision on your approval request: <span class="ap-s-no" style="color:#b42318;font-weight:bold;">not approved</span>');
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, isSelf: true })).toContain('You approved your own approval request');
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, isSelf: true, note: 'Too <b>pricey</b>' })).toContain('Your note');
-    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, isSelf: true, note: 'Too <b>pricey</b>' })).toContain('Too &lt;b&gt;pricey&lt;/b&gt;');
+  test('agent copy: verdict first in plain words, conditions as a list, note, signature, one hint with the ticket link', () => {
+    const html = renderRequesterDecisionEmail({ ticket: t, categoryName: 'Software', approved: true, approverName: 'Pat', conditionNote: 'UAT first\nNo prod data', note: 'Go ahead', signatureHtml: '<p>Pat · CFO</p>', requester: { name: 'Rita' } });
+    expectPlainMessage(html);
+    expect(html).toMatch(/^<p[^>]*><b>Approved with conditions\.<\/b> Software for Rita, <a href="https:\/\/app\/tickets\/1"/);
+    expect(html).toContain('<li style="margin:0 0 6px;">UAT first</li><li style="margin:0 0 6px;">No prod data</li>');
+    expect(html).toContain('Go ahead');
+    expect(html).toContain('Pat · CFO');
+    expect(html).toContain('You can carry on with the ticket, within the conditions.');
+    expect(html).toContain('>Open the ticket</a>');
   });
-  test('clarification carries the question and an answer button', () => {
-    const html = renderRequesterClarificationEmail({ workspaceName: 'IT', ticket: t, approverName: 'Vahid', question: 'Refurb <ok>?', requester: { name: 'Rita' } });
-    expect(html).toContain('Needs your answer');
-    expect(html).toContain('Vahid</b> needs more information before deciding the request for <b>Rita</b>');
-    expect(html).toContain('Refurb &lt;ok&gt;?');
-    expect(html).toContain('>Answer on the ticket<');
+  test('changed and self-decided copies say so', () => {
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, approverName: 'Pat', changedFrom: 'approved' })).toContain('<b>Not approved.</b> (changed from approved)');
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, isSelf: true })).toContain('You decided your own request; this is your copy.');
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: false, note: 'Too <b>pricey</b>' })).toContain('Too &lt;b&gt;pricey&lt;/b&gt;');
+    expect(renderRequesterDecisionEmail({ ticket: t, approved: true, conditionNote: 'UAT only' })).toContain('Condition:</span> UAT only');
+  });
+  test('parties copy: the agent can carry on; the requester\'s copy carries no ticket link and nothing internal', () => {
+    const toApprover = renderDecisionThreadEmail({ ticket: t, categoryName: 'Software', approved: true, approverName: 'Pat', requestedByName: 'Mia Agent', recipient: { role: 'approver', name: 'Lee' }, requester: { name: 'Rita' } });
+    expectPlainMessage(toApprover);
+    expect(toApprover).toContain('<b>Approved.</b> Software for Rita');
+    expect(toApprover).toContain('Mia can carry on with the ticket.');
+    expect(toApprover).toContain('href="https://app/tickets/1"');
+    const toRita = renderDecisionThreadEmail({ ticket: { ...t, appUrl: null }, categoryName: 'Software', approved: true, approverName: 'Pat', requestedByName: 'Mia Agent', recipient: { role: 'requester', name: 'Rita' }, requester: { name: 'Rita' } });
+    expect(toRita).toContain('<b>Approved.</b> Your Software request, #1.');
+    expect(toRita).not.toContain('href=');
+    expect(toRita).not.toContain('carry on');
+    expect(toRita).toContain('If you have a question about this, reply to this e-mail.');
   });
 });
 
-describe('one layout for the approval family (29 Sep 2026)', () => {
-  test('the request e-mail carries no pictograms (29 Sep 2026 redesign) — only people photos, if any', () => {
-    const html = renderApproverRequestEmail(baseCtx());
-    expect(html).not.toContain('cid:tp-');
-    expect(html).toContain('Service desk agent');
+describe('the agent-facing notices', () => {
+  const t = { ref: 'TP-1', subject: 'S', appUrl: 'https://x/tickets/1' };
+  test('hand-off: short sentence, no note, nothing to do, the ticket link', () => {
+    const html = renderRequesterHandoffEmail({ ticket: t, kind: 'escalated', byName: 'Pat', toNames: ['Lee'], toTierName: 'Tier 2', requester: { name: 'Rita' }, agentName: 'Mia Agent' });
+    expectPlainMessage(html);
+    expect(html).toContain('Hi Mia,');
+    expect(html).toContain('Pat escalated your approval request for Rita on <a href="https://x/tickets/1"');
+    expect(html).toContain('to Lee (Tier 2).');
+    expect(html).toContain('Nothing is needed from you; you will hear when it is decided.');
+    expect(renderRequesterHandoffEmail({ ticket: t, kind: 'auto', byName: 'Pat', toNames: ['Lee'], fromTierName: 'Tier 1', toTierName: 'Tier 2' })).toContain('moved on to Lee (Tier 2)');
   });
+  test('clarification: the approver\'s question in their words, then "Answer on the ticket →"', () => {
+    const html = renderRequesterClarificationEmail({ ticket: t, approverName: 'Pat Approver', question: 'Refurb <ok>?', requester: { name: 'Rita' }, agentName: 'Mia' });
+    expectPlainMessage(html);
+    expect(html).toContain('Pat Approver needs more information before deciding the request for Rita on');
+    expect(html).toContain('Refurb &lt;ok&gt;?');
+    expect(html).toContain('Answer on the ticket&nbsp;&rarr;');
+    expect(html).toContain('Your answer goes back to Pat by e-mail');
+  });
+  test('conditions: the list, not approved yet, the note, one link to answer', () => {
+    const html = renderConditionsEmail({ approverName: 'Pat Approver', technicianName: 'Mia Agent', categoryName: 'Security', ticket: { ref: 'TP-1', subject: 'Dashboards', appUrl: 'https://tp/tickets/1' }, items: [{ text: 'Named workspaces only' }, { text: 'Audit log on' }], note: 'Security first', requester: { name: 'Rita' } });
+    expectPlainMessage(html);
+    expect(html).toContain('Hi Mia,');
+    expect(html).toContain('Pat Approver will approve the Security request for Rita on');
+    expect(html).toContain('on 2 conditions. It is not approved yet: answer each one and your answers go straight back to Pat.');
+    expect(html).toContain('<li style="margin:0 0 6px;">Named workspaces only</li>');
+    expect(html).toContain('Security first');
+    expect(html).toContain('href="https://tp/tickets/1"');
+    expect(html).toContain('Answer on the ticket&nbsp;&rarr;');
+  });
+});
 
-  test('every approval e-mail shares the request layout: status word, category title, linked ref, no pictograms, no painted surfaces', () => {
-    const t = { ref: '#1', subject: 'Laptop swap', appUrl: 'https://app/t/1' };
-    const all = {
-      approved: renderRequesterDecisionEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: true, approverName: 'Boss' }),
-      condition: renderRequesterDecisionEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: true, approverName: 'Boss', conditionNote: 'UAT first' }),
-      rejected: renderRequesterDecisionEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: false, approverName: 'Boss' }),
-      question: renderRequesterClarificationEmail({ ticket: t, categoryName: 'New Computer Upgrade', approverName: 'Boss', question: 'Why?' }),
-      escalated: renderRequesterHandoffEmail({ ticket: t, categoryName: 'New Computer Upgrade', kind: 'escalated', byName: 'Boss', toNames: ['CFO'], toTierName: 'Tier 2' }),
-      thread: renderDecisionThreadEmail({ ticket: t, categoryName: 'New Computer Upgrade', approved: true, approverName: 'Boss', recipient: { role: 'agent', name: 'Ann' } }),
-      message: renderApprovalMessageEmail({ kind: 'question', authorName: 'Boss', categoryName: 'New Computer Upgrade', ticket: t, bodyText: 'Why?', replyUrl: 'https://app/r' }),
-    };
-    expect(all.approved).toContain('&#9679;&nbsp; Approved<');
-    expect(all.condition).toContain('&#9679;&nbsp; Approved with condition<');
-    expect(all.rejected).toContain('&#9679;&nbsp; Not approved<');
-    expect(all.question).toContain('&#9679;&nbsp; Needs your answer<');
-    expect(all.escalated).toContain('&#9679;&nbsp; Escalated<');
-    for (const html of Object.values(all)) {
-      expect(html).toContain('>New Computer Upgrade<');
-      expect(html).toContain('href="https://app/t/1"');
-      expect(html).toContain('#1&nbsp;&#8599;');
-      expect(html).not.toContain('cid:tp-');
-      expect(html).not.toContain('background:#f1f5f9');
-      expect(html).toContain('<meta name="color-scheme" content="light dark">');
-    }
+describe('renderApprovalMessageEmail — internal questions, notes and answers', () => {
+  test('the author\'s words and signature, one hint with the web link, the Internal line', () => {
+    const html = renderApprovalMessageEmail({
+      kind: 'question', authorName: 'Pat Approver', bodyText: 'Budget?\n\nWhich code?', signatureHtml: '<p>Pat · CFO</p>',
+      replyUrl: 'https://app/approval-reply/t', canReplyByEmail: true, requesterName: 'Rita Requester', internalNote: true, copied: ['Lee'],
+    });
+    expectPlainMessage(html);
+    expect(html).toMatch(/^<p[^>]*>Budget\?<\/p><p[^>]*>Which code\?<\/p>/);
+    expect(html).toContain('Pat · CFO');
+    expect(html).toContain('Just reply to this e-mail to answer, or <a href="https://app/approval-reply/t"');
+    expect(html).toContain('Lee is copied.');
+    expect(html).toContain('Internal: Rita is not on this conversation.');
+  });
+  test('an answer for an approver who decides carries the decide link; without a mailbox the web link is the way', () => {
+    const answer = renderApprovalMessageEmail({ kind: 'answer', authorName: 'Mia Agent', bodyText: 'DEV only', canReplyByEmail: true, decideUrl: 'https://app/approval/x', internalNote: true, requesterName: 'Rita' });
+    expect(answer).toContain('Mia answered. Reply to this e-mail to add to the conversation.');
+    expect(answer).toContain('href="https://app/approval/x"');
+    expect(answer).toContain('Decide on this request');
+    const noMail = renderApprovalMessageEmail({ kind: 'question', authorName: 'Pat', bodyText: 'x', replyUrl: 'https://app/r', canReplyByEmail: false });
+    expect(noMail).toContain('>Answer on the web</a>; this mailbox does not read replies.');
   });
 });

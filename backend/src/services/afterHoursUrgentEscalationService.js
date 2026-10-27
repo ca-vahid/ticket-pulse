@@ -22,6 +22,7 @@ import config from '../config/index.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { repairCp437Mojibake } from '../utils/mojibake.js';
 
 const ESCALATION_CHANNELS = Object.freeze(['email', 'sms', 'whatsapp', 'phone_call']);
 const PHONE_CHANNELS = new Set(['sms', 'whatsapp', 'phone_call']);
@@ -300,6 +301,66 @@ async function hydrateRun(run) {
       },
     },
   });
+}
+
+/**
+ * QA 10-26 #8: who the urgent-response people list shows. Every technician
+ * row of a workspace used to be listed, which pulled in vendor and former
+ * FreshService agents and showed a person twice when they had both a
+ * FreshService row and a local-agent row. A person belongs to the workspace
+ * when they are an active agent, an assignable-only agent, or an app member
+ * (workspace access by e-mail). Anyone already picked stays listed so they
+ * can be removed. One row per lower-cased e-mail: the picked row wins, then
+ * the active one, the assignable one, the one with notification settings,
+ * the FreshService one, the oldest.
+ */
+export function workspacePeople(technicians = [], { accessEmails = new Set(), selectedIds = new Set() } = {}) {
+  const MEMBERSHIP_ORDER = ['agent', 'assignable', 'member'];
+  const keyOf = (technician) => String(technician.email || '').trim().toLowerCase() || `id:${technician.id}`;
+  const membershipOf = (technician) => {
+    if (technician.isActive) return 'agent';
+    if (technician.assignableOnly) return 'assignable';
+    if (accessEmails.has(keyOf(technician))) return 'member';
+    return null;
+  };
+  const rank = (technician) => [
+    selectedIds.has(technician.id) ? 0 : 1,
+    technician.isActive ? 0 : 1,
+    technician.assignableOnly ? 0 : 1,
+    technician.notificationPreference ? 0 : 1,
+    technician.origin === 'local' ? 1 : 0,
+    technician.id,
+  ];
+  const better = (a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let index = 0; index < ra.length; index += 1) {
+      if (ra[index] !== rb[index]) return ra[index] < rb[index];
+    }
+    return false;
+  };
+
+  const groups = new Map();
+  for (const technician of technicians) {
+    const key = keyOf(technician);
+    groups.set(key, [...(groups.get(key) || []), technician]);
+  }
+
+  const people = [];
+  for (const rows of groups.values()) {
+    // Membership is the person's, whichever of their rows earns it.
+    const memberships = rows.map(membershipOf).filter(Boolean);
+    const membership = MEMBERSHIP_ORDER.find((value) => memberships.includes(value)) || 'outside';
+    const picked = rows.filter((technician) => selectedIds.has(technician.id));
+    if (membership === 'outside' && picked.length === 0) continue;
+    const winner = rows.reduce((best, technician) => (better(technician, best) ? technician : best));
+    people.push({ technician: winner, membership });
+    // Two rows of one person both picked: keep both so neither is lost.
+    for (const technician of picked) {
+      if (technician !== winner) people.push({ technician, membership });
+    }
+  }
+  return people;
 }
 
 async function validateTechnicians(workspaceId, ids) {
@@ -612,7 +673,7 @@ class AfterHoursUrgentEscalationService {
   }
 
   async listCandidates(workspaceId) {
-    const [providerStatus, policy, technicians] = await Promise.all([
+    const [providerStatus, policy, technicians, accessRows] = await Promise.all([
       getNotificationProviderStatus(),
       this.getPolicy(workspaceId),
       prisma.technician.findMany({
@@ -625,26 +686,36 @@ class AfterHoursUrgentEscalationService {
           { name: 'asc' },
         ],
       }),
+      // App members of this workspace (Settings → Members). Optional: a
+      // failed read only narrows the list to the workspace's agents.
+      Promise.resolve()
+        .then(() => prisma.workspaceAccess.findMany({ where: { workspaceId }, select: { email: true } }))
+        .catch(() => []),
     ]);
 
     const selectedBase = new Set(policy.baseRecipientIds);
     const selectedSelfExtra = new Set(policy.selfExtraRecipientIds);
     const selectedBusinessSupervisor = new Set(policy.businessSupervisorRecipientIds);
+    const people = workspacePeople(technicians, {
+      accessEmails: new Set((accessRows || []).map((row) => String(row.email || '').trim().toLowerCase()).filter(Boolean)),
+      selectedIds: new Set([...selectedBase, ...selectedSelfExtra, ...selectedBusinessSupervisor]),
+    });
 
     return {
       providerStatus,
       disabledChannels: policy.disabledChannels || [],
-      candidates: technicians.map((technician) => {
+      candidates: people.map(({ technician, membership }) => {
         const context = { technician, preference: technician.notificationPreference || null };
         const channels = Object.fromEntries(
           ESCALATION_CHANNELS.map((channel) => [channel, readinessForChannel(context, providerStatus, channel, policy.disabledChannels)]),
         );
         return {
           id: technician.id,
-          name: technician.name,
+          name: repairCp437Mojibake(technician.name),
           email: technician.email,
           photoUrl: technician.photoUrl,
           isActive: technician.isActive,
+          membership,
           selectedBase: selectedBase.has(technician.id),
           selectedSelfExtra: selectedSelfExtra.has(technician.id),
           selectedBusinessSupervisor: selectedBusinessSupervisor.has(technician.id),

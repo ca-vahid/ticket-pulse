@@ -1,6 +1,22 @@
-export const APP_VERSION = '4.3.24-preview';
+export const APP_VERSION = '4.3.25-preview';
 
 export const changelog = [
+  {
+    version: '4.3.25-preview',
+    date: 'October 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approvals read like a conversation</strong> &mdash; the Approvals tab on a ticket now says at the top who the request is waiting on, shows each message once in order with the newest marked, and has one place to answer or decide at the bottom. A question sent on to the requester shows as one question with a line saying who it went to, instead of three copies and a reply nobody wrote.' },
+      { type: 'improved', html: '<strong>Approval e-mails read like e-mail</strong> &mdash; the request to an approver, decisions, conditions, hand-offs, internal questions and answers, and watcher e-mails are now plain messages from the person, with their signature, one link (such as <em>Decide on this request</em>) and the earlier conversation below, instead of branded cards.' },
+      { type: 'fixed', html: '<strong>The right sender on e-mailed replies</strong> &mdash; a reply e-mailed in on a FreshService ticket by someone other than the requester (a colleague on Cc) showed as the requester after the next FreshService sync. It now keeps its real sender, and the replies it had already relabelled were corrected.' },
+      { type: 'improved', html: '<strong>Parked tickets wake at 8 am the agent&rsquo;s time</strong> &mdash; a park until a day now wakes at 8:00 in the assigned agent&rsquo;s time zone (the requester&rsquo;s office when unassigned, else the workspace&rsquo;s), and the park dialog and parked line say which, e.g. &ldquo;wakes 8:00 AM Toronto time&rdquo;.' },
+      { type: 'improved', html: '<strong>Alert bursts grouped per device</strong> &mdash; held e-mails from the same device (such as a NAS sending dozens of drive notices) are grouped by device and kind in the review list and the digest, with failures on top, and can be attached or discarded in one go. Counting repeats on the existing ticket ships in Shadow.' },
+      { type: 'improved', html: '<strong>Urgent Response: who gets alerted, in plain words</strong> &mdash; only this workspace&rsquo;s people are listed, once each and with their names spelled right; each says how they can be reached or why not and how to fix it (no more &ldquo;No ready channel&rdquo;), with simple tick boxes for roster, extra and supervisor.' },
+      { type: 'fixed', html: '<strong>Coordinators save on their own</strong> &mdash; the coordinators list saves even when another rule on the page is refused, says when it is not saved yet and who saved it last, and the page warns before you leave with unsaved changes.' },
+      { type: 'fixed', html: '<strong>Analytics tables keep a solid header</strong> &mdash; rows no longer show through the header row of Recent tickets and the other scrolling Analytics tables.' },
+      { type: 'improved', html: '<strong>Tidier workflow menus</strong> &mdash; the &hellip; menu on Mail Workflows rows only appears where it has something to offer; the reopen-on-reply workflow and archived ones no longer show a lone &ldquo;New variant&rdquo;.' },
+      { type: 'improved', html: '<strong>FreshService article import removed</strong> &mdash; Knowledge no longer offers importing FreshService solution articles; it was never used.' },
+    ],
+  },
   {
     version: '4.3.24-preview',
     date: 'October 26, 2026',

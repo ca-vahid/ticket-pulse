@@ -11,7 +11,9 @@ import { categoryTiers } from '../utils/approvalTiers.js';
 import {
   readConditions, conditionItems, sameConditions, splitConditionText, earlierConditionsFor, mergeAnswers, isAnswered, waitingOn, agreedSummary, conditionsText, countCantMeet,
 } from './approvalConditions.js';
-import { inlinePhotoAttachment } from './userPhotoService.js';
+import {
+  approvalHistory, requestNoteEntry, savedSignatureHtml, plainTextOf, viaTicketPulse,
+} from './approvalReplyMail.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -401,15 +403,7 @@ class TicketApprovalService {
    * resubmit; flips info_requested back to pending.
    */
   async reissueLinkWithAnswer(row, { question = null, answer = null, answeredBy = null } = {}) {
-    const token = newToken();
-    const updated = await prisma.ticketApproval.update({
-      where: { id: row.id },
-      data: {
-        ...(row.status === 'info_requested' ? { status: 'pending', decisionNote: null } : {}),
-        tokenHash: hashToken(token),
-        expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
-      },
-    });
+    const { updated, decisionUrl } = await this.reopenWithFreshLink(row);
     const ticket = await prisma.ticket.findFirst({
       where: { id: row.ticketId },
       include: {
@@ -425,10 +419,28 @@ class TicketApprovalService {
       const cat = await prisma.approvalCategory.findUnique({ where: { id: row.approvalCategoryId }, select: { name: true } }).catch(() => null);
       categoryName = cat?.name || null;
     }
-    const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
     await this._emailApprover(ticket, row, decisionUrl, categoryName, { question, answer, answeredBy });
     this._broadcast(ticket, 'approval');
     return updated;
+  }
+
+  /**
+   * An answer is in: the row goes back to pending (when a question parked it)
+   * with a fresh decision link — the old one stops working. The caller sends
+   * the link (reissueLinkWithAnswer: the request again; an internal answer:
+   * the answer itself, 26 Oct 2026).
+   */
+  async reopenWithFreshLink(row) {
+    const token = newToken();
+    const updated = await prisma.ticketApproval.update({
+      where: { id: row.id },
+      data: {
+        ...(row.status === 'info_requested' ? { status: 'pending', decisionNote: null } : {}),
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+      },
+    });
+    return { updated, decisionUrl: `${publicBaseUrl()}/approval/${encodeURIComponent(token)}` };
   }
 
   /**
@@ -1398,8 +1410,26 @@ class TicketApprovalService {
     if (!technician || !looksLikeEmail(technician)) return;
     const { renderConditionsEmail } = await import('./approvalEmailTemplate.js');
     const categoryName = await this._approvalCategoryName(approval).catch(() => null);
-    const html = renderConditionsEmail({
-      workspaceName: await this._workspaceName(ticket),
+    // The approver's message (26 Oct 2026): the conditions, their note and
+    // signature, one link to answer, then the history. The conditions' own
+    // conversation entry (the newest comment by the approver) is the body, so
+    // the history leaves it out.
+    const conditionsMessageId = await Promise.resolve()
+      .then(() => prisma.approvalMessage.findFirst({
+        where: { requestGroupId: approval.requestGroupId || `single-${approval.id}`, kind: 'comment', authorEmail: state.setBy || undefined },
+        orderBy: { id: 'desc' }, select: { id: true },
+      }))
+      .then((m) => m?.id || null)
+      .catch(() => null);
+    const [signatureHtml, history] = await Promise.all([
+      savedSignatureHtml(ticket.workspaceId, state.setBy),
+      approvalHistory({
+        ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
+        skip: (m) => m.id === conditionsMessageId,
+        requestNote: requestNoteEntry(approval, technicianName),
+      }),
+    ]);
+    const body = renderConditionsEmail({
       categoryName,
       ticket: this._emailTicketFacts(ticket),
       approverName: state.setByName,
@@ -1408,6 +1438,7 @@ class TicketApprovalService {
       items: state.items,
       note: state.note,
       changed: state.round > 1,
+      signatureHtml,
     });
     const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
     const ref = ticketDisplayRef(ticket);
@@ -1415,9 +1446,11 @@ class TicketApprovalService {
       workspaceId: ticket.workspaceId,
       to: [technician],
       subject: `Conditions to answer: ${categoryName ? `${categoryName} — ` : ''}${ticket.subject || 'ticket'} [${ref}]`,
-      html,
+      html: `${body}${history.html}`,
+      text: `${plainTextOf(body)}${history.text}`,
+      attachments: history.attachments,
       label: 'approval conditions',
-      fromName: `${state.setByName || 'Approver'} via Ticket Pulse`,
+      fromName: viaTicketPulse(state.setByName, 'Approver via Ticket Pulse'),
     });
   }
 
@@ -2070,8 +2103,9 @@ class TicketApprovalService {
     const requesterName = ticket.requester?.name || null;
     // Subject: what is asked, for whom, and the ref last (threading + inbox filters). Identical on a
     // re-request so it lands in the same conversation.
-    // The sender name says it is an approval (Ticket Pulse Approval), so the
-    // subject leads with what is being approved (19 Oct 2026, Vahid).
+    // The subject leads with what is being approved (19 Oct 2026, Vahid); since
+    // 26 Oct the sender is "<agent> via Ticket Pulse" and the first line says
+    // "asks you to approve".
     const subject = `${categoryName || 'Request'}${requesterName ? ` for ${requesterName}` : ''} — ${ticket.subject || 'ticket'} [${ref}]`;
 
     // T3.9: the request note supports placeholders. Plain values substitute
@@ -2120,13 +2154,9 @@ class TicketApprovalService {
       }
     }
 
-    // People photos travel INSIDE the message as inline (cid:) attachments — never a URL the
-    // client has to fetch (blocked by default in Outlook, and a public link would leak).
-    const [requesterPhoto, requestedByPhoto] = await Promise.all([
-      inlinePhotoAttachment(requester.email, 'requester-photo'),
-      inlinePhotoAttachment(approval.requestedBy, 'requested-by-photo'),
-    ]);
-    const attachments = [requesterPhoto, requestedByPhoto].filter(Boolean);
+    // 26 Oct 2026: the request is the agent's own message — no people row, so
+    // no photos up top; the history below carries each person's photo.
+    const attachments = [];
 
     // 19 Oct 2026: pictures pasted into the note travel inline too, in place of "[Image: name]".
     const noteImages = await findNoteImages(approval);
@@ -2155,8 +2185,17 @@ class TicketApprovalService {
       ? noteImages.map((img) => ({ name: img.fileName, url: noteImagePath(decisionToken, img.id, { absolute: true }) })).filter((x) => x.url)
       : [];
 
-    const html = renderApproverRequestEmail({
-      workspaceName: await this._workspaceName(ticket),
+    // The agent's message to the approver (26 Oct 2026): their note, the facts,
+    // their signature, ONE decide link, then the conversation so far —
+    // approvers are insiders, so the request's internal messages come too.
+    const [signatureHtml, history] = await Promise.all([
+      savedSignatureHtml(ticket.workspaceId, approval.requestedBy),
+      approvalHistory({
+        ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
+        reply: { text: approval.requestNote || null, authorName: requestedByName, authorEmail: approval.requestedBy },
+      }),
+    ]);
+    const body = renderApproverRequestEmail({
       categoryName,
       ticket: this._emailTicketFacts(ticket),
       // Approvals v2: amount + tier context + the hand-off block.
@@ -2168,20 +2207,20 @@ class TicketApprovalService {
         title: requester.jobTitle || requester.entraJobTitle || null,
         department: requester.department || requester.entraDepartment || null,
         location: requester.entraOfficeLocation || requester.entraCity || null,
-        photoCid: requesterPhoto?.contentId || null,
       },
       requestedByName,
-      requestedByPhotoCid: requestedByPhoto?.contentId || null,
-      approverName: approval.approverName || null,
+      approverName: approval.approverName || (await this._resolvePersonName(approval.approverEmail).catch(() => null)) || null,
       noteHtml,
       clarification: clarification?.answer ? clarification : null,
       conditions: conditions || null,
       otherApprovers,
       decisionUrl,
       expiresAt: approval.expiresAt || null,
-      reRequest: !!clarification?.answer || !!conditions,
       laptops: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [],
+      signatureHtml,
     });
+    const html = `${body}${history.html}`;
+    attachments.push(...history.attachments);
 
     // Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): the same request as a card the approver can decide from.
     import('./teamsNotificationService.js')
@@ -2195,7 +2234,10 @@ class TicketApprovalService {
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     // `ticket` → Reply-To +tp/+fs and threading headers, so an approver's
     // reply threads onto the ticket instead of dying on a bare mailbox (23 Sep 2026).
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, attachments, label: 'approval', ticket });
+    return sendTransactionalEmail({
+      workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, text: `${plainTextOf(body)}${history.text}`, attachments,
+      label: 'approval', ticket, fromName: viaTicketPulse(requestedByName, null),
+    });
   }
 
   /**
@@ -2222,12 +2264,21 @@ class TicketApprovalService {
     // Subject prefix stays identical for the self variant — inbox filters and
     // threading keep working; only the body wording changes.
     const subject = `${verdictLabel}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
-    const html = renderRequesterDecisionEmail({
-      workspaceName: await this._workspaceName(ticket),
+    const approverName = actorLabel || approval.approverName || approval.approverEmail;
+    // The approver's message (26 Oct 2026): the verdict, the conditions, their
+    // note and signature, one grey hint, then the conversation so far. The
+    // agent is an insider; the decision itself is the body, so earlier
+    // decision messages stay out of the history.
+    const history = await approvalHistory({
+      ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
+      skip: (m) => m.kind === 'decision',
+      requestNote: requestNoteEntry(approval, await this._resolvePersonName(approval.requestedBy).catch(() => null)),
+    });
+    const body = renderRequesterDecisionEmail({
       categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
       approved,
-      approverName: actorLabel || approval.approverName || approval.approverEmail,
+      approverName,
       isSelf,
       changedFrom: changedFrom || null,
       note: note?.trim() || null,
@@ -2236,7 +2287,10 @@ class TicketApprovalService {
       requester: { name: ticket.requester?.name || null },
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision', ticket, threadEntryId });
+    return sendTransactionalEmail({
+      workspaceId: ticket.workspaceId, to, subject, html: `${body}${history.html}`, text: `${plainTextOf(body)}${history.text}`,
+      attachments: history.attachments, label: 'approval decision', ticket, threadEntryId, fromName: viaTicketPulse(approverName, null),
+    });
   }
 
   /**
@@ -2281,24 +2335,43 @@ class TicketApprovalService {
     if (recipients.length === 0) return { sent: false, reason: 'nobody_else' };
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
-    const workspaceName = await this._workspaceName(ticket);
     const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     const verdictLabel = decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
+    const approverName = actorLabel || approval.approverName || approval.approverEmail;
+    // The approver's message in the reply format (26 Oct 2026). The history
+    // follows today's audience rule: the requester's copy quotes only
+    // requester-audience messages (+ the request note, as before); everyone
+    // else sees the whole conversation. One history per audience.
+    const histories = new Map();
+    const historyFor = async (audience) => {
+      const key = audience === 'requester' ? 'requester' : 'internal';
+      if (!histories.has(key)) {
+        histories.set(key, await approvalHistory({
+          ticketId: ticket.id, requestGroupId: groupId, audience: key,
+          skip: (m) => m.kind === 'decision',
+          requestNote: requestNoteEntry(approval, parts.agent?.name || null),
+        }));
+      }
+      return histories.get(key);
+    };
     let sent = 0;
     for (const r of recipients) {
-      const thread = await conversation.listForGroup(groupId, { audience: r.audience });
-      const html = renderDecisionThreadEmail({
-        workspaceName, categoryName: category?.name || null,
+      const history = await historyFor(r.audience);
+      const body = renderDecisionThreadEmail({
+        categoryName: category?.name || null,
         ticket: { ref, subject: ticket.subject || null, appUrl: r.role === 'requester' ? null : ticketUrl },
         approved: decision === 'approved', changedFrom: changedFrom || null,
-        approverName: actorLabel || approval.approverName || approval.approverEmail,
+        approverName,
         note: note?.trim() || null, conditionNote: conditionNote || null, signatureHtml: signatureHtml || null,
         recipient: r, requester: { name: parts.requester?.name || ticket.requester?.name || null },
-        requestNoteHtml: approval.requestNoteHtml || null, requestNote: approval.requestNote || null, requestedByName: parts.agent?.name || null,
-        thread: thread.filter((m) => m.kind !== 'decision'),
+        requestedByName: parts.agent?.name || null,
       });
-      const res = await sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: r.email, subject: `${verdictLabel}: ${ticket.subject || 'ticket'} [${ref}]`, html, label: 'approval decision', ticket, threadEntryId });
+      const res = await sendTransactionalEmail({
+        workspaceId: ticket.workspaceId, to: r.email, subject: `${verdictLabel}: ${ticket.subject || 'ticket'} [${ref}]`,
+        html: `${body}${history.html}`, text: `${plainTextOf(body)}${history.text}`, attachments: history.attachments,
+        label: 'approval decision', ticket, threadEntryId, fromName: viaTicketPulse(approverName, null),
+      });
       if (res?.sent !== false) sent += 1;
     }
     return { sent: sent > 0, count: sent };
@@ -2351,15 +2424,24 @@ class TicketApprovalService {
     const toNames = [];
     for (const em of targets) toNames.push((await this._resolvePersonName(em)) || prettifyLocalPart(em) || em);
     const subject = `${kind === 'forwarded' ? 'Forwarded' : 'Escalated'}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
-    const html = renderRequesterHandoffEmail({
-      workspaceName: await this._workspaceName(ticket),
+    const agentName = await this._resolvePersonName(to).catch(() => null);
+    // A short plain message (26 Oct 2026), still without the approver's note.
+    const history = await approvalHistory({
+      ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
+      requestNote: requestNoteEntry(approval, agentName),
+    });
+    const body = renderRequesterHandoffEmail({
       categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
       kind, byName: byName || byEmail || 'The approver', toNames, toTierName, fromTierName,
       requester: { name: ticket.requester?.name || null },
+      agentName,
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval hand-off', ticket, threadEntryId });
+    return sendTransactionalEmail({
+      workspaceId: ticket.workspaceId, to, subject, html: `${body}${history.html}`, text: `${plainTextOf(body)}${history.text}`,
+      attachments: history.attachments, label: 'approval hand-off', ticket, threadEntryId, fromName: viaTicketPulse(byName || null, null),
+    });
   }
 
   /** Notify the requester that an approver needs more info before deciding. */
@@ -2373,16 +2455,31 @@ class TicketApprovalService {
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     const subject = `More info needed on your approval request [${ref}]`;
-    const html = renderRequesterClarificationEmail({
-      workspaceName: await this._workspaceName(ticket),
+    const approverName = approval.approverName || approval.approverEmail;
+    const agentName = await this._resolvePersonName(to).catch(() => null);
+    // The approver's question as their own message (26 Oct 2026).
+    const [signatureHtml, history] = await Promise.all([
+      savedSignatureHtml(ticket.workspaceId, approval.approverEmail),
+      approvalHistory({
+        ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
+        reply: { text: question, authorName: approverName, authorEmail: approval.approverEmail },
+        requestNote: requestNoteEntry(approval, agentName),
+      }),
+    ]);
+    const body = renderRequesterClarificationEmail({
       categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
-      approverName: approval.approverName || approval.approverEmail,
+      approverName,
       question,
       requester: { name: ticket.requester?.name || null },
+      agentName,
+      signatureHtml,
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval clarification', ticket, threadEntryId });
+    return sendTransactionalEmail({
+      workspaceId: ticket.workspaceId, to, subject, html: `${body}${history.html}`, text: `${plainTextOf(body)}${history.text}`,
+      attachments: history.attachments, label: 'approval clarification', ticket, threadEntryId, fromName: viaTicketPulse(approval.approverName || null, null),
+    });
   }
 
   _broadcast(ticket, action) {

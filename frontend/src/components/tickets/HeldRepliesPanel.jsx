@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertCircle, CheckCircle, Inbox, Link2, Loader2, MailQuestion, Plus, Search, Trash2, X,
+  AlertCircle, CheckCircle, Inbox, Link2, Loader2, MailQuestion, Plus, Search, Trash2,
 } from 'lucide-react';
-import { searchAPI, ticketsAPI } from '../../services/api';
+import { ticketsAPI } from '../../services/api';
+import HeldDeviceGroup, { BURST_MODE_META } from './HeldDeviceGroup';
+import { TicketPicker } from './HeldTicketPicker';
 
 /**
  * Hold reasons (Phase RL, RL-4) → chip copy. Mirrors mailboxHoldService.
@@ -74,63 +76,46 @@ function fmtWhen(iso) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
 
-/** Ticket typeahead for "Attach to ticket" — global search, tickets only. */
-export function TicketPicker({ onPick, onCancel, initialQuery = '' }) {
-  const [q, setQ] = useState(initialQuery);
-  const [results, setResults] = useState([]);
-  const [busy, setBusy] = useState(false);
+export { TicketPicker } from './HeldTicketPicker';
 
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) { setResults([]); return undefined; }
-    let alive = true;
-    setBusy(true);
-    const t = setTimeout(() => {
-      searchAPI.global(term, 'tickets')
-        .then((res) => { if (alive) setResults(res.data?.sections?.tickets || []); })
-        .catch(() => { if (alive) setResults([]); })
-        .finally(() => { if (alive) setBusy(false); });
-    }, 200);
-    return () => { alive = false; clearTimeout(t); };
-  }, [q]);
+/**
+ * The queue as { groups, singles, total, mode }: alert bursts grouped by
+ * device when the server offers that (QA 10-26 #3), the flat list otherwise.
+ */
+export async function loadHeldQueue() {
+  try {
+    if (typeof ticketsAPI.listHeldGroups === 'function') {
+      const res = await ticketsAPI.listHeldGroups();
+      const data = res?.data;
+      if (data && Array.isArray(data.groups) && Array.isArray(data.singles)) {
+        const total = data.total ?? (data.singles.length + data.groups.reduce((n, g) => n + (g.count || 0), 0));
+        return { groups: data.groups, singles: data.singles, total, mode: data.mode || null };
+      }
+    }
+  } catch {
+    // An older server without the grouped list: fall through to the flat one.
+  }
+  const res = await ticketsAPI.listHeldMessages('held');
+  const list = res.data || [];
+  return { groups: [], singles: list, total: res.meta?.heldCount ?? list.length, mode: null };
+}
 
+/** "Repeat alerts in a burst" — the per-workspace switch (admins). */
+function BurstModeControl({ mode, onChange, busy }) {
+  if (!mode) return null;
   return (
-    <div className="mt-2 p-2 rounded-lg border border-border bg-muted/50 space-y-2" data-testid="held-ticket-picker">
-      <div className="flex items-center gap-2">
-        <Search className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" />
-        <input
-          autoFocus
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search tickets — TP-1204, subject, requester…"
-          aria-label="Search tickets to attach to"
-          className="flex-1 text-sm bg-card border border-border rounded-md px-2 py-1.5"
-        />
-        {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/75" aria-hidden="true" />}
-        <button type="button" onClick={onCancel} aria-label="Cancel attach" className="p-1 rounded-md text-muted-foreground/75 hover:text-foreground hover:bg-muted tp-focus-ring">
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      {results.length > 0 && (
-        <ul className="max-h-48 overflow-y-auto settings-scrollbar divide-y divide-border/60 rounded-md border border-border bg-card">
-          {results.map((t) => (
-            <li key={t.id}>
-              <button
-                type="button"
-                onClick={() => onPick(t)}
-                className="w-full text-left px-2.5 py-1.5 text-sm hover:bg-muted tp-focus-ring flex items-center gap-2"
-              >
-                <span className="font-mono text-xs text-primary">{t.displayRef}</span>
-                <span className="truncate text-foreground">{t.subject}</span>
-                <span className="ml-auto text-[11px] text-muted-foreground/75 whitespace-nowrap">{t.status}{t.requesterName ? ` · ${t.requesterName}` : ''}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {q.trim().length >= 2 && !busy && results.length === 0 && (
-        <p className="text-xs text-muted-foreground/75 px-1">No tickets match.</p>
-      )}
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" data-testid="held-burst-mode">
+      <label htmlFor="held-burst-mode" className="font-medium text-foreground">Repeat alerts in a burst</label>
+      <select
+        id="held-burst-mode"
+        value={mode}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 rounded-md border border-input bg-card px-2 text-xs text-foreground tp-focus-ring"
+      >
+        {Object.entries(BURST_MODE_META).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+      </select>
+      <span className="min-w-0 flex-1">{BURST_MODE_META[mode]?.help}</span>
     </div>
   );
 }
@@ -151,21 +136,56 @@ export default function HeldRepliesPanel({ onCountChange = null, compact = false
   const [attaching, setAttaching] = useState(null); // held id with the picker open
   const [choosing, setChoosing] = useState(null); // held id with the address chooser open
   const [chosen, setChosen] = useState('');
+  const [groups, setGroups] = useState([]);
+  const [mode, setMode] = useState(null);
+  const [groupBusy, setGroupBusy] = useState(null); // sender whose bulk action is running
 
   const load = useCallback(async () => {
     try {
-      const res = await ticketsAPI.listHeldMessages('held');
-      const list = res.data || [];
-      setRows(list);
+      const queue = await loadHeldQueue();
+      setRows(queue.singles);
+      setGroups(queue.groups);
+      setMode(queue.mode);
       setError(null);
-      onCountChange?.(res.meta?.heldCount ?? list.length);
+      onCountChange?.(queue.total);
     } catch (err) {
       setError(err.response?.data?.message || err.message);
       setRows([]);
+      setGroups([]);
     }
   }, [onCountChange]);
 
   useEffect(() => { load(); }, [load]);
+
+  const bulk = async (group, ids, action, ticket) => {
+    setGroupBusy(group.sender);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await ticketsAPI.bulkHeldMessages(ids, action, ticket?.id || null);
+      const n = res?.data?.count ?? ids.length;
+      setNotice(action === 'discard'
+        ? `Discarded ${n} ${n === 1 ? 'email' : 'emails'} from ${group.device}.`
+        : `Added ${n} ${n === 1 ? 'email' : 'emails'} from ${group.device} to ${ticket?.displayRef || 'the ticket'}.`);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    } finally {
+      setGroupBusy(null);
+    }
+  };
+
+  const changeMode = async (next) => {
+    const before = mode;
+    setMode(next);
+    try {
+      await ticketsAPI.setBurstGrouping(next);
+      setNotice(`Repeat alerts in a burst: ${BURST_MODE_META[next]?.label || next}.`);
+    } catch (err) {
+      setMode(before);
+      setError(err.response?.data?.message || err.message);
+    }
+  };
 
   const run = async (row, fn, successText) => {
     setBusyId(row.id);
@@ -220,8 +240,8 @@ export default function HeldRepliesPanel({ onCountChange = null, compact = false
           <div>
             <h3 className="text-base font-semibold text-foreground">Unmatched replies</h3>
             <p className="text-sm text-muted-foreground">
-              Emails that looked like replies to a conversation Ticket Pulse does not know, or came from an agent with no
-              identifiable requester. They were held instead of becoming new tickets — decide what each one is.
+              Emails Ticket Pulse could not file on its own: replies to a conversation it does not know, agent mail with no
+              identifiable requester, and alert bursts from one device (grouped by device below). Decide what each one is.
             </p>
           </div>
         </div>
@@ -251,9 +271,21 @@ export default function HeldRepliesPanel({ onCountChange = null, compact = false
         </div>
       )}
 
+      {!compact && <BurstModeControl mode={mode} onChange={changeMode} busy={Boolean(groupBusy)} />}
+
+      {groups.length > 0 && (
+        <ul className="space-y-3" aria-label="Alert bursts by device" data-testid="held-groups">
+          {groups.map((g) => (
+            <li key={g.sender} className="bg-card border border-border rounded-lg p-4">
+              <HeldDeviceGroup group={g} mode={mode || 'shadow'} busy={groupBusy === g.sender} onBulk={(ids, action, ticket) => bulk(g, ids, action, ticket)} />
+            </li>
+          ))}
+        </ul>
+      )}
+
       {rows === null ? (
         <div className="p-6 text-center text-muted-foreground/75"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && groups.length > 0 ? null : rows.length === 0 ? (
         <div className="bg-muted/50 border border-border rounded-lg p-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2" data-testid="held-empty">
           <Inbox className="w-4 h-4 text-muted-foreground/75" aria-hidden="true" />
           Nothing waiting — every inbound email found its ticket.

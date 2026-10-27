@@ -12,7 +12,7 @@ const prismaMock = {
   ticketApproval: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
   approvalMessage: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   approvalReplyToken: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
-  ticketThreadEntry: { create: jest.fn() },
+  ticketThreadEntry: { create: jest.fn(), findMany: jest.fn(), count: jest.fn() },
   ticketAttachment: { findMany: jest.fn() },
   mailboxConnection: { findFirst: jest.fn() },
   technician: { findFirst: jest.fn(), findMany: jest.fn() },
@@ -26,7 +26,14 @@ const publicStatusMock = { getPublicTicketStatusSettings: jest.fn(), ensurePubli
 const azureAdMock = { isConfigured: jest.fn(() => false), getUserPhoto: jest.fn(), resolveAddress: jest.fn() };
 const mailMock = { deliverTransactionalEmail: jest.fn().mockResolvedValue({ sent: true }), sendTransactionalEmail: jest.fn().mockResolvedValue({ sent: true }) };
 const directoryMock = { resolvePersonName: jest.fn(async (e) => ({ 'rita@x.io': 'Rita Requester', 'req@x.io': 'Mehdi Agent', 'vahid@x.io': 'Vahid', 'neville@x.io': 'Neville' }[String(e).toLowerCase()] || null)), fillPersonNames: jest.fn(async (rows) => rows) };
-const signatureMock = { getEnabledSignatureForSend: jest.fn().mockResolvedValue(null) };
+// The full export list ticketService imports, so the reply-format history (_lastInboundQuote) loads.
+const signatureMock = {
+  getEnabledSignatureForSend: jest.fn().mockResolvedValue(null),
+  appendSignatureToEmail: jest.fn((email, sig) => ({ ...email, html: `${email.html || ''}${sig?.html ? `<br>${sig.html}` : ''}` })),
+  signatureAsSent: jest.fn(() => null),
+  trimTrailingBlankHtml: jest.fn((h) => h),
+  closeLastParagraphTight: jest.fn((h) => h),
+};
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: activityMock }));
@@ -75,6 +82,9 @@ beforeEach(() => {
   prismaMock.approvalCategory.findUnique.mockResolvedValue(SECURITY);
   prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 3, address: 'ticketpulse@x.io', mode: 'ingest', isEnabled: true });
   prismaMock.ticketThreadEntry.create.mockResolvedValue({ id: 9 });
+  // The reply-format history (_lastInboundQuote): no public ticket mail, so it quotes the approval messages.
+  prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+  prismaMock.ticketThreadEntry.count.mockResolvedValue(0);
   prismaMock.ticketAttachment.findMany.mockResolvedValue([]);
   prismaMock.ticketApproval.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.ticketApproval.findMany.mockResolvedValue(groupRows);
@@ -165,8 +175,19 @@ describe('postMessage — ask the approvers / agent only', () => {
     expect(res.cc).toEqual([]);
     expect(prismaMock.ticketApproval.update).not.toHaveBeenCalled();
     expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(1);
-    expect(mailMock.deliverTransactionalEmail.mock.calls[0][0].to).toEqual(['vahid@x.io']);
-    expect(mailMock.deliverTransactionalEmail.mock.calls[0][0].html).toContain('the ticket requester is not on this message');
+    const mail = mailMock.deliverTransactionalEmail.mock.calls[0][0];
+    expect(mail.to).toEqual(['vahid@x.io']);
+    // 26 Oct 2026: the reply format for the internal audience — same token + plus-address as before.
+    const tokenRow = prismaMock.approvalReplyToken.create.mock.calls[0][0].data;
+    expect(tokenRow).toMatchObject({ recipientEmail: 'vahid@x.io' });
+    expect(mail.replyTo).toBe(`ticketpulse+ap${tokenRow.plusKey}@x.io`);
+    expect(mail.subject).toBe('Re: New laptop [TP-1234]');
+    expect(mail.fromName).toBe('Neville via Ticket Pulse');
+    expect(mail.html).toContain('Did we budget this?');
+    expect(mail.html).toContain('/approval-reply/');
+    expect(mail.html).toContain('Internal: Rita is not on this conversation.');
+    expect(mail.html).not.toContain('Question on an approval');
+    expect(mail.cc || []).toEqual([]);
     expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyText).toContain('(approvers + agent only)');
   });
 
@@ -334,6 +355,32 @@ describe('answer', () => {
     expect(res.message.author.role).toBe('agent');
   });
 
+  test('an internal answer (26 Oct 2026): the approver who decides gets it alone with a fresh decide link; the requester never', async () => {
+    const internalQ = { ...question, audience: 'internal', authorEmail: 'vahid@x.io', authorName: 'Vahid', toEmails: ['req@x.io'], ccEmails: [] };
+    prismaMock.approvalMessage.findUnique.mockResolvedValue(internalQ);
+    prismaMock.approvalMessage.findMany.mockResolvedValue([internalQ]);
+    msgSeq = 900; // the answer's id must not collide with the question's (501)
+    prismaMock.ticketApproval.findMany.mockImplementation(({ where }) => Promise.resolve(where.status ? [row({ status: 'info_requested' })] : groupRows));
+    await conversation.answer({ inReplyToId: 501, senderEmail: 'req@x.io', senderName: 'Mehdi Agent', bodyText: 'Yes, line IT-204.', via: 'app' });
+    // no full request e-mail again; one answer e-mail per person
+    expect(mailMock.sendTransactionalEmail.mock.calls.find((c) => c[0].label === 'approval')).toBeFalsy();
+    const sent = mailMock.deliverTransactionalEmail.mock.calls.map((c) => c[0]);
+    expect(sent.map((m) => m.to)).toEqual([['neville@x.io'], ['vahid@x.io']]);
+    expect(sent.flatMap((m) => [...m.to, ...(m.cc || [])])).not.toContain('rita@x.io');
+    const [toDecider, toAsker] = sent;
+    expect(toDecider.fromName).toBe('Mehdi Agent via Ticket Pulse');
+    expect(toDecider.label).toBe('approval answer');
+    expect(toDecider.html).toContain('Yes, line IT-204.');
+    expect(toDecider.html).toContain('Decide on this request');
+    expect(toDecider.html).toContain('Internal: Rita is not on this conversation.');
+    expect(toDecider.replyTo).toMatch(/^ticketpulse\+ap[a-f0-9]{12}@x\.io$/);
+    // the parked row is back with the approver, on a fresh link
+    expect(prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].where.id === 2 && c[0].data.tokenHash && c[0].data.status === 'pending')).toBeTruthy();
+    expect(toAsker.html).not.toContain('Decide on this request');
+    // the question is in the history below the answer
+    expect(toAsker.html).toContain('Which environments?');
+  });
+
   test('an expired reply token is refused with a clear message', async () => {
     prismaMock.approvalReplyToken.findUnique.mockResolvedValue({ id: 77, messageId: 501, recipientEmail: 'rita@x.io', expiresAt: new Date(Date.now() - 1000) });
     await expect(conversation.answer({ token: 'old', bodyText: 'x' })).rejects.toThrow(/expired/);
@@ -444,14 +491,20 @@ describe('decide with a condition', () => {
     expect(agent.html).toContain('CISO');
     const rita = sends.find((s) => s.to === 'rita@x.io');
     expect(rita.subject).toBe('Approved with conditions: New laptop [TP-1234]');
-    expect(rita.html).toContain('Hi Rita,');
+    // 26 Oct 2026: the approver's message in the reply format, from them via Ticket Pulse.
+    expect(rita.fromName).toBe('Neville via Ticket Pulse');
+    expect(rita.html).toContain('<b>Approved with conditions.</b>');
+    expect(rita.html).toContain('Earlier in this conversation');
     expect(rita.html).toContain('Which env?');
     expect(rita.html).not.toContain('Budget?'); // internal history never reaches the requester
     expect(rita.html).not.toContain('/tickets/501'); // no app link for the requester
+    expect(rita.html).not.toContain('carry on');
     const vahid = sends.find((s) => s.to === 'vahid@x.io');
     expect(vahid.html).toContain('Budget?');
-    expect(vahid.html).toContain('(internal)');
+    expect(vahid.html).toContain('Mehdi can carry on with the ticket.');
     expect(vahid.html).toContain('/tickets/501');
+    expect(agent.html).toContain('Budget?'); // the agent is an insider
+    expect(agent.fromName).toBe('Neville via Ticket Pulse');
   });
 
   test('a rejection ignores any condition, fans out to the agents, and reaches the requester only when asked', async () => {
@@ -504,54 +557,39 @@ describe('e-mail templates (v3)', () => {
     expect(descriptionHtmlForEmail('').html).toBe('');
   });
 
-  test('the approver e-mail renders the description formatted, not as a flattened excerpt', () => {
-    const html = renderApproverRequestEmail({ ticket: { ref: 'TP-9', subject: 'x', description: '<p>One</p><ul><li>Two</li></ul>' }, decisionUrl: 'https://app/a', noteHtml: '', otherApprovers: [] });
-    expect(html).toContain('What the requester wrote');
-    expect(html).toContain('<li style="margin:0 0 4px">Two</li>');
-    expect(html).not.toContain('white-space:pre-line');
+  test('the approver e-mail no longer repeats the description: it travels in the history below', () => {
+    const html = renderApproverRequestEmail({ ticket: { ref: 'TP-9', subject: 'x', description: '<p>One</p><ul><li>Two</li></ul>' }, decisionUrl: 'https://app/a', noteHtml: '', otherApprovers: [], quoteHtml: '<div>Earlier in this conversation<ul><li>Two</li></ul></div>' });
+    expect(html).not.toContain('What the requester wrote');
+    expect(html.indexOf('Two')).toBeGreaterThan(html.indexOf('Decide on this request'));
   });
 
-  test('renderApprovalMessageEmail: question with Answer button + reply-by-mail hint, internal flag, earlier thread', () => {
+  test('renderApprovalMessageEmail: the question as written, reply-by-mail hint with the web link, Internal line, history appended', () => {
     const html = renderApprovalMessageEmail({
-      kind: 'question', audience: 'internal', authorName: 'Neville', authorRole: 'approver', recipient: { email: 'v@x.io', name: 'Vahid' }, isCc: false,
-      categoryName: 'Security', ticket: { ref: 'TP-1', subject: 'Laptop' }, bodyText: 'Budget?', replyUrl: 'https://app/approval-reply/t', canReplyByEmail: true, internalNote: true,
-      thread: [{ kind: 'question', author: { name: 'Neville' }, bodyText: 'Earlier q', createdAt: '2026-09-16T10:00:00Z', audience: 'requester' }],
+      kind: 'question', authorName: 'Neville', bodyText: 'Budget?', replyUrl: 'https://app/approval-reply/t', canReplyByEmail: true,
+      internalNote: true, requesterName: 'Rita Requester', quoteHtml: '<div>Earlier q</div>',
     });
-    expect(html).toContain('<b>Neville</b> has a question for you:');
     expect(html).toContain('Budget?');
     expect(html).toContain('https://app/approval-reply/t');
-    expect(html).toContain('simply reply to this e-mail');
-    expect(html).toContain('the ticket requester is not on this message');
-    expect(html).toContain('Earlier on this request');
-    expect(html).toContain('Earlier q');
-    const noMail = renderApprovalMessageEmail({ kind: 'answer', authorName: 'Rita', recipient: { name: 'Neville' }, ticket: { ref: 'TP-1' }, bodyText: 'DEV only', replyUrl: 'https://app/r', canReplyByEmail: false });
-    expect(noMail).toContain('<b>Rita</b> answered your question:');
+    expect(html).toContain('Just reply to this e-mail to answer');
+    expect(html).toContain('Internal: Rita is not on this conversation.');
+    expect(html.indexOf('Earlier q')).toBeGreaterThan(html.indexOf('Internal:'));
+    const noMail = renderApprovalMessageEmail({ kind: 'question', authorName: 'Rita', bodyText: 'DEV only', replyUrl: 'https://app/r', canReplyByEmail: false });
     expect(noMail).toContain('this mailbox does not read replies');
   });
 
-  test('renderDecisionThreadEmail: verdict, condition, note, signature, quoted history newest first, no app link for the requester', () => {
+  test('renderDecisionThreadEmail: verdict first, condition, note, signature; no app link for the requester', () => {
     const html = renderDecisionThreadEmail({
-      workspaceName: 'IT', categoryName: 'Security', ticket: { ref: 'TP-1', subject: 'Laptop', appUrl: null },
+      categoryName: 'Security', ticket: { ref: 'TP-1', subject: 'Laptop', appUrl: null },
       approved: true, approverName: 'Neville', note: 'Go ahead', conditionNote: 'UAT only', signatureHtml: '<p>Neville · CISO</p>',
-      recipient: { role: 'requester', name: 'Rita Requester' }, requester: { name: 'Rita Requester' },
-      requestNote: 'Please approve', requestedByName: 'Mehdi',
-      thread: [
-        { kind: 'question', author: { name: 'Neville' }, bodyText: 'Which env?', createdAt: '2026-09-16T10:00:00Z' },
-        { kind: 'answer', author: { name: 'Rita' }, bodyText: 'DEV only', createdAt: '2026-09-16T11:00:00Z' },
-      ],
+      recipient: { role: 'requester', name: 'Rita Requester' }, requester: { name: 'Rita Requester' }, requestedByName: 'Mehdi',
     });
-    expect(html).toContain('Hi Rita,');
-    expect(html).toContain('<b>Neville</b> has <span');
-    expect(html).toContain('approved with condition</span> the request.');
-    expect(html).toContain('UAT only');
+    expect(html).toContain('<b>Approved with condition.</b> Your Security request, TP-1.');
+    expect(html).toContain('Condition:</span> UAT only');
     expect(html).toContain('Go ahead');
     expect(html).toContain('Neville · CISO');
-    expect(html).toContain('History');
-    expect(html.indexOf('DEV only')).toBeLessThan(html.indexOf('Which env?')); // newest first
-    expect(html).toContain('asked for approval:');
     expect(html).not.toContain('Open the ticket');
-    const rejected = renderDecisionThreadEmail({ ticket: { ref: 'TP-1', subject: 'x', appUrl: 'https://app/t/1' }, approved: false, approverName: 'N', recipient: { role: 'approver', name: 'Vahid' }, thread: [] });
-    expect(rejected).toContain('not approved</span> the request'); // reads "N has not approved the request"
+    const rejected = renderDecisionThreadEmail({ ticket: { ref: 'TP-1', subject: 'x', appUrl: 'https://app/t/1' }, approved: false, approverName: 'N', recipient: { role: 'approver', name: 'Vahid' } });
+    expect(rejected).toContain('<b>Not approved.</b>');
     expect(rejected).toContain('Open the ticket');
   });
 

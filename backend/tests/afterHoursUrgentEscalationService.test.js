@@ -47,6 +47,9 @@ const prismaMock = {
   technician: {
     findMany: jest.fn(),
   },
+  workspaceAccess: {
+    findMany: jest.fn(),
+  },
   ticket: {
     update: jest.fn(),
   },
@@ -131,7 +134,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { default: afterHoursUrgentEscalationService } = await import('../src/services/afterHoursUrgentEscalationService.js');
+const { default: afterHoursUrgentEscalationService, workspacePeople } = await import('../src/services/afterHoursUrgentEscalationService.js');
 
 describe('afterHoursUrgentEscalationService', () => {
   beforeEach(() => {
@@ -297,6 +300,44 @@ describe('afterHoursUrgentEscalationService', () => {
       ready: false,
       warnings: expect.arrayContaining(['not_enabled_by_user', 'missing_phone', 'phone_not_verified']),
     }));
+  });
+
+  test('lists only people in the workspace, once per e-mail, with readable names', async () => {
+    prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'Mona.Member@x.io' }]);
+    prismaMock.technician.findMany.mockResolvedValue([
+      { id: 17, name: 'Alex Agent', email: 'alex@x.io', isActive: true, origin: 'freshservice', notificationPreference: null },
+      // Same person as a local agent and as a former FreshService agent.
+      { id: 30, name: 'Dana Double', email: 'dana@x.io', isActive: false, origin: 'freshservice', notificationPreference: null },
+      { id: 31, name: 'Dana Double', email: 'DANA@x.io', isActive: true, origin: 'local', notificationPreference: null },
+      // Vendor agent, no longer active and not an app member.
+      { id: 40, name: 'Vera Vendor', email: 'vera@vendor.example', isActive: false, origin: 'freshservice', notificationPreference: null },
+      // App member who is not an agent; name stored as UTF-8 read as CP437.
+      { id: 50, name: 'Mona-H├⌐l├¿ne Member', email: 'mona.member@x.io', isActive: false, origin: 'freshservice', notificationPreference: null },
+      { id: 60, name: 'Ari Assignable', email: 'ari@x.io', isActive: false, assignableOnly: true, origin: 'freshservice', notificationPreference: null },
+    ]);
+
+    const result = await afterHoursUrgentEscalationService.listCandidates(5);
+    const byId = Object.fromEntries(result.candidates.map((candidate) => [candidate.id, candidate]));
+
+    expect(Object.keys(byId).map(Number).sort((a, b) => a - b)).toEqual([17, 31, 50, 60]);
+    expect(byId[31].membership).toBe('agent');
+    expect(byId[50]).toEqual(expect.objectContaining({ membership: 'member', name: 'Mona-Hélène Member' }));
+    expect(byId[60].membership).toBe('assignable');
+  });
+
+  test('keeps a picked person listed even when they left the workspace', () => {
+    const people = workspacePeople([
+      { id: 1, name: 'Old Owner', email: 'old@x.io', isActive: false, origin: 'freshservice' },
+      { id: 2, name: 'Pat Pair', email: 'pat@x.io', isActive: true, origin: 'freshservice' },
+      { id: 3, name: 'Pat Pair', email: 'pat@x.io', isActive: false, origin: 'local' },
+    ], { selectedIds: new Set([1, 3]) });
+
+    // The picked row of Pat stays (its settings are the ones alerts use);
+    // Pat still counts as an agent of the workspace through the other row.
+    expect(people.map(({ technician, membership }) => [technician.id, membership])).toEqual([
+      [1, 'outside'],
+      [3, 'agent'],
+    ]);
   });
 
   test('self-escalation updates local priority and queues alerts even if FreshService writeback fails', async () => {

@@ -7,6 +7,7 @@
 //
 // This service is the only writer of ticket_parks and of the denormalised
 // tickets.parked_until / park_kind columns.
+import { fromZonedTime } from 'date-fns-tz';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
@@ -64,16 +65,61 @@ function actorLabel(actor) {
   return actor?.name || actor?.email || 'Ticket Pulse';
 }
 
-function parseUntil(raw) {
+// QA 10-26 #2: a park "until <day>" wakes at 08:00 on that day in the zone of
+// the person it comes back to — the assignee's time zone; with no assignee,
+// the requester's (Entra location), else the workspace's. It used to be a
+// fixed 15:00 UTC (08:00 Vancouver), so an Ottawa agent's tickets woke at
+// 11:00. IANA zones through Intl, never fixed offsets (BC is UTC-7 for good
+// from 1 Nov 2026; the image carries the updated time zone data).
+export const PARK_WAKE_HOUR = 8;
+export const DEFAULT_PARK_ZONE = 'America/Vancouver';
+
+export function validTimeZone(tz) {
+  const text = String(tz || '').trim();
+  if (!text) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: text });
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+/** "America/Toronto" → "Toronto time". */
+export function timeZoneLabel(tz) {
+  const city = String(tz || '').split('/').pop().replace(/_/g, ' ');
+  return city ? `${city} time` : 'local time';
+}
+
+/** 08:00 on `day` (YYYY-MM-DD) in `timeZone`, as an instant. */
+export function wakeInstant(day, timeZone = DEFAULT_PARK_ZONE) {
+  const hh = String(PARK_WAKE_HOUR).padStart(2, '0');
+  return fromZonedTime(`${day}T${hh}:00:00`, validTimeZone(timeZone) || DEFAULT_PARK_ZONE);
+}
+
+function parseUntil(raw, timeZone = DEFAULT_PARK_ZONE) {
   if (raw instanceof Date) return raw;
   const text = String(raw ?? '').trim();
   if (!text) return null;
-  // A bare date ("2026-10-05") means the START of that local business day;
-  // keep it simple and wake at 07:00 UTC-ish via noon-safe parsing: treat
-  // it as 08:00 America/Vancouver by adding the offset explicitly.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return new Date(`${text}T15:00:00.000Z`);
+  // A bare date ("2026-10-05") means the start of that working day where the
+  // ticket's person is: 08:00 in `timeZone`. A full timestamp is kept as given.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return wakeInstant(text, timeZone);
   const d = new Date(text);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Which zone a park on this ticket wakes in. Pure: the ticket carries
+ * assignedTech { name, timezone } and requester { entra* } when known.
+ * Returns { timeZone, label, source: 'assignee' | 'requester' | 'workspace', who? }.
+ */
+export function resolveWakeZone(ticket, { workspaceTimeZone = null, requesterTimeZone = null } = {}) {
+  const techTz = ticket?.assignedTech ? validTimeZone(ticket.assignedTech.timezone) : null;
+  if (techTz) return { timeZone: techTz, label: timeZoneLabel(techTz), source: 'assignee', who: ticket.assignedTech.name || null };
+  const reqTz = validTimeZone(requesterTimeZone);
+  if (reqTz) return { timeZone: reqTz, label: timeZoneLabel(reqTz), source: 'requester' };
+  const wsTz = validTimeZone(workspaceTimeZone) || DEFAULT_PARK_ZONE;
+  return { timeZone: wsTz, label: timeZoneLabel(wsTz), source: 'workspace' };
 }
 
 function cleanWaitingOn(list) {
@@ -90,11 +136,11 @@ function cleanWaitingOn(list) {
 }
 
 /** Validation shared by the API, the UI routes, workflows and bulk. */
-export function validatePark({ kind, until, reason, waitingOn } = {}, { now = new Date(), requesterEmail = null, allowSystemKinds = false } = {}) {
+export function validatePark({ kind, until, reason, waitingOn } = {}, { now = new Date(), requesterEmail = null, allowSystemKinds = false, timeZone = DEFAULT_PARK_ZONE } = {}) {
   if (!PARK_KINDS.includes(kind) && !(allowSystemKinds && SYSTEM_PARK_KINDS.includes(kind))) {
     throw new ValidationError(`kind must be one of: ${PARK_KINDS.join(', ')}`);
   }
-  const date = parseUntil(until);
+  const date = parseUntil(until, timeZone);
   if (!date) throw new ValidationError('A date is required (until / chase-on / ETA)');
   if (date.getTime() <= now.getTime()) throw new ValidationError('The date must be in the future');
   const max = new Date(now.getTime() + MAX_PARK_DAYS * 86400e3);
@@ -138,12 +184,36 @@ class TicketParkService {
       select: {
         id: true, workspaceId: true, origin: true, status: true, subject: true, dueBy: true, dueBySetBy: true,
         nativeNumber: true, freshserviceTicketId: true, parkedUntil: true, parkKind: true, assignedTechId: true,
-        requester: { select: { email: true } },
-        assignedTech: { select: { id: true, name: true, email: true } },
+        requester: { select: { email: true, entraOfficeLocation: true, entraCity: true, entraState: true, entraCountry: true, entraCountryCode: true } },
+        assignedTech: { select: { id: true, name: true, email: true, timezone: true } },
       },
     });
     if (!ticket) throw new NotFoundError('Ticket not found');
     return ticket;
+  }
+
+  /** The zone a park on this (loaded) ticket wakes in — see resolveWakeZone. */
+  async _wakeZone(ticket) {
+    const [workspace, requesterTimeZone] = await Promise.all([
+      Promise.resolve()
+        .then(() => prisma.workspace.findUnique({ where: { id: Number(ticket.workspaceId) }, select: { defaultTimezone: true } }))
+        .catch(() => null),
+      ticket.assignedTech?.timezone || !ticket.requester
+        ? null
+        : import('./requesterProfileService.js')
+          .then(({ requesterEntraTimeZone }) => requesterEntraTimeZone(ticket.requester))
+          .catch(() => null),
+    ]);
+    return resolveWakeZone(ticket, { workspaceTimeZone: workspace?.defaultTimezone || null, requesterTimeZone });
+  }
+
+  /** For the ticket page: where a park "until <day>" would wake. Null on a failure. */
+  async wakeZoneFor(ticketId, workspaceId) {
+    try {
+      return await this._wakeZone(await this._loadTicket(ticketId, workspaceId));
+    } catch {
+      return null;
+    }
   }
 
   async activePark(ticketId) {
@@ -197,7 +267,8 @@ class TicketParkService {
     if (['Deleted', 'Spam'].includes(ticket.status)) throw new ValidationError('A deleted ticket cannot be parked');
     const base = await statusService.resolveBaseStatus(workspaceId, ticket.status);
     if (base === 'Resolved' || base === 'Closed') throw new ValidationError('A resolved or closed ticket cannot be parked — reopen it first');
-    const clean = validatePark(input, { requesterEmail: ticket.requester?.email || null, allowSystemKinds: source === 'auto_help' });
+    const wakeZone = await this._wakeZone(ticket);
+    const clean = validatePark(input, { requesterEmail: ticket.requester?.email || null, allowSystemKinds: source === 'auto_help', timeZone: wakeZone.timeZone });
     const existing = await this.activePark(ticket.id);
 
     // Status first: if FreshService refuses Pending, nothing is parked.
@@ -245,13 +316,14 @@ class TicketParkService {
         reason: clean.reason,
         waitingOn: clean.waitingOn,
         source,
+        wakeTimeZone: wakeZone.timeZone,
         ...(existing ? { previousUntil: existing.until } : {}),
       },
     }).catch(() => {});
     this._emit('ticket.parked', ticket.id, { parkId: park.id, kind: clean.kind, until: clean.until.toISOString(), reason: clean.reason, source, extended: Boolean(existing), actor: { name: actorLabel(actor) } });
     this._broadcast({ ...ticket, parkedUntil: clean.until, parkKind: clean.kind }, 'parked');
-    logger.info(`Ticket ${ticketDisplayRef(ticket)} parked until ${clean.until.toISOString()} (${clean.kind}) by ${actorLabel(actor)}`);
-    return { park: parkView(park), extended: Boolean(existing) };
+    logger.info(`Ticket ${ticketDisplayRef(ticket)} parked until ${clean.until.toISOString()} (${clean.kind}, ${wakeZone.timeZone}) by ${actorLabel(actor)}`);
+    return { park: parkView(park), extended: Boolean(existing), wakeZone };
   }
 
   /**

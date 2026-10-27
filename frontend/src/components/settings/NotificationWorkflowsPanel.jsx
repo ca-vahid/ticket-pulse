@@ -71,6 +71,7 @@ import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowListPage from './WorkflowListPage';
+import { canAddVariant } from './WorkflowIndex';
 import RunResultView, { formatDuration } from './workflowRun/RunResultView';
 import WorkflowPreviewPage, {
   IconSelect,
@@ -11479,7 +11480,8 @@ export default function NotificationWorkflowsPanel({
                       <div className="fixed inset-0 z-30" onClick={() => setMoreMenuOpen(false)} />
                       <div role="menu" aria-label="More workflow actions" className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-border bg-card p-1 shadow-xl">
                         {[
-                          { key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving || !selected, onClick: () => setVariantDialogOpen(true), title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' },
+                          // QA 10-26 #1: only where a variant can apply (canAddVariant).
+                          ...(canAddVariant(selected) ? [{ key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving, onClick: () => setVariantDialogOpen(true), title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' }] : []),
                           { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || (selected?.isDefaultVariant && !selected?.archivedAt), onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant && !selected?.archivedAt ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
                           ...(selected?.archivedAt && !selected?.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', Icon: Trash2, danger: true, disabled: saving || !selected, onClick: () => setDeleteConfirm({ workflow: selected }), title: 'Permanently delete this archived variant and its workflow audit history.' }] : []),
                           { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => loadWorkflows(selected?.id) },

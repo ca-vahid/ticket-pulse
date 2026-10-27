@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  BellRing,
   CheckCircle2,
   Clock3,
   Mail,
@@ -9,16 +8,14 @@ import {
   PhoneCall,
   RefreshCw,
   Save,
-  Search,
   ShieldAlert,
   Smartphone,
-  UserPlus,
-  X,
 } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { SettingsHero, StatusBanner } from './SettingsLayoutPrimitives';
+import EscalationPeople from './urgentResponse/EscalationPeople';
 
 const CHANNEL_META = {
   email: { label: 'Email', Icon: Mail },
@@ -43,38 +40,6 @@ const PROVIDER_WARNING_LABELS = {
 function friendlyProviderWarning(missing = []) {
   const parts = (missing || []).map((key) => PROVIDER_WARNING_LABELS[key] || key);
   return parts.join('; ');
-}
-
-const RECIPIENT_BUCKET_HELP = {
-  roster: 'Escalation roster: the core after-hours list. These users are alerted for automatic after-hours urgent detections AND when a requester clicks the after-hours immediate-support button. The phone number shown in after-hours e-mails is the on-call person\'s, from the On-call tab.',
-  self: 'Extra self-escalation recipients: alerted ONLY when a requester clicks the after-hours immediate-support button. They are added on top of the roster for those requester-initiated escalations, and are never paged by automatic detection.',
-  supervisor: 'Business-hours supervisors: alerted ONLY when a requester raises a ticket to Urgent from the public ticket page during business hours. They are never paged after hours.',
-};
-
-function readinessTone(readiness) {
-  if (readiness?.pausedByWorkspace) return 'border-border bg-muted text-muted-foreground/75 line-through decoration-gray-400/60';
-  if (readiness?.ready) return 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200';
-  if (readiness?.enabled) return 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200';
-  return 'border-border bg-muted/50 text-muted-foreground';
-}
-
-function ChannelChip({ readiness }) {
-  const meta = CHANNEL_META[readiness?.channel] || { label: readiness?.channel || 'Channel', Icon: BellRing };
-  const Icon = meta.Icon;
-  const tooltip = readiness?.pausedByWorkspace
-    ? `${meta.label} is paused for this workspace`
-    : readiness?.ready
-      ? `${meta.label} ready`
-      : readiness?.warnings?.join(', ') || `${meta.label} not ready`;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${readinessTone(readiness)}`}
-      title={tooltip}
-    >
-      <Icon className="h-3 w-3" />
-      {meta.label}
-    </span>
-  );
 }
 
 function ToggleCard({ enabled, title, description, onClick }) {
@@ -151,76 +116,6 @@ function IntegratedStatusCard({ tone = 'blue', label, status, detail }) {
       <div className="text-xs font-semibold uppercase">{label}</div>
       <div className="mt-1 text-sm font-semibold text-foreground">{status}</div>
       {detail && <div className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</div>}
-    </div>
-  );
-}
-
-function CandidateRow({
-  candidate,
-  selectedBase,
-  selectedSelfExtra,
-  selectedBusinessSupervisor,
-  onToggleBase,
-  onToggleSelfExtra,
-  onToggleBusinessSupervisor,
-}) {
-  const channels = Object.values(candidate.channels || {});
-  return (
-    <div className="grid grid-cols-[minmax(220px,1.1fr)_minmax(260px,1.2fr)_auto_auto_auto] items-center gap-3 border-b border-border/60 px-4 py-3 last:border-b-0">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-blue-50 dark:bg-blue-500/15 text-sm font-semibold text-blue-700 dark:text-blue-200">
-            {candidate.photoUrl
-              ? <img src={candidate.photoUrl} alt="" className="h-full w-full object-cover" />
-              : (candidate.name || '?').slice(0, 1)}
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-foreground">{candidate.name}</div>
-            <div className="truncate text-xs text-muted-foreground">{candidate.email || 'No email on technician record'}</div>
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {channels.map((readiness) => (
-          <ChannelChip key={readiness.channel} readiness={readiness} />
-        ))}
-        {candidate.readyChannelCount === 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-[11px] font-semibold text-red-700 dark:text-red-200">
-            <AlertTriangle className="h-3 w-3" />
-            No ready channel
-          </span>
-        )}
-      </div>
-      <button
-        type="button"
-        onClick={() => onToggleBase(candidate.id)}
-        title={RECIPIENT_BUCKET_HELP.roster}
-        className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          selectedBase ? 'border-blue-300 dark:border-blue-500/40 bg-blue-600 text-white' : 'border-border bg-card text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40'
-        }`}
-      >
-        {selectedBase ? 'Roster' : 'Add roster'}
-      </button>
-      <button
-        type="button"
-        onClick={() => onToggleSelfExtra(candidate.id)}
-        title={RECIPIENT_BUCKET_HELP.self}
-        className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          selectedSelfExtra ? 'border-purple-300 dark:border-purple-500/40 bg-purple-600 text-white' : 'border-border bg-card text-foreground/85 hover:border-purple-300 dark:hover:border-purple-500/40'
-        }`}
-      >
-        {selectedSelfExtra ? 'Self extra' : 'Add self'}
-      </button>
-      <button
-        type="button"
-        onClick={() => onToggleBusinessSupervisor(candidate.id)}
-        title={RECIPIENT_BUCKET_HELP.supervisor}
-        className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          selectedBusinessSupervisor ? 'border-orange-300 dark:border-orange-500/40 bg-orange-600 text-white' : 'border-border bg-card text-foreground/85 hover:border-orange-300 dark:hover:border-orange-500/40'
-        }`}
-      >
-        {selectedBusinessSupervisor ? 'Supervisor' : 'Add supervisor'}
-      </button>
     </div>
   );
 }
@@ -325,7 +220,6 @@ export default function UrgentEscalationPanel({ onOpenOnCall = null } = {}) {
   const [draft, setDraft] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [providerStatus, setProviderStatus] = useState({});
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
@@ -375,27 +269,6 @@ export default function UrgentEscalationPanel({ onOpenOnCall = null } = {}) {
   const selectedSelfExtra = useMemo(() => new Set(draft?.selfExtraRecipientIds || []), [draft?.selfExtraRecipientIds]);
   const selectedBusinessSupervisor = useMemo(() => new Set(draft?.businessSupervisorRecipientIds || []), [draft?.businessSupervisorRecipientIds]);
 
-  const filteredCandidates = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return candidates;
-    return candidates.filter((candidate) => {
-      const channelText = Object.values(candidate.channels || {})
-        .flatMap((channel) => [
-          channel.label,
-          channel.recipient,
-          ...(channel.warnings || []),
-        ]);
-      return [
-        candidate.name,
-        candidate.email,
-        ...channelText,
-      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(q));
-    });
-  }, [candidates, search]);
-
-  const selectedBaseUsers = candidates.filter((candidate) => selectedBase.has(candidate.id));
-  const selectedSelfUsers = candidates.filter((candidate) => selectedSelfExtra.has(candidate.id));
-  const selectedBusinessSupervisorUsers = candidates.filter((candidate) => selectedBusinessSupervisor.has(candidate.id));
   const pausedChannels = useMemo(() => new Set(draft?.disabledChannels || []), [draft?.disabledChannels]);
   const providerWarnings = Object.entries(providerStatus || {})
     .filter(([channel, value]) => value?.configured !== true && !pausedChannels.has(channel))
@@ -608,7 +481,7 @@ export default function UrgentEscalationPanel({ onOpenOnCall = null } = {}) {
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-300" />
             <div>
-              <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">Provider readiness warnings</div>
+              <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">Some channels are not set up yet</div>
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-amber-800 dark:text-amber-200">
                 {providerWarnings.map((warning) => (
                   <li key={warning}>{warning}</li>
@@ -669,124 +542,11 @@ export default function UrgentEscalationPanel({ onOpenOnCall = null } = {}) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
-        <div className="border-b border-border p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">Escalation recipients</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Roster users receive automatic and after-hours immediate-support alerts. Extra self-escalation users are added only for after-hours requester clicks. Supervisors are only used for business-hours urgency raises when that toggle is on.
-              </p>
-            </div>
-            <div className="relative min-w-[280px]">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground/75" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search users"
-                className="w-full rounded-lg border border-input py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
-              />
-            </div>
-          </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            Showing {filteredCandidates.length} of {candidates.length} workspace users.
-          </div>
-
-          <div className="mt-4 grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 p-3" title={RECIPIENT_BUCKET_HELP.roster}>
-              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-blue-700 dark:text-blue-200">
-                Escalation roster
-                <span className="cursor-help rounded-full bg-blue-100 dark:bg-blue-500/20 px-1.5 text-[10px] font-bold normal-case text-blue-600 dark:text-blue-300">?</span>
-              </div>
-              <div className="mt-0.5 text-[11px] leading-4 text-blue-700/80">Automatic after-hours alerts + requester immediate-support clicks</div>
-              <div className="mt-1 text-sm font-semibold text-foreground">{selectedBaseUsers.length} selected</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedBaseUsers.length === 0 && <span className="text-xs text-blue-700 dark:text-blue-200">No users selected yet.</span>}
-                {selectedBaseUsers.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    onClick={() => toggleId('baseRecipientIds', candidate.id)}
-                    className="inline-flex items-center gap-1 rounded-full bg-card px-2 py-1 text-xs font-semibold text-blue-800 dark:text-blue-200 ring-1 ring-blue-200 dark:ring-blue-500/30"
-                  >
-                    {candidate.name}
-                    <X className="h-3 w-3" />
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-lg border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/15 p-3" title={RECIPIENT_BUCKET_HELP.self}>
-              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-purple-700 dark:text-purple-200">
-                Extra self-escalation recipients
-                <span className="cursor-help rounded-full bg-purple-100 dark:bg-purple-500/20 px-1.5 text-[10px] font-bold normal-case text-purple-600 dark:text-purple-300">?</span>
-              </div>
-              <div className="mt-0.5 text-[11px] leading-4 text-purple-700/80">Only when a requester clicks the after-hours support button</div>
-              <div className="mt-1 text-sm font-semibold text-foreground">{selectedSelfUsers.length} selected</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedSelfUsers.length === 0 && <span className="text-xs text-purple-700 dark:text-purple-200">No extra users selected.</span>}
-                {selectedSelfUsers.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    onClick={() => toggleId('selfExtraRecipientIds', candidate.id)}
-                    className="inline-flex items-center gap-1 rounded-full bg-card px-2 py-1 text-xs font-semibold text-purple-800 dark:text-purple-200 ring-1 ring-purple-200 dark:ring-purple-500/30"
-                  >
-                    {candidate.name}
-                    <X className="h-3 w-3" />
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-lg border border-orange-200 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/15 p-3" title={RECIPIENT_BUCKET_HELP.supervisor}>
-              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-orange-700 dark:text-orange-200">
-                Business-hours supervisors
-                <span className="cursor-help rounded-full bg-orange-100 dark:bg-orange-500/20 px-1.5 text-[10px] font-bold normal-case text-orange-600 dark:text-orange-300">?</span>
-              </div>
-              <div className="mt-0.5 text-[11px] leading-4 text-orange-700/80">Only for requester urgency raises during business hours</div>
-              <div className="mt-1 text-sm font-semibold text-foreground">{selectedBusinessSupervisorUsers.length} selected</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedBusinessSupervisorUsers.length === 0 && <span className="text-xs text-orange-700 dark:text-orange-200">No supervisors selected.</span>}
-                {selectedBusinessSupervisorUsers.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    onClick={() => toggleId('businessSupervisorRecipientIds', candidate.id)}
-                    className="inline-flex items-center gap-1 rounded-full bg-card px-2 py-1 text-xs font-semibold text-orange-800 dark:text-orange-200 ring-1 ring-orange-200 dark:ring-orange-500/30"
-                  >
-                    {candidate.name}
-                    <X className="h-3 w-3" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <div className="min-w-[1040px]">
-            {filteredCandidates.map((candidate) => (
-              <CandidateRow
-                key={candidate.id}
-                candidate={candidate}
-                selectedBase={selectedBase.has(candidate.id)}
-                selectedSelfExtra={selectedSelfExtra.has(candidate.id)}
-                selectedBusinessSupervisor={selectedBusinessSupervisor.has(candidate.id)}
-                onToggleBase={(id) => toggleId('baseRecipientIds', id)}
-                onToggleSelfExtra={(id) => toggleId('selfExtraRecipientIds', id)}
-                onToggleBusinessSupervisor={(id) => toggleId('businessSupervisorRecipientIds', id)}
-              />
-            ))}
-            {filteredCandidates.length === 0 && (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                <UserPlus className="mx-auto mb-2 h-5 w-5 text-muted-foreground/75" />
-                {candidates.length === 0
-                  ? 'No workspace users loaded. Click Refresh to try again.'
-                  : 'No users match this search.'}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <EscalationPeople
+        candidates={candidates}
+        selected={{ base: selectedBase, self: selectedSelfExtra, supervisor: selectedBusinessSupervisor }}
+        onToggle={toggleId}
+      />
 
       <AfterHoursNumberCard
         contact={policy?.afterHoursActiveContact}

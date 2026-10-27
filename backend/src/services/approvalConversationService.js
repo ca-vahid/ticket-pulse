@@ -468,17 +468,50 @@ class ApprovalConversationService {
     }
   }
 
+  /**
+   * An INTERNAL question / comment (approvers + the agent; never the
+   * requester) in the reply format (26 Oct 2026): the author's words and
+   * signature, one grey hint, an "Internal" line, then the whole conversation
+   * so far. Still one e-mail per person, each with its own reply token and
+   * +ap plus-address Reply-To, exactly as before.
+   */
   async _emailRecipients(approval, parts, message, { toList, ccList, authorName, authorRole }) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return;
     const ticket = parts.ticket;
     if (!ticket) return;
-    const ingest = await pickIngestMailbox(approval.workspaceId).catch(() => null);
-    const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
-    const threadForAudience = await this.listForGroup(message.requestGroupId, { audience: message.audience === 'internal' ? null : 'requester' });
-    const prior = threadForAudience.filter((m) => m.id !== message.id);
-    const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
-    const ref = ticketDisplayRef(ticket);
-    for (const person of [...toList, ...ccList]) {
+    const from = { email: lc(message.authorEmail), name: authorName, role: authorRole };
+    const mail = await this._internalMail(approval, parts, message, { from });
+    const everyone = [...toList, ...ccList];
+    for (const person of everyone) {
+      const copied = everyone.filter((p) => p.email !== person.email).map((p) => String(p.name || p.email).trim().split(/\s+/)[0]);
+      await this._sendInternal(approval, parts, message, person, { ...mail, from, copied, webLink: true });
+    }
+  }
+
+  /** What every copy of an internal message shares: the author's signature and the history. */
+  async _internalMail(approval, parts, message, { from }) {
+    const { approvalHistory, requestNoteEntry, savedSignatureHtml } = await import('./approvalReplyMail.js');
+    const [signatureHtml, history, ingest] = await Promise.all([
+      from.role === 'requester' ? null : savedSignatureHtml(approval.workspaceId, from.email),
+      approvalHistory({
+        ticketId: parts.ticket.id, requestGroupId: message.requestGroupId, audience: 'internal',
+        skip: (m) => m.id === message.id,
+        reply: { text: message.bodyText, authorName: from.name, authorEmail: from.email },
+        requestNote: requestNoteEntry(approval, parts.agent?.name || null),
+      }),
+      pickIngestMailbox(approval.workspaceId).catch(() => null),
+    ]);
+    return { signatureHtml, history, ingest };
+  }
+
+  /**
+   * One internal e-mail to one person, with their own reply token (link +
+   * +ap plus-address Reply-To). `decideUrl` adds "Decide on this request →"
+   * for an approver who now has to decide. Never throws.
+   */
+  async _sendInternal(approval, parts, message, person, { from, signatureHtml, history, ingest, copied = [], decideUrl = null, webLink = false }) {
+    const ticket = parts.ticket;
+    try {
       const token = newToken();
       const plusKey = plusKeyFor(token);
       await prisma.approvalReplyToken.create({
@@ -488,27 +521,32 @@ class ApprovalConversationService {
           expiresAt: new Date(Date.now() + REPLY_TOKEN_DAYS * 24 * 60 * 60 * 1000),
         },
       }).catch((err) => logger.warn(`Approval reply token write failed for ${person.email}: ${err.message}`));
-      const replyUrl = `${publicBaseUrl()}/approval-reply/${encodeURIComponent(token)}`;
+      const replyUrl = webLink ? `${publicBaseUrl()}/approval-reply/${encodeURIComponent(token)}` : null;
       let replyTo = null;
       if (ingest?.address) {
         const [local, domain] = String(ingest.address).toLowerCase().split('@');
         if (local && domain) replyTo = `${local.replace(/\+.*$/, '')}+ap${plusKey}@${domain}`;
       }
-      const isCc = ccList.includes(person);
-      const subject = `${message.kind === 'question' ? 'Question' : 'Note'} on ${category?.name ? `${category.name} approval` : 'an approval'}: ${ticket.subject || 'ticket'} [${ref}]`;
-      const html = renderApprovalMessageEmail({
-        kind: message.kind, audience: message.audience, authorName, authorRole,
-        recipient: person, isCc, categoryName: category?.name || null,
-        ticket: { ref, subject: ticket.subject || null },
-        bodyHtml: message.bodyHtml, bodyText: message.bodyText,
-        thread: prior, replyUrl, canReplyByEmail: Boolean(replyTo),
-        internalNote: message.audience === 'internal',
+      const body = renderApprovalMessageEmail({
+        kind: message.kind, authorName: from.name, via: message.via,
+        bodyHtml: message.bodyHtml, bodyText: message.bodyText, signatureHtml,
+        replyUrl, canReplyByEmail: Boolean(replyTo), decideUrl,
+        requesterName: parts.requester?.name || null, internalNote: true, copied,
       });
-      try {
-        await deliverTransactionalEmail({ workspaceId: approval.workspaceId, to: [person.email], subject, html, label: 'approval question', replyTo, fromName: `${authorName} via Ticket Pulse` });
-      } catch (err) {
-        logger.warn(`Approval ${message.kind} e-mail to ${person.email} failed (non-fatal): ${err.message}`);
-      }
+      const { replySubject, plainTextOf, viaTicketPulse } = await import('./approvalReplyMail.js');
+      const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
+      await deliverTransactionalEmail({
+        workspaceId: approval.workspaceId, to: [person.email],
+        subject: replySubject(ticket.subject, ticketDisplayRef(ticket)),
+        html: `${body}${history?.html || ''}`, text: `${plainTextOf(body)}${history?.text || ''}`, attachments: history?.attachments || [],
+        label: message.kind === 'answer' ? 'approval answer' : 'approval question',
+        // `ticket` threads the mail under the ticket's conversation; only with
+        // the plus-address, so a reply never falls back to the ticket's own
+        // +tp address (a reply here answers the approval, not the ticket).
+        replyTo, fromName: viaTicketPulse(from.name || from.email), ...(replyTo ? { ticket } : {}),
+      });
+    } catch (err) {
+      logger.warn(`Approval ${message.kind} e-mail to ${person.email} failed (non-fatal): ${err.message}`);
     }
   }
 
@@ -665,40 +703,47 @@ class ApprovalConversationService {
     return this._emailAsReply(approval, parts, answer, { toList, ccList, from, relayed: true });
   }
 
-  /** Every open approver in the group hears an answer (and the asker if they are closed out, e.g. Tier 1 after escalation). */
+  /**
+   * An answer to an INTERNAL question (26 Oct 2026, mirroring _relayAnswer):
+   * every open approver who now has to decide gets the answer on their own,
+   * with a fresh "Decide on this request →" link (the row reopens if a
+   * question had parked it); the asker, when they no longer hold an open row
+   * (e.g. Tier 1 after escalation), gets the answer too. Reply-format mail,
+   * internal audience: the requester is never on it.
+   */
   async _notifyApproversOfAnswer(approval, parts, question, answer, { name }) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return;
+    if (!parts.ticket) return;
     const { default: ticketApprovalService } = await import('./ticketApprovalService.js');
     const openRows = await prisma.ticketApproval.findMany({ where: { requestGroupId: question.requestGroupId, status: { in: OPEN_STATUSES } } });
+    const known = new Map([parts.agent, ...parts.approvers].filter(Boolean).map((p) => [p.email, p]));
+    const answerer = lc(answer.authorEmail);
+    const requesterEmail = parts.requester?.email || null;
     const notified = new Set();
+    const deciders = [];
     for (const row of openRows) {
-      if (lc(row.approverEmail) === lc(answer.authorEmail)) continue;
+      const email = lc(row.approverEmail);
+      if (!looksLikeEmail(email) || email === answerer || notified.has(email)) continue;
       if (waitingOn(readConditions(row.conditions), row.status) === 'it') continue; // the technician is the asker; they hear it below
-      notified.add(lc(row.approverEmail));
+      notified.add(email);
+      let decideUrl = null;
       try {
-        await ticketApprovalService.reissueLinkWithAnswer(row, { question: question.bodyText, answer: answer.bodyText, answeredBy: name });
+        ({ decisionUrl: decideUrl } = await ticketApprovalService.reopenWithFreshLink(row));
       } catch (err) {
-        logger.warn(`Answer notification to ${row.approverEmail} failed (non-fatal): ${err.message}`);
+        logger.warn(`Decision link for ${email} failed (non-fatal): ${err.message}`);
       }
+      deciders.push({ person: known.get(email) || { role: 'approver', email, name: row.approverName || null }, decideUrl });
     }
-    // The person who asked, when they no longer hold an open row (e.g. Tier 1 who escalated), still gets the answer.
+    const others = [];
     const asker = lc(question.authorEmail);
-    if (asker && !notified.has(asker) && asker !== lc(answer.authorEmail) && looksLikeEmail(asker)) {
-      try {
-        const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
-        const ticket = parts.ticket;
-        const ref = ticket ? ticketDisplayRef(ticket) : '';
-        const html = renderApprovalMessageEmail({
-          kind: 'answer', audience: answer.audience, authorName: name, authorRole: answer.authorRole,
-          recipient: { email: asker }, ticket: { ref, subject: ticket?.subject || null },
-          bodyHtml: answer.bodyHtml, bodyText: answer.bodyText, thread: [this._shape(question)], replyUrl: null, canReplyByEmail: false,
-          internalNote: answer.audience === 'internal',
-        });
-        await deliverTransactionalEmail({ workspaceId: approval.workspaceId, to: [asker], subject: `Answer on ${ticket?.subject || 'ticket'} [${ref}]`, html, label: 'approval answer' });
-      } catch (err) {
-        logger.warn(`Answer notification to asker ${asker} failed (non-fatal): ${err.message}`);
-      }
+    if (asker && !notified.has(asker) && asker !== answerer && asker !== requesterEmail && looksLikeEmail(asker)) {
+      others.push(known.get(asker) || { role: question.authorRole || 'agent', email: asker, name: question.authorName || null });
     }
+    if (!deciders.length && !others.length) return;
+    const from = { email: answerer, name, role: answer.authorRole };
+    const mail = await this._internalMail(approval, parts, answer, { from });
+    for (const d of deciders) await this._sendInternal(approval, parts, answer, d.person, { ...mail, from, decideUrl: d.decideUrl });
+    for (const p of others) await this._sendInternal(approval, parts, answer, p, { ...mail, from });
   }
 
   _broadcast(approval) {

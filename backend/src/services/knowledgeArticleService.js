@@ -116,11 +116,15 @@ function hashOf(title, text) {
   return crypto.createHash('sha256').update(`${title}\n${text}`).digest('hex');
 }
 
-/** The article content hash (title + plain text): the FreshService import compares with it. */
+/** The article content hash (title + plain text): the Confluence sync compares with it. */
 export const articleContentHash = hashOf;
 
-/** FreshService solution articles are edited in FreshService; the import keeps them in step. */
-export const FS_READ_ONLY_MESSAGE = 'This article comes from FreshService — edit it there; the nightly import brings the change in.';
+/**
+ * FreshService solution articles stay read-only here. The import that brought
+ * them in was removed on 26 Oct 2026 (QA 10-26 #7); any article it left keeps
+ * working (readable, quotable, archivable) but is never edited here.
+ */
+export const FS_READ_ONLY_MESSAGE = 'This article was imported from FreshService and is read-only here — edit it in FreshService, or archive it.';
 function assertEditable(row) {
   if (row?.source === 'fs_solution') throw new ValidationError(FS_READ_ONLY_MESSAGE);
 }
@@ -891,9 +895,9 @@ class KnowledgeArticleService {
         data: {
           status: 'archived',
           updatedBy: actor?.email || actor?.name || null,
-          // An imported FreshService article archived here stays archived:
-          // the nightly import does not bring it back.
-          // Same for a Confluence page: the nightly sync never proposes it again.
+          // An archived Confluence page is never proposed again by the nightly
+          // sync. (FreshService articles keep the same mark from when they
+          // had an import too; it was removed on 26 Oct 2026.)
           ...(existing.source === 'fs_solution' || existing.source === 'confluence'
             ? { sourceMeta: { ...(existing.sourceMeta && typeof existing.sourceMeta === 'object' ? existing.sourceMeta : {}), archivedInTp: true } }
             : {}),

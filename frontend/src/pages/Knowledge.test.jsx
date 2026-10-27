@@ -114,9 +114,8 @@ const growthApi = {
   gaps: vi.fn(() => Promise.resolve({ success: true, data: { playbooks: [], totals: { tickets: 0, clusters: 0 } } })),
   backtestStatus: vi.fn(() => Promise.resolve({ success: true, data: null })),
   backtestResults: vi.fn(() => Promise.resolve({ success: true, data: { counts: { total: 0 }, runs: [] } })),
-  getSettings: vi.fn(() => Promise.resolve({ success: true, data: { fsImportEnabled: false, fsFolderIds: ['7'], fsImportState: null, reviewDigestEnabled: true, fsCallsAllowed: false } })),
-  updateSettings: vi.fn((patch) => Promise.resolve({ success: true, data: { fsImportEnabled: false, fsFolderIds: ['7'], reviewDigestEnabled: true, fsCallsAllowed: false, ...patch } })),
-  fsFolders: vi.fn(() => Promise.resolve({ success: true, data: { categories: [{ id: '3', name: 'IT how-tos', folders: [{ id: '7', name: 'VPN', description: null }] }] } })),
+  getSettings: vi.fn(() => Promise.resolve({ success: true, data: { reviewDigestEnabled: true } })),
+  updateSettings: vi.fn((patch) => Promise.resolve({ success: true, data: { reviewDigestEnabled: true, ...patch } })),
 };
 // The Confluence card (Settings, QA 10-23 #4) only needs to load quietly here.
 const confluenceApi = { get: vi.fn(async () => ({ data: null })), runs: vi.fn(async () => ({ data: [] })) };
@@ -191,8 +190,9 @@ describe('Knowledge page', () => {
     const panel = await screen.findByTestId('knowledge-settings');
     expect(within(panel).getByRole('heading', { name: 'Auto-help' })).toBeInTheDocument();
     expect(within(panel).getByRole('heading', { name: 'Automated-answer line' })).toBeInTheDocument();
-    expect(await within(panel).findByRole('heading', { name: 'Knowledge sources' })).toBeInTheDocument();
     expect(await within(panel).findByRole('heading', { name: 'Reviews' })).toBeInTheDocument();
+    // QA 10-26 #7: the FreshService solution import card is gone.
+    expect(within(panel).queryByRole('heading', { name: 'Knowledge sources' })).toBeNull();
     expect(screen.getByTestId('autohelp-state')).toHaveTextContent('On · shadow');
     expect(screen.getByTestId('cost-spent')).toHaveTextContent(/1\.25 spent this month/);
     expect(screen.getByTestId('auto-locked')).toHaveTextContent('Auto sending is switched off in this build');
@@ -208,10 +208,9 @@ describe('Knowledge page', () => {
     fireEvent.change(cap, { target: { value: '80' } });
     fireEvent.blur(cap);
     await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({ monthlyCostCapUsd: 80 }));
-    // The FS import folder picker and the review e-mail switch are here too (managers).
-    expect(await screen.findByTestId('fs-folder-picker')).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: /Weekly review e-mail/ })).toBeChecked();
-    expect(screen.getByRole('button', { name: /Import now/ })).toBeInTheDocument();
+    // The review e-mail switch is here too (managers); no FreshService import.
+    expect(await screen.findByRole('switch', { name: /Weekly review e-mail/ })).toBeChecked();
+    expect(screen.queryByRole('button', { name: /Import now/ })).not.toBeInTheDocument();
     api.getSettings.mockImplementation(() => Promise.resolve({ success: true, data: SETTINGS }));
   });
 
@@ -294,11 +293,8 @@ describe('Knowledge page', () => {
     expect(screen.getByRole('switch', { name: /Thank the requester/ })).toBeDisabled();
     expect(screen.getByLabelText('Monthly cost cap')).toBeDisabled();
     expect(screen.queryByRole('button', { name: /Save wording/ })).not.toBeInTheDocument();
-    // Sources + reviews read-only: no folder list call, no Import now.
-    expect(await screen.findByTestId('fs-import-readonly')).toHaveTextContent('1 folder picked.');
-    expect(screen.getByRole('switch', { name: /Weekly review e-mail/ })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: /Import now/ })).not.toBeInTheDocument();
-    expect(growthApi.fsFolders).not.toHaveBeenCalled();
+    // Reviews read-only.
+    expect(await screen.findByRole('switch', { name: /Weekly review e-mail/ })).toBeDisabled();
     api.getSettings.mockResolvedValue({ success: true, data: SETTINGS });
   });
 

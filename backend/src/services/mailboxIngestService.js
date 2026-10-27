@@ -1237,6 +1237,7 @@ class MailboxIngestService {
         const { default: watcherNotificationService } = await import('./watcherNotificationService.js');
         watcherNotificationService.notify('requester_reply', ticket.id, {
           entryPreview: entry.bodyText || entry.content || null,
+          entryId: entry.id ?? null,
         }).catch(() => {});
       } catch { /* non-fatal */ }
 

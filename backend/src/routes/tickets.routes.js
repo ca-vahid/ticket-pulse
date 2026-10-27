@@ -704,6 +704,35 @@ router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, re
   res.json({ success: true, data: rows, meta: { heldCount } });
 }));
 
+// The queue grouped by device (QA 10-26 #3): one group per sender with three
+// or more held mails, alert kinds inside; everything else as `singles`.
+// Declared before /:heldId so "groups" is never read as an id.
+router.get('/mailboxes/held/groups', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  res.json({ success: true, data: await mailboxHoldService.listGroups(req.workspaceId) });
+}));
+
+// One decision for many: { ids, action: 'attach' | 'discard', ticketId? }.
+router.post('/mailboxes/held/bulk', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  const action = String(req.body?.action || '');
+  const ticketId = req.body?.ticketId !== undefined && req.body?.ticketId !== null ? Number(req.body.ticketId) : null;
+  if (action === 'attach' && (!Number.isInteger(ticketId) || ticketId <= 0)) throw new ValidationError('ticketId is required');
+  const result = await mailboxHoldService.bulk(req.workspaceId, req.body?.ids, action, { ticketId, actor: req.ticketActor });
+  res.json({ success: true, data: result });
+}));
+
+// Repeat alerts in a burst: off | shadow (default) | on. Reading is staff, changing is admin.
+router.get('/mailboxes/burst-grouping', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  res.json({ success: true, data: { mode: await mailboxHoldService.getBurstFoldMode(req.workspaceId) } });
+}));
+
+router.put('/mailboxes/burst-grouping', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  res.json({ success: true, data: { mode: await mailboxHoldService.setBurstFoldMode(req.workspaceId, req.body?.mode) } });
+}));
+
 // One held message in full (17 Oct 2026): the Tickets "unmatched replies"
 // popup shows the email and why it is waiting next to the choices.
 router.get('/mailboxes/held/:heldId', requireTicketingStaff, asyncHandler(async (req, res) => {
@@ -1721,6 +1750,14 @@ router.get('/:id', asyncHandler(async (req, res) => {
     const ticket = await ticketService.getTicket(ticketId, req.workspaceId, { reconcile });
     // Parked (plans/PARKED_BUILD_PLAN.md): the active park rides on the ticket.
     if (ticket?.parkedUntil) ticket.park = parkView(await ticketParkService.activePark(ticketId));
+    // QA 10-26 #2: the zone a park wakes in (the assignee's, else the
+    // requester's, else the workspace's) — the dialog and the park line say it.
+    if (ticket) {
+      const zone = await Promise.resolve()
+        .then(() => ticketParkService.wakeZoneFor(ticketId, req.workspaceId))
+        .catch(() => null);
+      if (zone) ticket.parkZone = zone;
+    }
     // Urgent response (plans/URGENT_RESPONSE_PLAN.md): the running clock rides
     // on the ticket. Only High / Urgent tickets with an owner can have one, so
     // every other ticket costs no read; a failure never fails the page.

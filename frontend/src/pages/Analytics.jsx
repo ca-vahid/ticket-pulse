@@ -564,6 +564,9 @@ function EmptyState({ text = 'No data for this range.' }) {
   return <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{text}</div>;
 }
 
+/** The sticky header of the Analytics tables: opaque, above the rows. */
+const STICKY_THEAD = 'sticky top-0 z-10 bg-muted shadow-[inset_0_-1px_0_hsl(var(--border))]';
+
 function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
   if (!rows?.length) return <EmptyState />;
   return (
@@ -586,7 +589,10 @@ function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
       </div>
       <div className={`hidden overflow-auto rounded-lg border border-border sm:block ${maxHeight}`}>
         <table className="min-w-full divide-y divide-border text-sm">
-          <thead className="sticky top-0 bg-muted/50">
+          {/* QA 10-26 #6: an opaque header above the rows — a translucent one
+              let the rows show through it when the table scrolls. The inset
+              shadow keeps the rule under the header (borders do not stick). */}
+          <thead className={STICKY_THEAD}>
             <tr>
               {columns.map((col) => (
                 <th key={col.key} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-normal text-muted-foreground">
@@ -3545,7 +3551,7 @@ export default function Analytics({ view = 'standard' }) {
         </div>
         <div className="hidden max-h-[31rem] overflow-auto rounded-lg border border-border sm:block">
           <table className="min-w-full divide-y divide-border text-sm">
-            <thead className="sticky top-0 bg-muted/50">
+            <thead className={STICKY_THEAD}>
               <tr>
                 {TEAM_TABLE_COLUMNS.map(([key, label, metricKey]) => (
                   /* Numbers sit flush under their titles: name stays left,
@@ -3739,7 +3745,7 @@ export default function Analytics({ view = 'standard' }) {
           </div>
           <div className="hidden overflow-auto rounded-lg border border-border sm:block">
             <table className="min-w-full divide-y divide-border text-sm">
-              <thead className="sticky top-0 bg-muted/50">
+              <thead className={STICKY_THEAD}>
                 <tr>
                   {[
                     ['name', 'Technician', 'text-left', null],

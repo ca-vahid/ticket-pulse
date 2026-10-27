@@ -311,9 +311,11 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.to).toEqual(['req@x.io']);
     expect(email.subject).toMatch(/^Approved:/);
-    expect(email.html).toContain('approved</span>'); // sentence case in the sentence; the eyebrow carries the capitals
+    // 26 Oct 2026: the approver's own message — verdict first, from them via Ticket Pulse.
+    expect(email.html).toContain('<b>Approved.</b>');
     expect(email.html).toContain('go ahead');
     expect(email.html).toContain('/tickets/501');
+    expect(email.fromName).toBe('Alice via Ticket Pulse');
   });
 
   test('reject emails the requester with the rejection', async () => {
@@ -323,7 +325,7 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.to).toEqual(['req@x.io']);
     expect(email.subject).toMatch(/^Not approved:/);
-    expect(email.html).toContain('not approved</span>');
+    expect(email.html).toContain('<b>Not approved.</b>');
     expect(email.html).toContain('no budget');
   });
 
@@ -398,7 +400,7 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.to).toEqual(['req@x.io']);
     expect(email.subject).toMatch(/^Not approved:/);
-    expect(email.html).toContain('changed the decision on your approval request');
+    expect(email.html).toContain('<b>Not approved.</b> (changed from approved)');
   });
 
   test('non-email requestedBy (legacy "unknown") skips the email', async () => {
@@ -696,8 +698,8 @@ describe('decideByToken (Phase AP: reject needs a reason, decisions show a perso
   });
 });
 
-describe('_emailApprover (Phase AP: people, category, requester title)', () => {
-  test('says "Note from <name>", adds the category line and the requester title', async () => {
+describe('_emailApprover (the agent\'s message to the approver, 26 Oct 2026)', () => {
+  test('greets the approver, says what is asked for whom (title), keeps the note and placeholders, one decide link', async () => {
     prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket, requester: { name: 'Rita', email: 'rita@x.io', jobTitle: 'Analyst' } });
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
     prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
@@ -705,21 +707,19 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'Need {{decision.url}} please' }, { email: 'jane.doe@x.io' });
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.html).toContain('Why Jane is asking');
-    expect(email.html).toContain('Jane Doe');
-    expect(email.html).not.toContain('jane.doe@x.io');
     expect(email.subject).toBe('Laptop purchase for Rita — New laptop [TP-ID-501]');
-    // The category is the title (29 Sep 2026 redesign).
-    expect(email.html).toContain('>Laptop purchase<');
-    expect(email.html).toContain('Requested for');
-    expect(email.html).toContain('>Rita<');
-    expect(email.html).toContain('Analyst');
-    expect(email.html).toContain('?intent=approve');
+    expect(email.fromName).toBe('Jane Doe via Ticket Pulse');
+    expect(email.html).toContain('Jane Doe asks you to approve Laptop purchase for Rita (Analyst) on ');
+    expect(email.html).not.toContain('jane.doe@x.io');
+    expect(email.html).toContain('Decide on this request');
+    expect(email.html).not.toContain('?intent=');
     // Placeholders still substitute.
     expect(email.html).toContain('review &amp; decide</a>');
+    // A plain-text twin with the decision address.
+    expect(email.text).toMatch(/Decide on this request <https?:\/\/\S+\/approval\/[^>\s]+>/);
   });
 
-  test('embeds people photos as inline (cid:) attachments — never a URL', async () => {
+  test('sends no people photos up top — the history carries them; never a URL', async () => {
     const { resetUserPhotoCache } = await import('../src/services/userPhotoService.js');
     resetUserPhotoCache();
     const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -731,15 +731,8 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'nophoto.agent@x.io' });
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
-    // Brand pictograms (cid:tp-*) are appended by the mail lane (17 Sep 2026); people photos are unchanged.
-    const people = email.attachments.filter((a) => !String(a.contentId || '').startsWith('tp-'));
-    expect(people).toEqual([
-      { name: 'requester-photo.png', contentType: 'image/png', contentBytes: PNG, contentId: 'requester-photo', inline: true },
-    ]);
-    // The request e-mail carries no brand pictograms since the 29 Sep 2026 redesign.
-    expect(email.attachments.filter((a) => String(a.contentId || '').startsWith('tp-'))).toEqual([]);
-    expect(email.html).toContain('<img src="cid:requester-photo"');
-    // The agent has no directory photo → initials, no dangling cid reference.
+    expect((email.attachments || []).map((a) => a.contentId)).not.toContain('requester-photo');
+    expect(email.html).not.toContain('cid:requester-photo');
     expect(email.html).not.toContain('cid:requested-by-photo');
     expect(email.html).not.toMatch(/<img[^>]+src="https?:/);
     azureAdMock.getUserPhoto.mockReset();

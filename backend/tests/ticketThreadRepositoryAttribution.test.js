@@ -97,6 +97,20 @@ describe('ticketThreadRepository.bulkUpsert attribution preservation (Phase DR2)
     expect(data.rawPayload.body_text).toBe(FS_CONVERSATION.body_text);
   });
 
+  test('a Cc\'d colleague\'s e-mailed reply written back to FreshService keeps its sender when the sync returns it under the requester (26 Oct 2026)', async () => {
+    // Written back with the requester's user_id, so FS returns it as theirs.
+    const fsCopy = { ...FS_CONVERSATION, user_id: 1000560731, from_email: null, incoming: true, body: '<p>All signed up!</p>', body_text: 'All signed up!' };
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([{ ...LOCAL_ROW, source: 'email_inbound', rawPayload: { from: 'colleague@example.com' } }]);
+    await repo.bulkUpsert(transformTicketConversationEntries([fsCopy], { ticketId: 42039, workspaceId: 1 }));
+    expect(prismaMock.ticketThreadEntry.upsert).not.toHaveBeenCalled();
+    const { where, data } = prismaMock.ticketThreadEntry.update.mock.calls[0][0];
+    expect(where).toEqual({ id: 9001 });
+    for (const guarded of ['source', 'actorName', 'actorEmail', 'actorFreshserviceId', 'eventType', 'bodyHtml', 'bodyText']) {
+      expect(data).not.toHaveProperty(guarded);
+    }
+    expect(data.rawPayload.from).toBe('colleague@example.com');
+  });
+
   test('a plain FS-ingested row still refreshes through the full upsert (no regression)', async () => {
     prismaMock.ticketThreadEntry.findMany.mockResolvedValue([
       { ...LOCAL_ROW, source: 'freshservice_conversation' },

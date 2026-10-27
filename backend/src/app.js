@@ -398,7 +398,7 @@ async function initialize() {
     } catch (e) {
       logger.warn('FreshService status bindings not loaded (non-fatal):', e.message);
     }
-
+
     // Workspace link names for short ticket links in e-mails (/it/TP-10000), 14 Oct 2026.
     try {
       const { default: workspaceLinkNameService } = await import('./services/workspaceLinkNameService.js');
@@ -560,8 +560,8 @@ async function initialize() {
       logger.warn('Alert correlation sweep failed to start (non-fatal):', e.message);
     }
 
-    // Knowledge growth (Auto-help P1): verified-solution embeddings + FreshService
-    // solution import in quiet hours, review-due digest Mondays 08:00 PT.
+    // Knowledge growth (Auto-help P1): verified-solution embeddings, Confluence
+    // sync and the Knowledge review in quiet hours, review-due digest Mondays 08:00 PT.
     try {
       const { default: knowledgeGrowthWorker } = await import('./services/knowledgeGrowthWorker.js');
       knowledgeGrowthWorker.start();

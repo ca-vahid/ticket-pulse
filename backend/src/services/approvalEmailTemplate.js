@@ -1,10 +1,9 @@
 /**
- * Approval e-mails (MEGA-0901 AP-2). Table-based, inline-styled HTML that
- * survives Outlook desktop / OWA / Gmail / Apple Mail: a 640px white card on a
- * slate ground, Arial stack, no REMOTE images (Outlook blocks data URIs and
- * remote pictures by default). People photos and the brand pictograms ride
- * along as inline (cid:) attachments (emailBrandAssets); initials circles
- * (plain table cells) are the fallback for people.
+ * Approval e-mails (MEGA-0901 AP-2; reply format since 26 Oct 2026). Each one
+ * reads like a message in the ticket's e-mail conversation: the sender's
+ * words, their signature, one grey hint, one plain link, then the history
+ * (rendered by ticketService._lastInboundQuote, photos and pictures inline as
+ * cid: attachments). Inline-styled, Outlook-safe, no painted surfaces.
  *
  * Everything user-supplied is escaped here; the request note arrives already
  * sanitized by ticketApprovalService (allow-list) and is only *normalized* for
@@ -194,17 +193,10 @@ function pick(obj, keys) {
   return out;
 }
 
-// ---------------------------------------------------------------- building blocks
+// ---------------------------------------------------------------- the shell
 //
-// People photos travel as inline cid: attachments; initials circles are the
-// fallback. emailShell (the 17 Sep 2026 pictogram shell) is kept for the
-// requester-reply copy; approval e-mails use apDocument below.
-
-function photoCircle(cid, name, size) {
-  // Inline attachment referenced by cid: — the picture is INSIDE the message (no remote fetch, works
-  // with images-off policies). Outlook desktop ignores border-radius; the square photo is still right.
-  return `<img src="cid:${escapeHtml(cid)}" width="${size}" height="${size}" alt="${escapeHtml(initialsOf(name))}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:0;">`;
-}
+// emailShell (the 17 Sep 2026 pictogram shell) is kept for the urgent-response
+// notifier; the approval e-mails no longer use a shell (26 Oct 2026).
 
 /**
  * The shell: slate ground → 640px white card with a brand band on top and a
@@ -242,96 +234,28 @@ export function emailShell({ workspaceName, bodyRows, footerHtml, preheader = ''
   ].join('');
 }
 
+
 // ---------------------------------------------------------------- the e-mails
-
-// ------------------------------------------------ the approver request e-mail
 //
-// 29 Sep 2026 redesign (mockups C1 + D3). Title = the approval category, the
-// ticket number links to the ticket, and the decision sits at the END as one
-// full-width row: Approve takes half, Decline and Ask a quarter each. Every
-// button opens the approval page with that choice picked (?intent=) — nothing
-// is decided by a GET, so link scanners can't approve anything.
+// 26 Oct 2026 (Vahid): every approval e-mail reads like the e-mail
+// conversation itself, not a branded card — the person's own words, their
+// signature, ONE grey hint line, one plain link where there is something to
+// do, then "Earlier in this conversation" (ticketService._lastInboundQuote,
+// passed in as `quoteHtml`). The model is approvalConversationService's
+// _emailAsReply (4.3.21).
 //
-// Dark mode, learned on Outlook for Android: it honours prefers-color-scheme
-// AND then lightens any dark background it finds (a #161d28 card came out
-// slate). So surfaces are never painted — no page or card fill, the mail
-// app's own canvas shows through — and dark mode only swaps text, hairlines
-// and the tinted buttons (which turn into outlines).
+// Outlook-safe and dark-mode-safe: no painted surfaces, no buttons, no
+// gradients; every piece of text carries its own colour, so a dark-mode
+// client only has text to recolour.
 
-const AP = {
-  ink: '#0b1324', ink2: '#1f2937', muted: '#475569', line: '#e3e8ef', link: '#1d4ed8',
-  go: '#0f7a4f', goTint: '#e8f5ee', goLine: '#bfe3cf',
-  no: '#b42318', noTint: '#fdf1f0', noLine: '#f1c4bf',
-  ask: '#1d4ed8', askTint: '#eef3fe', askLine: '#c6d5f7',
-};
-const AP_DARK = {
-  ink: '#eef2f6', ink2: '#d3dae3', muted: '#a3aebb', line: '#3a4350', link: '#9cc0ff',
-  go: '#6ee7b7', goLine: '#2f6b52', no: '#ff9b93', noLine: '#6b3632', ask: '#9cc0ff', askLine: '#34496e',
-};
-const AP_FONT = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif";
-
-function approverCss() {
-  const d = AP_DARK;
-  return `<style>
-:root{color-scheme:light dark;supported-color-schemes:light dark}
-body{margin:0;padding:0} a{text-decoration:none}
-.ap-rich > :first-child{margin-top:0!important} .ap-rich > :last-child{margin-bottom:0!important}
-@media screen and (max-width:620px){
-  .ap-wrap{padding:0!important} .ap-card{border-left:0!important;border-right:0!important;border-radius:0!important}
-  .ap-pad{padding-left:18px!important;padding-right:18px!important}
-  .ap-stack{display:block!important;width:100%!important;border-left:0!important;padding-left:0!important}
-  .ap-h1{font-size:18px!important;line-height:24px!important}
-  .ap-btn{font-size:13px!important}
-}
-@media (prefers-color-scheme:dark){
-  .ap-ink{color:${d.ink}!important} .ap-ink2{color:${d.ink2}!important} .ap-muted{color:${d.muted}!important}
-  .ap-line{border-color:${d.line}!important} .ap-link{color:${d.link}!important}
-  .ap-go{background:transparent!important;border-color:${d.goLine}!important} .ap-go a{color:${d.go}!important}
-  .ap-no{background:transparent!important;border-color:${d.noLine}!important} .ap-no a{color:${d.no}!important}
-  .ap-ask{background:transparent!important;border-color:${d.askLine}!important} .ap-ask a{color:${d.ask}!important}
-  .ap-s-go{color:#6ee7b7!important} .ap-s-no{color:#ff9b93!important} .ap-s-amber{color:#fbbf24!important} .ap-s-violet{color:#c4b5fd!important} .ap-s-blue{color:#9cc0ff!important}
-  .ap-rich,.ap-rich *{color:${d.ink2}!important;background:transparent!important;border-color:${d.line}!important}
-  .ap-rich a{color:${d.link}!important}
-}
-[data-ogsc] .ap-ink{color:${d.ink}!important} [data-ogsc] .ap-ink2{color:${d.ink2}!important} [data-ogsc] .ap-muted{color:${d.muted}!important}
-</style>`;
-}
-
-const apText = (cls, style, html) => `<div class="${cls}" style="font-family:${AP_FONT};${style}">${html}</div>`;
-const apLabel = (text) => apText('ap-muted', `font-size:12px;line-height:16px;color:${AP.muted};`, escapeHtml(text));
-
-function apAvatar(name, photoCid, tint) {
-  if (photoCid) return photoCircle(photoCid, name, 38);
-  const [bg, fg] = tint === 'amber' ? ['#fdf0d5', '#8a4b08'] : ['#e0e9ff', '#1d4ed8'];
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="38" height="38" align="center" valign="middle" bgcolor="${bg}" style="width:38px;height:38px;border-radius:19px;background:${bg};color:${fg};font-family:${AP_FONT};font-size:14px;font-weight:bold;line-height:38px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
-}
-
-function apPerson({ label, name, sub, photoCid, tint }) {
-  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
-    + `<td valign="middle" style="padding-right:10px;">${apAvatar(name, photoCid, tint)}</td>`
-    + `<td valign="middle">${apLabel(label)}${apText('ap-ink', `font-size:14.5px;line-height:20px;font-weight:bold;color:${AP.ink};`, escapeHtml(name))}${sub ? apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};`, escapeHtml(sub)) : ''}</td>`
-    + '</tr></table>';
-}
-
-/** A quiet block marked by a rule on its left — no fill, so dark mode has nothing to repaint. */
-function apRuled(labelText, bodyHtml, { rich = false } = {}) {
-  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
-    + `<td class="ap-line" style="border-left:3px solid ${AP.line};padding:2px 0 2px 14px;">`
-    + `${labelText ? apLabel(labelText) : ''}<div class="ap-ink${rich ? ' ap-rich' : ''}" style="font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.ink};${labelText ? 'margin-top:4px;' : ''}">${bodyHtml}</div>`
-    + '</td></tr></table>';
-}
-
-function apFact(label, valueHtml) {
-  return `<td width="50%" valign="top" style="padding:10px 8px 0 0;">${apLabel(label)}${apText('ap-ink', `font-size:14px;line-height:20px;font-weight:600;color:${AP.ink};`, valueHtml || '—')}</td>`;
-}
-
-/** Full-cell button: fills its column, ~36 px tall. Plain <a> in a filled cell — Outlook desktop gets a square button. */
-function apButton(kind, label, href) {
-  const c = { go: [AP.goTint, AP.go, AP.goLine], no: [AP.noTint, AP.no, AP.noLine], ask: [AP.askTint, AP.ask, AP.askLine] }[kind];
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td align="center" bgcolor="${c[0]}" class="ap-${kind}" style="border-radius:7px;background:${c[0]};border:1px solid ${c[2]};">`
-    + `<a href="${escapeHtml(href)}" target="_blank" class="ap-btn" style="display:block;padding:9px 6px;font-family:${AP_FONT};font-size:13.5px;line-height:18px;font-weight:bold;color:${c[1]};text-align:center;white-space:nowrap;border-radius:7px;text-decoration:none;">${escapeHtml(label)}</a>`
-    + '</td></tr></table>';
-}
+export const REPLY_FONT = "Calibri,'Segoe UI',Arial,sans-serif";
+const R_INK = '#111827';
+const R_SOFT = '#374151';
+const R_HINT = '#6b7280';
+const R_LINK = '#1d4ed8';
+const R_GO = '#0f7a4f';
+const R_NO = '#b42318';
+const R_TEXT = `font-family:${REPLY_FONT};font-size:14.5px;line-height:21px;color:${R_INK};`;
 
 /** Adds ?intent= to the decision link (keeps any query string the link already has). */
 export function decisionIntentUrl(url, intent) {
@@ -339,452 +263,350 @@ export function decisionIntentUrl(url, intent) {
   return `${url}${url.includes('?') ? '&' : '?'}intent=${encodeURIComponent(intent)}`;
 }
 
+const firstNameOf = (name) => String(name || '').trim().split(/\s+/)[0] || null;
+const paragraphsOf = (text) => String(text || '').trim().split(/\n{2,}/).map((p) => escapeHtml(p.trim()).replace(/\r?\n/g, '<br>')).filter(Boolean);
+
+/** A paragraph of the message. `html` is trusted (callers escape). */
+export const replyPara = (html, margin = '0 0 12px') => `<p style="${R_TEXT}margin:${margin};">${html}</p>`;
+
+/** The one grey line under the message (same as _emailAsReply's hint). `html` is trusted. */
+export function replyHint(html, margin = '22px 0 0') {
+  return `<p style="font-family:${REPLY_FONT};font-size:12.5px;line-height:18px;color:${R_HINT};margin:${margin};">${html}</p>`;
+}
+
+/** One plain link line: "Decide on this request →". */
+export function replyLink(label, href, margin = '18px 0 0') {
+  if (!href) return '';
+  return `<p style="font-family:${REPLY_FONT};font-size:14px;line-height:20px;margin:${margin};"><a href="${escapeHtml(href)}" target="_blank" style="color:${R_LINK};font-weight:600;text-decoration:none;">${escapeHtml(label)}&nbsp;&rarr;</a></p>`;
+}
+
+const inlineLink = (label, href) => (href ? `<a href="${escapeHtml(href)}" target="_blank" style="color:${R_LINK};text-decoration:none;">${escapeHtml(label)}</a>` : escapeHtml(label));
+
+/** Plain text as the person wrote it, one <p> per paragraph. */
+const replyText = (text) => paragraphsOf(text).map((p) => replyPara(p)).join('');
+
+/** Rich text (already sanitized) as written; the wrapper only sets the type. */
+const replyRich = (html) => (html ? `<div style="${R_TEXT}margin:0 0 12px;">${html}</div>` : '');
+
+/** The message body: rich when there is HTML, else the plain text. */
+function messageBody(bodyHtml, bodyText) {
+  if (bodyHtml) return replyRich(normalizeNoteHtmlForEmail(bodyHtml) || bodyHtml);
+  return replyText(bodyText);
+}
+
+const replySignature = (html) => (html ? `<div style="${R_TEXT}margin:14px 0 0;">${html}</div>` : '');
+
+/** "Label: value" lines in one paragraph — the facts, only where present. */
+function replyFacts(lines) {
+  const list = lines.filter(Boolean);
+  if (!list.length) return '';
+  return replyPara(list.map(([label, value]) => `<span style="color:${R_SOFT};font-weight:600;">${escapeHtml(label)}:</span> ${value}`).join('<br>'));
+}
+
+const replyList = (itemsHtml) => (itemsHtml.length
+  ? `<ol style="${R_TEXT}margin:0 0 12px;padding:0 0 0 22px;">${itemsHtml.map((li) => `<li style="margin:0 0 6px;">${li}</li>`).join('')}</ol>`
+  : '');
+
+/** Ticket ref, linked when the reader can open the ticket. */
+const refHtml = (t, href = t?.appUrl) => (t?.ref ? inlineLink(t.ref, href || null) : null);
+
+/** The reply-format document: body, then the history. No shell, no card — a plain message. */
+const replyDocument = (parts, quoteHtml = '') => `${parts.filter(Boolean).join('')}${quoteHtml || ''}`;
+
+const verdictWordOf = (approved, conditionNote) => (!approved ? 'Not approved' : conditionNote ? (/\n/.test(conditionNote) ? 'Approved with conditions' : 'Approved with condition') : 'Approved');
+
+const RESPONSE_WORD = { can_meet: 'Can be met', cant_meet: "Can't be met as asked" };
+
+/** "Can be met: …" / "Can't be met as asked: …" with the verdict words coloured. */
+function answerLineHtml(line) {
+  const hit = [[RESPONSE_WORD.can_meet, R_GO], [RESPONSE_WORD.cant_meet, R_NO], ['Not answered', R_HINT]].find(([w]) => line.startsWith(w));
+  if (!hit) return `<span style="color:${R_SOFT};">${escapeHtml(line)}</span>`;
+  return `<span style="color:${hit[1]};font-weight:600;">${escapeHtml(hit[0])}</span><span style="color:${R_SOFT};">${escapeHtml(line.slice(hit[0].length))}</span>`;
+}
+
 /**
- * Approver: "your decision is needed". ctx:
- *  { workspaceName, categoryName, ticket:{ref, subject, createdAt, dueBy, priorityLabel, typeLabel, categoryPath, statusLabel, description, appUrl},
- *    requester:{name,title,department,location,photoCid?}, requestedByName, requestedByPhotoCid?, approverName,
- *    noteHtml (already sanitized + placeholders substituted), clarification:{question,answer}|null,
- *    otherApprovers:[{name,status}], decisionUrl, expiresAt, reRequest:boolean, amountLabel?, tierLabel?, handoff?, laptop? }
+ * Agreed conditions: several read as a list; one stays a sentence. Reads the
+ * agreed summary ("1. text" + an indented "Can be met: answer" line, see
+ * approvalConditions.agreedSummary) as well as plain one-per-line text.
+ */
+function conditionNoteHtml(conditionNote) {
+  const items = [];
+  for (const raw of String(conditionNote || '').split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const numbered = raw.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (numbered) items.push({ text: numbered[1].trim(), sub: [] });
+    else if (/^\s{2,}/.test(raw) && items.length) items[items.length - 1].sub.push(raw.trim());
+    else items.push({ text: raw.trim(), sub: [] });
+  }
+  if (!items.length) return '';
+  const itemHtml = (i) => `${escapeHtml(i.text)}${i.sub.map((s) => `<br>${answerLineHtml(s)}`).join('')}`;
+  if (items.length === 1) return replyPara(`<span style="color:${R_SOFT};font-weight:600;">Condition:</span> ${itemHtml(items[0])}`);
+  return replyPara(`<span style="color:${R_SOFT};font-weight:600;">Agreed conditions:</span>`, '0 0 4px') + replyList(items.map(itemHtml));
+}
+
+/** The conditions as a numbered list, with the technician's answer under each when there is one. */
+function conditionsList(items, { answers = true } = {}) {
+  return replyList((items || []).map((i) => {
+    const text = escapeHtml(i.text).replace(/\n/g, '<br>');
+    if (!answers || !i.response) return text;
+    const colour = i.response === 'cant_meet' ? R_NO : R_GO;
+    return `${text}<br><span style="color:${colour};font-weight:600;">${escapeHtml(RESPONSE_WORD[i.response] || '')}</span>`
+      + `${i.answer ? `<span style="color:${R_SOFT};"> &mdash; ${escapeHtml(i.answer).replace(/\n/g, '<br>')}</span>` : ''}`;
+  }));
+}
+
+/**
+ * Approver: the agent asks them to decide. Written as the AGENT's message.
+ * ctx: { categoryName, ticket:{ref, subject, appUrl}, requester:{name,title,department,location},
+ *   requestedByName, approverName, noteHtml (sanitized, placeholders done), clarification:{question,answer,answeredBy}|null,
+ *   conditions, otherApprovers:[{name,status}], decisionUrl, expiresAt, amountLabel?, tierLabel?, handoff?, laptops?,
+ *   signatureHtml?, quoteHtml? }
  */
 export function renderApproverRequestEmail(ctx) {
   const t = ctx.ticket || {};
   const requester = ctx.requester || {};
-  const agentName = ctx.requestedByName || 'the agent';
-  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || null;
-  const rows = [];
-  const pad = (html, padding = '0 28px') => `<tr><td class="ap-pad" style="padding:${padding};">${html}</td></tr>`;
+  const agentName = ctx.requestedByName || 'The service desk';
+  const body = [];
 
-  const kind = ['Approval', ctx.tierLabel].filter(Boolean).join(' · ');
+  body.push(replyPara(firstNameOf(ctx.approverName) ? `Hi ${escapeHtml(firstNameOf(ctx.approverName))},` : 'Hello,'));
 
-  // Title: the category (what is being approved); ticket number (linked) + subject underneath.
-  const ticketHref = t.appUrl || ctx.decisionUrl;
-  const refLink = t.ref ? `<a href="${escapeHtml(ticketHref)}" target="_blank" class="ap-link" style="color:${AP.link};font-weight:600;text-decoration:none;">${escapeHtml(t.ref)}&nbsp;&#8599;</a>&nbsp; ` : '';
-  const title = ctx.categoryName || t.subject || 'Approval request';
-  const sub = ctx.categoryName ? escapeHtml(t.subject || '') : '';
-  rows.push(pad(
-    (ctx.reRequest ? apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};margin-bottom:3px;`, ctx.conditions ? 'The answers to your conditions are in' : 'Re-requested with the answer you asked for') : '')
-    + apText('ap-h1 ap-ink', `font-size:19px;line-height:25px;font-weight:bold;color:${AP.ink};`, escapeHtml(title))
-    + ((refLink || sub) ? apText('ap-muted', `font-size:14px;line-height:21px;color:${AP.muted};margin-top:4px;`, `${refLink}${sub}`) : ''),
-    '22px 28px 0'));
-
-  // 26 Oct 2026: the answers to the approver's conditions, one by one.
-  if (ctx.conditions && Array.isArray(ctx.conditions.items) && ctx.conditions.items.length) {
-    rows.push(pad(conditionsBlock(ctx.conditions, {
-      label: `Your conditions and ${firstName(ctx.conditions.submittedByName) || agentName}'s answers`,
-    }), '20px 28px 0'));
-    const cant = ctx.conditions.items.filter((i) => i.response === 'cant_meet').length;
-    rows.push(pad(apText('ap-ink2', `font-size:14px;line-height:21px;color:${AP.ink2};`,
-      cant
-        ? `<b>${cant} of ${ctx.conditions.items.length}</b> can't be met as asked. Approve if you accept that, ask ${escapeHtml(firstName(ctx.conditions.submittedByName) || 'them')} or the requester about it, or choose Not approved.`
-        : 'Approve to accept these answers. The agreed conditions go out with your approval.'), '12px 28px 0'));
+  // One plain sentence: who asks, what, for whom (title, office), on which ticket.
+  const place = [
+    requester.location && !(requester.title || '').toLowerCase().includes(String(requester.location).toLowerCase()) ? requester.location : null,
+    requester.department && requester.department !== requester.location ? requester.department : null,
+  ].filter(Boolean)[0] || null;
+  const detail = [requester.title, place].filter(Boolean).join(', ');
+  const forWhom = requester.name ? ` for ${escapeHtml(requester.name)}${detail ? ` (${escapeHtml(detail)})` : ''}` : '';
+  const what = ctx.categoryName ? escapeHtml(ctx.categoryName) : (t.subject ? `&ldquo;${escapeHtml(t.subject)}&rdquo;` : 'a request');
+  const ref = refHtml(t);
+  const conditionItems = ctx.conditions && Array.isArray(ctx.conditions.items) ? ctx.conditions.items : [];
+  let again = '';
+  if (conditionItems.length) {
+    const who = firstNameOf(ctx.conditions.submittedByName) || firstNameOf(agentName) || 'The agent';
+    again = ` Here ${conditionItems.length === 1 ? 'is' : 'are'} ${escapeHtml(who)}&rsquo;s ${conditionItems.length === 1 ? 'answer' : 'answers'} to your conditions.`;
+  } else if (ctx.clarification?.answer) {
+    again = ' Here is the answer you asked for.';
   }
+  body.push(replyPara(`${escapeHtml(agentName)} asks you to approve ${what}${forWhom}${ref ? ` on ${ref}` : ''}.${again}`));
 
-  // The answer the approver asked for comes first on a re-request.
+  // A re-request leads with what changed: the answers to the conditions, or the answer to the question.
+  if (conditionItems.length) {
+    body.push(conditionsList(conditionItems));
+    const cant = conditionItems.filter((i) => i.response === 'cant_meet').length;
+    body.push(replyPara(cant
+      ? `${cant} of ${conditionItems.length} can&rsquo;t be met as asked. Approve if you accept that, ask about it, or say no.`
+      : 'Approve to accept these answers. The agreed conditions go out with your approval.'));
+  }
   if (ctx.clarification?.answer) {
-    const q = ctx.clarification.question ? `<div style="margin:0 0 6px;"><b>You asked:</b> ${escapeHtml(ctx.clarification.question)}</div>` : '';
-    rows.push(pad(apRuled(null, `${q}<div><b>${escapeHtml(agentName)} replied:</b> ${escapeHtml(ctx.clarification.answer)}</div>`), '20px 28px 0'));
+    const answeredBy = ctx.clarification.answeredBy || agentName;
+    body.push(replyPara(
+      `${ctx.clarification.question ? `<span style="color:${R_SOFT};font-weight:600;">You asked:</span> ${escapeHtml(ctx.clarification.question)}<br>` : ''}`
+      + `<span style="color:${R_SOFT};font-weight:600;">${escapeHtml(answeredBy)} replied:</span> ${escapeHtml(ctx.clarification.answer)}`,
+    ));
   }
 
-  // Hand-off (Approvals v2): why this landed with THIS approver.
+  // The agent's note, formatted as written.
+  if (ctx.noteHtml) body.push(replyRich(ctx.noteHtml));
+
+  // Why it is with this approver (Approvals v2 hand-off).
   const h = ctx.handoff;
   if (h && h.kind) {
     const by = escapeHtml(h.byName || 'The previous approver');
-    let lead;
-    if (h.kind === 'forwarded') lead = `<b>${by}</b> forwarded this request to you as the <b>final approver</b>.`;
-    else if (h.kind === 'auto_start') lead = `This request comes to you at <b>${escapeHtml(h.toTierName || 'this tier')}</b> directly: ${escapeHtml(h.note || `${h.byName || 'the requester'} is an approver on the earlier tier and cannot approve their own request`)}.`;
-    else if (h.kind === 'auto') lead = `<b>${by}</b> approved this at ${escapeHtml(h.fromTierName || 'the previous tier')}, but the amount is over that tier's limit${h.limitLabel ? ` (${escapeHtml(h.limitLabel)})` : ''}, so <b>your approval is needed</b> at ${escapeHtml(h.toTierName || 'this tier')}.`;
-    else lead = `<b>${by}</b> escalated this request from ${escapeHtml(h.fromTierName || 'the previous tier')} to you (${escapeHtml(h.toTierName || 'next tier')}).`;
-    const noteHtml = h.note && h.kind !== 'auto_start' ? `<div style="margin-top:6px;"><b>Their note:</b> ${escapeHtml(h.note)}</div>` : '';
-    rows.push(pad(apRuled(null, `${lead}${noteHtml}`), '20px 28px 0'));
+    let line;
+    if (h.kind === 'forwarded') line = `${by} forwarded this request to you as the final approver.`;
+    else if (h.kind === 'auto_start') line = `This request comes to you at <b>${escapeHtml(h.toTierName || 'this tier')}</b> directly: ${escapeHtml(h.note || `${h.byName || 'the requester'} is an approver on the earlier tier and cannot approve their own request`)}.`;
+    else if (h.kind === 'auto') line = `${by} approved this at ${escapeHtml(h.fromTierName || 'the previous tier')}, but the amount is over that tier&rsquo;s limit${h.limitLabel ? ` (${escapeHtml(h.limitLabel)})` : ''}, so your approval is needed at ${escapeHtml(h.toTierName || 'this tier')}.`;
+    else line = `${by} escalated this request from ${escapeHtml(h.fromTierName || 'the previous tier')} to you (${escapeHtml(h.toTierName || 'next tier')}).`;
+    const note = h.note && h.kind !== 'auto_start' ? `<br><span style="color:${R_SOFT};font-weight:600;">Their note:</span> ${escapeHtml(h.note)}` : '';
+    body.push(replyPara(`${line}${note}`));
   }
 
-  // Why the agent is asking — their note, formatted as written.
-  if (ctx.noteHtml) rows.push(pad(apRuled(`Why ${firstName(ctx.requestedByName) || 'the agent'} is asking`, ctx.noteHtml, { rich: true }), '20px 28px 0'));
-
-  // People — side by side, stacked on a phone. A department that repeats the location is dropped.
-  const place = [requester.location && !(requester.title || '').toLowerCase().includes(String(requester.location).toLowerCase()) ? requester.location : null,
-    requester.department && requester.department !== requester.location ? requester.department : null].filter(Boolean).join(' · ');
-  const forSub = [requester.title, place].filter(Boolean).join(' · ');
-  rows.push(pad('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
-    + `<td class="ap-stack" width="55%" valign="top" style="padding:0 12px 12px 0;">${apPerson({ label: 'Requested for', name: requester.name || 'Unknown requester', sub: forSub, photoCid: requester.photoCid || null, tint: 'amber' })}</td>`
-    + `<td class="ap-stack" width="45%" valign="top" style="padding:0 0 12px 0;">${apPerson({ label: 'Asked by', name: ctx.requestedByName || 'Agent', sub: 'Service desk agent', photoCid: ctx.requestedByPhotoCid || null, tint: 'blue' })}</td>`
-    + '</tr></table>', '20px 28px 0'));
-
-  // Facts: amount first when there is one, then the ticket's own.
+  // The facts, in plain lines, only where present.
   const facts = [];
   if (ctx.amountLabel) facts.push(['Amount', escapeHtml(ctx.amountLabel)]);
-  // Assetron devices held by this request (up to 5 since 29 Sep 2026).
-  const held = (Array.isArray(ctx.laptops) ? ctx.laptops : (ctx.laptop ? [ctx.laptop] : [])).filter((h) => h && h.asset);
-  held.forEach((h, i) => {
-    const a = h.asset;
+  if (ctx.tierLabel) facts.push(['Approval tier', escapeHtml(ctx.tierLabel)]);
+  const held = (Array.isArray(ctx.laptops) ? ctx.laptops : (ctx.laptop ? [ctx.laptop] : [])).filter((x) => x && x.asset);
+  held.forEach((x, i) => {
+    const a = x.asset;
     const id = a.assetTag || (a.serialNumber ? `S/N ${a.serialNumber}` : '');
     const spec = [a.cpu, a.ram, a.storage, a.screenSize].filter(Boolean).join(' · ');
-    const label = held.length > 1 ? `Device ${i + 1} (held in Assetron)` : 'Device (held in Assetron)';
-    facts.push([label, `${escapeHtml([a.make, a.model].filter(Boolean).join(' ') || 'Device')}${id ? ` <span class="ap-muted" style="font-weight:normal;color:${AP.muted};">· ${escapeHtml(id)}</span>` : ''}${spec ? `<div class="ap-muted" style="font-size:12.5px;line-height:18px;font-weight:normal;color:${AP.muted};">${escapeHtml(spec)}</div>` : ''}`]);
-    facts.push(['Assigned to on approval', escapeHtml(h.recipient?.name || h.recipient?.email || '—')]);
+    const to = x.recipient?.name || x.recipient?.email || null;
+    facts.push([held.length > 1 ? `Device ${i + 1} reserved` : 'Device reserved',
+      `${escapeHtml([a.make, a.model].filter(Boolean).join(' ') || 'Device')}${id ? ` (${escapeHtml(id)})` : ''}${spec ? `, ${escapeHtml(spec)}` : ''}${to ? `; goes to ${escapeHtml(to)} on approval` : ''}`]);
   });
-  facts.push(['Priority', escapeHtml(t.priorityLabel || '—')]);
-  facts.push(['Due', escapeHtml(t.dueBy ? fmtDay(t.dueBy) : '—')]);
-  facts.push(['Type', escapeHtml(t.typeLabel || '—')]);
-  facts.push(['Category', escapeHtml(t.categoryPath || '—')]);
-  let factRows = '';
-  for (let i = 0; i < facts.length; i += 2) factRows += `<tr>${apFact(...facts[i])}${facts[i + 1] ? apFact(...facts[i + 1]) : '<td width="50%"></td>'}</tr>`;
-  rows.push(pad(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td colspan="2" class="ap-line" style="border-top:1px solid ${AP.line};font-size:0;line-height:0;">&nbsp;</td></tr>${factRows}</table>`, '0 28px'));
-
-  // What the requester wrote — formatted like the ticket; long ones point at the page.
-  const desc = descriptionHtmlForEmail(t.description);
-  const tail = [];
-  if (desc.html) {
-    tail.push(apLabel(`What ${firstName(requester.name) || 'the requester'} wrote`));
-    tail.push(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.ink2};margin-top:4px;">${desc.html}</div>`);
-    if (desc.truncated) tail.push(apText('ap-muted', `font-size:12px;line-height:18px;color:${AP.muted};margin-top:6px;`, '… the full description is on the approval page.'));
-  }
   const others = (ctx.otherApprovers || []).filter((a) => a && a.name);
-  if (others.length > 0) {
-    const list = others.map((a) => `${escapeHtml(a.name)}${a.status && a.status !== 'pending' ? ` (${escapeHtml(a.status)})` : ''}`).join(', ');
-    tail.push(apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};margin-top:${desc.html ? 12 : 0}px;`, `Also asked to approve: ${list}. The first decision closes the request for everyone.`));
+  if (others.length) {
+    facts.push(['Also asked', `${others.map((a) => `${escapeHtml(a.name)}${a.status && a.status !== 'pending' ? ` (${escapeHtml(a.status)})` : ''}`).join(', ')}. The first decision closes the request for everyone.`]);
   }
-  if (tail.length) rows.push(pad(tail.join(''), '16px 28px 0'));
+  body.push(replyFacts(facts));
 
-  // The decision — at the end, filling the row: Approve half, Decline and Ask a quarter each.
-  rows.push(apActions([
-    { kind: 'go', label: 'Approve', href: decisionIntentUrl(ctx.decisionUrl, 'approve'), width: '50%' },
-    { kind: 'no', label: 'Not approved', href: decisionIntentUrl(ctx.decisionUrl, 'reject'), width: '25%' },
-    { kind: 'ask', label: 'Ask', href: decisionIntentUrl(ctx.decisionUrl, 'ask'), width: '25%' },
-  ], 'Each button opens the approval page with that choice picked. Add a note if you like, then confirm.'));
+  body.push(replySignature(ctx.signatureHtml));
 
   const expires = fmtDayLong(ctx.expiresAt);
-  return apDocument({
-    headerRight: kind,
-    rows,
-    footerHtml: `This link is personal to you. Please don't forward it.${expires ? ` It expires on ${escapeHtml(expires)}.` : ''}<br>`
-      + `Sent by Ticket Pulse on behalf of ${escapeHtml(ctx.requestedByName || 'the service desk')}${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.`,
-    preheader: `${ctx.requestedByName || 'An agent'} needs your approval${requester.name ? ` for ${requester.name}` : ''}: ${ctx.categoryName || t.subject || ''}`,
-  });
+  body.push(replyLink('Decide on this request', ctx.decisionUrl, '20px 0 0'));
+  body.push(replyHint(`Approve, approve with conditions, ask a question or say no on that page. The link is yours alone${expires ? ` and works until ${escapeHtml(expires)}` : ''}.`, '4px 0 0'));
+  return replyDocument(body, ctx.quoteHtml);
 }
-
-// ------------------------------------------ the rest of the approval family
-//
-// 29 Sep 2026: every approval e-mail follows the request e-mail's layout —
-// status word with a dot, the category as the title, the ticket ref (linked
-// when the reader can open the ticket) and subject under it, ruled blocks for
-// notes, and the action as a full-width row at the end. Same dark-mode rule:
-// no painted surfaces.
-
-const AP_STATUS = {
-  go: { color: '#0f7a4f', dark: '#6ee7b7' },
-  no: { color: '#b42318', dark: '#ff9b93' },
-  amber: { color: '#b45309', dark: '#fbbf24' },
-  violet: { color: '#6d28d9', dark: '#c4b5fd' },
-  blue: { color: '#1d4ed8', dark: '#9cc0ff' },
-};
-
-/** "● Approved" — the state as a coloured word with a dot, never a pill or band. */
-function apStatus(word, tone) {
-  const c = AP_STATUS[tone] || AP_STATUS.blue;
-  return apText(`ap-s-${tone}`, `font-size:13px;line-height:18px;font-weight:bold;color:${c.color};margin-bottom:4px;`, `&#9679;&nbsp; ${escapeHtml(word)}`);
-}
-
-/** Title block shared by every approval e-mail: optional status, title, linked ref + subject. */
-function apHero({ status = null, statusTone = 'blue', categoryName = null, ticket = {}, href = null }) {
-  const title = categoryName || ticket.subject || 'Approval';
-  const sub = categoryName ? escapeHtml(ticket.subject || '') : '';
-  const ref = ticket.ref
-    ? (href
-      ? `<a href="${escapeHtml(href)}" target="_blank" class="ap-link" style="color:${AP.link};font-weight:600;text-decoration:none;">${escapeHtml(ticket.ref)}&nbsp;&#8599;</a>&nbsp; `
-      : `<span class="ap-ink2" style="color:${AP.ink2};font-weight:600;">${escapeHtml(ticket.ref)}</span>&nbsp; `)
-    : '';
-  return `<tr><td class="ap-pad" style="padding:22px 28px 0;">${status ? apStatus(status, statusTone) : ''}`
-    + apText('ap-h1 ap-ink', `font-size:19px;line-height:25px;font-weight:bold;color:${AP.ink};`, escapeHtml(title))
-    + ((ref || sub) ? apText('ap-muted', `font-size:14px;line-height:21px;color:${AP.muted};margin-top:4px;`, `${ref}${sub}`) : '')
-    + '</td></tr>';
-}
-
-/** A body row with the standard side padding. */
-const apRow = (html, top = 18) => `<tr><td class="ap-pad" style="padding:${top}px 28px 0;">${html}</td></tr>`;
-const apSentence = (html) => apText('ap-ink2', `font-size:15px;line-height:22px;color:${AP.ink2};`, html);
 
 /**
- * The action row at the end, above the footer: a hairline, then buttons that
- * fill the row. `buttons` = [{ kind:'go'|'no'|'ask', label, href, width }].
- */
-function apActions(buttons, helpHtml = null) {
-  const list = buttons.filter((b) => b && b.href);
-  if (!list.length && !helpHtml) return '';
-  const cells = list.map((b, i) => `<td width="${b.width || `${Math.floor(100 / list.length)}%`}" valign="top" style="padding:0 ${i === list.length - 1 ? 0 : 4}px 0 ${i === 0 ? 0 : 4}px;">${apButton(b.kind || 'ask', b.label, b.href)}</td>`).join('');
-  return `<tr><td class="ap-pad" style="padding:22px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td class="ap-line" style="border-top:1px solid ${AP.line};padding-top:18px;">`
-    + (cells ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>${cells}</tr></table>` : '')
-    + (helpHtml ? apText('ap-muted', `font-size:12px;line-height:17px;color:${AP.muted};margin-top:${cells ? 10 : 0}px;text-align:center;`, helpHtml) : '')
-    + '</td></tr></table></td></tr>';
-}
-
-/** Quoted history entries (conversation / decision thread), each on a left rule. */
-function apHistoryItem(headHtml, bodyHtml) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 10px;"><tr><td class="ap-line" style="border-left:3px solid ${AP.line};padding:0 0 0 12px;">`
-    + apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};`, headHtml)
-    + `<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13.5px;line-height:19px;color:${AP.ink2};margin-top:2px;">${bodyHtml}</div>`
-    + '</td></tr></table>';
-}
-
-/** The whole document: header, rows, footer — shared by every approval e-mail. */
-function apDocument({ headerRight = 'Approval', rows, footerHtml, preheader = '' }) {
-  const head = `<tr><td class="ap-pad ap-line" style="padding:14px 28px;border-bottom:1px solid ${AP.line};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>`
-    + `<td class="ap-ink" style="font-family:${AP_FONT};font-size:13.5px;font-weight:bold;color:${AP.ink};">Ticket Pulse</td>`
-    + `<td align="right" class="ap-muted" style="font-family:${AP_FONT};font-size:12px;color:${AP.muted};">${escapeHtml(headerRight)}</td>`
-    + '</tr></table></td></tr>';
-  const foot = '<tr><td style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr>'
-    + `<tr><td class="ap-pad ap-muted ap-line" style="padding:16px 28px 22px;border-top:1px solid ${AP.line};font-family:${AP_FONT};font-size:12px;line-height:18px;color:${AP.muted};">${footerHtml}</td></tr>`;
-  return [
-    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting">',
-    '<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title></title>',
-    approverCss(),
-    '</head><body style="margin:0;padding:0;-webkit-text-size-adjust:100%;">',
-    preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;opacity:0;">${escapeHtml(preheader)}${'&nbsp;&zwnj;'.repeat(40)}</div>` : '',
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td align="center" class="ap-wrap" style="padding:20px 12px;">',
-    '<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->',
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="ap-card ap-line" style="max-width:600px;border:1px solid ${AP.line};border-radius:12px;border-collapse:separate;">`,
-    head, rows.join(''), foot,
-    '</table>',
-    '<!--[if mso]></td></tr></table><![endif]-->',
-    '</td></tr></table></body></html>',
-  ].join('');
-}
-
-const verdictWordOf = (approved, conditionNote) => (!approved ? 'Not approved' : conditionNote ? (/\n/.test(conditionNote) ? 'Approved with conditions' : 'Approved with condition') : 'Approved');
-// Agreed conditions (several lines) read as a list; a one-line condition stays a sentence.
-const conditionLabel = (conditionNote) => (/\n/.test(String(conditionNote || '')) ? 'Agreed conditions' : 'Condition');
-
-const RESPONSE_WORD = { can_meet: 'Can be met', cant_meet: "Can't be met as asked" };
-
-/** The conditions as a numbered list, with the answer under each when there is one. */
-function conditionsBlock(state, { label = 'Conditions', answers = true } = {}) {
-  const items = (state?.items || []).map((i, n) => {
-    const tone = i.response === 'cant_meet' ? 'no' : 'go';
-    const answer = answers && i.response
-      ? `<div style="margin-top:3px;">${apWord(RESPONSE_WORD[i.response] || '', tone)}${i.answer ? ` <span class="ap-ink2" style="color:${AP.ink2};">— ${escapeHtml(i.answer).replace(/\n/g, '<br>')}</span>` : ''}</div>`
-      : '';
-    return `<tr><td valign="top" class="ap-muted" style="width:22px;padding:0 0 10px;font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.muted};">${n + 1}.</td>`
-      + `<td valign="top" style="padding:0 0 10px;"><div class="ap-ink" style="font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.ink};">${escapeHtml(i.text).replace(/\n/g, '<br>')}</div>${answer}</td></tr>`;
-  }).join('');
-  return apRuled(label, `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:2px;">${items}</table>`);
-}
-const apWord = (text, tone) => `<span class="ap-s-${tone}" style="color:${AP_STATUS[tone].color};font-weight:bold;">${escapeHtml(text)}</span>`;
-const workspaceFooter = (ctx, tail = '') => `Sent by Ticket Pulse${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.${tail}`;
-
-/**
- * Requester (the agent): the verdict. ctx:
- *  { workspaceName, categoryName, ticket:{ref, subject, appUrl}, approved:boolean, approverName, isSelf, changedFrom, note, conditionNote, signatureHtml, requester:{name,title,location,photoCid} }
+ * The agent who asked: the verdict, as the approver's message. ctx:
+ *  { categoryName, ticket:{ref, subject, appUrl}, approved, approverName, isSelf, changedFrom, note, conditionNote,
+ *    signatureHtml, requester:{name}, agentName?, quoteHtml? }
  */
 export function renderRequesterDecisionEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
   const verdict = verdictWordOf(approved, ctx.conditionNote);
-  const tone = approved ? 'go' : 'no';
-  const who = ctx.isSelf ? 'You' : (ctx.approverName || 'The approver');
-  const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
-  const verdictWord = apWord(verdict.toLowerCase(), tone);
-  // Sentence shapes are load-bearing (inbox filters + tests): "<actor> decided your approval request",
-  // "changed the decision on your approval request", "You approved your own approval request".
-  const sentence = ctx.isSelf
-    ? (ctx.changedFrom
-      ? `You changed the decision on your own approval request${forWhom}: ${verdictWord}`
-      : `You ${approved ? 'approved' : 'did not approve'} your own approval request${forWhom}.`)
-    : (ctx.changedFrom
-      ? `${escapeHtml(who)} changed the decision on your approval request${forWhom}: ${verdictWord}`
-      : `${escapeHtml(who)} decided your approval request${forWhom}: ${verdictWord}`);
-  const verb = ctx.changedFrom ? `changed the decision to ${verdict.toLowerCase()} on` : (approved ? 'approved' : 'did not approve');
-  const rows = [];
-  rows.push(apHero({ status: `${verdict}${ctx.changedFrom ? ' (changed)' : ''}`, statusTone: tone, categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
-  rows.push(apRow(apSentence(sentence)));
-  if (ctx.requester?.name) {
-    rows.push(apRow(apPerson({ label: 'Requested for', name: ctx.requester.name, sub: [ctx.requester.title, ctx.requester.location].filter(Boolean).join(' · '), photoCid: ctx.requester.photoCid || null, tint: 'amber' })));
-  }
-  if (ctx.conditionNote) rows.push(apRow(apRuled(conditionLabel(ctx.conditionNote), escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>'))));
-  if (ctx.note) rows.push(apRow(apRuled(ctx.isSelf ? 'Your note' : `Note from ${ctx.approverName || 'the approver'}`, escapeHtml(ctx.note).replace(/\r?\n/g, '<br>'))));
-  if (ctx.signatureHtml) rows.push(apRow(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13px;line-height:18px;color:${AP.ink2};">${ctx.signatureHtml}</div>`, 14));
-  rows.push(apActions(
-    [t.appUrl ? { kind: approved ? 'go' : 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null],
-    approved ? 'The approval is recorded on the ticket — you can proceed.' : 'The decision and the reason are recorded on the ticket.',
-  ));
-  return apDocument({
-    rows,
-    footerHtml: workspaceFooter(ctx, ' The full approval trail is on the ticket.'),
-    preheader: `${who} ${verb} your approval request on ${t.ref || 'the ticket'}`,
-  });
+  const body = [];
+  const what = ctx.categoryName ? escapeHtml(ctx.categoryName) : 'Your request';
+  const forWhom = ctx.requester?.name ? ` for ${escapeHtml(ctx.requester.name)}` : '';
+  const ref = refHtml(t);
+  const changed = ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom === 'rejected' ? 'not approved' : ctx.changedFrom)})` : '';
+  body.push(replyPara(`<b>${escapeHtml(verdict)}.</b>${changed} ${what}${forWhom}${ref ? `, ${ref}` : ''}.`));
+  body.push(conditionNoteHtml(ctx.conditionNote));
+  if (ctx.note) body.push(replyText(ctx.note));
+  body.push(replySignature(ctx.signatureHtml));
+  let hint;
+  if (ctx.isSelf) hint = 'You decided your own request; this is your copy.';
+  else if (approved) hint = ctx.conditionNote ? 'You can carry on with the ticket, within the conditions.' : 'You can carry on with the ticket.';
+  else hint = 'The decision and the reason are on the ticket.';
+  if (t.appUrl) hint += ` ${inlineLink('Open the ticket', t.appUrl)}`;
+  body.push(replyHint(hint));
+  return replyDocument(body, ctx.quoteHtml);
 }
 
 /**
- * Requester (the agent): the request moved to another approver (Approvals v2).
- * ctx: { workspaceName, categoryName, ticket:{ref, subject, appUrl}, kind:'escalated'|'forwarded'|'auto',
- *        byName, toNames:[…], toTierName, fromTierName, requester:{name} }
+ * The agent who asked: the request moved to another approver (Approvals v2).
+ * ctx: { categoryName, ticket:{ref, subject, appUrl}, kind:'escalated'|'forwarded'|'auto', byName, toNames:[…],
+ *        toTierName, fromTierName, requester:{name}, agentName?, quoteHtml? }
  * No note on purpose — the approver's reasoning stays between approvers.
  */
 export function renderRequesterHandoffEmail(ctx) {
   const t = ctx.ticket || {};
   const names = (ctx.toNames || []).filter(Boolean);
-  const who = names.length ? names.join(', ') : (ctx.toTierName || 'the next approver');
-  const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
+  const who = escapeHtml(names.length ? names.join(', ') : (ctx.toTierName || 'the next approver'));
+  const forWhom = ctx.requester?.name ? ` for ${escapeHtml(ctx.requester.name)}` : '';
   const by = escapeHtml(ctx.byName || 'The approver');
-  const forwarded = ctx.kind === 'forwarded';
+  const ref = refHtml(t);
+  const on = ref ? ` on ${ref}` : '';
   let sentence;
-  if (forwarded) sentence = `<b>${by}</b> forwarded your approval request${forWhom} to <b>${escapeHtml(who)}</b>, who will make the final decision.`;
-  else if (ctx.kind === 'auto') sentence = `<b>${by}</b> approved your request${forWhom} at ${escapeHtml(ctx.fromTierName || 'Tier 1')}. The amount is above that tier's limit, so it has moved on to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}) for the final approval.`;
-  else sentence = `<b>${by}</b> escalated your approval request${forWhom} to <b>${escapeHtml(who)}</b> (${escapeHtml(ctx.toTierName || 'next tier')}).`;
-  const rows = [];
-  rows.push(apHero({ status: forwarded ? 'Forwarded' : 'Escalated', statusTone: 'amber', categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
-  rows.push(apRow(apSentence(sentence)));
-  rows.push(apActions(
-    [t.appUrl ? { kind: 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null],
-    'Nothing is needed from you — you will get another e-mail when the decision is made.',
-  ));
-  return apDocument({
-    rows,
-    footerHtml: workspaceFooter(ctx, ' The full approval trail is on the ticket.'),
-    preheader: `${ctx.byName || 'The approver'} ${forwarded ? 'forwarded' : 'escalated'} your approval request on ${t.ref || 'the ticket'} to ${who}`,
-  });
+  if (ctx.kind === 'forwarded') sentence = `${by} forwarded your approval request${forWhom}${on} to ${who}, who will make the final decision.`;
+  else if (ctx.kind === 'auto') sentence = `${by} approved your request${forWhom}${on} at ${escapeHtml(ctx.fromTierName || 'Tier 1')}. The amount is above that tier&rsquo;s limit, so it has moved on to ${who} (${escapeHtml(ctx.toTierName || 'next tier')}) for the final approval.`;
+  else sentence = `${by} escalated your approval request${forWhom}${on} to ${who} (${escapeHtml(ctx.toTierName || 'next tier')}).`;
+  const body = [];
+  if (firstNameOf(ctx.agentName)) body.push(replyPara(`Hi ${escapeHtml(firstNameOf(ctx.agentName))},`));
+  body.push(replyPara(sentence));
+  body.push(replyHint(`Nothing is needed from you; you will hear when it is decided.${t.appUrl ? ` ${inlineLink('Open the ticket', t.appUrl)}` : ''}`));
+  return replyDocument(body, ctx.quoteHtml);
 }
 
 /**
- * Requester (the agent): the approver asked a question. ctx:
- *  { workspaceName, categoryName, ticket:{ref, subject, appUrl}, approverName, question, requester:{name} }
+ * The agent who asked: the approver needs more information. ctx:
+ *  { categoryName, ticket:{ref, subject, appUrl}, approverName, question, requester:{name}, agentName?, signatureHtml?, quoteHtml? }
  */
 export function renderRequesterClarificationEmail(ctx) {
   const t = ctx.ticket || {};
-  const rows = [];
-  rows.push(apHero({ status: 'Needs your answer', statusTone: 'violet', categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
-  rows.push(apRow(apSentence(`<b>${escapeHtml(ctx.approverName || 'The approver')}</b> needs more information before deciding${ctx.requester?.name ? ` the request for <b>${escapeHtml(ctx.requester.name)}</b>` : ''}.`)));
-  rows.push(apRow(apRuled('Their question', escapeHtml(ctx.question || '')), 14));
-  rows.push(apActions(
-    [t.appUrl ? { kind: 'ask', label: 'Answer on the ticket', href: t.appUrl, width: '100%' } : null],
-    `Your answer goes back to ${escapeHtml(ctx.approverName || 'the approver')} by e-mail and the approval link re-opens for them.`,
-  ));
-  return apDocument({
-    rows,
-    footerHtml: workspaceFooter(ctx),
-    preheader: `${ctx.approverName || 'The approver'} asked: ${ctx.question || ''}`,
-  });
+  const approver = ctx.approverName || 'The approver';
+  const ref = refHtml(t);
+  const body = [];
+  if (firstNameOf(ctx.agentName)) body.push(replyPara(`Hi ${escapeHtml(firstNameOf(ctx.agentName))},`));
+  body.push(replyPara(`${escapeHtml(approver)} needs more information before deciding the request${ctx.requester?.name ? ` for ${escapeHtml(ctx.requester.name)}` : ''}${ref ? ` on ${ref}` : ''}:`));
+  body.push(replyText(ctx.question));
+  body.push(replySignature(ctx.signatureHtml));
+  body.push(replyLink('Answer on the ticket', t.appUrl));
+  body.push(replyHint(`Your answer goes back to ${escapeHtml(firstNameOf(approver) || approver)} by e-mail and the decision link opens again for them.`, '4px 0 0'));
+  return replyDocument(body, ctx.quoteHtml);
 }
 
 /**
- * Approvals v3 — a question / comment / answer on the conversation, to one
- * recipient. ctx: { kind, audience, authorName, authorRole, recipient:{email,name,role}, isCc,
- *   categoryName, ticket:{ref,subject}, bodyHtml|bodyText, thread:[messages], replyUrl, canReplyByEmail, internalNote }
+ * Approvals v3 — an INTERNAL question / comment / answer (approvers + the
+ * agent; never the requester), to one recipient. ctx:
+ *  { kind, authorName, bodyHtml|bodyText, signatureHtml?, replyUrl?, canReplyByEmail, decideUrl?,
+ *    requesterName?, internalNote, copied:[names]?, via?, quoteHtml? }
  */
 export function renderApprovalMessageEmail(ctx) {
-  const t = ctx.ticket || {};
-  const rows = [];
-  const by = escapeHtml(ctx.authorName || 'An approver');
-  const status = ctx.kind === 'answer' ? 'Answer' : ctx.kind === 'comment' ? 'Note' : 'Question';
-  const tone = ctx.kind === 'answer' ? 'go' : ctx.kind === 'comment' ? 'blue' : 'violet';
-  rows.push(apHero({ status: `${status} on an approval`, statusTone: tone, categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
-  const lead = ctx.kind === 'answer'
-    ? `<b>${by}</b> answered${ctx.recipient?.name ? ' your question' : ''}:`
-    : ctx.kind === 'comment'
-      ? `<b>${by}</b> left a note${ctx.isCc ? ' (you are copied)' : ' for you'}:`
-      : `<b>${by}</b> has a question${ctx.isCc ? ' (you are copied)' : ' for you'}:`;
-  rows.push(apRow(apSentence(lead)));
-  const body = ctx.bodyHtml ? (normalizeNoteHtmlForEmail(ctx.bodyHtml) || ctx.bodyHtml) : escapeHtml(ctx.bodyText || '').replace(/\n/g, '<br>');
-  rows.push(apRow(apRuled(null, body, { rich: true }), 10));
-  if (ctx.internalNote) rows.push(apRow(apText('ap-s-amber', `font-size:12.5px;line-height:18px;color:${AP_STATUS.amber.color};`, 'Internal — the ticket requester is not on this message.'), 8));
-  const thread = Array.isArray(ctx.thread) ? ctx.thread.filter((m) => m && (m.bodyText || m.bodyHtml)) : [];
-  if (thread.length) {
-    const items = thread.slice(-8).map((m) => {
-      const who = escapeHtml(m.author?.name || m.author?.email || 'Someone');
-      const when = m.createdAt ? fmtDay(m.createdAt) : '';
-      const label = m.kind === 'question' ? 'asked' : m.kind === 'answer' ? 'answered' : m.kind === 'decision' ? 'decided' : m.kind === 'handoff' ? 'handed off' : 'wrote';
-      const mb = m.bodyHtml ? (normalizeNoteHtmlForEmail(m.bodyHtml) || m.bodyHtml) : escapeHtml(m.bodyText || '').replace(/\n/g, '<br>');
-      return apHistoryItem(`<b>${who}</b> ${label}${when ? ` · ${escapeHtml(when)}` : ''}${m.audience === 'internal' ? ' · internal' : ''}`, mb);
-    }).join('');
-    rows.push(apRow(`${apLabel('Earlier on this request')}<div style="margin-top:8px;">${items}</div>`, 20));
+  const body = [];
+  body.push(messageBody(ctx.bodyHtml, ctx.bodyText));
+  body.push(replySignature(ctx.signatureHtml));
+  const copied = (ctx.copied || []).filter(Boolean);
+  const copiedLine = copied.length ? ` ${escapeHtml(copied.join(', '))} ${copied.length === 1 ? 'is' : 'are'} copied.` : '';
+  let hint;
+  if (ctx.kind === 'question') {
+    if (ctx.canReplyByEmail) hint = `Just reply to this e-mail to answer${ctx.replyUrl ? `, or ${inlineLink('answer on the web', ctx.replyUrl)}` : ''}.${copiedLine}`;
+    else hint = `${ctx.replyUrl ? `${inlineLink('Answer on the web', ctx.replyUrl)}; this` : 'This'} mailbox does not read replies.${copiedLine}`;
+  } else if (ctx.kind === 'answer') {
+    hint = `${escapeHtml(firstNameOf(ctx.authorName) || 'They')} answered${ctx.via === 'email' ? ' by e-mail' : ''}.${ctx.canReplyByEmail ? ' Reply to this e-mail to add to the conversation.' : ''}${copiedLine}`;
+  } else {
+    hint = `${ctx.canReplyByEmail ? 'Reply to this e-mail to add to the conversation.' : (ctx.replyUrl ? inlineLink('Reply on the web', ctx.replyUrl) : '')}${copiedLine}`;
   }
-  if (ctx.replyUrl || ctx.canReplyByEmail) {
-    rows.push(apActions(
-      [ctx.replyUrl ? { kind: ctx.kind === 'question' ? 'ask' : 'go', label: ctx.kind === 'question' ? 'Answer' : 'Reply', href: ctx.replyUrl, width: '100%' } : null],
-      ctx.canReplyByEmail ? 'Or simply reply to this e-mail — your answer lands on the request and everyone on it is told.' : 'Use the button to answer — this mailbox does not read replies.',
-    ));
-  }
-  return apDocument({
-    rows,
-    footerHtml: 'Sent by Ticket Pulse. This message is part of an approval on the ticket above.',
-    preheader: `${ctx.authorName || 'An approver'}: ${String(ctx.bodyText || '').slice(0, 120)}`,
-  });
+  if (hint.trim()) body.push(replyHint(hint.trim()));
+  if (ctx.decideUrl) body.push(replyLink('Decide on this request', ctx.decideUrl, '8px 0 0'));
+  if (ctx.internalNote) body.push(replyHint(`Internal: ${escapeHtml(firstNameOf(ctx.requesterName) || 'the requester')} is not on this conversation.`, ctx.decideUrl ? '8px 0 0' : '4px 0 0'));
+  return replyDocument(body, ctx.quoteHtml);
 }
 
 /**
- * Approvals v3 — the decision, reply-style, to the requester and the chain.
- * ctx: { workspaceName, categoryName, ticket:{ref,subject,appUrl|null}, approved, changedFrom, approverName,
- *   note, conditionNote, signatureHtml, recipient:{role,name}, requester:{name}, requestNote(Html), requestedByName, thread:[…], amountLabel?, tierLabel? }
+ * Approvals v3 — the decision, as the approver's message, to the other
+ * approvers, the agents involved and (only when the approver asked for it)
+ * the ticket requester. ctx:
+ *  { categoryName, ticket:{ref,subject,appUrl|null}, approved, changedFrom, approverName, note, conditionNote,
+ *    signatureHtml, recipient:{role,name}, requester:{name}, requestedByName, quoteHtml? }
  */
 export function renderDecisionThreadEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
   const verdict = verdictWordOf(approved, ctx.conditionNote);
-  const tone = approved ? 'go' : 'no';
-  const rows = [];
-  rows.push(apHero({ status: verdict, statusTone: tone, categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
-  const greet = ctx.recipient?.name ? `Hi ${escapeHtml(String(ctx.recipient.name).split(' ')[0])},` : 'Hello,';
-  const forWhom = ctx.requester?.name && ctx.recipient?.role !== 'requester' ? ` for ${escapeHtml(ctx.requester.name)}` : '';
-  rows.push(apRow(apSentence(`${greet}<br><br><b>${escapeHtml(ctx.approverName || 'The approver')}</b> has ${apWord(verdict.toLowerCase(), tone)} the request${forWhom}${ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom === 'rejected' ? 'not approved' : ctx.changedFrom)})` : ''}.`)));
-  if (ctx.amountLabel || ctx.tierLabel) {
-    rows.push(apRow('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
-      + (ctx.amountLabel ? apFact('Amount', escapeHtml(ctx.amountLabel)) : '')
-      + (ctx.tierLabel ? apFact('Approval tier', escapeHtml(ctx.tierLabel)) : '')
-      + '</tr></table>', 6));
+  const toRequester = ctx.recipient?.role === 'requester';
+  const body = [];
+  const what = ctx.categoryName ? escapeHtml(ctx.categoryName) : 'The request';
+  const forWhom = !toRequester && ctx.requester?.name ? ` for ${escapeHtml(ctx.requester.name)}` : '';
+  const ref = refHtml(t, toRequester ? null : t.appUrl);
+  const changed = ctx.changedFrom ? ` (changed from ${escapeHtml(ctx.changedFrom === 'rejected' ? 'not approved' : ctx.changedFrom)})` : '';
+  const lead = toRequester
+    ? `Your ${ctx.categoryName ? escapeHtml(ctx.categoryName) : ''} request${ref ? `, ${ref}` : ''}.`.replace('Your  request', 'Your request')
+    : `${what}${forWhom}${ref ? `, ${ref}` : ''}.`;
+  body.push(replyPara(`<b>${escapeHtml(verdict)}.</b>${changed} ${lead}`));
+  body.push(conditionNoteHtml(ctx.conditionNote));
+  if (ctx.note) body.push(replyText(ctx.note));
+  body.push(replySignature(ctx.signatureHtml));
+  let hint;
+  if (toRequester) hint = 'If you have a question about this, reply to this e-mail.';
+  else {
+    const agent = firstNameOf(ctx.requestedByName) || 'The agent';
+    hint = approved ? `${escapeHtml(agent)} can carry on with the ticket.` : 'The decision and the reason are on the ticket.';
+    if (t.appUrl) hint += ` ${inlineLink('Open the ticket', t.appUrl)}`;
   }
-  if (ctx.conditionNote) rows.push(apRow(apRuled(conditionLabel(ctx.conditionNote), escapeHtml(ctx.conditionNote).replace(/\n/g, '<br>')), 14));
-  if (ctx.note) rows.push(apRow(apSentence(escapeHtml(ctx.note).replace(/\n/g, '<br>')), 14));
-  if (ctx.signatureHtml) rows.push(apRow(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:13px;line-height:18px;color:${AP.ink2};">${ctx.signatureHtml}</div>`, 14));
-  // History — quoted like a reply thread, newest first.
-  const history = [];
-  for (const m of (Array.isArray(ctx.thread) ? ctx.thread : []).slice().reverse()) {
-    if (!m || !(m.bodyText || m.bodyHtml)) continue;
-    const who = escapeHtml(m.author?.name || m.author?.email || 'Someone');
-    const label = m.kind === 'question' ? 'asked' : m.kind === 'answer' ? 'answered' : m.kind === 'handoff' ? 'handed off' : 'wrote';
-    const mb = m.bodyHtml ? (normalizeNoteHtmlForEmail(m.bodyHtml) || m.bodyHtml) : escapeHtml(m.bodyText || '').replace(/\n/g, '<br>');
-    history.push(apHistoryItem(`On ${escapeHtml(m.createdAt ? fmtDayLong(m.createdAt) : '')}, <b>${who}</b> ${label}${m.audience === 'internal' ? ' (internal)' : ''}:`, mb));
-  }
-  if (ctx.requestNoteHtml || ctx.requestNote) {
-    const rb = ctx.requestNoteHtml ? (normalizeNoteHtmlForEmail(ctx.requestNoteHtml) || ctx.requestNoteHtml) : escapeHtml(ctx.requestNote || '').replace(/\n/g, '<br>');
-    history.push(apHistoryItem(`<b>${escapeHtml(ctx.requestedByName || 'The agent')}</b> asked for approval:`, rb));
-  }
-  if (history.length) rows.push(apRow(`${apLabel('History')}<div style="margin-top:8px;">${history.join('')}</div>`, 20));
-  rows.push(apActions([t.appUrl ? { kind: approved ? 'go' : 'ask', label: 'Open the ticket', href: t.appUrl, width: '100%' } : null]));
-  return apDocument({
-    rows,
-    footerHtml: workspaceFooter(ctx, ctx.recipient?.role === 'requester' ? '' : ' The full approval trail is on the ticket.'),
-    preheader: `${ctx.approverName || 'The approver'} ${verdict.toLowerCase()} — ${t.subject || t.ref || ''}`,
-  });
+  body.push(replyHint(hint));
+  return replyDocument(body, ctx.quoteHtml);
 }
 
 /**
- * The technician (the agent who asked): the approver approved WITH conditions,
- * and nothing is approved until each one is answered (26 Oct 2026). ctx:
- *  { workspaceName, categoryName, ticket:{ref, subject, appUrl}, approverName, technicianName,
- *    requester:{name}, items:[{text}], note, changed }
+ * The technician (the agent who asked): the approver approves WITH
+ * conditions, and nothing is approved until each one is answered. ctx:
+ *  { categoryName, ticket:{ref, subject, appUrl}, approverName, technicianName, requester:{name}, items:[{text}],
+ *    note, changed, signatureHtml?, quoteHtml? }
  */
 export function renderConditionsEmail(ctx) {
   const t = ctx.ticket || {};
-  const by = escapeHtml(ctx.approverName || 'The approver');
+  const approver = ctx.approverName || 'The approver';
+  const by = escapeHtml(approver);
   const n = (ctx.items || []).length;
-  const forWhom = ctx.requester?.name ? ` for <b>${escapeHtml(ctx.requester.name)}</b>` : '';
-  const rows = [];
-  rows.push(apHero({ status: ctx.changed ? 'Conditions changed — your answers needed' : 'Approved with conditions — your answers needed', statusTone: 'amber', categoryName: ctx.categoryName, ticket: t, href: t.appUrl || null }));
-  rows.push(apRow(apSentence(`<b>${by}</b> ${ctx.changed ? 'changed the conditions on' : 'will approve'} the request${forWhom} ${ctx.changed ? '' : `on ${n === 1 ? 'one condition' : `${n} conditions`}`}. `
-    + `It is <b>not approved yet</b>: answer ${n === 1 ? 'it' : 'each one'} and the answers go straight back to ${by}.`)));
-  rows.push(apRow(conditionsBlock({ items: ctx.items }, { label: n === 1 ? 'The condition' : 'The conditions', answers: false }), 14));
-  if (ctx.note) rows.push(apRow(apRuled(`Note from ${ctx.approverName || 'the approver'}`, escapeHtml(ctx.note).replace(/\n/g, '<br>')), 14));
-  rows.push(apRow(apText('ap-ink2', `font-size:14px;line-height:21px;color:${AP.ink2};`,
-    'For each one, say whether it can be met and how, or that it can\'t be met as asked and why. '
-    + 'If only the requester knows, ask them from the ticket first; their answer lands on the request.'), 14));
-  rows.push(apActions(
-    [t.appUrl ? { kind: 'ask', label: 'Answer on the ticket', href: t.appUrl, width: '100%' } : null],
-    `${by} decides once your answers are in. You will hear the decision by e-mail.`,
-  ));
-  return apDocument({
-    rows,
-    footerHtml: workspaceFooter(ctx, ' The full approval trail is on the ticket.'),
-    preheader: `${ctx.approverName || 'The approver'} set ${n === 1 ? 'a condition' : `${n} conditions`} — answer ${n === 1 ? 'it' : 'them'} to get this approved`,
-  });
+  const what = ctx.categoryName ? `the ${escapeHtml(ctx.categoryName)} request` : 'the request';
+  const forWhom = ctx.requester?.name ? ` for ${escapeHtml(ctx.requester.name)}` : '';
+  const ref = refHtml(t);
+  const on = ref ? ` on ${ref}` : '';
+  const body = [];
+  if (firstNameOf(ctx.technicianName)) body.push(replyPara(`Hi ${escapeHtml(firstNameOf(ctx.technicianName))},`));
+  const head = ctx.changed
+    ? `${by} changed the conditions on ${what}${forWhom}${on}.`
+    : `${by} will approve ${what}${forWhom}${on} on ${n === 1 ? 'one condition' : `${n} conditions`}.`;
+  body.push(replyPara(`${head} It is not approved yet: answer ${n === 1 ? 'it' : 'each one'} and your answers go straight back to ${escapeHtml(firstNameOf(approver) || approver)}.`));
+  body.push(conditionsList(ctx.items, { answers: false }));
+  if (ctx.note) body.push(replyText(ctx.note));
+  body.push(replySignature(ctx.signatureHtml));
+  body.push(replyLink('Answer on the ticket', t.appUrl));
+  body.push(replyHint('For each one, say whether it can be met and how, or why it can&rsquo;t. If only the requester knows, ask them from the ticket first; their answer lands on the request.', '4px 0 0'));
+  return replyDocument(body, ctx.quoteHtml);
 }
 
 export default {
@@ -792,4 +614,5 @@ export default {
   renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail,
   renderApprovalMessageEmail, renderDecisionThreadEmail, descriptionHtmlForEmail,
   normalizeNoteHtmlForEmail, dropEmptyTableColumns, textExcerpt, escapeHtml, initialsOf, emailShell,
+  replyPara, replyHint, replyLink, decisionIntentUrl,
 };

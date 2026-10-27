@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 // Knowledge that grows (Auto-help P1): Gaps tab, drafting from tickets,
-// drafted-from banner, FreshService read-only articles + import settings,
-// the review digest line, playbook backtests and "Turn into an article".
+// drafted-from banner, FreshService read-only articles (the import itself was
+// removed on 26 Oct 2026), the review digest line + its setting, playbook backtests and "Turn into an article".
 
 const growth = {
   gaps: vi.fn(),
@@ -14,10 +14,6 @@ const growth = {
   draftFromTicket: vi.fn(),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
-  fsFolders: vi.fn(),
-  fsImportNow: vi.fn(),
-  fsImportStatus: vi.fn(),
-  fsImportJob: vi.fn(),
   reviewDigest: vi.fn(),
   backtestEstimate: vi.fn(),
   startBacktest: vi.fn(),
@@ -41,12 +37,12 @@ vi.mock('../tickets/RichTextEditor', () => ({ default: () => <textarea aria-labe
 import GapsPanel from './GapsPanel';
 import DraftFromTicketsDialog from './DraftFromTicketsDialog';
 import { DraftedFromBanner, FsSourceNote, ReviewDigestLine } from './ArticleGrowth';
-import { KnowledgeSources } from './KnowledgeSourcesSettings';
+import { KnowledgeReviews } from './KnowledgeReviewSettings';
 import PlaybookBacktestBox from './PlaybookBacktestBox';
 import TurnIntoArticleButton from './TurnIntoArticleButton';
 import ArticlesPanel from './ArticlesPanel';
 import {
-  estimateLine, importSummary, money, parseTicketRefs, readableNotes, reasonLine,
+  estimateLine, money, parseTicketRefs, readableNotes, reasonLine,
 } from './knowledgeGrowthFormat';
 
 function Where() {
@@ -244,30 +240,22 @@ describe('Article pieces', () => {
     expect(screen.getByText('12 d overdue')).toBeInTheDocument();
   });
 
-  test('Sources: pick folders, save, import now (dry run explained), weekly e-mail switch', async () => {
-    growth.getSettings.mockResolvedValue({ success: true, data: { fsImportEnabled: false, fsFolderIds: [], fsImportState: null, reviewDigestEnabled: false, fsCallsAllowed: false } });
-    growth.fsFolders.mockResolvedValue({ success: true, data: { categories: [{ id: '3', name: 'IT how-tos', folders: [{ id: '7', name: 'VPN', description: null }, { id: '8', name: 'Printers', description: null }] }] } });
-    growth.updateSettings.mockImplementation(async (patch) => ({ success: true, data: { fsImportEnabled: false, fsFolderIds: [], reviewDigestEnabled: false, fsCallsAllowed: false, ...patch } }));
-    growth.fsImportNow.mockResolvedValue({ success: true, data: { dryRun: true, reason: 'not_production' } });
-    renderIn(<KnowledgeSources />, '/knowledge/articles');
-    const picker = await screen.findByTestId('fs-folder-picker');
-    expect(screen.getByRole('switch', { name: /Import FreshService solution articles/ })).toBeDisabled(); // no folders yet
-    fireEvent.click(within(picker).getByLabelText('VPN'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save 1 folder' }));
-    await waitFor(() => expect(growth.updateSettings).toHaveBeenCalledWith({ fsFolderIds: ['7'] }));
-    fireEvent.click(await screen.findByRole('button', { name: /Import now/ }));
-    expect(await screen.findByText(/Dry run only: this environment never calls FreshService/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('switch', { name: /Weekly review e-mail/ }));
+  test('Reviews: the weekly e-mail switch saves; no FreshService import section (QA 10-26 #7)', async () => {
+    growth.getSettings.mockResolvedValue({ success: true, data: { reviewDigestEnabled: false } });
+    growth.updateSettings.mockImplementation(async (patch) => ({ success: true, data: { reviewDigestEnabled: false, ...patch } }));
+    renderIn(<KnowledgeReviews />, '/knowledge/articles');
+    fireEvent.click(await screen.findByRole('switch', { name: /Weekly review e-mail/ }));
     await waitFor(() => expect(growth.updateSettings).toHaveBeenCalledWith({ reviewDigestEnabled: true }));
-    expect(screen.getByTestId('fs-import-state')).toHaveTextContent('Not imported yet');
+    expect(await screen.findByText('On')).toBeInTheDocument();
+    expect(screen.queryByText(/Knowledge sources/)).toBeNull();
+    expect(screen.queryByRole('switch', { name: /Import FreshService solution articles/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Import now/ })).toBeNull();
   });
 
-  test('Sources: a refused folder list is explained with a retry', async () => {
-    growth.getSettings.mockResolvedValue({ success: true, data: { fsImportEnabled: false, fsFolderIds: [], reviewDigestEnabled: false, fsCallsAllowed: false } });
-    growth.fsFolders.mockRejectedValue(new Error('The FreshService folder list is only fetched in production'));
-    renderIn(<KnowledgeSources />, '/knowledge/articles');
-    expect(await screen.findByText(/only fetched in production/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  test('Reviews: read-only for people who cannot manage Knowledge', async () => {
+    growth.getSettings.mockResolvedValue({ success: true, data: { reviewDigestEnabled: true } });
+    renderIn(<KnowledgeReviews canManage={false} />, '/knowledge/articles');
+    expect(await screen.findByRole('switch', { name: /Weekly review e-mail/ })).toBeDisabled();
   });
 });
 
@@ -353,43 +341,4 @@ describe('audit fixes (Part B)', () => {
     expect(screen.getByTestId('reviewer-notes')).toHaveTextContent('When this doesn’t apply list is thin.');
   });
 
-  test('import summary: progress while running, partial listings and skipped articles said plainly', () => {
-    expect(importSummary({ status: 'running', progress: { foldersTotal: 5, foldersDone: 2, articlesSeen: 140 } })).toBe('Importing… 2 of 5 folders, 140 articles read');
-    expect(importSummary({ status: 'queued' })).toBe('Starting the import…');
-    expect(importSummary({ status: 'interrupted' })).toMatch(/stopped before it finished/);
-    const done = importSummary({ status: 'done', at: null, created: 3, updated: 0, unchanged: 9, failedArticles: [{ id: '4' }], archiveSkipped: 'partial_listing', unknownFolders: ['9'] });
-    expect(done).toMatch(/3 new, 0 updated, 9 unchanged, 1 article skipped, 1 folder no longer in FreshService\./);
-    expect(done).toMatch(/Nothing was archived/);
-  });
-
-  test('"Import now" starts a background job and follows its progress until it is done', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    growth.getSettings.mockResolvedValue({ success: true, data: { fsImportEnabled: true, fsFolderIds: ['7'], fsImportState: null, reviewDigestEnabled: false, fsCallsAllowed: true } });
-    growth.fsFolders.mockResolvedValue({ success: true, data: { categories: [{ id: '3', name: 'IT how-tos', folders: [{ id: '7', name: 'VPN', description: null }] }] } });
-    growth.fsImportNow.mockResolvedValue({ success: true, data: { jobId: 'fsi-1-a', status: 'queued' } });
-    growth.fsImportJob
-      .mockResolvedValueOnce({ success: true, data: { jobId: 'fsi-1-a', status: 'running', progress: { foldersTotal: 1, foldersDone: 0, articlesSeen: 40 } } })
-      .mockResolvedValueOnce({ success: true, data: { jobId: 'fsi-1-a', status: 'done', at: new Date().toISOString(), created: 40, updated: 0, unchanged: 0 } });
-    renderIn(<KnowledgeSources />, '/knowledge/articles');
-    fireEvent.click(await screen.findByRole('button', { name: /Import now/ }));
-    expect(await screen.findByRole('button', { name: /Importing/ })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1100); });
-    await waitFor(() => expect(screen.getByTestId('fs-import-state')).toHaveTextContent('Importing… 0 of 1 folder, 40 articles read'));
-    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
-    await waitFor(() => expect(screen.getByTestId('fs-import-state')).toHaveTextContent(/40 new/));
-    expect(screen.getByRole('button', { name: /Import now/ })).not.toBeDisabled();
-    expect(growth.fsImportJob).toHaveBeenCalledWith('fsi-1-a');
-  });
-
-  test('an import already running when the panel opens is followed', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    growth.getSettings.mockResolvedValue({ success: true, data: { fsImportEnabled: true, fsFolderIds: ['7'], fsImportState: { jobId: 'fsi-1-b', status: 'running', progress: { foldersTotal: 2, foldersDone: 1, articlesSeen: 3 } }, reviewDigestEnabled: false, fsCallsAllowed: true } });
-    growth.fsFolders.mockResolvedValue({ success: true, data: { categories: [] } });
-    growth.fsImportJob.mockResolvedValue({ success: true, data: { jobId: 'fsi-1-b', status: 'done', created: 1, updated: 0, unchanged: 2 } });
-    renderIn(<KnowledgeSources />, '/knowledge/articles');
-    expect(await screen.findByTestId('fs-import-state')).toHaveTextContent('Importing… 1 of 2 folders');
-    await act(async () => { await vi.advanceTimersByTimeAsync(1100); });
-    await waitFor(() => expect(screen.getByTestId('fs-import-state')).toHaveTextContent(/1 new/));
-    expect(growth.fsImportJob).toHaveBeenCalledWith('fsi-1-b');
-  });
 });

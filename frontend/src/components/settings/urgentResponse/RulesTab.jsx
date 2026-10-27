@@ -133,6 +133,29 @@ function CoordinatorsEditor({ value, onChange, technicians, techById }) {
   );
 }
 
+/**
+ * QA 10-26 #5: the coordinators were picked but never stored (no save reached
+ * the server). Right under the list: "not saved yet" with its own Save while
+ * the list is changed, and who saved it last once it is stored — so a list on
+ * screen is never mistaken for a saved one.
+ */
+function CoordinatorsSaveState({ dirty, saving, canSave, onSave, info, timezone = null }) {
+  if (dirty) {
+    return (
+      <p className="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-amber-700 dark:text-amber-300" role="status" data-testid="coordinators-unsaved">
+        Coordinators not saved yet.
+        <TextButton onClick={onSave} disabled={saving || !canSave} className="text-xs">{saving ? 'Saving…' : 'Save now'}</TextButton>
+      </p>
+    );
+  }
+  if (!info?.saved || !info?.updatedAt) return null;
+  return (
+    <p className="mt-2 text-xs text-muted-foreground" data-testid="coordinators-saved">
+      Saved{info.updatedBy ? ` by ${info.updatedBy}` : ''} on {fmtWhen(info.updatedAt, timezone)}.
+    </p>
+  );
+}
+
 /** A person in the group list: their name, marked when they are no longer active. */
 const personName = (p) => (p ? `${p.name}${p.isActive === false ? ' (inactive)' : ''}` : null);
 
@@ -176,6 +199,8 @@ export default function RulesTab({
   // The workspace coordinators are their own setting (PUT /coordinators), saved by the same Save.
   const [coordSaved, setCoordSaved] = useState(() => pickCoordinators(workspaceCoordinators, settings));
   const [coordDraft, setCoordDraft] = useState(coordSaved);
+  // Who saved the list last, and when (QA 10-26 #5: a list on screen is not proof it was stored).
+  const [coordInfo, setCoordInfo] = useState(() => workspaceCoordinators || null);
   const [status, setStatus] = useState(null);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState({ state: 'idle', data: null });
@@ -223,35 +248,70 @@ export default function RulesTab({
     return () => { alive = false; };
   }, [changesKey]);
 
+  // QA 10-26 #5: changes that only live on screen are lost when the page is
+  // left; the browser asks first while anything here is unsaved.
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  // A fresh load of the saved list (the panel reloaded) shows it, unless the list is being edited.
+  const savedCoordKey = JSON.stringify(workspaceCoordinators ? pickCoordinators(workspaceCoordinators, settings) : null);
+  useEffect(() => {
+    if (!workspaceCoordinators) return;
+    const next = pickCoordinators(workspaceCoordinators, settings);
+    setCoordInfo(workspaceCoordinators);
+    if (!coordinatorsDirty(coordSaved, next)) return;
+    if (!coordinatorsDirty(coordDraft, coordSaved)) setCoordDraft(next);
+    setCoordSaved(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedCoordKey]);
+
+  /**
+   * One Save, two independent stores (the coordinators list and the rules).
+   * QA 10-26 #5: each is saved on its own — the coordinators first — so a
+   * refused rules change never keeps the coordinators from being stored, and
+   * the message says exactly which part did not save.
+   */
   const save = async () => {
     setSaving(true);
     setStatus(null);
-    try {
-      let n = 0;
-      let savedSettings = null;
-      if (Object.keys(patch).length) {
+    let n = 0;
+    const failed = [];
+    let coordinators = null;
+    if (coordDirty) {
+      try {
+        const res = await urgentResponseAPI.updateCoordinators({ technicianIds: coordDraft.technicianIds, mode: coordDraft.mode });
+        const list = res?.data?.technicianIds ? pickCoordinators(res.data) : coordDraft;
+        setCoordSaved(list);
+        setCoordDraft(list);
+        // Who and when ride along, so the panel's copy (and the "Saved by" line) stay current.
+        coordinators = { ...list, updatedBy: res?.data?.updatedBy ?? null, updatedAt: res?.data?.updatedAt ?? null };
+        setCoordInfo({ ...coordinators, saved: true });
+        if (res?.data?.changed !== false) n += 1;
+      } catch (err) {
+        failed.push(`Coordinators not saved: ${err?.message || 'could not save'}`);
+      }
+    }
+    let savedSettings = null;
+    if (Object.keys(patch).length) {
+      try {
         const res = await urgentResponseAPI.updateSettings(patch);
         const next = res?.data?.settings ? pickRules(res.data.settings) : draft;
         setDraft(next);
         n += res?.data?.changes?.length || 0;
         savedSettings = res?.data?.settings || patch;
+      } catch (err) {
+        failed.push(`${coordinators ? 'The coordinators were saved; the rules were not' : 'Rules not saved'}: ${err?.message || 'could not save'}`);
       }
-      let coordinators = null;
-      if (coordDirty) {
-        const res = await urgentResponseAPI.updateCoordinators({ technicianIds: coordDraft.technicianIds, mode: coordDraft.mode });
-        coordinators = res?.data?.technicianIds ? pickCoordinators(res.data) : coordDraft;
-        setCoordSaved(coordinators);
-        setCoordDraft(coordinators);
-        if (res?.data?.changed !== false) n += 1;
-      }
-      setStatus({ ok: true, text: n ? `Saved. ${n} ${n === 1 ? 'change' : 'changes'} recorded below.` : 'Saved.' });
-      if (coordinators) onSaved?.(savedSettings || {}, { coordinators });
-      else onSaved?.(savedSettings || patch);
-    } catch (err) {
-      setStatus({ ok: false, text: err?.message || 'Could not save' });
-    } finally {
-      setSaving(false);
     }
+    if (failed.length) setStatus({ ok: false, text: failed.join(' · ') });
+    else setStatus({ ok: true, text: n ? `Saved. ${n} ${n === 1 ? 'change' : 'changes'} recorded below.` : 'Saved.' });
+    if (coordinators) onSaved?.(savedSettings || {}, { coordinators });
+    else if (savedSettings) onSaved?.(savedSettings);
+    setSaving(false);
   };
 
   const onCallNow = onCall?.current?.technician || null;
@@ -394,6 +454,7 @@ export default function RulesTab({
             <p className="text-xs leading-normal text-muted-foreground">The coordinator is the ticket’s group coordinator if that group has one at work, else one of the coordinators below.</p>
           </div>
           <CoordinatorsEditor value={coordDraft} onChange={setCoordinators} technicians={technicians} techById={techById} />
+          <CoordinatorsSaveState dirty={coordDirty} saving={saving} canSave={problems.length === 0} onSave={save} info={coordInfo} timezone={timezone} />
           <GroupCoordinatorList items={groupCoordinators} />
         </section>
 

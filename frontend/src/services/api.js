@@ -1373,6 +1373,15 @@ export const ticketsAPI = {
   discardHeldMessage: async (id) => {
     return await api.post(`/tickets/mailboxes/held/${id}/discard`);
   },
+
+  // Alert bursts grouped by device (QA 10-26 #3): { groups, singles, total, mode }.
+  listHeldGroups: async () => await api.get('/tickets/mailboxes/held/groups'),
+  // One decision for many held mails: action 'attach' (with ticketId) or 'discard'.
+  bulkHeldMessages: async (ids, action, ticketId = null) => {
+    return await api.post('/tickets/mailboxes/held/bulk', { ids, action, ...(ticketId ? { ticketId } : {}) });
+  },
+  getBurstGrouping: async () => await api.get('/tickets/mailboxes/burst-grouping'),
+  setBurstGrouping: async (mode) => await api.put('/tickets/mailboxes/burst-grouping', { mode }),
 };
 
 /**
@@ -1479,8 +1488,8 @@ export const knowledgeAPI = {
 
 /**
  * Knowledge that grows (Auto-help P1, plans/AUTO_HELP_P1_PLAN.md §4-§5): gaps,
- * articles drafted from solved tickets, FreshService solution import, the
- * review digest and playbook backtests. Drafting waits on a model call.
+ * articles drafted from solved tickets, the review digest and playbook
+ * backtests. Drafting waits on a model call.
  */
 export const knowledgeGrowthAPI = {
   gaps: (params = {}) => api.get('/knowledge/gaps', { params }),
@@ -1488,11 +1497,6 @@ export const knowledgeGrowthAPI = {
   draftFromTicket: (ticketId) => apiLongTimeout.post(`/knowledge/drafts/from-ticket/${ticketId}`, {}, { timeout: 120000 }),
   getSettings: () => api.get('/knowledge/growth-settings'),
   updateSettings: (data) => api.put('/knowledge/growth-settings', data),
-  fsFolders: (params = {}) => apiLongTimeout.get('/knowledge/fs-import/folders', { params, timeout: 90000 }),
-  // "Import now" answers at once with a job id (202); progress comes from fsImportJob.
-  fsImportNow: (data = {}) => api.post('/knowledge/fs-import/run', data),
-  fsImportStatus: () => api.get('/knowledge/fs-import/status'),
-  fsImportJob: (jobId) => api.get(`/knowledge/fs-import/jobs/${encodeURIComponent(jobId)}`),
   reviewDigest: () => api.get('/knowledge/review-digest', { _speculative: true }),
   backtestEstimate: (playbookId, n) => api.get(`/knowledge/playbooks/${playbookId}/backtest`, { params: { n } }),
   startBacktest: (playbookId, n) => api.post(`/knowledge/playbooks/${playbookId}/backtest`, { n, confirm: true }),

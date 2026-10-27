@@ -247,7 +247,7 @@ describe('Urgent response: workspace coordinators', () => {
     await waitFor(() => expect(api.updateCoordinators).toHaveBeenCalledWith({ technicianIds: [13, 11], mode: 'all' }));
     expect(api.updateSettings).not.toHaveBeenCalled();
     expect(await screen.findByText('Saved. 1 change recorded below.')).toBeInTheDocument();
-    expect(onSaved).toHaveBeenCalledWith({}, { coordinators: { technicianIds: [13, 11], mode: 'all' } });
+    expect(onSaved).toHaveBeenCalledWith({}, { coordinators: { technicianIds: [13, 11], mode: 'all', updatedBy: null, updatedAt: null } });
     expect(saveButton()).toBeDisabled();
   });
 
@@ -272,8 +272,58 @@ describe('Urgent response: workspace coordinators', () => {
     crew({ workspaceCoordinators: { technicianIds: [], mode: 'first_available' } });
     add('Priya Nair');
     fireEvent.click(saveButton());
-    expect(await screen.findByText('Coordinators: pick active technicians of this workspace')).toBeInTheDocument();
+    expect(await screen.findByText(/Coordinators not saved: Coordinators: pick active technicians of this workspace/)).toBeInTheDocument();
     expect(listed()).toEqual(['Priya Nair']);
+  });
+
+  // QA 10-26 #5: the list was picked on screen but never reached the server.
+  test('an unsaved list says so right under it, with its own Save', async () => {
+    crew({ workspaceCoordinators: { technicianIds: [], mode: 'first_available', saved: false } });
+    expect(screen.queryByTestId('coordinators-unsaved')).toBeNull();
+    add('Priya Nair');
+    expect(screen.getByTestId('coordinators-unsaved')).toHaveTextContent('Coordinators not saved yet.');
+    fireEvent.click(within(screen.getByTestId('coordinators-unsaved')).getByRole('button', { name: 'Save now' }));
+    await waitFor(() => expect(api.updateCoordinators).toHaveBeenCalledWith({ technicianIds: [11], mode: 'first_available' }));
+    await waitFor(() => expect(screen.queryByTestId('coordinators-unsaved')).toBeNull());
+  });
+
+  test('a stored list says who saved it and when', () => {
+    crew({ workspaceCoordinators: { technicianIds: [11, 12], mode: 'all', saved: true, updatedBy: 'rita@x.io', updatedAt: '2026-10-16T19:40:00Z' } });
+    expect(listed()).toEqual(['Priya Nair', 'Sam Okafor']);
+    expect(screen.getByTestId('coordinators-saved')).toHaveTextContent('Saved by rita@x.io on Oct 16, 12:40 PM.');
+  });
+
+  test('a refused rules change never keeps the coordinators from being stored', async () => {
+    api.updateSettings = vi.fn(async () => { throw new Error('Who is told: pick active technicians of this workspace'); });
+    crew({ workspaceCoordinators: { technicianIds: [11], mode: 'first_available' } });
+    fireEvent.change(num('Minutes before the people at work are told'), { target: { value: '10' } });
+    add('Lena Brooks');
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(api.updateCoordinators).toHaveBeenCalledWith({ technicianIds: [11, 14], mode: 'first_available' }));
+    expect(await screen.findByText(/The coordinators were saved; the rules were not: Who is told/)).toBeInTheDocument();
+    expect(screen.queryByTestId('coordinators-unsaved')).toBeNull();
+    // The rule change is still there to fix and save again.
+    expect(saveButton()).toBeEnabled();
+  });
+
+  test('leaving the page with unsaved coordinators asks first', () => {
+    crew({ workspaceCoordinators: { technicianIds: [], mode: 'first_available' } });
+    const quiet = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented).toBe(false);
+    add('Priya Nair');
+    const leaving = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+  });
+
+  test('a reload of the saved list shows it (the tab stays open)', () => {
+    const props = { technicians: CREW, techById: new Map(CREW.map((t) => [t.id, t])), settings: SETTINGS, teamsEnabled: true, onCall: ON_CALL, timezone: 'America/Vancouver', previewDelayMs: 0, onSaved: vi.fn() };
+    const { rerender } = render(<RulesTab {...props} workspaceCoordinators={{ technicianIds: [], mode: 'first_available' }} />);
+    expect(listed()).toEqual([]);
+    rerender(<RulesTab {...props} workspaceCoordinators={{ technicianIds: [12], mode: 'first_available', saved: true }} />);
+    expect(listed()).toEqual(['Sam Okafor']);
+    expect(saveButton()).toBeDisabled();
   });
 
   test('the change history reads the list in words', async () => {

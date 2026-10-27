@@ -9,10 +9,12 @@ import { readableNotes } from './knowledgeGrowthFormat';
 /**
  * Knowledge that grows (Auto-help P1) — the article-side pieces:
  *   DraftedFromBanner    on an article drafted from solved tickets
- *   FsSourceNote         on a read-only FreshService-imported article
+ *   FsSourceNote         on a read-only FreshService-imported article (the
+ *                        import itself was removed on 26 Oct 2026; an article
+ *                        it left behind still reads as one)
  *   ReviewDigestLine     "3 of your articles are due for review" (Articles tab)
- * (The FreshService import and the review e-mail switch live on Knowledge →
- * Settings: KnowledgeSourcesSettings.jsx.)
+ * (The review e-mail switch lives on Knowledge → Settings:
+ * KnowledgeReviewSettings.jsx.)
  */
 
 export function DraftedFromBanner({ article }) {
@@ -62,7 +64,7 @@ export function FsSourceNote({ article }) {
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground" data-testid="fs-source-note">
       <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-      <span>Imported from FreshService{article.fsUpdatedAt ? ` · changed there ${agoWords(article.fsUpdatedAt)}` : ''}. Read-only here; the nightly import brings changes in.</span>
+      <span>Imported from FreshService{article.fsUpdatedAt ? ` · changed there ${agoWords(article.fsUpdatedAt)}` : ''}. Read-only here.</span>
       {url && (
         <a href={url} target="_blank" rel="noopener noreferrer" className="tp-focus-ring inline-flex items-center gap-1 rounded font-medium text-primary hover:underline">
           Edit in FreshService <ExternalLink className="h-3 w-3" aria-hidden="true" />
