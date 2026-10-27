@@ -78,7 +78,9 @@ describe('ApprovalsInbox (Phase B + E; 1B · 2A · 3B redesign 27 Oct 2026)', ()
   test('subtitle marks approvals as a Ticket Pulse feature not synced to FreshService; the header counts what is waiting', async () => {
     renderPage();
     expect(await screen.findByText(/A Ticket Pulse feature — not synced to FreshService/i)).toBeInTheDocument();
-    expect(screen.getByTestId('approvals-hero')).toHaveTextContent('1 to decide · 0 waiting on an answer');
+    // the counts fill in once the lists have loaded
+    await screen.findByText('New laptop for Rita');
+    await waitFor(() => expect(screen.getByTestId('approvals-hero')).toHaveTextContent('1 to decide · 0 waiting on an answer'));
   });
 
   test('reviewer gets a Categories tab that mounts ApprovalCategoriesPanel (v3.7.02 RM1)', async () => {
