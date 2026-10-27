@@ -313,6 +313,15 @@ export const TOOL_SCHEMAS = [
 
 FORMAT: Plain text or simple Markdown. Use short paragraphs separated by a blank line, and bullet lists ("- ") where you're enumerating candidates or factors. Do NOT produce one giant wall of text — break it up so an admin can scan it quickly. No HTML.`,
         },
+        requiredLevel: {
+          type: 'string',
+          enum: ['basic', 'intermediate', 'advanced', 'expert'],
+          description: 'The lowest skill level THIS request needs (Level match). Judge the request itself, not its category: a routine request in a specialist subcategory is still basic. See "Level Needed For This Request".',
+        },
+        requiredLevelReason: {
+          type: 'string',
+          description: 'One short line on why this request needs that level (admin-facing).',
+        },
         assessedPriority: {
           type: 'string',
           enum: ['Low', 'Medium', 'High', 'Urgent'],
