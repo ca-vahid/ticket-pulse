@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.30-preview';
+export const APP_VERSION = '4.3.31-preview';
 
 export const changelog = [
+  {
+    version: '4.3.31-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>New hires: User Creation, then Laptop and Workstation Setup</strong> &mdash; a new hire&rsquo;s two tickets are now User Creation, due a week before the start date, and Laptop and Workstation Setup, due on the start date. Both still go to the same person from the hire&rsquo;s office. User Creation lists what HR sent, one line each: name, employee #, position, employee status, department, division, office, reports to and start date, so the account can be made without opening the HR notice. The open onboarding tickets were renamed the same way and kept their owner.' },
+      { type: 'fixed', html: '<strong>NH automation tickets go with the setup ticket</strong> &mdash; the account script&rsquo;s NH Laptop and NH Workstation tickets are now matched with Laptop and Workstation Setup. Before, an NH Laptop ticket was matched with the first onboarding ticket, which is now User Creation.' },
+    ],
+  },
   {
     version: '4.3.30-preview',
     date: 'October 27, 2026',

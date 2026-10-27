@@ -113,7 +113,7 @@ const ticketSvc = {
     if (input.dueBy !== undefined) t.dueBy = new Date(input.dueBy);
     if (input.status !== undefined) t.status = input.status;
   }),
-  updateTicketFields: jest.fn(async (id, ws, input) => { ticketById(id).dueBy = new Date(input.dueBy); }),
+  updateTicketFields: jest.fn(async (id, ws, input) => { Object.assign(ticketById(id), input, input.dueBy ? { dueBy: new Date(input.dueBy) } : {}); }),
   changeStatus: jest.fn(async (id, ws, status) => { ticketById(id).status = status; }),
   addPrivateNote: jest.fn(async () => ({})),
 };
@@ -141,7 +141,7 @@ jest.unstable_mockModule('../src/services/statusService.js', () => ({
   default: { baseStatusOf: jest.fn(async (_ws, s) => ({ Open: 'Open', Pending: 'Pending', Resolved: 'Resolved', Closed: 'Closed' }[s] ?? null)) },
 }));
 
-const { default: hr, dueInstant } = await import('../src/services/hrLifecycleService.js');
+const { default: hr, dueInstant, addDays } = await import('../src/services/hrLifecycleService.js');
 const { hrWakeDate } = await import('../src/utils/hrNoticeDates.js');
 
 // ---------------------------------------------------------------- fixtures
@@ -186,7 +186,7 @@ describe('settings', () => {
     expect(s.templates.offboarding_standard.find((i) => i.key === 'decommission_account')).toMatchObject({ dueOffsetDays: 7, assigneeTechId: 2 });
     expect(s.templates.offboarding_standard.find((i) => i.key === 'laptop').assigneeTechId).toBeNull(); // blank → AI routing
     expect(s.templates.offboarding_after_fact.map((i) => i.key)).toEqual(['laptop', 'phone', 'ipad']);
-    expect(s.templates.onboarding.map((i) => i.title)).toEqual(['Laptop', 'Workstation']);
+    expect(s.templates.onboarding.map((i) => [i.key, i.title, i.dueOffsetDays])).toEqual([['laptop', 'User Creation', -7], ['workstation', 'Laptop and Workstation Setup', 0]]);
   });
 
   test('every change is audited: who, when, field, before → after', async () => {
@@ -289,7 +289,7 @@ describe('modes', () => {
     const open = await hr.listFamilies(1, { status: 'open' });
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({ shadow: true, kind: 'onboarding', personName: 'Isabela Sousa', status: 'open', linked: 1, progress: { done: 0, total: 2 } });
-    expect(open[0].plannedChildren.map((c) => c.title)).toEqual(['Laptop', 'Workstation']);
+    expect(open[0].plannedChildren.map((c) => c.title)).toEqual(['User Creation', 'Laptop and Workstation Setup']);
     expect(open[0].parent).toMatchObject({ id: hire.id });
     const all = await hr.listFamilies(1, {});
     expect(all.find((f) => f.personName === 'Jamie Gill')).toMatchObject({ shadow: true, status: 'cancelled', progress: { total: 5 } });
@@ -371,7 +371,7 @@ describe('live: family creation', () => {
     expect(ticketSvc.createTicket).toHaveBeenCalledTimes(3);
   });
 
-  test('onboarding: the BambooHR notice is the parent of Laptop + Workstation, due on the start date', async () => {
+  test('onboarding: the BambooHR notice is the parent of User Creation (a week before the start, with the notice fields) + Laptop and Workstation Setup', async () => {
     await setMode('live');
     const start = day(20);
     const [y, m, d] = start.split('-');
@@ -384,10 +384,55 @@ describe('live: family creation', () => {
     const ev = await hr.onTicketCreated(parent.id, 1);
     expect(ev.decision).toBe('create_family');
     expect(ticketSvc.createTicket.mock.calls.map((c) => [c[1].subject, c[1].dueBy])).toEqual([
-      ['Child Ticket - Laptop - New Hire: Teddi Hern', dueInstant(start)],
-      ['Child Ticket - Workstation - New Hire: Teddi Hern', dueInstant(start)],
+      ['Child Ticket - User Creation - New Hire: Teddi Hern', dueInstant(addDays(start, -7))],
+      ['Child Ticket - Laptop and Workstation Setup - New Hire: Teddi Hern', dueInstant(start)],
     ]);
+    const uc = ticketSvc.createTicket.mock.calls[0][1].description;
+    expect(uc).toMatch(/^<p>Please create the user account for the following new hire\.<\/p>/);
+    for (const line of ['<strong>Name:</strong> Teddi Hern', '<strong>Employee #:</strong> 2374', '<strong>Position:</strong> Geologist', '<strong>Employee status:</strong> FTR', '<strong>Office:</strong> Calgary', '<strong>Reports to:</strong> Maria Cruz']) expect(uc).toContain(line);
+    expect(ticketSvc.createTicket.mock.calls[1][1].description).toMatch(/^<p>Please set up the laptop and the workstation/);
     expect(db.families[0]).toMatchObject({ kind: 'onboarding', employeeId: '2374', template: 'onboarding' });
+  });
+
+  test('children made before the rename take the new title, subject, intro, fields and due date; owner and edited bodies are kept', async () => {
+    const old = [
+      { key: 'laptop', title: 'Laptop', dueOffsetDays: 0, assigneeTechIds: [], groupId: null },
+      { key: 'workstation', title: 'Workstation', dueOffsetDays: 0, assigneeTechIds: [], groupId: null },
+    ];
+    const s0 = await hr.getSettings(1);
+    await setMode('live', { templates: { ...s0.templates, onboarding: old } });
+    const start = day(12);
+    const parent = fsNotice({ subject: 'New Hire: Gabe Comet', sender: BAMBOO, text: `New Team Member Start Date: ${start} Employee #: 2400 Position: Engineer Employee Status: FTR Department: Engineering Location: Calgary Reports To: Kim Lee View Employee Record` });
+    await hr.onTicketCreated(parent.id, 1);
+    const fam = db.families.find((f) => f.parentTicketId === parent.id);
+    const kids = db.members.filter((m) => m.familyId === fam.id && m.role === 'child').map((m) => ticketById(m.ticketId));
+    expect(kids.map((t) => t.subject)).toEqual(['Child Ticket - Laptop - New Hire: Gabe Comet', 'Child Ticket - Workstation - New Hire: Gabe Comet']);
+    kids[0].assignedTechId = 4;
+    kids[1].description = '<p>Desk 4B, see Kim.</p>'; // an agent rewrote it
+    await setMode('live', { templates: { ...s0.templates, onboarding: [{ ...old[0], title: 'User Creation', dueOffsetDays: -7 }, { ...old[1], title: 'Laptop and Workstation Setup' }] } });
+    jest.clearAllMocks();
+
+    const dry = await hr.retitleOnboardingChildren(1);
+    expect(dry.map((r) => [r.from, r.to, r.changed])).toEqual([
+      ['Laptop', 'User Creation', ['subject', 'description', 'title', `due ${addDays(start, -7)}`]],
+      ['Workstation', 'Laptop and Workstation Setup', ['subject', 'title']],
+    ]);
+    expect(ticketSvc.updateTicketFields).not.toHaveBeenCalled();
+    expect(kids[0].subject).toMatch(/Laptop/);
+
+    await hr.retitleOnboardingChildren(1, { dryRun: false });
+    expect(kids.map((t) => t.subject)).toEqual(['Child Ticket - User Creation - New Hire: Gabe Comet', 'Child Ticket - Laptop and Workstation Setup - New Hire: Gabe Comet']);
+    expect(kids[0].description).toContain('<strong>Department:</strong> Engineering');
+    expect(kids[0].description).toMatch(/^<p>Please create the user account/);
+    expect(kids[1].description).toBe('<p>Desk 4B, see Kim.</p>');
+    expect(kids[0].assignedTechId).toBe(4);
+    expect(kids[0].dueBy.toISOString()).toBe(dueInstant(addDays(start, -7)));
+    expect(db.members.filter((m) => m.familyId === fam.id && m.role === 'child').map((m) => [m.title, m.dueOffsetDays])).toEqual([['User Creation', -7], ['Laptop and Workstation Setup', 0]]);
+    expect(ticketSvc.addPrivateNote.mock.calls.map((c) => c[2].bodyHtml)).toEqual([
+      expect.stringMatching(/renamed from Laptop to User Creation, due 7 days before the start date/),
+      expect.stringMatching(/renamed from Workstation to Laptop and Workstation Setup\. /),
+    ]);
+    expect(await hr.retitleOnboardingChildren(1)).toEqual([]); // nothing left to do
   });
 
   test('a re-sent departure for the same person links to the open family, no new children', async () => {
@@ -715,7 +760,7 @@ describe('organise now: existing tickets are taken in, only the missing ones cre
     expect(ticketSvc.updateFsTicket.mock.calls.some((c) => c[0] === disable.id)).toBe(false); // closed stays closed
   });
 
-  test('a new hire whose NH Laptop ticket exists: it is the Laptop child, only Workstation is created, no password travels', async () => {
+  test('a new hire whose NH Laptop ticket exists: it is the Laptop and Workstation Setup child, only User Creation is created, no password travels', async () => {
     await setMode('live');
     const parent = fsNotice({ subject: 'New Hire: Jane Doe', sender: BAMBOO, text: `Start Date: ${day(14)} Employee #: 2249 Position: Engineer Employee Status: FTR Location: Brisbane Reports To: Kim Lee` });
     const nh = fsNotice({ subject: `NH Laptop - Brisbane - AU - jdoe - ${day(14)}`, sender: 'jdoe@bgcengineering.ca', text: `Start Date: ${day(14)} Username: jdoe Full Name: Jane D. ID: 2249 Email: jdoe@x.ca Password: Hunter2!` });
@@ -723,8 +768,8 @@ describe('organise now: existing tickets are taken in, only the missing ones cre
     jest.clearAllMocks();
     const r = await hr.organise(parent.id, 1, { email: 'vahid@x.ca' });
     expect(r.outcome).toBe('done');
-    expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].subject)).toEqual(['Child Ticket - Workstation - New Hire: Jane Doe']);
-    expect(db.members.find((m) => m.ticketId === nh.id)).toMatchObject({ role: 'child', templateKey: 'laptop' });
+    expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].subject)).toEqual(['Child Ticket - User Creation - New Hire: Jane Doe']);
+    expect(db.members.find((m) => m.ticketId === nh.id)).toMatchObject({ role: 'child', templateKey: 'workstation', title: 'Laptop and Workstation Setup' });
     expect(linkSvc.link).toHaveBeenCalledWith(parent.id, 1, { relatedTicketId: nh.id, kind: 'related_to' }, expect.anything());
     expect(ticketSvc.addPrivateNote.mock.calls.some((c) => c[0] === nh.id)).toBe(false);
     expect(JSON.stringify([ticketSvc.addPrivateNote.mock.calls, ticketSvc.createTicket.mock.calls, db.events])).not.toMatch(/Hunter2/);
@@ -763,7 +808,7 @@ describe('organise now: existing tickets are taken in, only the missing ones cre
     expect(matt).toMatchObject({ ticketId: shadowed.id, kind: 'offboarding', effectiveDate: day(8) });
     expect(matt.existing.map((x) => x.title)).toEqual(['Laptop']);
     expect(matt.toCreate.map((x) => x.title)).toEqual(['Phone', 'iPad', 'Disable Account', 'Decommissioning Account']);
-    expect(list.find((c) => c.ticketId === hire.id).toCreate.map((x) => x.title)).toEqual(['Laptop', 'Workstation']);
+    expect(list.find((c) => c.ticketId === hire.id).toCreate.map((x) => x.title)).toEqual(['User Creation', 'Laptop and Workstation Setup']);
     // Reads only.
     expect(ticketSvc.createTicket).not.toHaveBeenCalled();
     expect(ticketSvc.addPrivateNote).not.toHaveBeenCalled();
@@ -965,7 +1010,7 @@ describe('asleep with no owner until the lead time; the owner is chosen on wakin
     jest.clearAllMocks();
     expect(await wake(kids[0])).toMatchObject({ action: 'assigned', techId: 4 });
     expect(await wake(kids[1])).toMatchObject({ action: 'assigned', techId: 4 }); // same person as the sibling
-    expect(ticketSvc.updateTicketFields).toHaveBeenCalledWith(kids[0].id, 1, { dueBy: dueInstant(day(15)) }, expect.anything());
+    expect(ticketSvc.updateTicketFields).toHaveBeenCalledWith(kids[0].id, 1, { dueBy: dueInstant(addDays(day(15), -7)) }, expect.anything()); // User Creation: a week before
     expect(ticketSvc.addPrivateNote.mock.calls[0][2].bodyHtml).toMatch(/the work is due to start — assigned to Adrian Lo \(office: Vancouver\)/);
     expect(db.events.filter((e) => e.decision === 'assign_due')).toHaveLength(2);
     expect(ticketSvc._startAiTriage).not.toHaveBeenCalled();

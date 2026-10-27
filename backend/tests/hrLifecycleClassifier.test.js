@@ -1,4 +1,4 @@
-import { classifyHrNotice, normalizePersonName, stripSecrets, DETECTION_RULES, NOTICE_EFFECT } from '../src/utils/hrNoticeClassifier.js';
+import { classifyHrNotice, newHireFields, normalizePersonName, stripSecrets, DETECTION_RULES, NOTICE_EFFECT } from '../src/utils/hrNoticeClassifier.js';
 
 /**
  * Onboarding / Offboarding classifier (plans/HR_LIFECYCLE_PLAN.md). Every case
@@ -180,4 +180,32 @@ test('a notice whose text lost its spaces still gives the date, the office and a
     requesterEmail: 'notifications@app.bamboohr.com', createdAt: '2026-01-05T17:00:00Z',
   });
   expect(c).toMatchObject({ type: 'new_hire', person: 'Emma Benjamin', date: '2026-05-04', employeeId: '1948', office: 'Fredericton', title: 'Junior Intern', manager: 'Kyle Stubbs' });
+});
+
+describe('newHireFields (the User Creation child lists them)', () => {
+  test('a spaced BambooHR body: every labelled field, in order', () => {
+    expect(newHireFields('New Hire: Teddi Hern New Team Member Start Date: Mon October 05 Employee #: 2374 Position: Geoscientist-in-Training Employee Status: PTR - Part-time Regular Department: Engineering/Geoscience Division: Intermediate I Location: Calgary Reports To: Maria Cruz View Employee Record')).toEqual([
+      { label: 'Start Date', value: 'Mon October 05' },
+      { label: 'Employee #', value: '2374' },
+      { label: 'Position', value: 'Geoscientist-in-Training' },
+      { label: 'Employee Status', value: 'PTR - Part-time Regular' },
+      { label: 'Department', value: 'Engineering/Geoscience' },
+      { label: 'Division', value: 'Intermediate I' },
+      { label: 'Location', value: 'Calgary' },
+      { label: 'Reports To', value: 'Maria Cruz' },
+    ]);
+  });
+
+  test('a glued body (no spaces around labels) and missing fields', () => {
+    const f = newHireFields('Employee #:1948Position:Junior InternEmployee Status:FTR - Full-time RegularDepartment:Engineering/GeoscienceDivision:Junior ILocation:FrederictonReports To:Kyle StubbsView Employee Record');
+    expect(Object.fromEntries(f.map((x) => [x.label, x.value]))).toEqual({
+      'Employee #': '1948', Position: 'Junior Intern', 'Employee Status': 'FTR - Full-time Regular', Department: 'Engineering/Geoscience', Division: 'Junior I', Location: 'Fredericton', 'Reports To': 'Kyle Stubbs',
+    });
+    expect(newHireFields('Position: Engineer')).toEqual([{ label: 'Position', value: 'Engineer' }]);
+    expect(newHireFields('')).toEqual([]);
+  });
+
+  test('never carries a password', () => {
+    expect(JSON.stringify(newHireFields('Position: Engineer\nPassword: Hunter2!\nLocation: Calgary'))).not.toMatch(/Hunter2/);
+  });
 });
