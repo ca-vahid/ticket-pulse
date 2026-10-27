@@ -98,6 +98,8 @@ export default function ApprovalTimeline({
   onEscalate, onForward,
   // Approvals v3
   ticketId = null, requester = null, onAsk, onAnswer,
+  // 27 Oct 2026: an internal question goes to the requester instead.
+  onAskRequester = null,
   // 26 Oct 2026: IT answers an approver's conditions ({ answers, submit }).
   onAnswerConditions = null,
   // Assetron (24 Sep 2026)
@@ -523,6 +525,13 @@ export default function ApprovalTimeline({
                   const awaiting = groupMessages.some((m) => m.kind === 'question' && m.audience === 'internal' && !answered.has(m.id));
                   const viewerIsApprover = rows.some((r) => String(r.approverEmail).toLowerCase() === actorEmail);
                   const threadApproval = { ...head, requestNote: null, requestNoteHtml: null, clarificationLog: rows.flatMap((r) => r.clarificationLog || []), escalationLog: rows.flatMap((r) => r.escalationLog || []) };
+                  // Who is on the request, with their part in it (for the To line).
+                  const threadParticipants = {
+                    requester: requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null } : null,
+                    agent: head.requestedBy ? { email: String(head.requestedBy).toLowerCase() } : null,
+                    approvers: rows.map((r) => ({ email: String(r.approverEmail || '').toLowerCase(), tier: r.tier || 1 })),
+                    tierCount,
+                  };
                   if (!groupMessages.length && !threadApproval.clarificationLog.length && !threadApproval.escalationLog.length && !awaiting) return null;
                   return (
                     <div className="mt-3 border-t border-border/60 pt-3">
@@ -535,6 +544,8 @@ export default function ApprovalTimeline({
                         viewerRole={actorIsAdmin ? 'admin' : viewerIsApprover ? 'approver' : 'agent'}
                         awaitingApprover={awaiting}
                         onAnswer={onAnswer ? (m) => setAnswering(m) : null}
+                        participants={threadParticipants}
+                        onAskRequester={onAskRequester ? async (m) => { await onAskRequester(m.id); await loadMessages(); } : null}
                         title="Conversation"
                       />
                       {answering && groupMessages.some((m) => m.id === answering.id) && (

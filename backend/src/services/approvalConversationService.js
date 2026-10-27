@@ -255,6 +255,54 @@ class ApprovalConversationService {
   }
 
   /**
+   * An internal question the requester should answer (Vahid, 27 Oct 2026):
+   * it goes to the requester as the asker's own question — same words, same
+   * author — in the ticket-reply e-mail format, with everyone it was addressed
+   * to (and whoever sent it on) on Cc. Their answer then reaches the asker,
+   * with a link to decide, and the rest, like any question to the requester.
+   * The internal question is closed with a line saying where it went.
+   */
+  async askRequesterInstead(messageId, actor) {
+    const q = await prisma.approvalMessage.findUnique({ where: { id: Number(messageId) } });
+    if (!q || q.kind !== 'question') throw new NotFoundError('Question not found');
+    if (q.audience !== 'internal') throw new ValidationError('This question already went to the requester');
+    const done = await prisma.approvalMessage.findFirst({ where: { inReplyToId: q.id, kind: 'answer' }, select: { id: true } });
+    if (done) throw new ValidationError('This question was already answered');
+    // The row that waits: the question's own while open, else the group's open one.
+    let approval = q.approvalId ? await prisma.ticketApproval.findUnique({ where: { id: q.approvalId } }) : null;
+    if (!approval || !OPEN_STATUSES.includes(approval.status)) {
+      approval = await prisma.ticketApproval.findFirst({ where: { requestGroupId: q.requestGroupId, workspaceId: q.workspaceId, status: { in: OPEN_STATUSES } }, orderBy: { id: 'desc' } });
+    }
+    if (!approval) throw new ValidationError('This request is already decided');
+    const parts = await this.participants(approval);
+    if (!parts.requester) throw new ValidationError('This ticket has no requester to ask');
+    const actorEmail = lc(actor?.email);
+    const allowed = actor?.role === 'admin' || actor?.workspaceRole === 'admin'
+      || [lc(q.authorEmail), ...(q.toEmails || []).map(lc), ...(q.ccEmails || []).map(lc)].includes(actorEmail)
+      || Boolean(this.roleOf(parts, actorEmail));
+    if (!actorEmail || !allowed) throw new ValidationError('Only someone on this request (or an admin) can send it to the requester');
+
+    const cc = [...new Set([...(q.toEmails || []), ...(q.ccEmails || []), actorEmail].map(lc).filter(Boolean))];
+    const shaped = await this.postMessage(approval, {
+      kind: 'question', mode: 'requester', to: [parts.requester.email], cc,
+      bodyText: q.bodyText, bodyHtml: q.bodyHtml, via: 'app',
+      author: { email: q.authorEmail, name: q.authorName },
+    });
+    const actorName = actor?.name || [parts.agent, ...parts.approvers].find((p) => p && p.email === actorEmail)?.name || actorEmail;
+    await prisma.approvalMessage.create({
+      data: {
+        workspaceId: q.workspaceId, ticketId: q.ticketId, approvalId: q.approvalId, requestGroupId: q.requestGroupId,
+        inReplyToId: q.id, kind: 'answer', audience: 'internal',
+        authorEmail: actorEmail, authorName: actorName, authorRole: this.roleOf(parts, actorEmail) || 'agent',
+        bodyText: `Sent to ${parts.requester.name || parts.requester.email} to answer. Their reply comes back here.`, via: 'app',
+        toEmails: [lc(q.authorEmail)].filter(Boolean), ccEmails: [],
+      },
+    });
+    logger.info(`Approval question ${q.id} on ticket ${q.ticketId} sent on to the requester by ${actorEmail}`);
+    return shaped;
+  }
+
+  /**
    * An answer to a question/comment — from the magic link (token) or from a
    * mailbox reply (plusKey), or in-app (participant answering directly).
    */

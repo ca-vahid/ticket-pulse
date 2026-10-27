@@ -2419,6 +2419,15 @@ router.post('/:id/approvals/:approvalId/messages', asyncHandler(async (req, res)
   res.status(201).json({ success: true, data });
 }));
 
+// An internal question goes to the requester instead, as the asker's own (27 Oct 2026).
+router.post('/:id/approvals/messages/:messageId/ask-requester', asyncHandler(async (req, res) => {
+  const { default: conversation } = await import('../services/approvalConversationService.js');
+  const q = await prisma.approvalMessage.findFirst({ where: { id: Number(req.params.messageId), ticketId: parseTicketId(req), workspaceId: req.workspaceId }, select: { id: true } });
+  if (!q) throw new NotFoundError('Question not found');
+  const data = await conversation.askRequesterInstead(q.id, req.ticketActor);
+  res.status(201).json({ success: true, data });
+}));
+
 // A participant (agent, approver, or an admin) answers a question in-app.
 router.post('/:id/approvals/messages/:messageId/answer', asyncHandler(async (req, res) => {
   const { default: conversation } = await import('../services/approvalConversationService.js');
