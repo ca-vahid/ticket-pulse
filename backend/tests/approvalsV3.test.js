@@ -10,7 +10,7 @@ const prismaMock = {
   ticket: { findFirst: jest.fn(), findUnique: jest.fn() },
   approvalCategory: { findFirst: jest.fn(), findUnique: jest.fn() },
   ticketApproval: { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
-  approvalMessage: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  approvalMessage: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   approvalReplyToken: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   ticketThreadEntry: { create: jest.fn() },
   ticketAttachment: { findMany: jest.fn() },
@@ -207,6 +207,49 @@ describe('listForGroup / awaitingApprover', () => {
       { id: 1, kind: 'question', audience: 'internal', inReplyToId: null }, { id: 3, kind: 'answer', audience: 'internal', inReplyToId: 1 },
     ]);
     await expect(conversation.awaitingApprover('grp-1')).resolves.toBe(false);
+  });
+});
+
+describe('askRequesterInstead (27 Oct 2026)', () => {
+  const internalQ = (over = {}) => ({
+    id: 70, workspaceId: 1, ticketId: 501, approvalId: 2, requestGroupId: 'grp-1', kind: 'question', audience: 'internal',
+    authorEmail: 'neville@x.io', authorName: 'Neville', authorRole: 'approver',
+    bodyText: 'Who will use it?', bodyHtml: '<ul><li>Who will use it?</li></ul>',
+    toEmails: ['req@x.io', 'vahid@x.io'], ccEmails: [], ...over,
+  });
+
+  test('the asker’s own question goes to the requester, the earlier recipients copied; the internal one is closed', async () => {
+    prismaMock.approvalMessage.findUnique.mockResolvedValue(internalQ());
+    prismaMock.approvalMessage.findFirst.mockResolvedValue(null);
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    const res = await conversation.askRequesterInstead(70, { email: 'vahid@x.io', name: 'Vahid', role: 'admin' });
+    expect(res).toMatchObject({ kind: 'question', audience: 'requester', to: ['rita@x.io'] });
+    expect(res.author).toMatchObject({ email: 'neville@x.io', name: 'Neville' });
+    expect(res.cc.sort()).toEqual(['req@x.io', 'vahid@x.io']);
+    // Neville's row waits on the requester
+    expect(prismaMock.ticketApproval.update.mock.calls[0][0]).toMatchObject({ where: { id: 2 }, data: { status: 'info_requested' } });
+    // ONE reply-format e-mail: To Rita, Cc the agent, Vahid and the asker
+    expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(1);
+    const mail = mailMock.deliverTransactionalEmail.mock.calls[0][0];
+    expect(mail.to).toEqual(['rita@x.io']);
+    expect(mail.cc.sort()).toEqual(['neville@x.io', 'req@x.io', 'vahid@x.io']);
+    expect(mail.html).toContain('Who will use it?');
+    // the internal question is answered with where it went
+    const closing = prismaMock.approvalMessage.create.mock.calls.map((c) => c[0].data).find((d) => d.kind === 'answer');
+    expect(closing).toMatchObject({ inReplyToId: 70, audience: 'internal', authorEmail: 'vahid@x.io' });
+    expect(closing.bodyText).toContain('Sent to Rita Requester');
+  });
+
+  test('refuses a question already with the requester, one already answered, and someone outside the request', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    prismaMock.approvalMessage.findUnique.mockResolvedValue(internalQ({ audience: 'requester' }));
+    await expect(conversation.askRequesterInstead(70, { email: 'vahid@x.io' })).rejects.toThrow(/already went to the requester/);
+    prismaMock.approvalMessage.findUnique.mockResolvedValue(internalQ());
+    prismaMock.approvalMessage.findFirst.mockResolvedValue({ id: 71 });
+    await expect(conversation.askRequesterInstead(70, { email: 'vahid@x.io' })).rejects.toThrow(/already answered/);
+    prismaMock.approvalMessage.findFirst.mockResolvedValue(null);
+    await expect(conversation.askRequesterInstead(70, { email: 'stranger@x.io' })).rejects.toThrow(/Only someone on this request/);
+    expect(mailMock.deliverTransactionalEmail).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.22-preview';
+export const APP_VERSION = '4.3.23-preview';
 
 export const changelog = [
+  {
+    version: '4.3.23-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Who an approval question went to</strong> &mdash; the To line now names each person&rsquo;s part (agent, Tier 1 approver, requester), and an internal question says plainly when the requester was not asked. An escalation shows once in the conversation instead of once per tier.' },
+      { type: 'new', html: '<strong>Ask the requester instead</strong> &mdash; an open internal question has an &ldquo;Ask Sam instead&rdquo; button. The requester gets the question in the asker&rsquo;s own words, as a reply on the ticket, with everyone it was addressed to on Cc. Their answer comes back to the conversation and reaches the asker with a link to decide, like any question to the requester.' },
+    ],
+  },
   {
     version: '4.3.22-preview',
     date: 'October 27, 2026',

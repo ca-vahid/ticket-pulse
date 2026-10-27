@@ -1267,6 +1267,11 @@ export const ticketsAPI = {
     }
   },
 
+  // An internal approval question goes to the requester instead (27 Oct 2026).
+  askRequesterInstead: async (id, messageId) => {
+    return await api.post(`/tickets/${id}/approvals/messages/${messageId}/ask-requester`, {});
+  },
+
   answerApprovalMessage: async (id, messageId, { bodyText, bodyHtml }) => {
     return await api.post(`/tickets/${id}/approvals/messages/${messageId}/answer`, { bodyText, bodyHtml });
   },

@@ -3694,6 +3694,7 @@ export default function TicketDetail() {
                         onDecide={(apId, decision, note = null, extra = {}) => applyChange(`approval-${apId}`, () => ticketsAPI.decideApproval(ticketId, apId, decision, note, extra))}
                         onAsk={(apId, payload) => applyChange(`approval-${apId}`, () => ticketsAPI.askApproval(ticketId, apId, payload))}
                         onAnswer={(messageId, payload) => applyChange(`approval-answer-${messageId}`, () => ticketsAPI.answerApprovalMessage(ticketId, messageId, payload))}
+                        onAskRequester={(messageId) => applyChange(`approval-answer-${messageId}`, () => ticketsAPI.askRequesterInstead(ticketId, messageId), { label: `Sent to ${ticket.requester?.name || 'the requester'}` })}
                         onAnswerConditions={async (apId, payload) => {
                           const ok = await applyChange(`approval-${apId}`, () => ticketsAPI.answerApprovalConditions(ticketId, apId, payload), { label: payload.submit ? 'Answers sent to the approver' : 'Answers saved' });
                           if (!ok) throw new Error('Not saved — see the message above.');
