@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.29-preview';
+export const APP_VERSION = '4.3.30-preview';
 
 export const changelog = [
+  {
+    version: '4.3.30-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The ticket&rsquo;s Approvals tab is a list now</strong> &mdash; the same look as the Approvals page. Each request is one row: its status, category and who it waits on. Open requests start open; decided ones fold to two lines and open into the whole conversation, the questions and answers included, then the decision note.' },
+      { type: 'improved', html: '<strong>Answer in full screen</strong> &mdash; answering an approver&rsquo;s question on the ticket opens the same large editor as the decision note, for answers that read like an e-mail.' },
+      { type: 'fixed', html: 'On a phone, the formatting buttons of the editor wrap to a second line instead of running off the edge.' },
+    ],
+  },
   {
     version: '4.3.29-preview',
     date: 'October 27, 2026',
