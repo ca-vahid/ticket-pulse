@@ -282,6 +282,27 @@ describe('answer', () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ status: 'info_requested', clarificationLog: [{ question: 'Which environments?', askedBy: 'neville@x.io', messageId: 501, answer: null }] }));
   });
 
+  test('the same e-mail read twice is one answer (27 Oct 2026)', async () => {
+    prismaMock.approvalMessage.findFirst.mockResolvedValueOnce({ id: 85, approvalId: 2, requestGroupId: 'grp-1', kind: 'answer', audience: 'requester', authorEmail: 'rita@x.io', authorName: 'Rita', authorRole: 'requester', bodyText: 'DEV only.', inReplyToId: 501, createdAt: new Date('2026-10-27T14:09:10Z') });
+    const res = await conversation.answer({ plusKey: 'abcdef012345', senderEmail: 'rita@x.io', via: 'email', emailMessageId: '<m1@x.io>', bodyText: 'DEV only.' });
+    expect(res.duplicate).toBe(true);
+    expect(res.message.id).toBe(85);
+    expect(prismaMock.approvalMessage.findFirst).toHaveBeenCalledWith({ where: { emailMessageId: '<m1@x.io>', requestGroupId: 'grp-1' } });
+    expect(prismaMock.approvalMessage.create).not.toHaveBeenCalled();
+    expect(mailMock.deliverTransactionalEmail).not.toHaveBeenCalled();
+  });
+
+  test('the HTML body wins over a cut-off plain-text preview (27 Oct 2026)', async () => {
+    prismaMock.approvalMessage.findFirst.mockResolvedValue(null);
+    prismaMock.ticketApproval.findMany.mockResolvedValueOnce(groupRows).mockResolvedValueOnce([]);
+    const res = await conversation.answer({
+      plusKey: 'abcdef012345', senderEmail: 'rita@x.io', via: 'email', emailMessageId: '<m2@x.io>',
+      bodyText: 'Hi Vahid, I am adm',
+      bodyHtml: '<div>Hi Vahid,</div><div><br /></div><div>I am admittedly not up to date.</div>',
+    });
+    expect(res.message.bodyText).toBe('Hi Vahid,' + String.fromCharCode(10, 10) + 'I am admittedly not up to date.');
+  });
+
   test('by mailbox reply (plus key): strips the quoted history, records the answer, un-parks the request; a plain Reply is passed on to the others as the next e-mail', async () => {
     prismaMock.ticketApproval.findMany
       .mockResolvedValueOnce(groupRows) // participants

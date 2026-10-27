@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.26-preview';
+export const APP_VERSION = '4.3.27-preview';
 
 export const changelog = [
+  {
+    version: '4.3.27-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approvals is a list now</strong> &mdash; For you is one table: to decide, waiting on an answer, and your own requests an approver asked about. Each row is two lines with the requester, the agent, what happened last (&ldquo;Phillip answered &middot; 7:09 AM&rdquo;) and how long it has been open. All approvals is the same kind of table with when it was asked, decided and how long it took.' },
+      { type: 'improved', html: '<strong>The whole conversation when you open a request</strong> &mdash; the agent&rsquo;s request, every question and answer and each hand-off, newest last and marked, beside your decision. Before, an opened request showed only the ticket, so a back-and-forth with the requester was invisible there.' },
+      { type: 'new', html: '<strong>Full-screen decision note</strong> &mdash; the note box is mail-sized and has a full-screen button, with the same rich editor as a ticket reply. The decision buttons and recipients come with it; Esc brings it back. Works on the ticket&rsquo;s Approvals tab too.' },
+      { type: 'fixed', html: '<strong>Answers by e-mail arrived cut off and twice</strong> &mdash; a requester&rsquo;s reply to an approval question was saved from the e-mail&rsquo;s 255-character preview, so it stopped mid-word, and a later mailbox check saved the same e-mail again. The whole message is kept now, and one e-mail is one answer.' },
+    ],
+  },
   {
     version: '4.3.26-preview',
     date: 'October 27, 2026',

@@ -90,3 +90,26 @@ describe('overview rows carry people’s NAMES (18 Sep 2026)', () => {
     expect(items[0].approverName).toBe('Vahid Haeri');
   });
 });
+
+describe('rows carry the newest conversation entry (27 Oct 2026)', () => {
+  test('who wrote last and when, per request, never the text; a row without messages gets null', async () => {
+    prismaMock.technician = { findFirst: jest.fn().mockResolvedValue(null) };
+    prismaMock.requester = { findFirst: jest.fn().mockResolvedValue(null) };
+    prismaMock.approvalMessage = {
+      findMany: jest.fn().mockResolvedValue([
+        { requestGroupId: 'g1', kind: 'answer', audience: 'requester', authorName: 'Phillip Crispell', authorEmail: 'p@x.io', authorRole: 'requester', createdAt: new Date('2026-10-27T14:09:10Z') },
+        { requestGroupId: 'g1', kind: 'question', audience: 'requester', authorName: 'Vahid Haeri', authorEmail: 'v@x.io', authorRole: 'approver', createdAt: new Date('2026-10-27T02:33:19Z') },
+      ]),
+    };
+    const base = { workspaceId: 1, ticketId: 9, status: 'pending', approverEmail: 'v@x.io', approverName: 'Vahid Haeri', requestedBy: 'a@x.io', requestedByName: 'Alexey', createdAt: new Date(), ticket: { id: 9, subject: 'Claude AI', origin: 'ticketpulse', nativeNumber: 10518, freshserviceTicketId: null } };
+    prismaMock.ticketApproval.findMany.mockResolvedValueOnce([{ ...base, id: 161, requestGroupId: 'g1' }, { ...base, id: 162, requestGroupId: null }]);
+    const { items } = await ticketApprovalService.overview(1, {});
+    expect(prismaMock.approvalMessage.findMany.mock.calls[0][0].where.requestGroupId.in).toEqual(['g1', 'single-162']);
+    expect(items[0].latest).toMatchObject({ kind: 'answer', authorName: 'Phillip Crispell', authorRole: 'requester' });
+    expect(items[0].latest.bodyText).toBeUndefined();
+    expect(items[0].messageCount).toBe(2);
+    expect(items[1].latest).toBeNull();
+    expect(items[1].messageCount).toBe(0);
+    delete prismaMock.approvalMessage;
+  });
+});
