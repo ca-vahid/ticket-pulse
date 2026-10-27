@@ -140,6 +140,29 @@ function newHireStart(body, createdAt) {
   return wm ? fromWeekdayMonthDay(wm[1], wm[2], wm[3], createdAt, { maxAheadDays: 366 }) : null;
 }
 
+// The labelled fields of a BambooHR "New Hire" e-mail, in their order there.
+const NEW_HIRE_LABELS = ['Start Date', 'Employee #', 'Position', 'Employee Status', 'Department', 'Division', 'Location', 'Reports To'];
+const NEW_HIRE_STOP = new RegExp(`(?:${NEW_HIRE_LABELS.map((l) => l.replace(/[#]/g, '\\$&')).join('|')})\\s*:|View Employee Record`, 'i');
+
+/**
+ * [{ label, value }] for every labelled field a new-hire notice carries
+ * (a User Creation child lists them). Works on flattened bodies, with or
+ * without spaces around the labels. Never includes a password.
+ */
+export function newHireFields(text) {
+  const body = stripSecrets(String(text || '')).replace(/\s+/g, ' ');
+  const out = [];
+  for (const label of NEW_HIRE_LABELS) {
+    const at = body.search(new RegExp(`${label.replace(/[#]/g, '\\$&')}\\s*:`, 'i'));
+    if (at < 0) continue;
+    const rest = body.slice(at).replace(new RegExp(`^${label.replace(/[#]/g, '\\$&')}\\s*:\\s*`, 'i'), '');
+    const stop = rest.search(NEW_HIRE_STOP);
+    const value = clean(stop < 0 ? rest : rest.slice(0, stop));
+    if (value) out.push({ label, value: value.slice(0, 200) });
+  }
+  return out;
+}
+
 function firstIsoIn(section) {
   const m = String(section || '').match(/\b(20\d{2}-\d{2}-\d{2})\b/);
   return m ? fromIso(m[1]) : null;

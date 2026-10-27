@@ -4,7 +4,7 @@ import statusService from './statusService.js';
 import { ConflictError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import {
-  DETECTION_RULES, HR_SENDERS, NOTICE_EFFECT, classifyHrNotice, localDate, normalizePersonName, stripSecrets,
+  DETECTION_RULES, HR_SENDERS, NOTICE_EFFECT, classifyHrNotice, localDate, newHireFields, normalizePersonName, stripSecrets,
 } from '../utils/hrNoticeClassifier.js';
 
 /**
@@ -71,11 +71,18 @@ const DEFAULT_TEMPLATES = Object.freeze({
     { key: 'phone', title: 'Phone', dueOffsetDays: 0, assigneeHint: 'Gaby Tonnova' },
     { key: 'ipad', title: 'iPad', dueOffsetDays: 0 },
   ],
+  // Vahid, 27 Oct 2026: the team works a new hire as User Creation (the
+  // account, due a week before the start) then Laptop and Workstation Setup.
+  // The keys stay 'laptop' / 'workstation': saved settings and wake rules
+  // point at them.
   onboarding: [
-    { key: 'laptop', title: 'Laptop', dueOffsetDays: 0 },
-    { key: 'workstation', title: 'Workstation', dueOffsetDays: 0 },
+    { key: 'laptop', title: 'User Creation', dueOffsetDays: -7 },
+    { key: 'workstation', title: 'Laptop and Workstation Setup', dueOffsetDays: 0 },
   ],
 });
+// The onboarding child that takes in the NH automation's tickets (NH Laptop
+// and NH Workstation are both the hardware setup).
+const NH_CHILD_KEY = 'workstation';
 const DEFAULT_PARENT_HINT = 'Vahid Haeri';
 
 // New hires by office (Vahid, 8 Oct 2026): the Laptop and Workstation of a new
@@ -100,15 +107,22 @@ const MAX_FALLBACK = 20;
 
 // The intro line of each child (FreshService wording the team already knows).
 const CHILD_INTRO = {
-  laptop: { offboarding: 'Please take the necessary steps to retrieve the laptop from the following user.', onboarding: 'Please set up a laptop for the following new hire.' },
+  laptop: { offboarding: 'Please take the necessary steps to retrieve the laptop from the following user.', onboarding: 'Please create the user account for the following new hire.' },
   phone: { offboarding: 'Please take the necessary steps to retrieve the phone from the following user.', onboarding: 'Please set up a phone for the following new hire.' },
   ipad: { offboarding: 'Please take the necessary steps to retrieve the iPad from the following user.', onboarding: 'Please set up an iPad for the following new hire.' },
   disable_account: { offboarding: 'Please proceed with disabling the account of the following user.' },
   decommission_account: { offboarding: 'Please proceed with the decommissioning of the following user by retrieving licenses, removing from groups, and completing other necessary offboarding actions.' },
+  workstation: { onboarding: 'Please set up the laptop and the workstation for the following new hire. Contact the admin team to get the desk number.' },
+};
+
+// Intros the onboarding children had before 27 Oct 2026 (a renamed child's
+// body is rewritten only while it still holds one of these).
+const OLD_CHILD_INTRO = {
+  laptop: { onboarding: 'Please set up a laptop for the following new hire.' },
   workstation: { onboarding: 'Please contact the admin team to get the desk number and set up the workstation for the following new hire.' },
 };
 
-const FAMILY_KIND_LABEL = { offboarding: 'offboarding', onboarding: 'onboarding' };
+const FAMILY_KIND_LABEL = {offboarding: 'offboarding', onboarding: 'onboarding' };
 
 // ---------------------------------------------------------------- helpers
 
@@ -215,6 +229,40 @@ function plainBody(ticket) {
   const raw = ticket?.descriptionText
     || String(ticket?.description || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr)>/gi, '\n').replace(/<[^>]+>/g, ' ');
   return stripSecrets(String(raw || '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')).replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, MAX_BODY_CHARS);
+}
+
+/**
+ * A child ticket's description. A new hire's children open with the notice's
+ * fields one per line (name, employee #, position, office, …) so the account
+ * can be made without opening the parent; the notice follows, passwords out.
+ */
+export function childDescription({ key, title, familyKind, c = {}, effectiveDate = null, afterTheFact = false, notice, body = plainBody(notice) }) {
+  const intro = CHILD_INTRO[key]?.[familyKind] || `${title} for the following ${familyKind === 'onboarding' ? 'new hire' : 'user'}.`;
+  let facts;
+  if (familyKind === 'onboarding') {
+    const raw = notice?.descriptionText || String(notice?.description || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|td)>/gi, '\n').replace(/<[^>]+>/g, ' ');
+    const fields = newHireFields(String(raw).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&'));
+    const get = (label) => fields.find((f) => f.label === label)?.value || null;
+    const rows = [
+      ['Name', c.person],
+      ['Employee #', get('Employee #') || c.employeeId],
+      ['Position', get('Position') || c.title],
+      ['Employee status', get('Employee Status')],
+      ['Department', get('Department')],
+      ['Division', get('Division')],
+      ['Office', get('Location') || c.office],
+      ['Reports to', get('Reports To') || c.manager],
+      ['Start date', effectiveDate ? fmtDay(effectiveDate) : null],
+    ].filter(([, v]) => v);
+    facts = `<p>${rows.map(([k, v]) => `<strong>${esc(k)}:</strong> ${esc(v)}`).join('<br>')}</p>`;
+  } else {
+    facts = `<p>${esc(c.person || '')}${c.office ? ` — ${esc(c.office)}` : ''}${effectiveDate ? ` — last day ${esc(fmtDay(effectiveDate))}` : ''}${afterTheFact ? ' (after the fact)' : ''}</p>`;
+  }
+  return [
+    `<p>${esc(intro)}</p>`,
+    facts,
+    body ? `<p>From the HR notice ${esc(ticketDisplayRef(notice))}:</p><p>${esc(body).replace(/\n/g, '<br>')}</p>` : '',
+  ].join('');
 }
 
 /** A short, password-free quote of a notice for notes. */
@@ -884,12 +932,12 @@ class HrLifecycleService {
         const sameId = c.employeeId && nc.employeeId && String(c.employeeId) === String(nc.employeeId);
         const sameName = !(c.employeeId && nc.employeeId) && name && nc.person && normalizePersonName(nc.person) === name;
         if (!sameId && !sameName) continue;
-        const key = nc.nhKind === 'workstation' ? 'workstation' : 'laptop';
+        const key = NH_CHILD_KEY;
         if (found.some((f) => f.key === key)) continue;
         const item = titles.get(key);
         // Never carry the NH body along: it can hold the initial password.
         const card = { id: t.id, workspaceId: t.workspaceId, origin: t.origin, nativeNumber: t.nativeNumber, freshserviceTicketId: t.freshserviceTicketId, subject: t.subject, status: t.status, assignedTechId: t.assignedTechId };
-        found.push({ key, title: item?.title || (key === 'workstation' ? 'Workstation' : 'Laptop'), dueOffsetDays: item?.dueOffsetDays ?? 0, ticket: card });
+        found.push({ key, title: item?.title || 'Laptop and Workstation Setup', dueOffsetDays: item?.dueOffsetDays ?? 0, ticket: card });
       }
     }
     for (const f of found) f.terminal = await this._isTerminal(ws, f.ticket.status);
@@ -953,6 +1001,68 @@ class HrLifecycleService {
       list.push({ member: m, ticket: t, terminal: await this._isTerminal(family.workspaceId, t.status) });
     }
     return { parent, parentTerminal: parent ? await this._isTerminal(family.workspaceId, parent.status) : true, members: list };
+  }
+
+  /**
+   * Open onboarding children made before their template was renamed take the
+   * title, subject, intro, field list and due date Settings has now (Vahid,
+   * 27 Oct 2026: Laptop → User Creation, Workstation → Laptop and
+   * Workstation Setup). Only TP-born children get a new subject and body, and
+   * a body is rewritten only while it still opens with an intro this service
+   * wrote. Owners, sleep and links are kept. dryRun reports without writing.
+   */
+  async retitleOnboardingChildren(workspaceId, { dryRun = true } = {}) {
+    const ws = Number(workspaceId);
+    const settings = await this.getSettings(ws, { withTechs: false });
+    const items = new Map((settings.templates.onboarding || []).map((i) => [i.key, i]));
+    const tz = await this._timeZone(ws);
+    const svc = await this._ticketService();
+    const families = await prisma.hrLifecycleFamily.findMany({ where: { workspaceId: ws, kind: 'onboarding', status: 'open' }, orderBy: { id: 'asc' }, take: 200 });
+    const report = [];
+    for (const family of families) {
+      const fam = await this._familyTickets(family);
+      const notice = fam.parent ? await this._loadTicket(fam.parent.id, ws) : null;
+      const c = (notice && this.classify(notice, tz)) || { person: family.personName, office: family.office };
+      const date = dateOnly(family.effectiveDate);
+      for (const m of fam.members) {
+        const item = items.get(m.member.templateKey);
+        if (m.member.role !== 'child' || m.terminal || !item) continue;
+        const from = m.member.title;
+        const row = { familyId: family.id, person: family.personName, ref: ticketDisplayRef(m.ticket), from, to: item.title, assignee: m.ticket.assignedTech?.name || null, changed: [] };
+        if (from === item.title && m.member.dueOffsetDays === item.dueOffsetDays) continue;
+        // A taken-in FreshService / NH ticket keeps its own title: it was the
+        // other kind of work under the old keys.
+        if (!this._isNative(m.ticket)) { report.push({ ...row, skipped: 'not TP-born' }); continue; }
+        const t = await this._loadTicket(m.ticket.id, ws);
+        const patch = {};
+        const prefix = `Child Ticket - ${from} - `;
+        if (t && from !== item.title && String(t.subject || '').startsWith(prefix)) {
+          patch.subject = `Child Ticket - ${item.title} - ${t.subject.slice(prefix.length)}`.slice(0, 500);
+        }
+        const ours = Object.values(CHILD_INTRO).concat(Object.values(OLD_CHILD_INTRO)).flatMap((v) => Object.values(v)).some((intro) => String(t?.description || '').includes(esc(intro)));
+        if (t && notice && ours) {
+          patch.description = childDescription({ key: m.member.templateKey, title: item.title, familyKind: 'onboarding', c, effectiveDate: date, notice });
+        }
+        const due = date && m.member.dueOffsetDays !== item.dueOffsetDays ? addDays(date, item.dueOffsetDays) : null;
+        if (patch.subject) row.changed.push('subject');
+        if (patch.description) row.changed.push('description');
+        if (from !== item.title) row.changed.push('title');
+        if (due) row.changed.push(`due ${due}`);
+        report.push(row);
+        if (dryRun) continue;
+        const out = { warnings: [] };
+        await prisma.hrLifecycleFamilyMember.update({ where: { id: m.member.id }, data: { title: item.title, dueOffsetDays: item.dueOffsetDays } });
+        if (t && Object.keys(patch).length) {
+          await svc.updateTicketFields(t.id, ws, patch, HR_LIFECYCLE_ACTOR, { emitEvent: false }).catch((err) => out.warnings.push(err.message));
+        }
+        if (due) await this._setDue(t, due, tz, out);
+        if (from !== item.title) {
+          await this._note(m.ticket, `<p><strong>Onboarding:</strong> renamed from ${esc(from)} to ${esc(item.title)}${item.dueOffsetDays < 0 ? `, due ${-item.dueOffsetDays} days before the start date` : ''}. Nothing else changed.</p>`, out);
+        }
+        row.warnings = out.warnings;
+      }
+    }
+    return report;
   }
 
   // ------------------------------------------------------------ entry points
@@ -1315,12 +1425,7 @@ class HrLifecycleService {
         continue;
       }
       const defer = await deferFor(child.key);
-      const intro = CHILD_INTRO[child.key]?.[plan.familyKind] || `${child.title} for the following ${plan.familyKind === 'onboarding' ? 'new hire' : 'user'}.`;
-      const html = [
-        `<p>${esc(intro)}</p>`,
-        `<p>${esc(c.person || '')}${c.office ? ` — ${esc(c.office)}` : ''}${plan.effectiveDate ? ` — ${plan.familyKind === 'onboarding' ? 'starts' : 'last day'} ${esc(fmtDay(plan.effectiveDate))}` : ''}${plan.afterTheFact ? ' (after the fact)' : ''}</p>`,
-        body ? `<p>From the HR notice ${esc(ticketDisplayRef(ticket))}:</p><p>${esc(body).replace(/\n/g, '<br>')}</p>` : '',
-      ].join('');
+      const html = childDescription({ key: child.key, title: child.title, familyKind: plan.familyKind, c, effectiveDate: plan.effectiveDate, afterTheFact: plan.afterTheFact, notice: ticket, body });
       let groupFields = {};
       if (child.groupId) {
         const g = await soft(() => prisma.group.findFirst({ where: { id: child.groupId, workspaceId: ws }, select: { id: true, origin: true, freshserviceId: true } }));
@@ -1478,8 +1583,8 @@ class HrLifecycleService {
       create: { familyId, workspaceId: family.workspaceId, ticketId: nh.id, role: 'linked', templateKey: `nh_${c.nhKind || 'ticket'}`, title: `NH ${c.nhKind === 'workstation' ? 'Workstation' : 'Laptop'} (automation)` },
       update: {},
     });
-    const childTitle = c.nhKind === 'workstation' ? 'Workstation' : 'Laptop';
-    const childKey = c.nhKind === 'workstation' ? 'workstation' : 'laptop';
+    const childKey = NH_CHILD_KEY;
+    const nhLabel = `NH ${c.nhKind === 'workstation' ? 'Workstation' : 'Laptop'}`;
     // Stop-gap (9 Oct 2026) while the account script still files NH tickets:
     // when the family already has that child, the NH ticket is the same work
     // twice. Pair the two with a note each way and close the NH ticket before
@@ -1487,18 +1592,19 @@ class HrLifecycleService {
     // the initial password — the notes only point at the ticket.
     const fam = await this._familyTickets(family);
     const twin = (fam.members || []).find((m) => m.member.role === 'child' && m.member.templateKey === childKey && m.ticket.id !== nh.id) || null;
+    const childTitle = (fam.members || []).find((m) => m.member.role === 'child' && m.member.templateKey === childKey)?.member.title || 'Laptop and Workstation Setup';
     // Somebody already holds the NH ticket: leave it to them, link only.
     if (twin && !nh.assignedTechId && !(await this._isTerminal(nh.workspaceId, nh.status))) {
       const owner = twin.ticket.assignedTech?.name || null;
       await this._note(nh, `<p><strong>Onboarding:</strong> this is the same work as ${esc(ticketDisplayRef(twin.ticket))} (${esc(childTitle)}) in the onboarding of ${esc(family.personName)} (parent ${esc(ticketDisplayRef(parent))})${owner ? `, which ${esc(owner)} has` : ''}. Closed as a duplicate — the account details stay on this ticket.</p>`, out);
-      await this._note(twin.ticket, `<p><strong>Onboarding:</strong> the account script filed ${esc(ticketDisplayRef(nh))} (NH ${esc(childTitle)}) for the same work. It was closed as a duplicate; the account details for ${esc(family.personName)} are on that ticket.</p>`, out);
+      await this._note(twin.ticket, `<p><strong>Onboarding:</strong> the account script filed ${esc(ticketDisplayRef(nh))} (${esc(nhLabel)}) for the same work. It was closed as a duplicate; the account details for ${esc(family.personName)} are on that ticket.</p>`, out);
       const closed = await this._close(nh, out);
       out.paired = { nhTicketId: nh.id, childTicketId: twin.ticket.id, closed };
-      if (closed) plan.summary = `${family.personName}: NH ${childTitle} ticket closed as a duplicate of ${ticketDisplayRef(twin.ticket)} and linked to the onboarding family`;
+      if (closed) plan.summary = `${family.personName}: ${nhLabel} ticket closed as a duplicate of ${ticketDisplayRef(twin.ticket)} and linked to the onboarding family`;
       return;
     }
     await this._note(nh, `<p><strong>Onboarding:</strong> part of the onboarding of ${esc(family.personName)} (parent ${esc(ticketDisplayRef(parent))}). The ${esc(childTitle)} child ticket there covers this work — no duplicate child was created.</p>`, out);
-    await this._note(parent, `<p><strong>Onboarding:</strong> the automation's ${esc(ticketDisplayRef(nh))} (NH ${esc(childTitle)}) was linked to this family.</p>`, out);
+    await this._note(parent, `<p><strong>Onboarding:</strong> the automation's ${esc(ticketDisplayRef(nh))} (${esc(nhLabel)}) was linked to this family.</p>`, out);
   }
 
   async _handleNotice(ticket, c, plan, tz, out) {

@@ -99,7 +99,7 @@ function OfficeRouting({ routing, onChange, techOptions }) {
   const setOffice = (i, patch) => onChange({ ...routing, offices: offices.map((o, j) => (j === i ? { ...o, ...patch } : o)) });
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-subtle" aria-label="New hires by office">
-      <SectionTitle hint="A new hire's Laptop and Workstation go to one person from the list of the hire's office, in turn; anyone off that day is skipped. A child with its own default assignee above keeps it.">
+      <SectionTitle hint="A new hire's children (User Creation, Laptop and Workstation Setup) go to one person from the list of the hire's office, in turn; anyone off that day is skipped. A child with its own default assignee above keeps it.">
         New hires by office
       </SectionTitle>
       <div className="hidden grid-cols-[minmax(0,12rem)_minmax(0,1fr)_minmax(0,1fr)_2rem] gap-2 px-1 pb-1 text-xs text-muted-foreground sm:grid">
