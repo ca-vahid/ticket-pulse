@@ -93,7 +93,9 @@ const row = (id, status) => ({
   lastActivityAt: '2026-08-01T10:00:00Z',
 });
 
-const lastListParams = () => listSpy.mock.calls.at(-1)[0];
+// The page's own list fetch (it asks for the rail's facets); board columns
+// fetch per status on their own since QA 10-27 #4.
+const lastListParams = () => listSpy.mock.calls.filter(([p]) => p?.facets).at(-1)[0];
 
 function LocationProbe() {
   const location = useLocation();
@@ -406,7 +408,7 @@ describe('Row anchors — right-click / new-tab (QA 08-07 #7)', () => {
 });
 
 describe('Board density — 50-card page (QA 08-07 #12)', () => {
-  test('list fetches pageSize 25; board fetches 50 and the pagination math follows', async () => {
+  test('list fetches pageSize 25 with a pager; the board has no pager, its columns fetch 50 each', async () => {
     listSpy.mockResolvedValue({ data: { items: [row(1, 'Open'), row(2, 'Pending')], total: 60 } });
     mount();
     await waitFor(() => expect(listSpy).toHaveBeenCalled());
@@ -415,22 +417,27 @@ describe('Board density — 50-card page (QA 08-07 #12)', () => {
     expect(screen.getAllByRole('button', { name: '3' }).length).toBeGreaterThan(0);
     cleanup();
 
+    // QA 10-27 #4: a ?page= left from the list must not empty the board.
     localStorage.setItem('tp_ticket_layout', 'board');
     listSpy.mockClear();
-    mount();
-    await waitFor(() => expect(listSpy).toHaveBeenCalled());
-    expect(lastListParams().pageSize).toBe(50);
-    // 60 tickets at 50/page → 2 pages, range text follows the derived size.
-    await waitFor(() => expect(screen.getAllByText('1–50 of 60').length).toBeGreaterThan(0));
-    expect(screen.getAllByRole('button', { name: '2' }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: '3' })).not.toBeInTheDocument();
+    mount('/tickets?page=2');
+    await waitFor(() => expect(listSpy.mock.calls.some(([p]) => !p?.facets)).toBe(true));
+    expect(lastListParams().page).toBe(1);
+    const columnCalls = listSpy.mock.calls.map(([p]) => p).filter((p) => !p?.facets);
+    expect(columnCalls.every((p) => p.pageSize === 50 && p.page === 1 && p.parkedSplit === '1')).toBe(true);
+    expect(columnCalls.map((p) => p.status)).toEqual(expect.arrayContaining([expect.stringContaining('Open'), expect.stringContaining('Pending'), expect.stringContaining('Closed')]));
+    expect(screen.queryByRole('button', { name: 'Next page' })).not.toBeInTheDocument();
   });
 
-  test('board columns flag page-local counts once total exceeds the 50-card page', async () => {
+  test('board column headers carry each column\'s own total, not an "on page" count', async () => {
     localStorage.setItem('tp_ticket_layout', 'board');
-    listSpy.mockResolvedValue({ data: { items: [row(1, 'Open')], total: 51 } });
+    listSpy.mockImplementation((p) => Promise.resolve(p?.facets
+      ? { data: { items: [row(1, 'Open')], total: 51 } }
+      : { data: { items: String(p.status).startsWith('Open') ? [row(1, 'Open')] : [], total: String(p.status).startsWith('Open') ? 51 : 0 } }));
     mount();
-    await waitFor(() => expect(screen.getAllByText('on page').length).toBeGreaterThan(0));
+    const open = await screen.findByRole('region', { name: 'Open column' });
+    await waitFor(() => expect(within(open).getByTestId('board-column-count')).toHaveTextContent('51'));
+    expect(screen.queryByText('on page')).not.toBeInTheDocument();
   });
 });
 

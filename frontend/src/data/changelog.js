@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.3.32-preview';
+export const APP_VERSION = '4.3.33-preview';
 
 export const changelog = [
+  {
+    version: '4.3.33-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Verifying your phone again</strong> &mdash; after Send code, the box for the code from the text message now appears even when the phone was already verified, and the page no longer flashes while the code is sent.' },
+      { type: 'improved', html: '<strong>Quiet hours never mute the person on call</strong> &mdash; while you hold on-call, your alerts, Teams messages and phone notifications come through at any hour. Quiet hours pick up again when your week ends.' },
+      { type: 'fixed', html: '<strong>Mail Workflows: the &hellip; menu</strong> opens in full, upward near the bottom of the screen and inside the right edge, and acts on its own row. Rows with nothing to offer have no &hellip; button.' },
+      { type: 'fixed', html: '<strong>Board view and the status filter</strong> &mdash; each column now loads its own tickets, so a ticked status always shows its tickets and its real count, with Load more per column. Before, the board split only the newest 50 tickets into columns, so a status with few tickets could look empty. Columns follow the ticked statuses.' },
+      { type: 'new', html: '<strong>Requester filter</strong> &mdash; the Tickets filter rail has a Requester section under Members: type a name, tick one or more people. It shows as a chip, clears with Clear all and is kept in saved views.' },
+      { type: 'new', html: '<strong>HR corrections are caught</strong> &mdash; when HR sends a new-hire or departure notice again with a different start date, status, office or manager, Ticket Pulse treats it as a correction: every open ticket of the person moves to the new date, the details on the tickets are refreshed, the repeat notice is closed with a pointer to the family, and the family owner and everybody holding one of its tickets get a Teams message and an e-mail saying exactly what changed. The very same notice sent twice is closed too, so it never sits in someone&rsquo;s queue.' },
+    ],
+  },
   {
     version: '4.3.32-preview',
     date: 'October 27, 2026',

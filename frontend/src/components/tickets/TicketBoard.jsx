@@ -4,7 +4,7 @@ import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor,
   useDraggable, useDroppable, useSensor, useSensors,
 } from '@dnd-kit/core';
-import { Circle, Clock3, CheckCircle2, Lock } from 'lucide-react';
+import { Activity, Circle, Clock3, CheckCircle2, Lock } from 'lucide-react';
 import { PersonAvatar, SlaChip, StatusPill, TypePill, PRIORITY_STRIP_COLORS, PRIORITY_LABELS } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import ErrorBoundary from '../ErrorBoundary';
@@ -268,13 +268,16 @@ export function CloseConfirm({ ticket, onConfirm, onCancel }) {
   );
 }
 
-function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, children }) {
+function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, total = null, note = null, loading = false, error = null, hasMore = false, loadingMore = false, onLoadMore = null, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.key });
   const highlight = isOver && activeBucket && activeBucket !== column.key;
+  // Per-column fetch (QA 10-27 #4): the header carries the column's true total.
+  const count = total ?? tickets.length;
   return (
     <section
       ref={setNodeRef}
       aria-label={`${column.label} column`}
+      aria-busy={loading || undefined}
       className={`flex min-w-[270px] flex-1 flex-col rounded-xl border bg-muted/30 transition-shadow ${
         highlight ? `ring-2 ${column.ring} border-transparent` : 'border-border'
       }`}
@@ -282,14 +285,15 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, chi
       <header className={`flex items-center gap-2 rounded-t-xl border-b px-3 py-2 ${column.headerBg}`}>
         <column.Icon className={`h-4 w-4 ${column.accent}`} aria-hidden="true" />
         <h3 className="text-sm font-bold text-foreground">{column.label}</h3>
-        {/* Honest count: the board renders ONE page of the queue, so when more
-            pages exist the number says so instead of posing as a workspace
-            total (QA 08-04 #16). */}
+        {note && <span className="text-[11px] font-medium text-muted-foreground">{note}</span>}
+        {/* Honest count: a board that renders ONE page of the queue says so
+            instead of posing as a workspace total (QA 08-04 #16). */}
         <span
-          className="ml-auto rounded-full bg-card px-2 py-0.5 text-xs font-bold text-muted-foreground shadow-subtle"
+          className="ml-auto rounded-full bg-card px-2 py-0.5 text-xs font-bold tabular-nums text-muted-foreground shadow-subtle"
           title={paginated ? `${tickets.length} ${column.label} ticket${tickets.length === 1 ? '' : 's'} on this page — more may match on other pages (use the pager below)` : undefined}
+          data-testid="board-column-count"
         >
-          {tickets.length}
+          {loading ? '…' : count.toLocaleString()}
           {paginated && <span className="font-medium text-muted-foreground/75"> on page</span>}
         </span>
       </header>
@@ -301,8 +305,26 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, chi
           third of the screen. */}
       <div className="settings-scrollbar flex min-h-[42rem] max-h-[max(48rem,calc(100vh-200px))] flex-col gap-2 overflow-y-auto p-2">
         {children}
-        {tickets.length === 0 && (
+        {loading && tickets.length === 0 && (
+          <p className="flex items-center justify-center gap-1.5 py-6 text-xs text-muted-foreground">
+            <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Loading…
+          </p>
+        )}
+        {!loading && error && tickets.length === 0 && (
+          <p className="py-6 text-center text-xs text-red-700 dark:text-red-300" role="alert">{error}</p>
+        )}
+        {!loading && !error && tickets.length === 0 && (
           emptyState || <p className="py-6 text-center text-xs text-muted-foreground/75">Nothing here — drag a card over.</p>
+        )}
+        {hasMore && onLoadMore && (
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="tp-focus-ring mt-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-muted-foreground shadow-subtle hover:bg-muted hover:text-foreground disabled:opacity-60"
+          >
+            {loadingMore ? 'Loading…' : `Load more · ${(count - tickets.length).toLocaleString()} left`}
+          </button>
         )}
       </div>
     </section>
@@ -314,6 +336,9 @@ function TicketBoardInner({
   closedExcluded = false, onShowClosed = null, paginated = false,
   statusDefs = null, // workspace status registry (queue meta) — base-aware buckets
   slaCalendarAware = false, // Phase SLA: business-hours tooltip on due chips
+  // QA 10-27 #4: per-column data from useBoardColumns — { scopes, columns,
+  // loadMore }. Absent → the legacy mode that buckets `tickets` (one page).
+  columnData = null,
 }) {
   const [activeId, setActiveId] = useState(null);
   const [pendingClose, setPendingClose] = useState(null);
@@ -332,14 +357,38 @@ function TicketBoardInner({
 
   const buckets = useMemo(() => {
     const map = { open: [], pending: [], closed: [] };
+    if (columnData) {
+      // Each column's own fetch; a card is shown once, in the column of its status.
+      const seen = new Set();
+      for (const key of Object.keys(map)) {
+        for (const t of columnData.columns?.[key]?.items || []) {
+          if (seen.has(t.id)) continue;
+          seen.add(t.id);
+          map[key].push(t);
+        }
+      }
+      return map;
+    }
     for (const t of tickets) {
       const bucket = bucketFor(t.status);
       if (bucket) map[bucket].push(t);
     }
     return map;
-  }, [tickets, bucketFor]);
+  }, [tickets, bucketFor, columnData]);
 
-  const byId = useMemo(() => new Map(tickets.map((t) => [String(t.id), t])), [tickets]);
+  const scopeByKey = useMemo(() => new Map((columnData?.scopes || []).map((s) => [s.key, s])), [columnData]);
+  // Columns follow the status filter (QA 10-27 #4): one whose statuses are all
+  // out of scope is not shown — except Closed, which explains itself.
+  const shownColumns = useMemo(() => (columnData
+    ? BOARD_COLUMNS
+      .filter((c) => scopeByKey.get(c.key)?.inScope || (c.key === 'closed' && closedExcluded))
+      .map((c) => ({ ...c, label: scopeByKey.get(c.key)?.label || c.label }))
+    : BOARD_COLUMNS), [columnData, scopeByKey, closedExcluded]);
+
+  const byId = useMemo(
+    () => new Map([...buckets.open, ...buckets.pending, ...buckets.closed, ...(columnData ? [] : tickets)].map((t) => [String(t.id), t])),
+    [buckets, tickets, columnData],
+  );
   // Crash guard (QA 08-07 #10): a live-refetch can remove the dragged ticket
   // mid-drag, leaving activeId pointing at nothing. `?? null` keeps the drag
   // overlay's ternary safe, and the effect below cancels the phantom drag so
@@ -355,8 +404,10 @@ function TicketBoardInner({
     setActiveId(null);
     if (!over) return;
     const ticket = byId.get(String(active.id));
-    const nextStatus = planStatusDrop(ticket, over.id, statusDefs);
-    if (!nextStatus) return;
+    const planned = planStatusDrop(ticket, over.id, statusDefs);
+    if (!planned) return;
+    // A Closed column scoped to Resolved only resolves instead (QA 10-27 #4).
+    const nextStatus = scopeByKey.get(String(over.id))?.dropStatus || planned;
     if (needsCloseConfirm(ticket, nextStatus)) { setPendingClose(ticket); return; }
     onStatusDrop?.(ticket, nextStatus);
   };
@@ -369,44 +420,60 @@ function TicketBoardInner({
       onDragEnd={handleDragEnd}
     >
       <div className="flex gap-3 overflow-x-auto pb-2" role="list" aria-label="Ticket board">
-        {BOARD_COLUMNS.map((column) => (
-          <BoardColumn
-            key={column.key}
-            column={column}
-            tickets={buckets[column.key]}
-            activeBucket={activeBucket}
-            paginated={paginated}
-            // The board honors the queue's status scope (QA 08-04 #15/#16) —
-            // when that scope excludes Resolved/Closed, say so instead of
-            // presenting an empty Closed column as "no closed tickets".
-            emptyState={column.key === 'closed' && closedExcluded ? (
-              <div className="py-6 text-center">
-                <p className="text-xs text-muted-foreground/75">Closed hidden by current filters</p>
-                {onShowClosed && (
-                  <button
-                    onClick={onShowClosed}
-                    className="tp-focus-ring mt-2 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground shadow-subtle transition-colors hover:border-emerald-300 dark:hover:border-emerald-500/40 hover:text-emerald-700 dark:hover:text-emerald-200"
-                  >
+        {shownColumns.length === 0 && (
+          <p className="w-full rounded-xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+            The board shows Open, Pending and Closed work, and this view has none of those. Switch to the list to see it.
+          </p>
+        )}
+        {shownColumns.map((column) => {
+          const data = columnData?.columns?.[column.key];
+          const scope = scopeByKey.get(column.key);
+          return (
+            <BoardColumn
+              key={column.key}
+              column={column}
+              tickets={buckets[column.key]}
+              activeBucket={activeBucket}
+              paginated={columnData ? false : paginated}
+              total={columnData ? (scope?.inScope ? (data?.total ?? 0) : 0) : null}
+              note={scope?.note || null}
+              loading={Boolean(data?.loading)}
+              error={data?.error || null}
+              hasMore={Boolean(data && !data.loading && data.items.length < data.total)}
+              loadingMore={Boolean(data?.loadingMore)}
+              onLoadMore={columnData ? () => columnData.loadMore(column.key) : null}
+              // The board honors the queue's status scope (QA 08-04 #15/#16) —
+              // when that scope excludes Resolved/Closed, say so instead of
+              // presenting an empty Closed column as "no closed tickets".
+              emptyState={column.key === 'closed' && closedExcluded ? (
+                <div className="py-6 text-center">
+                  <p className="text-xs text-muted-foreground/75">Closed hidden by current filters</p>
+                  {onShowClosed && (
+                    <button
+                      onClick={onShowClosed}
+                      className="tp-focus-ring mt-2 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground shadow-subtle transition-colors hover:border-emerald-300 dark:hover:border-emerald-500/40 hover:text-emerald-700 dark:hover:text-emerald-200"
+                    >
                     Show closed
-                  </button>
-                )}
-              </div>
-            ) : null}
-          >
-            {buckets[column.key].map((ticket) => (
-              <BoardCard
-                key={ticket.id}
-                ticket={ticket}
-                statusDefs={statusDefs}
-                canDrag={canDragTicket(ticket, ticketingOn)}
-                linkState={linkState}
-                onClick={onCardClick}
-                onDoubleClick={onCardDoubleClick}
-                slaCalendarAware={slaCalendarAware}
-              />
-            ))}
-          </BoardColumn>
-        ))}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+            >
+              {buckets[column.key].map((ticket) => (
+                <BoardCard
+                  key={ticket.id}
+                  ticket={ticket}
+                  statusDefs={statusDefs}
+                  canDrag={canDragTicket(ticket, ticketingOn)}
+                  linkState={linkState}
+                  onClick={onCardClick}
+                  onDoubleClick={onCardDoubleClick}
+                  slaCalendarAware={slaCalendarAware}
+                />
+              ))}
+            </BoardColumn>
+          );
+        })}
       </div>
       <DragOverlay dropAnimation={null}>
         {activeTicket ? (

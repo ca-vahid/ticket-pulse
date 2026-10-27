@@ -25,6 +25,8 @@ jest.unstable_mockModule('../src/services/teamsNotificationService.js', () => ({
 jest.unstable_mockModule('../src/services/transactionalEmailService.js', () => emailMock);
 jest.unstable_mockModule('../src/utils/publicBaseUrl.js', () => ({ resolvePublicBaseUrl: () => 'https://tp.example.com', default: () => 'https://tp.example.com' }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+const isOnCallNow = jest.fn().mockResolvedValue(false);
+jest.unstable_mockModule('../src/services/urgentResponse/onCallNow.js', () => ({ isOnCallNow }));
 
 const { default: agentAlertService } = await import('../src/services/agentAlertService.js');
 
@@ -319,5 +321,36 @@ describe('agentAlertService.list — shaped categories', () => {
     expect(b.computedLabel).toBe('3 categories · Urgent+');
     expect(c.categoryIds).toEqual([3]);
     expect(c.computedLabel).toBe('Devices & Hardware › Laptops');
+  });
+});
+
+describe('quiet hours never mute the person on call (QA 10-27 #2)', () => {
+  const PREF = { workspaceId: 1, quietHoursEnabled: true, quietHoursStart: '00:00', quietHoursEnd: '23:59', quietHoursAllowUrgent: false };
+  const SUB = { id: 9, workspaceId: 1, technicianId: 11, isActive: true, channelEmail: true, technician: { id: 11, timezone: 'America/Vancouver' } };
+  const EVENT = { id: 1, subscriptionId: 9, ticketId: 100, priority: 2, trigger: 'created', attempts: 0 };
+
+  beforeEach(() => {
+    prismaMock.agentAlertSubscription.findUnique = jest.fn().mockResolvedValue(SUB);
+    prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue(PREF);
+    prismaMock.agentAlertEvent.findMany = jest.fn().mockResolvedValue([EVENT]);
+    prismaMock.agentAlertEvent.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    prismaMock.ticket.findMany = jest.fn().mockResolvedValue([{ id: 100, subject: 'Printer', priority: 2 }]);
+  });
+
+  test('off call: a routine alert waits for the end of quiet hours', async () => {
+    isOnCallNow.mockResolvedValue(false);
+    const deliver = jest.spyOn(agentAlertService, '_deliver').mockResolvedValue({ channels: { email: { sent: true } } });
+    await agentAlertService._flushSubscription(9);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(isOnCallNow).toHaveBeenCalledWith(1, 11);
+    deliver.mockRestore();
+  });
+
+  test('on call: the same alert goes out straight away', async () => {
+    isOnCallNow.mockResolvedValue(true);
+    const deliver = jest.spyOn(agentAlertService, '_deliver').mockResolvedValue({ channels: { email: { sent: true } } });
+    await agentAlertService._flushSubscription(9);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    deliver.mockRestore();
   });
 });

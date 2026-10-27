@@ -19,6 +19,7 @@ import TicketSearchBox, { viewAllSearch } from '../components/tickets/TicketSear
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
 import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
+import { boardColumnScopes, useBoardColumns } from '../components/tickets/boardColumns';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView } from '../utils/queueMemory';
@@ -388,8 +389,8 @@ export default function Tickets() {
   const aiState = searchParams.get('aiState') || '';
   const approval = searchParams.get('approval') || '';
   const approvalCategory = searchParams.get('approvalCategory') || '';
+  // One requester id or a comma list (QA 10-27 #5); ?requesterName= only seeds the chip's name.
   const requesterId = searchParams.get('requesterId') || '';
-  const requesterName = searchParams.get('requesterName') || '';
   // Custom-field filters (Phase 2): the dynamic cf_* param family forwards to
   // the API verbatim. Serialized so unrelated URL churn (peek, page) doesn't
   // recompute queryParams and refetch the list.
@@ -751,7 +752,10 @@ export default function Tickets() {
 
   const queryParams = useMemo(() => {
     // `facets=source`: the rail's Source counts follow this exact view (QA 09-18 #2).
-    const params = { page, pageSize: effectivePageSize, sort, dir, facets: 'source,parked,status,priority' };
+    // The board has no pager (its columns load more on their own, QA 10-27 #4),
+    // so it always reads page 1 — a ?page= left over from the list must not
+    // empty it.
+    const params = { page: boardMode ? 1 : page, pageSize: effectivePageSize, sort, dir, facets: 'source,parked,status,priority' };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
     // Board mode sends the SAME status scope as the list (QA 08-04 #16/#15 —
     // silently fetching every status made the board disagree with the rail
@@ -793,7 +797,7 @@ export default function Tickets() {
     for (const [k, v] of JSON.parse(cfSerialized)) params[k] = v;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
-  }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
+  }, [page, boardMode, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
     type, category, subcategory, group, source, createdFrom, createdTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
@@ -849,8 +853,12 @@ export default function Tickets() {
     }
   }, []);
 
+  // Board columns refetch when the list does a quiet refresh (live updates,
+  // edits, drops); a filter change already refetches them on its own.
+  const [boardRefresh, setBoardRefresh] = useState(0);
   const fetchTickets = useCallback(async ({ silent = false, diffAgainst = null } = {}) => {
     if (!silent) setIsLoading(true);
+    if (silent) setBoardRefresh((n) => n + 1);
     try {
       const res = await ticketsAPI.list(queryParams);
       const items = res.data.items || [];
@@ -1709,6 +1717,14 @@ export default function Tickets() {
   const onBoardShowClosed = segment === 'all' && boardClosedExcluded
     ? () => setParams({ status: [...statuses, ...statusNamesForBase(statusDefs, ['Resolved', 'Closed'])].join(',') })
     : null;
+  // QA 10-27 #4: each board column fetches its own statuses (the page's other
+  // filters, sort and search unchanged) instead of slicing one 50-row page.
+  const boardScopes = useMemo(
+    () => boardColumnScopes({ statusDefs, statuses, segment, allCount: statusFilterNames.length + 1 }),
+    [statusDefs, statuses, segment, statusFilterNames.length],
+  );
+  const boardColumns = useBoardColumns({ enabled: boardMode, baseParams: queryParams, scopes: boardScopes, refreshKey: boardRefresh });
+  const boardColumnData = useMemo(() => ({ scopes: boardScopes, ...boardColumns }), [boardScopes, boardColumns]);
   const groupNames = useMemo(() => {
     const map = new Map();
     for (const g of meta?.groups || []) map.set(String(g.freshserviceId), g.name);
@@ -2175,20 +2191,8 @@ export default function Tickets() {
               <TicketFilterRail meta={meta} stats={stats} facets={facets} docked={docked} tucked={docked && railTucked} pull={docked && railTucked && !cardsFolded ? railPull : null} createdWindow={createdWin} onCreatedWindow={pickCreatedWindow} />
 
               <div className={docked ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}>
-                {requesterId && (
-                  <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-sm text-blue-800 dark:text-blue-200">
-                    <UserRound className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 truncate">
-                      Showing tickets from <span className="font-semibold">{requesterName || 'this requester'}</span>
-                    </span>
-                    <button
-                      onClick={() => setParams({ requesterId: null, requesterName: null })}
-                      className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
-                    >
-                      <X className="w-3.5 h-3.5" aria-hidden="true" /> Clear
-                    </button>
-                  </div>
-                )}
+                {/* The requester filter is a rail section + a chip in this bar
+                    (QA 10-27 #5); the old "Showing tickets from …" banner went. */}
                 <ActiveFilterBar meta={meta} />
                 {/* One toolbar row (16 Sep 2026): layout controls on the left, the
                     AI-approval worklist and pagination on the right. On desktop the
@@ -2351,12 +2355,15 @@ export default function Tickets() {
                       {tickets.length > 0 && (
                         <>
                           {/* Phone: the count only; the full pager sits under the list. */}
-                          <span className="text-xs tabular-nums text-muted-foreground sm:hidden" data-testid="queue-count-phone">{total.toLocaleString()} ticket{total === 1 ? '' : 's'}</span>
+                          {/* The board has no pages (each column loads more, QA 10-27 #4): the count only. */}
+                          <span className={`text-xs tabular-nums text-muted-foreground ${boardMode ? '' : 'sm:hidden'}`} data-testid="queue-count-phone">{total.toLocaleString()} ticket{total === 1 ? '' : 's'}</span>
                           {/* Docked: the pager under the list is always on screen, and this
                               copy wrapped to a row of its own on a laptop. */}
-                          <div className={docked && listShown ? 'hidden' : 'hidden sm:block'}>
-                            <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
-                          </div>
+                          {!boardMode && (
+                            <div className={docked && listShown ? 'hidden' : 'hidden sm:block'}>
+                              <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -2437,14 +2444,9 @@ export default function Tickets() {
                         onStatusDrop={onBoardStatusDrop}
                         closedExcluded={boardClosedExcluded}
                         onShowClosed={onBoardShowClosed}
-                        paginated={total > effectivePageSize}
+                        columnData={boardColumnData}
                       />
-                      {/* Same pagination as the list — the board renders one
-                          page sliced into columns, so without this the rest of
-                          the queue was simply unreachable (QA 08-04 #16). */}
-                      <div className="mt-3 tp-card rounded-xl px-4 py-3">
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} />
-                      </div>
+                      {/* No pager: each column loads more on its own (QA 10-27 #4). */}
                     </>
                   ) : (
                     /* --tp-q-grid: the ONE computed xl template header + rows

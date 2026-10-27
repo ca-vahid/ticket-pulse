@@ -137,6 +137,10 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jes
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketSvc }));
 jest.unstable_mockModule('../src/services/ticketLinkService.js', () => ({ default: linkSvc }));
 jest.unstable_mockModule('../src/services/ticketParkService.js', () => ({ default: parkSvc }));
+const teamsMock = { sendWorkflowMessage: jest.fn(async () => ({ sent: 1 })) };
+const mailMock = { sendTransactionalEmail: jest.fn(async () => ({ sent: true })) };
+jest.unstable_mockModule('../src/services/teamsNotificationService.js', () => ({ default: teamsMock }));
+jest.unstable_mockModule('../src/services/transactionalEmailService.js', () => mailMock);
 jest.unstable_mockModule('../src/services/statusService.js', () => ({
   default: { baseStatusOf: jest.fn(async (_ws, s) => ({ Open: 'Open', Pending: 'Pending', Resolved: 'Resolved', Closed: 'Closed' }[s] ?? null)) },
 }));
@@ -445,6 +449,46 @@ describe('live: family creation', () => {
     expect(ev.decision).toBe('duplicate_linked');
     expect(ticketSvc.createTicket).not.toHaveBeenCalled();
     expect(linkSvc.link).toHaveBeenCalledWith(first.id, 1, { relatedTicketId: again.id, kind: 'related_to' }, expect.anything());
+  });
+
+  test('QA 10-27 #6: HR re-sends a new hire with a corrected start date and status: the family follows it, the owners are told', async () => {
+    await setMode('live');
+    const nh = (start, status) => `New Team Member Start Date: ${start} Employee #: 2200 Position: Junior Intern Employee Status: ${status} Department: Engineering Location: Vancouver Reports To: Kim Lee View Employee Record`;
+    const first = fsNotice({ subject: 'New Hire: Sam Rivers', sender: BAMBOO, text: nh(day(12), 'PTR - Part-time Regular') });
+    await hr.onTicketCreated(first.id, 1);
+    const fam = db.families.find((f) => f.parentTicketId === first.id);
+    const kids = db.members.filter((m) => m.familyId === fam.id && m.role === 'child').map((m) => ticketById(m.ticketId));
+    for (const k of kids) k.assignedTechId = 4;
+    jest.clearAllMocks();
+
+    const to = day(30);
+    const again = fsNotice({ subject: 'New Hire: Sam Rivers', sender: BAMBOO, text: nh(to, 'FTR - Full-time Regular') });
+    const ev = await hr.onTicketCreated(again.id, 1);
+    expect(ev).toMatchObject({ decision: 'hr_correction', outcome: 'done' });
+    expect(ev.summary).toMatch(/corrected onboarding notice .*Start date .* → .*Employee status PTR - Part-time Regular → FTR - Full-time Regular/i);
+    expect(fam.effectiveDate.toISOString().slice(0, 10)).toBe(to);
+    const userCreation = kids.find((t) => t.subject.includes('User Creation'));
+    expect(userCreation.dueBy.toISOString()).toBe(dueInstant(addDays(to, -7)));
+    expect(userCreation.description).toContain('FTR - Full-time Regular');
+    expect(again.status).toBe('Closed');
+    expect(ticketSvc.createTicket).not.toHaveBeenCalled();
+    const teams = teamsMock.sendWorkflowMessage.mock.calls[0][0];
+    expect(teams.emails).toEqual(expect.arrayContaining(['al@x.ca']));
+    expect(teams.body).toMatch(/Start date/);
+    expect(mailMock.sendTransactionalEmail).toHaveBeenCalled();
+  });
+
+  test('the very same new-hire notice again is linked and closed, nobody is alerted', async () => {
+    await setMode('live');
+    const text = `New Team Member Start Date: ${day(12)} Employee #: 2201 Position: Engineer Employee Status: FTR Department: Engineering Location: Calgary Reports To: Kim Lee View Employee Record`;
+    const first = fsNotice({ subject: 'New Hire: Ana Wu', sender: BAMBOO, text });
+    await hr.onTicketCreated(first.id, 1);
+    jest.clearAllMocks();
+    const again = fsNotice({ subject: 'New Hire: Ana Wu', sender: BAMBOO, text });
+    const ev = await hr.onTicketCreated(again.id, 1);
+    expect(ev.decision).toBe('duplicate_linked');
+    expect(again.status).toBe('Closed');
+    expect(teamsMock.sendWorkflowMessage).not.toHaveBeenCalled();
   });
 
   test('child descriptions never carry a password from the notice', async () => {

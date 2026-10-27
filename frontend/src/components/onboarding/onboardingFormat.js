@@ -31,6 +31,7 @@ export const DECISION_LABEL = {
   create_family: 'New family',
   create_family_after_the_fact: 'New family (after the fact)',
   duplicate_linked: 'Re-sent notice linked',
+  hr_correction: 'HR correction applied',
   move_dates: 'Dates moved',
   office_changed: 'Office changed',
   cancel_family: 'Family cancelled',

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
@@ -139,16 +140,52 @@ export function rowMenuItems(workflow) {
   ];
 }
 
-function RowMenu({ workflow, displayName, items, onRowAction, onClose }) {
+const MENU_WIDTH = 176; // w-44
+const MENU_ITEM_HEIGHT = 30;
+
+/**
+ * Where a row menu goes: under the ⋯ button, right edges aligned, flipped
+ * above it when the viewport has no room below and kept inside the viewport
+ * sideways. Fixed coordinates, so no scroll container or card can clip it.
+ */
+export function rowMenuPosition(rect, itemCount, viewport = { width: window.innerWidth, height: window.innerHeight }) {
+  const height = itemCount * MENU_ITEM_HEIGHT + 8;
+  const left = Math.max(8, Math.min(rect.right - MENU_WIDTH, viewport.width - MENU_WIDTH - 8));
+  const spaceBelow = viewport.height - rect.bottom;
+  if (spaceBelow < height + 8 && rect.top > spaceBelow) return { left, bottom: viewport.height - rect.top + 2 };
+  return { left, top: rect.bottom + 2 };
+}
+
+/**
+ * QA 10-27 #3: the row "⋯" menu (list page and sidebar). It used to sit
+ * absolutely inside the row, so a trigger card's overflow-hidden (and the
+ * list's scroll area) cut it off — on a card's last row it was clipped away
+ * entirely and the ⋯ seemed to do nothing. It now renders in a portal at
+ * fixed coordinates (the StatusPicker pattern).
+ */
+export function WorkflowRowMenu({ anchorRef, workflow, name, items, onRowAction, onClose }) {
   const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const rect = anchorRef?.current?.getBoundingClientRect();
+      if (rect) setPos(rowMenuPosition(rect, items.length));
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [anchorRef, items.length]);
   useEffect(() => {
-    const onDoc = (e) => { if (!ref.current?.contains(e.target)) onClose(); };
+    // A press on the ⋯ itself is left to its own toggle.
+    const onDoc = (e) => { if (!ref.current?.contains(e.target) && !anchorRef?.current?.contains(e.target)) onClose(); };
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
-  }, [onClose]);
-  return (
-    <div ref={ref} role="menu" aria-label={`Actions for ${displayName}`} className="tp-card absolute right-2 top-full z-30 mt-0.5 w-44 rounded-lg p-1 shadow-soft animate-popIn">
+  }, [onClose, anchorRef]);
+  if (!pos || typeof document === 'undefined') return null;
+  return createPortal(
+    <div ref={ref} role="menu" aria-label={`Actions for ${name}`} style={pos} className="tp-card fixed z-[60] w-44 rounded-lg p-1 shadow-soft animate-popIn">
       {items.map((item) => (
         <button
           key={item.key}
@@ -160,7 +197,8 @@ function RowMenu({ workflow, displayName, items, onRowAction, onClose }) {
           {item.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -169,6 +207,8 @@ function IndexRow({
   getDisplayName, isAfterHours, onRowAction,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const isEnabled = !!workflow.isEnabled;
   const isShadow = isEnabled && workflow.mockModeEnabled === true;
   const isArchived = Boolean(workflow.archivedAt);
@@ -218,6 +258,7 @@ function IndexRow({
       )}
       {menuItems.length > 0 && (
         <button
+          ref={menuButtonRef}
           type="button"
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
           aria-haspopup="menu"
@@ -228,7 +269,7 @@ function IndexRow({
           <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       )}
-      {menuOpen && menuItems.length > 0 && <RowMenu workflow={workflow} displayName={name} items={menuItems} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
+      {menuOpen && menuItems.length > 0 && <WorkflowRowMenu anchorRef={menuButtonRef} workflow={workflow} name={name} items={menuItems} onRowAction={onRowAction} onClose={closeMenu} />}
     </div>
   );
 }

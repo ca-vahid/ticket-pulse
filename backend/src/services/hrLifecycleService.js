@@ -231,6 +231,20 @@ function plainBody(ticket) {
   return stripSecrets(String(raw || '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')).replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, MAX_BODY_CHARS);
 }
 
+/** label → value of a new-hire notice's fields (Start Date, Employee Status, Location, …). */
+function noticeFieldMap(ticket) {
+  const raw = ticket?.descriptionText || String(ticket?.description || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|td)>/gi, '\n').replace(/<[^>]+>/g, ' ');
+  return new Map(newHireFields(String(raw).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')).map((f) => [f.label, f.value]));
+}
+
+/** The fields whose change in a re-sent notice is a correction (the start date is compared as a date). */
+const CORRECTION_FIELDS = [
+  ['Employee Status', 'Employee status'], ['Position', 'Position'], ['Location', 'Office'], ['Reports To', 'Reports to'],
+  ['Department', 'Department'], ['Division', 'Division'], ['Employee #', 'Employee #'],
+];
+const sameText = (a, b) => String(a || '').replace(/\s+/g, ' ').trim().toLowerCase() === String(b || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const changesText = (changes = []) => changes.map((x) => `${x.label} ${x.from} → ${x.to}`).join('; ');
+
 /**
  * A child ticket's description. A new hire's children open with the notice's
  * fields one per line (name, employee #, position, office, …) so the account
@@ -1189,6 +1203,31 @@ class HrLifecycleService {
 
     if (fx.effect === 'create') {
       if (family) {
+        // QA 10-27 #6: HR re-sends a notice to correct it (a new start date,
+        // status, office…) without telling IT. The latest notice wins: the
+        // family follows it and the owners are told what changed.
+        const changes = await this._noticeChanges(family, ticket, c);
+        if (changes.length) {
+          const dateChange = changes.find((x) => x.field === 'date');
+          const officeChange = changes.find((x) => x.field === 'office');
+          const fam = await this._familyTickets(family);
+          const openChildren = fam.members.filter((m) => !m.terminal && m.member.role === 'child');
+          const moves = dateChange ? [
+            ...(fam.parent && !fam.parentTerminal ? [{ ticketId: fam.parent.id, ref: ticketDisplayRef(fam.parent), dueDate: c.date, role: 'parent' }] : []),
+            ...openChildren.map((m) => ({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), dueDate: addDays(c.date, m.member.dueOffsetDays || 0), role: 'child' })),
+          ] : [];
+          return {
+            decision: 'hr_correction',
+            familyId: family.id,
+            familyKind: fx.family,
+            fromDate: dateOnly(family.effectiveDate),
+            toDate: dateChange ? c.date : null,
+            office: officeChange ? (c.office || officeChange.to) : null,
+            changes,
+            moves,
+            summary: `${person}: HR sent a corrected ${FAMILY_KIND_LABEL[fx.family]} notice (${changesText(changes)})${moves.length ? ` — ${moves.length} open ${moves.length === 1 ? 'ticket' : 'tickets'} moved` : ''}; the owners were told`,
+          };
+        }
         return { decision: 'duplicate_linked', familyId: family.id, familyKind: fx.family, summary: `${person}: HR sent this ${FAMILY_KIND_LABEL[fx.family]} notice again — linked to the open family (no new children)` };
       }
       const afterTheFact = fx.family === 'offboarding' && Boolean(c.effectiveImmediately || (c.date && c.noticeDate && c.date <= c.noticeDate));
@@ -1337,6 +1376,11 @@ class HrLifecycleService {
         break;
       case 'duplicate_linked':
         await this._attachNotice(familyId, ticket, c, out, `HR sent this notice again. The ${plan.familyKind} is already organised on the parent ticket; no new children were created.`);
+        // Nothing in it is new: closed, so it never sits in somebody's queue.
+        await this._closeRepeat(ticket, out);
+        break;
+      case 'hr_correction':
+        await this._applyCorrection(familyId, ticket, c, plan, settings, tz, out);
         break;
       case 'move_dates':
       case 'office_changed':
@@ -1520,13 +1564,164 @@ class HrLifecycleService {
     return { family, parent };
   }
 
+  /**
+   * What a re-sent notice changes against the family: the date (the family's
+   * effective date) and, for a new hire, the notice fields compared with the
+   * latest notice the family took in. [] = the same notice again.
+   */
+  async _noticeChanges(family, notice, c) {
+    const changes = [];
+    const was = dateOnly(family.effectiveDate);
+    if (c.date && was && c.date !== was) {
+      changes.push({ field: 'date', label: family.kind === 'offboarding' ? 'Last day' : 'Start date', from: fmtDay(was), to: fmtDay(c.date) });
+    }
+    if (family.kind === 'onboarding') {
+      const ids = (Array.isArray(family.sourceTicketIds) ? family.sourceTicketIds : []).map(Number).filter((id) => id && id !== notice.id);
+      const prevId = ids.length ? ids[ids.length - 1] : family.parentTicketId;
+      const prev = prevId && prevId !== notice.id ? await this._loadTicket(prevId, family.workspaceId) : null;
+      if (prev) {
+        const a = noticeFieldMap(prev);
+        const b = noticeFieldMap(notice);
+        for (const [key, label] of CORRECTION_FIELDS) {
+          const x = a.get(key);
+          const y = b.get(key);
+          if (x && y && !sameText(x, y)) changes.push({ field: key === 'Location' ? 'office' : key, label, from: x, to: y });
+        }
+      }
+    } else if (c.office && family.office && !sameText(c.office, family.office)) {
+      changes.push({ field: 'office', label: 'Office', from: family.office, to: c.office });
+    }
+    return changes;
+  }
+
+  /**
+   * QA 10-27 #6: apply a corrected notice. Dates move (and the sleep follows),
+   * TP-born children still showing the notice's facts get them refreshed, the
+   * repeat notice is closed with a pointer to the family, and everybody who
+   * owns a part of it is told what changed (Teams and e-mail).
+   */
+  async _applyCorrection(familyId, notice, c, plan, settings, tz, out) {
+    // Owners as they are now: a moved child that goes back to sleep is released.
+    const start = await prisma.hrLifecycleFamily.findUnique({ where: { id: familyId } });
+    const before = start ? await this._familyTickets(start) : null;
+    let family;
+    if (plan.moves?.length) {
+      await this._moveFamily(familyId, notice, c, plan, tz, out);
+      family = await prisma.hrLifecycleFamily.findUnique({ where: { id: familyId } });
+    } else {
+      ({ family } = await this._attachNotice(familyId, notice, c, out, `HR sent a corrected notice: ${changesText(plan.changes)}. Every open ticket in the ${plan.familyKind} family was noted.`));
+      const fam = await this._familyTickets(family);
+      const html = `<p><strong>Onboarding / Offboarding:</strong> HR sent a corrected notice: ${esc(changesText(plan.changes))}. Notice ${esc(ticketDisplayRef(notice))}: “${esc(noticeQuote(notice))}”</p>`;
+      if (fam.parent && !fam.parentTerminal) await this._note(fam.parent, html, out);
+      for (const m of fam.members) if (!m.terminal && m.ticket.id !== notice.id) await this._note(m.ticket, html, out);
+      if (plan.office) {
+        await soft(() => prisma.hrLifecycleFamily.update({ where: { id: familyId }, data: { office: String(plan.office).slice(0, 120) } }));
+      }
+    }
+    if (!family) return;
+    const fam = await this._familyTickets(family);
+    // The children's field list now reads from the corrected notice.
+    if (plan.familyKind === 'onboarding') {
+      const items = new Map((settings.templates.onboarding || []).map((i) => [i.key, i]));
+      const intros = Object.values(CHILD_INTRO).concat(Object.values(OLD_CHILD_INTRO)).flatMap((v) => Object.values(v));
+      const svc = await this._ticketService();
+      for (const m of fam.members) {
+        if (m.member.role !== 'child' || m.terminal || !this._isNative(m.ticket)) continue;
+        const t = await this._loadTicket(m.ticket.id, family.workspaceId);
+        if (!t || !intros.some((intro) => String(t.description || '').includes(esc(intro)))) continue;
+        const description = childDescription({
+          key: m.member.templateKey, title: m.member.title || items.get(m.member.templateKey)?.title || 'Child', familyKind: 'onboarding',
+          c, effectiveDate: dateOnly(family.effectiveDate), notice,
+        });
+        await svc.updateTicketFields(t.id, family.workspaceId, { description }, HR_LIFECYCLE_ACTOR, { emitEvent: false })
+          .catch((err) => out.warnings.push(`Details on ${ticketDisplayRef(t)} not refreshed: ${err.message}`));
+      }
+    }
+    const parent = fam.parent || null;
+    await this._closeRepeat(notice, out, parent);
+    await this._alertCorrection(family, fam, notice, plan, settings, out, before);
+  }
+
+  /** A re-sent notice adds nothing the family does not hold: close it with a pointer, never leave it in a queue. */
+  async _closeRepeat(notice, out, parent = null) {
+    const t = await this._loadTicket(notice.id, notice.workspaceId);
+    if (!t || await this._isTerminal(t.workspaceId, t.status)) return;
+    const where = parent && parent.id !== t.id ? ` on ${esc(ticketDisplayRef(parent))}` : ' on its family parent';
+    await this._note(t, `<p><strong>Onboarding / Offboarding:</strong> closed by Ticket Pulse. Everything in this notice is organised${where}.</p>`, out);
+    if (t.parkedUntil) {
+      const parks = await this._parkService();
+      await parks.unpark(t.id, t.workspaceId, { reason: 'closed', reopen: false, note: 'A repeat HR notice, organised on its family' }, PARK_ACTOR)
+        .catch((err) => out.warnings.push(`Unpark of ${ticketDisplayRef(t)} skipped: ${err.message}`));
+    }
+    await this._close(t, out);
+  }
+
+  /** Tell the family owner and everybody holding an open ticket of the family. Never throws. */
+  async _alertCorrection(family, fam, notice, plan, settings, out, before = null) {
+    try {
+      const ids = new Set();
+      if (settings.parentAssigneeTechId) ids.add(Number(settings.parentAssigneeTechId));
+      for (const f of [before, fam].filter(Boolean)) {
+        if (f.parent?.assignedTechId && !f.parentTerminal) ids.add(Number(f.parent.assignedTechId));
+        for (const m of f.members) if (!m.terminal && m.member.role === 'child' && m.ticket.assignedTechId) ids.add(Number(m.ticket.assignedTechId));
+      }
+      if (!ids.size) return;
+      const people = await prisma.technician.findMany({
+        where: { workspaceId: family.workspaceId, id: { in: [...ids] }, isActive: true },
+        select: { id: true, email: true },
+        take: 20,
+      });
+      const emails = people.map((p) => p.email).filter(Boolean);
+      if (!emails.length) return;
+      const title = `HR corrected ${family.personName}'s ${plan.familyKind === 'onboarding' ? 'new-hire' : 'departure'} notice`;
+      const lines = [
+        `HR sent the notice again with different details, without saying so: ${changesText(plan.changes)}.`,
+        plan.moves?.length
+          ? `Ticket Pulse moved ${plan.moves.length} open ${plan.moves.length === 1 ? 'ticket' : 'tickets'} to match: ${plan.moves.map((m) => `${m.ref} now due ${fmtDay(m.dueDate)}`).join(', ')}.`
+          : 'No due date changed; every open ticket has a note.',
+        `The repeat notice ${ticketDisplayRef(notice)} was closed. If the earlier details were the right ones, ask HR and change the family back by hand.`,
+      ];
+      const ref = fam.parent ? ticketDisplayRef(fam.parent) : null;
+      const { default: teams } = await import('./teamsNotificationService.js');
+      await teams.sendWorkflowMessage({
+        workspaceId: family.workspaceId, emails, title, body: lines.join('\n\n'),
+        ticketId: fam.parent?.id || null, ticketRef: ref, includeTicketLink: Boolean(fam.parent), refKey: `hr-correction:${notice.id}`,
+      }).catch((err) => out.warnings.push(`Teams alert not sent: ${err.message}`));
+      const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+      const { emailShell, escapeHtml } = await import('./approvalEmailTemplate.js');
+      const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js');
+      const { ticketLinkUrl } = await import('../utils/ticketLink.js');
+      const link = fam.parent ? ticketLinkUrl(resolvePublicBaseUrl({ warn: () => {} }), fam.parent) : null;
+      const cell = 'font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:21px;color:#0f172a;';
+      const html = emailShell({
+        workspaceName: null,
+        bodyRows: [
+          `<tr><td style="padding:0 0 12px;font-family:Segoe UI,Arial,sans-serif;font-size:18px;line-height:24px;font-weight:bold;color:#0f172a;">${escapeHtml(title)}</td></tr>`,
+          ...lines.map((l) => `<tr><td style="padding:0 0 10px;${cell}">${escapeHtml(l)}</td></tr>`),
+          ...(link ? [`<tr><td style="padding:4px 0 16px;${cell}"><a href="${escapeHtml(link)}" style="color:#2563eb;font-weight:bold;">Open ${escapeHtml(ref)}</a></td></tr>`] : []),
+        ],
+        footerHtml: '<span style="color:#64748b;">Sent by Comings &amp; Goings in Ticket Pulse.</span>',
+        preheader: lines[0],
+      });
+      const text = [title, '', ...lines, ...(link ? ['', `Open ${ref}: ${link}`] : [])].join('\n');
+      for (const to of emails) {
+        await sendTransactionalEmail({ workspaceId: family.workspaceId, to, subject: title, html, text, label: 'hr correction alert' })
+          .catch((err) => out.warnings.push(`E-mail alert to one owner not sent: ${err.message}`));
+      }
+      out.alerted = emails.length;
+    } catch (err) {
+      out.warnings.push(`Correction alert not sent: ${err.message}`);
+    }
+  }
+
   async _moveFamily(familyId, notice, c, plan, tz, out) {
     const { family } = await this._attachNotice(familyId, notice, c, out, `This change was applied to every open ticket in the ${plan.familyKind} family.`);
     const fam = await this._familyTickets(family);
     const quote = noticeQuote(notice);
-    const what = plan.decision === 'office_changed' && !plan.moves.length
+    let what = plan.decision === 'office_changed' && !plan.moves.length
       ? `HR changed the office${plan.office ? ` to ${plan.office}` : ''}.`
       : `HR moved the date from ${fmtDay(plan.fromDate)} to ${fmtDay(plan.toDate)}${plan.office ? ` (office: ${plan.office})` : ''}.`;
+    if (plan.decision === 'hr_correction') what = `HR sent a corrected notice: ${changesText(plan.changes)}.`;
     const note = (extra = '') => `<p><strong>Onboarding / Offboarding:</strong> ${esc(what)}${extra} Notice ${esc(ticketDisplayRef(notice))}: “${esc(quote)}”</p>`;
     const moveBy = new Map((plan.moves || []).map((m) => [m.ticketId, m]));
     const touched = [];
