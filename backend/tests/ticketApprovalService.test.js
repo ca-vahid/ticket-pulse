@@ -698,8 +698,8 @@ describe('decideByToken (Phase AP: reject needs a reason, decisions show a perso
   });
 });
 
-describe('_emailApprover (the agent\'s message to the approver, 26 Oct 2026)', () => {
-  test('greets the approver, says what is asked for whom (title), keeps the note and placeholders, one decide link', async () => {
+describe('_emailApprover (the first request is the card, 27 Oct 2026)', () => {
+  test('the first request is the official card: category title, people, Approve / Not approved / Ask, note placeholders', async () => {
     prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket, requester: { name: 'Rita', email: 'rita@x.io', jobTitle: 'Analyst' } });
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
     prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
@@ -708,18 +708,39 @@ describe('_emailApprover (the agent\'s message to the approver, 26 Oct 2026)', (
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
     expect(email.subject).toBe('Laptop purchase for Rita — New laptop [TP-ID-501]');
-    expect(email.fromName).toBe('Jane Doe via Ticket Pulse');
-    expect(email.html).toContain('Jane Doe asks you to approve Laptop purchase for Rita (Analyst) on ');
+    // The card comes from the system sender, not "<agent> via Ticket Pulse".
+    expect(email.fromName).not.toContain('via Ticket Pulse');
+    expect(email.html).toContain('Requested for');
+    expect(email.html).toContain('Asked by');
+    expect(email.html).toContain('Jane Doe');
+    expect(email.html).toContain('Why Jane is asking');
     expect(email.html).not.toContain('jane.doe@x.io');
-    expect(email.html).toContain('Decide on this request');
-    expect(email.html).not.toContain('?intent=');
+    expect(email.html).toMatch(/\/approval\/[^"]+\?intent=approve/);
+    expect(email.html).toContain('?intent=reject');
+    expect(email.html).toContain('?intent=ask');
+    expect(email.html).not.toContain('asks you to approve');
+    expect(email.html).not.toContain('Earlier in this conversation');
     // Placeholders still substitute.
     expect(email.html).toContain('review &amp; decide</a>');
-    // A plain-text twin with the decision address.
+  });
+
+  test('a re-request with the answer is a follow-up in the reply format', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket, requester: { name: 'Rita', email: 'rita@x.io', jobTitle: 'Analyst' } });
+    await ticketApprovalService._emailApprover(
+      { ...ticket, requester: { name: 'Rita', email: 'rita@x.io', jobTitle: 'Analyst' } },
+      { id: 77, ticketId: 501, approverEmail: 'alice@x.io', approverName: 'Alice', requestedBy: 'jane.doe@x.io', requestNote: 'pls' },
+      'https://app/approval/tok', 'Laptop purchase', { question: 'Which model?', answer: 'The 14 inch one' },
+    );
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.fromName).toBe('Jane Doe via Ticket Pulse');
+    expect(email.html).toContain('Jane Doe asks you to approve Laptop purchase for Rita (Analyst) on ');
+    expect(email.html).toContain('Here is the answer you asked for.');
+    expect(email.html).toContain('Decide on this request');
+    expect(email.html).not.toContain('?intent=');
     expect(email.text).toMatch(/Decide on this request <https?:\/\/\S+\/approval\/[^>\s]+>/);
   });
 
-  test('sends no people photos up top — the history carries them; never a URL', async () => {
+  test('the card carries the people photos inline (cid:), never a URL', async () => {
     const { resetUserPhotoCache } = await import('../src/services/userPhotoService.js');
     resetUserPhotoCache();
     const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -731,8 +752,9 @@ describe('_emailApprover (the agent\'s message to the approver, 26 Oct 2026)', (
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'nophoto.agent@x.io' });
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect((email.attachments || []).map((a) => a.contentId)).not.toContain('requester-photo');
-    expect(email.html).not.toContain('cid:requester-photo');
+    expect(email.attachments).toEqual(expect.arrayContaining([expect.objectContaining({ contentId: 'requester-photo', inline: true })]));
+    expect(email.html).toContain('cid:requester-photo');
+    // No photo for the agent → an initials circle, no broken cid.
     expect(email.html).not.toContain('cid:requested-by-photo');
     expect(email.html).not.toMatch(/<img[^>]+src="https?:/);
     azureAdMock.getUserPhoto.mockReset();
