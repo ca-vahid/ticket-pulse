@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.25-preview';
+export const APP_VERSION = '4.3.26-preview';
 
 export const changelog = [
+  {
+    version: '4.3.26-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Level match</strong> no longer moves a ticket to someone whose only skill is the broad parent category. A rating like "Security: expert" says nothing about a firewall firmware patch, so only a skill in the ticket&rsquo;s own subcategory can earn a move. When nobody has that skill at the needed level, the AI&rsquo;s choice stays.' },
+    ],
+  },
   {
     version: '4.3.25-preview',
     date: 'October 26, 2026',

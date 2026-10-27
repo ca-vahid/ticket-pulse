@@ -126,13 +126,19 @@ export function onShiftAt(person, now, fallbackTimeZone = 'America/Vancouver') {
 /**
  * The person's best skill for this ticket: exact subcategory (priority 2) over
  * the parent category (priority 1). Same rule as find_matching_agents.
+ * `broad` marks a parent-category skill on a ticket that has a subcategory: a
+ * broad "Security: expert" says nothing about firewall firmware, so it never
+ * earns a move (27 Oct 2026, #65201 bounced back as a competency mismatch).
  * @param {Array<{categoryId:number, level:string}>} skills
  */
 export function skillFor(skills, { categoryId = null, subcategoryId = null } = {}) {
   const exact = subcategoryId ? skills.find((s) => s.categoryId === subcategoryId) : null;
   if (exact) return { level: normalizeLevel(exact.level), num: levelNum(exact.level), priority: 2 };
   const parent = categoryId ? skills.find((s) => s.categoryId === categoryId) : null;
-  if (parent) return { level: normalizeLevel(parent.level), num: levelNum(parent.level), priority: 1 };
+  if (parent) {
+    const skill = { level: normalizeLevel(parent.level), num: levelNum(parent.level), priority: 1 };
+    return subcategoryId ? { ...skill, broad: true } : skill;
+  }
   return null;
 }
 
@@ -161,7 +167,7 @@ export function decide({ requiredLevel, aiPickId, candidates = [], scoreMargin =
   const topScore = scores.length ? Math.max(...scores) : null;
   const closeEnough = (c) => topScore === null || !Number.isFinite(Number(c.score)) || Number(c.score) >= topScore - scoreMargin - 1e-9;
   const promotable = (c) => c.techId === aiPickId
-    || (!c.onLeave && !c.rejectedThisTicket && !c.assignableOnly && !String(c.routingNote || '').trim() && closeEnough(c));
+    || (!c.onLeave && !c.rejectedThisTicket && !c.assignableOnly && !String(c.routingNote || '').trim() && !c.skill?.broad && closeEnough(c));
   let pool = candidates.filter((c) => c.skill && c.skill.num >= needNum && promotable(c));
   if (!pool.length) return { ...base, outcome: OUTCOMES.NO_SKILL, sentence: null };
 

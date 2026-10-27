@@ -54,6 +54,19 @@ describe('decide', () => {
     expect(byOpen.techId).toBe(SOHEIL);
   });
 
+  test('a broad parent-category skill never earns a move when the ticket has a subcategory (#65201)', () => {
+    const d = decide({
+      requiredLevel: 'intermediate',
+      aiPickId: 7,
+      candidates: [
+        person(7, 'Anton', 'basic', { open: 21 }),
+        { ...person(6, 'Andrii', 'expert', { rank: 2, open: 9, priority: 1 }), skill: { level: 'expert', num: 4, priority: 1, broad: true } },
+      ],
+    });
+    expect(d.outcome).toBe('no_skill');
+    expect(d.techId).toBe(7);
+  });
+
   test('exact subcategory skill beats parent-category skill', () => {
     const r = decide({
       requiredLevel: 'basic',
@@ -122,7 +135,8 @@ describe('helpers', () => {
   test('skillFor prefers the exact subcategory', () => {
     const skills = [{ categoryId: 136, level: 'expert' }, { categoryId: 140, level: 'basic' }];
     expect(skillFor(skills, { categoryId: 136, subcategoryId: 140 })).toEqual({ level: 'basic', num: 1, priority: 2 });
-    expect(skillFor(skills, { categoryId: 136, subcategoryId: 999 })).toEqual({ level: 'expert', num: 4, priority: 1 });
+    expect(skillFor(skills, { categoryId: 136, subcategoryId: 999 })).toEqual({ level: 'expert', num: 4, priority: 1, broad: true });
+    expect(skillFor(skills, { categoryId: 136, subcategoryId: null })).toEqual({ level: 'expert', num: 4, priority: 1 });
     expect(skillFor([], { categoryId: 136 })).toBeNull();
   });
 
