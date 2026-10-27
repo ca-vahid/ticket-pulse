@@ -67,6 +67,19 @@ describe('decide', () => {
     expect(d.techId).toBe(7);
   });
 
+  test('an AI pick who meets the level only broadly is kept over a busier exact-skill person (#65257)', () => {
+    const d = decide({
+      requiredLevel: 'basic',
+      aiPickId: 4939238,
+      candidates: [
+        { ...person(4939238, 'Seifeddine', 'basic', { today: 1, open: 10, priority: 1 }), skill: { level: 'basic', num: 1, priority: 1, broad: true } },
+        person(7, 'Anton', 'expert', { rank: 2, today: 3, open: 21 }),
+      ],
+    });
+    expect(d.outcome).toBe('kept');
+    expect(d.techId).toBe(4939238);
+  });
+
   test('exact subcategory skill beats parent-category skill', () => {
     const r = decide({
       requiredLevel: 'basic',

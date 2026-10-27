@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.28-preview';
+export const APP_VERSION = '4.3.29-preview';
 
 export const changelog = [
+  {
+    version: '4.3.29-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Level match</strong> no longer moves a ticket off the AI&rsquo;s choice when that person already has the skill the request needs. It only hands the ticket to someone qualified who has had a lighter day.' },
+    ],
+  },
   {
     version: '4.3.28-preview',
     date: 'October 27, 2026',

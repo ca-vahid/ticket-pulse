@@ -172,8 +172,11 @@ export function decide({ requiredLevel, aiPickId, candidates = [], scoreMargin =
   if (!pool.length) return { ...base, outcome: OUTCOMES.NO_SKILL, sentence: null };
 
   // Exact-subcategory skill first; parent-category skill only when nobody exact qualifies.
+  // An AI pick who meets the level stays in the running whatever the tier: the
+  // rule moves a qualified pick only to someone with a lighter day (27 Oct,
+  // #65257 left Seifeddine at 1 today for Anton at 3 and came straight back).
   const bestPriority = Math.max(...pool.map((c) => c.skill.priority));
-  pool = pool.filter((c) => c.skill.priority === bestPriority);
+  pool = pool.filter((c) => c.skill.priority === bestPriority || c.techId === aiPickId);
   // Off-shift people only when nobody qualified is at work (the AI's pick may always stay).
   if (pool.some((c) => c.onShift)) pool = pool.filter((c) => c.onShift || c.techId === aiPickId);
 
