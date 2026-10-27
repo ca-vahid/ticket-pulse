@@ -276,7 +276,7 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     Icon = MessageCircleQuestion;
     const last = [...(approval.clarificationLog || [])].reverse().find((q) => q?.askedAt) || (() => { const q = [...(approval.messages || [])].reverse().find((m) => m?.kind === 'question'); return q ? { askedAt: q.createdAt } : null; })();
     title = `You asked a question${last ? ` on ${formatDayTime(last.askedAt)}` : ''} — you can still decide now`;
-    body = <p className="mt-1 text-sm opacity-80">They answer by replying to the e-mail or through their link, and the answer shows up in the conversation below.</p>;
+    body = <p className="mt-1 text-sm opacity-80">They answer by replying to the e-mail, and the answer shows up in the conversation below.</p>;
   } else {
     return null;
   }

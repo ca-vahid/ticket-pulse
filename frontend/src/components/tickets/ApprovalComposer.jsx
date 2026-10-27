@@ -492,7 +492,7 @@ export default function ApprovalComposer({
                   )}
                   <p className="mt-2 text-[11.5px] text-muted-foreground">
                     {askMode === 'requester'
-                      ? 'They answer by replying to the e-mail or through a link — no sign-in needed. The request shows “question sent” until the answer arrives.'
+                      ? 'One e-mail in the ticket’s conversation, with your signature; everyone ticked is copied and you are too. They answer with a normal reply. The request shows “question sent” until the answer arrives.'
                       : 'Internal: the requester never sees this exchange. The request stays with you; the requester sees “waiting on approver”.'}
                   </p>
                 </div>

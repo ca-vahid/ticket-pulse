@@ -73,10 +73,12 @@ describe('copyAgentsOnRequesterReply', () => {
     expect(call.subject).toBe('Re: Field Email Address/Account [#241459]');
     expect(call.ticket).toBe(ticket);
     expect(call.label).toBe('requester_reply_copy');
-    expect(call.html).toContain('Olina Meaker');
+    expect(call.html).toContain('Olina replied on #241459');
     expect(call.html).toContain('Thanks, that works.');
     expect(call.html).toContain('/tickets/44036');
-    expect(call.html).toContain('Requester replied');
+    expect(call.html).not.toContain('Requester replied');
+    expect(call.html).toContain('does not reach Olina');
+    expect(call.fromName).toBe('Olina Meaker via Ticket Pulse');
   });
 
   test('a send failure never throws', async () => {
@@ -89,12 +91,12 @@ describe('copyAgentsOnRequesterReply', () => {
 });
 
 describe('renderRequesterReplyCopyEmail', () => {
-  test('escapes user text and flags the last-replier fallback', () => {
-    const html = renderRequesterReplyCopyEmail({ workspaceName: 'IT', ticket: { subject: 'x <b>y</b>' }, ref: '#1', appUrl: 'https://app/tickets/1', fromName: 'R <script>', fromEmail: 'r@x.io', bodyText: 'a < b', primary: { why: 'last_replier' } });
-    expect(html).toContain('x &lt;b&gt;y&lt;/b&gt;');
-    expect(html).toContain('R &lt;script&gt;');
+  test('reads like the conversation: the reply, one hint line, then the history; escapes user text and flags the last-replier fallback', () => {
+    const html = renderRequesterReplyCopyEmail({ ref: '#1', appUrl: 'https://app/tickets/1', fromName: 'R<script> Smith', fromEmail: 'r@x.io', bodyText: 'a < b', primary: { why: 'last_replier' }, quoteHtml: '<div class="gmail_quote">history</div>' });
+    expect(html).toContain('R&lt;script&gt;');
     expect(html).toContain('a &lt; b');
-    expect(html).toContain('unassigned — you replied last');
+    expect(html).toContain('you get this because you replied last');
     expect(html).toContain('href="https://app/tickets/1"');
+    expect(html.indexOf('a &lt; b')).toBeLessThan(html.indexOf('history'));
   });
 });

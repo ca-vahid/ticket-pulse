@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.20-preview';
+export const APP_VERSION = '4.3.21-preview';
 
 export const changelog = [
+  {
+    version: '4.3.21-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Asking the requester reads like an e-mail</strong> &mdash; a question to the requester on an approval now goes out as one e-mail in the ticket&rsquo;s own conversation, like a reply: your words and signature, the agent and approvers on Cc (you too), and the earlier messages quoted below. It was a separate notification card for each person. They answer with a normal reply; with Reply all everyone sees it, and anyone who was left off gets the answer as the next e-mail in the conversation. The separate &ldquo;Answer on&rdquo; e-mail is gone.' },
+      { type: 'improved', html: '<strong>Requester replies reach the agent as e-mail</strong> &mdash; the copy an agent gets when a requester replies now shows the reply itself, a one-line note on where to answer, and the conversation so far with photos, instead of a &ldquo;Requester replied&rdquo; card with a button.' },
+    ],
+  },
   {
     version: '4.3.20-preview',
     date: 'October 26, 2026',
