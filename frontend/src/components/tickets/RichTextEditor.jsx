@@ -644,7 +644,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
 
   return (
     <div className={`${expanded ? 'flex flex-col flex-1 min-h-0 ' : ''}border rounded-lg transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/30 ${className}`}>
-      <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-border/60 relative" role="toolbar" aria-label="Formatting">
+      <div className="flex flex-wrap items-center gap-0.5 px-1.5 py-1 border-b border-border/60 relative" role="toolbar" aria-label="Formatting">
         {headings && (
           <>
             <button type="button" onClick={() => setBlockTag('p')} title="Normal text" aria-label="Normal text" aria-pressed={block === 'p'} className={`${toolBtn} ${block === 'p' ? blockOn : ''}`}><Pilcrow className="w-3.5 h-3.5" aria-hidden="true" /></button>
