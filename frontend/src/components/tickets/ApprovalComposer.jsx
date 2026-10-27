@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  Activity, ArrowUpRight, Check, ChevronDown, CircleAlert, Forward, Lock, Mail, MessageCircleQuestion, PenLine, ShieldAlert, Users, X,
+  Activity, ArrowUpRight, Check, ChevronDown, CircleAlert, Forward, Lock, Mail, MessageCircleQuestion, Minimize2, PenLine, ShieldAlert, Users, X,
 } from 'lucide-react';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { HandoffPanel } from './ApprovalHandoff';
@@ -262,6 +263,21 @@ export default function ApprovalComposer({
   const [conds, setConds] = useState(() => (currentConditions ? currentConditions.items.map((i) => i.text) : earlier ? [...earlier.items] : ['']));
   const condList = conds.map((c) => c.trim()).filter(Boolean);
   const editorRef = useRef(null);
+  // Full screen (27 Oct 2026, Vahid): approval notes are often a whole e-mail
+  // conversation, so the composer opens as a large dialog with the same rich
+  // editor as the ticket's reply box. The choices, recipients and buttons come
+  // with it; Esc or the toolbar button brings it back.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [expanded]);
+  const toggleExpanded = () => {
+    setExpanded((v) => !v);
+    setTimeout(() => editorRef.current?.focus?.(), 0);
+  };
   const text = note.trim();
   const hasNote = text.length > 0;
   const busy = Boolean(submitting) || disabled;
@@ -282,7 +298,7 @@ export default function ApprovalComposer({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
   }, []);
 
-  const clear = () => { setNote(''); setNoteHtml(''); };
+  const clear = () => { setNote(''); setNoteHtml(''); setExpanded(false); };
   const rich = () => (text && isRichContent(noteHtml) ? noteHtml : null);
 
   const stage = useCallback((decision) => {
@@ -402,9 +418,34 @@ export default function ApprovalComposer({
   };
   const pick = (key) => { setTab(key); setTabChosen(true); setError(null); };
 
-  return (
-    <section aria-labelledby="composer-heading" className={compact || choices ? '' : 'mt-5'} data-testid="approval-composer">
-      <div className={choices ? '' : `rounded-2xl border border-border bg-card shadow-subtle ${compact ? '' : 'min-[800px]:shadow-soft'}`}>
+  const body = (
+    <section
+      aria-labelledby="composer-heading"
+      className={expanded
+        ? 'tp-card fixed inset-0 z-50 flex flex-col overflow-y-auto settings-scrollbar p-4 shadow-soft sm:inset-4 sm:rounded-xl sm:p-5 lg:inset-x-[max(1.5rem,calc(50vw_-_40rem))]'
+        : compact || choices ? '' : 'mt-5'}
+      data-testid="approval-composer"
+      role={expanded ? 'dialog' : undefined}
+      aria-modal={expanded || undefined}
+      onKeyDown={expanded ? (e) => {
+        if (e.key === 'Escape' && !e.defaultPrevented && !pending) { e.preventDefault(); setExpanded(false); }
+      } : undefined}
+    >
+      {expanded && (
+        <div className="mb-3 flex items-start gap-3 border-b border-border/70 pb-3" data-testid="composer-fullscreen-header">
+          <div className="min-w-0 flex-1">
+            {approval?.categoryName && <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{approval.categoryName}</p>}
+            <p className="truncate text-[15px] font-semibold text-foreground">
+              {approval?.subject || approval?.categoryName || 'Approval'}
+              {approval?.ticketRef && <span className="ml-2 font-mono text-[12px] font-normal text-primary">{approval.ticketRef}</span>}
+            </p>
+          </div>
+          <button type="button" onClick={toggleExpanded} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+            <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" /> Exit full screen
+          </button>
+        </div>
+      )}
+      <div className={choices || expanded ? '' : `rounded-2xl border border-border bg-card shadow-subtle ${compact ? '' : 'min-[800px]:shadow-soft'}`}>
         {choices ? (
           <div role="tablist" aria-label="What do you want to do?" data-testid="approval-choices">
             <h3 id="composer-heading" className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Your decision</h3>
@@ -529,8 +570,10 @@ export default function ApprovalComposer({
                 onChange={({ html, text: t }) => { setNoteHtml(html); setNote(t); if (error) setError(null); }}
                 placeholder={PLACEHOLDER[tab] || PLACEHOLDER.approved}
                 ariaLabel={tab === 'question' ? 'Your question' : tab === 'condition' ? 'Note for the technician' : tab === 'rejected' ? 'Reason it is not approved' : 'Decision note'}
-                minHeight={tab === 'condition' ? 96 : compact ? Math.min(minHeight, 160) : minHeight}
-                className="border-input bg-card shadow-subtle"
+                minHeight={expanded ? 360 : tab === 'condition' ? 96 : compact ? Math.min(minHeight, 160) : minHeight}
+                className={`border-input bg-card shadow-subtle ${expanded ? 'min-h-[45vh]' : ''}`}
+                expanded={expanded}
+                onToggleExpand={toggleExpanded}
               />
 
               {isDecision && signatureHtml && (
@@ -640,5 +683,14 @@ export default function ApprovalComposer({
         <ConfirmSheet pending={pending} approval={approval} busy={Boolean(submitting)} onConfirm={confirm} onCancel={() => setPending(null)} />
       )}
     </section>
+  );
+  // Full screen moves it into a portal on <body>, so no transformed ancestor traps the fixed panel.
+  if (!expanded || typeof document === 'undefined') return body;
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40 bg-slate-950/45" aria-hidden="true" onClick={() => setExpanded(false)} />
+      {body}
+    </>,
+    document.body,
   );
 }

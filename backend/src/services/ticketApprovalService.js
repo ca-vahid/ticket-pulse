@@ -1468,7 +1468,40 @@ class TicketApprovalService {
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
       },
     });
-    return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list)).then((list) => list.map((a) => this._inboxRow(a)));
+    return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list)).then((list) => this._withLatest(list.map((a) => this._inboxRow(a))));
+  }
+
+  /**
+   * The newest conversation entry per request (27 Oct 2026) — who wrote last
+   * and when, never the text — so the Approvals list can say "Phillip
+   * answered · 7:09 AM" without opening the row. One query per list.
+   */
+  async _withLatest(items) {
+    const keyOf = (r) => r.requestGroupId || `single-${r.id}`;
+    const keys = [...new Set(items.map(keyOf))];
+    if (!keys.length) return items;
+    // A failed read leaves the list without it rather than failing the page.
+    const rows = await Promise.resolve()
+      .then(() => prisma.approvalMessage.findMany({
+        where: { requestGroupId: { in: keys }, kind: { in: ['question', 'answer', 'comment'] } },
+        orderBy: { id: 'desc' },
+        select: { requestGroupId: true, kind: true, audience: true, authorName: true, authorEmail: true, authorRole: true, createdAt: true },
+      }))
+      .catch(() => []);
+    const latest = new Map();
+    const counts = new Map();
+    for (const m of rows) {
+      counts.set(m.requestGroupId, (counts.get(m.requestGroupId) || 0) + 1);
+      if (!latest.has(m.requestGroupId)) latest.set(m.requestGroupId, m);
+    }
+    return items.map((r) => {
+      const m = latest.get(keyOf(r));
+      return {
+        ...r,
+        messageCount: counts.get(keyOf(r)) || 0,
+        latest: m ? { kind: m.kind, audience: m.audience, authorName: m.authorName || null, authorEmail: m.authorEmail || null, authorRole: m.authorRole || null, at: m.createdAt } : null,
+      };
+    });
   }
 
   /**
@@ -1488,7 +1521,7 @@ class TicketApprovalService {
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
       },
     });
-    return this._fillApproverNames(rows).then((list) => list.map((a) => ({ ...this._inboxRow(a), waitingSince: a.updatedAt || null })));
+    return this._fillApproverNames(rows).then((list) => this._withLatest(list.map((a) => ({ ...this._inboxRow(a), waitingSince: a.updatedAt || null }))));
   }
 
   /**
@@ -1630,7 +1663,7 @@ class TicketApprovalService {
     // "Snasiri" for Soheil Nasiri (Vahid, 18 Sep 2026). One lookup per distinct
     // person per call.
     await this._fillApproverNames(items);
-    return { stats, items: items.map((a) => this._inboxRow(a)) };
+    return { stats, items: await this._withLatest(items.map((a) => this._inboxRow(a))) };
   }
 
   /**

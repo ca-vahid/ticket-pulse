@@ -57,7 +57,7 @@ function publicBaseUrl() {
 }
 
 function textFromHtml(html) {
-  return String(html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')
+  return String(html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(?:p|div|li|h[1-6])>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -319,6 +319,16 @@ class ApprovalConversationService {
     }
     if (!target) throw new NotFoundError('The message you are answering no longer exists');
 
+    // One e-mail is one answer (27 Oct 2026): a later mailbox poll read the same
+    // reply again and saved it twice (approvals 161 and 176).
+    if (emailMessageId) {
+      const seen = await prisma.approvalMessage.findFirst({ where: { emailMessageId, requestGroupId: target.requestGroupId } });
+      if (seen) {
+        logger.info(`Approval answer ${seen.id} already holds ${emailMessageId} — the repeat is skipped`);
+        return { message: this._shape(seen), approvalId: seen.approvalId, requestGroupId: target.requestGroupId, duplicate: true };
+      }
+    }
+
     const approval = approvalId
       ? await prisma.ticketApproval.findFirst({ where: { id: Number(approvalId), requestGroupId: target.requestGroupId } })
       : (await prisma.ticketApproval.findFirst({ where: { requestGroupId: target.requestGroupId, status: { in: OPEN_STATUSES } }, orderBy: { id: 'desc' } }))
@@ -341,7 +351,9 @@ class ApprovalConversationService {
     const name = senderName || [parts.requester, parts.agent, ...parts.approvers].find((p) => p && p.email === email)?.name || (await resolvePersonName(email)) || email.split('@')[0];
 
     const cleanHtml = bodyHtml ? sanitizeNoteHtml(stripQuotedHtml(bodyHtml)) : null;
-    const cleanText = String(stripQuotedText(bodyText || '') || textFromHtml(cleanHtml) || '').trim();
+    // The HTML body is the whole message; a plain-text body can be Graph's
+    // 255-character preview, which cut answers off mid-word (27 Oct 2026).
+    const cleanText = String((cleanHtml && textFromHtml(cleanHtml)) || stripQuotedText(bodyText || '') || '').trim();
     if (!cleanText) throw new ValidationError('Type your answer first');
 
     // The answer inherits the question's audience; a requester's answer is

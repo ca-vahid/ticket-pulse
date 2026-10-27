@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Ban, CheckCircle2, Clock, XCircle,
-  Loader2, Check, X, MessageCircleQuestion, Inbox, RotateCcw, ClipboardList, Tags, ArrowUpRight, Forward,
-  Search, Download, UserRound, Ticket, Flag, ChevronDown, ChevronUp, Tag, ListFilter,
+  Loader2, Check, X, Inbox, RotateCcw, ClipboardList, Tags,
+  Search, Download, UserRound, Flag, ChevronDown, ListFilter,
 } from 'lucide-react';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer, { ConfirmSheet } from '../components/tickets/ApprovalComposer';
-import ApprovalTicketBrief from '../components/approvals/ApprovalTicketBrief';
-import { groupApprovals, splitImageRefs } from '../utils/approvalBrief';
+import {
+  ALL_COLS, AllRow, FOR_YOU_COLS, ForYouRow, GroupRow, RequestConversation, STATUS_LOOK, TableHead,
+} from '../components/approvals/ApprovalRows';
+import { groupApprovals } from '../utils/approvalBrief';
 import AppHeader from '../components/AppHeader';
 import PullToRefresh from '../components/common/PullToRefresh';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -18,6 +19,7 @@ import WhenFilter, { resolveWhen } from '../components/common/WhenFilter';
 import { ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
+import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
@@ -26,12 +28,14 @@ import { motionReduced } from '../utils/motionPreference';
 import { cleanNoteText } from '../utils/noteText';
 
 /**
- * Approvals (QA 09-16 #4 redesign; density pass 20 Sep 2026, "A1 + B1"): an
- * illustrated inbox that matches the rest of the app — status art per row,
- * people with photos in their own column, one Decide button (ask / escalate /
- * forward live inside it), the ticket as an icon after the title. Reviewers
- * get a real filter bar: text, a status menu (several at once), category,
- * approver, requester, one When control (presets + calendar), sort, CSV.
+ * Approvals (27 Oct 2026, Vahid picked 1B · 2A · 3B): For you is one table —
+ * to decide, waiting on an answer, and my own requests an approver asked
+ * about — each row two lines with requester, agent, what happened last and
+ * how long it has been open. Opening a row shows the whole conversation
+ * beside the decision; the decision note opens full screen for a long reply.
+ * All approvals is the same kind of table with asked / decided / took.
+ * Reviewers keep the filter bar: text, a status menu (several at once),
+ * category, approver, requester, one When control, sort, CSV.
  *
  * Every tab has its own URL (/approvals, /approvals/all, /approvals/categories)
  * and the All-approvals filters live in the query string, so F5 and shared
@@ -46,25 +50,6 @@ const STATUS_META = {
   escalated: { label: 'Escalated', art: 'approval-escalate', dot: 'bg-amber-500' },
   forwarded: { label: 'Forwarded', art: 'approval-forward', dot: 'bg-blue-500' },
 };
-// Status as a glyph and coloured words — no pills, no stamp clip-art (Vahid, 18 Sep 2026).
-const STATUS_ICON = {
-  pending: { Icon: Clock, text: 'text-amber-700 dark:text-amber-300', soft: 'bg-amber-50 dark:bg-amber-500/15' },
-  info_requested: { Icon: MessageCircleQuestion, text: 'text-violet-700 dark:text-violet-300', soft: 'bg-violet-50 dark:bg-violet-500/15' },
-  approved: { Icon: CheckCircle2, text: 'text-emerald-700 dark:text-emerald-300', soft: 'bg-emerald-50 dark:bg-emerald-500/15' },
-  rejected: { Icon: XCircle, text: 'text-red-700 dark:text-red-300', soft: 'bg-red-50 dark:bg-red-500/15' },
-  cancelled: { Icon: Ban, text: 'text-muted-foreground', soft: 'bg-muted' },
-  escalated: { Icon: ArrowUpRight, text: 'text-amber-700 dark:text-amber-300', soft: 'bg-amber-50 dark:bg-amber-500/15' },
-  forwarded: { Icon: Forward, text: 'text-blue-700 dark:text-blue-300', soft: 'bg-blue-50 dark:bg-blue-500/15' },
-};
-function StatusGlyph({ status, size = 'h-9 w-9', icon = 'h-[18px] w-[18px]' }) {
-  // The layered-glass set (Vahid's pick, 18 Sep 2026), kept small. Statuses without
-  // artwork (cancelled) fall back to a quiet glyph in a soft circle.
-  const art = STATUS_META[status]?.art;
-  if (art) return <BrandArt name={art} className={`${size} flex-shrink-0`} />;
-  const m = STATUS_ICON[status] || STATUS_ICON.cancelled;
-  return <span className={`inline-flex ${size} flex-shrink-0 items-center justify-center rounded-full ${m.soft}`} aria-hidden="true"><m.Icon className={`${icon} ${m.text}`} /></span>;
-}
-
 /** "snasiri@…" → "Snasiri" — only ever a fallback; the server fills real names. */
 const prettyName = (email) => (email ? String(email).split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
 const lower = (v) => String(v || '').trim().toLowerCase();
@@ -271,82 +256,6 @@ function csvEscape(v) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** The ticket as an icon after the title: opens /tickets/:id on its Approvals tab. */
-const TicketIcon = ({ a, state }) => (
-  <Link
-    to={`/tickets/${a.ticketId}?tab=approvals`}
-    state={state}
-    title={`Open ${a.displayRef}`}
-    aria-label={`Open ticket ${a.displayRef}`}
-    className="tp-focus-ring inline-flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25"
-  >
-    <Ticket className="h-3.5 w-3.5" aria-hidden="true" />
-  </Link>
-);
-const Dot = () => <span className="text-muted-foreground/40" aria-hidden="true">·</span>;
-
-/*
- * Option A rows (Vahid, 7 Oct 2026): the request reads at full size, the
- * people collapse into one quiet sentence, and opening a row shows the ticket
- * beside the decision — no more clicking through to the ticket for context.
- */
-
-/** The ticket number as a quiet link after the subject. */
-const TicketRef = ({ a, state }) => (
-  <Link
-    to={`/tickets/${a.ticketId}?tab=approvals`}
-    state={state}
-    title={`Open ${a.displayRef}`}
-    aria-label={`Open ticket ${a.displayRef}`}
-    className="tp-focus-ring flex-shrink-0 rounded font-mono text-[12px] text-primary hover:underline"
-  >
-    {a.displayRef}
-  </Link>
-);
-
-/** "Marcus Blackstock asks for Seifeddine Reguige · approver Vahid Haeri" */
-function PeopleLine({ a, withApprover = false, approvers = null, approverLabel = null, className = '' }) {
-  const shownApprovers = approvers || (a.approverName || a.approverEmail ? [{ name: a.approverName, email: a.approverEmail }] : []);
-  const byEmail = lower(a.requestedBy);
-  const forEmail = lower(a.requesterEmail);
-  const self = byEmail && forEmail && byEmail === forEmail;
-  return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-muted-foreground ${className}`} data-testid="approval-people">
-      <InlinePerson name={a.requestedByName} email={a.requestedBy} />
-      {self || !(a.requesterName || a.requesterEmail)
-        ? <span>asks</span>
-        : <><span>asks for</span><InlinePerson name={a.requesterName} email={a.requesterEmail} /></>}
-      {withApprover && shownApprovers.length > 0 && (
-        <>
-          <Dot />
-          <span>{approverLabel || (shownApprovers.length > 1 ? 'approvers' : 'approver')}</span>
-          {shownApprovers.map((p, i) => (
-            <span key={p.email || i} className="inline-flex items-center gap-1.5">
-              {i > 0 && <span className="text-muted-foreground/60">or</span>}
-              <InlinePerson name={p.name} email={p.email} />
-            </span>
-          ))}
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * The approval category is what the approver is deciding about (Vahid, 7 Oct
- * 2026: "one of the most important things") — its own line above the title,
- * in the accent colour, not a grey suffix.
- */
-function CategoryLine({ name, className = '' }) {
-  if (!name) return null;
-  return (
-    <div className={`mb-1 flex items-center gap-1.5 text-[13px] font-semibold text-primary ${className}`} data-testid="approval-category">
-      <Tag className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-      <span className="[overflow-wrap:anywhere]">{name}</span>
-    </div>
-  );
-}
-
 /**
  * Opening and closing a row glides (grid-rows 0fr ↔ 1fr) instead of snapping;
  * the content stays mounted until it has closed. Off under the motion setting.
@@ -374,80 +283,10 @@ function Collapse({ open, children }) {
   );
 }
 
-/** Who the people line names as approver(s) for a grouped row. */
-function groupApprovers(g) {
-  const a = g.primary;
-  if (a.status === 'approved') return { label: 'approved by', list: [{ name: a.approverName, email: a.approverEmail }] };
-  if (a.status === 'rejected') return { label: 'not approved by', list: [{ name: a.approverName, email: a.approverEmail }] };
-  const open = g.members.filter((m) => ['pending', 'info_requested'].includes(m.status));
-  const list = (open.length ? open : g.members).map((m) => ({ name: m.approverName, email: m.approverEmail }));
-  const seen = new Set();
-  return { label: null, list: list.filter((p) => { const k = lower(p.email); if (seen.has(k)) return false; seen.add(k); return true; }) };
-}
-
-/**
- * The status as its own column beside the row (Vahid, 7 Oct 2026): the plain
- * icon with the word under it, in the status colour — not squeezed into the
- * title line.
- */
-/** What a parked request is waiting on: the technician's answers to my conditions, or the answer to my question. */
-function WaitingLine({ a }) {
-  const conds = a.conditions && Array.isArray(a.conditions.items) ? a.conditions : null;
-  const who = (a.requestedByName || prettyName(a.requestedBy) || 'the technician').split(' ')[0];
-  const text = conds && !conds.submittedAt
-    ? `Waiting on ${who}’s answers to your ${conds.items.length === 1 ? 'condition' : `${conds.items.length} conditions`}`
-    : 'Your question is out; they answer by e-mail';
-  return (
-    <p className="mt-1.5 text-[12.5px] text-violet-700 dark:text-violet-300" data-testid="waiting-line">
-      {text}{a.waitingSince ? <span className="text-muted-foreground"> · since {timeAgo(a.waitingSince)}</span> : null}
-    </p>
-  );
-}
-
-function StatusBlock({ status }) {
-  const meta = STATUS_META[status] || {};
-  const ic = STATUS_ICON[status] || STATUS_ICON.cancelled;
-  return (
-    <div className="flex w-12 flex-shrink-0 flex-col items-center gap-1 pt-0.5 text-center sm:w-[4.5rem]" data-testid="approval-status">
-      <StatusGlyph status={status} size="h-7 w-7 sm:h-8 sm:w-8" />
-      <span className={`text-[10px] font-semibold leading-tight sm:text-[11.5px] ${ic.text}`}>{meta.label || status}</span>
-    </div>
-  );
-}
-
-/** Whole-card click / Enter / Space opens a row — but not from its own links and buttons. */
-const rowToggleProps = (isOpen, toggle, label) => ({
-  role: 'button',
-  tabIndex: 0,
-  'aria-expanded': isOpen,
-  'aria-label': label,
-  onClick: (e) => {
-    if (e.target.closest('a, button, input, textarea, select, [contenteditable="true"]')) return;
-    if (window.getSelection?.()?.toString()) return; // selecting text is not a click
-    toggle();
-  },
-  onKeyDown: (e) => {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-  },
-});
-
-/** The request at reading size, two lines, pictures counted rather than named. */
-function RequestLine({ note, muted = false, className = 'mt-2.5' }) {
-  const { text, names } = splitImageRefs(cleanNoteText(note || ''));
-  if (!text && !names.length) return null;
-  return (
-    <p className={`${className} line-clamp-2 text-[14px] leading-relaxed [overflow-wrap:anywhere] ${muted ? 'text-foreground/70' : 'text-foreground/90'}`} data-testid="approval-request">
-      {text && <>&ldquo;{text}&rdquo;</>}
-      {names.length > 0 && <span className="text-muted-foreground">{text ? ' · ' : ''}{names.length === 1 ? '1 picture' : `${names.length} pictures`}</span>}
-    </p>
-  );
-}
-
 /** What happened to a decided approval, for the opened All-approvals row. */
 function DecisionRecord({ a, members = null }) {
   const others = (members || []).filter((m) => m.id !== a.id);
-  const m = STATUS_ICON[a.status] || STATUS_ICON.cancelled;
+  const m = STATUS_LOOK[a.status] || STATUS_LOOK.cancelled;
   const label = STATUS_META[a.status]?.label || a.status;
   const note = cleanNoteText(a.decisionNote || '');
   const condition = cleanNoteText(a.conditionNote || '');
@@ -481,40 +320,6 @@ function DecisionRecord({ a, members = null }) {
     </div>
   );
 }
-/**
- * The note on a row: one truncated line at rest, the whole text on click
- * (Vahid, 21 Sep 2026: an approver had no way to read the full request in
- * the UI). Short notes are plain text; anything that could be cut gets the
- * More / Less control.
- */
-function RowNote({ note: rawNote, open, onToggle, muted = false }) {
-  // Stored notes could carry "&nbsp;" and friends (23 Sep 2026) — read as text.
-  const note = cleanNoteText(rawNote);
-  if (!note) return null;
-  const long = note.length > 60;
-  if (!long) return <span className={`min-w-0 truncate ${muted ? 'text-muted-foreground/60' : ''}`}>“{note}”</span>;
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={open}
-      title={open ? 'Show less' : 'Show the whole note'}
-      className={`tp-focus-ring group/note flex min-w-0 items-start gap-1 rounded text-left hover:text-foreground/85 ${open ? '' : 'items-center'}`}
-    >
-      <span className={`min-w-0 ${open ? 'whitespace-pre-line' : 'truncate'}`}>“{note}”</span>
-      <span className="inline-flex flex-shrink-0 items-center gap-0.5 text-[11px] font-medium text-blue-700 group-hover/note:underline dark:text-blue-200">
-        {open ? <>Less <ChevronUp className="h-3 w-3" aria-hidden="true" /></> : <>More <ChevronDown className="h-3 w-3" aria-hidden="true" /></>}
-      </span>
-    </button>
-  );
-}
-const When = ({ at, className = '' }) => (
-  <span className={`whitespace-nowrap text-[11px] text-muted-foreground/75 ${className}`} title={new Date(at).toLocaleString()}>
-    <span className="hidden sm:inline">{`${formatDayTime(at)} · ${timeAgo(at)}`}</span>
-    <span className="sm:hidden">{timeAgo(at)}</span>
-  </span>
-);
-
 export default function ApprovalsInbox() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -522,6 +327,8 @@ export default function ApprovalsInbox() {
   // Return address so /tickets/:id's Back control comes back to this inbox.
   const backState = { from: `${location.pathname}${location.search}` };
   const { currentWorkspace, isWorkspaceSelected } = useWorkspace();
+  const { user } = useAuth();
+  const viewerEmail = lower(user?.email);
   const { width: layoutWidth } = useLayoutWidth();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
@@ -702,41 +509,59 @@ export default function ApprovalsInbox() {
   }, [meta, overview, pending, needsInfo]);
 
   const chosenStatuses = splitStatuses(filters.status);
+  const groups = useMemo(() => groupApprovals(overview?.items || []), [overview]);
+
+  // 2A: the conversation on the left, the decision on the right — the note
+  // box is mail-sized and opens full screen for a long reply.
+  const decidePanel = (a) => (
+    <div className="grid border-t border-border/70 bg-card lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+      <div className="min-w-0 px-4 py-4 sm:px-5 lg:border-r lg:border-border/70">
+        <RequestConversation a={a} viewerEmail={viewerEmail || a.approverEmail} backState={backState} refreshKey={a.latest?.at ? String(a.latest.at) : ''} />
+      </div>
+      <div className="min-w-0 px-4 py-4 sm:px-5">
+        <ApprovalComposer
+          layout="choices"
+          showShortcuts={false}
+          minHeight={220}
+          approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
+          participants={null}
+          selfEmail={a.approverEmail}
+          forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
+          onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
+          onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
+          onHandoff={({ mode, note, toEmail }) => act(async () => {
+            if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
+            else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
+          }, a.id)}
+          disabled={busyId === a.id}
+          footer={<>You confirm before anything is sent.</>}
+        />
+      </div>
+    </div>
+  );
 
   const decideRow = (a) => {
     const isOpen = openId === a.id;
     return (
-      <li key={a.id} className="tp-card overflow-hidden rounded-xl" data-testid="inbox-row">
-        <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer flex-wrap gap-x-2.5 gap-y-2 px-3 py-3.5 hover:bg-muted/25 sm:flex-nowrap sm:gap-4 sm:px-4 sm:py-4">
-          <StatusBlock status={a.status === 'info_requested' ? 'info_requested' : 'pending'} />
-          <div className="min-w-0 flex-1">
-            <CategoryLine name={a.categoryName} />
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
-              <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
-              <TicketRef a={a} state={backState} />
-              {isOpen && <span className="text-muted-foreground">· {a.isFinal ? 'final approval' : a.tierCount > 1 ? `${a.tierName}, not the final approval` : 'not the final approval'}</span>}
-              <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
-            </div>
-            <PeopleLine a={a} className="mt-2" />
-            {a.status === 'info_requested' && <WaitingLine a={a} />}
-            {!isOpen && <RequestLine note={a.requestNote} />}
-          </div>
-          <div className="flex flex-shrink-0 gap-2 max-sm:basis-full max-sm:flex-row max-sm:items-center max-sm:justify-end max-sm:gap-3 sm:flex-col sm:items-end">
-            <When at={a.createdAt} />
-            {!isOpen && a.status !== 'info_requested' && (
-              <button
-                type="button"
-                onClick={() => setQuickId(a.id)}
-                disabled={busyId === a.id}
-                title="Approve without a note — you confirm first"
-                className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
-              >
-                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Quick approve
-              </button>
-            )}
-            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-          </div>
-        </div>
+      <ForYouRow
+        key={a.id}
+        a={a}
+        viewerEmail={viewerEmail || a.approverEmail}
+        isOpen={isOpen}
+        backState={backState}
+        onToggle={() => (isOpen ? setOpenId(null) : openComposer(a))}
+        actions={!isOpen && a.status !== 'info_requested' ? (
+          <button
+            type="button"
+            onClick={() => setQuickId(a.id)}
+            disabled={busyId === a.id}
+            title="Approve without a note — you confirm first"
+            className="tp-focus-ring inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-2 text-[12px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+          >
+            {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Quick approve
+          </button>
+        ) : null}
+      >
         {quickId === a.id && (
           <ConfirmSheet
             pending={{ decision: 'approved', note: null, conditionNote: null, amountLabel: a.amountLabel || null, notifyRequester: false }}
@@ -746,89 +571,85 @@ export default function ApprovalsInbox() {
             onCancel={() => setQuickId(null)}
           />
         )}
-        <Collapse open={isOpen}>
-          <div className="grid border-t border-border/70 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-            <div className="min-w-0 px-4 py-4 lg:border-r lg:border-border/70">
-              <ApprovalTicketBrief approval={a} backState={backState} />
-            </div>
-            <div className="min-w-0 px-4 py-4">
-              <ApprovalComposer
-                layout="choices"
-                compact
-                showShortcuts={false}
-                minHeight={110}
-                approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
-                participants={null}
-                selfEmail={a.approverEmail}
-                forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
-                onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
-                onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
-                onHandoff={({ mode, note, toEmail }) => act(async () => {
-                  if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
-                  else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
-                }, a.id)}
-                disabled={busyId === a.id}
-                footer={<>You confirm before anything is sent.</>}
-              />
-            </div>
-          </div>
-        </Collapse>
-      </li>
+        <Collapse open={isOpen}>{decidePanel(a)}</Collapse>
+      </ForYouRow>
     );
   };
+
+  // My own requests an approver asked me about: the conversation, and the way to answer.
+  const needsInfoRow = (a) => {
+    const isOpen = expanded.has(a.id);
+    const condsOut = a.conditions && !a.conditions.submittedAt;
+    return (
+      <ForYouRow
+        key={a.id}
+        a={{ ...a, status: 'info_requested' }}
+        viewerEmail={viewerEmail || a.requestedBy}
+        isOpen={isOpen}
+        backState={backState}
+        onToggle={() => toggleExpanded(a.id)}
+        actions={condsOut ? (
+          <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring inline-flex h-7 items-center whitespace-nowrap rounded-md bg-primary px-2 text-[12px] font-semibold text-primary-foreground hover:bg-blue-700">Answer the conditions</Link>
+        ) : (
+          <>
+            <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-7 items-center whitespace-nowrap rounded-md px-1.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info</Link>
+            <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md bg-primary px-2 text-[12px] font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
+              {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Resubmit
+            </button>
+          </>
+        )}
+      >
+        <Collapse open={isOpen}>
+          <div className="border-t border-border/70 bg-card px-4 py-4 sm:px-5">
+            <RequestConversation a={a} viewerEmail={viewerEmail || a.requestedBy} backState={backState} />
+          </div>
+        </Collapse>
+      </ForYouRow>
+    );
+  };
+
+  const tabList = [
+    { k: 'mine', label: 'For you', Icon: Inbox },
+    { k: 'all', label: 'All approvals', Icon: ClipboardList },
+    { k: 'categories', label: 'Categories', Icon: Tags },
+  ];
 
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
       <AppHeader activePage="approvals" />
       <PullToRefresh onRefresh={() => load({ silent: true })} />
-      <main className={applyWidth('max-w-5xl mx-auto px-4 sm:px-6 py-5 pb-24 lg:pb-6 animate-fadeIn', layoutWidth)}>
-        {/* Hero — small, one line. Phones skip it (12 Oct 2026): the tab bar below
-            already says where you are, and the band cost a fifth of the screen. */}
-        <div className="tp-card tp-ticket-header relative mb-4 hidden items-center gap-3 rounded-2xl px-4 py-3 sm:flex" data-testid="approvals-hero">
-          <span className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-blue-50 shadow-subtle ring-1 ring-blue-100 dark:bg-blue-500/15 dark:ring-blue-500/20">
-            <BrandArt name="approval-inbox" className="h-8 w-8" />
-          </span>
-          <div className="min-w-0">
-            <h1 className="text-lg font-bold leading-6 text-foreground">Approvals</h1>
-            <p className="truncate text-[13px] text-muted-foreground">Requests awaiting your decision, and your requests that need more info. A Ticket Pulse feature — not synced to FreshService.</p>
-          </div>
-          {canReview && overview?.stats && (
-            <div className="ml-auto hidden items-center gap-4 pl-4 text-xs font-semibold text-foreground/85 sm:flex">
-              {[['pending', 'waiting'], ['info_requested', 'need info']].map(([k, word]) => (
-                <span key={k} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${STATUS_META[k].dot}`} />
-                  {overview.stats[k] ?? 0} {word}
-                </span>
-              ))}
-            </div>
-          )}
+      <main className={applyWidth('max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-24 lg:pb-6 animate-fadeIn', layoutWidth)}>
+        {/* One quiet line: the page, what is waiting on you, and that it is TP-only. */}
+        <div className="mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-1" data-testid="approvals-hero">
+          <h1 className="text-xl font-bold text-foreground">Approvals</h1>
+          <p className="text-[13px] text-muted-foreground">
+            <span className="font-semibold text-foreground">{pending.length}</span> to decide
+            {' · '}<span className="font-semibold text-foreground">{waiting.length}</span> waiting on an answer
+            {needsInfo.length > 0 && <>{' · '}<span className="font-semibold text-foreground">{needsInfo.length}</span> need your info</>}
+          </p>
+          <p className="text-[12px] text-muted-foreground/75 sm:ml-auto">A Ticket Pulse feature — not synced to FreshService</p>
         </div>
 
         {/* Reviewer/admin tabs: my inbox vs. everything in the workspace vs. categories — each its own URL */}
         {canReview && (
-          <div role="tablist" className="tp-swipe-row -mx-4 mb-3 flex items-end gap-1 overflow-x-auto overflow-y-hidden border-b border-border px-4 sm:mx-0 sm:mb-4 sm:overflow-visible sm:px-0">
-            {[
-              { k: 'mine', label: 'For you', Icon: Inbox },
-              { k: 'all', label: 'All approvals', Icon: ClipboardList },
-              { k: 'categories', label: 'Categories', Icon: Tags },
-            ].map(({ k, label, Icon }) => (
+          <div role="tablist" className="tp-swipe-row -mx-4 mb-4 flex items-end gap-5 overflow-x-auto overflow-y-hidden border-b border-border px-4 sm:mx-0 sm:px-0">
+            {tabList.map(({ k, label, Icon }) => (
               <Link
                 key={k}
                 role="tab"
                 to={tabPath(k)}
                 aria-selected={view === k}
                 onClick={(e) => { e.preventDefault(); goTab(k); }}
-                className={`tp-focus-ring relative -mb-px inline-flex flex-shrink-0 snap-start items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-t-lg border px-3 py-2 text-sm font-semibold transition-colors sm:px-3.5 ${
-                  view === k ? 'border-border border-b-card bg-card text-emerald-700 dark:text-emerald-200' : 'border-transparent bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground/85'
+                className={`tp-focus-ring -mb-px inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 py-2.5 text-sm transition-colors ${
+                  view === k ? 'border-primary font-semibold text-foreground' : 'border-transparent font-medium text-muted-foreground hover:text-foreground'
                 }`}
               >
-                {/* overflow-hidden on the tab clips this bar to the rounded top corners (QA 10-09 #2: it stuck out past them). */}
-                {view === k && <span data-testid="approvals-tab-accent" className="absolute inset-x-0 top-0 h-0.5 bg-emerald-600" aria-hidden="true" />}
                 <Icon className="h-4 w-4" aria-hidden="true" /> {label}
               </Link>
             ))}
           </div>
         )}
+        {!canReview && <div className="mb-4" />}
 
         {error && (
           <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200">
@@ -844,29 +665,29 @@ export default function ApprovalsInbox() {
           <div className="flex items-center justify-center py-24 text-muted-foreground/75"><Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" /></div>
         ) : view === 'all' && canReview ? (
           <div className="space-y-3" data-testid="approvals-all">
-            {/* Status strip = counts at a glance and one-click toggles (several may be on). */}
-            <div role="group" aria-label="Approvals by status" className="tp-card tp-swipe-row flex divide-x divide-border/70 overflow-x-auto rounded-xl sm:overflow-hidden">
-              {STAT_TILES.map(({ key, label, color }) => {
+            {/* Status counts double as one-click filters (several may be on). */}
+            <div role="group" aria-label="Approvals by status" className="tp-swipe-row flex gap-x-5 gap-y-1 overflow-x-auto text-[13px] sm:flex-wrap">
+              {STAT_TILES.map(({ key, label }) => {
                 const active = chosenStatuses.includes(key);
+                const look = STATUS_LOOK[key];
                 return (
                   <button
                     key={key}
                     type="button"
                     onClick={() => toggleStatus(key)}
                     aria-pressed={active}
-                    className={`tp-focus-ring relative flex flex-shrink-0 snap-start items-center gap-2 px-3 py-2 text-left transition-colors sm:min-w-0 sm:flex-1 sm:flex-shrink ${active ? 'bg-muted/70' : 'hover:bg-muted/40'}`}
+                    className={`tp-focus-ring inline-flex flex-shrink-0 items-center gap-1.5 border-b-2 py-1 transition-colors ${active ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
                   >
-                    <StatusGlyph status={key} size="h-7 w-7" icon="h-3.5 w-3.5" />
-                    <span className={`text-lg font-bold leading-none tabular-nums ${color}`}>{overview?.stats?.[key] ?? 0}</span>
-                    <span className="whitespace-nowrap text-xs font-medium text-muted-foreground sm:truncate">{label}</span>
-                    {active && <span className={`absolute inset-x-0 bottom-0 h-0.5 ${STATUS_META[key].dot}`} aria-hidden="true" />}
+                    <look.Icon className={`h-3.5 w-3.5 ${look.text}`} aria-hidden="true" />
+                    <span className="font-bold tabular-nums text-foreground">{overview?.stats?.[key] ?? 0}</span>
+                    <span className={active ? 'font-semibold' : ''}>{label}</span>
                   </button>
                 );
               })}
             </div>
 
             {/* Filter bar — everything in one row, nothing behind "More filters" */}
-            <div className="tp-card rounded-xl p-2.5" data-testid="approvals-filters">
+            <div data-testid="approvals-filters">
               <div className="flex flex-wrap items-center gap-2">
                 <label className="relative min-w-0 flex-1 basis-40 sm:min-w-[200px]">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
@@ -920,7 +741,7 @@ export default function ApprovalsInbox() {
               </div>
               {activeFilterCount > 0 && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{groupApprovals(overview?.items || []).length} request{groupApprovals(overview?.items || []).length === 1 ? '' : 's'} match</span>
+                  <span>{groups.length} request{groups.length === 1 ? '' : 's'} match</span>
                   <button onClick={() => setFilters(EMPTY_FILTERS)} className="tp-focus-ring inline-flex items-center gap-1 rounded text-blue-700 hover:underline dark:text-blue-200">
                     <X className="h-3 w-3" aria-hidden="true" /> Clear filters
                   </button>
@@ -928,130 +749,64 @@ export default function ApprovalsInbox() {
               )}
             </div>
 
-            {/* All approvals list / history — two lines per row */}
-            {(overview?.items?.length || 0) === 0 ? (
+            {/* 3B: one table — status, request, requester, approver, asked, decided, took */}
+            {groups.length === 0 ? (
               <div className="tp-card rounded-xl p-10 text-center">
                 <BrandArt name="approval-inbox" className="mx-auto mb-3 h-12 w-12 opacity-80" />
                 <p className="text-sm font-medium text-foreground/85">No approvals{chosenStatuses.length === 1 ? ` with status “${STATUS_META[chosenStatuses[0]]?.label}”` : ''}{activeFilterCount ? ' match these filters' : ' yet'}.</p>
               </div>
             ) : (
-              <ul className="space-y-1.5">
-                {groupApprovals(overview.items).map((g) => {
-                  const a = g.primary;
-                  const who = groupApprovers(g);
-                  const isOpen = expanded.has(a.id);
-                  const decided = cleanNoteText(a.decisionNote || a.conditionNote || '');
-                  return (
-                    <li key={g.key} className="tp-card overflow-hidden rounded-xl transition-shadow hover:shadow-subtle" data-testid="approval-row">
-                      <div {...rowToggleProps(isOpen, () => toggleExpanded(a.id), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer gap-2.5 px-3 py-3.5 hover:bg-muted/25 sm:gap-4 sm:px-4 sm:py-4">
-                        <StatusBlock status={a.status} />
-                        <div className="min-w-0 flex-1">
-                          <CategoryLine name={a.categoryName} />
-                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
-                            <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
-                            <TicketRef a={a} state={backState} />
+              <div className="tp-card overflow-hidden rounded-xl" data-testid="approvals-table">
+                <TableHead cols={ALL_COLS} labels={['Status', 'Request', 'Requester', 'Approver', 'Asked', 'Decided', 'Took', '']} />
+                <ul>
+                  {groups.map((g) => {
+                    const a = g.primary;
+                    const isOpen = expanded.has(a.id);
+                    return (
+                      <AllRow key={g.key} g={g} viewerEmail={viewerEmail} isOpen={isOpen} onToggle={() => toggleExpanded(a.id)} backState={backState}>
+                        <Collapse open={isOpen}>
+                          <div className="grid gap-5 border-t border-border/70 bg-card px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                            <RequestConversation a={a} viewerEmail={viewerEmail} backState={backState} />
+                            <div className="min-w-0 lg:border-l lg:border-border/70 lg:pl-5">
+                              <DecisionRecord a={a} members={g.members} />
+                            </div>
                           </div>
-                          <PeopleLine a={a} withApprover approvers={who.list} approverLabel={who.label} className="mt-2" />
-                          {!isOpen && <RequestLine note={a.requestNote} muted={!['pending', 'info_requested'].includes(a.status)} />}
-                          {!isOpen && decided && (
-                            <p className="mt-1.5 truncate text-[12.5px] text-muted-foreground">
-                              <span className="font-medium text-foreground/75">{(a.approverName || prettyName(a.approverEmail)).split(' ')[0]}:</span> &ldquo;{decided}&rdquo;
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex flex-shrink-0 flex-col items-end gap-2">
-                          <When at={a.decidedAt || a.createdAt} />
-                          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-                        </div>
-                      </div>
-                      <Collapse open={isOpen}>
-                        <div className="grid gap-5 border-t border-border/70 px-4 py-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-                          <ApprovalTicketBrief approval={a} backState={backState} />
-                          <div className="min-w-0 lg:border-l lg:border-border/70 lg:pl-5">
-                            <DecisionRecord a={a} members={g.members} />
-                          </div>
-                        </div>
-                      </Collapse>
-                    </li>
-                  );
-                })}
-              </ul>
+                        </Collapse>
+                      </AllRow>
+                    );
+                  })}
+                </ul>
+              </div>
             )}
           </div>
         ) : (
-          <div className="space-y-5">
-            {/* Pending for me — A1: what · who · when + Decide */}
-            <section>
-              <h2 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Pending for you ({pending.length})</h2>
+          /* 1B: one table for everything that is yours — to decide, asked about, and your own requests an approver asked about */
+          <div className="tp-card overflow-hidden rounded-xl" data-testid="for-you-table">
+            <TableHead cols={FOR_YOU_COLS} labels={['', 'Request', 'Requester', 'Agent', 'Latest', 'Open for', '']} />
+            <section aria-label="To decide">
+              <GroupRow title="To decide" count={pending.length} testId="pending-section" />
               {pending.length === 0 ? (
-                <div className="tp-card rounded-xl p-8 text-center text-sm text-muted-foreground/75">
-                  <BrandArt name="approval-stamp" className="mx-auto mb-2 h-10 w-10 opacity-80" /> Nothing awaiting your decision. 🎉
-                </div>
+                <p className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground/75">
+                  <BrandArt name="approval-stamp" className="h-7 w-7 opacity-80" /> Nothing awaiting your decision.
+                </p>
               ) : (
-                <ul className="space-y-1.5">
-                  {pending.map((a) => decideRow(a))}
-                </ul>
+                <ul>{pending.map((a) => decideRow(a))}</ul>
               )}
             </section>
 
             {/* Asked about: parked until the answer arrives, still mine to decide */}
             {waiting.length > 0 && (
-              <section data-testid="waiting-section">
-                <h2 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Waiting on an answer ({waiting.length})</h2>
-                <p className="mb-2 text-xs text-muted-foreground">You asked a question or set conditions. Each moves back up to Pending when the answer arrives; you can still decide now.</p>
-                <ul className="space-y-1.5">
-                  {waiting.map((a) => decideRow(a))}
-                </ul>
+              <section aria-label="Waiting on an answer" data-testid="waiting-section">
+                <GroupRow title="Waiting on an answer" count={waiting.length} hint="each moves up when the answer arrives; you can still decide now" />
+                <ul>{waiting.map((a) => decideRow(a))}</ul>
               </section>
             )}
 
-            {/* Needs my info */}
+            {/* My requests an approver asked me about */}
             {needsInfo.length > 0 && (
-              <section>
-                <h2 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Needs your info ({needsInfo.length})</h2>
-                <ul className="space-y-1.5">
-                  {needsInfo.map((a) => (
-                    <li key={a.id} className="tp-card rounded-xl px-3.5 py-2.5">
-                      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:gap-4">
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <StatusBlock status="info_requested" />
-                          <div className="min-w-0 flex-1">
-                            <CategoryLine name={a.categoryName} />
-                            <div className="flex items-center gap-2 text-[12px]">
-                              <span className="min-w-0 truncate text-sm font-semibold text-foreground" title={a.subject || undefined}>{a.subject || '(no subject)'}</span>
-                              <TicketIcon a={a} state={backState} />
-                              {a.categoryName && <><span className="hidden lg:inline"><Dot /></span><span className="hidden truncate text-muted-foreground lg:inline">{a.categoryName}</span></>}
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300">
-                              <InlinePerson name={a.approverName} email={a.approverEmail} />
-                              {a.conditions && !a.conditions.submittedAt ? (
-                                <span className="text-amber-700 dark:text-amber-300">approved on {a.conditions.items.length === 1 ? 'a condition' : `${a.conditions.items.length} conditions`} — answer {a.conditions.items.length === 1 ? 'it' : 'each one'} on the ticket</span>
-                              ) : (
-                                <>
-                                  <span className="text-muted-foreground/75">asks</span>
-                                  {a.decisionNote && <RowNote note={a.decisionNote} open={expanded.has(a.id)} onToggle={() => toggleExpanded(a.id)} />}
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border/70 pt-2 xl:flex-col xl:items-end xl:gap-1 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
-                          <When at={a.createdAt} />
-                          <span className="flex items-center gap-1">
-                            {a.conditions && !a.conditions.submittedAt ? (
-                              <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-blue-700">Answer the conditions →</Link>
-                            ) : (<>
-                              <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring inline-flex h-8 items-center rounded-lg px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Add info →</Link>
-                              <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
-                                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Resubmit
-                              </button>
-                            </>)}
-                          </span>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+              <section aria-label="Needs your info" data-testid="needs-info-section">
+                <GroupRow title="Needs your info" count={needsInfo.length} hint="an approver asked you about your request" />
+                <ul>{needsInfo.map((a) => needsInfoRow(a))}</ul>
               </section>
             )}
           </div>
