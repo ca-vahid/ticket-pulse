@@ -196,7 +196,8 @@ function pick(obj, keys) {
 // ---------------------------------------------------------------- the shell
 //
 // emailShell (the 17 Sep 2026 pictogram shell) is kept for the urgent-response
-// notifier; the approval e-mails no longer use a shell (26 Oct 2026).
+// notifier; the approval e-mails no longer use a shell (26 Oct 2026). The
+// approver's first request uses apDocument below (27 Oct 2026).
 
 /**
  * The shell: slate ground → 640px white card with a brand band on top and a
@@ -609,9 +610,240 @@ export function renderConditionsEmail(ctx) {
   return replyDocument(body, ctx.quoteHtml);
 }
 
+// ------------------------------------------ the first request: the card
+//
+// 27 Oct 2026 (Vahid): the FIRST e-mail an approver gets is the official
+// card again (29 Sep 2026 design, mockups C1 + D3): the category as the
+// title, the people with their photos, the facts, the requester's words and
+// Approve / Not approved / Ask buttons at the end. Everything after it (the
+// answers, conditions, decisions, questions) stays in the reply format above.
+//
+// Dark mode, learned on Outlook for Android: it honours prefers-color-scheme
+// AND then lightens any dark background it finds. So surfaces are never
+// painted; dark mode only swaps text, hairlines and the tinted buttons
+// (which turn into outlines).
+
+function photoCircle(cid, name, size) {
+  // Inline attachment referenced by cid: — the picture is INSIDE the message (no remote fetch, works
+  // with images-off policies). Outlook desktop ignores border-radius; the square photo is still right.
+  return `<img src="cid:${escapeHtml(cid)}" width="${size}" height="${size}" alt="${escapeHtml(initialsOf(name))}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:0;">`;
+}
+
+const AP = {
+  ink: '#0b1324', ink2: '#1f2937', muted: '#475569', line: '#e3e8ef', link: '#1d4ed8',
+  go: '#0f7a4f', goTint: '#e8f5ee', goLine: '#bfe3cf',
+  no: '#b42318', noTint: '#fdf1f0', noLine: '#f1c4bf',
+  ask: '#1d4ed8', askTint: '#eef3fe', askLine: '#c6d5f7',
+};
+const AP_DARK = {
+  ink: '#eef2f6', ink2: '#d3dae3', muted: '#a3aebb', line: '#3a4350', link: '#9cc0ff',
+  go: '#6ee7b7', goLine: '#2f6b52', no: '#ff9b93', noLine: '#6b3632', ask: '#9cc0ff', askLine: '#34496e',
+};
+const AP_FONT = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif";
+
+function approverCss() {
+  const d = AP_DARK;
+  return `<style>
+:root{color-scheme:light dark;supported-color-schemes:light dark}
+body{margin:0;padding:0} a{text-decoration:none}
+.ap-rich > :first-child{margin-top:0!important} .ap-rich > :last-child{margin-bottom:0!important}
+@media screen and (max-width:620px){
+  .ap-wrap{padding:0!important} .ap-card{border-left:0!important;border-right:0!important;border-radius:0!important}
+  .ap-pad{padding-left:18px!important;padding-right:18px!important}
+  .ap-stack{display:block!important;width:100%!important;border-left:0!important;padding-left:0!important}
+  .ap-h1{font-size:18px!important;line-height:24px!important}
+  .ap-btn{font-size:13px!important}
+}
+@media (prefers-color-scheme:dark){
+  .ap-ink{color:${d.ink}!important} .ap-ink2{color:${d.ink2}!important} .ap-muted{color:${d.muted}!important}
+  .ap-line{border-color:${d.line}!important} .ap-link{color:${d.link}!important}
+  .ap-go{background:transparent!important;border-color:${d.goLine}!important} .ap-go a{color:${d.go}!important}
+  .ap-no{background:transparent!important;border-color:${d.noLine}!important} .ap-no a{color:${d.no}!important}
+  .ap-ask{background:transparent!important;border-color:${d.askLine}!important} .ap-ask a{color:${d.ask}!important}
+  .ap-s-go{color:#6ee7b7!important} .ap-s-no{color:#ff9b93!important} .ap-s-amber{color:#fbbf24!important} .ap-s-violet{color:#c4b5fd!important} .ap-s-blue{color:#9cc0ff!important}
+  .ap-rich,.ap-rich *{color:${d.ink2}!important;background:transparent!important;border-color:${d.line}!important}
+  .ap-rich a{color:${d.link}!important}
+}
+[data-ogsc] .ap-ink{color:${d.ink}!important} [data-ogsc] .ap-ink2{color:${d.ink2}!important} [data-ogsc] .ap-muted{color:${d.muted}!important}
+</style>`;
+}
+
+const apText = (cls, style, html) => `<div class="${cls}" style="font-family:${AP_FONT};${style}">${html}</div>`;
+const apLabel = (text) => apText('ap-muted', `font-size:12px;line-height:16px;color:${AP.muted};`, escapeHtml(text));
+
+function apAvatar(name, photoCid, tint) {
+  if (photoCid) return photoCircle(photoCid, name, 38);
+  const [bg, fg] = tint === 'amber' ? ['#fdf0d5', '#8a4b08'] : ['#e0e9ff', '#1d4ed8'];
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="38" height="38" align="center" valign="middle" bgcolor="${bg}" style="width:38px;height:38px;border-radius:19px;background:${bg};color:${fg};font-family:${AP_FONT};font-size:14px;font-weight:bold;line-height:38px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
+}
+
+function apPerson({ label, name, sub, photoCid, tint }) {
+  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
+    + `<td valign="middle" style="padding-right:10px;">${apAvatar(name, photoCid, tint)}</td>`
+    + `<td valign="middle">${apLabel(label)}${apText('ap-ink', `font-size:14.5px;line-height:20px;font-weight:bold;color:${AP.ink};`, escapeHtml(name))}${sub ? apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};`, escapeHtml(sub)) : ''}</td>`
+    + '</tr></table>';
+}
+
+/** A quiet block marked by a rule on its left — no fill, so dark mode has nothing to repaint. */
+function apRuled(labelText, bodyHtml, { rich = false } = {}) {
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
+    + `<td class="ap-line" style="border-left:3px solid ${AP.line};padding:2px 0 2px 14px;">`
+    + `${labelText ? apLabel(labelText) : ''}<div class="ap-ink${rich ? ' ap-rich' : ''}" style="font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.ink};${labelText ? 'margin-top:4px;' : ''}">${bodyHtml}</div>`
+    + '</td></tr></table>';
+}
+
+function apFact(label, valueHtml) {
+  return `<td width="50%" valign="top" style="padding:10px 8px 0 0;">${apLabel(label)}${apText('ap-ink', `font-size:14px;line-height:20px;font-weight:600;color:${AP.ink};`, valueHtml || '—')}</td>`;
+}
+
+/** Full-cell button: fills its column, ~36 px tall. Plain <a> in a filled cell — Outlook desktop gets a square button. */
+function apButton(kind, label, href) {
+  const c = { go: [AP.goTint, AP.go, AP.goLine], no: [AP.noTint, AP.no, AP.noLine], ask: [AP.askTint, AP.ask, AP.askLine] }[kind];
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td align="center" bgcolor="${c[0]}" class="ap-${kind}" style="border-radius:7px;background:${c[0]};border:1px solid ${c[2]};">`
+    + `<a href="${escapeHtml(href)}" target="_blank" class="ap-btn" style="display:block;padding:9px 6px;font-family:${AP_FONT};font-size:13.5px;line-height:18px;font-weight:bold;color:${c[1]};text-align:center;white-space:nowrap;border-radius:7px;text-decoration:none;">${escapeHtml(label)}</a>`
+    + '</td></tr></table>';
+}
+
+function apActions(buttons, helpHtml = null) {
+  const list = buttons.filter((b) => b && b.href);
+  if (!list.length && !helpHtml) return '';
+  const cells = list.map((b, i) => `<td width="${b.width || `${Math.floor(100 / list.length)}%`}" valign="top" style="padding:0 ${i === list.length - 1 ? 0 : 4}px 0 ${i === 0 ? 0 : 4}px;">${apButton(b.kind || 'ask', b.label, b.href)}</td>`).join('');
+  return `<tr><td class="ap-pad" style="padding:22px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td class="ap-line" style="border-top:1px solid ${AP.line};padding-top:18px;">`
+    + (cells ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>${cells}</tr></table>` : '')
+    + (helpHtml ? apText('ap-muted', `font-size:12px;line-height:17px;color:${AP.muted};margin-top:${cells ? 10 : 0}px;text-align:center;`, helpHtml) : '')
+    + '</td></tr></table></td></tr>';
+}
+
+function apDocument({ headerRight = 'Approval', rows, footerHtml, preheader = '' }) {
+  const head = `<tr><td class="ap-pad ap-line" style="padding:14px 28px;border-bottom:1px solid ${AP.line};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>`
+    + `<td class="ap-ink" style="font-family:${AP_FONT};font-size:13.5px;font-weight:bold;color:${AP.ink};">Ticket Pulse</td>`
+    + `<td align="right" class="ap-muted" style="font-family:${AP_FONT};font-size:12px;color:${AP.muted};">${escapeHtml(headerRight)}</td>`
+    + '</tr></table></td></tr>';
+  const foot = '<tr><td style="height:22px;line-height:22px;font-size:1px;">&nbsp;</td></tr>'
+    + `<tr><td class="ap-pad ap-muted ap-line" style="padding:16px 28px 22px;border-top:1px solid ${AP.line};font-family:${AP_FONT};font-size:12px;line-height:18px;color:${AP.muted};">${footerHtml}</td></tr>`;
+  return [
+    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting">',
+    '<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title></title>',
+    approverCss(),
+    '</head><body style="margin:0;padding:0;-webkit-text-size-adjust:100%;">',
+    preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;opacity:0;">${escapeHtml(preheader)}${'&nbsp;&zwnj;'.repeat(40)}</div>` : '',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td align="center" class="ap-wrap" style="padding:20px 12px;">',
+    '<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->',
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="ap-card ap-line" style="max-width:600px;border:1px solid ${AP.line};border-radius:12px;border-collapse:separate;">`,
+    head, rows.join(''), foot,
+    '</table>',
+    '<!--[if mso]></td></tr></table><![endif]-->',
+    '</td></tr></table></body></html>',
+  ].join('');
+}
+
+/**
+ * Approver, first request: "your decision is needed", as the card. ctx:
+ *  { workspaceName, categoryName, ticket:{ref, subject, dueBy, priorityLabel, typeLabel, categoryPath, description, appUrl},
+ *    requester:{name,title,department,location,photoCid?}, requestedByName, requestedByPhotoCid?,
+ *    noteHtml (sanitized, placeholders done), otherApprovers:[{name,status}], decisionUrl, expiresAt,
+ *    amountLabel?, tierLabel?, handoff?, laptops? }
+ */
+export function renderApproverRequestCard(ctx) {
+  const t = ctx.ticket || {};
+  const requester = ctx.requester || {};
+  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || null;
+  const rows = [];
+  const pad = (html, padding = '0 28px') => `<tr><td class="ap-pad" style="padding:${padding};">${html}</td></tr>`;
+
+  const kind = ['Approval', ctx.tierLabel].filter(Boolean).join(' · ');
+
+  // Title: the category (what is being approved); ticket number (linked) + subject underneath.
+  const ticketHref = t.appUrl || ctx.decisionUrl;
+  const refLink = t.ref ? `<a href="${escapeHtml(ticketHref)}" target="_blank" class="ap-link" style="color:${AP.link};font-weight:600;text-decoration:none;">${escapeHtml(t.ref)}&nbsp;&#8599;</a>&nbsp; ` : '';
+  const title = ctx.categoryName || t.subject || 'Approval request';
+  const sub = ctx.categoryName ? escapeHtml(t.subject || '') : '';
+  rows.push(pad(
+    apText('ap-h1 ap-ink', `font-size:19px;line-height:25px;font-weight:bold;color:${AP.ink};`, escapeHtml(title))
+    + ((refLink || sub) ? apText('ap-muted', `font-size:14px;line-height:21px;color:${AP.muted};margin-top:4px;`, `${refLink}${sub}`) : ''),
+    '22px 28px 0'));
+
+  // Hand-off (Approvals v2): why this landed with THIS approver.
+  const h = ctx.handoff;
+  if (h && h.kind) {
+    const by = escapeHtml(h.byName || 'The previous approver');
+    let lead;
+    if (h.kind === 'forwarded') lead = `<b>${by}</b> forwarded this request to you as the <b>final approver</b>.`;
+    else if (h.kind === 'auto_start') lead = `This request comes to you at <b>${escapeHtml(h.toTierName || 'this tier')}</b> directly: ${escapeHtml(h.note || `${h.byName || 'the requester'} is an approver on the earlier tier and cannot approve their own request`)}.`;
+    else if (h.kind === 'auto') lead = `<b>${by}</b> approved this at ${escapeHtml(h.fromTierName || 'the previous tier')}, but the amount is over that tier's limit${h.limitLabel ? ` (${escapeHtml(h.limitLabel)})` : ''}, so <b>your approval is needed</b> at ${escapeHtml(h.toTierName || 'this tier')}.`;
+    else lead = `<b>${by}</b> escalated this request from ${escapeHtml(h.fromTierName || 'the previous tier')} to you (${escapeHtml(h.toTierName || 'next tier')}).`;
+    const noteHtml = h.note && h.kind !== 'auto_start' ? `<div style="margin-top:6px;"><b>Their note:</b> ${escapeHtml(h.note)}</div>` : '';
+    rows.push(pad(apRuled(null, `${lead}${noteHtml}`), '20px 28px 0'));
+  }
+
+  // Why the agent is asking — their note, formatted as written.
+  if (ctx.noteHtml) rows.push(pad(apRuled(`Why ${firstName(ctx.requestedByName) || 'the agent'} is asking`, ctx.noteHtml, { rich: true }), '20px 28px 0'));
+
+  // People — side by side, stacked on a phone. A department that repeats the location is dropped.
+  const place = [requester.location && !(requester.title || '').toLowerCase().includes(String(requester.location).toLowerCase()) ? requester.location : null,
+    requester.department && requester.department !== requester.location ? requester.department : null].filter(Boolean).join(' · ');
+  const forSub = [requester.title, place].filter(Boolean).join(' · ');
+  rows.push(pad('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
+    + `<td class="ap-stack" width="55%" valign="top" style="padding:0 12px 12px 0;">${apPerson({ label: 'Requested for', name: requester.name || 'Unknown requester', sub: forSub, photoCid: requester.photoCid || null, tint: 'amber' })}</td>`
+    + `<td class="ap-stack" width="45%" valign="top" style="padding:0 0 12px 0;">${apPerson({ label: 'Asked by', name: ctx.requestedByName || 'Agent', sub: 'Service desk agent', photoCid: ctx.requestedByPhotoCid || null, tint: 'blue' })}</td>`
+    + '</tr></table>', '20px 28px 0'));
+
+  // Facts: amount first when there is one, then the ticket's own.
+  const facts = [];
+  if (ctx.amountLabel) facts.push(['Amount', escapeHtml(ctx.amountLabel)]);
+  // Assetron devices held by this request (up to 5 since 29 Sep 2026).
+  const held = (Array.isArray(ctx.laptops) ? ctx.laptops : (ctx.laptop ? [ctx.laptop] : [])).filter((h) => h && h.asset);
+  held.forEach((h, i) => {
+    const a = h.asset;
+    const id = a.assetTag || (a.serialNumber ? `S/N ${a.serialNumber}` : '');
+    const spec = [a.cpu, a.ram, a.storage, a.screenSize].filter(Boolean).join(' · ');
+    const label = held.length > 1 ? `Device ${i + 1} (held in Assetron)` : 'Device (held in Assetron)';
+    facts.push([label, `${escapeHtml([a.make, a.model].filter(Boolean).join(' ') || 'Device')}${id ? ` <span class="ap-muted" style="font-weight:normal;color:${AP.muted};">· ${escapeHtml(id)}</span>` : ''}${spec ? `<div class="ap-muted" style="font-size:12.5px;line-height:18px;font-weight:normal;color:${AP.muted};">${escapeHtml(spec)}</div>` : ''}`]);
+    facts.push(['Assigned to on approval', escapeHtml(h.recipient?.name || h.recipient?.email || '—')]);
+  });
+  facts.push(['Priority', escapeHtml(t.priorityLabel || '—')]);
+  facts.push(['Due', escapeHtml(t.dueBy ? fmtDay(t.dueBy) : '—')]);
+  facts.push(['Type', escapeHtml(t.typeLabel || '—')]);
+  facts.push(['Category', escapeHtml(t.categoryPath || '—')]);
+  let factRows = '';
+  for (let i = 0; i < facts.length; i += 2) factRows += `<tr>${apFact(...facts[i])}${facts[i + 1] ? apFact(...facts[i + 1]) : '<td width="50%"></td>'}</tr>`;
+  rows.push(pad(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td colspan="2" class="ap-line" style="border-top:1px solid ${AP.line};font-size:0;line-height:0;">&nbsp;</td></tr>${factRows}</table>`, '0 28px'));
+
+  // What the requester wrote — formatted like the ticket; long ones point at the page.
+  const desc = descriptionHtmlForEmail(t.description);
+  const tail = [];
+  if (desc.html) {
+    tail.push(apLabel(`What ${firstName(requester.name) || 'the requester'} wrote`));
+    tail.push(`<div class="ap-ink2 ap-rich" style="font-family:${AP_FONT};font-size:14px;line-height:21px;color:${AP.ink2};margin-top:4px;">${desc.html}</div>`);
+    if (desc.truncated) tail.push(apText('ap-muted', `font-size:12px;line-height:18px;color:${AP.muted};margin-top:6px;`, '… the full description is on the approval page.'));
+  }
+  const others = (ctx.otherApprovers || []).filter((a) => a && a.name);
+  if (others.length > 0) {
+    const list = others.map((a) => `${escapeHtml(a.name)}${a.status && a.status !== 'pending' ? ` (${escapeHtml(a.status)})` : ''}`).join(', ');
+    tail.push(apText('ap-muted', `font-size:12.5px;line-height:18px;color:${AP.muted};margin-top:${desc.html ? 12 : 0}px;`, `Also asked to approve: ${list}. The first decision closes the request for everyone.`));
+  }
+  if (tail.length) rows.push(pad(tail.join(''), '16px 28px 0'));
+
+  // The decision — at the end, filling the row: Approve half, Decline and Ask a quarter each.
+  rows.push(apActions([
+    { kind: 'go', label: 'Approve', href: decisionIntentUrl(ctx.decisionUrl, 'approve'), width: '50%' },
+    { kind: 'no', label: 'Not approved', href: decisionIntentUrl(ctx.decisionUrl, 'reject'), width: '25%' },
+    { kind: 'ask', label: 'Ask', href: decisionIntentUrl(ctx.decisionUrl, 'ask'), width: '25%' },
+  ], 'Each button opens the approval page with that choice picked. Add a note if you like, then confirm.'));
+
+  const expires = fmtDayLong(ctx.expiresAt);
+  return apDocument({
+    headerRight: kind,
+    rows,
+    footerHtml: `This link is personal to you. Please don't forward it.${expires ? ` It expires on ${escapeHtml(expires)}.` : ''}<br>`
+      + `Sent by Ticket Pulse on behalf of ${escapeHtml(ctx.requestedByName || 'the service desk')}${ctx.workspaceName ? ` · ${escapeHtml(ctx.workspaceName)} workspace` : ''}.`,
+    preheader: `${ctx.requestedByName || 'An agent'} needs your approval${requester.name ? ` for ${requester.name}` : ''}: ${ctx.categoryName || t.subject || ''}`,
+  });
+}
+
 export default {
   renderConditionsEmail,
-  renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail,
+  renderApproverRequestEmail, renderApproverRequestCard, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail,
   renderApprovalMessageEmail, renderDecisionThreadEmail, descriptionHtmlForEmail,
   normalizeNoteHtmlForEmail, dropEmptyTableColumns, textExcerpt, escapeHtml, initialsOf, emailShell,
   replyPara, replyHint, replyLink, decisionIntentUrl,

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.31-preview';
+export const APP_VERSION = '4.3.32-preview';
 
 export const changelog = [
+  {
+    version: '4.3.32-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The first approval e-mail is the card again</strong> &mdash; an approver&rsquo;s first e-mail for a request is the formal card once more: the category as the title, who it is for and who asks with their photos, priority, due date, type and category, what the requester wrote, and Approve, Not approved and Ask buttons. It comes from Ticket Pulse Approval. Everything after it (answers to the approver&rsquo;s questions, answers to conditions, decisions) still reads like e-mail in the conversation.' },
+    ],
+  },
   {
     version: '4.3.31-preview',
     date: 'October 27, 2026',

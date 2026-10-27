@@ -6,7 +6,7 @@ import { ValidationError, NotFoundError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { decodeBasicEntities } from '../utils/htmlContent.js';
-import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
+import { renderApproverRequestEmail, renderApproverRequestCard, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
 import { categoryTiers } from '../utils/approvalTiers.js';
 import {
   readConditions, conditionItems, sameConditions, splitConditionText, earlierConditionsFor, mergeAnswers, isAnswered, waitingOn, agreedSummary, conditionsText, countCantMeet,
@@ -14,6 +14,7 @@ import {
 import {
   approvalHistory, requestNoteEntry, savedSignatureHtml, plainTextOf, viaTicketPulse,
 } from './approvalReplyMail.js';
+import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -2187,9 +2188,21 @@ class TicketApprovalService {
       }
     }
 
-    // 26 Oct 2026: the request is the agent's own message — no people row, so
-    // no photos up top; the history below carries each person's photo.
-    const attachments = [];
+    // 27 Oct 2026 (Vahid): the FIRST e-mail an approver gets is the official
+    // card (people with photos, facts, Approve / Not approved / Ask); a
+    // re-request with an answer or the answers to conditions is a follow-up
+    // and stays the agent's own message in the reply format (26 Oct 2026).
+    const firstRequest = !clarification?.answer && !conditions;
+
+    // Card photos travel INSIDE the message as inline (cid:) attachments — never a URL the
+    // client has to fetch (blocked by default in Outlook, and a public link would leak).
+    const [requesterPhoto, requestedByPhoto] = firstRequest
+      ? await Promise.all([
+        inlinePhotoAttachment(requester.email, 'requester-photo').catch(() => null),
+        inlinePhotoAttachment(approval.requestedBy, 'requested-by-photo').catch(() => null),
+      ])
+      : [null, null];
+    const attachments = [requesterPhoto, requestedByPhoto].filter(Boolean);
 
     // 19 Oct 2026: pictures pasted into the note travel inline too, in place of "[Image: name]".
     const noteImages = await findNoteImages(approval);
@@ -2218,42 +2231,15 @@ class TicketApprovalService {
       ? noteImages.map((img) => ({ name: img.fileName, url: noteImagePath(decisionToken, img.id, { absolute: true }) })).filter((x) => x.url)
       : [];
 
-    // The agent's message to the approver (26 Oct 2026): their note, the facts,
-    // their signature, ONE decide link, then the conversation so far —
-    // approvers are insiders, so the request's internal messages come too.
-    const [signatureHtml, history] = await Promise.all([
-      savedSignatureHtml(ticket.workspaceId, approval.requestedBy),
-      approvalHistory({
-        ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
-        reply: { text: approval.requestNote || null, authorName: requestedByName, authorEmail: approval.requestedBy },
-      }),
-    ]);
-    const body = renderApproverRequestEmail({
-      categoryName,
-      ticket: this._emailTicketFacts(ticket),
-      // Approvals v2: amount + tier context + the hand-off block.
-      amountLabel: formatAmount(amountNumber(approval.amount), approval.amountCurrency || 'CAD'),
-      tierLabel: approval.tier && approval.tier > 1 ? `Tier ${approval.tier}` : null,
-      handoff,
-      requester: {
-        name: requester.name || null,
-        title: requester.jobTitle || requester.entraJobTitle || null,
-        department: requester.department || requester.entraDepartment || null,
-        location: requester.entraOfficeLocation || requester.entraCity || null,
-      },
-      requestedByName,
-      approverName: approval.approverName || (await this._resolvePersonName(approval.approverEmail).catch(() => null)) || null,
-      noteHtml,
-      clarification: clarification?.answer ? clarification : null,
-      conditions: conditions || null,
-      otherApprovers,
-      decisionUrl,
-      expiresAt: approval.expiresAt || null,
-      laptops: approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [],
-      signatureHtml,
-    });
-    const html = `${body}${history.html}`;
-    attachments.push(...history.attachments);
+    const requesterFacts = {
+      name: requester.name || null,
+      title: requester.jobTitle || requester.entraJobTitle || null,
+      department: requester.department || requester.entraDepartment || null,
+      location: requester.entraOfficeLocation || requester.entraCity || null,
+    };
+    const amountLabel = formatAmount(amountNumber(approval.amount), approval.amountCurrency || 'CAD');
+    const tierLabel = approval.tier && approval.tier > 1 ? `Tier ${approval.tier}` : null;
+    const laptops = approval.requestGroupId ? await assetronReservationService.forGroup(approval.requestGroupId).catch(() => []) : [];
 
     // Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): the same request as a card the approver can decide from.
     import('./teamsNotificationService.js')
@@ -2265,6 +2251,60 @@ class TicketApprovalService {
       .catch(() => {});
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+
+    if (firstRequest) {
+      const html = renderApproverRequestCard({
+        workspaceName: await this._workspaceName(ticket).catch(() => null),
+        categoryName,
+        ticket: this._emailTicketFacts(ticket),
+        amountLabel,
+        tierLabel,
+        handoff,
+        requester: { ...requesterFacts, photoCid: requesterPhoto?.contentId || null },
+        requestedByName,
+        requestedByPhotoCid: requestedByPhoto?.contentId || null,
+        noteHtml,
+        otherApprovers,
+        decisionUrl,
+        expiresAt: approval.expiresAt || null,
+        laptops,
+      });
+      // Sender stays "Ticket Pulse Approval" (the label's system name) on the card.
+      return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, attachments, label: 'approval', ticket });
+    }
+
+    // A follow-up is the agent's message to the approver (26 Oct 2026): their
+    // note, the facts, their signature, ONE decide link, then the conversation
+    // so far — approvers are insiders, so the request's internal messages come too.
+    const [signatureHtml, history] = await Promise.all([
+      savedSignatureHtml(ticket.workspaceId, approval.requestedBy),
+      approvalHistory({
+        ticketId: ticket.id, requestGroupId: approval.requestGroupId || `single-${approval.id}`, audience: 'internal',
+        reply: { text: approval.requestNote || null, authorName: requestedByName, authorEmail: approval.requestedBy },
+      }),
+    ]);
+    const body = renderApproverRequestEmail({
+      categoryName,
+      ticket: this._emailTicketFacts(ticket),
+      // Approvals v2: amount + tier context + the hand-off block.
+      amountLabel,
+      tierLabel,
+      handoff,
+      requester: requesterFacts,
+      requestedByName,
+      approverName: approval.approverName || (await this._resolvePersonName(approval.approverEmail).catch(() => null)) || null,
+      noteHtml,
+      clarification: clarification?.answer ? clarification : null,
+      conditions: conditions || null,
+      otherApprovers,
+      decisionUrl,
+      expiresAt: approval.expiresAt || null,
+      laptops,
+      signatureHtml,
+    });
+    const html = `${body}${history.html}`;
+    attachments.push(...history.attachments);
+
     // `ticket` → Reply-To +tp/+fs and threading headers, so an approver's
     // reply threads onto the ticket instead of dying on a bare mailbox (23 Sep 2026).
     return sendTransactionalEmail({
