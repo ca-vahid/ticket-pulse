@@ -5,7 +5,9 @@ import {
   AlertCircle, ArrowRight, CheckCircle, Inbox, Info, Link2, Loader2, MailQuestion, Paperclip, Plus, Search, Trash2, X,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
-import { HOLD_REASON_META, ReasonChip, TicketPicker } from './HeldRepliesPanel';
+import { HOLD_REASON_META, ReasonChip, loadHeldQueue } from './HeldRepliesPanel';
+import { TicketPicker } from './HeldTicketPicker';
+import HeldDeviceGroup from './HeldDeviceGroup';
 
 /**
  * Unmatched replies, as a popup (Vahid, 17 Oct 2026). The pill used to unfold
@@ -90,20 +92,40 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
   const [choosing, setChoosing] = useState(false);
   const [chosen, setChosen] = useState('');
   const dialogRef = useRef(null);
+  // Alert bursts grouped by device (QA 10-26 #3): listed first, one entry per device.
+  const [groups, setGroups] = useState([]);
+  const [groupKey, setGroupKey] = useState(null);
+  const [mode, setMode] = useState(null);
+  const [total, setTotal] = useState(0);
+  const selRef = useRef({ id: null, group: null });
+  selRef.current = { id: selectedId, group: groupKey };
 
-  const load = useCallback(async (preferId = null) => {
+  // prefer.row / prefer.group: what to open after a decision (undefined = keep the current one).
+  const load = useCallback(async (prefer = {}) => {
     try {
-      const res = await ticketsAPI.listHeldMessages('held');
-      const list = res.data || [];
+      const queue = await loadHeldQueue();
+      const list = queue.singles;
       setRows(list);
-      onCountChange?.(res.meta?.heldCount ?? list.length);
-      setSelectedId((cur) => {
-        const keep = preferId ?? cur;
-        return list.some((r) => r.id === keep) ? keep : (list[0]?.id ?? null);
-      });
+      setGroups(queue.groups);
+      setMode(queue.mode);
+      setTotal(queue.total);
+      onCountChange?.(queue.total);
+      const cur = selRef.current;
+      const keepGroup = prefer.group !== undefined ? prefer.group : cur.group;
+      const keepRow = prefer.row !== undefined ? prefer.row : cur.id;
+      if (keepGroup && queue.groups.some((g) => g.sender === keepGroup)) {
+        setGroupKey(keepGroup); setSelectedId(null);
+      } else if (keepRow != null && list.some((r) => r.id === keepRow)) {
+        setGroupKey(null); setSelectedId(keepRow);
+      } else if (queue.groups.length) {
+        setGroupKey(queue.groups[0].sender); setSelectedId(null);
+      } else {
+        setGroupKey(null); setSelectedId(list[0]?.id ?? null);
+      }
     } catch (err) {
       setError(err.response?.data?.message || err.message);
       setRows([]);
+      setGroups([]);
     }
   }, [onCountChange]);
 
@@ -159,7 +181,7 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
       setNotice(typeof text === 'function' ? text(res) : text);
       // Open the email that took this one's place in the list.
       const next = (rows || []).filter((r) => r.id !== row.id)[Math.max(0, index)] || null;
-      await load(next?.id ?? null);
+      await load({ row: next?.id ?? null, group: null });
     } catch (err) {
       setError(err.response?.data?.message || err.message);
     } finally {
@@ -173,7 +195,26 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
   );
   const discard = () => run(() => ticketsAPI.discardHeldMessage(row.id), 'Discarded.');
 
-  const count = rows?.length ?? 0;
+  const group = groupKey ? groups.find((g) => g.sender === groupKey) || null : null;
+  const bulk = async (g, ids, action, ticket) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await ticketsAPI.bulkHeldMessages(ids, action, ticket?.id || null);
+      const n = res?.data?.count ?? ids.length;
+      setNotice(action === 'discard'
+        ? `Discarded ${n} ${n === 1 ? 'email' : 'emails'} from ${g.device}.`
+        : `Added ${n} ${n === 1 ? 'email' : 'emails'} from ${g.device} to ${ticket?.displayRef || 'the ticket'}.`);
+      await load({ group: g.sender, row: null });
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const count = rows ? total : 0;
   const btn = 'tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold disabled:opacity-50';
 
   return createPortal(
@@ -213,13 +254,37 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
           {/* Left: the waiting emails */}
           <ul className="w-72 flex-shrink-0 overflow-y-auto settings-scrollbar border-r border-border bg-muted/30" aria-label="Waiting emails" data-testid="held-dialog-list">
             {rows === null && <li className="p-6 text-center text-muted-foreground"><Loader2 className="mx-auto h-5 w-5 animate-spin" aria-hidden="true" /></li>}
+            {groups.map((g) => {
+              const on = g.sender === groupKey;
+              return (
+                <li key={`g:${g.sender}`}>
+                  <button
+                    type="button"
+                    onClick={() => { setGroupKey(g.sender); setSelectedId(null); }}
+                    aria-current={on ? 'true' : undefined}
+                    className={`tp-focus-ring block w-full border-l-2 px-4 py-3 text-left ${on ? 'border-l-primary bg-card' : 'border-l-transparent hover:bg-card/70'}`}
+                    data-testid="held-dialog-group"
+                  >
+                    <span className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span className="font-semibold text-amber-700 dark:text-amber-300">Alert burst · {g.count}</span>
+                      <span className="whitespace-nowrap">{relative(g.lastAt)}</span>
+                    </span>
+                    <span className="mt-1 block truncate text-sm font-semibold text-foreground">{g.device}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {g.kinds?.length || 0} {g.kinds?.length === 1 ? 'kind' : 'kinds'}{g.newKinds ? ` · ${g.newKinds} without a ticket` : ''}
+                    </span>
+                    {g.attention && <span className="mt-0.5 block text-xs font-semibold text-red-700 dark:text-red-300">Reads like a failure</span>}
+                  </button>
+                </li>
+              );
+            })}
             {(rows || []).map((r) => {
               const on = r.id === selectedId;
               return (
                 <li key={r.id}>
                   <button
                     type="button"
-                    onClick={() => setSelectedId(r.id)}
+                    onClick={() => { setSelectedId(r.id); setGroupKey(null); }}
                     aria-current={on ? 'true' : undefined}
                     className={`tp-focus-ring block w-full border-l-2 px-4 py-3 text-left ${on ? 'border-l-primary bg-card' : 'border-l-transparent hover:bg-card/70'}`}
                   >
@@ -237,7 +302,11 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
 
           {/* Right: the selected email */}
           <div className="min-w-0 flex-1 overflow-y-auto settings-scrollbar">
-            {rows && rows.length === 0 ? (
+            {group ? (
+              <div className="p-5" data-testid="held-dialog-group-detail">
+                <HeldDeviceGroup group={group} mode={mode || 'shadow'} busy={busy} onBulk={(ids, action, ticket) => bulk(group, ids, action, ticket)} />
+              </div>
+            ) : rows && rows.length === 0 && groups.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center" data-testid="held-dialog-empty">
                 <Inbox className="h-8 w-8 text-emerald-500" aria-hidden="true" />
                 <p className="text-sm font-semibold text-foreground">Nothing is waiting</p>

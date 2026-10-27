@@ -44,7 +44,7 @@ jest.unstable_mockModule('../src/services/statusService.js', () => ({
   },
 }));
 
-const { default: parks, validatePark, parkActor } = await import('../src/services/ticketParkService.js');
+const { default: parks, validatePark, parkActor, resolveWakeZone, wakeInstant } = await import('../src/services/ticketParkService.js');
 
 const inDays = (d) => new Date(Date.now() + d * 86400e3);
 const TP_TICKET = {
@@ -82,6 +82,30 @@ describe('validatePark', () => {
   test('a bare date wakes at 08:00 Pacific', () => {
     expect(validatePark({ kind: 'until_date', until: '2099-10-05', reason: 'x' }, { now: new Date('2099-09-30T00:00:00Z') }).until.toISOString()).toBe('2099-10-05T15:00:00.000Z');
   });
+
+  // QA 10-26 #2: 08:00 on the clock of the zone it wakes in (IANA, not offsets).
+  test('a bare date wakes at 08:00 in the given zone', () => {
+    const now = new Date('2026-10-26T00:00:00Z');
+    expect(validatePark({ kind: 'until_date', until: '2026-11-16', reason: 'x' }, { now, timeZone: 'America/Toronto' }).until.toISOString()).toBe('2026-11-16T13:00:00.000Z');
+    expect(validatePark({ kind: 'until_date', until: '2026-10-28', reason: 'x' }, { now, timeZone: 'America/Halifax' }).until.toISOString()).toBe('2026-10-28T11:00:00.000Z');
+    // A full timestamp is kept as given, whatever the zone.
+    expect(validatePark({ kind: 'until_date', until: '2026-11-16T17:30:00.000Z', reason: 'x' }, { now, timeZone: 'America/Toronto' }).until.toISOString()).toBe('2026-11-16T17:30:00.000Z');
+    // An unknown zone falls back to Vancouver instead of failing.
+    expect(wakeInstant('2026-10-28', 'Not/AZone').toISOString()).toBe('2026-10-28T15:00:00.000Z');
+  });
+});
+
+describe('resolveWakeZone', () => {
+  test('assignee first, then the requester, then the workspace, then Vancouver', () => {
+    expect(resolveWakeZone({ assignedTech: { name: 'Otto Ottawa', timezone: 'America/Toronto' } }, { requesterTimeZone: 'America/Edmonton' }))
+      .toEqual({ timeZone: 'America/Toronto', label: 'Toronto time', source: 'assignee', who: 'Otto Ottawa' });
+    expect(resolveWakeZone({ assignedTech: null }, { requesterTimeZone: 'America/Edmonton', workspaceTimeZone: 'America/Vancouver' }))
+      .toMatchObject({ timeZone: 'America/Edmonton', source: 'requester' });
+    expect(resolveWakeZone({ assignedTech: null }, { workspaceTimeZone: 'America/Halifax' })).toMatchObject({ timeZone: 'America/Halifax', source: 'workspace' });
+    expect(resolveWakeZone({}, {})).toMatchObject({ timeZone: 'America/Vancouver', label: 'Vancouver time', source: 'workspace' });
+    // A bad stored zone is skipped, not trusted.
+    expect(resolveWakeZone({ assignedTech: { timezone: 'Eastern Time (US & Canada)' } }, {})).toMatchObject({ source: 'workspace' });
+  });
 });
 
 describe('park / unpark', () => {
@@ -92,6 +116,24 @@ describe('park / unpark', () => {
     expect(tx.ticket.update).toHaveBeenCalledWith({ where: { id: 45000 }, data: expect.objectContaining({ parkKind: 'until_date' }) });
     expect(out.extended).toBe(false);
     expect(activityCreate).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'ticket_parked' }));
+  });
+
+  test('a day park wakes at 08:00 on the assignee\'s clock and says which zone', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, assignedTech: { id: 12, name: 'Otto Ottawa', email: 'otto@x.io', timezone: 'America/Toronto' } });
+    const day = inDays(12).toISOString().slice(0, 10);
+    const out = await parks.park(45000, 1, { kind: 'until_date', until: day, reason: 'Back from leave' }, { name: 'Otto' });
+    const until = tx.ticketPark.create.mock.calls[0][0].data.until;
+    const torontoClock = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit' }).format(until);
+    expect(torontoClock).toBe(`${day}, 08:00`);
+    expect(out.wakeZone).toMatchObject({ timeZone: 'America/Toronto', source: 'assignee' });
+  });
+
+  test('no assignee and no requester location: the workspace zone', async () => {
+    prismaMock.workspace.findUnique = jest.fn().mockResolvedValue({ defaultTimezone: 'America/Edmonton' });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, assignedTechId: null, assignedTech: null });
+    const out = await parks.park(45000, 1, { kind: 'until_date', until: inDays(5).toISOString().slice(0, 10), reason: 'x' }, { name: 'Otto' });
+    expect(out.wakeZone).toMatchObject({ timeZone: 'America/Edmonton', source: 'workspace' });
+    delete prismaMock.workspace.findUnique;
   });
 
   test('FreshService tickets are parked through the FS write-back (Pending = 3 there)', async () => {

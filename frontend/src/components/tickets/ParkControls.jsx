@@ -22,29 +22,72 @@ export const PARK_KINDS = [
 const KIND_LABEL = { ...Object.fromEntries(PARK_KINDS.map((k) => [k.value, k.label])), eta: 'In progress, with an ETA', waiting_on: 'Waiting on someone' };
 const MAX_DAYS = 184;
 
-function isoDay(d) {
+function isoDay(d, timeZone = undefined) {
   const x = new Date(d);
+  if (timeZone) {
+    try {
+      // en-CA formats as YYYY-MM-DD.
+      return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(x);
+    } catch { /* the viewer's calendar */ }
+  }
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+/** "Mon, Nov 16" for a YYYY-MM-DD day (no time zone shift: it is a calendar day). */
+function dayLabel(day) {
+  const [y, m, d] = String(day).split('-').map(Number);
+  if (!y || !m || !d) return day;
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d; }
 function nextMonday() { const d = new Date(); const add = ((8 - d.getDay()) % 7) || 7; d.setDate(d.getDate() + add); return d; }
 
-export function formatParkDate(value) {
+function safeZone(tz) {
+  if (!tz) return undefined;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return undefined; }
+}
+
+export function formatParkDate(value, timeZone = undefined) {
   if (!value) return '';
   const d = new Date(value);
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }), timeZone: safeZone(timeZone) });
 }
 
+/** "8:00 AM" — the wake time on the zone's own clock. */
+export function formatWakeTime(value, timeZone = undefined) {
+  if (!value) return '';
+  return new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: safeZone(timeZone) });
+}
+
+// QA 10-26 #2: why this zone (the server picks: assignee, else requester,
+// else workspace — ticketParkService.resolveWakeZone).
+const ZONE_WHY = {
+  assignee: 'the assignee’s time zone',
+  requester: 'the requester’s time zone (no assignee)',
+  workspace: 'the workspace time zone (no assignee)',
+};
+
 /** Quiet line under the ticket subject: when it wakes, why, who. No pill. */
-export function ParkLine({ park, parkedUntil, onExtend, onUnpark, busy = false, canEdit = true }) {
+export function ParkLine({ park, parkedUntil, wakeZone = null, onExtend, onUnpark, busy = false, canEdit = true }) {
   const until = park?.until || parkedUntil;
   if (!until) return null;
   const who = (park?.waitingOn || []).map((p) => p.name || p.email).filter(Boolean).join(', ');
+  const tz = wakeZone?.timeZone;
+  const localTime = formatWakeTime(until);
+  const zoneTime = tz ? formatWakeTime(until, tz) : null;
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground" data-testid="park-line">
       <PauseCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-      <span className="font-semibold text-foreground/85">Parked until {formatParkDate(until)}</span>
+      <span className="font-semibold text-foreground/85">Parked until {formatParkDate(until, tz)}</span>
+      {tz && (
+        <span
+          data-testid="park-wake-zone"
+          title={`Wakes at ${zoneTime} ${wakeZone.label} (${ZONE_WHY[wakeZone.source] || 'time zone'})${zoneTime !== localTime ? ` — ${localTime} your time` : ''}`}
+        >
+          · wakes {zoneTime} {wakeZone.label}
+        </span>
+      )}
       {park?.kind && park.kind !== 'until_date' && <span>· {KIND_LABEL[park.kind]}{who ? ` — ${who}` : ''}</span>}
       {park?.reason && <span className="min-w-0 truncate">· {park.reason}</span>}
       {park?.parkedBy && <span className="text-muted-foreground/75">· by {park.parkedBy}</span>}
@@ -92,9 +135,10 @@ export function ParkedMark({ until, kind }) {
  * 'until_date', except when an older waiting-on park gets a new date.
  */
 export default function ParkDialog({
-  ticketRef, initial = null, busy = false, error = null, onSubmit, onClose, onUsePendingResponse, bulkCount = null,
+  ticketRef, initial = null, busy = false, error = null, onSubmit, onClose, onUsePendingResponse, bulkCount = null, wakeZone = null,
 }) {
-  const [until, setUntil] = useState(initial?.until ? isoDay(initial.until) : '');
+  // An existing park's day on the wake zone's calendar (not the viewer's).
+  const [until, setUntil] = useState(initial?.until ? isoDay(initial.until, wakeZone?.timeZone) : '');
   const [reason, setReason] = useState(initial?.reason || '');
   const firstRef = useRef(null);
   useEffect(() => { firstRef.current?.focus(); }, []);
@@ -160,6 +204,14 @@ export default function ParkDialog({
               </button>
             ))}
           </div>
+          {/* QA 10-26 #2: say where 8:00 AM is — it wakes on its person's clock. */}
+          <p className="mt-1.5 text-xs text-muted-foreground" data-testid="park-wake-hint">
+            {bulkCount
+              ? 'Each ticket wakes at 8:00 AM in its assignee’s time zone (no assignee: the requester’s, else the workspace’s).'
+              : wakeZone?.timeZone
+                ? <>Wakes {until ? <strong className="font-semibold text-foreground/85">{dayLabel(until)}, 8:00 AM {wakeZone.label}</strong> : <>at 8:00 AM {wakeZone.label}</>} — {ZONE_WHY[wakeZone.source] || 'its time zone'}.</>
+                : 'Wakes at 8:00 AM in the assignee’s time zone.'}
+          </p>
         </div>
 
         <div className="mt-3">

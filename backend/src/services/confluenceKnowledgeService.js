@@ -1,7 +1,7 @@
 /**
  * Confluence -> Knowledge (QA 10-23 #4; plans/CONFLUENCE_KNOWLEDGE_PLAN.md
- * options B then C). Built on the FreshService solution import
- * (fsSolutionImportService.js): same lock, job-state and soft-read idioms.
+ * options B then C). Built with the idioms of the FreshService solution
+ * import (removed 26 Oct 2026): advisory lock, job state and soft reads.
  *
  *   Connection   site address + a service account's e-mail + API token, per
  *                workspace in knowledge_settings.confluence_auth. The token

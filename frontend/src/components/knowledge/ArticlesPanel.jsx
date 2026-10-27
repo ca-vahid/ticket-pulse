@@ -64,7 +64,6 @@ function categoryName(tree, id) {
 const SOURCE_FILTERS = [
   { value: 'tp', label: 'Written in Ticket Pulse' },
   { value: 'drafted', label: 'Drafted from tickets' },
-  { value: 'fs_solution', label: 'FreshService solution' },
   { value: 'confluence', label: 'Confluence page' },
 ];
 const SORT_OPTIONS = [

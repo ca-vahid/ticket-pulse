@@ -165,6 +165,22 @@ function deriveTimeZoneIana({ city, state, country, countryCode, freshserviceTim
   return fsTimeZone ? FRESHSERVICE_TIMEZONE_TO_IANA.get(fsTimeZone) || fsTimeZone : null;
 }
 
+/**
+ * The requester's time zone from their Entra location only (city / office /
+ * state / country), or null. FreshService's own requester time zone is NOT
+ * used here: almost every requester carries the tenant default ("Pacific Time
+ * (US & Canada)" — QA 10-26 #2), so it says nothing about where they are.
+ */
+export function requesterEntraTimeZone(requester) {
+  if (!requester) return null;
+  const city = cleanString(requester.entraCity) || firstLocationToken(requester.entraOfficeLocation);
+  const state = cleanString(requester.entraState);
+  const country = cleanString(requester.entraCountry);
+  const countryCode = cleanString(requester.entraCountryCode);
+  if (!city && !state && !country && !countryCode) return null;
+  return deriveTimeZoneIana({ city, state, country, countryCode, freshserviceTimeZone: null });
+}
+
 function deriveRouteKeys({ officeLocation, city, state, country, countryCode, freshserviceDepartment }) {
   const cityKey = normalizeKeyPart(city);
   const officeKey = normalizeKeyPart(officeLocation);
@@ -428,4 +444,5 @@ export default {
   REQUESTER_PROFILE_SELECT,
   enrichEventContextWithRequesterProfile,
   requesterContextFromSource,
+  requesterEntraTimeZone,
 };

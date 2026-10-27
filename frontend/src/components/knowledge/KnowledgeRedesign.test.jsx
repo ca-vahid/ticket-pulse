@@ -51,8 +51,7 @@ const growthApi = {
   reviewDigest: vi.fn(() => Promise.resolve({ success: true, data: { count: 0, groups: [] } })),
   backtestStatus: vi.fn(() => Promise.resolve({ success: true, data: null })),
   backtestResults: vi.fn(() => Promise.resolve({ success: true, data: { counts: { total: 0 }, runs: [] } })),
-  getSettings: vi.fn(() => Promise.resolve({ success: true, data: { fsImportEnabled: false, fsFolderIds: [], reviewDigestEnabled: false, fsCallsAllowed: false } })),
-  fsFolders: vi.fn(() => Promise.resolve({ success: true, data: { categories: [] } })),
+  getSettings: vi.fn(() => Promise.resolve({ success: true, data: { reviewDigestEnabled: false } })),
 };
 const ticketsMeta = vi.hoisted(() => vi.fn(async () => ({ data: { technicians: [], groups: [] } })));
 // The Confluence card (Settings) only needs to load quietly here.

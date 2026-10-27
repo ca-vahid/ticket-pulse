@@ -4,18 +4,18 @@ import { ValidationError } from '../utils/errors.js';
 import knowledgeGapService from '../services/knowledgeGapService.js';
 import articleDraftService, { DRAFT_MAX_TICKETS } from '../services/articleDraftService.js';
 import knowledgeSettingsService from '../services/knowledgeSettingsService.js';
-import fsSolutionImportService, { fsCallsAllowed } from '../services/fsSolutionImportService.js';
 import knowledgeReviewDigestService from '../services/knowledgeReviewDigestService.js';
 import autoHelpBacktestService, { MAX_N } from '../services/autoHelpBacktestService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
 
 /**
  * Knowledge that grows (Auto-help P1, plans/AUTO_HELP_P1_PLAN.md §4-§5):
- * gaps, drafting articles from solved tickets, FreshService import settings,
- * the review digest and playbook backtests. Mounted by knowledge.routes.js,
+ * gaps, drafting articles from solved tickets, the review digest setting and
+ * playbook backtests. (The FreshService solution-article import was removed
+ * on 26 Oct 2026, QA 10-26 #7.) Mounted by knowledge.routes.js,
  * which passes in ITS role gates, so Knowledge keeps one place that decides
  * who may manage it. Reads are open to workspace members; anything that
- * writes, costs a model call or calls FreshService needs the manager gate;
+ * writes or costs a model call needs the manager gate;
  * recomputing the gaps (?refresh=1, embeddings + a big scan) needs the
  * review capability.
  */
@@ -93,45 +93,16 @@ export default function knowledgeGrowthRoutes({
     res.status(result.reused ? 200 : 201).json({ success: true, data: result });
   }));
 
-  // ---------- settings: FreshService import + review digest ----------
+  // ---------- settings: review digest ----------
 
   router.get('/growth-settings', asyncHandler(async (req, res) => {
     const settings = await knowledgeSettingsService.get(req.workspaceId);
-    res.json({ success: true, data: { ...settings, fsCallsAllowed: fsCallsAllowed() } });
+    res.json({ success: true, data: settings });
   }));
 
   router.put('/growth-settings', requireKnowledgeManager, asyncHandler(async (req, res) => {
-    const body = req.body || {};
-    // Folder ids must be folders of THIS workspace's FreshService (checked live when FreshService may be called).
-    if (Array.isArray(body.fsFolderIds) && body.fsFolderIds.length) {
-      await fsSolutionImportService.validateFolderIds(req.workspaceId, body.fsFolderIds.map(String));
-    }
-    const settings = await knowledgeSettingsService.update(req.workspaceId, body, actorOf(req));
-    res.json({ success: true, data: { ...settings, fsCallsAllowed: fsCallsAllowed() } });
-  }));
-
-  router.get('/fs-import/folders', requireKnowledgeManager, asyncHandler(async (req, res) => {
-    const data = await fsSolutionImportService.listFolders(req.workspaceId, { refresh: req.query.refresh === '1' });
-    res.json({ success: true, data });
-  }));
-
-  /**
-   * "Import now" (the nightly import on demand): starts a background job on
-   * the interactive FreshService lane and answers 202 with its id at once.
-   * Outside production it answers 200 with the dry-run plan.
-   */
-  router.post('/fs-import/run', requireKnowledgeManager, asyncHandler(async (req, res) => {
-    const data = await fsSolutionImportService.startImport(req.workspaceId, { actor: actorOf(req), dryRun: req.body?.dryRun === true });
-    res.status(data?.jobId ? 202 : 200).json({ success: true, data });
-  }));
-
-  /** The import's progress (any container): the latest job, or one job by id. */
-  router.get('/fs-import/status', requireKnowledgeManager, asyncHandler(async (req, res) => {
-    res.json({ success: true, data: await fsSolutionImportService.jobStatus(req.workspaceId) });
-  }));
-
-  router.get('/fs-import/jobs/:jobId', requireKnowledgeManager, asyncHandler(async (req, res) => {
-    res.json({ success: true, data: await fsSolutionImportService.jobStatus(req.workspaceId, String(req.params.jobId).slice(0, 80)) });
+    const settings = await knowledgeSettingsService.update(req.workspaceId, req.body || {}, actorOf(req));
+    res.json({ success: true, data: settings });
   }));
 
   /** The signed-in person's own articles due for review, grouped by category. */

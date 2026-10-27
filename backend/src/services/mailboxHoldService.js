@@ -2,6 +2,11 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import settingsRepository from './settingsRepository.js';
+import {
+  GROUP_MIN_ROWS, KIND_TICKET_LOOKBACK_HOURS, alertKindKey, groupHeldRows, isAttentionKind, kindLabel, kindTicketFor,
+} from '../utils/heldAlertGroups.js';
+import { noteAtCount } from './ticketGrouping/rules.js';
 
 /**
  * Mailbox hold queue (MEGA 09-01 Phase RL, RL-4).
@@ -45,8 +50,23 @@ export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'disc
 
 export const NEW_TICKET_POLICIES = Object.freeze(['create', 'replies_only', 'hold_unmatched']);
 
+/**
+ * Repeat alerts in a burst (QA 10-26 #3), per workspace:
+ *   off     every extra mail is held on its own (the behaviour before)
+ *   shadow  still held, but the row says which ticket it would have joined (default)
+ *   on      a mail whose alert kind already has a ticket from the same device in
+ *           the last 24 hours is counted on that ticket instead of held. A new
+ *           kind, and a broken-sounding kind whose ticket is closed, stay held.
+ */
+export const BURST_FOLD_MODES = Object.freeze(['off', 'shadow', 'on']);
+export const DEFAULT_BURST_FOLD_MODE = 'shadow';
+export const burstFoldKey = (workspaceId) => `mailbox_burst_fold_ws${Number(workspaceId)}`;
+const BULK_MAX = 500;
+const GROUP_TICKET_LOOKBACK_HOURS = 7 * 24;
+
 const SNIPPET_MAX = 500;
 const SYSTEM_ACTOR = { email: 'mailbox@ticketpulse.internal', name: 'Ticket Pulse Mail', role: 'system', technicianId: null };
+const FOLD_ACTOR = { email: 'mailbox@ticketpulse.internal', name: 'Ticket Pulse burst grouping', role: 'system', technicianId: null };
 
 function normalizeAddressList(list) {
   return [...new Set(
@@ -239,7 +259,8 @@ class MailboxHoldService {
     try {
       const row = await prisma.mailboxHeldMessage.create({ data, select: { id: true, status: true } });
       logger.info(`Mailbox ingest HELD "${data.subject || '(no subject)'}" from ${data.fromEmail} (${holdReason}) as held #${row.id}`);
-      return { id: row.id, status: row.status, duplicate: false };
+      const fold = holdReason === 'sender_burst' ? await this._burstFold(connection, row.id, data) : null;
+      return { id: row.id, status: fold?.status || row.status, duplicate: false, ...(fold ? { fold: fold.fold } : {}) };
     } catch (err) {
       // Lost the race against a concurrent hold of the same message.
       if (err?.code === 'P2002') {
@@ -365,6 +386,190 @@ class MailboxHoldService {
     return prisma.mailboxHeldMessage.count({ where: { workspaceId: Number(workspaceId), status } });
   }
 
+  // ---- alert bursts grouped by device (QA 10-26 #3) --------------------------
+
+  async getBurstFoldMode(workspaceId) {
+    const raw = await Promise.resolve().then(() => settingsRepository.get(burstFoldKey(workspaceId))).catch(() => null);
+    const mode = String(raw || '').trim().toLowerCase();
+    return BURST_FOLD_MODES.includes(mode) ? mode : DEFAULT_BURST_FOLD_MODE;
+  }
+
+  async setBurstFoldMode(workspaceId, mode) {
+    const next = String(mode || '').trim().toLowerCase();
+    if (!BURST_FOLD_MODES.includes(next)) throw new ValidationError(`mode must be one of ${BURST_FOLD_MODES.join(', ')}`);
+    await settingsRepository.set(burstFoldKey(workspaceId), next);
+    return next;
+  }
+
+  /** Tickets the given senders opened in the last `hours`, newest first, with displayRef + requesterEmail. Never throws. */
+  async _recentSenderTickets(workspaceId, senders, hours) {
+    const list = [...new Set((senders || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))].slice(0, 50);
+    if (!list.length) return [];
+    const rows = await Promise.resolve().then(() => prisma.ticket.findMany({
+      where: {
+        workspaceId: Number(workspaceId),
+        createdAt: { gte: new Date(Date.now() - hours * 60 * 60 * 1000) },
+        status: { notIn: ['Deleted', 'Spam'] },
+        OR: list.map((email) => ({ requester: { is: { email: { equals: email, mode: 'insensitive' } } } })),
+      },
+      select: { ...TICKET_SUMMARY_SELECT, createdAt: true, occurrenceCount: true, requester: { select: { email: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    })).then((r) => (Array.isArray(r) ? r : [])).catch((err) => {
+      logger.warn(`mailboxHoldService: recent sender tickets lookup failed (non-fatal): ${err.message}`);
+      return [];
+    });
+    return rows.map((t) => ({ ...t, displayRef: ticketDisplayRef(t), requesterEmail: t.requester?.email || null }));
+  }
+
+  /**
+   * The held queue as the review screens show it: one group per device that
+   * sent three or more held mails (alert kinds inside, broken-sounding and new
+   * kinds first), and every other row as before.
+   */
+  async listGroups(workspaceId, { limit = 500 } = {}) {
+    const rows = await this.list(workspaceId, { status: 'held', limit });
+    const senders = [...new Set(rows.map((r) => r.fromEmail).filter(Boolean))];
+    const counts = senders.map((s) => [s, rows.filter((r) => r.fromEmail === s).length]);
+    const busy = counts.filter(([, n]) => n >= GROUP_MIN_ROWS).map(([s]) => s);
+    const tickets = busy.length ? await this._recentSenderTickets(workspaceId, busy, GROUP_TICKET_LOOKBACK_HOURS) : [];
+    const { groups, singles } = groupHeldRows(rows, { tickets });
+    return { groups, singles, total: rows.length, mode: await this.getBurstFoldMode(workspaceId) };
+  }
+
+  /** occurrence_count / last_occurrence_* on the ticket the alerts were counted on (the AlertOccurrenceStrip reads them). */
+  async _countOccurrences(ticketId, added, { lastAt, summary }) {
+    const n = Math.max(0, Number(added) || 0);
+    if (!n) return null;
+    const current = await prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { occurrenceCount: true, lastOccurrenceAt: true } });
+    if (!current) return null;
+    const count = (current.occurrenceCount > 0 ? current.occurrenceCount : 1) + n;
+    const latest = current.lastOccurrenceAt && lastAt && new Date(current.lastOccurrenceAt) > new Date(lastAt) ? current.lastOccurrenceAt : (lastAt || new Date());
+    await prisma.ticket.update({
+      where: { id: Number(ticketId) },
+      data: { occurrenceCount: count, lastOccurrenceAt: latest, lastOccurrenceSummary: String(summary || '').slice(0, 290) || null },
+    });
+    return count;
+  }
+
+  /**
+   * A sender_burst row just written: does its alert kind already have a ticket
+   * from the same device in the last 24 hours? Shadow records the answer on the
+   * row (and makes that ticket the best guess); On counts the mail on the
+   * ticket and files the row as attached. A first occurrence never gets here
+   * (it became a ticket under the cap), a new kind finds no ticket, and a
+   * broken-sounding kind whose ticket is closed stays held. Never throws.
+   */
+  async _burstFold(connection, rowId, data) {
+    try {
+      const mode = await this.getBurstFoldMode(connection.workspaceId);
+      if (mode === 'off' || !data?.fromEmail) return null;
+      const kindKey = alertKindKey(data.subject);
+      if (!kindKey || kindKey.length < 8) return null;
+      const attention = isAttentionKind(data.subject);
+      const tickets = await this._recentSenderTickets(connection.workspaceId, [data.fromEmail], KIND_TICKET_LOOKBACK_HOURS);
+      const target = kindTicketFor({ kindKey, attention, tickets });
+      if (!target) return null;
+      const fold = { mode, ticketId: target.id, displayRef: target.displayRef, kind: kindLabel([data.subject]) };
+      const decision = { ...(data.decision || {}), details: { ...(data.decision?.details || {}), fold } };
+      if (mode === 'shadow') {
+        await prisma.mailboxHeldMessage.update({ where: { id: rowId }, data: { decision, bestGuessTicketId: target.id } });
+        logger.info(`Burst grouping (shadow): held #${rowId} would have been counted on ${target.displayRef}`);
+        return { status: 'held', fold };
+      }
+      await prisma.mailboxHeldMessage.update({
+        where: { id: rowId },
+        data: {
+          decision, bestGuessTicketId: target.id, status: 'attached', resolvedTicketId: target.id,
+          resolvedBy: FOLD_ACTOR.name, resolvedAt: new Date(),
+        },
+      });
+      const count = await this._countOccurrences(target.id, 1, { lastAt: data.receivedAt, summary: data.subject }).catch(() => null);
+      if (count && noteAtCount(count)) {
+        const { default: ticketService } = await import('./ticketService.js');
+        await ticketService.addPrivateNote(target.id, connection.workspaceId, {
+          bodyText: `This alert has now arrived ${count} times from ${data.fromEmail}. The repeats came in a burst, so Ticket Pulse counted them here instead of holding each one for review. Each email is kept under Settings, Ticket Mailboxes, Unmatched replies (attached).`,
+        }, FOLD_ACTOR, [], { systemNote: true }).catch((err) => logger.warn(`Burst grouping note on ${target.displayRef} failed (non-fatal): ${err.message}`));
+      }
+      logger.info(`Burst grouping: held #${rowId} counted on ${target.displayRef}${count ? ` (seen ${count} times)` : ''}`);
+      return { status: 'attached', fold };
+    } catch (err) {
+      logger.warn(`Burst grouping skipped for held #${rowId} (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * One decision for many held mails ("attach all to TP-x", "discard all").
+   * Attach of a single mail is the ordinary reply attach; attach of several
+   * writes ONE internal note on the ticket listing what arrived (kinds and
+   * counts) and counts them there — sixty alerts never become sixty replies,
+   * sixty FreshService notes or sixty "reply received" workflow runs. The
+   * emails themselves stay on their rows (status attached).
+   */
+  async bulk(workspaceId, ids, action, { ticketId = null, actor } = {}) {
+    if (!['attach', 'discard'].includes(action)) throw new ValidationError('action must be attach or discard');
+    const wanted = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!wanted.length) throw new ValidationError('ids are required');
+    if (wanted.length > BULK_MAX) throw new ValidationError(`At most ${BULK_MAX} emails at a time`);
+    const rows = await prisma.mailboxHeldMessage.findMany({
+      where: { id: { in: wanted }, workspaceId: Number(workspaceId), status: 'held' },
+      select: { id: true, subject: true, fromEmail: true, receivedAt: true },
+      orderBy: { receivedAt: 'asc' },
+    });
+    if (!rows.length) throw new ValidationError('These emails were already dealt with');
+    const rowIds = rows.map((r) => r.id);
+    const stamp = { resolvedBy: actorLabel(actor), resolvedAt: new Date() };
+
+    if (action === 'discard') {
+      const res = await prisma.mailboxHeldMessage.updateMany({ where: { id: { in: rowIds }, status: 'held' }, data: { status: 'discarded', ...stamp } });
+      logger.info(`Held messages discarded in bulk by ${actorLabel(actor)}: ${res.count}`);
+      return { action, count: res.count };
+    }
+
+    const ticket = await prisma.ticket.findFirst({ where: { id: Number(ticketId), workspaceId: Number(workspaceId) }, select: TICKET_SUMMARY_SELECT });
+    if (!ticket) throw new ValidationError('Ticket not found in this workspace');
+    if (String(ticket.status) === 'Deleted') throw new ValidationError('That ticket was deleted');
+    const ref = ticketDisplayRef(ticket);
+    if (rows.length === 1) {
+      const one = await this.attach(rows[0].id, ticket.id, actor, { workspaceId });
+      return { action, count: 1, ticket: one.ticket };
+    }
+
+    const tz = await this._workspaceTimeZone(workspaceId);
+    const kinds = new Map();
+    for (const r of rows) {
+      const key = alertKindKey(r.subject);
+      if (!kinds.has(key)) kinds.set(key, []);
+      kinds.get(key).push(r.subject);
+    }
+    const senders = [...new Set(rows.map((r) => r.fromEmail).filter(Boolean))];
+    const lines = [...kinds.values()].sort((a, b) => b.length - a.length).slice(0, 20).map((subs) => `- ${subs.length} × ${kindLabel(subs)}`);
+    const text = [
+      `${rows.length} held emails from ${senders.slice(0, 3).join(', ') || 'one sender'} were added here from Unmatched replies by ${actor?.name || actorLabel(actor)}.`,
+      `They arrived between ${formatWhen(rows[0].receivedAt, tz)} and ${formatWhen(rows[rows.length - 1].receivedAt, tz)}.`,
+      '',
+      ...lines,
+      ...(kinds.size > 20 ? [`- and ${kinds.size - 20} more kinds`] : []),
+    ].join('\n');
+    const { default: ticketService } = await import('./ticketService.js');
+    await ticketService.addPrivateNote(ticket.id, Number(workspaceId), { bodyText: text }, actor || SYSTEM_ACTOR, [], { systemNote: true });
+    const res = await prisma.mailboxHeldMessage.updateMany({
+      where: { id: { in: rowIds }, status: 'held' },
+      data: { status: 'attached', resolvedTicketId: ticket.id, ...stamp },
+    });
+    const last = rows[rows.length - 1];
+    await this._countOccurrences(ticket.id, res.count, { lastAt: last.receivedAt, summary: last.subject })
+      .catch((err) => logger.warn(`Bulk attach: occurrence count on ${ref} failed (non-fatal): ${err.message}`));
+    logger.info(`Held messages attached in bulk to ${ref} by ${actorLabel(actor)}: ${res.count}`);
+    return { action, count: res.count, ticket: { id: ticket.id, displayRef: ref } };
+  }
+
+  async _workspaceTimeZone(workspaceId) {
+    const ws = await Promise.resolve().then(() => prisma.workspace.findUnique({ where: { id: Number(workspaceId) }, select: { name: true, defaultTimezone: true } })).catch(() => null);
+    return ws?.defaultTimezone || 'America/Vancouver';
+  }
+
   async _requireHeld(id, workspaceId) {
     const row = await prisma.mailboxHeldMessage.findFirst({
       where: { id: Number(id), ...(workspaceId ? { workspaceId: Number(workspaceId) } : {}) },
@@ -477,24 +682,24 @@ class MailboxHoldService {
           logger.warn(`Mailbox hold digest: workspace ${workspaceId} has ${count} held message(s) but no admin recipients`);
           continue;
         }
-        const rows = await this.list(workspaceId, { status: 'held', limit: 15 });
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } }).catch(() => null);
-        const items = rows.map((r) => {
-          const when = r.receivedAt ? new Date(r.receivedAt).toLocaleString('en-CA', { hour12: false }) : '';
-          const guess = r.bestGuessTicket ? ` · best guess ${r.bestGuessTicket.displayRef}` : '';
-          return `<li><strong>${escapeHtml(r.subject || '(no subject)')}</strong> — ${escapeHtml(r.fromEmail || 'unknown sender')} · ${escapeHtml(r.reason)}${guess}${when ? ` · ${escapeHtml(when)}` : ''}</li>`;
-        }).join('');
+        // Grouped per device (QA 10-26 #3): 103 flat lines from two NAS units
+        // became two paragraphs. Plain e-mail style, every colour explicit.
+        const { groups, singles } = await this.listGroups(workspaceId);
+        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, defaultTimezone: true } }).catch(() => null);
         const link = appUrl ? `${String(appUrl).replace(/\/$/, '')}/settings#ticket-mailboxes` : 'Settings → Ticket Mailboxes → Unmatched replies';
-        const html = `
-          <p><strong>${escapeHtml(workspace?.name || `Workspace ${workspaceId}`)}</strong> has <strong>${count}</strong> unmatched ${count === 1 ? 'reply' : 'replies'} waiting for review.</p>
-          <p>These emails looked like replies to a conversation Ticket Pulse does not know, or came from an agent with no identifiable requester, so they were held instead of becoming new tickets. Each one needs a decision: attach to a ticket, create a ticket, or discard.</p>
-          <ul>${items}</ul>
-          ${count > rows.length ? `<p>…and ${count - rows.length} more.</p>` : ''}
-          <p>Review them at ${appUrl ? `<a href="${escapeHtml(link)}">${escapeHtml(link)}</a>` : escapeHtml(link)}.</p>`;
+        const { subject, html } = buildHoldDigest({
+          workspaceName: workspace?.name || `Workspace ${workspaceId}`,
+          count,
+          groups,
+          singles,
+          link,
+          linkIsUrl: Boolean(appUrl),
+          timeZone: workspace?.defaultTimezone || 'America/Vancouver',
+        });
         const result = await sendTransactionalEmail({
           workspaceId,
           to,
-          subject: `Ticket Pulse: ${count} unmatched ${count === 1 ? 'reply' : 'replies'} waiting for review`,
+          subject,
           html,
           label: 'mailbox-hold-digest',
         });
@@ -510,6 +715,94 @@ class MailboxHoldService {
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** "Fri 23 Oct, 08:52" in the workspace's time zone (the digest used to print the server's UTC). */
+export function formatWhen(value, timeZone = 'America/Vancouver') {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(d).map((p) => [p.type, p.value]));
+    return `${parts.weekday} ${parts.day} ${parts.month}, ${parts.hour}:${parts.minute}`;
+  } catch {
+    return d.toISOString().slice(0, 16).replace('T', ' ');
+  }
+}
+
+/** "Fri 23 Oct, 08:53 to 09:52", or two full stamps across midnight. */
+export function formatSpan(from, to, timeZone = 'America/Vancouver') {
+  const a = formatWhen(from, timeZone);
+  const b = formatWhen(to, timeZone);
+  if (!a || a === b) return a || b;
+  const [dayA, timeA] = a.split(', ');
+  const [dayB, timeB] = b.split(', ');
+  return dayA === dayB ? `${dayA}, ${timeA} to ${timeB}` : `${a} to ${b}`;
+}
+
+const REASON_WORDS = {
+  unknown_reference: 'answers mail Ticket Pulse never saw',
+  agent_reply_no_requester: 'agent mail, no requester',
+  ambiguous_sender: 'sender unclear',
+  policy_replies_only: 'mailbox takes replies only',
+  ambiguous_ticket: 'two tickets match',
+  sender_burst: 'burst from one sender',
+  ingest_error: 'could not be filed',
+};
+
+const FONT = "font-family:Calibri,'Segoe UI',Arial,sans-serif;";
+const P = `${FONT}font-size:14px;line-height:20px;color:#1f2937;margin:0 0 12px;`;
+const LI = `${FONT}font-size:14px;line-height:20px;color:#1f2937;margin:0 0 4px;`;
+const MUTED = 'color:#6b7280;';
+const RED = 'color:#b91c1c;font-weight:bold;';
+const KINDS_SHOWN = 6;
+const SINGLES_SHOWN = 15;
+
+/**
+ * The daily hold digest (pure, so a test can read it): a plain e-mail, no
+ * card, no gradient, explicit colours, Outlook-safe. One paragraph per device
+ * that sent an alert burst, its alert kinds as bullets (broken-sounding and
+ * new kinds first, marked), then the other held emails one per line.
+ */
+export function buildHoldDigest({ workspaceName, count, groups = [], singles = [], link, linkIsUrl = false, timeZone = 'America/Vancouver' }) {
+  const inGroups = groups.reduce((n, g) => n + g.count, 0);
+  const noun = count === 1 ? 'email' : 'emails';
+  const parts = [];
+  parts.push(`<p style="${P}"><strong>${escapeHtml(workspaceName)}</strong> has <strong>${count}</strong> held ${noun} waiting for review.</p>`);
+  if (groups.length) {
+    parts.push(`<p style="${P}">${inGroups} of them are alert bursts from ${groups.length === 1 ? 'one device' : `${groups.length} devices`}: the device mailed more alerts at once than the mailbox opens tickets for, so the extra ones were held. They are grouped by device below. On the review page you can add a device's alerts to its ticket, or discard them, in one click.</p>`);
+    for (const g of groups) {
+      const kinds = g.kinds.length;
+      parts.push(`<p style="${P}margin-bottom:4px;"><strong>${escapeHtml(g.device)}</strong>: ${g.count} alerts, ${kinds} ${kinds === 1 ? 'kind' : 'kinds'}, ${escapeHtml(formatSpan(g.firstAt, g.lastAt, timeZone))}<br><span style="${MUTED}">${escapeHtml(g.sender)}</span></p>`);
+      const items = g.kinds.slice(0, KINDS_SHOWN).map((k) => {
+        const flag = k.attention ? `<span style="${RED}">Needs a look:</span> ` : '';
+        const where = k.ticket ? `ticket ${escapeHtml(k.ticket.displayRef)} (${escapeHtml(k.ticket.status)})` : '<strong>no ticket yet</strong>';
+        return `<li style="${LI}">${flag}${k.count} × ${escapeHtml(k.label)} <span style="${MUTED}">· ${where} · newest ${escapeHtml(formatWhen(k.newestAt, timeZone))}</span></li>`;
+      });
+      if (kinds > KINDS_SHOWN) items.push(`<li style="${LI}${MUTED}">and ${kinds - KINDS_SHOWN} more kinds</li>`);
+      parts.push(`<ul style="margin:0 0 14px 20px;padding:0;">${items.join('')}</ul>`);
+    }
+  } else {
+    parts.push(`<p style="${P}">These emails looked like replies to a conversation Ticket Pulse does not know, or came from an agent with no identifiable requester, so they were held instead of becoming new tickets. Each one needs a decision: attach to a ticket, create a ticket, or discard.</p>`);
+  }
+  if (singles.length) {
+    if (groups.length) parts.push(`<p style="${P}margin-bottom:4px;"><strong>Other held emails</strong> (${singles.length})</p>`);
+    const items = singles.slice(0, SINGLES_SHOWN).map((r) => {
+      const guess = r.bestGuessTicket ? ` · best guess ${escapeHtml(r.bestGuessTicket.displayRef)}` : '';
+      return `<li style="${LI}"><strong>${escapeHtml(r.subject || '(no subject)')}</strong> <span style="${MUTED}">· ${escapeHtml(r.fromEmail || 'unknown sender')} · ${escapeHtml(REASON_WORDS[r.reason] || r.reason)}${guess} · ${escapeHtml(formatWhen(r.receivedAt, timeZone))}</span></li>`;
+    });
+    if (singles.length > SINGLES_SHOWN) items.push(`<li style="${LI}${MUTED}">and ${singles.length - SINGLES_SHOWN} more</li>`);
+    parts.push(`<ul style="margin:0 0 14px 20px;padding:0;">${items.join('')}</ul>`);
+  }
+  const shown = inGroups + singles.length;
+  if (count > shown) parts.push(`<p style="${P}${MUTED}">${count - shown} more are not listed here.</p>`);
+  parts.push(`<p style="${P}">Review them at ${linkIsUrl ? `<a href="${escapeHtml(link)}" style="color:#1d4ed8;">${escapeHtml(link)}</a>` : escapeHtml(link)}.</p>`);
+  const subject = groups.length
+    ? `Ticket Pulse: ${count} held ${noun} waiting for review (alert bursts from ${groups.length === 1 ? groups[0].device : `${groups.length} devices`})`
+    : `Ticket Pulse: ${count} unmatched ${count === 1 ? 'reply' : 'replies'} waiting for review`;
+  return { subject, html: parts.join('\n') };
 }
 
 export { rehydrateEmail, presentHeld, SYSTEM_ACTOR as HOLD_SYSTEM_ACTOR };

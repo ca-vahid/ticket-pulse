@@ -284,6 +284,20 @@ describe('Analytics Team Balance charts (Phase TB regression)', () => {
     expect(caraRow.querySelectorAll('td')[headers.findIndex((h) => h.startsWith('AI share'))].textContent.trim()).toBe('—');
   });
 
+  test('sticky table headers are opaque and sit above the rows (QA 10-26 #6)', async () => {
+    const { container } = renderAnalytics('team');
+    await screen.findByText('Workload by Agent');
+    const heads = [...container.querySelectorAll('thead.sticky')];
+    expect(heads.length).toBeGreaterThan(0);
+    for (const thead of heads) {
+      const classes = thead.className.split(/\s+/);
+      expect(classes).toContain('z-10');
+      expect(classes).toContain('bg-muted');
+      // A translucent fill (bg-muted/50) let scrolled rows show through the header.
+      expect(classes.some((c) => /^bg-.*\/\d+$/.test(c))).toBe(false);
+    }
+  });
+
   test('table headers still re-sort deliberately after the alphabetical default', async () => {
     renderAnalytics('team');
     await screen.findByText('Workload by Agent');

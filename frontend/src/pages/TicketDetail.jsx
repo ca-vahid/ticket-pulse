@@ -57,7 +57,7 @@ import {
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
   ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
-import ParkDialog, { ParkLine, ParkSuggestion } from '../components/tickets/ParkControls';
+import ParkDialog, { ParkLine, ParkSuggestion, formatParkDate, formatWakeTime } from '../components/tickets/ParkControls';
 import UrgentClockLine from '../components/tickets/UrgentClockLine';
 import NewRequestSuggestionLine from '../components/tickets/NewRequestSuggestionLine';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
@@ -1262,11 +1262,16 @@ export default function TicketDetail() {
   const parkTicket = async (data) => {
     setParkBusy(true); setParkError(null);
     try {
-      await ticketsAPI.park(ticketId, data);
+      const res = await ticketsAPI.park(ticketId, data);
       setParkDialog(null);
       lastLocalMutationRef.current = Date.now();
       await fetchTicket({ silent: true });
-      showToast('emerald', `Parked until ${new Date(`${data.until}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`);
+      // QA 10-26 #2: say the wake time on the clock of the zone it wakes in.
+      const zone = res?.data?.wakeZone;
+      const wakeAt = res?.data?.park?.until;
+      showToast('emerald', zone && wakeAt
+        ? `Parked until ${formatParkDate(wakeAt, zone.timeZone)}, ${formatWakeTime(wakeAt, zone.timeZone)} ${zone.label}`
+        : `Parked until ${new Date(`${data.until}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`);
     } catch (err) {
       setParkError(err.response?.data?.message || err.message || 'Could not park the ticket');
     } finally {
@@ -2397,6 +2402,7 @@ export default function TicketDetail() {
                         <ParkLine
                           park={ticket.park}
                           parkedUntil={ticket.parkedUntil}
+                          wakeZone={ticket.parkZone || null}
                           canEdit={canPark}
                           busy={parkBusy}
                           onExtend={() => { setParkError(null); setParkDialog({ initial: ticket.park || { until: ticket.parkedUntil } }); }}
@@ -2596,6 +2602,7 @@ export default function TicketDetail() {
                       <ParkDialog
                         ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
                         initial={parkDialog.initial}
+                        wakeZone={ticket.parkZone || null}
                         busy={parkBusy}
                         error={parkError}
                         onClose={() => setParkDialog(null)}

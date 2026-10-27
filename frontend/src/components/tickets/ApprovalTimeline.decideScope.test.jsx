@@ -41,7 +41,8 @@ describe('who may decide an approval row', () => {
     mount({ email: 'vhaeri@x.io', kind: 'admin', workspaceRole: 'admin' });
     // Row label reads the roster name for an app-only member (no approverName stored).
     expect((await screen.findAllByText('Neville Vyland')).length).toBeGreaterThan(0);
-    expect(screen.getByTestId('approval-waiting-on')).toHaveTextContent(/Waiting on Neville Vyland — only they can decide/);
+    // 26 Oct 2026: one status line at the top of the request says who it waits on.
+    expect(await screen.findByTestId('approval-waiting-on')).toHaveTextContent(/Waiting on Neville Vyland to decide\s*Only they can decide\./);
     expect(screen.queryByRole('tab', { name: /^Approve$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Not approved/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Ask a question/ })).not.toBeInTheDocument();
@@ -79,14 +80,19 @@ describe('who may decide an approval row', () => {
         onDecide={vi.fn()} onForward={vi.fn()} onEscalate={vi.fn()} onCancel={vi.fn()} onResubmit={vi.fn()} />,
     );
     const lines = await screen.findAllByTestId('approval-waiting-on');
-    expect(lines[0]).toHaveTextContent(/Waiting on Neville Vyland — one of the approvers; any one of them decides/);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toHaveTextContent(/Waiting on Neville Vyland or Ada Agent to decide\s*Any one of them decides\./);
+    // An admin may forward either part.
+    expect(screen.getByRole('button', { name: "Forward Neville's part to someone else" })).toBeInTheDocument();
   });
 
   test('the named approver gets the full composer', async () => {
     mount({ email: 'nvyland@x.io', kind: 'admin', workspaceRole: 'admin' });
     expect(await screen.findByRole('tab', { name: /^Approve$/ })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Not approved/ })).toBeInTheDocument();
-    expect(screen.queryByTestId('approval-waiting-on')).not.toBeInTheDocument();
+    expect(screen.getByTestId('approval-waiting-on')).toHaveTextContent(/Waiting on you to decide/);
+    expect(screen.getByTestId('approval-composer-slot')).toHaveAttribute('data-mode', 'approver');
+    expect(screen.queryByRole('button', { name: /Forward to someone else/ })).not.toBeInTheDocument();
   });
 
   test('a technician who is neither approver nor admin sees who holds it and nothing to press', async () => {

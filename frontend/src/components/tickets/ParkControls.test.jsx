@@ -117,3 +117,31 @@ describe('ParkDialog — one choice for a date or an ETA', () => {
     expect(screen.getByTestId('park-line')).toHaveTextContent('In progress, with an ETA');
   });
 });
+
+// QA 10-26 #2: a park wakes at 08:00 on its person's clock, and says so.
+describe('wake time zone', () => {
+  const TORONTO = { timeZone: 'America/Toronto', label: 'Toronto time', source: 'assignee', who: 'Otto Ottawa' };
+
+  test('the dialog says the day, 8:00 AM and whose zone', () => {
+    render(<ParkDialog ticketRef="TP-1700" wakeZone={TORONTO} onSubmit={() => {}} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/Until/), { target: { value: '2026-11-16' } });
+    expect(screen.getByTestId('park-wake-hint')).toHaveTextContent(/Wakes Mon, Nov 16, 8:00 AM Toronto time — the assignee’s time zone/);
+  });
+
+  test('bulk: each ticket on its own assignee’s clock', () => {
+    render(<ParkDialog bulkCount={4} onSubmit={() => {}} onClose={() => {}} />);
+    expect(screen.getByTestId('park-wake-hint')).toHaveTextContent(/Each ticket wakes at 8:00 AM in its assignee’s time zone/);
+  });
+
+  test('the park line reads the wake on the zone clock (13:00 UTC = 8:00 AM Toronto in November)', () => {
+    render(<ParkLine park={{ kind: 'until_date', until: '2026-11-16T13:00:00Z', reason: 'Back from leave' }} wakeZone={TORONTO} />);
+    expect(screen.getByTestId('park-line')).toHaveTextContent(/Parked until Nov 16/);
+    expect(screen.getByTestId('park-wake-zone')).toHaveTextContent(/wakes 8:00\sAM Toronto time/);
+  });
+
+  test('changing the date of a park opens on its day in the wake zone, not the viewer’s', () => {
+    // 02:00 UTC on Nov 17 is still Nov 16 in Toronto.
+    render(<ParkDialog ticketRef="TP-1700" wakeZone={TORONTO} initial={{ kind: 'until_date', until: '2026-11-17T02:00:00Z', reason: 'x' }} onSubmit={() => {}} onClose={() => {}} />);
+    expect(screen.getByLabelText(/Until/)).toHaveValue('2026-11-16');
+  });
+});

@@ -4,7 +4,7 @@ import { knowledgeAPI } from '../../services/api';
 import { Switch } from '../ui';
 import { usd } from './autoHelpWords';
 import { SettingsRow as Row, SettingsSection, inputClass } from './knowledgeUi';
-import { KnowledgeSources } from './KnowledgeSourcesSettings';
+import { KnowledgeReviews } from './KnowledgeReviewSettings';
 import { ConfluenceSettings } from './ConfluenceSettings';
 import { StayQuietList } from './StayQuietEditor';
 import AutoHelpSignatureSettings from './AutoHelpSignatureSettings';
@@ -23,8 +23,9 @@ import ContributionSettings from './ContributionSettings';
  *   Automated-answer line   the AI disclosure switch + wording + live preview
  *   E-mail signature        pasted signature for every answer (30 Sep 2026)
  *   Prompts                 versioned guidance for the three prompts (30 Sep 2026)
- *   Knowledge sources       FreshService solution import (KnowledgeSourcesSettings)
- *   Reviews                 the Monday review e-mail (KnowledgeSourcesSettings)
+ *   Reviews                 the Monday review e-mail (KnowledgeReviewSettings;
+ *                           the FreshService solution import card above it
+ *                           was removed on 26 Oct 2026, QA 10-26 #7)
  *   Confluence              connection, page picking, one-time import, nightly
  *                           check and run history (ConfluenceSettings, QA 10-23)
  * People who can't manage Knowledge see the same cards read-only.
@@ -396,7 +397,7 @@ export default function KnowledgeSettingsPanel({ settings, onChange }) {
       {error && <p className="px-1 text-xs text-destructive" role="alert">{error}</p>}
       {!error && saved && <p className="px-1 text-xs text-muted-foreground" aria-hidden="true">Saved.</p>}
 
-      <KnowledgeSources canManage={canManage} />
+      <KnowledgeReviews canManage={canManage} />
       <ConfluenceSettings canManage={canManage} />
     </div>
   );

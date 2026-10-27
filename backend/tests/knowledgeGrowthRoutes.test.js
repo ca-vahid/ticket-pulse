@@ -5,8 +5,7 @@ import request from 'supertest';
 /**
  * Knowledge growth routes (Auto-help P1), mounted through knowledge.routes.js
  * so they share its role gate: members read gaps / backtest results / their
- * own review list; drafting, FreshService settings + folders and backtests
- * are manager-only; backtests need an explicit confirm; drafting is
+ * own review list; drafting, settings and backtests are manager-only; backtests need an explicit confirm; drafting is
  * rate-limited per person.
  */
 const prismaMock = {
@@ -16,13 +15,7 @@ const prismaMock = {
 };
 const gapsMock = { gaps: jest.fn(async () => ({ playbooks: [] })), clearCache: jest.fn() };
 const draftsMock = { draftFromTickets: jest.fn(async () => ({ article: { id: 5 }, used: 1, skipped: [] })), draftFromTicket: jest.fn() };
-const settingsMock = { get: jest.fn(async () => ({ fsImportEnabled: false, fsFolderIds: [] })), update: jest.fn(async (ws, body) => body) };
-const importMock = {
-  listFolders: jest.fn(async () => ({ categories: [] })),
-  startImport: jest.fn(async () => ({ dryRun: true })),
-  jobStatus: jest.fn(async (ws, id) => ({ jobId: id || 'fsi-1-a', status: 'running', progress: { foldersDone: 1, foldersTotal: 2 } })),
-  validateFolderIds: jest.fn(async () => ({ checked: true })),
-};
+const settingsMock = { get: jest.fn(async () => ({ reviewDigestEnabled: false })), update: jest.fn(async (ws, body) => body) };
 const digestMock = { forOwner: jest.fn(async () => ({ count: 2, groups: [] })) };
 const backtestMock = {
   estimate: jest.fn(async () => ({ count: 3, totalUsd: 0.1 })), start: jest.fn(async () => ({ status: 'running' })),
@@ -43,7 +36,6 @@ jest.unstable_mockModule('../src/services/autoHelpRunner.js', () => ({ default: 
 jest.unstable_mockModule('../src/services/knowledgeGapService.js', () => ({ default: gapsMock }));
 jest.unstable_mockModule('../src/services/articleDraftService.js', () => ({ default: draftsMock, DRAFT_MAX_TICKETS: 12 }));
 jest.unstable_mockModule('../src/services/knowledgeSettingsService.js', () => ({ default: settingsMock }));
-jest.unstable_mockModule('../src/services/fsSolutionImportService.js', () => ({ default: importMock, fsCallsAllowed: () => false }));
 jest.unstable_mockModule('../src/services/knowledgeReviewDigestService.js', () => ({ default: digestMock }));
 jest.unstable_mockModule('../src/services/autoHelpBacktestService.js', () => ({ default: backtestMock, MAX_N: 50 }));
 jest.unstable_mockModule('../src/services/ticketRefResolver.js', () => refMock);
@@ -83,17 +75,17 @@ test('members read gaps (days passed through), backtest results and their own re
   const d = await request(app(MEMBER)).get('/api/knowledge/review-digest');
   expect(d.body.data.count).toBe(2);
   expect(digestMock.forOwner).toHaveBeenCalledWith(1, 'viewer@example.com');
-  expect((await request(app(MEMBER)).get('/api/knowledge/growth-settings')).body.data.fsCallsAllowed).toBe(false);
+  const s = await request(app(MEMBER)).get('/api/knowledge/growth-settings');
+  expect(s.status).toBe(200);
+  expect(s.body.data).toEqual({ reviewDigestEnabled: false });
 });
 
-test('manager-only: drafting, settings, folders, import, backtests', async () => {
+test('manager-only: drafting, settings, backtests', async () => {
   const m = request(app(MEMBER));
   const calls = [
     m.post('/api/knowledge/drafts').send({ ticketIds: [1] }),
     m.post('/api/knowledge/drafts/from-ticket/4'),
     m.put('/api/knowledge/growth-settings').send({ reviewDigestEnabled: true }),
-    m.get('/api/knowledge/fs-import/folders'),
-    m.post('/api/knowledge/fs-import/run'),
     m.get('/api/knowledge/playbooks/3/backtest'),
     m.post('/api/knowledge/playbooks/3/backtest').send({ n: 5, confirm: true }),
     m.delete('/api/knowledge/backtest'),
@@ -101,7 +93,7 @@ test('manager-only: drafting, settings, folders, import, backtests', async () =>
   for (const res of await Promise.all(calls)) expect(res.status).toBe(403);
   expect(draftsMock.draftFromTickets).not.toHaveBeenCalled();
   expect(backtestMock.start).not.toHaveBeenCalled();
-  expect(importMock.listFolders).not.toHaveBeenCalled();
+  expect(settingsMock.update).not.toHaveBeenCalled();
 });
 
 test('drafts: ids and refs resolve in this workspace; the gap cache is cleared', async () => {
@@ -138,21 +130,15 @@ test('backtest needs an explicit confirm and at most 50 tickets', async () => {
   expect(backtestMock.estimate).toHaveBeenCalledWith(1, '3', { n: '7' });
 });
 
-test('"Import now" starts a background job (202 + job id); outside production the service answers with the dry-run plan', async () => {
-  let res = await request(app(ADMIN)).post('/api/knowledge/fs-import/run').send({});
-  expect(res.status).toBe(200);
-  expect(res.body.data).toEqual({ dryRun: true });
-  expect(importMock.startImport).toHaveBeenCalledWith(1, { actor: { email: ADMIN.email, name: ADMIN.name }, dryRun: false });
-  importMock.startImport.mockResolvedValueOnce({ jobId: 'fsi-1-a', status: 'queued' });
-  res = await request(app(ADMIN)).post('/api/knowledge/fs-import/run').send({});
-  expect(res.status).toBe(202);
-  expect(res.body.data).toEqual({ jobId: 'fsi-1-a', status: 'queued' });
-  const st = await request(app(ADMIN)).get('/api/knowledge/fs-import/jobs/fsi-1-a');
-  expect(st.body.data).toMatchObject({ jobId: 'fsi-1-a', status: 'running' });
-  expect(importMock.jobStatus).toHaveBeenCalledWith(1, 'fsi-1-a');
-  expect((await request(app(ADMIN)).get('/api/knowledge/fs-import/status')).status).toBe(200);
-  expect((await request(app(MEMBER)).get('/api/knowledge/fs-import/status')).status).toBe(403);
-  expect((await request(app(MEMBER)).get('/api/knowledge/fs-import/jobs/fsi-1-a')).status).toBe(403);
+test('the FreshService solution import is gone (QA 10-26 #7): its routes answer 404', async () => {
+  for (const call of [
+    request(app(ADMIN)).get('/api/knowledge/fs-import/folders'),
+    request(app(ADMIN)).post('/api/knowledge/fs-import/run').send({}),
+    request(app(ADMIN)).get('/api/knowledge/fs-import/status'),
+    request(app(ADMIN)).get('/api/knowledge/fs-import/jobs/fsi-1-a'),
+  ]) {
+    expect((await call).status).toBe(404);
+  }
 });
 
 test('gaps ?refresh=1 needs the review capability; admins and reviewers may, members may not', async () => {
@@ -165,18 +151,11 @@ test('gaps ?refresh=1 needs the review capability; admins and reviewers may, mem
   expect((await request(app(MEMBER)).get('/api/knowledge/gaps?refresh=true')).status).toBe(200);
 });
 
-test('saving folder ids checks them against the workspace\'s FreshService first', async () => {
-  const ok = await request(app(ADMIN)).put('/api/knowledge/growth-settings').send({ fsFolderIds: ['7', 8] });
+test('managers save the growth settings; the body goes to the settings service as sent', async () => {
+  const ok = await request(app(ADMIN)).put('/api/knowledge/growth-settings').send({ reviewDigestEnabled: true });
   expect(ok.status).toBe(200);
-  expect(importMock.validateFolderIds).toHaveBeenCalledWith(1, ['7', '8']);
-  const { ValidationError } = await import('../src/utils/errors.js');
-  importMock.validateFolderIds.mockRejectedValueOnce(new ValidationError('Folder 31337 is not in this workspace\'s FreshService solutions.'));
-  settingsMock.update.mockClear();
-  const bad = await request(app(ADMIN)).put('/api/knowledge/growth-settings').send({ fsFolderIds: ['31337'] });
-  expect(bad.status).toBe(400);
-  expect(settingsMock.update).not.toHaveBeenCalled();
-  await request(app(ADMIN)).put('/api/knowledge/growth-settings').send({ reviewDigestEnabled: true });
-  expect(importMock.validateFolderIds).toHaveBeenCalledTimes(2); // not for other settings
+  expect(settingsMock.update).toHaveBeenCalledWith(1, { reviewDigestEnabled: true }, { email: ADMIN.email, name: ADMIN.name });
+  expect(ok.body.data).toEqual({ reviewDigestEnabled: true });
 });
 
 test('backtest status and cancel are awaited (they read the shared lease)', async () => {

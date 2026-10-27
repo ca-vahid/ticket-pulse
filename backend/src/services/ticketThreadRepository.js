@@ -7,6 +7,15 @@ import { isMirrorEcho } from '../utils/mirrorEcho.js';
 /** Rows Ticket Pulse authored itself (live reply/note write). */
 export const TP_AUTHORED_SOURCE = 'ticketpulse_user';
 
+/**
+ * Rows whose author Ticket Pulse knows better than FreshService: its own
+ * writes, and replies that came in by e-mail and were written back to an
+ * FS-born ticket. FreshService files those under the ticket requester's user,
+ * so a Cc'd colleague's reply came back from sync as the requester's (QA,
+ * 26 Oct 2026: a Cc'd colleague's reply showed as the requester's).
+ */
+export const TP_KNOWN_AUTHOR_SOURCES = new Set([TP_AUTHORED_SOURCE, 'email_inbound']);
+
 export { isMirrorEcho };
 
 function plainObject(value) {
@@ -183,7 +192,7 @@ class TicketThreadRepository {
           ? existingRows.get(`${entry.ticketId}:${entry.externalEntryId}`)
           : null;
         let row;
-        if (existingRow && existingRow.source === TP_AUTHORED_SOURCE) {
+        if (existingRow && TP_KNOWN_AUTHOR_SOURCES.has(existingRow.source)) {
           // Attribution preservation (Phase DR2, QA 08-28 #1): the row was
           // written by Ticket Pulse when the agent sent the reply — keep the
           // agent's name/email, the clean body and the TP source. Only

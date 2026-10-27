@@ -387,7 +387,7 @@ function ModeBody({ view, mode, rules, ChartBlock, isMobile, palette }) {
             </ul>
             <div className="hidden max-h-96 overflow-auto sm:block">
               <table className="min-w-full text-sm" data-testid="ai-pick-overrides">
-                <thead className="sticky top-0 bg-card">
+                <thead className="sticky top-0 z-10 bg-card">{/* QA 10-26 #6: above the rows' links */}
                   <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
                     <th scope="col" className="py-2 pr-4 font-medium">Ticket</th>
                     <th scope="col" className="py-2 pr-4 font-medium">Category</th>

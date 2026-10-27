@@ -1,5 +1,4 @@
 /** Plain helpers for the Knowledge growth pieces (Auto-help P1): gaps, backtests, drafts. No components. */
-import { timeAgo } from '../tickets/ticketUi';
 
 export const GAP_REASON_WORDS = Object.freeze({
   no_sources: 'nothing in Knowledge matched',
@@ -63,32 +62,4 @@ export function readableNotes(text) {
     .replace(/\bdoes_?not_?apply\b/gi, 'When this doesn\u2019t apply')
     .replace(/\bused_?ticket_?ids\b/gi, 'the source tickets')
     .replace(/\breviewer_?notes\b/gi, 'these notes');
-}
-
-export const IMPORT_ACTIVE = new Set(['queued', 'running']);
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-/** "Importing… 2 of 5 folders, 140 articles read" while a job runs. */
-export function importProgress(state) {
-  if (!state || !IMPORT_ACTIVE.has(state.status)) return null;
-  const p = state.progress || {};
-  if (state.status === 'queued' || !p.foldersTotal) return 'Starting the import…';
-  return `Importing… ${p.foldersDone || 0} of ${plural(p.foldersTotal, 'folder')}, ${plural(p.articlesSeen || 0, 'article')} read`;
-}
-
-export function importSummary(state) {
-  if (!state) return 'Not imported yet — it runs every night in quiet hours.';
-  if (IMPORT_ACTIVE.has(state.status)) return importProgress(state);
-  const when = state.at ? timeAgo(state.at) : '';
-  if (state.status === 'interrupted') return `The last import stopped before it finished ${when}. Nothing was archived; run it again.`;
-  if (state.error) return `Last import failed ${when}: ${state.error}`;
-  const parts = [
-    `${state.created || 0} new`, `${state.updated || 0} updated`, `${state.unchanged || 0} unchanged`,
-    state.archived ? `${state.archived} archived` : null,
-    state.failedArticles?.length ? `${plural(state.failedArticles.length, 'article')} skipped` : null,
-    state.failedFolders?.length ? `${plural(state.failedFolders.length, 'folder')} failed` : null,
-    state.unknownFolders?.length ? `${plural(state.unknownFolders.length, 'folder')} no longer in FreshService` : null,
-  ].filter(Boolean);
-  const partial = state.archiveSkipped === 'partial_listing' ? ' Nothing was archived: FreshService did not list everything.' : '';
-  return `Last import ${when}: ${parts.join(', ')}.${partial}`;
 }

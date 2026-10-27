@@ -1,4 +1,4 @@
-import { requesterContextFromSource } from '../src/services/requesterProfileService.js';
+import { requesterContextFromSource, requesterEntraTimeZone } from '../src/services/requesterProfileService.js';
 
 describe('requester profile service', () => {
   test('builds requester location context from Entra fields', () => {
@@ -49,5 +49,15 @@ describe('requester profile service', () => {
     expect(context.locationSummary).toBe('Calgary');
     expect(context.locationSource).toBe('freshservice_department');
     expect(context.timeZoneIana).toBe('America/Edmonton');
+  });
+});
+
+describe('requesterEntraTimeZone (QA 10-26 #2: where an unassigned park wakes)', () => {
+  test('reads the Entra location only, never the FreshService default zone', () => {
+    expect(requesterEntraTimeZone({ entraOfficeLocation: 'Ottawa', timeZone: 'Pacific Time (US & Canada)' })).toBe('America/Toronto');
+    expect(requesterEntraTimeZone({ entraState: 'CA-AB' })).toBe('America/Edmonton');
+    expect(requesterEntraTimeZone({ timeZone: 'Eastern Time (US & Canada)' })).toBeNull();
+    expect(requesterEntraTimeZone({ entraCountry: 'Canada' })).toBeNull();
+    expect(requesterEntraTimeZone(null)).toBeNull();
   });
 });

@@ -227,10 +227,13 @@ describe('IT answers the conditions', () => {
     expect(data.conditions).toMatchObject({ submittedBy: 'req@x.io', submittedByName: 'Mehdi Agent' });
     const mail = mailMock.sendTransactionalEmail.mock.calls.find((c) => c[0].label === 'approval');
     expect(mail[0].to).toBe('neville@x.io');
-    expect(mail[0].html).toContain('The answers to your conditions are in');
+    // The agent's message again (26 Oct 2026): the answers first, then one decide link.
+    expect(mail[0].html).toContain('answers to your conditions.');
     expect(mail[0].html).toContain("Can&#39;t be met as asked");
     expect(mail[0].html).toContain('The endpoint reaches every model the user can see');
-    expect(mail[0].html).toContain('>Not approved<');
+    expect(mail[0].html).toContain('1 of 2 can&rsquo;t be met as asked.');
+    expect(mail[0].html).toContain('Decide on this request');
+    expect(mail[0].fromName).toMatch(/ via Ticket Pulse$/);
     expect(prismaMock.approvalMessage.create.mock.calls[0][0].data).toMatchObject({ kind: 'answer', audience: 'internal', toEmails: ['neville@x.io'] });
     expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload).toMatchObject({ event: 'condition_answers' });
     // and it cannot be sent twice
@@ -258,16 +261,17 @@ describe('looping in the requester while IT answers', () => {
 describe('e-mails', () => {
   test('the technician e-mail lists the conditions and says nothing is approved yet', () => {
     const html = renderConditionsEmail({ approverName: 'Neville', technicianName: 'Mehdi', categoryName: 'Security', ticket: { ref: 'TP-1', subject: 'Dashboards', appUrl: 'https://tp/tickets/1' }, items: OPEN.items, note: 'Security first' });
-    expect(html).toContain('Approved with conditions — your answers needed');
-    expect(html).toContain('<b>not approved yet</b>');
+    expect(html).toContain('Hi Mehdi,');
+    expect(html).toContain('It is not approved yet');
     expect(html).toContain('Only Public or Internal data');
     expect(html).toContain('Answer on the ticket');
     expect(html).toContain('Security first');
   });
 
-  test('a first request keeps Approve / Not approved / Ask', () => {
+  test('a first request has one link to the decision page, which offers every choice', () => {
     const html = renderApproverRequestEmail({ ticket: { ref: 'TP-1', subject: 'X' }, decisionUrl: 'https://tp/approval/t', requester: {} });
-    expect(html).toContain('>Not approved<');
+    expect(html).toContain('href="https://tp/approval/t"');
+    expect(html).toContain('Approve, approve with conditions, ask a question or say no on that page.');
     expect(html).not.toContain('>Decline<');
   });
 });

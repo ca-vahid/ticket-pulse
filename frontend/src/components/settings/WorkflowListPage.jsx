@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronRight, MoreHorizontal, Plus, Search, X } from 'lucide-react';
-import { relativeTime, runFailed, workflowState } from './WorkflowIndex';
+import { relativeTime, rowMenuItems, runFailed, workflowState } from './WorkflowIndex';
 import { WORKFLOW_STAGES, groupWorkflowsByStage, listWatchSignals, runsInAddition, stageForTrigger } from '../../utils/workflowStages';
 import { motionReduced } from '../../utils/motionPreference';
 
@@ -79,7 +79,9 @@ function matchesFilter(workflow, filter) {
   return key === filter;
 }
 
-function RowMenu({ workflow, name, onRowAction, onClose }) {
+// The row's actions come from rowMenuItems (WorkflowIndex): QA 10-26 #1 —
+// a row whose menu would be empty shows no "⋯".
+function RowMenu({ workflow, name, items, onRowAction, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
     const onDoc = (e) => { if (!ref.current?.contains(e.target)) onClose(); };
@@ -88,14 +90,6 @@ function RowMenu({ workflow, name, onRowAction, onClose }) {
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [onClose]);
-  const archived = Boolean(workflow.archivedAt);
-  const items = [
-    { key: 'variant', label: 'New variant…' },
-    // A default is never archived here; one retired by Ticket Ops → When a
-    // requester replies can still be restored.
-    ...(workflow.isDefaultVariant && !archived ? [] : [{ key: archived ? 'restore' : 'archive', label: archived ? 'Restore' : 'Archive' }]),
-    ...(archived && !workflow.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', danger: true }] : []),
-  ];
   return (
     <div ref={ref} role="menu" aria-label={`Actions for ${name}`} className="tp-card absolute right-2 top-full z-30 mt-0.5 w-44 rounded-lg p-1 shadow-soft animate-popIn">
       {items.map((item) => (
@@ -124,6 +118,7 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
   const versionText = version > 0 ? `v${version}` : 'draft';
   const runText = lastRun ? `${failed ? 'Failed' : 'Ran'} ${relativeTime(lastRun.startedAt)}` : 'No runs yet';
   const signals = listWatchSignals(workflow);
+  const menuItems = onRowAction ? rowMenuItems(workflow) : [];
 
   // A plain left click stays in the app; modified and middle clicks fall
   // through to the browser so the link opens in a new tab or window.
@@ -182,7 +177,7 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
         </span>
         <ChevronRight className="hidden h-4 w-4 text-muted-foreground/60 md:block" aria-hidden="true" />
       </a>
-      {onRowAction && (
+      {menuItems.length > 0 && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
@@ -194,7 +189,7 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
           <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
         </button>
       )}
-      {menuOpen && <RowMenu workflow={workflow} name={name} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
+      {menuOpen && menuItems.length > 0 && <RowMenu workflow={workflow} name={name} items={menuItems} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
     </li>
   );
 }

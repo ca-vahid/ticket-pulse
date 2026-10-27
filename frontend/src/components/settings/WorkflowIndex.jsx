@@ -114,7 +114,32 @@ export function workflowMeta(workflow, { isAfterHours = () => false } = {}) {
   return parts.join(' · ');
 }
 
-function RowMenu({ workflow, displayName, onRowAction, onClose }) {
+/**
+ * QA 10-26 #1: whether "New variant" is a real option for a workflow. The
+ * seeded "Reopen on requester reply" default is not: what a requester reply
+ * does is set in Settings → Ticket Ops → When a requester replies, which
+ * retires this workflow when it takes the reopen over, so a routed copy of it
+ * has nothing to add. An archived workflow is restored before it is copied.
+ */
+export function canAddVariant(workflow) {
+  if (!workflow || workflow.archivedAt) return false;
+  return !(workflow.isDefaultVariant && workflow.triggerType === 'ticket.reply_received');
+}
+
+/** A row's "⋯" actions (list page and sidebar); an empty list means no "⋯" button. */
+export function rowMenuItems(workflow) {
+  if (!workflow) return [];
+  const isArchived = Boolean(workflow.archivedAt);
+  return [
+    ...(canAddVariant(workflow) ? [{ key: 'variant', label: 'New variant…' }] : []),
+    // A default is never archived here; one retired by Ticket Ops → When a
+    // requester replies can still be restored.
+    ...(workflow.isDefaultVariant && !isArchived ? [] : [{ key: isArchived ? 'restore' : 'archive', label: isArchived ? 'Restore' : 'Archive' }]),
+    ...(isArchived && !workflow.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', danger: true }] : []),
+  ];
+}
+
+function RowMenu({ workflow, displayName, items, onRowAction, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
     const onDoc = (e) => { if (!ref.current?.contains(e.target)) onClose(); };
@@ -122,14 +147,6 @@ function RowMenu({ workflow, displayName, onRowAction, onClose }) {
     document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [onClose]);
-  const isArchived = Boolean(workflow.archivedAt);
-  const items = [
-    { key: 'variant', label: 'New variant…' },
-    // A default is never archived here; one retired by Ticket Ops → When a
-    // requester replies can still be restored.
-    ...(workflow.isDefaultVariant && !isArchived ? [] : [{ key: isArchived ? 'restore' : 'archive', label: isArchived ? 'Restore' : 'Archive' }]),
-    ...(isArchived && !workflow.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', danger: true }] : []),
-  ];
   return (
     <div ref={ref} role="menu" aria-label={`Actions for ${displayName}`} className="tp-card absolute right-2 top-full z-30 mt-0.5 w-44 rounded-lg p-1 shadow-soft animate-popIn">
       {items.map((item) => (
@@ -159,6 +176,7 @@ function IndexRow({
   const state = workflowState(workflow);
   const name = getDisplayName(workflow);
   const meta = workflowMeta(workflow, { isAfterHours });
+  const menuItems = onRowAction ? rowMenuItems(workflow) : [];
   return (
     <div
       data-testid="workflow-row"
@@ -198,7 +216,7 @@ function IndexRow({
           {isShadow ? 'Shadow' : isEnabled ? 'Live' : version === 0 ? 'Draft' : 'Off'}
         </span>
       )}
-      {onRowAction && (
+      {menuItems.length > 0 && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
@@ -210,7 +228,7 @@ function IndexRow({
           <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       )}
-      {menuOpen && <RowMenu workflow={workflow} displayName={name} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
+      {menuOpen && menuItems.length > 0 && <RowMenu workflow={workflow} displayName={name} items={menuItems} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
     </div>
   );
 }

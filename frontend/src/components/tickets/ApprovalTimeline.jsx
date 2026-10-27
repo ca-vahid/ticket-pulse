@@ -1,42 +1,63 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApprovalLaptop from './ApprovalLaptop';
 import {
-  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Reply, Trash2, XCircle,
+  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, Hourglass, MessageCircleQuestion, RefreshCw, Reply, Trash2, XCircle,
 } from 'lucide-react';
 import { BrandArt, PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
-import { AmountChip, TierChip, handoffSentence } from './ApprovalHandoff';
+import { AmountChip, TierChip } from './ApprovalHandoff';
 import ApprovalComposer from './ApprovalComposer';
 import { ConditionsAnswerForm, ConditionsReview, conditionsWaitingOn, readConditions } from './ApprovalConditions';
-import ApprovalThread, { WaitingOnApproverChip } from './ApprovalThread';
+import ApprovalThread, { andList, buildThreadItems, threadState } from './ApprovalThread';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { ticketsAPI } from '../../services/api';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 import { cleanNoteText } from '../../utils/noteText';
 
-/** Approvals v3: an agent / approver answers an open question in-app. */
-function AnswerBox({ message, busy, onSend, onCancel }) {
+const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
+const orList = (names) => {
+  const list = (names || []).filter(Boolean);
+  return list.length <= 1 ? (list[0] || '') : `${list.slice(0, -1).join(', ')} or ${list[list.length - 1]}`;
+};
+
+/**
+ * The one place to write on an open request (26 Oct 2026, ticket 65030): its
+ * heading says what is being written and who gets it. Here: an answer to an
+ * open question. Folded to one line when the viewer was only copied.
+ */
+function AnswerComposer({ message, heading, recipients, folded: startFolded = false, foldedText = null, busy, onSend, secondary = null }) {
   const [text, setText] = useState('');
   const [html, setHtml] = useState('');
+  const [folded, setFolded] = useState(startFolded);
   const ref = useRef(null);
-  useEffect(() => { ref.current?.focus(); }, []);
+  // Focus follows a click only — focusing on arrival scrolls the ticket page (23 Sep 2026).
+  const [focusNext, setFocusNext] = useState(false);
+  useEffect(() => { if (focusNext && !folded) { ref.current?.focus(); setFocusNext(false); } }, [focusNext, folded]);
+  if (folded) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5" data-testid="answer-box" data-folded="true">
+        <p className="text-[13px] text-muted-foreground">{foldedText}</p>
+        <button type="button" onClick={() => { setFolded(false); setFocusNext(true); }} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-input px-2.5 py-1 text-[12px] font-semibold text-foreground hover:bg-muted">
+          <Reply className="h-3.5 w-3.5" aria-hidden="true" /> Answer it yourself
+        </button>
+        {secondary}
+      </div>
+    );
+  }
   return (
-    <div className="mt-2 rounded-xl border border-violet-200 bg-violet-50/40 p-2.5 dark:border-violet-500/30 dark:bg-violet-500/10" data-testid="answer-box">
-      <p className="mb-1.5 text-[12px] text-muted-foreground">
-        Answering <span className="font-semibold text-foreground">{message?.author?.name || message?.author?.email || 'the approver'}</span>
-        {message?.bodyText ? <>: “{String(message.bodyText).slice(0, 140)}{String(message.bodyText).length > 140 ? '…' : ''}”</> : null}
-        {message?.audience === 'internal' ? ' · internal, the requester is not copied' : ' · everyone on the request is told'}
-      </p>
-      <RichTextEditor ref={ref} value={html} onChange={({ html: h, text: t }) => { setHtml(h); setText(t); }} placeholder="Your answer…" ariaLabel="Your answer" minHeight={140} className="border-input bg-card" />
-      <div className="mt-2 flex items-center gap-1.5">
+    <div data-testid="answer-box" data-message-id={message?.id}>
+      <p className="text-[14px] font-semibold text-foreground">{heading}</p>
+      {recipients && <p className="mt-0.5 mb-2 text-[12.5px] text-muted-foreground">{recipients}</p>}
+      <RichTextEditor ref={ref} value={html} onChange={({ html: h, text: t }) => { setHtml(h); setText(t); }} placeholder="Your answer…" ariaLabel="Your answer" minHeight={120} className="border-input bg-card" />
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <button
           type="button"
           onClick={() => { const t = text.trim(); if (t) onSend({ bodyText: t, bodyHtml: isRichContent(html) ? html : null }); }}
           disabled={busy || !text.trim()}
-          className="tp-focus-ring inline-flex items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+          className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {busy ? <Activity className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Reply className="h-3 w-3" aria-hidden="true" />} Send answer
+          {busy ? <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Reply className="h-3.5 w-3.5" aria-hidden="true" />} Send answer
         </button>
-        <button type="button" onClick={onCancel} className="tp-focus-ring rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted">Cancel</button>
+        {secondary}
       </div>
     </div>
   );
@@ -127,6 +148,8 @@ export default function ApprovalTimeline({
   // Approvals v3: the conversation on every request of this ticket, and which
   // question is being answered in-app.
   const [messages, setMessages] = useState([]);
+  // An older open question picked from the conversation ("Answer" on it) —
+  // otherwise the composer answers the newest open question.
   const [answering, setAnswering] = useState(null); // message
   const [answerBusy, setAnswerBusy] = useState(false);
   const loadMessages = useCallback(async () => {
@@ -147,12 +170,6 @@ export default function ApprovalTimeline({
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [meta?.technicians, meta?.members]);
-  // Hand-off log entries carry e-mails; read them as names where we know the person.
-  const named = (entry) => (entry ? {
-    ...entry,
-    toNames: (entry.toNames && entry.toNames.length ? entry.toNames : (entry.toEmails || []).map((e) => people.find((p) => p.email === String(e).toLowerCase())?.name || e)),
-    byName: entry.byName || (entry.byEmail ? (people.find((p) => p.email === String(entry.byEmail).toLowerCase())?.name || entry.byEmail) : null),
-  } : entry);
   const groups = useMemo(() => {
     const map = new Map();
     for (const ap of approvals) {
@@ -291,276 +308,359 @@ export default function ApprovalTimeline({
                 )}
               </div>
             ) : (
-              <div className="px-3.5 py-3">
-                <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>Requested by <span className="font-medium text-muted-foreground">{head.requestedByName || people.find((p) => p.email === String(head.requestedBy || '').toLowerCase())?.name || head.requestedBy}</span>
-                    {rows.length > 1 && <span className="text-muted-foreground/75"> · {rows.length} approvers · any one decides</span>}</span>
-                  {(() => {
-                    const groupId = head.requestGroupId || `single-${head.id}`;
-                    const gm = messages.filter((m) => m.requestGroupId === groupId);
-                    const answered = new Set(gm.filter((m) => m.kind === 'answer' && m.inReplyToId).map((m) => m.inReplyToId));
-                    const awaiting = gm.some((m) => m.kind === 'question' && m.audience === 'internal' && !answered.has(m.id));
-                    const viewerIsApprover = rows.some((r) => String(r.approverEmail).toLowerCase() === actorEmail);
-                    return awaiting && !viewerIsApprover ? <WaitingOnApproverChip /> : null;
-                  })()}
-                </p>
-                {head.requestNoteHtml ? (
-                  <div className="mt-1 text-xs text-muted-foreground border-l-2 border-border pl-2">
-                    <SafeHtml html={head.requestNoteHtml} className="text-xs text-muted-foreground" />
-                  </div>
-                ) : head.requestNote && (
-                  <p className="mt-1 text-xs text-muted-foreground italic border-l-2 border-border pl-2">“{cleanNoteText(head.requestNote)}”</p>
-                )}
-
-                {/* Approver rail */}
-                <ol className="mt-3 space-y-3">
-                  {rows.map((ap, i) => {
-                    const sm = statusMeta(ap.status);
-                    const approverKey = String(ap.approverEmail || '').toLowerCase();
-                    const person = people.find((p) => p.email === approverKey) || null;
-                    const approverLabel = ap.approverName || person?.name || ap.approverEmail;
-                    // Only the named approver decides (Vahid, 17 Sep 2026). Admins see the row and can forward it.
-                    const isApprover = Boolean(actorEmail) && actorEmail === approverKey;
-                    const canForwardAsAdmin = actorIsAdmin && !isApprover && typeof onForward === 'function';
-                    // The viewer holds their own pending row on this request — their own composer has Forward.
-                    const viewerApprovesHere = rows.some((r) => String(r.approverEmail || '').toLowerCase() === actorEmail && (r.status === 'pending' || r.status === 'info_requested'));
-                    const isRequester = meta?.actor && (meta.actor.email === ap.requestedBy || meta.actor.kind === 'admin' || meta.actor.workspaceRole === 'admin');
-                    const busy = savingField === `approval-${ap.id}`;
-                    const last = i === rows.length - 1;
-                    // Approvals v3: who is on this request (for the composer's audience chips).
-                    const participants = {
-                      requester: requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null, role: 'requester' } : null,
-                      agent: ap.requestedBy ? { email: String(ap.requestedBy).toLowerCase(), name: people.find((p) => p.email === String(ap.requestedBy).toLowerCase())?.name || null, role: 'agent' } : null,
-                      approvers: rows.map((r) => ({ email: String(r.approverEmail).toLowerCase(), name: r.approverName || people.find((p) => p.email === String(r.approverEmail).toLowerCase())?.name || null, role: 'approver' })),
-                    };
-                    const nextTier = tiers[ap.tier || 1] || null;
-                    return (
-                      <li key={ap.id} className="relative flex gap-3">
-                        {/* rail: avatar + status dot + connector */}
-                        <div className="relative flex flex-col items-center">
-                          <div className="relative">
-                            <ApproverAvatar email={approverKey} name={approverLabel} photoUrl={person?.photoUrl || null} />
-                            <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${sm.dot} flex items-center justify-center`} title={sm.label}>
-                              <sm.Icon className="w-2 h-2 text-white" aria-hidden="true" />
-                            </span>
-                          </div>
-                          {!last && <span className="flex-1 w-px bg-secondary mt-1" aria-hidden="true" />}
-                        </div>
-
-                        <div className="min-w-0 flex-1 pb-0.5">
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <span className="text-sm font-medium text-foreground truncate" title={ap.approverEmail}>{approverLabel}</span>
-                            {tierCount > 1 && (
-                              <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground" title={`Approval tier ${ap.tier || 1} of ${tierCount}`}>
-                                {(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}
-                              </span>
-                            )}
-                            {ap.isFinal && <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground" title="Forwarded as the final approver">final</span>}
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${sm.chip}`}>
-                              {rowLabel(ap)}
-                            </span>
-                            {ap.decidedAt && (
-                              <span className="text-[11px] text-muted-foreground/75" title={new Date(ap.decidedAt).toLocaleString()}>{formatDayTime(ap.decidedAt)} · {timeAgo(ap.decidedAt)}</span>
-                            )}
-                          </div>
-                          {conditionsWaitingOn(ap.conditions, ap.status) === 'it'
-                            ? <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-300" data-testid="conditions-waiting">Approved on {readConditions(ap.conditions).items.length === 1 ? 'a condition' : `${readConditions(ap.conditions).items.length} conditions`} — not approved until {head.requestedByName || 'the technician'} answers {readConditions(ap.conditions).items.length === 1 ? 'it' : 'them'}</p>
-                            : conditionsWaitingOn(ap.conditions, ap.status) === 'approver'
-                              ? <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-300">Answers to the conditions are in — waiting on {approverLabel} to decide</p>
-                              : ap.status === 'info_requested'
-                                ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
-                                : (ap.status === 'escalated' || ap.status === 'forwarded')
-                                  ? (() => { const last = named([...(ap.escalationLog || [])].reverse()[0]); return last ? <p className={`text-xs mt-0.5 ${sm.text}`}>{handoffSentence({ ...last, byName: null, byEmail: null }).replace(/^An approver /, '').replace(/^\w/, (c) => c.toUpperCase())}</p> : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>; })()
-                                  : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
-                          {/* How this row came to exist (escalated / forwarded / auto over-limit) — only on the receiving row. */}
-                          {ap.status === 'pending' && Array.isArray(ap.escalationLog) && ap.escalationLog.length > 0 && (() => {
-                            const last = ap.escalationLog[ap.escalationLog.length - 1];
-                            return last && last.toEmails?.includes?.(String(ap.approverEmail).toLowerCase()) ? (
-                              <p className="text-[11px] text-muted-foreground mt-0.5 border-l-2 border-amber-300 dark:border-amber-500/40 pl-2">{handoffSentence(named(last))}</p>
-                            ) : null;
-                          })()}
-
-                          {/* Approver actions (pending / question sent): the same composer as the magic link. */}
-                          {(ap.status === 'pending' || ap.status === 'info_requested') && isApprover && (
-                            <div className="mt-2">
-                              <ApprovalComposer
-                                compact
-                                showShortcuts={false}
-                                minHeight={180}
-                                approval={{
-                                  ...ap,
-                                  ticketRef: null,
-                                  requesterName: requester?.name || null,
-                                  canEscalate: Boolean(!ap.isFinal && nextTier && onEscalate),
-                                  nextTier: nextTier ? { name: nextTier.name, approverNames: (nextTier.managerEmails || []).map((e) => people.find((p) => p.email === e)?.name || e) } : null,
-                                  tierName: (tiers[(ap.tier || 1) - 1] || {}).name || null,
-                                  amountLabel: null,
-                                }}
-                                participants={participants}
-                                selfEmail={ap.approverEmail}
-                                forwardCandidates={people.filter((p) => p.email !== String(ap.approverEmail).toLowerCase() && p.email !== String(ap.requestedBy || '').toLowerCase())}
-                                onDecide={(decision, note, noteHtml, extra) => onDecide(ap.id, decision, note, { noteHtml, ...extra })}
-                                onAsk={onAsk ? async (payload) => { await onAsk(ap.id, payload); await loadMessages(); } : undefined}
-                                onHandoff={(onEscalate || onForward) ? async ({ mode, note, toEmail }) => {
-                                  if (mode === 'forward') await onForward?.(ap.id, toEmail, note);
-                                  else await onEscalate?.(ap.id, note);
-                                } : undefined}
-                                disabled={busy}
-                                footer={conditionsWaitingOn(ap.conditions, ap.status) === 'it'
-                                  ? `Waiting for ${head.requestedByName || 'the technician'} to answer your conditions — you can still decide now.`
-                                  : ap.status === 'info_requested' ? 'A question is out — you can still decide, or wait for the answer below.' : 'Decisions ask you to confirm first.'}
-                              />
-                            </div>
-                          )}
-
-                          {/* Everyone else on a pending row: who holds it. Admins may hand it on (forward-only composer). */}
-                          {ap.status === 'pending' && !isApprover && (
-                            <div className="mt-2" data-testid="approval-waiting-on">
-                              {/* 23 Sep 2026: "only they can decide" was wrong on a shared
-                                  request (any one approver decides), and a second Forward
-                                  sat open under a row the viewer already approves on. */}
-                              <p className="text-[11px] text-muted-foreground border-l-2 border-border pl-2">
-                                {viewerApprovesHere ? (
-                                  <>Also with <span className="font-medium text-foreground/85">{approverLabel}</span> — whichever of you decides first closes the request.</>
-                                ) : (
-                                  <>
-                                    Waiting on <span className="font-medium text-foreground/85">{approverLabel}</span>
-                                    {rows.length > 1 ? ' — one of the approvers; any one of them decides' : ' — only they can decide'}
-                                    {tierCount > 1 ? ` ${(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}` : ''}.
-                                  </>
-                                )}
-                                {canForwardAsAdmin && !viewerApprovesHere && !forwardOpen.has(ap.id) && (
-                                  <>
-                                    {' '}
-                                    <button
-                                      type="button"
-                                      onClick={() => setForwardOpen((prev) => new Set(prev).add(ap.id))}
-                                      className="tp-focus-ring rounded font-medium text-primary hover:underline"
-                                    >
-                                      Forward to someone else
-                                    </button>
-                                  </>
-                                )}
-                              </p>
-                              {canForwardAsAdmin && !viewerApprovesHere && forwardOpen.has(ap.id) && (
-                                <div className="mt-2">
-                                  <ApprovalComposer
-                                    compact
-                                    canDecide={false}
-                                    showShortcuts={false}
-                                    minHeight={120}
-                                    approval={{ ...ap, ticketRef: null, requesterName: requester?.name || null, canEscalate: false, nextTier: null, tierName: (tiers[(ap.tier || 1) - 1] || {}).name || null, amountLabel: null }}
-                                    participants={participants}
-                                    selfEmail={ap.approverEmail}
-                                    forwardCandidates={people.filter((p) => p.email !== approverKey && p.email !== String(ap.requestedBy || '').toLowerCase())}
-                                    onDecide={() => {}}
-                                    onHandoff={async ({ mode, note, toEmail }) => { if (mode === 'forward') await onForward(ap.id, toEmail, note); }}
-                                    disabled={busy}
-                                    footer={`Forwarding moves the request to the person you pick; ${approverLabel} is told.`}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* 26 Oct 2026: the answers are in and back with the approver. */}
-                          {conditionsWaitingOn(ap.conditions, ap.status) === 'approver' && !isApprover && (
-                            <ConditionsReview conditions={ap.conditions} className="mt-2" />
-                          )}
-                          {/* IT answers the approver's conditions, one by one. */}
-                          {conditionsWaitingOn(ap.conditions, ap.status) === 'it' && !isApprover && (
-                            onAnswerConditions ? (
-                              <ConditionsAnswerForm
-                                key={`${ap.id}-${readConditions(ap.conditions).round || 1}`}
-                                conditions={ap.conditions}
-                                approverName={approverLabel}
-                                requesterName={requester?.name || null}
-                                busy={busy}
-                                onSave={(answers) => onAnswerConditions(ap.id, { answers, submit: false })}
-                                onSubmit={(answers) => onAnswerConditions(ap.id, { answers, submit: true })}
-                                onAskRequester={onAsk && requester?.email ? async (q) => {
-                                  await onAsk(ap.id, { kind: 'question', mode: 'requester', to: [String(requester.email).toLowerCase()], cc: [], bodyText: q, bodyHtml: null });
-                                  await loadMessages();
-                                } : null}
-                              />
-                            ) : <ConditionsReview conditions={ap.conditions} className="mt-2" />
-                          )}
-
-                          {/* Requester actions: type the requested info right here,
-                              it travels with the resubmit (QA 07-14 #1). */}
-                          {ap.status === 'info_requested' && isRequester && conditionsWaitingOn(ap.conditions, ap.status) !== 'it' && (
-                            <div className="mt-2 space-y-1.5">
-                              <textarea
-                                rows={2}
-                                value={resubmitNotes[ap.id] || ''}
-                                onChange={(e) => setResubmitNotes((m) => ({ ...m, [ap.id]: e.target.value }))}
-                                placeholder="Reply with the requested info — sent to the approver with the resubmit…"
-                                className="tp-focus-ring w-full text-xs bg-card border border-violet-200 dark:border-violet-500/30 rounded-lg px-2.5 py-1.5 placeholder:text-muted-foreground/75 resize-y"
-                              />
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <button
-                                  onClick={() => onResubmit(ap.id, (resubmitNotes[ap.id] || '').trim() || null)}
-                                  disabled={busy}
-                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
-                                >
-                                  <ChevronRight className="w-3 h-3" aria-hidden="true" /> Resubmit for approval
-                                </button>
-                                <span className="text-[11px] text-muted-foreground/75">Your reply is kept on the request and emailed to the approver.</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-
-                {/* Approvals v3: the conversation on this request — request note,
-                    hand-offs, questions / answers (internal ones locked), with an
-                    in-app Answer for whoever the question was addressed to. */}
+              <div className="px-5 py-4">
                 {(() => {
+                  // 26 Oct 2026 (ticket 65030): one status line says who the
+                  // request waits on and for what; the conversation is the main
+                  // thing, newest last; ONE composer at the bottom changes with
+                  // who is looking and what is pending.
                   const groupId = head.requestGroupId || `single-${head.id}`;
                   const groupMessages = messages.filter((m) => m.requestGroupId === groupId || (m.approvalId && rows.some((r) => r.id === m.approvalId)));
-                  const answered = new Set(groupMessages.filter((m) => m.kind === 'answer' && m.inReplyToId).map((m) => m.inReplyToId));
-                  const awaiting = groupMessages.some((m) => m.kind === 'question' && m.audience === 'internal' && !answered.has(m.id));
+                  const state = threadState(groupMessages);
+                  const nameOf = (email) => {
+                    const e = String(email || '').toLowerCase();
+                    if (!e) return null;
+                    if (requester?.email && String(requester.email).toLowerCase() === e && requester.name) return requester.name;
+                    const row = rows.find((r) => String(r.approverEmail || '').toLowerCase() === e && r.approverName);
+                    return people.find((p) => p.email === e)?.name || row?.approverName || (String(head.requestedBy || '').toLowerCase() === e ? head.requestedByName : null) || e;
+                  };
+                  const youOr = (email) => (actorEmail && String(email || '').toLowerCase() === actorEmail ? 'you' : nameOf(email));
+                  const agentEmail = String(head.requestedBy || '').toLowerCase();
+                  const agentName = head.requestedByName || nameOf(agentEmail);
+                  const viewerIsAgent = Boolean(actorEmail) && actorEmail === agentEmail;
                   const viewerIsApprover = rows.some((r) => String(r.approverEmail).toLowerCase() === actorEmail);
-                  const threadApproval = { ...head, requestNote: null, requestNoteHtml: null, clarificationLog: rows.flatMap((r) => r.clarificationLog || []), escalationLog: rows.flatMap((r) => r.escalationLog || []) };
-                  // Who is on the request, with their part in it (for the To line).
+                  const openRows = rows.filter((r) => r.status === 'pending' || r.status === 'info_requested');
+                  const myRow = openRows.find((r) => String(r.approverEmail || '').toLowerCase() === actorEmail) || null;
+                  const condItRow = rows.find((r) => conditionsWaitingOn(r.conditions, r.status) === 'it') || null;
+                  const condApproverRow = rows.find((r) => conditionsWaitingOn(r.conditions, r.status) === 'approver') || null;
+                  const infoRow = rows.find((r) => r.status === 'info_requested' && conditionsWaitingOn(r.conditions, r.status) !== 'it') || null;
+                  const latestOpen = state.open[state.open.length - 1] || null;
+                  // When a relayed question was sent on, it is "asked" from then.
+                  const askedAt = (m) => {
+                    if (!m) return null;
+                    for (const [, r] of state.relays) if (r.copy.id === m.id) return r.marker.createdAt || m.createdAt;
+                    return m.createdAt;
+                  };
+                  const tierLabel = (ap) => (tierCount > 1 ? (tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}` : null);
+                  const approverLabelOf = (ap) => ap.approverName || nameOf(ap.approverEmail);
+
+                  // ---- who the request waits on
+                  let waiting = null; // { who, line, sub, at, mine }
+                  if (condItRow) {
+                    waiting = { mine: viewerIsAgent, line: `Waiting on ${viewerIsAgent ? 'you' : agentName} to answer ${firstName(approverLabelOf(condItRow))}'s conditions`, sub: `${approverLabelOf(condItRow)} approved on ${readConditions(condItRow.conditions).items.length === 1 ? 'a condition' : `${readConditions(condItRow.conditions).items.length} conditions`} — it is not approved until each one is answered.`, at: condItRow.decidedAt };
+                  } else if (condApproverRow) {
+                    const mine = String(condApproverRow.approverEmail || '').toLowerCase() === actorEmail;
+                    waiting = { mine, line: `Waiting on ${mine ? 'you' : approverLabelOf(condApproverRow)} to decide`, sub: 'The answers to the conditions are in.' };
+                  } else if (latestOpen) {
+                    const askerEmail = String(latestOpen.author?.email || '').toLowerCase();
+                    const asker = askerEmail === actorEmail ? 'your' : `${firstName(latestOpen.author?.name || nameOf(askerEmail))}'s`;
+                    const to = (latestOpen.to || []).map((e) => String(e).toLowerCase());
+                    const mine = to.includes(actorEmail);
+                    waiting = {
+                      mine,
+                      line: `Waiting on ${mine && to.length === 1 ? 'you' : orList(to.map(youOr))} to answer ${asker} question`,
+                      sub: latestOpen.audience === 'internal' ? `Internal — ${requester?.name || 'the requester'} does not see it.` : null,
+                      at: askedAt(latestOpen), atVerb: askedAt(latestOpen) !== latestOpen.createdAt ? `sent to ${to.length > 1 ? 'them' : (mine ? 'you' : firstName(nameOf(to[0])))}` : 'asked',
+                    };
+                  } else if (infoRow) {
+                    waiting = { mine: viewerIsAgent, line: `Waiting on ${viewerIsAgent ? 'you' : agentName} to send ${firstName(approverLabelOf(infoRow))} the information they asked for`, at: null };
+                  } else if (openRows.length) {
+                    const others = openRows.filter((r) => r !== myRow);
+                    const who = myRow ? (others.length ? `you or ${orList(others.map(approverLabelOf))}` : 'you') : orList(openRows.map(approverLabelOf));
+                    const tierName = openRows.length && tierCount > 1 ? ` (${tierLabel(openRows[0])})` : '';
+                    waiting = {
+                      mine: Boolean(myRow),
+                      line: `Waiting on ${who}${tierName} to decide`,
+                      sub: myRow && others.length
+                        ? `Also with ${orList(others.map(approverLabelOf))} — whichever of you decides first closes the request.`
+                        : !myRow ? (openRows.length > 1 ? 'Any one of them decides.' : 'Only they can decide.') : null,
+                    };
+                  }
+
+                  // ---- the last thing that happened
+                  const threadApproval = { ...head, requestedByName: agentName, clarificationLog: rows.flatMap((r) => r.clarificationLog || []), escalationLog: rows.flatMap((r) => r.escalationLog || []) };
+                  const items = buildThreadItems({ approval: threadApproval, messages: groupMessages, people });
+                  const lastEvent = items.reduce((acc, it) => {
+                    const at = it.relay?.at || it.at;
+                    const by = it.relay ? it.relay.by : it.author;
+                    const t = at ? new Date(at).getTime() : 0;
+                    return !acc || t >= acc.t ? { t, at, by } : acc;
+                  }, null);
+
+                  // ---- the one composer
+                  const target = (answering && state.open.some((m) => m.id === answering.id)) ? answering : latestOpen;
+                  const targetTo = (target?.to || []).map((e) => String(e).toLowerCase());
+                  const targetCc = (target?.cc || []).map((e) => String(e).toLowerCase());
+                  const canAnswerTarget = Boolean(target) && typeof onAnswer === 'function' && String(target.author?.email || '').toLowerCase() !== actorEmail && (targetTo.includes(actorEmail) || targetCc.includes(actorEmail) || actorIsAdmin);
+                  const isRequesterSide = actorIsAdmin || viewerIsAgent;
+                  let mode = null;
+                  if (answering && canAnswerTarget) mode = 'answer';
+                  else if (myRow) mode = 'approver';
+                  else if (condItRow && onAnswerConditions) mode = 'conditions';
+                  else if (canAnswerTarget) mode = 'answer';
+                  else if (infoRow && isRequesterSide && !latestOpen) mode = 'resubmit';
+                  const forwardRows = actorIsAdmin && !myRow && typeof onForward === 'function' ? rows.filter((r) => r.status === 'pending') : [];
+                  const participantsFor = (ap) => ({
+                    requester: requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null, role: 'requester' } : null,
+                    agent: ap.requestedBy ? { email: agentEmail, name: agentName || null, role: 'agent' } : null,
+                    approvers: rows.map((r) => ({ email: String(r.approverEmail).toLowerCase(), name: approverLabelOf(r) || null, role: 'approver' })),
+                  });
                   const threadParticipants = {
                     requester: requester?.email ? { email: String(requester.email).toLowerCase(), name: requester.name || null } : null,
-                    agent: head.requestedBy ? { email: String(head.requestedBy).toLowerCase() } : null,
+                    agent: head.requestedBy ? { email: agentEmail } : null,
                     approvers: rows.map((r) => ({ email: String(r.approverEmail || '').toLowerCase(), tier: r.tier || 1 })),
                     tierCount,
                   };
-                  if (!groupMessages.length && !threadApproval.clarificationLog.length && !threadApproval.escalationLog.length && !awaiting) return null;
+                  const threadPeople = [...people, ...(requester?.email && requester.name ? [{ email: String(requester.email).toLowerCase(), name: requester.name }] : [])];
+
                   return (
-                    <div className="mt-3 border-t border-border/60 pt-3">
-                      <ApprovalThread
-                        compact
-                        approval={threadApproval}
-                        messages={groupMessages}
-                        people={people}
-                        viewerEmail={actorEmail}
-                        viewerRole={actorIsAdmin ? 'admin' : viewerIsApprover ? 'approver' : 'agent'}
-                        awaitingApprover={awaiting}
-                        onAnswer={onAnswer ? (m) => setAnswering(m) : null}
-                        participants={threadParticipants}
-                        onAskRequester={onAskRequester ? async (m) => { await onAskRequester(m.id); await loadMessages(); } : null}
-                        title="Conversation"
-                      />
-                      {answering && groupMessages.some((m) => m.id === answering.id) && (
-                        <AnswerBox
-                          message={answering}
-                          busy={answerBusy}
-                          onCancel={() => setAnswering(null)}
-                          onSend={async (payload) => {
-                            setAnswerBusy(true);
-                            try { await onAnswer(answering.id, payload); setAnswering(null); await loadMessages(); }
-                            finally { setAnswerBusy(false); }
-                          }}
-                        />
+                    <>
+                      {/* Who it waits on — the first thing to read. */}
+                      {waiting && (
+                        <div className="flex items-start gap-3" data-testid="approval-waiting-on" role="status">
+                          <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${waiting.mine ? 'bg-primary text-primary-foreground' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100'}`}>
+                            <Hourglass className="h-4 w-4" aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[15px] font-semibold leading-snug text-foreground">
+                              {waiting.line}
+                              {waiting.at && <span className="font-normal text-muted-foreground" title={new Date(waiting.at).toLocaleString()}> · {waiting.atVerb || 'since'} {formatDayTime(waiting.at)}</span>}
+                            </p>
+                            {waiting.sub && <p className="mt-0.5 text-[13px] text-muted-foreground">{waiting.sub}</p>}
+                          </div>
+                        </div>
                       )}
-                    </div>
+                      <p className={`${waiting ? 'mt-1.5 sm:pl-11' : ''} text-[12.5px] text-muted-foreground`} data-testid="approval-requested-by">
+                        Requested by <span className="font-medium text-foreground/85">{agentName}</span>
+                        {lastEvent?.by?.name && items.length > 1 && (
+                          <> · last update from <span className="font-medium text-foreground/85">{String(lastEvent.by.email || '').toLowerCase() === actorEmail ? 'you' : lastEvent.by.name}</span>{lastEvent.at ? `, ${formatDayTime(lastEvent.at)}` : ''}</>
+                        )}
+                      </p>
+
+                      {/* The approvers, in tier order — one line each, no notes (the conversation has them). */}
+                      <ol className={`${waiting ? 'mt-3 sm:pl-11' : 'mt-3'} flex flex-wrap items-center gap-x-2 gap-y-2 text-[12.5px]`} aria-label="Approvers">
+                        {rows.map((ap, i) => {
+                          const sm = statusMeta(ap.status);
+                          const approverKey = String(ap.approverEmail || '').toLowerCase();
+                          const person = people.find((p) => p.email === approverKey) || null;
+                          const label = approverLabelOf(ap);
+                          const prev = rows[i - 1];
+                          const handoff = [...(ap.escalationLog || [])].reverse()[0];
+                          const ownQuestion = [...groupMessages].reverse().find((m) => m.kind === 'question' && String(m.author?.email || '').toLowerCase() === approverKey && !state.hidden.has(m.id));
+                          const cond = conditionsWaitingOn(ap.conditions, ap.status);
+                          let what = rowLabel(ap);
+                          let at = ap.decidedAt;
+                          if ((ap.status === 'escalated' || ap.status === 'forwarded') && handoff) {
+                            const to = (handoff.toNames?.length ? handoff.toNames : (handoff.toEmails || []).map(nameOf)).filter(Boolean);
+                            what = `${handoff.kind === 'auto' ? 'Approved · sent up' : handoff.kind === 'forwarded' ? 'Forwarded' : 'Escalated'}${to.length ? ` to ${andList(to)}` : ''}`;
+                            at = handoff.at || at;
+                          } else if (cond === 'it') {
+                            what = `Approved on ${readConditions(ap.conditions).items.length === 1 ? 'a condition' : `${readConditions(ap.conditions).items.length} conditions`}`;
+                          } else if (cond === 'approver') {
+                            what = 'Answers in · deciding';
+                          } else if (ap.status === 'info_requested') {
+                            what = 'Asked a question';
+                            at = ownQuestion?.createdAt || at;
+                          } else if (ap.status === 'pending') {
+                            what = 'Deciding';
+                          }
+                          return (
+                            <li key={ap.id} className="flex items-center gap-2" data-testid="approver-row" data-status={ap.status}>
+                              {prev && (prev.tier || 1) !== (ap.tier || 1)
+                                ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                                : prev ? <span className="text-muted-foreground/75">or</span> : null}
+                              <span className="relative shrink-0">
+                                <ApproverAvatar email={approverKey} name={label} photoUrl={person?.photoUrl || null} size="h-6 w-6" textSize="text-[9px]" />
+                                <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card ${sm.dot}`} title={sm.label} />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="font-medium text-foreground" title={ap.approverEmail}>{label}</span>
+                                {tierCount > 1 && <span className="text-muted-foreground"> · {tierLabel(ap)}</span>}
+                                {ap.isFinal && <span className="text-muted-foreground" title="Forwarded as the final approver"> · final</span>}
+                                <span className={` ${sm.text}`} data-testid="approver-status"> · {what}</span>
+                                {at && <span className="text-muted-foreground/75" title={new Date(at).toLocaleString()}> {formatDayTime(at)}</span>}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ol>
+
+                      {/* The conversation — request, hand-offs, questions, answers; newest last. */}
+                      {items.length > 0 && <div className="mt-4 border-t border-border/60 pt-4">
+                        <ApprovalThread
+                          compact
+                          approval={threadApproval}
+                          messages={groupMessages}
+                          people={threadPeople}
+                          viewerEmail={actorEmail}
+                          viewerRole={actorIsAdmin ? 'admin' : viewerIsApprover ? 'approver' : 'agent'}
+                          // The composer below answers the newest open question; "Answer" on an older one moves it there.
+                          onAnswer={onAnswer && state.open.length > (mode === 'answer' ? 1 : 0) ? (m) => setAnswering(m) : null}
+                          participants={threadParticipants}
+                          onAskRequester={onAskRequester ? async (m) => { await onAskRequester(m.id); await loadMessages(); } : null}
+                          showOpenState={false}
+                          title="Conversation"
+                        />
+                      </div>}
+
+                      {/* 26 Oct 2026: the answers are in and back with the approver. */}
+                      {condApproverRow && String(condApproverRow.approverEmail || '').toLowerCase() !== actorEmail && (
+                        <ConditionsReview conditions={condApproverRow.conditions} className="mt-4" />
+                      )}
+
+                      {/* The one place to write — it changes with the viewer and what is pending. */}
+                      {(mode || forwardRows.length > 0) && (
+                        <div className="mt-4 border-t border-border/60 pt-4" data-testid="approval-composer-slot" data-mode={mode || 'forward'}>
+                          {mode === 'approver' && (() => {
+                            const ap = myRow;
+                            const nextTier = tiers[ap.tier || 1] || null;
+                            return (
+                              <>
+                                <p className="mb-2 text-[14px] font-semibold text-foreground">Your decision{tierCount > 1 ? ` · ${tierLabel(ap)}` : ''}</p>
+                                <ApprovalComposer
+                                  compact
+                                  showShortcuts={false}
+                                  minHeight={160}
+                                  approval={{
+                                    ...ap,
+                                    ticketRef: null,
+                                    requesterName: requester?.name || null,
+                                    canEscalate: Boolean(!ap.isFinal && nextTier && onEscalate),
+                                    nextTier: nextTier ? { name: nextTier.name, approverNames: (nextTier.managerEmails || []).map((e) => people.find((p) => p.email === e)?.name || e) } : null,
+                                    tierName: (tiers[(ap.tier || 1) - 1] || {}).name || null,
+                                    amountLabel: null,
+                                  }}
+                                  participants={participantsFor(ap)}
+                                  selfEmail={ap.approverEmail}
+                                  forwardCandidates={people.filter((p) => p.email !== String(ap.approverEmail).toLowerCase() && p.email !== agentEmail)}
+                                  onDecide={(decision, note, noteHtml, extra) => onDecide(ap.id, decision, note, { noteHtml, ...extra })}
+                                  onAsk={onAsk ? async (payload) => { await onAsk(ap.id, payload); await loadMessages(); } : undefined}
+                                  onHandoff={(onEscalate || onForward) ? async ({ mode: m, note, toEmail }) => {
+                                    if (m === 'forward') await onForward?.(ap.id, toEmail, note);
+                                    else await onEscalate?.(ap.id, note);
+                                  } : undefined}
+                                  disabled={savingField === `approval-${ap.id}`}
+                                  footer={conditionsWaitingOn(ap.conditions, ap.status) === 'it'
+                                    ? `Waiting for ${agentName || 'the technician'} to answer your conditions — you can still decide now.`
+                                    : latestOpen ? 'A question is out — you can still decide, or wait for the answer.' : 'Decisions ask you to confirm first.'}
+                                />
+                              </>
+                            );
+                          })()}
+
+                          {mode === 'conditions' && (
+                            <ConditionsAnswerForm
+                              key={`${condItRow.id}-${readConditions(condItRow.conditions).round || 1}`}
+                              conditions={condItRow.conditions}
+                              approverName={approverLabelOf(condItRow)}
+                              requesterName={requester?.name || null}
+                              busy={savingField === `approval-${condItRow.id}`}
+                              onSave={(answers) => onAnswerConditions(condItRow.id, { answers, submit: false })}
+                              onSubmit={(answers) => onAnswerConditions(condItRow.id, { answers, submit: true })}
+                              onAskRequester={onAsk && requester?.email ? async (q) => {
+                                await onAsk(condItRow.id, { kind: 'question', mode: 'requester', to: [String(requester.email).toLowerCase()], cc: [], bodyText: q, bodyHtml: null });
+                                await loadMessages();
+                              } : null}
+                            />
+                          )}
+
+                          {mode === 'answer' && (() => {
+                            const askerName = target.author?.name || nameOf(target.author?.email) || 'the approver';
+                            const toRequester = target.audience !== 'internal';
+                            const direct = targetTo.includes(actorEmail);
+                            const reqName = requester?.name || 'the requester';
+                            const askerRow = rows.find((r) => String(r.approverEmail || '').toLowerCase() === String(target.author?.email || '').toLowerCase());
+                            const backTo = askerRow && askerRow.status === 'info_requested' ? ` The request goes back to ${firstName(askerName)} to decide.` : '';
+                            return (
+                              <AnswerComposer
+                                key={target.id}
+                                message={target}
+                                heading={`Answer ${firstName(askerName)}'s question${!direct && toRequester ? ` for ${firstName(reqName)}` : ''}`}
+                                recipients={toRequester
+                                  ? `Goes to ${askerName} and everyone on the e-mail.${backTo}`
+                                  : `Goes to ${askerName} — internal, ${reqName} does not see it.`}
+                                folded={!direct && !viewerIsAgent && !answering}
+                                foldedText={`${orList(targetTo.map(youOr))} ${targetTo.length > 1 ? 'were' : 'was'} asked. You are copied.`}
+                                busy={answerBusy || savingField === `approval-answer-${target.id}`}
+                                onSend={async (payload) => {
+                                  setAnswerBusy(true);
+                                  try { await onAnswer(target.id, payload); setAnswering(null); await loadMessages(); }
+                                  finally { setAnswerBusy(false); }
+                                }}
+                                secondary={answering ? (
+                                  <button type="button" onClick={() => setAnswering(null)} className="tp-focus-ring rounded-lg px-2 py-1 text-[12px] font-medium text-muted-foreground hover:bg-muted">Cancel</button>
+                                ) : infoRow && isRequesterSide && typeof onResubmit === 'function' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onResubmit(infoRow.id, null)}
+                                    disabled={savingField === `approval-${infoRow.id}`}
+                                    className="tp-focus-ring rounded-lg px-2 py-1 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                                    title={`Puts the request back with ${approverLabelOf(infoRow)} to decide, without an answer`}
+                                  >
+                                    Send back to {firstName(approverLabelOf(infoRow))} without an answer
+                                  </button>
+                                ) : null}
+                              />
+                            );
+                          })()}
+
+                          {mode === 'resubmit' && (
+                            <div className="space-y-2">
+                              <p className="text-[14px] font-semibold text-foreground">Send {firstName(approverLabelOf(infoRow))} the information they asked for</p>
+                              <textarea
+                                rows={3}
+                                value={resubmitNotes[infoRow.id] || ''}
+                                onChange={(e) => setResubmitNotes((m) => ({ ...m, [infoRow.id]: e.target.value }))}
+                                placeholder="Your reply…"
+                                aria-label={`Reply to ${approverLabelOf(infoRow)}`}
+                                className="tp-focus-ring w-full resize-y rounded-lg border border-input bg-card px-3 py-2 text-[13.5px] placeholder:text-muted-foreground/75"
+                              />
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                                <button
+                                  onClick={() => onResubmit(infoRow.id, (resubmitNotes[infoRow.id] || '').trim() || null)}
+                                  disabled={savingField === `approval-${infoRow.id}`}
+                                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                >
+                                  <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> Resubmit for approval
+                                </button>
+                                <span className="text-[12px] text-muted-foreground">Your reply is kept on the request and e-mailed to {approverLabelOf(infoRow)}.</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Admins may hand a pending row on (forward-only composer, folded until asked for). */}
+                          {forwardRows.map((ap) => (
+                            <div key={`fwd-${ap.id}`} className={mode ? 'mt-3' : ''}>
+                              {!forwardOpen.has(ap.id) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setForwardOpen((prev) => new Set(prev).add(ap.id))}
+                                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-primary hover:underline"
+                                >
+                                  <Forward className="h-3.5 w-3.5" aria-hidden="true" />
+                                  {forwardRows.length > 1 ? `Forward ${firstName(approverLabelOf(ap))}'s part to someone else` : 'Forward to someone else'}
+                                </button>
+                              ) : (
+                                <ApprovalComposer
+                                  compact
+                                  canDecide={false}
+                                  showShortcuts={false}
+                                  minHeight={120}
+                                  approval={{ ...ap, ticketRef: null, requesterName: requester?.name || null, canEscalate: false, nextTier: null, tierName: (tiers[(ap.tier || 1) - 1] || {}).name || null, amountLabel: null }}
+                                  participants={participantsFor(ap)}
+                                  selfEmail={ap.approverEmail}
+                                  forwardCandidates={people.filter((p) => p.email !== String(ap.approverEmail || '').toLowerCase() && p.email !== agentEmail)}
+                                  onDecide={() => {}}
+                                  onHandoff={async ({ mode: m, note, toEmail }) => { if (m === 'forward') await onForward(ap.id, toEmail, note); }}
+                                  disabled={savingField === `approval-${ap.id}`}
+                                  footer={`Forwarding moves the request to the person you pick; ${approverLabelOf(ap)} is told.`}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   );
                 })()}
 

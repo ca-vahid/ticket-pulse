@@ -1,19 +1,18 @@
 /**
- * Per-workspace Knowledge switches (Auto-help P1): the FreshService solution
- * import (folders) and the weekly "review due" digest. Both off by default.
- * A missing table (migration not applied yet) reads as the defaults and
- * refuses writes with a clear message instead of a 500.
+ * Per-workspace Knowledge switches (Auto-help P1): the weekly "review due"
+ * digest (off by default) and contribution by skill. A missing table
+ * (migration not applied yet) reads as the defaults and refuses writes with
+ * a clear message instead of a 500.
+ *
+ * The FreshService solution-article import was removed on 26 Oct 2026
+ * (QA 10-26 #7). Its columns (fs_import_enabled, fs_folder_ids,
+ * fs_import_state, fs_imported_at) stay in the table, unread and unwritten.
  */
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError } from '../utils/errors.js';
 
-export const MAX_FS_FOLDERS = 50;
 export const DEFAULT_KNOWLEDGE_SETTINGS = Object.freeze({
-  fsImportEnabled: false,
-  fsFolderIds: [],
-  fsImportState: null,
-  fsImportedAt: null,
   reviewDigestEnabled: false,
   reviewDigestSentAt: null,
 });
@@ -27,8 +26,7 @@ export const CONTRIBUTION_LEVELS = Object.freeze(['basic', 'intermediate', 'adva
  * columns separately, and confluence_auth never leaves the server.
  */
 export const SETTINGS_SELECT = Object.freeze({
-  workspaceId: true, fsImportEnabled: true, fsFolderIds: true, fsImportState: true, fsImportedAt: true,
-  reviewDigestEnabled: true, reviewDigestSentAt: true, publishLevel: true, checkLevel: true, askAtClose: true,
+  workspaceId: true, reviewDigestEnabled: true, reviewDigestSentAt: true, publishLevel: true, checkLevel: true, askAtClose: true,
   askDailyCap: true, stewardEnabled: true, stewardState: true, inboxWeeklyCap: true, updatedBy: true, updatedAt: true,
 });
 const CONTRIBUTION_DEFAULTS = Object.freeze({ publishLevel: 'intermediate', checkLevel: 'advanced', askAtClose: false, askDailyCap: 1, inboxWeeklyCap: 5, stewardEnabled: false });
@@ -39,10 +37,6 @@ function view(row, workspaceId) {
     ...DEFAULT_KNOWLEDGE_SETTINGS,
     ...CONTRIBUTION_DEFAULTS,
     ...(row ? {
-      fsImportEnabled: row.fsImportEnabled === true,
-      fsFolderIds: Array.isArray(row.fsFolderIds) ? row.fsFolderIds.map(String) : [],
-      fsImportState: row.fsImportState ?? null,
-      fsImportedAt: row.fsImportedAt ?? null,
       reviewDigestEnabled: row.reviewDigestEnabled === true,
       reviewDigestSentAt: row.reviewDigestSentAt ?? null,
       // Contribution by skill and the nightly review (plans/KNOWLEDGE_SIMPLIFY_PLAN.md sections 7-10).
@@ -59,18 +53,6 @@ function view(row, workspaceId) {
   };
 }
 
-export function cleanFolderIds(list) {
-  if (!Array.isArray(list)) throw new ValidationError('fsFolderIds must be a list of FreshService folder ids');
-  const out = [];
-  for (const raw of list) {
-    const id = String(raw ?? '').trim();
-    if (!/^\d{1,20}$/.test(id)) throw new ValidationError(`"${id}" is not a FreshService folder id`);
-    if (!out.includes(id)) out.push(id);
-  }
-  if (out.length > MAX_FS_FOLDERS) throw new ValidationError(`Pick at most ${MAX_FS_FOLDERS} folders`);
-  return out;
-}
-
 class KnowledgeSettingsService {
   async get(workspaceId) {
     const row = await Promise.resolve()
@@ -81,8 +63,6 @@ class KnowledgeSettingsService {
 
   async update(workspaceId, input = {}, actor = null) {
     const data = {};
-    if (input.fsImportEnabled !== undefined) data.fsImportEnabled = input.fsImportEnabled === true;
-    if (input.fsFolderIds !== undefined) data.fsFolderIds = cleanFolderIds(input.fsFolderIds);
     if (input.reviewDigestEnabled !== undefined) data.reviewDigestEnabled = input.reviewDigestEnabled === true;
     for (const field of ['publishLevel', 'checkLevel']) {
       if (input[field] === undefined) continue;
@@ -105,9 +85,6 @@ class KnowledgeSettingsService {
     if (CONTRIBUTION_LEVELS.indexOf(check) < CONTRIBUTION_LEVELS.indexOf(publish)) {
       throw new ValidationError('The level that can check articles cannot be lower than the level that can write them');
     }
-    if ((data.fsImportEnabled ?? current.fsImportEnabled) && !(data.fsFolderIds ?? current.fsFolderIds).length) {
-      throw new ValidationError('Pick at least one FreshService folder before switching the import on');
-    }
     const by = actor?.email || actor?.name || null;
     try {
       const row = await prisma.knowledgeSettings.upsert({
@@ -123,7 +100,7 @@ class KnowledgeSettingsService {
     }
   }
 
-  /** Bookkeeping written by the import / digest workers. Never throws. */
+  /** Bookkeeping written by the digest and steward workers. Never throws. */
   async record(workspaceId, data) {
     return Promise.resolve()
       .then(() => prisma.knowledgeSettings.upsert({

@@ -20,6 +20,7 @@ const prismaMock = {
 };
 const holdMock = {
   list: jest.fn(), count: jest.fn(), attach: jest.fn(), createTicket: jest.fn(), discard: jest.fn(),
+  listGroups: jest.fn(), bulk: jest.fn(), getBurstFoldMode: jest.fn(), setBurstFoldMode: jest.fn(),
 };
 const emailHealthMock = { getGraphSendLane: jest.fn() };
 const graphMock = { isConfigured: jest.fn(() => true), testConnection: jest.fn() };
@@ -115,6 +116,39 @@ describe('GET /api/tickets/mailboxes/held', () => {
     const res = await request(asAgent()).get('/api/tickets/mailboxes/held?status=discarded').expect(200);
     expect(res.body.meta).toEqual({ heldCount: 4 });
     expect(holdMock.count).toHaveBeenCalledWith(7, 'held');
+  });
+});
+
+describe('alert bursts grouped by device (QA 10-26 #3)', () => {
+  test('GET /held/groups is the grouped queue and is never read as a held id', async () => {
+    holdMock.listGroups.mockResolvedValue({ groups: [{ sender: 'nas@x.io', count: 63 }], singles: [], total: 63, mode: 'shadow' });
+    const res = await request(asAgent()).get('/api/tickets/mailboxes/held/groups').expect(200);
+    expect(res.body.data).toEqual({ groups: [{ sender: 'nas@x.io', count: 63 }], singles: [], total: 63, mode: 'shadow' });
+    expect(holdMock.listGroups).toHaveBeenCalledWith(7);
+    prismaMock.technician.findFirst.mockResolvedValue(null);
+    await request(asViewer()).get('/api/tickets/mailboxes/held/groups').expect(403);
+  });
+
+  test('POST /held/bulk: attach needs a ticketId; the service gets ids, action, ticket and actor', async () => {
+    await request(asAgent()).post('/api/tickets/mailboxes/held/bulk').send({ ids: [1, 2], action: 'attach' }).expect(400);
+    holdMock.bulk.mockResolvedValue({ action: 'attach', count: 2, ticket: { id: 42, displayRef: 'TP-1204' } });
+    const res = await request(asAgent()).post('/api/tickets/mailboxes/held/bulk').send({ ids: [1, 2], action: 'attach', ticketId: 42 }).expect(200);
+    expect(res.body.data.count).toBe(2);
+    expect(holdMock.bulk).toHaveBeenCalledWith(7, [1, 2], 'attach', { ticketId: 42, actor: expect.objectContaining({ technicianId: 3 }) });
+    holdMock.bulk.mockResolvedValue({ action: 'discard', count: 2 });
+    await request(asAgent()).post('/api/tickets/mailboxes/held/bulk').send({ ids: [1, 2], action: 'discard' }).expect(200);
+    expect(holdMock.bulk).toHaveBeenLastCalledWith(7, [1, 2], 'discard', expect.objectContaining({ ticketId: null }));
+  });
+
+  test('burst grouping mode: staff read it, only admins change it', async () => {
+    holdMock.getBurstFoldMode.mockResolvedValue('shadow');
+    const read = await request(asAgent()).get('/api/tickets/mailboxes/burst-grouping').expect(200);
+    expect(read.body.data).toEqual({ mode: 'shadow' });
+    await request(asAgent()).put('/api/tickets/mailboxes/burst-grouping').send({ mode: 'on' }).expect(403);
+    holdMock.setBurstFoldMode.mockResolvedValue('on');
+    const write = await request(buildApp(ADMIN)).put('/api/tickets/mailboxes/burst-grouping').send({ mode: 'on' }).expect(200);
+    expect(write.body.data).toEqual({ mode: 'on' });
+    expect(holdMock.setBurstFoldMode).toHaveBeenCalledWith(7, 'on');
   });
 });
 

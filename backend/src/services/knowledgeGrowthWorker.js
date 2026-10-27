@@ -1,18 +1,20 @@
 /**
  * Knowledge growth worker (Auto-help P1, plans/AUTO_HELP_P1_PLAN.md §4).
- * One 10-minute tick drives three jobs:
+ * One 10-minute tick drives these jobs:
  *
  *   solution embeddings   nightly, quiet hours (utils/quietHours.js), at most
  *                         once per 20 h: solutionEmbeddingService.runAll
- *   FreshService import   nightly, quiet hours, once per 20 h, workspaces with
- *                         the import on; production only (the service itself
- *                         refuses to call FreshService elsewhere)
  *   Confluence sync       nightly, quiet hours, once per 20 h, workspaces with
  *                         the Confluence sync on (and connected, and imported
  *                         once); suggestions only (confluenceKnowledgeService);
- *                         production only, like the FreshService import
+ *                         production only
+ *   Knowledge review      nightly, quiet hours, workspaces with it switched on
+ *                         (knowledgeStewardService)
  *   review digest         Monday 08:00 Pacific, opted-in workspaces, once a
  *                         week each (knowledgeReviewDigestService.tick)
+ *
+ * The nightly FreshService solution-article import was removed on 26 Oct
+ * 2026 (QA 10-26 #7).
  *
  * Last-run times live in app_settings `knowledge_growth_state`, so a restart
  * does not re-run a job that already ran tonight. Every job is non-fatal.
@@ -38,7 +40,7 @@ class KnowledgeGrowthWorker {
       this.tick().catch((err) => logger.warn(`Knowledge growth tick failed (non-fatal): ${err.message}`));
     }, TICK_MS);
     this.timer.unref?.();
-    logger.info('Knowledge growth worker started (solution embeddings + FreshService import + Confluence sync in quiet hours, review digest Mondays 08:00 PT)');
+    logger.info('Knowledge growth worker started (solution embeddings + Confluence sync + Knowledge review in quiet hours, review digest Mondays 08:00 PT)');
   }
 
   stop() {
@@ -76,11 +78,8 @@ class KnowledgeGrowthWorker {
           done.solutions = await solutionEmbeddingService.runAll().catch((err) => ({ error: err.message }));
           state.solutionsAt = now.toISOString();
         }
-        if (this._due(state.fsImportAt, now)) {
-          const { default: fsSolutionImportService } = await import('./fsSolutionImportService.js');
-          done.fsImport = await fsSolutionImportService.runAll().catch((err) => ({ error: err.message }));
-          state.fsImportAt = now.toISOString();
-        }
+        // The FreshService import's last-run stamp goes with it (QA 10-26 #7).
+        delete state.fsImportAt;
         // Confluence (QA 10-23 #4): changed / new / deleted pages become
         // inbox suggestions; nothing goes live without a person.
         if (this._due(state.confluenceAt, now)) {
@@ -98,7 +97,7 @@ class KnowledgeGrowthWorker {
       }
       const { default: digest } = await import('./knowledgeReviewDigestService.js');
       done.digest = await digest.tick(now).catch((err) => ({ error: err.message }));
-      if (done.solutions || done.fsImport || done.confluence || done.steward) await this._save(state);
+      if (done.solutions || done.confluence || done.steward) await this._save(state);
       return done;
     } finally {
       this.running = false;
