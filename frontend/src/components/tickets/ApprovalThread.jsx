@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowUpRight, CheckCircle2, Clock, CornerDownRight, Forward, Hourglass, Lock, MessageCircleQuestion, PenLine, Reply, Send, XCircle } from 'lucide-react';
 import { PersonAvatar, SafeHtml, formatDayTime } from './ticketUi';
 import { handoffSentence } from './ApprovalHandoff';
+import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 
 /**
  * Approvals v3 — the conversation on a request, oldest first, newest last:
@@ -161,9 +162,13 @@ export function andList(names) {
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
-function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, onAskRequester, participants, answeredIds, compact, nameOf = (e) => e, latest = false, last = false, showOpenState = true }) {
+function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, onAskRequester, participants, answeredIds, compact, nameOf = (e) => e, latest = false, last = false, showOpenState = true, lookupPhotos = false }) {
   const [confirmAsk, setConfirmAsk] = useState(false);
   const [askBusy, setAskBusy] = useState(false);
+  // Real faces (27 Oct 2026, Vahid: "I only see initials"): the directory
+  // photo by e-mail, cached per session, unless the caller already has one.
+  // Signed-in pages only: the public link pages cannot call the photo route.
+  const directoryPhoto = useRequesterPhoto(!lookupPhotos || item.kind === 'handoff' || item.author?.photoUrl ? null : item.author?.email);
   const meta = KIND_META[item.kind] || KIND_META.comment;
   const Icon = meta.Icon;
   const internal = item.audience === 'internal';
@@ -223,7 +228,7 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, onAskRequ
           <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100 ${latest ? 'ring-2 ring-primary/50 ring-offset-2 ring-offset-card' : ''}`}><Icon className="h-3.5 w-3.5" aria-hidden="true" /></span>
         ) : (
           <span className={`shrink-0 rounded-full ${latest ? 'ring-2 ring-primary/50 ring-offset-2 ring-offset-card' : ''}`}>
-            <PersonAvatar name={item.author?.name || item.author?.email} photoUrl={item.author?.photoUrl || null} size="h-7 w-7" textSize="text-[10px]" />
+            <PersonAvatar name={item.author?.name || item.author?.email} photoUrl={item.author?.photoUrl || directoryPhoto || null} size="h-7 w-7" textSize="text-[10px]" />
           </span>
         )}
         {!last && <span className="mt-1 w-px flex-1 bg-border" aria-hidden="true" />}
@@ -314,6 +319,8 @@ export default function ApprovalThread({
   participants = null, onAskRequester = null,
   // false = the caller shows who the request waits on (the ticket's status line), so items skip "Waiting for …".
   showOpenState = true,
+  // true = look up directory photos by e-mail (signed-in pages; never the public link pages).
+  lookupPhotos = false,
 }) {
   const items = buildThreadItems({ approval, messages, people });
   const nameOf = (email) => people.find((p) => p?.email === lc(email))?.name || email;
@@ -345,6 +352,7 @@ export default function ApprovalThread({
             latest={items.length > 1 && i === items.length - 1}
             last={i === items.length - 1}
             showOpenState={showOpenState}
+            lookupPhotos={lookupPhotos}
           />
         ))}
       </ol>

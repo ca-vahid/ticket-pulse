@@ -474,7 +474,15 @@ class MailboxIngestService {
       where: { emailMessageId: internetMessageId, workspaceId: connection.workspaceId },
       select: { id: true },
     });
-    return Boolean(seen);
+    if (seen) return true;
+    // An answer to an approval question lives in approval_messages, not the
+    // ticket thread (27 Oct 2026): without this, a later delta round (a
+    // read/unread flip) or the webhook worker read the same reply again and
+    // saved it, its ticket note and its relay e-mails twice.
+    const answer = await Promise.resolve()
+      .then(() => prisma.approvalMessage.findFirst({ where: { emailMessageId: internetMessageId, workspaceId: connection.workspaceId }, select: { id: true } }))
+      .catch(() => null);
+    return Boolean(answer);
   }
 
   /** Back-compat alias — the pipeline entry point is ingestSingleMessage. */
@@ -489,11 +497,21 @@ class MailboxIngestService {
    * table → new ticket / hold. Returns 'reply' | 'created' | 'held' | 'skipped'.
    */
   async ingestSingleMessage(connection, email, senderCreates = new Map()) {
+    // The poller and the webhook worker can hold the same message at once:
+    // only one of them reads it (27 Oct 2026).
+    const key = email?.internetMessageId ? `${connection.id}:${email.internetMessageId}` : null;
+    if (!this._inFlight) this._inFlight = new Set();
+    if (key && this._inFlight.has(key)) {
+      logger.info(`Mailbox ingest: ${email.internetMessageId} is already being read — skipped the second copy`);
+      return 'skipped';
+    }
+    if (key) this._inFlight.add(key);
     let outcome = 'error';
     try {
       outcome = await this._ingestOne(connection, email, senderCreates);
       return outcome;
     } finally {
+      if (key) this._inFlight.delete(key);
       this._count(connection, outcome);
     }
   }

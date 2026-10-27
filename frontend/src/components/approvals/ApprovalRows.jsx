@@ -309,6 +309,7 @@ export function RequestConversation({ a, viewerEmail, backState, refreshKey = 0 
         <p className="flex items-center gap-2 text-[13px] text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Reading the conversation…</p>
       ) : (
         <ApprovalThread
+          lookupPhotos
           approval={a}
           messages={messages}
           people={people}

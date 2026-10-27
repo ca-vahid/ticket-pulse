@@ -489,6 +489,7 @@ export default function ApprovalTimeline({
                       {items.length > 0 && <div className="mt-4 border-t border-border/60 pt-4">
                         <ApprovalThread
                           compact
+                          lookupPhotos
                           approval={threadApproval}
                           messages={groupMessages}
                           people={threadPeople}

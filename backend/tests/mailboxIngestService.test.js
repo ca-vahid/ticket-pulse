@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   mailboxConnection: { findMany: jest.fn(), update: jest.fn() },
   ticketThreadEntry: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+  approvalMessage: { findFirst: jest.fn() },
   ticket: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   ticketLink: { findFirst: jest.fn() },
   requester: { findUnique: jest.fn() },
@@ -140,6 +141,30 @@ describe('approval reply rung (Approvals v3)', () => {
     }));
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
     expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+  });
+
+  test('an approval answer already saved from this e-mail is not read again (27 Oct 2026: a later poll saved Phillip\'s answer twice)', async () => {
+    prismaMock.approvalMessage.findFirst.mockResolvedValueOnce({ id: 85 });
+    conversationMock.plusAddressApprovalKey.mockReturnValueOnce('abcdef012345');
+    const outcome = await mailboxIngestService.processEmail(connection, { ...baseEmail, to: ['helpdesk-pilot+apabcdef012345@example.com'] });
+    expect(outcome).toBe('skipped');
+    expect(prismaMock.approvalMessage.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { emailMessageId: '<abc-123@example.com>', workspaceId: connection.workspaceId } }));
+    expect(conversationMock.answer).not.toHaveBeenCalled();
+  });
+
+  test('the poller and the webhook worker holding the same message at once: only one reads it', async () => {
+    conversationMock.plusAddressApprovalKey.mockReturnValue('abcdef012345');
+    let release;
+    conversationMock.answer.mockImplementationOnce(() => new Promise((r) => { release = () => r({ message: { id: 5 } }); }));
+    const email = { ...baseEmail, to: ['helpdesk-pilot+apabcdef012345@example.com'] };
+    const first = mailboxIngestService.ingestSingleMessage(connection, email);
+    await new Promise((r) => setTimeout(r, 0));
+    const second = await mailboxIngestService.ingestSingleMessage(connection, email);
+    expect(second).toBe('skipped');
+    release();
+    expect(await first).toBe('approval_reply');
+    expect(conversationMock.answer).toHaveBeenCalledTimes(1);
+    conversationMock.plusAddressApprovalKey.mockReturnValue(null);
   });
 
   test('a bad key falls through to the normal ladder so the mail is not lost', async () => {

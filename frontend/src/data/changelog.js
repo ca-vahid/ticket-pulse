@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.27-preview';
+export const APP_VERSION = '4.3.28-preview';
 
 export const changelog = [
+  {
+    version: '4.3.28-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Real faces in approval conversations</strong> &mdash; everyone in an approval conversation shows their directory photo, on the Approvals page and on the ticket&rsquo;s Approvals tab. People without one keep their initials.' },
+      { type: 'fixed', html: '<strong>One e-mail, one answer, for good</strong> &mdash; the mailbox reader now knows an approval answer it has already saved, so a later check never reads that e-mail again, and two readers holding the same message at once only read it once. Before, an answer could be saved twice with its ticket note and its e-mails.' },
+    ],
+  },
   {
     version: '4.3.27-preview',
     date: 'October 27, 2026',
