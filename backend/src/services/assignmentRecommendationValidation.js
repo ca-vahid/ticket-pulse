@@ -223,6 +223,17 @@ export async function normalizeSubmitRecommendationPayload(payload = {}, workspa
   normalized.subcategoryFit = requiredText(normalized, 'subcategoryFit').toLowerCase();
   normalized.confidence = requiredText(normalized, 'confidence').toLowerCase();
   normalized.taxonomyReviewNeeded = parseBoolean(normalized.taxonomyReviewNeeded, 'taxonomyReviewNeeded');
+  // Level match (26 Oct 2026): optional — a missing or unknown level is dropped, never an error.
+  {
+    const level = String(normalized.requiredLevel ?? '').trim().toLowerCase();
+    if (['basic', 'intermediate', 'advanced', 'expert'].includes(level)) normalized.requiredLevel = level;
+    else delete normalized.requiredLevel;
+    if (normalized.requiredLevel && typeof normalized.requiredLevelReason === 'string') {
+      normalized.requiredLevelReason = normalized.requiredLevelReason.trim().slice(0, 400);
+    } else {
+      delete normalized.requiredLevelReason;
+    }
+  }
 
   if (!FIT_VALUES.has(normalized.categoryFit)) {
     throw new ValidationError('categoryFit must be exact, weak, or none');

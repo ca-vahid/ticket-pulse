@@ -41,6 +41,24 @@ const MAX_TURNS = 20;
 const NON_INTAKE_SETTLE_TRIGGERS = Object.freeze(['priority_assessment_only', 'priority_changed']);
 const PRIORITY_ASSESSMENT_DISABLED_REASON = 'priority_assessment_disabled';
 const PRIORITY_WRITEBACK_DISABLED_REASON = 'priority_writeback_disabled';
+// Level match (26 Oct 2026): appended to the system prompt when the workspace
+// has Level match in Shadow or Live (services/assignmentLevelMatch).
+const LEVEL_NEEDED_SECTION = [
+  '',
+  '',
+  '## Level Needed For This Request',
+  'Judge the LOWEST skill level this specific request needs and submit it as `requiredLevel` (basic, intermediate, advanced or expert) with a one-line `requiredLevelReason`. Always include both when you recommend anyone.',
+  '',
+  'Judge the request itself, not its category. Most subcategories hold both routine and hard requests; a routine request in a specialist subcategory is still basic.',
+  '- basic: routine and well-understood — grant or remove access, a licence or seat, a standard install, a password or MFA reset, a known how-to, forwarding to a vendor.',
+  '- intermediate: some diagnosis needed for one person or device — an app misbehaving, a configuration change with judgement, a standard setup with a few unknowns.',
+  '- advanced: unclear cause, several systems or several people affected, server/admin-level changes, or risk to data.',
+  '- expert: specialist depth — design or architecture, complex automation or scripting, a failure with no known fix, a security-sensitive or business-critical outage.',
+  '',
+  'Ticket Pulse uses this level to share work fairly: everyone you list who holds the skill at that level or above is treated as qualified, and a higher level than needed is not a reason to give someone the ticket. List every person you consider fit (location, presence, history), up to five, not only your first choice.',
+  '',
+  'This overrides the "higher proficiency wins" rule above for this request: score people who meet the needed level on their fit (location, presence, history, workload), NOT on how far above the level they are. Two people who both meet the level should get about the same score unless something other than their level separates them. Someone below the needed level should score clearly lower.',
+].join('\n');
 
 function sanitizeJsonValue(value) {
   if (typeof value === 'bigint') return value.toString();
@@ -1030,6 +1048,13 @@ class AssignmentPipelineService {
     } else if (assignmentConfig?.priorityWritebackEnabled === false) {
       systemPrompt += '\n\n## Workspace Priority Controls\nAssess priority for Ticket Pulse audit, but FreshService native priority writeback is disabled for this workspace. Ticket Pulse will save the assessed priority locally only.';
     }
+    // Level match (26 Oct 2026): the AI judges the level the REQUEST needs;
+    // the code then picks among qualified people by load (assignmentLevelMatch).
+    if (triggerSource !== 'classification_only' && !isPriorityAssessmentOnly) {
+      const levelMatchActive = await import('./assignmentLevelMatch/levelMatchService.js')
+        .then(({ default: s }) => s.isActive(workspaceId)).catch(() => false);
+      if (levelMatchActive) systemPrompt += LEVEL_NEEDED_SECTION;
+    }
     if (triggerSource === 'classification_only') {
       systemPrompt += '\n\n## Classification-only Mode\nThis ticket is already assigned or self-picked. Ticket Pulse must classify it, but must not change its assignee, close it, or add an assignment note. Focus on selecting the best existing internal top-level category/subcategory, priority, and FreshService ticket type. Use get_ticket_details and get_ticket_categories first; use similar-ticket search only if needed. Still call submit_recommendation so the selected category/subcategory, assessed priority, and ticket type are saved. If the schema requires recommendations, keep them aligned with the current assignee context; the system will ignore assignment recommendations and will only sync Ticket Pulse category fields plus allowed priority/type fields.';
     } else if (isPriorityAssessmentOnly) {
@@ -1785,6 +1810,36 @@ class AssignmentPipelineService {
       }
       const shareRuleAssigned = Boolean(shareRule?.applied && decision === 'auto_assigned' && shareRule.techId && assignTechId === shareRule.techId);
 
+      // Level match (26 Oct 2026, services/assignmentLevelMatch): among the
+      // people the AI listed who meet the level THIS request needs, extra
+      // skill gives no edge — the lightest load today wins. Shadow records
+      // only. Never after the urgent, escalation or share rule chose.
+      let levelMatch = null;
+      const levelPickId = assignTechId || topRec?.techId || null;
+      if (recommendation && !isNoise && !groupObserved && !urgentGuardHeld && levelPickId
+        && ['auto_assigned', 'pending_review'].includes(decision)) {
+        try {
+          const { default: levelMatchService } = await import('./assignmentLevelMatch/levelMatchService.js');
+          levelMatch = await levelMatchService.guard({
+            workspaceId, ticketId, runId, techId: levelPickId, decision, recommendation,
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
+            dryRun: assignmentConfig?.dryRunMode ?? true,
+          });
+          if (levelMatch?.record) recommendation.levelMatch = levelMatch.record;
+          if (levelMatch?.applied && levelMatch.techId && decision === 'auto_assigned') assignTechId = levelMatch.techId;
+          if (levelMatch?.step) {
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({ ...levelMatch.step, pipelineRunId: runId, stepNumber: stepCounter }).catch((stepError) => {
+              logger.warn('Pipeline: failed to record level_match step', { runId, error: stepError.message });
+            });
+            emit({ type: 'level_match', applied: levelMatch.applied === true, message: levelMatch.record?.sentence || null });
+          }
+        } catch (levelError) {
+          levelMatch = null;
+          logger.warn('Pipeline: level match failed - assignment unchanged', { runId, ticketId, error: levelError.message });
+        }
+      }
+
       // Assignment spread (QA 10-13 item 17, services/assignmentSpread): no
       // more than N automatic assignments to one person in M minutes, and a
       // new hire's Workstation + Laptop stay with one person. Every decision
@@ -1796,7 +1851,9 @@ class AssignmentPipelineService {
           const { default: assignmentSpreadService } = await import('./assignmentSpread/spreadService.js');
           spreadGuard = await assignmentSpreadService.guardAutoAssignment({
             workspaceId, ticketId, runId, techId: assignTechId, recommendation, reboundFrom,
-            techName: shareRuleAssigned ? (shareRule.techName || null) : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
+            techName: shareRuleAssigned ? (shareRule.techName || null)
+              : levelMatch?.applied ? (levelMatch.record?.to?.techName || null)
+                : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
             // Either/or: a ticket the share rule gave out is counted by Spread, never moved by its cap.
             locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
             dryRun: assignmentConfig?.dryRunMode ?? true,
@@ -1816,6 +1873,7 @@ class AssignmentPipelineService {
         escalationGuard && ['swapped', 'kept'].includes(escalationGuard.outcome) ? escalationGuard.sentence : null,
         urgentGuardRedirected ? urgentGuard.sentence : null,
         shareRuleAssigned ? shareRule.sentence : null,
+        levelMatch?.applied ? levelMatch.sentence : null,
         spreadGuard?.sentence || null,
       ].filter(Boolean).join(' ');
 

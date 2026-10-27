@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.23-preview';
+export const APP_VERSION = '4.3.24-preview';
 
 export const changelog = [
+  {
+    version: '4.3.24-preview',
+    date: 'October 26, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Level match</strong> — the assignment AI now judges the skill level each request actually needs (basic, intermediate, advanced or expert). Everyone it suggests who has the skill at that level or above qualifies, and the one with the fewest tickets today gets it: experts stay free for the hard requests and routine ones are shared. Assignment Review → Level match shows every decision and switches it Off, Shadow or Live.' },
+    ],
+  },
   {
     version: '4.3.23-preview',
     date: 'October 27, 2026',

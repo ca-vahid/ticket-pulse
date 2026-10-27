@@ -14,6 +14,7 @@ import PromptManager from '../components/assignment/PromptManager';
 import HandBacksTab from '../components/assignment/HandBacksTab';
 import SpreadTab from '../components/assignment/SpreadTab';
 import SharesTab from '../components/assignment/SharesTab';
+import LevelMatchTab from '../components/assignment/LevelMatchTab';
 import RunEscalationLine from '../components/assignment/RunEscalationLine';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
@@ -27,7 +28,7 @@ import {
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
-  MessageSquare, Copy, KeyRound, Webhook, Eye, PieChart,
+  MessageSquare, Copy, KeyRound, Webhook, Eye, PieChart, Gauge,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -38,6 +39,8 @@ const ALL_TABS = [
   { id: 'spread', label: 'Spread', icon: Users, minRole: 'reviewer' },
   // QA 10-16 item 4: fixed-percentage shares for chosen categories (Off · Shadow · Live).
   { id: 'shares', label: 'Shares', icon: PieChart, minRole: 'reviewer' },
+  // 26 Oct 2026: the AI judges the level a request needs; lightest day among the qualified wins.
+  { id: 'level-match', label: 'Level match', icon: Gauge, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Improvements', icon: Sparkles, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: MessageSquare, minRole: 'admin' },
@@ -5130,6 +5133,7 @@ export default function AssignmentReview() {
             {activeTab === 'hand-backs' && <HandBacksTab isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'spread' && <SpreadTab workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'shares' && <SharesTab workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'level-match' && <LevelMatchTab workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}

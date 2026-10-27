@@ -2217,6 +2217,12 @@ export const assignmentSpreadAPI = {
   saveSettings: (patch) => api.put('/assignment-spread/settings', patch),
 };
 
+// Level match (26 Oct 2026): Assignment Review → Level match.
+export const assignmentLevelMatchAPI = {
+  get: (days = 14) => api.get('/assignment-level-match', { params: { days } }),
+  saveSettings: (patch) => api.put('/assignment-level-match/settings', patch),
+};
+
 // Ticket shares (QA 10-16 item 4, proof of concept): Assignment Review → Shares.
 export const assignmentSharesAPI = {
   get: (days = 14) => api.get('/assignment-shares', { params: { days } }),
