@@ -154,3 +154,17 @@ describe('it can only cost the Cc line', () => {
     expect(quote.text).toMatch(/On .+, Dana Richard wrote:\n> Cc: lkassab@bgcengineering\.ca\n>\n> Please set up/);
   });
 });
+
+describe('extra messages from outside the thread (approval questions, 27 Oct 2026)', () => {
+  test('join the history in date order, newest first, with their own Cc line', async () => {
+    findUnique.mockResolvedValue(ticketRow());
+    findMany.mockResolvedValue([entry({ id: 7, occurredAt: new Date('2026-09-12T10:00:00Z') })]);
+    const quote = await ticketService._lastInboundQuote(1, null, {
+      extra: [{ actorName: 'Sam Ortega', actorEmail: 'sortega@example.com', occurredAt: new Date('2026-09-13T10:00:00Z'), bodyText: 'Which office will the plotter sit in, Calgary or Edmonton?', cc: ['lkassab@bgcengineering.ca'] }],
+    });
+    expect(quote.html.indexOf('Which office')).toBeGreaterThan(-1);
+    expect(quote.html.indexOf('Which office')).toBeLessThan(quote.html.indexOf('Monday morning'));
+    expect(quote.html).toContain('lkassab@bgcengineering.ca');
+    expect(quote.html).toContain('3 messages');
+  });
+});

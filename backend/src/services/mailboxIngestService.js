@@ -539,6 +539,7 @@ class MailboxIngestService {
           plusKey: apKey, senderEmail: email.from, senderName: email.fromName || null,
           bodyText: email.bodyText || email.bodyPreview || null, bodyHtml: email.bodyHtml || null,
           via: 'email', emailMessageId: email.internetMessageId || null,
+          seenBy: [...(Array.isArray(email.to) ? email.to : [email.to]), ...(Array.isArray(email.cc) ? email.cc : [email.cc])].filter(Boolean),
         });
         logger.info(`Mailbox ingest: approval answer from ${email.from} (+ap${apKey}) recorded`);
         return 'approval_reply';

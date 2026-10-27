@@ -17,8 +17,8 @@ import prisma from './prisma.js';
 import settingsRepository from './settingsRepository.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
-import { emailShell, escapeHtml, textExcerpt } from './approvalEmailTemplate.js';
-import { brandImg } from './emailBrandAssets.js';
+import { escapeHtml } from './approvalEmailTemplate.js';
+import { stripQuotedHtml } from '../utils/replyQuoteStripper.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketLinkUrl } from '../utils/ticketLink.js';
@@ -101,31 +101,23 @@ export async function copyRecipientsFor(ticket, { senderEmail = null, extra = []
   return { to: [...out], primary };
 }
 
-export function renderRequesterReplyCopyEmail({ workspaceName, ticket, ref, appUrl, fromName, fromEmail, bodyHtml, bodyText, primary }) {
-  const FONT = 'Arial,Helvetica,sans-serif';
-  const INK = '#0f172a'; const MUTED = '#64748b'; const LINE = '#e2e8f0'; const BLUE = '#2563eb';
-  const art = brandImg('kind-answer', { size: 64, alt: 'Requester replied' });
-  const rows = [];
-  rows.push(`<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>${art ? `<td width="80" valign="top" style="padding:2px 16px 0 0;">${art}</td>` : ''}<td valign="top">`
-    + `<div style="font-family:${FONT};font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.8px;text-transform:uppercase;color:#065f46;">Requester replied</div>`
-    + `<div style="font-family:${FONT};font-size:23px;line-height:29px;font-weight:bold;color:${INK};margin-top:6px;">${escapeHtml(ticket.subject || 'Ticket')}</div>`
-    + `<div style="font-family:Consolas,'Courier New',monospace;font-size:12.5px;line-height:18px;color:${MUTED};margin-top:4px;">${escapeHtml(ref)}${primary?.why === 'last_replier' ? '  ·  unassigned — you replied last' : ''}</div>`
-    + '</td></tr></table></td></tr>');
-  rows.push('<tr><td height="16" style="height:16px;line-height:16px;font-size:1px;">&nbsp;</td></tr>');
-  rows.push(`<tr><td style="font-family:${FONT};font-size:15px;line-height:22px;color:${INK};"><b>${escapeHtml(fromName || fromEmail || 'The requester')}</b>${fromEmail ? ` &lt;${escapeHtml(fromEmail)}&gt;` : ''} wrote:</td></tr>`);
-  rows.push('<tr><td height="10" style="height:10px;line-height:10px;font-size:1px;">&nbsp;</td></tr>');
-  const body = bodyHtml || `<p style="margin:0;">${escapeHtml(bodyText || '').replace(/\r?\n/g, '<br>')}</p>`;
-  rows.push(`<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f8fafc" style="border-collapse:separate;background:#f8fafc;border:1px solid ${LINE};border-radius:10px;"><tr><td width="4" bgcolor="#059669" style="width:4px;background:#059669;border-radius:10px 0 0 10px;">&nbsp;</td><td style="padding:14px 16px;font-family:${FONT};font-size:15px;line-height:22px;color:${INK};">${body}</td></tr></table></td></tr>`);
-  rows.push('<tr><td height="18" style="height:18px;line-height:18px;font-size:1px;">&nbsp;</td></tr>');
-  rows.push(`<tr><td><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td align="center" bgcolor="${BLUE}" style="border-radius:10px;background:${BLUE};"><a href="${escapeHtml(appUrl)}" target="_blank" style="display:inline-block;padding:13px 28px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:10px;">Open the ticket &rarr;</a></td></tr></table></td></tr>`);
-  rows.push(`<tr><td style="padding-top:10px;font-family:${FONT};font-size:13px;line-height:19px;color:${MUTED};">Reply from the ticket to answer ${escapeHtml(fromName || 'the requester')}. Replying to this e-mail adds your note to the ticket but does not reach them.</td></tr>`);
-  rows.push('<tr><td height="8" style="height:8px;line-height:8px;font-size:1px;">&nbsp;</td></tr>');
-  return emailShell({
-    workspaceName,
-    bodyRows: rows,
-    footerHtml: `Sent by Ticket Pulse${workspaceName ? ` · ${escapeHtml(workspaceName)} workspace` : ''} because the requester answered a reply on this ticket. Turn this off in Settings → Email Branding → Sender identity.`,
-    preheader: `${fromName || fromEmail || 'The requester'} replied on ${ref}: ${textExcerpt(bodyHtml || bodyText, 120).text}`,
-  });
+/**
+ * The copy reads like the e-mail conversation itself (Vahid, 27 Oct 2026):
+ * the requester's words, one quiet line about where to answer, then the
+ * ticket's history in the same "Earlier in this conversation" format a reply
+ * carries. It was a "Requester replied" card with a button.
+ */
+export function renderRequesterReplyCopyEmail({ ref, appUrl, fromName, fromEmail, bodyHtml, bodyText, primary, quoteHtml = '' }) {
+  const who = String(fromName || fromEmail || 'The requester').trim();
+  const firstName = who.split(/\s+/)[0];
+  const body = bodyHtml
+    ? (stripQuotedHtml(bodyHtml) || bodyHtml)
+    : String(bodyText || '').split(/\n{2,}/).map((p) => `<p>${escapeHtml(p).replace(/\r?\n/g, '<br>')}</p>`).join('');
+  const why = primary?.why === 'last_replier' ? ' The ticket is unassigned; you get this because you replied last.' : '';
+  const hint = '<p style="font-family:Calibri,\'Segoe UI\',Arial,sans-serif;font-size:12.5px;line-height:18px;color:#6b7280;margin:22px 0 0;">'
+    + `${escapeHtml(firstName)} replied on ${escapeHtml(ref)}. Answer from <a href="${escapeHtml(appUrl)}" target="_blank" style="color:#1d4ed8;">the ticket</a>; `
+    + `a reply to this e-mail is added to the ticket as a note and does not reach ${escapeHtml(firstName)}.${escapeHtml(why)}</p>`;
+  return `${body}${hint}${quoteHtml || ''}`;
 }
 
 /**
@@ -139,11 +131,25 @@ export async function copyAgentsOnRequesterReply(ticket, entry, { fromEmail = nu
     const { to, primary } = await copyRecipientsFor(ticket, { senderEmail: fromEmail, extra: settings.extra });
     if (!to.length) return { sent: false, reason: 'no_recipient' };
     const ref = ticketDisplayRef(ticket);
-    const workspace = await prisma.workspace.findUnique({ where: { id: ticket.workspaceId }, select: { name: true } }).catch(() => null);
+    const bodyText = entry.bodyText || entry.content || '';
+    // The history below the reply, with photos and pictures, exactly as a reply carries it.
+    let quoteHtml = '';
+    let attachments = [];
+    let bodyHtml = entry.bodyHtml || null;
+    try {
+      const { default: ticketService } = await import('./ticketService.js');
+      const { createInlineBudget, inlinePictures, inlineAttachments } = await import('./replyEmailPictures.js');
+      const budget = createInlineBudget();
+      if (bodyHtml) bodyHtml = await inlinePictures(bodyHtml, { budget, ticketId: ticket.id, entryId: entry.id ?? null, at: entry.occurredAt || null, maxWidth: 600 });
+      const quote = await ticketService._lastInboundQuote(ticket.id, entry.id ?? null, { reply: { text: bodyText, authorName: fromName, authorEmail: fromEmail }, budget });
+      quoteHtml = quote?.html || '';
+      attachments = inlineAttachments(budget);
+    } catch (err) {
+      logger.debug?.(`requesterReplyCopy: history skipped for ticket ${ticket.id}: ${err.message}`);
+    }
     const html = renderRequesterReplyCopyEmail({
-      workspaceName: workspace?.name || null, ticket, ref,
-      appUrl: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
-      fromName, fromEmail, bodyHtml: entry.bodyHtml || null, bodyText: entry.bodyText || entry.content || '', primary,
+      ref, appUrl: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
+      fromName, fromEmail, bodyHtml, bodyText, primary, quoteHtml,
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     const result = await sendTransactionalEmail({
@@ -151,6 +157,8 @@ export async function copyAgentsOnRequesterReply(ticket, entry, { fromEmail = nu
       to,
       subject: `Re: ${String(ticket.subject || 'Your ticket').replace(/[\r\n]+/g, ' ').trim()} [${ref}]`,
       html,
+      attachments,
+      fromName: `${fromName || fromEmail || 'The requester'} via Ticket Pulse`,
       label: 'requester_reply_copy',
       ticket,
     });

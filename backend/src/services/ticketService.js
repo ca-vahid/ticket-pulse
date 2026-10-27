@@ -5981,7 +5981,7 @@ class TicketService {
    *    single earlier reply was enough to lose it.
    * `reply` is the message being sent: { text, authorName, authorEmail }.
    */
-  async _lastInboundQuote(ticketId, excludeEntryId = null, { reply = null, budget = null } = {}) {
+  async _lastInboundQuote(ticketId, excludeEntryId = null, { reply = null, budget = null, extra = [] } = {}) {
     // The history reads like Outlook's own reply header (Vahid, 23 Oct 2026):
     // one "Earlier in this conversation" heading for the whole history, then
     // per message a photo and From / Sent / Cc lines. It was a blue label, a
@@ -6076,8 +6076,20 @@ class TicketService {
         actorEmail: true, occurredAt: true, isPrivate: true, eventType: true, rawPayload: true,
       },
     });
+    // `extra`: messages that live outside the thread but belong to the same
+    // conversation, e.g. an approval question to the requester and its answer
+    // (27 Oct 2026). Callers pass only requester-visible ones.
+    const extraRows = (Array.isArray(extra) ? extra : [])
+      .filter((r) => r && (r.bodyHtml || r.bodyText) && r.occurredAt)
+      .map((r) => ({
+        id: null, source: 'approval', content: null, eventType: 'approval_message',
+        bodyHtml: r.bodyHtml || null, bodyText: r.bodyText || null, actorName: r.actorName || null,
+        actorEmail: r.actorEmail || null, occurredAt: r.occurredAt, isPrivate: false,
+        rawPayload: { cc_emails: Array.isArray(r.cc) ? r.cc : [] },
+      }));
     // Belt and braces: never trust the query alone with this one.
-    let quotable = rows.filter((r) => r.isPrivate === false);
+    let quotable = [...rows, ...extraRows].filter((r) => r.isPrivate === false)
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 
     // ── Same message twice (TP-1285) ─────────────────────────────────────
     const normText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();

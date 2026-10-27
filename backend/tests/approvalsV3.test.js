@@ -106,7 +106,7 @@ describe('plusAddressApprovalKey', () => {
 });
 
 describe('postMessage — ask the requester', () => {
-  test('To requester, Cc agent + the rest of the chain; parks the request; one reply token + e-mail per recipient with a plus-address Reply-To', async () => {
+  test('To requester, Cc agent + the rest of the chain; parks the request; ONE e-mail in the reply format, author copied, plus-address Reply-To', async () => {
     const approval = row();
     const res = await conversation.postMessage(approval, { kind: 'question', mode: 'requester', bodyText: 'Which environments?', via: 'link', author: { email: 'neville@x.io', name: 'Neville' } });
     expect(res.kind).toBe('question');
@@ -120,17 +120,25 @@ describe('postMessage — ask the requester', () => {
     expect(upd.data.clarificationLog[0]).toMatchObject({ question: 'Which environments?', askedBy: 'neville@x.io', messageId: 501 });
     // private ticket note
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isPrivate: true, bodyText: expect.stringContaining('Question from Neville') }) }));
-    // tokens + e-mails: three recipients
-    expect(prismaMock.approvalReplyToken.create).toHaveBeenCalledTimes(3);
-    const tokenRows = prismaMock.approvalReplyToken.create.mock.calls.map((c) => c[0].data);
-    expect(tokenRows.map((t) => t.recipientEmail).sort()).toEqual(['req@x.io', 'rita@x.io', 'vahid@x.io']);
-    expect(tokenRows[0].plusKey).toMatch(/^[a-f0-9]{12}$/);
-    expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(3);
-    const first = mailMock.deliverTransactionalEmail.mock.calls[0][0];
-    expect(first.replyTo).toBe(`ticketpulse+ap${tokenRows[0].plusKey}@x.io`);
-    expect(first.html).toContain('/approval-reply/');
-    expect(first.html).toContain('simply reply to this e-mail');
-    expect(first.subject).toMatch(/^Question on Security approval: New laptop \[TP-1234\]$/);
+    // one token (the requester's) and ONE e-mail to everyone, like a ticket reply (27 Oct 2026)
+    expect(prismaMock.approvalReplyToken.create).toHaveBeenCalledTimes(1);
+    const tokenRow = prismaMock.approvalReplyToken.create.mock.calls[0][0].data;
+    expect(tokenRow.recipientEmail).toBe('rita@x.io');
+    expect(tokenRow.plusKey).toMatch(/^[a-f0-9]{12}$/);
+    expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(1);
+    const mail = mailMock.deliverTransactionalEmail.mock.calls[0][0];
+    expect(mail.to).toEqual(['rita@x.io']);
+    expect(mail.cc.sort()).toEqual(['neville@x.io', 'req@x.io', 'vahid@x.io']);
+    expect(mail.replyTo).toBe(`ticketpulse+ap${tokenRow.plusKey}@x.io`);
+    expect(mail.subject).toBe('Re: New laptop [TP-1234]');
+    expect(mail.ticket).toMatchObject({ id: 501 });
+    expect(mail.html).toContain('Which environments?');
+    expect(mail.html).toContain('Just reply to this e-mail to answer.');
+    expect(mail.html).toContain('The request is on hold until then.');
+    expect(mail.html).not.toContain('/approval-reply/');
+    expect(mail.html).not.toContain('Question on an approval');
+    // the author is copied on the e-mail but not stored as a recipient
+    expect(res.cc).not.toContain('neville@x.io');
   });
 
   test('untick a chip: an explicit To/Cc narrows the recipients but the requester must stay in To', async () => {
@@ -210,11 +218,10 @@ describe('answer', () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ status: 'info_requested', clarificationLog: [{ question: 'Which environments?', askedBy: 'neville@x.io', messageId: 501, answer: null }] }));
   });
 
-  test('by mailbox reply (plus key): strips the quoted history, records the answer, un-parks the request and re-issues the approver link', async () => {
+  test('by mailbox reply (plus key): strips the quoted history, records the answer, un-parks the request; a plain Reply is passed on to the others as the next e-mail', async () => {
     prismaMock.ticketApproval.findMany
       .mockResolvedValueOnce(groupRows) // participants
-      .mockResolvedValueOnce([row({ status: 'info_requested', clarificationLog: [{ question: 'Which environments?', askedBy: 'neville@x.io', messageId: 501, answer: null }] })]) // parked rows
-      .mockResolvedValueOnce([row({ status: 'info_requested' })]); // open rows for the re-issue
+      .mockResolvedValueOnce([row({ status: 'info_requested', clarificationLog: [{ question: 'Which environments?', askedBy: 'neville@x.io', messageId: 501, answer: null }] })]); // parked rows
     const res = await conversation.answer({
       plusKey: 'abcdef012345', senderEmail: 'Rita@x.io', senderName: 'Rita Requester', via: 'email', emailMessageId: '<m1@x.io>',
       bodyText: 'DEV and UAT only.\n\nOn Tue, Neville wrote:\n> Which environments?',
@@ -231,13 +238,31 @@ describe('answer', () => {
     const unpark = prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].data.status === 'pending');
     expect(unpark).toBeTruthy();
     expect(unpark[0].data.clarificationLog[0]).toMatchObject({ answer: 'DEV and UAT only.', answeredBy: 'rita@x.io' });
-    // the open approver gets a fresh link with the Q&A (reissueLinkWithAnswer → _emailApprover → sendgrid lane)
-    const reissue = prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].data.tokenHash);
-    expect(reissue).toBeTruthy();
-    const reissued = mailMock.sendTransactionalEmail.mock.calls.find((c) => c[0].label === 'approval');
-    expect(reissued).toBeTruthy();
-    expect(reissued[0].to).toBe('neville@x.io');
-    expect(reissued[0].html).toContain('DEV and UAT only.');
+    // no separate "Answer on" e-mail and no new decision link: the approver's link still works
+    expect(prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].data.tokenHash)).toBeFalsy();
+    expect(mailMock.sendTransactionalEmail.mock.calls.find((c) => c[0].label === 'approval')).toBeFalsy();
+    // nobody else was on the reply, so the answer goes on: to the asker, Cc the rest
+    expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(1);
+    const relay = mailMock.deliverTransactionalEmail.mock.calls[0][0];
+    expect(relay.to).toEqual(['neville@x.io']);
+    expect(relay.cc.sort()).toEqual(['req@x.io', 'vahid@x.io']);
+    expect(relay.fromName).toBe('Rita Requester via Ticket Pulse');
+    expect(relay.subject).toBe('Re: New laptop [TP-1234]');
+    expect(relay.html).toContain('DEV and UAT only.');
+  });
+
+  test('a Reply all already reached everyone: nothing more is sent', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValueOnce(groupRows).mockResolvedValueOnce([]);
+    await conversation.answer({
+      plusKey: 'abcdef012345', senderEmail: 'rita@x.io', senderName: 'Rita Requester', via: 'email',
+      bodyText: 'DEV only.', seenBy: ['ticketpulse+abcdef012345@x.io', '"Neville" <neville@x.io>', 'req@x.io, vahid@x.io'],
+    });
+    expect(mailMock.deliverTransactionalEmail).not.toHaveBeenCalled();
+  });
+
+  test('a mail on the shared reply address from someone outside the request is refused', async () => {
+    prismaMock.ticketApproval.findMany.mockResolvedValue(groupRows);
+    await expect(conversation.answer({ plusKey: 'abcdef012345', senderEmail: 'outsider@x.io', bodyText: 'hi', via: 'email' })).rejects.toThrow(/not part of this approval/);
   });
 
   test('by link (token): the token recipient is the author; a stranger with no token is refused', async () => {

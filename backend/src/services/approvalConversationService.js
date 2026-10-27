@@ -5,7 +5,7 @@ import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sanitizeNoteHtml } from './ticketApprovalService.js';
 import { resolvePersonName } from './personDirectoryService.js';
-import { renderApprovalMessageEmail } from './approvalEmailTemplate.js';
+import { renderApprovalMessageEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
 import { pickIngestMailbox } from './mailboxPicker.js';
 import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
 
@@ -59,6 +59,16 @@ function publicBaseUrl() {
 function textFromHtml(html) {
   return String(html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Bare lower-case addresses from To/Cc values (arrays or comma strings, "Name <a@b>" allowed). */
+export function addressesOf(...values) {
+  const out = new Set();
+  for (const v of values.flat(Infinity).flatMap((x) => String(x || '').split(/[,;]/))) {
+    const m = String(v || '').match(/[^\s<>"',;]+@[^\s<>"',;]+/);
+    if (m) out.add(m[0].toLowerCase());
+  }
+  return [...out];
 }
 
 /** Key of the plus-address on the recipient side of an inbound mail, or null. */
@@ -229,7 +239,16 @@ class ApprovalConversationService {
       event: kind, messageId: message.id,
     });
 
-    await this._emailRecipients(approval, parts, message, { toList, ccList, authorName, authorRole });
+    if (audience === 'requester') {
+      // ONE e-mail in the ticket-reply format (Vahid, 27 Oct 2026). The author
+      // is on its Cc too, so a Reply all reaches them like any conversation.
+      const withAuthor = looksLikeEmail(authorEmail) && ![...toList, ...ccList].some((p) => p.email === authorEmail)
+        ? [...ccList, { role: authorRole, email: authorEmail, name: authorName }]
+        : ccList;
+      await this._emailAsReply(approval, parts, message, { toList, ccList: withAuthor, from: { email: authorEmail, name: authorName, role: authorRole } });
+    } else {
+      await this._emailRecipients(approval, parts, message, { toList, ccList, authorName, authorRole });
+    }
     this._broadcast(approval);
     logger.info(`Approval ${kind} (${audience}) on ticket ${approval.ticketId} by ${authorName} → ${[...toList, ...ccList].map((p) => p.email).join(', ')}`);
     return this._shape(message);
@@ -239,7 +258,7 @@ class ApprovalConversationService {
    * An answer to a question/comment — from the magic link (token) or from a
    * mailbox reply (plusKey), or in-app (participant answering directly).
    */
-  async answer({ token = null, plusKey = null, inReplyToId = null, approvalId = null, senderEmail = null, senderName = null, bodyText = null, bodyHtml = null, via = 'link', emailMessageId = null }) {
+  async answer({ token = null, plusKey = null, inReplyToId = null, approvalId = null, senderEmail = null, senderName = null, bodyText = null, bodyHtml = null, via = 'link', emailMessageId = null, seenBy = [] }) {
     let target = null; // the message being answered
     let tokenRow = null;
     if (token || plusKey) {
@@ -265,7 +284,9 @@ class ApprovalConversationService {
     if (senderEmail && looksLikeEmail(senderEmail)) {
       const s = lc(senderEmail);
       if (this.roleOf(parts, s)) email = s;
-      else if (!email) throw new ValidationError(`${s} is not part of this approval`);
+      // One e-mail now goes to everyone on the request, so its reply address is
+      // shared: a mail from someone outside the request is not theirs to answer.
+      else if (!email || (via === 'email' && s !== email)) throw new ValidationError(`${s} is not part of this approval`);
     }
     if (!email) throw new ValidationError('Could not tell who is answering');
     const role = this.roleOf(parts, email) || (tokenRow ? 'requester' : 'agent');
@@ -318,7 +339,13 @@ class ApprovalConversationService {
       event: 'answer', messageId: message.id,
     });
 
-    await this._notifyApproversOfAnswer(approval, parts, target, message, { name });
+    if (target.audience === 'requester') {
+      // Everyone on a Reply all already has the answer; the rest get it as a
+      // reply in the same conversation. No separate "Answer on" e-mail.
+      await this._relayAnswer(approval, parts, target, message, { email, name, role, seenBy });
+    } else {
+      await this._notifyApproversOfAnswer(approval, parts, target, message, { name });
+    }
     this._broadcast(approval);
     logger.info(`Approval answer (${audience}, ${via}) on ticket ${approval.ticketId} by ${name}`);
     return { message: this._shape(message), approvalId: approval.id, requestGroupId: target.requestGroupId };
@@ -435,6 +462,130 @@ class ApprovalConversationService {
         logger.warn(`Approval ${message.kind} e-mail to ${person.email} failed (non-fatal): ${err.message}`);
       }
     }
+  }
+
+  /**
+   * A requester-audience message as ONE e-mail in the ticket-reply format
+   * (27 Oct 2026): the author's words and signature, a one-line hint, then
+   * "Earlier in this conversation" with the ticket's own history. Threads
+   * under the ticket's mail; the plus-address Reply-To brings every reply
+   * back to this approval. Never throws.
+   */
+  async _emailAsReply(approval, parts, message, { toList, ccList, from, relayed = false }) {
+    if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return null;
+    const ticket = parts.ticket;
+    if (!ticket || !toList.length) return null;
+    try {
+      const ref = ticketDisplayRef(ticket);
+      const first = (n) => String(n || '').trim().split(/\s+/)[0] || null;
+      const token = newToken();
+      const plusKey = plusKeyFor(token);
+      await prisma.approvalReplyToken.create({
+        data: {
+          workspaceId: approval.workspaceId, messageId: message.id, requestGroupId: message.requestGroupId,
+          recipientEmail: toList[0].email, tokenHash: hashToken(token), plusKey,
+          expiresAt: new Date(Date.now() + REPLY_TOKEN_DAYS * 24 * 60 * 60 * 1000),
+        },
+      });
+      const ingest = await pickIngestMailbox(approval.workspaceId).catch(() => null);
+      let replyTo = null;
+      if (ingest?.address) {
+        const [local, domain] = String(ingest.address).toLowerCase().split('@');
+        if (local && domain) replyTo = `${local.replace(/\+.*$/, '')}+ap${plusKey}@${domain}`;
+      }
+
+      const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      let html = message.bodyHtml
+        ? (normalizeNoteHtmlForEmail(message.bodyHtml) || message.bodyHtml)
+        : String(message.bodyText || '').split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+      let text = String(message.bodyText || '');
+      // Staff sign their own words, as on a ticket reply; a relayed answer carries the sender's own.
+      if (!relayed && from.role !== 'requester') {
+        try {
+          const sigModule = await import('./userSignatureService.js');
+          const signature = await sigModule.getEnabledSignatureForSend(approval.workspaceId, from.email);
+          if (signature && typeof sigModule.appendSignatureToEmail === 'function') ({ html, text } = sigModule.appendSignatureToEmail({ html, text }, signature));
+          else if (signature?.html) html = `${html}<br>${signature.html}`;
+        } catch { /* unsigned */ }
+      }
+      const requester = parts.requester;
+      const others = [...toList, ...ccList].filter((p) => p.email !== requester?.email && p.email !== from.email);
+      const copied = others.length ? others.map((p) => first(p.name) || p.email).join(', ') : null;
+      let hint;
+      if (message.kind === 'answer') {
+        hint = `${first(from.name) || 'The requester'} answered${message.via === 'email' ? ' by e-mail' : ''}. Reply to this e-mail to add to the conversation.`;
+      } else {
+        hint = `Just reply to this e-mail to answer.${copied ? ` ${copied} ${others.length === 1 ? 'is' : 'are'} copied.` : ''}${message.kind === 'question' ? ' The request is on hold until then.' : ''}`;
+      }
+      const hintHtml = `<p style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:12.5px;line-height:18px;color:#6b7280;margin:22px 0 0;">${esc(hint)}</p>`;
+      html += hintHtml;
+      text += `\n\n${hint}`;
+
+      // Earlier in this conversation: the request's own messages (never internal) + the ticket's history.
+      const attachments = [];
+      try {
+        const prior = (await this.listForGroup(message.requestGroupId, { audience: 'requester' }))
+          .filter((m) => m.id !== message.id && ['question', 'answer', 'comment'].includes(m.kind) && (m.bodyText || m.bodyHtml));
+        const extra = prior.map((m) => ({
+          actorName: m.author?.name || null, actorEmail: m.author?.email || null, occurredAt: m.createdAt,
+          bodyHtml: m.bodyHtml || null, bodyText: m.bodyText || null, cc: m.cc || [],
+        }));
+        const { default: ticketService } = await import('./ticketService.js');
+        const { createInlineBudget, inlineAttachments } = await import('./replyEmailPictures.js');
+        const budget = createInlineBudget();
+        const quote = await ticketService._lastInboundQuote(ticket.id, null, {
+          reply: { text: message.bodyText, authorName: from.name, authorEmail: from.email }, budget, extra,
+        });
+        if (quote) { html += quote.html; text += quote.text; }
+        attachments.push(...inlineAttachments(budget));
+      } catch (err) {
+        logger.debug(`Approval reply quote skipped for ticket ${ticket.id}: ${err.message}`);
+      }
+
+      let fromName = from.name;
+      if (relayed) fromName = `${from.name || from.email} via Ticket Pulse`;
+      else {
+        try {
+          const { resolveReplyFromName } = await import('./workspaceEmailIdentityService.js');
+          fromName = (await resolveReplyFromName(approval.workspaceId, from.name)) || from.name;
+        } catch { /* keep the author's name */ }
+      }
+      const subject = `Re: ${String(ticket.subject || 'Your ticket').replace(/[\r\n]+/g, ' ').replace(/^\s*(re|fw|fwd)\s*:\s*/i, '').trim()} [${ref}]`;
+      const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
+      return await deliverTransactionalEmail({
+        workspaceId: approval.workspaceId,
+        to: toList.map((p) => p.email),
+        cc: ccList.map((p) => p.email),
+        subject, html, text, attachments,
+        label: message.kind === 'answer' ? 'approval answer' : 'approval question',
+        replyTo, fromName, ticket,
+      });
+    } catch (err) {
+      logger.warn(`Approval ${message.kind} e-mail on ticket ${ticket.id} failed (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * An answer to a requester-audience question: whoever was on the question
+   * but did not get the answer directly (a plain Reply, or the reply page)
+   * receives it as the next e-mail in the conversation.
+   */
+  async _relayAnswer(approval, parts, question, answer, { email, name, role, seenBy = [] }) {
+    const seen = new Set([lc(email), ...addressesOf(seenBy)]);
+    const known = new Map([parts.requester, parts.agent, ...parts.approvers].filter(Boolean).map((p) => [p.email, p]));
+    const wanted = [lc(question.authorEmail), ...(question.toEmails || []), ...(question.ccEmails || [])].map(lc);
+    const people = [];
+    for (const e of wanted) {
+      if (!e || seen.has(e) || people.some((p) => p.email === e)) continue;
+      const p = known.get(e) || (e === lc(question.authorEmail) && looksLikeEmail(e) ? { role: question.authorRole || 'approver', email: e, name: question.authorName || null } : null);
+      if (p) people.push(p);
+    }
+    if (!people.length) return null;
+    const asker = people.find((p) => p.email === lc(question.authorEmail));
+    const toList = [asker || people[0]];
+    const ccList = people.filter((p) => p !== toList[0]);
+    return this._emailAsReply(approval, parts, answer, { toList, ccList, from: { email, name, role }, relayed: true });
   }
 
   /** Every open approver in the group hears an answer (and the asker if they are closed out, e.g. Tier 1 after escalation). */
