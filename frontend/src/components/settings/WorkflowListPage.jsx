@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronRight, MoreHorizontal, Plus, Search, X } from 'lucide-react';
-import { relativeTime, rowMenuItems, runFailed, workflowState } from './WorkflowIndex';
+import { WorkflowRowMenu, relativeTime, rowMenuItems, runFailed, workflowState } from './WorkflowIndex';
 import { WORKFLOW_STAGES, groupWorkflowsByStage, listWatchSignals, runsInAddition, stageForTrigger } from '../../utils/workflowStages';
 import { motionReduced } from '../../utils/motionPreference';
 
@@ -80,35 +80,13 @@ function matchesFilter(workflow, filter) {
 }
 
 // The row's actions come from rowMenuItems (WorkflowIndex): QA 10-26 #1 —
-// a row whose menu would be empty shows no "⋯".
-function RowMenu({ workflow, name, items, onRowAction, onClose }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const onDoc = (e) => { if (!ref.current?.contains(e.target)) onClose(); };
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
-  }, [onClose]);
-  return (
-    <div ref={ref} role="menu" aria-label={`Actions for ${name}`} className="tp-card absolute right-2 top-full z-30 mt-0.5 w-44 rounded-lg p-1 shadow-soft animate-popIn">
-      {items.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          role="menuitem"
-          onClick={() => { onRowAction(workflow, item.key); onClose(); }}
-          className={cx('tp-focus-ring flex w-full items-center rounded-md px-2 py-1.5 text-left text-xs font-medium hover:bg-muted', item.danger ? 'text-red-700 dark:text-red-300' : 'text-foreground/85')}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
+// a row whose menu would be empty shows no "⋯". The menu itself is
+// WorkflowRowMenu, portalled so the card's overflow-hidden can't clip it
+// (QA 10-27 #3).
 function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, variant = false, lastVariant = false, familyStart = false, last = false }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const state = workflowState(workflow);
   const lastRun = workflow.runs?.[0];
   const failed = Boolean(lastRun && runFailed(lastRun.status));
@@ -179,6 +157,7 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
       </a>
       {menuItems.length > 0 && (
         <button
+          ref={menuButtonRef}
           type="button"
           onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
           aria-haspopup="menu"
@@ -189,7 +168,7 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
           <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
         </button>
       )}
-      {menuOpen && menuItems.length > 0 && <RowMenu workflow={workflow} name={name} items={menuItems} onRowAction={onRowAction} onClose={() => setMenuOpen(false)} />}
+      {menuOpen && menuItems.length > 0 && <WorkflowRowMenu anchorRef={menuButtonRef} workflow={workflow} name={name} items={menuItems} onRowAction={onRowAction} onClose={closeMenu} />}
     </li>
   );
 }

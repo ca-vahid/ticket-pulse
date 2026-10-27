@@ -6,6 +6,7 @@ import { resolveAgentTechnician } from './agentCompetencyService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketLinkUrl } from '../utils/ticketLink.js';
+import { isOnCallNow } from './urgentResponse/onCallNow.js';
 const TRIGGERS = ['created', 'priority_raised', 'recategorized'];
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 const MAX_CATEGORIES = 40; // categories one alert may watch
@@ -400,8 +401,10 @@ class AgentAlertService {
     if (!events.length) return;
 
     // Quiet hours: hold the batch unless an urgent event is allowed through.
+    // Never while the person is on call (QA 10-27 #2).
     const hasUrgent = events.some((e) => Number(e.priority) >= 4);
-    if (this._inQuietHours(pref, sub.technician.timezone)) {
+    if (this._inQuietHours(pref, sub.technician.timezone)
+      && !(await isOnCallNow(sub.workspaceId ?? pref?.workspaceId, sub.technicianId))) {
       if (!(pref?.quietHoursAllowUrgent && hasUrgent)) return; // keep pending; deliver after quiet hours
     }
 

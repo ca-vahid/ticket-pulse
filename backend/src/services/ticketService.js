@@ -1454,6 +1454,10 @@ class TicketService {
         where.parkedUntil = { not: null };
       }
     }
+    // The explicit status pick, kept so a segment below narrows to it instead
+    // of replacing it (QA 10-27 #4: a board column asks for its own statuses
+    // inside the "Unassigned" / "Open" / … segment).
+    const statusPick = query.status && Array.isArray(where.status?.in) ? where.status.in : null;
     // Parked filter (plans/PARKED_BUILD_PLAN.md): ?parked=any|none|until_date|waiting_on|eta|waking7
     if (query.parked) {
       const p = String(query.parked);
@@ -1485,9 +1489,12 @@ class TicketService {
     }
     // Verified solutions (QA 09-22 #6): the "Verified solutions" view.
     if (String(query.solution || '') === 'verified') where.solutionVerifiedAt = { not: null };
+    // Requester filter: one id or several (QA 10-27 #5, the rail's Requester
+    // section sends a comma list).
     if (query.requesterId) {
-      const rid = Number(query.requesterId);
-      if (Number.isFinite(rid) && rid > 0) where.requesterId = rid;
+      const ids = [...new Set(asList(query.requesterId).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+      if (ids.length === 1) where.requesterId = ids[0];
+      else if (ids.length > 1) where.requesterId = { in: ids };
     }
     if (query.type) {
       // Multi-select over the workspace's type names, plus the literal 'none'
@@ -1724,6 +1731,10 @@ class TicketService {
         : query.segment === 'created_month' ? zonedStartOfMonth(now, timezone)
           : zonedStartOfYear(now, timezone);
       where.AND = [...(where.AND || []), { createdAt: { gte: start } }];
+    }
+    // A segment that set its own status scope keeps only the picked names.
+    if (statusPick && Array.isArray(where.status?.in) && where.status.in !== statusPick) {
+      where.status = { in: where.status.in.filter((name) => statusPick.includes(name)) };
     }
 
     // Deleted/Spam tickets are hidden everywhere except the explicit 'deleted'

@@ -90,12 +90,29 @@ describe('NotificationSettingsPanel', () => {
     });
 
     expect(await screen.findByText('Dev code: 123456')).toBeInTheDocument();
-    const codeInput = await screen.findByPlaceholderText('Code');
+    const codeInput = await screen.findByLabelText('Verification code');
     fireEvent.change(codeInput, { target: { value: '123456' } });
     fireEvent.click(screen.getByText('Confirm'));
 
     await waitFor(() => {
       expect(agentAPI.confirmPhoneVerification).toHaveBeenCalledWith({ workspaceId: 1, code: '123456' });
     });
+  });
+
+  test('an already verified phone still gets a code box after Send code, without the panel flashing', async () => {
+    const verified = { ...preferences, phoneVerified: true, phoneVerifiedAt: '2026-05-26T16:00:00.000Z' };
+    agentAPI.getNotificationPreferences.mockResolvedValue({ success: true, data: { preferences: verified } });
+    agentAPI.saveNotificationPreferences.mockResolvedValue({ success: true, data: verified });
+    agentAPI.requestPhoneVerification.mockResolvedValue({ success: true, sent: true });
+    render(<NotificationSettingsPanel workspaceId={1} />);
+
+    expect(await screen.findByText('Verified')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Verification code')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Send code'));
+
+    expect(await screen.findByLabelText('Verification code')).toBeInTheDocument();
+    expect(screen.getByText('Verification code sent')).toBeInTheDocument();
+    // The quiet reload keeps the panel on screen (no spinner swap).
+    expect(screen.getByText('Priority threshold')).toBeInTheDocument();
   });
 });

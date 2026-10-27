@@ -84,7 +84,9 @@ const row = (id, status, extra = {}) => ({
   ...extra,
 });
 
-const lastListParams = () => listSpy.mock.calls.at(-1)[0];
+// The page's own list fetch (it asks for the rail's facets). Board columns
+// fetch their statuses on their own since QA 10-27 #4 — those calls carry no facets.
+const lastListParams = () => listSpy.mock.calls.filter(([p]) => p?.facets).at(-1)[0];
 
 function mount(initialEntry = '/tickets') {
   return render(<Tickets />, {

@@ -286,7 +286,7 @@ export default function AgentAlertsPanel({ workspaceId }) {
               <span>to</span>
               <input type="time" aria-label="Quiet until" value={quietHours.end || ''} onChange={(e) => saveQuiet({ ...quietHours, end: e.target.value })} className="tp-focus-ring rounded-lg border border-input bg-card px-2 py-1 text-sm" />
             </div>
-            <p className="text-xs text-muted-foreground">Your local time. Muted alerts arrive when quiet hours end.</p>
+            <p className="text-xs text-muted-foreground">Your local time. Muted alerts arrive when quiet hours end. While you&rsquo;re on call, quiet hours are paused and everything comes through.</p>
             <div className="flex items-center gap-3">
               <Switch small checked={quietHours.allowUrgent !== false} onChange={(on) => saveQuiet({ ...quietHours, allowUrgent: on })} labelledBy="alerts-urgent-label" />
               <span id="alerts-urgent-label" className="text-sm text-foreground">Let Urgent through</span>

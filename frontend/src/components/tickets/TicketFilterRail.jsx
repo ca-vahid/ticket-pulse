@@ -15,6 +15,7 @@ import { PARKED_STATUS, statusDefsFromMeta, statusDotClass, statusNamesForBase, 
 import { ticketsAPI } from '../../services/api';
 import { WINDOW_CHOICES, resolveCreatedWindow, windowChoice } from './createdWindow';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
+import { rememberRequesterName, useRequesterNames } from './requesterNames';
 import 'react-day-picker/style.css';
 
 // Approval facet (16 Sep 2026): one pick, mirrors the API's `approval` param.
@@ -424,13 +425,19 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'parked', 'customFields', 'created', 'due', 'origin', 'approval'];
+  const FACET_KEYS = ['status', 'technician', 'requester', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'parked', 'customFields', 'created', 'due', 'origin', 'approval'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
       if (Array.isArray(saved)) {
         const merged = saved.filter((k) => FACET_KEYS.includes(k));
-        for (const k of FACET_KEYS) if (!merged.includes(k)) merged.push(k);
+        // A new section lands after its neighbour in the default order
+        // (Requester under Members), not at the bottom.
+        FACET_KEYS.forEach((k, i) => {
+          if (merged.includes(k)) return;
+          const after = i > 0 ? merged.indexOf(FACET_KEYS[i - 1]) : -1;
+          if (after === -1) merged.push(k); else merged.splice(after + 1, 0, k);
+        });
         return merged;
       }
     } catch { /* ignore */ }
@@ -554,6 +561,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     origin, createdFrom || createdTo || get('created'), noise, view, aiState, get('q'), approval || approvalCats.length,
     get('reopened'), // Re-opened view (QA 09-25 #1)
     get('parkKind'), // Auto-help waiting view
+    get('requesterId'), // Requester (QA 10-27 #5)
     ...cfActiveKeys, // each cf_ param counts like the URL param it is
   ].filter(Boolean).length;
   // What the badge and "Clear all" SHOW (17 Oct 2026): the same number as the
@@ -561,7 +569,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   // and "1" here. Each status counts, as each is its own chip. (activeTotal
   // itself still matches saved views by URL params.)
   const statusValues = statusRaw && statusRaw !== 'any' ? csvList(statusRaw).length : 0;
-  const shownTotal = activeTotal + Math.max(0, statusValues - 1);
+  const requesterValues = csvList(get('requesterId')).length;
+  const shownTotal = activeTotal + Math.max(0, statusValues - 1) + Math.max(0, requesterValues - 1);
 
   const clearAll = () => {
     setSearchParams((prev) => {
@@ -592,6 +601,40 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     const extraSelected = techs.slice(techLimit).filter((t) => assignees.includes(String(t.id)));
     return [...capped, ...extraSelected];
   }, [techs, techLimit, techQuery, assignees]);
+
+  // Requester (QA 10-27 #5): search-as-you-type over the requester directory
+  // (the same endpoint the ticket form uses); the URL keeps the ids.
+  const requesterIds = csvList(get('requesterId'));
+  const requesterLabel = useRequesterNames(requesterIds, { hint: get('requesterName') });
+  const [reqQuery, setReqQuery] = useState('');
+  const [reqResults, setReqResults] = useState([]);
+  const [reqLoading, setReqLoading] = useState(false);
+  useEffect(() => {
+    const q = reqQuery.trim();
+    if (q.length < 2) { setReqResults([]); setReqLoading(false); return undefined; }
+    let cancelled = false;
+    setReqLoading(true);
+    const timer = setTimeout(() => {
+      Promise.resolve()
+        .then(() => ticketsAPI.requesterSearch(q))
+        .then((res) => {
+          if (cancelled) return;
+          // Directory-only (Entra) hits have no requester id yet — nothing to filter on.
+          const list = (res?.data?.requesters || []).filter((r) => r?.id != null);
+          for (const r of list) rememberRequesterName(r.id, r.name || r.email);
+          setReqResults(list);
+        })
+        .catch(() => { if (!cancelled) setReqResults([]); })
+        .finally(() => { if (!cancelled) setReqLoading(false); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [reqQuery]);
+  const toggleRequester = (id) => {
+    const key = String(id);
+    const next = requesterIds.includes(key) ? requesterIds.filter((v) => v !== key) : [...requesterIds, key];
+    // The deep link's one name is only a seed for the chip; the ids are the filter.
+    setParams({ requesterId: next.join(','), requesterName: null });
+  };
 
   // Category tree expansion
   const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -717,7 +760,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -1009,6 +1052,50 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                 >
                   Show {Math.min(TECH_PAGE, techs.length - techLimit)} more · {techs.length - techLimit} hidden
                 </button>
+              )}
+            </div>
+          </Section>
+        </SortableFacet>
+
+        {/* Requester (QA 10-27 #5): the Members pattern, fed by a search */}
+        <SortableFacet {...facetProps('requester')}>
+          <Section
+            title="Requester"
+            activeCount={requesterIds.length}
+            onClear={() => setParams({ requesterId: null, requesterName: null })}
+          >
+            <div className="relative mb-1">
+              <Search className="w-3 h-3 text-muted-foreground/50 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <input
+                type="search"
+                value={reqQuery}
+                onChange={(e) => setReqQuery(e.target.value)}
+                placeholder="Find requester…"
+                aria-label="Search requesters"
+                className="tp-focus-ring w-full pl-6 pr-2 py-1 text-xs bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/75"
+              />
+            </div>
+            <div data-testid="requester-facet">
+              {requesterIds.map((id) => (
+                <Facet key={`picked-${id}`} checked onToggle={() => toggleRequester(id)}>
+                  <PersonAvatar name={requesterLabel(id)} size="h-[18px] w-[18px]" textSize="text-[8px]" />
+                  <span className="truncate">{requesterLabel(id)}</span>
+                </Facet>
+              ))}
+              {reqResults.filter((r) => !requesterIds.includes(String(r.id))).map((r) => (
+                <Facet key={r.id} checked={false} onToggle={() => toggleRequester(r.id)}>
+                  <PersonAvatar name={r.name || r.email} size="h-[18px] w-[18px]" textSize="text-[8px]" />
+                  <span className="truncate" title={r.email || undefined}>{r.name || r.email}</span>
+                </Facet>
+              ))}
+              {reqQuery.trim().length < 2 && requesterIds.length === 0 && (
+                <p className="px-1.5 py-1 text-[12px] text-muted-foreground/75">Type a name or e-mail to find a requester.</p>
+              )}
+              {reqQuery.trim().length >= 2 && reqLoading && reqResults.length === 0 && (
+                <p className="px-1.5 py-1 text-[12px] text-muted-foreground/75">Searching…</p>
+              )}
+              {reqQuery.trim().length >= 2 && !reqLoading && reqResults.length === 0 && (
+                <p className="px-1.5 py-1 text-[12px] text-muted-foreground/75">No requester matches “{reqQuery.trim()}”.</p>
               )}
             </div>
           </Section>
@@ -1528,6 +1615,8 @@ const fmtDay = (s) => {
 export function ActiveFilterBar({ meta }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const get = (k) => searchParams.get(k) || '';
+  const requesterIds = csvList(get('requesterId'));
+  const requesterLabel = useRequesterNames(requesterIds, { hint: get('requesterName') });
 
   const patch = (changes) => {
     setSearchParams((prev) => {
@@ -1572,6 +1661,12 @@ export function ActiveFilterBar({ meta }) {
   if (statusRaw === 'any') chips.push({ label: 'Any status', onRemove: () => patch({ status: null }) });
   else if (statusRaw) for (const s of csvList(statusRaw)) chips.push({ label: s === PARKED_STATUS ? 'Parked' : s, onRemove: () => removeFromCsv('status', s) });
   for (const a of csvList(get('assignee'))) chips.push({ label: techName(a), onRemove: () => removeFromCsv('assignee', a) });
+  for (const r of requesterIds) {
+    chips.push({
+      label: `Requester: ${requesterLabel(r)}`,
+      onRemove: () => patch({ requesterId: requesterIds.filter((v) => v !== r).join(','), requesterName: null }),
+    });
+  }
   for (const p of csvList(get('priority'))) chips.push({ label: PRIOS[p] || `P${p}`, onRemove: () => removeFromCsv('priority', p) });
   for (const t of csvList(get('type'))) chips.push({ label: t, onRemove: () => removeFromCsv('type', t) });
   for (const c of csvList(get('category'))) chips.push({ label: catName(c), onRemove: () => removeFromCsv('category', c) });

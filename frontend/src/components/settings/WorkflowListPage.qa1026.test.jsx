@@ -10,7 +10,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1 } }) }));
 
 import WorkflowListPage from './WorkflowListPage';
-import { canAddVariant, rowMenuItems } from './WorkflowIndex';
+import { canAddVariant, rowMenuItems, rowMenuPosition } from './WorkflowIndex';
 
 afterEach(cleanup);
 
@@ -47,5 +47,38 @@ describe('workflow row menu (QA 10-26 #1)', () => {
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['New variant…']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'New variant…' }));
     expect(onRowAction).toHaveBeenCalledWith(CLOSED, 'variant');
+  });
+});
+
+describe('workflow row menu is never clipped (QA 10-27 #3)', () => {
+  test('the menu renders outside the trigger card, at fixed coordinates', () => {
+    render(<WorkflowListPage workflows={[CLOSED, ROUTED]} onOpen={vi.fn()} onRowAction={vi.fn()} eventLabels={LABELS} getVisuals={() => ({})} />);
+    const row = rowFor('Closed for the lab');
+    fireEvent.click(within(row).getByRole('button', { name: 'More actions for Closed for the lab' }));
+    const menu = screen.getByRole('menu', { name: 'Actions for Closed for the lab' });
+    // Portalled: not inside the card (whose overflow-hidden used to cut it off).
+    expect(screen.getAllByTestId('workflow-list-group').some((card) => card.contains(menu))).toBe(false);
+    expect(menu.className).toContain('fixed');
+    expect(within(menu).getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['New variant…', 'Archive']);
+  });
+
+  test('the ⋯ toggles the menu closed again; Escape closes it', () => {
+    render(<WorkflowListPage workflows={[ROUTED]} onOpen={vi.fn()} onRowAction={vi.fn()} eventLabels={LABELS} getVisuals={() => ({})} />);
+    const button = screen.getByRole('button', { name: 'More actions for Closed for the lab' });
+    fireEvent.mouseDown(button); fireEvent.click(button);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    fireEvent.mouseDown(button); fireEvent.click(button);
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.click(button);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  test('position flips above the button near the bottom and stays inside the right edge', () => {
+    const viewport = { width: 1000, height: 800 };
+    expect(rowMenuPosition({ top: 100, bottom: 120, right: 600 }, 2, viewport)).toEqual({ left: 424, top: 122 });
+    expect(rowMenuPosition({ top: 760, bottom: 780, right: 600 }, 2, viewport)).toEqual({ left: 424, bottom: 42 });
+    expect(rowMenuPosition({ top: 100, bottom: 120, right: 1200 }, 2, viewport).left).toBe(1000 - 176 - 8);
+    expect(rowMenuPosition({ top: 100, bottom: 120, right: 50 }, 2, viewport).left).toBe(8);
   });
 });

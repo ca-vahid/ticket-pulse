@@ -21,6 +21,7 @@ import bot from '../integrations/teamsBotClient.js';
 import { ticketCard, approvalCard, digestCard, textCard, EVENT_META, OUTCOMES, htmlToCardMarkdown, textToCardMarkdown } from './teamsCards.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { isOnCallNow } from './urgentResponse/onCallNow.js';
 import { findNoteImages, noteImagePath, noteTextForPreview, noteTextWithoutMarkers, tokenFromDecisionUrl } from './approvalNoteImages.js';
 
 /** What an agent can choose from. mode: 'teams' | 'digest' | 'off'. */
@@ -518,7 +519,9 @@ class TeamsNotificationService {
   async _inQuietHours(tech) {
     const pref = await prisma.technicianNotificationPreference.findUnique({ where: { technicianId: tech.id } }).catch(() => null);
     if (!pref?.quietHoursEnabled) return false;
-    return inWindow(pref.quietHoursStart, pref.quietHoursEnd, localHHMM(tech.timezone));
+    if (!inWindow(pref.quietHoursStart, pref.quietHoursEnd, localHHMM(tech.timezone))) return false;
+    // Quiet hours never mute the person on call (QA 10-27 #2).
+    return !(await isOnCallNow(tech.workspaceId ?? pref.workspaceId, tech.id));
   }
 
   /** Coalesce: everything for the same person + ticket within 45 s becomes one card. */

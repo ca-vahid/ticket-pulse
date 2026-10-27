@@ -41,9 +41,12 @@ export default function NotificationSettingsPanel({ workspaceId }) {
   });
   const [verificationCode, setVerificationCode] = useState('');
   const [devCode, setDevCode] = useState('');
+  // A code was sent and not yet confirmed. Re-verifying an already verified phone still needs the box.
+  const [codeSent, setCodeSent] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  // quiet: refresh without swapping the panel for the spinner (it made the screen flash after Send code).
+  const load = async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const res = await agentAPI.getNotificationPreferences(workspaceId ? { workspaceId } : {});
@@ -120,8 +123,10 @@ export default function NotificationSettingsPanel({ workspaceId }) {
       });
       const res = await agentAPI.requestPhoneVerification({ workspaceId });
       setDevCode(res.devCode || '');
+      setCodeSent(true);
+      setVerificationCode('');
       setMessage(res.sent ? 'Verification code sent' : 'Dev verification code generated');
-      await load();
+      await load({ quiet: true });
     } catch (err) {
       setError(err.message || 'Could not start phone verification');
     } finally {
@@ -138,6 +143,7 @@ export default function NotificationSettingsPanel({ workspaceId }) {
       setData((prev) => ({ ...prev, preferences: res.data }));
       setVerificationCode('');
       setDevCode('');
+      setCodeSent(false);
       setMessage('Phone verified');
     } catch (err) {
       setError(err.message || 'Could not verify phone');
@@ -267,12 +273,16 @@ export default function NotificationSettingsPanel({ workspaceId }) {
               Dev code: {devCode}
             </div>
           )}
-          {(devCode || !phoneVerified) && (
+          {(codeSent || devCode || !phoneVerified) && (
             <div className="flex gap-2">
               <input
                 value={verificationCode}
                 onChange={(event) => setVerificationCode(event.target.value)}
-                placeholder="Code"
+                placeholder="Code from the text message"
+                aria-label="Verification code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus={codeSent}
                 className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-blue-400"
               />
               <button

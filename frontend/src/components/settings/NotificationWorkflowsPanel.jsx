@@ -7371,6 +7371,8 @@ export default function NotificationWorkflowsPanel({
   // run on every matching ticket but take NO real actions — confirm intent.
   const [enableMockConfirm, setEnableMockConfirm] = useState(null);
   const [variantDialogOpen, setVariantDialogOpen] = useState(false);
+  // The workflow a list-row "New variant…" was picked on (null = the selected one).
+  const [variantSource, setVariantSource] = useState(null);
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [showArchivedWorkflows, setShowArchivedWorkflows] = useState(false);
@@ -8406,8 +8408,8 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function createVariant(customName) {
-    const triggerType = selected?.triggerType || 'ticket.created';
+  async function createVariant(customName, source = selected) {
+    const triggerType = source?.triggerType || 'ticket.created';
     const eventLabel = EVENT_LABELS[triggerType] || triggerType;
     setSaving(true);
     setMessage(null);
@@ -8455,18 +8457,18 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function duplicateVariant(customName) {
-    if (!selected) return false;
+  async function duplicateVariant(customName, source = selected) {
+    if (!source) return false;
     setSaving(true);
     setMessage(null);
     try {
-      const response = await notificationWorkflowAPI.duplicateVariant(selected.id, {
-        name: (customName || '').trim() || `${workflowDisplayName(selected)} variant`,
-        routingMode: selected.routingMode || 'exclusive',
-        routingPriority: selected.isDefaultVariant ? 1 : Math.min(999, Number(selected.routingPriority || 1) + 1),
+      const response = await notificationWorkflowAPI.duplicateVariant(source.id, {
+        name: (customName || '').trim() || `${workflowDisplayName(source)} variant`,
+        routingMode: source.routingMode || 'exclusive',
+        routingPriority: source.isDefaultVariant ? 1 : Math.min(999, Number(source.routingPriority || 1) + 1),
         // Copies keep the source's rule; a rule-less source stays rule-less
         // instead of inheriting the old never-matching demo rule (QA 08-06 #6).
-        routingRule: selected.routingRule || null,
+        routingRule: source.routingRule || null,
       });
       await loadWorkflows(response.data?.id);
       setWorkflowListCollapsed(false);
@@ -8517,17 +8519,21 @@ export default function NotificationWorkflowsPanel({
   }
 
   async function toggleArchived(nextArchived = !selected?.archivedAt) {
-    if (!selected) return;
+    // QA 10-27 #3: the row ⋯ on the list confirms for its own workflow, which
+    // may not have finished loading as `selected` yet — act on what was confirmed.
+    const target = archiveConfirm?.workflow || selected;
+    if (!target) return;
     setSaving(true);
     setMessage(null);
     try {
-      const response = await notificationWorkflowAPI.setArchived(selected.id, nextArchived);
-      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      const response = await notificationWorkflowAPI.setArchived(target.id, nextArchived);
+      if (target.id === selected?.id) applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      else if (response.data) setWorkflows((current) => current.map((workflow) => (workflow.id === target.id ? { ...workflow, ...response.data } : workflow)));
       await refreshHealth();
       setMessage({ type: 'success', text: nextArchived ? 'Variant archived' : 'Variant restored' });
       setArchiveConfirm(null);
       if (nextArchived && !showArchivedWorkflows) {
-        const nextWorkflow = workflows.find((workflow) => workflow.id !== selected.id && !workflow.archivedAt);
+        const nextWorkflow = workflows.find((workflow) => workflow.id !== target.id && !workflow.archivedAt);
         if (nextWorkflow) await loadWorkflow(nextWorkflow.id, false);
       } else if (!nextArchived && showArchivedWorkflows) {
         // Restored out of the archived-only view — follow it back to the live list.
@@ -11347,7 +11353,7 @@ export default function NotificationWorkflowsPanel({
   const handleWorkflowRowAction = (workflow, action) => {
     if (!workflow) return;
     if (workflow.id !== selected?.id) handleWorkflowSelect(workflow.id);
-    if (action === 'variant') setVariantDialogOpen(true);
+    if (action === 'variant') { setVariantSource(workflow); setVariantDialogOpen(true); }
     else if (action === 'archive' || action === 'restore') setArchiveConfirm({ workflow, archived: action === 'archive' });
     else if (action === 'delete') setDeleteConfirm({ workflow });
   };
@@ -11481,7 +11487,7 @@ export default function NotificationWorkflowsPanel({
                       <div role="menu" aria-label="More workflow actions" className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-border bg-card p-1 shadow-xl">
                         {[
                           // QA 10-26 #1: only where a variant can apply (canAddVariant).
-                          ...(canAddVariant(selected) ? [{ key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving, onClick: () => setVariantDialogOpen(true), title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' }] : []),
+                          ...(canAddVariant(selected) ? [{ key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving, onClick: () => { setVariantSource(null); setVariantDialogOpen(true); }, title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' }] : []),
                           { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || (selected?.isDefaultVariant && !selected?.archivedAt), onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant && !selected?.archivedAt ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
                           ...(selected?.archivedAt && !selected?.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', Icon: Trash2, danger: true, disabled: saving || !selected, onClick: () => setDeleteConfirm({ workflow: selected }), title: 'Permanently delete this archived variant and its workflow audit history.' }] : []),
                           { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => loadWorkflows(selected?.id) },
@@ -12015,12 +12021,13 @@ export default function NotificationWorkflowsPanel({
       />
       <WorkflowVariantDialog
         open={variantDialogOpen}
-        sourceWorkflow={selected}
+        sourceWorkflow={variantSource || selected}
         saving={saving}
-        onCancel={() => setVariantDialogOpen(false)}
+        onCancel={() => { setVariantDialogOpen(false); setVariantSource(null); }}
         onCreate={async ({ name, mode }) => {
-          const ok = mode === 'copy' ? await duplicateVariant(name) : await createVariant(name);
-          if (ok) setVariantDialogOpen(false);
+          const source = variantSource || selected;
+          const ok = mode === 'copy' ? await duplicateVariant(name, source) : await createVariant(name, source);
+          if (ok) { setVariantDialogOpen(false); setVariantSource(null); }
         }}
       />
       <NewWorkflowDialog
