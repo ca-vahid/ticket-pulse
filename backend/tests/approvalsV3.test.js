@@ -238,17 +238,25 @@ describe('answer', () => {
     const unpark = prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].data.status === 'pending');
     expect(unpark).toBeTruthy();
     expect(unpark[0].data.clarificationLog[0]).toMatchObject({ answer: 'DEV and UAT only.', answeredBy: 'rita@x.io' });
-    // no separate "Answer on" e-mail and no new decision link: the approver's link still works
-    expect(prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].data.tokenHash)).toBeFalsy();
+    // no separate "Answer on" card
     expect(mailMock.sendTransactionalEmail.mock.calls.find((c) => c[0].label === 'approval')).toBeFalsy();
-    // nobody else was on the reply, so the answer goes on: to the asker, Cc the rest
-    expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(1);
-    const relay = mailMock.deliverTransactionalEmail.mock.calls[0][0];
-    expect(relay.to).toEqual(['neville@x.io']);
-    expect(relay.cc.sort()).toEqual(['req@x.io', 'vahid@x.io']);
-    expect(relay.fromName).toBe('Rita Requester via Ticket Pulse');
-    expect(relay.subject).toBe('Re: New laptop [TP-1234]');
-    expect(relay.html).toContain('DEV and UAT only.');
+    // nobody else was on the reply, so the answer goes on as the next e-mail:
+    // the approver who now decides gets it alone, with a fresh decision link…
+    expect(mailMock.deliverTransactionalEmail).toHaveBeenCalledTimes(2);
+    const [solo, shared] = mailMock.deliverTransactionalEmail.mock.calls.map((c) => c[0]);
+    expect(solo.to).toEqual(['neville@x.io']);
+    expect(solo.cc).toEqual([]);
+    expect(solo.fromName).toBe('Rita Requester via Ticket Pulse');
+    expect(solo.subject).toBe('Re: New laptop [TP-1234]');
+    expect(solo.html).toContain('DEV and UAT only.');
+    expect(solo.html).toContain('Decide on this request');
+    expect(solo.html).toMatch(/\/approval\/[A-Za-z0-9_-]+/);
+    expect(prismaMock.ticketApproval.update.mock.calls.find((c) => c[0].where.id === 2 && c[0].data.tokenHash)).toBeTruthy();
+    // …and the others share one, with no decision link
+    expect(shared.to).toEqual(['req@x.io']);
+    expect(shared.cc).toEqual(['vahid@x.io']);
+    expect(shared.html).toContain('DEV and UAT only.');
+    expect(shared.html).not.toContain('Decide on this request');
   });
 
   test('a Reply all already reached everyone: nothing more is sent', async () => {
@@ -510,5 +518,19 @@ describe('e-mail templates (v3)', () => {
     expect(html).toContain('Condition');
     expect(html).toContain('UAT only');
     expect(html).toContain('<p>Sig</p>');
+  });
+});
+
+describe('waitingFor — requests I asked about stay on "For you"', () => {
+  test('my parked rows only, newest first, with when they were parked', async () => {
+    const parkedAt = new Date('2026-10-27T17:00:00Z');
+    prismaMock.ticketApproval.findMany.mockResolvedValue([{ ...row({ status: 'info_requested' }), updatedAt: parkedAt, ticket, approvalCategory: SECURITY }]);
+    const rows = await ticketApprovalService.waitingFor(1, { email: 'Neville@x.io' });
+    const q = prismaMock.ticketApproval.findMany.mock.calls[0][0];
+    expect(q.where).toEqual({ workspaceId: 1, status: 'info_requested', approverEmail: 'neville@x.io' });
+    expect(q.orderBy).toEqual({ updatedAt: 'desc' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: 2, status: 'info_requested', displayRef: 'TP-1234', waitingSince: parkedAt });
+    await expect(ticketApprovalService.waitingFor(1, {})).resolves.toEqual([]);
   });
 });

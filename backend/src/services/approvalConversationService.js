@@ -471,7 +471,7 @@ class ApprovalConversationService {
    * under the ticket's mail; the plus-address Reply-To brings every reply
    * back to this approval. Never throws.
    */
-  async _emailAsReply(approval, parts, message, { toList, ccList, from, relayed = false }) {
+  async _emailAsReply(approval, parts, message, { toList, ccList, from, relayed = false, decideUrl = null }) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return null;
     const ticket = parts.ticket;
     if (!ticket || !toList.length) return null;
@@ -520,6 +520,11 @@ class ApprovalConversationService {
       const hintHtml = `<p style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:12.5px;line-height:18px;color:#6b7280;margin:22px 0 0;">${esc(hint)}</p>`;
       html += hintHtml;
       text += `\n\n${hint}`;
+      // Only in the copy of an approver who still has to decide (sent to them alone).
+      if (decideUrl) {
+        html += `<p style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:13px;line-height:19px;margin:8px 0 0;"><a href="${esc(decideUrl)}" target="_blank" style="color:#1d4ed8;font-weight:600;text-decoration:none;">Decide on this request &rarr;</a></p>`;
+        text += `\n\nDecide on this request: ${decideUrl}`;
+      }
 
       // Earlier in this conversation: the request's own messages (never internal) + the ticket's history.
       const attachments = [];
@@ -582,10 +587,34 @@ class ApprovalConversationService {
       if (p) people.push(p);
     }
     if (!people.length) return null;
-    const asker = people.find((p) => p.email === lc(question.authorEmail));
-    const toList = [asker || people[0]];
-    const ccList = people.filter((p) => p !== toList[0]);
-    return this._emailAsReply(approval, parts, answer, { toList, ccList, from: { email, name, role }, relayed: true });
+    // An approver who now has to decide gets the answer on their own, with a
+    // link to decide (27 Oct 2026); everyone else shares one e-mail.
+    const deciding = new Map();
+    try {
+      const open = await prisma.ticketApproval.findMany({
+        where: { requestGroupId: question.requestGroupId, workspaceId: approval.workspaceId, status: 'pending' },
+        select: { id: true, approverEmail: true, ticketId: true, workspaceId: true, status: true },
+      });
+      for (const r of open || []) if (r?.approverEmail && r.status === 'pending') deciding.set(lc(r.approverEmail), r);
+    } catch (err) {
+      logger.debug(`Open approver lookup skipped for ${question.requestGroupId}: ${err.message}`);
+    }
+    const from = { email, name, role };
+    const solo = people.filter((p) => deciding.has(p.email));
+    const shared = people.filter((p) => !deciding.has(p.email));
+    if (solo.length) {
+      const { default: ticketApprovalService } = await import('./ticketApprovalService.js');
+      for (const p of solo) {
+        let decideUrl = null;
+        try { decideUrl = await ticketApprovalService.freshDecisionUrl(deciding.get(p.email)); } catch (err) { logger.warn(`Decision link for ${p.email} failed (non-fatal): ${err.message}`); }
+        await this._emailAsReply(approval, parts, answer, { toList: [p], ccList: [], from, relayed: true, decideUrl });
+      }
+    }
+    if (!shared.length) return null;
+    const asker = shared.find((p) => p.email === lc(question.authorEmail));
+    const toList = [asker || shared[0]];
+    const ccList = shared.filter((p) => p !== toList[0]);
+    return this._emailAsReply(approval, parts, answer, { toList, ccList, from, relayed: true });
   }
 
   /** Every open approver in the group hears an answer (and the asker if they are closed out, e.g. Tier 1 after escalation). */

@@ -52,6 +52,27 @@ const renderPage = (path = '/approvals') => render(
 describe('ApprovalsInbox (Phase B + E)', () => {
   afterEach(() => { cleanup(); roleState.role = 'viewer'; });
 
+  test('requests I asked about stay on For you under "Waiting on an answer", still decidable, no quick approve (27 Oct 2026)', async () => {
+    apiOverrides.approvalsWaitingOnAnswer = vi.fn(() => Promise.resolve([
+      { ...pendingRow, id: 12, subject: 'Claude AI', displayRef: 'TP-10518', status: 'info_requested', waitingSince: createdAt },
+      { ...pendingRow, id: 13, subject: 'Firewall change', displayRef: 'TP-10600', status: 'info_requested', requestedByName: 'Anton K', conditions: { items: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }], submittedAt: null } },
+    ]));
+    try {
+      renderPage();
+      const section = await screen.findByTestId('waiting-section');
+      expect(section).toHaveTextContent('Waiting on an answer (2)');
+      expect(section).toHaveTextContent('Claude AI');
+      expect(section).toHaveTextContent('Your question is out; they answer by e-mail');
+      expect(section).toHaveTextContent('Waiting on Anton’s answers to your 2 conditions');
+      expect(section.querySelectorAll('[data-testid="approval-status"]')[0]).toHaveTextContent('Needs info');
+      expect(section).not.toHaveTextContent('Quick approve');
+      // the pending row above keeps its quick approve
+      expect(screen.getAllByText('Quick approve')).toHaveLength(1);
+    } finally {
+      delete apiOverrides.approvalsWaitingOnAnswer;
+    }
+  });
+
   test('subtitle marks approvals as a Ticket Pulse feature not synced to FreshService', async () => {
     renderPage();
     expect(await screen.findByText(/A Ticket Pulse feature — not synced to FreshService/i)).toBeInTheDocument();

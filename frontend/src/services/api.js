@@ -1313,6 +1313,11 @@ export const ticketsAPI = {
     const res = await api.get('/tickets/approvals/mine');
     return res.data;
   },
+  // Requests I asked about, parked until the answer arrives (27 Oct 2026)
+  approvalsWaitingOnAnswer: async () => {
+    const res = await api.get('/tickets/approvals/waiting');
+    return res.data;
+  },
   approvalsOverview: async (params = {}) => {
     const res = await api.get('/tickets/approvals/all', { params });
     return res.data;

@@ -1438,6 +1438,39 @@ class TicketApprovalService {
     return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list)).then((list) => list.map((a) => this._inboxRow(a)));
   }
 
+  /**
+   * Requests I asked about (27 Oct 2026): parked while a question or my
+   * conditions are out. They stay on "For you" under "Waiting on an answer",
+   * and I can still decide them.
+   */
+  async waitingFor(workspaceId, actor) {
+    const email = String(actor?.email || '').toLowerCase();
+    if (!email) return [];
+    const rows = await prisma.ticketApproval.findMany({
+      where: { workspaceId, status: 'info_requested', approverEmail: email },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+      include: {
+        approvalCategory: { select: { name: true, tiers: true, managerEmails: true, hasAmount: true, amountCurrency: true } },
+        ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } },
+      },
+    });
+    return this._fillApproverNames(rows).then((list) => list.map((a) => ({ ...this._inboxRow(a), waitingSince: a.updatedAt || null })));
+  }
+
+  /**
+   * A new decision link for an open row, for an e-mail that carries it. The
+   * old link stops working, as with reissueLinkWithAnswer.
+   */
+  async freshDecisionUrl(row) {
+    const token = newToken();
+    await prisma.ticketApproval.update({
+      where: { id: row.id },
+      data: { tokenHash: hashToken(token), expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000) },
+    });
+    return `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
+  }
+
   async inboxCountFor(workspaceId, actor) {
     const email = String(actor?.email || '').toLowerCase();
     if (!email) return 0;

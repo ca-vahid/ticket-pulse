@@ -2270,6 +2270,13 @@ router.get('/approvals/mine', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+// Requests I asked about, parked until the answer arrives ("Waiting on an answer").
+router.get('/approvals/waiting', asyncHandler(async (req, res) => {
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const data = await ticketApprovalService.waitingFor(req.workspaceId, req.ticketActor);
+  res.json({ success: true, data });
+}));
+
 // Admin/reviewer overview: stats + all approvals in the workspace (history).
 router.get('/approvals/all', asyncHandler(async (req, res) => {
   const a = req.ticketActor;
