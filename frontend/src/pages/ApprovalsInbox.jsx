@@ -390,6 +390,20 @@ function groupApprovers(g) {
  * icon with the word under it, in the status colour — not squeezed into the
  * title line.
  */
+/** What a parked request is waiting on: the technician's answers to my conditions, or the answer to my question. */
+function WaitingLine({ a }) {
+  const conds = a.conditions && Array.isArray(a.conditions.items) ? a.conditions : null;
+  const who = (a.requestedByName || prettyName(a.requestedBy) || 'the technician').split(' ')[0];
+  const text = conds && !conds.submittedAt
+    ? `Waiting on ${who}’s answers to your ${conds.items.length === 1 ? 'condition' : `${conds.items.length} conditions`}`
+    : 'Your question is out; they answer by e-mail';
+  return (
+    <p className="mt-1.5 text-[12.5px] text-violet-700 dark:text-violet-300" data-testid="waiting-line">
+      {text}{a.waitingSince ? <span className="text-muted-foreground"> · since {timeAgo(a.waitingSince)}</span> : null}
+    </p>
+  );
+}
+
 function StatusBlock({ status }) {
   const meta = STATUS_META[status] || {};
   const ic = STATUS_ICON[status] || STATUS_ICON.cancelled;
@@ -518,6 +532,8 @@ export default function ApprovalsInbox() {
   const legacyTab = searchParams.get('tab');
   const [pending, setPending] = useState([]);
   const [needsInfo, setNeedsInfo] = useState([]);
+  // Requests I asked about: parked, still mine to decide (27 Oct 2026).
+  const [waiting, setWaiting] = useState([]);
   const [overview, setOverview] = useState(null); // { stats, items }
   const [filters, setFilters] = useState(() => filtersFromParams(searchParams));
   const [debouncedQ, setDebouncedQ] = useState(filters.q.trim());
@@ -608,6 +624,10 @@ export default function ApprovalsInbox() {
     try {
       const tasks = [ticketsAPI.approvalInbox(), ticketsAPI.approvalsNeedingMyInfo()];
       if (canReview) tasks.push(ticketsAPI.approvalsOverview(overviewParams));
+      Promise.resolve()
+        .then(() => ticketsAPI.approvalsWaitingOnAnswer())
+        .then((rows) => setWaiting(Array.isArray(rows) ? rows : []))
+        .catch(() => setWaiting([]));
       const [inbox, mine, ov] = await Promise.all(tasks);
       setPending(inbox || []);
       setNeedsInfo(mine || []);
@@ -682,6 +702,80 @@ export default function ApprovalsInbox() {
   }, [meta, overview, pending, needsInfo]);
 
   const chosenStatuses = splitStatuses(filters.status);
+
+  const decideRow = (a) => {
+    const isOpen = openId === a.id;
+    return (
+      <li key={a.id} className="tp-card overflow-hidden rounded-xl" data-testid="inbox-row">
+        <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer flex-wrap gap-x-2.5 gap-y-2 px-3 py-3.5 hover:bg-muted/25 sm:flex-nowrap sm:gap-4 sm:px-4 sm:py-4">
+          <StatusBlock status={a.status === 'info_requested' ? 'info_requested' : 'pending'} />
+          <div className="min-w-0 flex-1">
+            <CategoryLine name={a.categoryName} />
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
+              <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
+              <TicketRef a={a} state={backState} />
+              {isOpen && <span className="text-muted-foreground">· {a.isFinal ? 'final approval' : a.tierCount > 1 ? `${a.tierName}, not the final approval` : 'not the final approval'}</span>}
+              <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
+            </div>
+            <PeopleLine a={a} className="mt-2" />
+            {a.status === 'info_requested' && <WaitingLine a={a} />}
+            {!isOpen && <RequestLine note={a.requestNote} />}
+          </div>
+          <div className="flex flex-shrink-0 gap-2 max-sm:basis-full max-sm:flex-row max-sm:items-center max-sm:justify-end max-sm:gap-3 sm:flex-col sm:items-end">
+            <When at={a.createdAt} />
+            {!isOpen && a.status !== 'info_requested' && (
+              <button
+                type="button"
+                onClick={() => setQuickId(a.id)}
+                disabled={busyId === a.id}
+                title="Approve without a note — you confirm first"
+                className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+              >
+                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Quick approve
+              </button>
+            )}
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </div>
+        </div>
+        {quickId === a.id && (
+          <ConfirmSheet
+            pending={{ decision: 'approved', note: null, conditionNote: null, amountLabel: a.amountLabel || null, notifyRequester: false }}
+            approval={{ ...a, ticketRef: a.displayRef }}
+            busy={busyId === a.id}
+            onConfirm={() => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, 'approved', null, { noteHtml: null, conditionNote: null, notifyRequester: false }), a.id).finally(() => setQuickId(null))}
+            onCancel={() => setQuickId(null)}
+          />
+        )}
+        <Collapse open={isOpen}>
+          <div className="grid border-t border-border/70 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+            <div className="min-w-0 px-4 py-4 lg:border-r lg:border-border/70">
+              <ApprovalTicketBrief approval={a} backState={backState} />
+            </div>
+            <div className="min-w-0 px-4 py-4">
+              <ApprovalComposer
+                layout="choices"
+                compact
+                showShortcuts={false}
+                minHeight={110}
+                approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
+                participants={null}
+                selfEmail={a.approverEmail}
+                forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
+                onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
+                onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
+                onHandoff={({ mode, note, toEmail }) => act(async () => {
+                  if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
+                  else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
+                }, a.id)}
+                disabled={busyId === a.id}
+                footer={<>You confirm before anything is sent.</>}
+              />
+            </div>
+          </div>
+        </Collapse>
+      </li>
+    );
+  };
 
   return (
     <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
@@ -895,81 +989,21 @@ export default function ApprovalsInbox() {
                 </div>
               ) : (
                 <ul className="space-y-1.5">
-                  {pending.map((a) => {
-                    const isOpen = openId === a.id;
-                    return (
-                      <li key={a.id} className="tp-card overflow-hidden rounded-xl" data-testid="inbox-row">
-                        <div {...rowToggleProps(isOpen, () => (isOpen ? setOpenId(null) : openComposer(a)), `${isOpen ? 'Close' : 'Open'} ${a.subject || 'approval'}`)} className="tp-focus-ring flex cursor-pointer flex-wrap gap-x-2.5 gap-y-2 px-3 py-3.5 hover:bg-muted/25 sm:flex-nowrap sm:gap-4 sm:px-4 sm:py-4">
-                          <StatusBlock status="pending" />
-                          <div className="min-w-0 flex-1">
-                            <CategoryLine name={a.categoryName} />
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
-                              <span className="min-w-0 text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{a.subject || '(no subject)'}</span>
-                              <TicketRef a={a} state={backState} />
-                              {isOpen && <span className="text-muted-foreground">· {a.isFinal ? 'final approval' : a.tierCount > 1 ? `${a.tierName}, not the final approval` : 'not the final approval'}</span>}
-                              <AmountChip amount={a.amount} currency={a.amountCurrency} className="!text-xs" />
-                            </div>
-                            <PeopleLine a={a} className="mt-2" />
-                            {!isOpen && <RequestLine note={a.requestNote} />}
-                          </div>
-                          <div className="flex flex-shrink-0 gap-2 max-sm:basis-full max-sm:flex-row max-sm:items-center max-sm:justify-end max-sm:gap-3 sm:flex-col sm:items-end">
-                            <When at={a.createdAt} />
-                            {!isOpen && (
-                              <button
-                                type="button"
-                                onClick={() => setQuickId(a.id)}
-                                disabled={busyId === a.id}
-                                title="Approve without a note — you confirm first"
-                                className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
-                              >
-                                {busyId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Quick approve
-                              </button>
-                            )}
-                            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-                          </div>
-                        </div>
-                        {quickId === a.id && (
-                          <ConfirmSheet
-                            pending={{ decision: 'approved', note: null, conditionNote: null, amountLabel: a.amountLabel || null, notifyRequester: false }}
-                            approval={{ ...a, ticketRef: a.displayRef }}
-                            busy={busyId === a.id}
-                            onConfirm={() => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, 'approved', null, { noteHtml: null, conditionNote: null, notifyRequester: false }), a.id).finally(() => setQuickId(null))}
-                            onCancel={() => setQuickId(null)}
-                          />
-                        )}
-                        <Collapse open={isOpen}>
-                          <div className="grid border-t border-border/70 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-                            <div className="min-w-0 px-4 py-4 lg:border-r lg:border-border/70">
-                              <ApprovalTicketBrief approval={a} backState={backState} />
-                            </div>
-                            <div className="min-w-0 px-4 py-4">
-                              <ApprovalComposer
-                                layout="choices"
-                                compact
-                                showShortcuts={false}
-                                minHeight={110}
-                                approval={{ ...a, ticketRef: a.displayRef, nextTier: a.nextTierName ? { name: a.nextTierName, approverNames: [] } : null, amountLabel: null }}
-                                participants={null}
-                                selfEmail={a.approverEmail}
-                                forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
-                                onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
-                                onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
-                                onHandoff={({ mode, note, toEmail }) => act(async () => {
-                                  if (mode === 'forward') await ticketsAPI.forwardApproval(a.ticketId, a.id, { toEmail, note });
-                                  else await ticketsAPI.escalateApproval(a.ticketId, a.id, { note });
-                                }, a.id)}
-                                disabled={busyId === a.id}
-                                footer={<>You confirm before anything is sent.</>}
-                              />
-                            </div>
-                          </div>
-                        </Collapse>
-                      </li>
-                    );
-                  })}
+                  {pending.map((a) => decideRow(a))}
                 </ul>
               )}
             </section>
+
+            {/* Asked about: parked until the answer arrives, still mine to decide */}
+            {waiting.length > 0 && (
+              <section data-testid="waiting-section">
+                <h2 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Waiting on an answer ({waiting.length})</h2>
+                <p className="mb-2 text-xs text-muted-foreground">You asked a question or set conditions. Each moves back up to Pending when the answer arrives; you can still decide now.</p>
+                <ul className="space-y-1.5">
+                  {waiting.map((a) => decideRow(a))}
+                </ul>
+              </section>
+            )}
 
             {/* Needs my info */}
             {needsInfo.length > 0 && (

@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.21-preview';
+export const APP_VERSION = '4.3.22-preview';
 
 export const changelog = [
+  {
+    version: '4.3.22-preview',
+    date: 'October 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Requests you asked about stay on your list</strong> &mdash; asking a question or setting conditions no longer makes a request vanish from <em>For you</em>. It sits under <em>Waiting on an answer</em> with what it is waiting for, you can still decide it there, and it moves back up to Pending when the answer arrives.' },
+      { type: 'improved', html: '<strong>A link to decide, with the answer</strong> &mdash; when the answer to your question reaches you as an e-mail from Ticket Pulse, your copy ends with <em>Decide on this request</em>. Only the approver who still has to decide gets that line; the requester and the others get the answer without it.' },
+    ],
+  },
   {
     version: '4.3.21-preview',
     date: 'October 27, 2026',
