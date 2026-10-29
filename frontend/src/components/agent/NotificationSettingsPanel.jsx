@@ -82,6 +82,21 @@ export default function NotificationSettingsPanel({ workspaceId }) {
     && (!form.phoneOverride || form.phoneOverride === data?.preferences?.phoneOverride);
 
   const canEnablePhoneChannels = phoneVerified && !!effectivePhone;
+  // QA 10-28 #1: a code was sent and not confirmed. Save waits until the code
+  // is confirmed or the check is cancelled, so a half-done check never reads
+  // as saved.
+  const codePending = codeSent || !!devCode;
+  // Phone channels the server will accept right now (an unverified number
+  // keeps them off rather than failing the whole save).
+  const savableChannels = canEnablePhoneChannels
+    ? form.channels
+    : { ...form.channels, sms: false, whatsapp: false, phone_call: false };
+  const cancelCode = () => {
+    setCodeSent(false);
+    setDevCode('');
+    setVerificationCode('');
+    setMessage(null);
+  };
 
   const setChannel = (channel, enabled) => {
     setForm((prev) => ({
@@ -91,6 +106,7 @@ export default function NotificationSettingsPanel({ workspaceId }) {
   };
 
   const save = async () => {
+    if (codePending) return;
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -98,7 +114,7 @@ export default function NotificationSettingsPanel({ workspaceId }) {
       const res = await agentAPI.saveNotificationPreferences({
         workspaceId,
         threshold: form.threshold,
-        channels: form.channels,
+        channels: savableChannels,
         phoneOverride: form.phoneOverride,
       });
       setData((prev) => ({ ...prev, preferences: res.data }));
@@ -115,10 +131,12 @@ export default function NotificationSettingsPanel({ workspaceId }) {
     setError(null);
     setMessage(null);
     try {
+      // Saves the number first. A number that is already verified keeps its
+      // phone channels (re-checking it used to switch SMS off silently).
       await agentAPI.saveNotificationPreferences({
         workspaceId,
         threshold: form.threshold,
-        channels: { ...form.channels, sms: false, whatsapp: false, phone_call: false },
+        channels: savableChannels,
         phoneOverride: form.phoneOverride,
       });
       const res = await agentAPI.requestPhoneVerification({ workspaceId });
@@ -219,7 +237,7 @@ export default function NotificationSettingsPanel({ workspaceId }) {
                       </span>
                       <input
                         type="checkbox"
-                        checked={!!form.channels[id]}
+                        checked={!!savableChannels[id]}
                         disabled={disabled}
                         onChange={(event) => setChannel(id, event.target.checked)}
                         className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
@@ -295,6 +313,15 @@ export default function NotificationSettingsPanel({ workspaceId }) {
               </button>
             </div>
           )}
+          {codePending && (
+            <p className="text-[11px] leading-snug text-muted-foreground" data-testid="code-pending-note">
+              {phoneVerified
+                ? 'This number is already verified. Enter the code to check it again, or '
+                : 'Enter the code to verify this number, or '}
+              <button type="button" onClick={cancelCode} className="tp-focus-ring rounded font-semibold text-blue-700 hover:underline dark:text-blue-300">cancel the check</button>
+              . Save waits until then.
+            </p>
+          )}
         </aside>
       </div>
 
@@ -302,7 +329,8 @@ export default function NotificationSettingsPanel({ workspaceId }) {
         <button
           type="button"
           onClick={save}
-          disabled={saving}
+          disabled={saving || codePending}
+          title={codePending ? 'Confirm the code or cancel the check first' : undefined}
           className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
         >
           {saving && <Loader2 className="h-4 w-4 animate-spin" />}

@@ -1096,7 +1096,12 @@ export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onC
  * "Always shown", Reset-to-default footer. Same shell as FilterFlyout.
  * Hidden in board mode (the board has status columns, not these).
  */
-export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null, sideArrows = false, onSideArrowsChange = null, freezeSubject = true, onFreezeSubjectChange = null }) {
+export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths, columnMap = false, onColumnMapChange = null, sideArrows = false, onSideArrowsChange = null, freezeSubject = true, onFreezeSubjectChange = null, fixedKeys = null }) {
+  // QA 10-28 #3: Focus shows a fixed set of columns, but the menu's switches
+  // (Column map, Scroll arrows, Keep Subject in place, Reset widths) still
+  // apply there. With `fixedKeys` the menu names the fixed set instead of
+  // offering the column list.
+  const fixed = Array.isArray(fixedKeys) && fixedKeys.length > 0;
   const [open, setOpen] = useState(false);
   // 17 Oct 2026 (Vahid): on a short window the menu ran off the bottom of the
   // screen and its switches (Scroll arrows, Reset) could not be reached. It is
@@ -1143,7 +1148,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
   }, [open]);
 
   const visibleSet = new Set(value);
-  const customized = value.join(',') !== DEFAULT_COLUMN_KEYS.join(',');
+  const customized = !fixed && value.join(',') !== DEFAULT_COLUMN_KEYS.join(',');
   const emit = (nextOrder, nextVisible) => onChange(nextOrder.filter((k) => nextVisible.has(k)));
 
   const toggle = (key) => {
@@ -1194,7 +1199,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Choose and reorder the list's columns (applies on large screens)"
+        title={fixed ? 'Focus shows a fixed set of columns; the list switches still apply' : "Choose and reorder the list's columns (applies on large screens)"}
         className={`tp-focus-ring relative inline-flex h-9 items-center gap-1.5 text-sm rounded-lg px-2.5 border transition-colors ${
           customized ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 font-medium' : 'bg-card text-foreground/85 border-input hover:border-blue-300 dark:hover:border-blue-500/40'
         }`}
@@ -1211,10 +1216,19 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           style={roomPx ? { maxHeight: `${roomPx}px` } : undefined}
           className="absolute top-full mt-1 z-30 left-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn flex flex-col overflow-y-auto settings-scrollbar"
         >
-          <p className="flex-none px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
-            {coarsePointer ? 'Use the arrows to reorder' : 'Drag a row to reorder'} · applies on large screens (smaller screens keep the essentials)
-          </p>
-          <ul className="min-h-[6rem] flex-1 max-h-[min(60vh,26rem)] overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
+          {fixed ? (
+            <div className="flex-none px-2 pb-2 border-b border-border/60" data-testid="columns-menu-fixed">
+              <p className="text-sm font-medium text-foreground/85">Focus keeps five columns</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                {fixedKeys.map((k) => QUEUE_COLUMN_MAP.get(k)?.label || k).join(' · ')}. Requester, office and category sit under the subject. To pick your own columns, switch to Dense or Compact.
+              </p>
+            </div>
+          ) : (
+            <p className="flex-none px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
+              {coarsePointer ? 'Use the arrows to reorder' : 'Drag a row to reorder'} · applies on large screens (smaller screens keep the essentials)
+            </p>
+          )}
+          {!fixed && <ul className="min-h-[6rem] flex-1 max-h-[min(60vh,26rem)] overflow-y-auto settings-scrollbar -mx-0.5 mt-1" onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropTarget(null); }}>
             {order.map((key) => {
               const col = QUEUE_COLUMN_MAP.get(key);
               if (!col) return null;
@@ -1276,7 +1290,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
                 </li>
               );
             })}
-          </ul>
+          </ul>}
           {/* Column map (2 Oct 2026): a personal, opt-in row of jump links +
               a mini-map over the list when it scrolls sideways. */}
           {onColumnMapChange && (
@@ -1332,7 +1346,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           {/* Footer: column-set reset (QC4) beside the width reset (QR3) —
               two different customizations, two explicit ways back. */}
           <div className="flex-none mt-1.5 flex items-stretch gap-1 border-t border-border/60 pt-1">
-            <button
+            {!fixed && <button
               onClick={reset}
               disabled={!customized}
               title="Restore the default column set and order"
@@ -1340,7 +1354,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
             >
               <RotateCcw className="w-3 h-3" aria-hidden="true" />
               Reset columns
-            </button>
+            </button>}
             <button
               onClick={onResetWidths}
               disabled={!hasCustomWidths}

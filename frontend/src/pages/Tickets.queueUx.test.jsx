@@ -714,7 +714,7 @@ describe('Toolbar + pager tidy-up (17 Oct 2026)', () => {
 });
 
 describe('Focus view (17 Oct 2026)', () => {
-  test('five fixed columns with room for the subject; no Columns button, no resize handles', async () => {
+  test('five fixed columns with room for the subject; Columns names the fixed set (QA 10-28 #3), no resize handles', async () => {
     localStorage.setItem('tp_ticket_layout', 'focus');
     localStorage.setItem('tp_queue_columns', JSON.stringify(['subject', 'requester', 'category', 'priority', 'state', 'reopened']));
     listSpy.mockResolvedValue({ data: { items: [{ ...row(1, 'Open'), state: 'requester_responded', internalCategory: { name: 'Network' }, internalSubcategory: { name: 'VPN' } }], total: 1 } });
@@ -723,7 +723,11 @@ describe('Focus view (17 Oct 2026)', () => {
     expect(screen.getByRole('button', { name: /^Focus$/ })).toHaveAttribute('aria-pressed', 'true');
     const card = document.querySelector('[style*="--tp-q-grid"]');
     expect(card.style.getPropertyValue('--tp-q-grid')).toBe('6px minmax(0,3fr) minmax(200px,0.9fr) 200px 96px 96px');
-    expect(screen.queryByRole('button', { name: /^Columns/ })).toBeNull();
+    // QA 10-28 #3: the button stays for its switches; the column list is fixed.
+    fireEvent.click(screen.getByRole('button', { name: /^Columns/ }));
+    expect(screen.getByTestId('columns-menu-fixed')).toHaveTextContent('Focus keeps five columns');
+    expect(screen.queryByLabelText('Requester column')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Columns/ }));
     expect(screen.queryByRole('separator', { name: /Resize/ })).toBeNull();
     // State rides beside Status; the category reads under the subject.
     expect(screen.getAllByTestId('focus-state')[0]).toHaveTextContent('Requester replied');

@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import { linkifyHtml, linkifyText } from '../../utils/linkify';
 import { fsSystemEntryKind } from '../../utils/fsSystemEntry';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, RotateCcw, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, BadgeX, Ban, CheckCircle2, CircleMinus, ClipboardList, Clock, Cloud, CloudOff, CloudUpload, ExternalLink, Globe, Hourglass, MessageCircleQuestion, RotateCcw, Sparkles, Ticket as TicketIcon, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -1080,6 +1080,41 @@ export function SolutionMark({ className = '', withLabel = false }) {
     >
       <BrandArt name="verified-solution" className={withLabel ? 'h-6 w-6' : 'h-5 w-5'} />
       {withLabel ? <span className="text-[11px] font-semibold">Verified solution</span> : <span className="sr-only">Verified solution</span>}
+    </span>
+  );
+}
+
+/**
+ * Approval mark for queue rows (QA 10-28 #2): one small icon, no pill. Each
+ * state has its own shape as well as its own colour, so it reads without
+ * colour too; the tooltip names who it is waiting on or who decided.
+ */
+export const APPROVAL_MARKS = Object.freeze({
+  pending: { Icon: Hourglass, label: 'Waiting for approval', tone: 'text-amber-600 dark:text-amber-300' },
+  info_requested: { Icon: MessageCircleQuestion, label: 'Approval on hold for an answer', tone: 'text-amber-600 dark:text-amber-300' },
+  approved: { Icon: BadgeCheck, label: 'Approved', tone: 'text-emerald-600 dark:text-emerald-300' },
+  rejected: { Icon: BadgeX, label: 'Not approved', tone: 'text-red-600 dark:text-red-300' },
+  closed: { Icon: CircleMinus, label: 'Approval closed without a decision', tone: 'text-sky-700 dark:text-sky-300' },
+});
+
+export function approvalMarkTitle(approval) {
+  const mark = APPROVAL_MARKS[approval?.state];
+  if (!mark) return '';
+  const who = (approval.approvers || []).filter(Boolean).join(', ');
+  if (!who) return mark.label;
+  const waiting = approval.state === 'pending' || approval.state === 'info_requested';
+  return `${mark.label} · ${waiting ? 'with' : 'by'} ${who}`;
+}
+
+export function ApprovalMark({ approval, className = '' }) {
+  const mark = APPROVAL_MARKS[approval?.state];
+  if (!mark) return null;
+  const { Icon } = mark;
+  const title = approvalMarkTitle(approval);
+  return (
+    <span className={`inline-flex shrink-0 items-center ${mark.tone} ${className}`} title={title} data-testid="approval-mark" data-state={approval.state}>
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      <span className="sr-only">{title}</span>
     </span>
   );
 }

@@ -64,6 +64,12 @@ export { actorKindOf, deriveActorKind };
 // an FS code via the label's base status.
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
+// Ticket grouping (4.2.41) closes a repeat into its master with is_noise so it
+// leaves the totals, and labels it "Grouped: ...". Those copies are not noise
+// (QA 10-28 #4). NULL-safe: a bare NOT would also drop rows with no label.
+export const NOT_GROUPED_COPY = Object.freeze({
+  OR: [{ noiseRuleMatched: null }, { NOT: { noiseRuleMatched: { startsWith: 'Grouped:' } } }],
+});
 
 // Lifecycle order for sort=status (QA 08-04 #14a): alphabetical is meaningless
 // to operators — asc walks the ticket lifecycle Open-first (matching
@@ -1635,8 +1641,12 @@ class TicketService {
         where.tagLinks = { none: {} };
       }
     }
-    if (query.noise === 'only') where.isNoise = true;
-    else if (query.excludeNoise !== 'false') where.isNoise = false;
+    if (query.noise === 'only') {
+      where.isNoise = true;
+      // QA 10-28 #4: a grouped copy is kept out of totals with is_noise, but it
+      // is not noise. The Noise & spam view leaves it to Tickets -> Grouped.
+      where.AND = [...(where.AND || []), NOT_GROUPED_COPY];
+    } else if (query.excludeNoise !== 'false') where.isNoise = false;
 
     // Approval filter (16 Sep 2026): `approval` = any | pending | approved |
     // rejected | none, optionally narrowed to `approvalCategory` ids. "pending"
@@ -1717,8 +1727,10 @@ class TicketService {
     } else if (query.segment === 'noise') {
       // Opt-in "Noise" card (Phase FC): everything the noise rules flagged,
       // any status — matching the stats `noise` count exactly. Overrides the
-      // default isNoise:false exclusion set above.
+      // default isNoise:false exclusion set above. Grouped copies are not
+      // noise (QA 10-28 #4) and stay out, as in the stats count.
       where.isNoise = true;
+      where.AND = [...(where.AND || []), NOT_GROUPED_COPY];
     } else if (query.segment === 'created_week' || query.segment === 'created_month' || query.segment === 'created_year') {
       // "Tickets this week/month/year" (Phase FC): createdAt >= the calendar
       // boundary on the WORKSPACE's wall clock (see utils/zonedBoundaries.js
@@ -1807,11 +1819,12 @@ class TicketService {
       ]);
       const hasMore = rows.length > pageSize;
       const items = hasMore ? rows.slice(0, pageSize) : rows;
-      const [incoming, ai, bypass, proposed] = await Promise.all([
+      const [incoming, ai, bypass, proposed, approvals] = await Promise.all([
         this._lastPublicEntryIncoming(items.map((t) => t.id)),
         this._aiRunStateByTicket(items.map((t) => t.id)),
         this._aiBypassByTicket(items),
         this._openProposalTicketIds(items.map((t) => t.id)),
+        this._approvalStateByTicket(items.map((t) => t.id)),
       ]);
       const nextCursor = hasMore
         ? Buffer.from(String(items[items.length - 1].id), 'utf8').toString('base64url')
@@ -1825,6 +1838,7 @@ class TicketService {
           state: deriveQueueState(t, incoming.get(t.id) === true, statusSets, { lastAgentReplyAt: incoming.lastAgentReplyAt?.get(t.id) }),
           ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
           hasProposedReply: proposed.has(t.id),
+          approvalState: approvals.get(t.id) || null,
         })),
         nextCursor, pageSize, total,
       };
@@ -1894,11 +1908,12 @@ class TicketService {
     // always what clicking it shows.
     const facets = await this._listFacets(workspaceId, query);
 
-    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds] = await Promise.all([
+    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds, approvalByTicket] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
       this._aiBypassByTicket(items),
       this._openProposalTicketIds(items.map((t) => t.id)),
+      this._approvalStateByTicket(items.map((t) => t.id)),
     ]);
 
     return {
@@ -1918,6 +1933,8 @@ class TicketService {
         // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
         // drafts sat unseen unless someone opened the ticket).
         hasProposedReply: proposedTicketIds.has(t.id),
+        // QA 10-28 #2: the row's approval mark (waiting / on hold / approved / not approved / closed).
+        approvalState: approvalByTicket.get(t.id) || null,
       })),
       total,
       page,
@@ -1991,6 +2008,67 @@ class TicketService {
       take: s.take,
     })));
     return { total, items: rows.flat() };
+  }
+
+  /** The ticket a grouped copy was closed into: { id, displayRef, kind } or null. Never throws. */
+  async _groupedInto(ticketId, workspaceId) {
+    try {
+      const ev = await prisma.ticketGroupingEvent.findFirst({
+        where: { workspaceId, ticketId, state: 'applied', targetTicketId: { not: null } },
+        orderBy: { id: 'desc' },
+        select: { targetTicketId: true, kind: true },
+      });
+      if (!ev) return null;
+      const target = await prisma.ticket.findFirst({
+        where: { id: ev.targetTicketId, workspaceId },
+        select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+      });
+      return target ? { id: target.id, displayRef: ticketDisplayRef(target), kind: ev.kind } : null;
+    } catch (err) {
+      logger.warn(`grouped-into lookup failed (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Approval state per ticket for the queue's approval mark (QA 10-28 #2).
+   * One row per ticket: `pending` (someone still has to decide), `info_requested`
+   * (on hold for an answer), else the latest decision (approved / rejected /
+   * closed). Cancelled rows and superseded hand-off rows (escalated / forwarded)
+   * never count. Never throws.
+   */
+  async _approvalStateByTicket(ticketIds) {
+    const out = new Map();
+    if (!ticketIds.length) return out;
+    try {
+      const rows = await prisma.ticketApproval.findMany({
+        where: { ticketId: { in: ticketIds }, status: { in: ['pending', 'info_requested', 'approved', 'rejected', 'closed'] } },
+        select: { ticketId: true, status: true, approverName: true, approverEmail: true, decidedAt: true, createdAt: true },
+        orderBy: { id: 'asc' },
+      });
+      const byTicket = new Map();
+      for (const r of rows) {
+        if (!byTicket.has(r.ticketId)) byTicket.set(r.ticketId, []);
+        byTicket.get(r.ticketId).push(r);
+      }
+      for (const [ticketId, list] of byTicket) {
+        const waiting = list.filter((r) => r.status === 'pending' || r.status === 'info_requested');
+        if (waiting.length) {
+          const onHold = waiting.every((r) => r.status === 'info_requested');
+          out.set(ticketId, {
+            state: onHold ? 'info_requested' : 'pending',
+            approvers: [...new Set(waiting.map((r) => r.approverName || r.approverEmail))].slice(0, 3),
+            count: list.length,
+          });
+          continue;
+        }
+        const last = list.reduce((a, b) => ((b.decidedAt || b.createdAt) >= (a.decidedAt || a.createdAt) ? b : a));
+        out.set(ticketId, { state: last.status, approvers: [last.approverName || last.approverEmail], at: last.decidedAt || null, count: list.length });
+      }
+    } catch (err) {
+      logger.warn(`approval-state lookup failed (non-fatal): ${err.message}`);
+    }
+    return out;
   }
 
   async _openProposalTicketIds(ticketIds) {
@@ -2545,7 +2623,7 @@ class TicketService {
       }),
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: resolvedNames }, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] }, ...(windowStart ? { AND: [win] } : {}) } }),
-      prisma.ticket.count({ where: { workspaceId, isNoise: true, ...(windowStart ? { AND: [win] } : {}) } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: true, ...NOT_GROUPED_COPY, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: weekStart } } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: monthStart } } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: yearStart } } }),
@@ -2707,11 +2785,16 @@ class TicketService {
     const mergedInto = await import('./ticketMergeService.js')
       .then(({ default: svc }) => svc.mergedInto(ticket.id, workspaceId))
       .catch(() => null);
+    // QA 10-28 #4: a grouped copy says where it went instead of "Flagged as noise".
+    const groupedInto = String(ticket.noiseRuleMatched || '').startsWith('Grouped:')
+      ? await this._groupedInto(ticket.id, workspaceId)
+      : null;
     const detailStatusSets = await statusService.baseStatusSets(workspaceId);
 
     return {
       ...ticket,
       mergedInto,
+      groupedInto,
       tagLinks: undefined,
       tags: ticketTags(ticket),
       displayRef: ticketDisplayRef(ticket),

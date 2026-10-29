@@ -52,6 +52,7 @@ import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
+import GroupedBanner, { isGroupedCopy as isGroupedCopyOf } from '../components/tickets/GroupedBanner';
 import {
   BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, LinkedText, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
@@ -1242,6 +1243,8 @@ export default function TicketDetail() {
   useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
   const isNative = ticket?.origin === 'ticketpulse';
+  // QA 10-28 #4: closed into another ticket by grouping (kept out of totals with is_noise).
+  const isGroupedCopy = isGroupedCopyOf(ticket);
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
   const canWrite = isNative && ticketingOn;
   // Workspace status registry (Phase 8b): TP-born tickets pick from it
@@ -2483,7 +2486,7 @@ export default function TicketDetail() {
                       </button>
                     )}
                     {ticket.isNoise && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground border border-border">Noise</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground border border-border">{isGroupedCopy ? 'Grouped' : 'Noise'}</span>
                     )}
                     {/* Requester sentiment (AI, team-safe: requester state only).
                         Neutral is the default state — only the actionable ends
@@ -2776,7 +2779,10 @@ export default function TicketDetail() {
                     </span>
                   </div>
 
-                  {ticket.isNoise && (
+                  {/* QA 10-28 #4: a grouped copy is kept out of the totals the way
+                      noise is, but it is not noise. Say where it went. */}
+                  <GroupedBanner ticket={ticket} onOpen={(id) => navigate(`/tickets/${id}`)} />
+                  {ticket.isNoise && !isGroupedCopy && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg text-xs text-violet-800 dark:text-violet-200">
                       <VolumeX className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
                       <span>Flagged as noise — hidden from the default queue (Views → Noise &amp; spam).</span>

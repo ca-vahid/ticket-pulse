@@ -37,7 +37,7 @@ import PullToRefresh from '../components/common/PullToRefresh';
 import StatusPicker from '../components/tickets/StatusPicker';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SlaChip, SolutionMark, StateChip, StatusPill, TagChip, TypePill,
+  ApprovalMark, ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SlaChip, SolutionMark, StateChip, StatusPill, TagChip, TypePill,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import ParkDialog, { ParkedMark } from '../components/tickets/ParkControls';
@@ -2309,9 +2309,10 @@ export default function Tickets() {
                       custom columns apply at xl+ and mobile keeps its cards.
                       Last in the row (17 Oct 2026) so switching to the board,
                       which hides it, moves nothing else. */}
-                  {!boardMode && !focus && (
+                  {/* QA 10-28 #3: Focus keeps the menu for its switches; the column list is fixed there. */}
+                  {!boardMode && (
                     <div className="hidden md:block order-2">
-                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} freezeSubject={freezeSubject} onFreezeSubjectChange={updateFreezeSubject} />
+                      <QueueColumnsMenu fixedKeys={focus ? FOCUS_COLUMN_KEYS : null} value={columnKeys} onChange={updateColumns} hasCustomWidths={hasCustomWidths} onResetWidths={resetAllWidths} columnMap={columnMap} onColumnMapChange={updateColumnMap} sideArrows={sideArrows} onSideArrowsChange={updateSideArrows} freezeSubject={freezeSubject} onFreezeSubjectChange={updateFreezeSubject} />
                     </div>
                   )}
                   {/* Right end: AI-approval worklist connector + pagination */}
@@ -2586,6 +2587,7 @@ export default function Tickets() {
                                     )}
                                     {ticket.isExternal && <ExternalChip />}
                                     {ticket.solutionVerifiedAt && <SolutionMark />}
+                                    <ApprovalMark approval={ticket.approvalState} />
                                     {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
                                     <OccurrenceMark ticket={ticket} />
                                     <StateChip state={ticket.stateChip} />
@@ -2921,6 +2923,7 @@ export default function Tickets() {
                                           <span className="ml-auto flex min-w-0 items-center gap-1.5">
                                             {ticket.isExternal && <ExternalChip />}
                                             {ticket.solutionVerifiedAt && <SolutionMark />}
+                                            <ApprovalMark approval={ticket.approvalState} />
                                             <OccurrenceMark ticket={ticket} />
                                             {ticket.hasProposedReply && (
                                               <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300" title="A drafted reply is waiting for approval on this ticket">
