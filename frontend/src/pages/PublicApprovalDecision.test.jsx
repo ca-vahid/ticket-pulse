@@ -126,7 +126,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
 
     // Composer: tabs, mail-sized editor, approve enabled, reject behind its tab
     expect(screen.getByTestId('approval-composer')).toBeInTheDocument();
-    expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['ApproveA', 'Approve with conditions', 'Ask a question', 'Not approvedR', 'Forward']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent.trim())).toEqual(['ApproveA', 'Approve with conditions', 'Ask or reply', 'Not approvedR', 'Close the approval', 'Forward']);
     expect(noteBox()).toHaveAttribute('placeholder', expect.stringMatching(/Optional note/));
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
     expect(screen.getByText(/Sent to ingrid\.manager@bgcengineering\.ca · link expires Oct 1/)).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     cleanup();
 
     renderPage('tok-1', '?intent=ask');
-    expect(await screen.findByRole('tab', { name: 'Ask a question' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('tab', { name: 'Ask or reply' })).toHaveAttribute('aria-selected', 'true');
     cleanup();
 
     renderPage('tok-1', '?intent=nonsense');
@@ -251,11 +251,40 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(screen.getByRole('tab', { name: 'Approve' })).toBeEnabled();
   });
 
+  test('close the approval (29 Oct 2026): a reason, an optional note, confirmed, never a refusal', async () => {
+    apiMock.get.mockReturnValue(ok(pendingFixture));
+    apiMock.decide.mockReturnValue(ok({ status: 'closed', closeReason: 'not_needed', decidedAt: '2026-09-02T16:30:00.000Z', approverName: 'Dana Whitfield' }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Close the approval' }));
+    expect(screen.getByRole('radio', { name: 'No longer needed' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
+    expect(screen.getByRole('button', { name: 'Close the approval' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: 'No longer needed' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'What happened' }), { target: { value: 'Ingrid does not need it after all.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close the approval' }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/It is not a refusal/);
+    await confirmSheet(/Yes, close the approval/);
+    await waitFor(() => expect(apiMock.decide).toHaveBeenCalledWith('tok-1', 'closed', 'Ingrid does not need it after all.', null, { ...NO_CONDITION, closeReason: 'not_needed' }));
+    expect(await screen.findByText(/You closed this approval on Sep 2.*: no longer needed/)).toBeInTheDocument();
+    expect(screen.queryByTestId('approval-composer')).not.toBeInTheDocument();
+  });
+
+  test('a reply that waits for nothing goes out as a comment (29 Oct 2026)', async () => {
+    apiMock.get.mockReturnValue(ok(pendingFixture));
+    apiMock.postMessage.mockReturnValue(ok({ message: { id: 79, kind: 'comment', audience: 'internal', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Thanks, noted.', to: ['mblackstock@bgcengineering.ca'], cc: [], createdAt: '2026-09-02T16:30:00.000Z' } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask or reply' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Wait for an answer/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your reply' }), { target: { value: 'Thanks, noted.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send the reply' }));
+    await waitFor(() => expect(apiMock.postMessage).toHaveBeenCalledWith('tok-1', { kind: 'comment', mode: 'internal', bodyText: 'Thanks, noted.', bodyHtml: null }));
+  });
+
   test('ask the requester: needs a question, posts with audience, joins the conversation, keeps the decision open', async () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.postMessage.mockReturnValue(ok({ message: { id: 77, kind: 'question', audience: 'requester', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Is a refurbished unit an option?', bodyHtml: null, to: ['iberrugarcia@bgcengineering.ca'], cc: ['mblackstock@bgcengineering.ca'], createdAt: '2026-09-02T16:30:00.000Z' } }));
     renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask or reply' }));
     // QA 10-01 #5: internal is the default; the requester is a deliberate choice.
     expect(screen.getByRole('radio', { name: /Ask the approvers \/ agent only/ })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('radio', { name: /Ask the requester/ }));
@@ -280,7 +309,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok(pendingFixture));
     apiMock.postMessage.mockReturnValue(ok({ message: { id: 78, kind: 'question', audience: 'internal', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield', role: 'approver' }, bodyText: 'Did we budget this?', to: ['mblackstock@bgcengineering.ca'], cc: [], createdAt: '2026-09-02T16:30:00.000Z' } }));
     renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask or reply' }));
     fireEvent.click(screen.getByRole('radio', { name: /approvers \/ agent only/ }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Your question' }), { target: { value: 'Did we budget this?' } });
     fireEvent.click(screen.getByRole('button', { name: /Send to the approvers/ }));
@@ -300,7 +329,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     apiMock.get.mockReturnValue(ok({ ...pendingFixture, approval: { ...pendingFixture.approval, participants } }));
     apiMock.postMessage.mockReturnValue(ok({ message: { id: 79, kind: 'question', audience: 'requester', author: { email: 'ingrid.manager@bgcengineering.ca', name: 'Dana Whitfield' }, bodyText: 'q', to: [], cc: [], createdAt: '2026-09-02T16:30:00.000Z' } }));
     renderPage();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ask a question' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Ask or reply' }));
     // QA 10-01 #5: internal is the default — pick the requester mode first.
     fireEvent.click(screen.getByRole('radio', { name: /Ask the requester/ }));
     const chips = screen.getByTestId('audience-chips');

@@ -4,7 +4,7 @@ import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
 import {
-  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -174,6 +174,7 @@ function CopyValueButton({ value, label, onCopy }) {
  */
 const APPROVAL_EVENT_STYLES = {
   approved: { Icon: CheckCircle2, wrap: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30', accent: 'bg-emerald-500', text: 'text-emerald-800 dark:text-emerald-200', chip: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
+  closed: { Icon: CircleMinus, wrap: 'bg-sky-50 dark:bg-sky-500/15 border-sky-200 dark:border-sky-500/30', accent: 'bg-sky-500', text: 'text-sky-800 dark:text-sky-200', chip: 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30' },
   rejected: { Icon: XCircle, wrap: 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30', accent: 'bg-red-500', text: 'text-red-800 dark:text-red-200', chip: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' },
   clarification: { Icon: MessageCircleQuestion, wrap: 'bg-violet-50 dark:bg-violet-500/15 border-violet-200 dark:border-violet-500/30', accent: 'bg-violet-500', text: 'text-violet-800 dark:text-violet-200', chip: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30' },
   // The request itself (what the agent asked for) — blue like the request button.
@@ -189,6 +190,7 @@ export function approvalEventMeta(entry) {
   if (entry.rawPayload?.kind === 'approval_event') {
     const event = String(entry.rawPayload.event || '').toLowerCase();
     const changed = entry.rawPayload.changed === true || event.includes('changed');
+    if (event === 'closed') return { label: 'Closed', ...APPROVAL_EVENT_STYLES.closed };
     if (event.includes('reject')) return { label: changed ? 'Not approved (changed)' : 'Not approved', ...APPROVAL_EVENT_STYLES.rejected };
     if (event.includes('clarif') || event.includes('info')) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
     if (event.includes('approv')) return { label: changed ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
@@ -197,6 +199,7 @@ export function approvalEventMeta(entry) {
   }
   const t = String(entry.bodyText || entry.content || '');
   if (/^Approval (CHANGED to )?APPROVED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
+  if (/^Approval CLOSED/i.test(t)) return { label: 'Closed', ...APPROVAL_EVENT_STYLES.closed };
   if (/^Approval (CHANGED to )?(REJECTED|NOT APPROVED)/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Not approved (changed)' : 'Not approved', ...APPROVAL_EVENT_STYLES.rejected };
   if (/^Clarification requested/i.test(t)) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
   if (/^Approval requested/i.test(t)) return { label: 'Requested', ...APPROVAL_EVENT_STYLES.requested };
@@ -1333,6 +1336,7 @@ export default function TicketDetail() {
     if (open.length) return { label: open.length > 1 ? `Awaiting approval (${open.length})` : 'Awaiting approval', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30' };
     if (list.some((a) => a.status === 'approved')) return { label: 'Approved', cls: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' };
     if (list.some((a) => a.status === 'rejected')) return { label: 'Rejected', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' };
+    if (list.some((a) => a.status === 'closed')) return { label: 'Approval closed', cls: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30' };
     return null;
   }, [ticket?.approvals]);
 

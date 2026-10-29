@@ -179,7 +179,9 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, onAskRequ
   const decided = item.kind === 'decision';
   // 'Not approved' since 18 Sep 2026; 'Rejected' on messages written before.
   const rejected = decided && /^(rejected|not approved)/i.test(item.bodyText || '');
-  const rule = decided ? (rejected ? 'border-red-400' : 'border-emerald-400') : meta.rule;
+  // 29 Oct 2026: closed without a decision ("Closed: no longer needed").
+  const closedDecision = decided && /^closed/i.test(item.bodyText || '');
+  const rule = decided ? (closedDecision ? 'border-sky-400' : rejected ? 'border-red-400' : 'border-emerald-400') : meta.rule;
   const target = item.target || item.message || null;
   const relay = item.relay || null;
   const addressees = [...(target?.to || []), ...(target?.cc || [])].map(lc);
@@ -206,6 +208,7 @@ function ThreadItem({ item, viewerEmail, viewerRole, isDark, onAnswer, onAskRequ
 
   let sentence;
   if (item.kind === 'handoff') sentence = handoffSentence(item.entry, { withNote: false }).replace(/^An approver /, `${item.author?.name || 'An approver'} `);
+  else if (closedDecision) sentence = `${who} closed the approval`;
   else if (decided) sentence = `${who} ${rejected ? 'did not approve' : 'approved'}${/with condition/i.test(item.bodyText || '') ? ' with a condition' : ''}`;
   else if (item.kind === 'request' && isMine) sentence = 'You asked for approval';
   else sentence = `${who} ${meta.label}`;

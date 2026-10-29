@@ -28,7 +28,7 @@ export function briefDescription(ticket) {
  * asker and note). A row cancelled because a sibling decided ("Superseded")
  * is dropped; the row that matters most leads.
  */
-const STATUS_RANK = { approved: 0, rejected: 0, info_requested: 1, pending: 2, escalated: 3, forwarded: 3, cancelled: 4 };
+const STATUS_RANK = { approved: 0, rejected: 0, closed: 0, info_requested: 1, pending: 2, escalated: 3, forwarded: 3, cancelled: 4 };
 export function groupApprovals(items = []) {
   const groups = new Map();
   for (const a of items) {

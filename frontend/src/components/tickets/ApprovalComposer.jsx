@@ -1,19 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Activity, ArrowUpRight, Check, ChevronDown, CircleAlert, Forward, Lock, Mail, MessageCircleQuestion, Minimize2, PenLine, ShieldAlert, Users, X,
+  Activity, ArrowUpRight, Check, ChevronDown, CircleAlert, CircleMinus, Forward, Lock, Mail, MessageCircleQuestion, Minimize2, PenLine, ShieldAlert, Users, X,
 } from 'lucide-react';
 import RichTextEditor, { isRichContent } from './RichTextEditor';
 import { HandoffPanel } from './ApprovalHandoff';
 import { SafeHtml, formatDay } from './ticketUi';
 import { ConditionsEditor, ConditionsReview, conditionsWaitingOn, readConditions } from './ApprovalConditions';
+import { CLOSE_REASON_OPTIONS, closeReasonLabel } from '../../utils/approvalCloseReasons';
 
 /**
  * Approvals v3 — the one composer every approver surface uses (magic-link
  * page, the ticket's Approvals tab, the Approvals inbox). Mail-client sized
  * (260 px editor by default) with tabs:
  *
- *   Approve · Approve with conditions · Ask a question · Not approved · Escalate · Forward
+ *   Approve · Approve with conditions · Ask or reply · Not approved · Close the approval · Escalate · Forward
+ *
+ * 29 Oct 2026 (Vahid): "Close the approval" ends a request that is neither a
+ * yes nor a no (the requester no longer needs it, or it is handled another
+ * way) with a reason; the ticket stays open and the agent is told to carry
+ * on. "Ask or reply" can send a plain reply that waits for nothing.
  *
  * 26 Oct 2026: approving with conditions sends them to the technician to
  * answer one by one; the request comes back here with the answers and is
@@ -24,7 +30,7 @@ import { ConditionsEditor, ConditionsReview, conditionsWaitingOn, readConditions
  * every recipient is a chip the approver can untick.
  *
  * Callbacks return promises; the parent updates its own state on success.
- *   onDecide(decision, note, noteHtml, { conditionNote, conditionNoteHtml, conditions, notifyRequester })
+ *   onDecide(decision, note, noteHtml, { conditionNote, conditionNoteHtml, conditions, notifyRequester, closeReason })
  *
  * QA 09-18 #1: the ticket requester is NOT on the decision e-mail unless the
  * approver ticks the large "Also e-mail the requester" box - a rejection note
@@ -49,8 +55,9 @@ function Kbd({ children, onSolid = false }) {
 const TABS = [
   { key: 'approved', label: 'Approve', Icon: Check, tone: 'text-emerald-700 dark:text-emerald-200', active: 'border-emerald-500 text-emerald-700 dark:text-emerald-200' },
   { key: 'condition', label: 'Approve with conditions', Icon: PenLine, tone: 'text-emerald-700 dark:text-emerald-200', active: 'border-emerald-500 text-emerald-700 dark:text-emerald-200' },
-  { key: 'question', label: 'Ask a question', Icon: MessageCircleQuestion, tone: 'text-violet-700 dark:text-violet-200', active: 'border-violet-500 text-violet-700 dark:text-violet-200' },
+  { key: 'question', label: 'Ask or reply', Icon: MessageCircleQuestion, tone: 'text-violet-700 dark:text-violet-200', active: 'border-violet-500 text-violet-700 dark:text-violet-200' },
   { key: 'rejected', label: 'Not approved', Icon: X, tone: 'text-red-700 dark:text-red-200', active: 'border-red-500 text-red-700 dark:text-red-200' },
+  { key: 'closed', label: 'Close the approval', Icon: CircleMinus, tone: 'text-sky-700 dark:text-sky-200', active: 'border-sky-500 text-sky-700 dark:text-sky-200' },
   { key: 'escalate', label: 'Escalate', Icon: ArrowUpRight, tone: 'text-amber-700 dark:text-amber-200', active: 'border-amber-500 text-amber-700 dark:text-amber-200' },
   { key: 'forward', label: 'Forward', Icon: Forward, tone: 'text-foreground', active: 'border-primary text-primary' },
 ];
@@ -58,8 +65,9 @@ const TABS = [
 const PLACEHOLDER = {
   approved: 'Optional note — the agent and the other approvers read it in the decision e-mail (the requester too, only if you tick the box below).',
   condition: 'Optional note for the technician, e.g. why these conditions matter.',
-  question: 'Your question…',
+  question: 'Your question or reply…',
   rejected: 'Why not — required. The agents read it; the requester only if you tick the box below.',
+  closed: 'What happened, e.g. “Jack says he does not need it after all.” The agent reads it in the e-mail.',
 };
 
 /**
@@ -75,7 +83,7 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel]);
   if (!pending) return null;
-  const { decision, note, conditionNote, conditions, amountLabel, notifyRequester } = pending;
+  const { decision, note, conditionNote, conditions, amountLabel, notifyRequester, closeReason } = pending;
   const agentName = approval?.requestedByName || approval?.agentName || 'the technician';
   const answered = conditionsWaitingOn(approval?.conditions, approval?.status) === 'approver';
   const requesterWho = approval?.requesterName ? `the requester (${approval.requesterName})` : 'the requester';
@@ -86,6 +94,7 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
       ? { title: `Send ${conditions.length === 1 ? 'this condition' : `these ${conditions.length} conditions`} to ${agentName}?`, cta: 'Yes, send the conditions', tone: 'bg-emerald-600 hover:bg-emerald-700', Icon: PenLine }
       : { title: answered ? 'Approve, accepting these answers?' : conditionNote ? 'Approve with this condition?' : 'Approve this request?', cta: answered ? 'Yes, approve' : conditionNote ? 'Yes, approve with condition' : 'Yes, approve', tone: 'bg-emerald-600 hover:bg-emerald-700', Icon: Check },
     rejected: { title: 'Mark this request as not approved?', cta: 'Yes, not approved', tone: 'bg-red-600 hover:bg-red-700', Icon: X },
+    closed: { title: 'Close this approval without a decision?', cta: 'Yes, close the approval', tone: 'bg-sky-600 hover:bg-sky-700', Icon: CircleMinus },
     escalate: { title: `Escalate to ${approval?.nextTier?.name || 'the next tier'}?`, cta: 'Yes, escalate', tone: 'bg-amber-600 hover:bg-amber-700', Icon: ArrowUpRight },
     forward: { title: `Forward to ${pending.toName || pending.toEmail || 'this person'}?`, cta: 'Yes, forward', tone: 'bg-primary hover:bg-blue-700', Icon: Forward },
   };
@@ -101,6 +110,8 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
     consequence = notifyRequester
       ? `This ends the request with your reason. The agent, the other approvers and ${requesterWho} are notified right away.`
       : `This ends the request with your reason. The agent and the other approvers are notified right away — ${requesterWho} is not e-mailed, the agent follows up.`;
+  } else if (decision === 'closed') {
+    consequence = `It is not a refusal. The approval ends as “${closeReasonLabel(closeReason)}” and the ticket stays open. ${agentName} and the other approvers are e-mailed to carry on${notifyRequester ? `, and so is ${requesterWho}` : `; ${requesterWho} is not e-mailed`}.`;
   } else if (decision === 'escalate') {
     consequence = `You are handed off — ${approval?.nextTier?.approverNames?.join(', ') || 'the next tier'} decide from here and your note goes with it.`;
   } else {
@@ -119,7 +130,7 @@ export function ConfirmSheet({ pending, approval, onConfirm, onCancel, busy }) {
           <div className="min-w-0 flex-1">
             <h4 id="confirm-title" className="text-base font-bold text-foreground">{v.title}</h4>
             <p className="mt-1 text-sm text-muted-foreground">
-              You are about to <span className="font-semibold text-foreground">{decision === 'approved' ? (conditions?.length ? 'approve on conditions' : 'approve') : decision === 'rejected' ? 'mark as not approved' : decision}</span>{' '}
+              You are about to <span className="font-semibold text-foreground">{decision === 'approved' ? (conditions?.length ? 'approve on conditions' : 'approve') : decision === 'rejected' ? 'mark as not approved' : decision === 'closed' ? 'close the approval on' : decision}</span>{' '}
               <span className="font-mono font-semibold text-foreground">{ref}</span>{forWhom}{amountLabel ? <> · <span className="font-semibold text-foreground">{amountLabel}</span></> : null}.
             </p>
             <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{consequence}</p>
@@ -235,7 +246,7 @@ export default function ApprovalComposer({
   const [tab, setTab] = useState(() => {
     const fallback = canDecide ? 'approved' : 'forward';
     if (!initialTab) return fallback;
-    if (!canDecide && ['approved', 'rejected', 'condition'].includes(initialTab)) return fallback;
+    if (!canDecide && ['approved', 'rejected', 'condition', 'closed'].includes(initialTab)) return fallback;
     if (initialTab === 'question' && typeof onAsk !== 'function') return fallback;
     return initialTab;
   });
@@ -253,6 +264,10 @@ export default function ApprovalComposer({
   const [picked, setPicked] = useState({});
   // QA 09-18 #1: off by default — the requester hears the verdict from the agent.
   const [notifyRequester, setNotifyRequester] = useState(false);
+  // 29 Oct 2026: why an approval is closed without a decision.
+  const [closeReason, setCloseReason] = useState('not_needed');
+  // 29 Oct 2026: off = a plain reply (thanks, an update) that waits for nothing.
+  const [expectAnswer, setExpectAnswer] = useState(true);
   const [showSignature, setShowSignature] = useState(false);
   // 26 Oct 2026: conditions are a list. Changing them starts from the current ones.
   const currentConditions = readConditions(approval?.conditions);
@@ -303,10 +318,16 @@ export default function ApprovalComposer({
 
   const stage = useCallback((decision) => {
     if (busy) return;
-    if (!canDecide && ['approved', 'rejected', 'condition'].includes(decision)) return;
+    if (!canDecide && ['approved', 'rejected', 'condition', 'closed'].includes(decision)) return;
     if (decision === 'rejected' && !text) {
       setError('Add the reason — the agents read it and pass it on.');
       setTab('rejected');
+      editorRef.current?.focus();
+      return;
+    }
+    if (decision === 'closed' && closeReason === 'other' && !text) {
+      setError('Say why it is closed — the agent reads it.');
+      setTab('closed');
       editorRef.current?.focus();
       return;
     }
@@ -319,13 +340,13 @@ export default function ApprovalComposer({
       setPending({ decision: 'approved', note: text || null, noteHtml: rich(), conditions: condList, conditionNote: condList.join('\n'), conditionNoteHtml: null, amountLabel: approval?.amountLabel || null, notifyRequester: false });
       return;
     }
-    setPending({ decision, note: text || null, noteHtml: rich(), conditionNote: null, amountLabel: approval?.amountLabel || null, notifyRequester });
-  }, [busy, text, noteHtml, approval, canDecide, notifyRequester, conds]); // eslint-disable-line react-hooks/exhaustive-deps
+    setPending({ decision, note: text || null, noteHtml: rich(), conditionNote: null, amountLabel: approval?.amountLabel || null, notifyRequester, ...(decision === 'closed' ? { closeReason } : {}) });
+  }, [busy, text, noteHtml, approval, canDecide, notifyRequester, conds, closeReason]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runDecision = useCallback(async (p) => {
     setSubmitting(p.decision);
     try {
-      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, ...(p.conditions ? { conditions: p.conditions } : {}), notifyRequester: p.notifyRequester === true });
+      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, ...(p.conditions ? { conditions: p.conditions } : {}), notifyRequester: p.notifyRequester === true, ...(p.closeReason ? { closeReason: p.closeReason } : {}) });
       setPending(null);
       clear();
     } catch (err) {
@@ -339,7 +360,7 @@ export default function ApprovalComposer({
   const ask = useCallback(async () => {
     if (busy) return;
     if (!text) {
-      setError('Type your question first — it is sent by e-mail and the answer lands back here.');
+      setError(expectAnswer ? 'Type your question first — it is sent by e-mail and the answer lands back here.' : 'Type your reply first.');
       editorRef.current?.focus();
       return;
     }
@@ -352,7 +373,7 @@ export default function ApprovalComposer({
         ? { to: [participants?.requester], cc: [participants?.agent, ...chain] }
         : { to: [participants?.agent, ...chain], cc: [] };
       const emails = (list) => [...new Set(list.filter((p) => p?.email).map((p) => p.email.toLowerCase()).filter((e) => e !== self && picked[e] !== false))];
-      const payload = { kind: 'question', mode: askMode, bodyText: text, bodyHtml: rich() };
+      const payload = { kind: expectAnswer ? 'question' : 'comment', mode: askMode, bodyText: text, bodyHtml: rich() };
       if (participants) { payload.to = emails(all.to); payload.cc = emails(all.cc).filter((e) => !payload.to.includes(e)); }
       if (participants && payload.to.length === 0 && payload.cc.length === 0) {
         setError('Pick at least one person to send the question to.');
@@ -366,7 +387,7 @@ export default function ApprovalComposer({
     } finally {
       setSubmitting(null);
     }
-  }, [busy, text, noteHtml, askMode, picked, participants, selfEmail, onAsk]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [busy, text, noteHtml, askMode, picked, participants, selfEmail, onAsk, expectAnswer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const confirm = useCallback(async () => {
     if (!pending) return;
@@ -407,13 +428,14 @@ export default function ApprovalComposer({
 
   const expires = approval?.expiresAt ? formatDay(approval.expiresAt) : null;
   const isHandoff = tab === 'escalate' || tab === 'forward';
-  const isDecision = tab === 'approved' || tab === 'condition' || tab === 'rejected';
+  const isDecision = tab === 'approved' || tab === 'condition' || tab === 'rejected' || tab === 'closed';
 
   const choices = layout === 'choices';
   const CHOICE_TONE = {
     approved: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/45 dark:bg-emerald-500/15 dark:text-emerald-200',
     condition: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/45 dark:bg-emerald-500/15 dark:text-emerald-200',
     question: 'border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-500/45 dark:bg-violet-500/15 dark:text-violet-200',
+    closed: 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-500/45 dark:bg-sky-500/15 dark:text-sky-200',
     rejected: 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/45 dark:bg-red-500/15 dark:text-red-200',
   };
   const pick = (key) => { setTab(key); setTabChosen(true); setError(null); };
@@ -450,7 +472,7 @@ export default function ApprovalComposer({
           <div role="tablist" aria-label="What do you want to do?" data-testid="approval-choices">
             <h3 id="composer-heading" className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Your decision</h3>
             <div className="grid grid-cols-2 gap-2">
-              {tabs.filter((t) => t.key !== 'escalate' && t.key !== 'forward').map((t) => (
+              {tabs.filter((t) => t.key !== 'escalate' && t.key !== 'forward' && t.key !== 'closed').map((t) => (
                 <button
                   key={t.key}
                   type="button"
@@ -531,6 +553,23 @@ export default function ApprovalComposer({
                   {participants && (
                     <AudienceChips mode={askMode} participants={participants} selfEmail={selfEmail} picked={picked} onToggle={(e) => setPicked((p) => ({ ...p, [e]: p[e] === false }))} />
                   )}
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 text-[12.5px]" data-testid="expect-answer">
+                    <input
+                      type="checkbox"
+                      className="tp-focus-ring mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-[hsl(var(--primary))]"
+                      checked={expectAnswer}
+                      onChange={(e) => setExpectAnswer(e.target.checked)}
+                      disabled={busy}
+                    />
+                    <span>
+                      <span className="font-semibold text-foreground">Wait for an answer</span>
+                      <span className="block text-[11.5px] text-muted-foreground">
+                        {expectAnswer
+                          ? (askMode === 'requester' ? 'A question: the request is on hold until they answer.' : 'A question: the answer lands back here.')
+                          : 'A reply, e.g. thanks or an update. Nothing is put on hold; the request stays with you to decide.'}
+                      </span>
+                    </span>
+                  </label>
                   <p className="mt-2 text-[11.5px] text-muted-foreground">
                     {askMode === 'requester'
                       ? 'One e-mail in the ticket’s conversation, with your signature; everyone ticked is copied and you are too. They answer with a normal reply. The request shows “question sent” until the answer arrives.'
@@ -544,6 +583,30 @@ export default function ApprovalComposer({
               )}
               {answersIn && tab === 'approved' && (
                 <p className="mb-2 text-[12.5px] text-muted-foreground">Approving accepts these answers. The agreed conditions go out with your approval.</p>
+              )}
+
+              {tab === 'closed' && (
+                <div className="mb-3" data-testid="close-panel">
+                  <p className="mb-2 text-[12.5px] text-muted-foreground">
+                    Neither a yes nor a no. The approval ends with the reason you pick, the ticket stays open, and {approval?.requestedByName || 'the agent'} is e-mailed to carry on.
+                  </p>
+                  <div role="radiogroup" aria-label="Why is it closed?" className="flex flex-wrap gap-x-4 gap-y-1.5">
+                    {CLOSE_REASON_OPTIONS.map((r) => (
+                      <label key={r.key} className="inline-flex cursor-pointer items-center gap-1.5 text-[13px] text-foreground">
+                        <input
+                          type="radio"
+                          name="close-reason"
+                          value={r.key}
+                          checked={closeReason === r.key}
+                          onChange={() => { setCloseReason(r.key); if (error) setError(null); }}
+                          disabled={busy}
+                          className="tp-focus-ring h-4 w-4 accent-[hsl(var(--primary))]"
+                        />
+                        {r.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {tab === 'condition' && (
@@ -569,7 +632,7 @@ export default function ApprovalComposer({
                 value={noteHtml}
                 onChange={({ html, text: t }) => { setNoteHtml(html); setNote(t); if (error) setError(null); }}
                 placeholder={PLACEHOLDER[tab] || PLACEHOLDER.approved}
-                ariaLabel={tab === 'question' ? 'Your question' : tab === 'condition' ? 'Note for the technician' : tab === 'rejected' ? 'Reason it is not approved' : 'Decision note'}
+                ariaLabel={tab === 'question' ? (expectAnswer ? 'Your question' : 'Your reply') : tab === 'condition' ? 'Note for the technician' : tab === 'rejected' ? 'Reason it is not approved' : tab === 'closed' ? 'What happened' : 'Decision note'}
                 minHeight={expanded ? 360 : tab === 'condition' ? 96 : compact ? Math.min(minHeight, 160) : minHeight}
                 className={`border-input bg-card shadow-subtle ${expanded ? 'min-h-[45vh]' : ''}`}
                 expanded={expanded}
@@ -614,9 +677,11 @@ export default function ApprovalComposer({
                       Also e-mail the requester{approval?.requesterName ? `, ${approval.requesterName}` : ''}
                     </span>
                     <span className="mt-0.5 block text-[12px] leading-relaxed text-muted-foreground">
-                      {notifyRequester
-                        ? 'They receive the verdict and your note by e-mail.'
-                        : 'Off: the verdict and your note go to the agents on this request only. The agent tells the requester.'}
+                      {tab === 'closed'
+                        ? (notifyRequester ? 'They are told the approval is closed, with your note.' : 'Off: only the agents on this request are told. The agent tells the requester.')
+                        : notifyRequester
+                          ? 'They receive the verdict and your note by e-mail.'
+                          : 'Off: the verdict and your note go to the agents on this request only. The agent tells the requester.'}
                     </span>
                   </span>
                 </label>
@@ -650,20 +715,33 @@ export default function ApprovalComposer({
                     {showShortcuts && submitting !== 'rejected' && <Kbd onSolid>R</Kbd>}
                   </button>
                 )}
+                {tab === 'closed' && (
+                  <button type="button" onClick={() => stage('closed')} disabled={busy || (closeReason === 'other' && !hasNote)} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-[10px] bg-sky-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-sky-700 disabled:opacity-60">
+                    {submitting === 'closed' ? <Activity className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CircleMinus className="h-4 w-4" aria-hidden="true" />}
+                    {submitting === 'closed' ? 'Closing…' : 'Close the approval'}
+                  </button>
+                )}
                 {tab === 'question' && (
                   <button type="button" onClick={ask} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-[10px] bg-violet-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
                     {submitting === 'question' ? <Activity className="h-4 w-4 animate-spin" aria-hidden="true" /> : <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />}
-                    {submitting === 'question' ? 'Sending…' : askMode === 'requester' ? 'Send to the requester' : 'Send to the approvers / agent'}
+                    {submitting === 'question' ? 'Sending…' : !expectAnswer ? 'Send the reply' : askMode === 'requester' ? 'Send to the requester' : 'Send to the approvers / agent'}
                   </button>
                 )}
                 {tab === 'rejected' && !hasNote && <span id="reject-helper" className="text-xs text-muted-foreground">Add the reason to continue</span>}
                 {tab === 'condition' && !condList.length && <span className="text-xs text-muted-foreground">Write at least one condition</span>}
+                {tab === 'closed' && closeReason === 'other' && !hasNote && <span className="text-xs text-muted-foreground">Say why to continue</span>}
               </div>
             </>
           )}
 
+          {choices && canDecide && (
+            <p className="mt-3 border-t border-border/70 pt-2 text-[12px] text-muted-foreground" data-testid="approval-close-link">
+              Neither a yes nor a no?{' '}
+              <button type="button" onClick={() => pick('closed')} disabled={busy} className={`tp-focus-ring rounded font-medium hover:underline ${tab === 'closed' ? 'text-foreground' : 'text-sky-700 dark:text-sky-300'}`}>Close the approval</button>
+            </p>
+          )}
           {choices && (canForward || canEscalate) && (
-            <p className="mt-3 border-t border-border/70 pt-2 text-[12px] text-muted-foreground" data-testid="approval-handoff-links">
+            <p className={`${canDecide ? 'mt-1' : 'mt-3 border-t border-border/70 pt-2'} text-[12px] text-muted-foreground`} data-testid="approval-handoff-links">
               Not yours to decide?{' '}
               {canForward && <button type="button" onClick={() => pick('forward')} disabled={busy} className={`tp-focus-ring rounded font-medium hover:underline ${tab === 'forward' ? 'text-foreground' : 'text-primary'}`}>Forward</button>}
               {canForward && canEscalate && ' · '}

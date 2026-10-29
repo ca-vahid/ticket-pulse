@@ -545,6 +545,48 @@ describe('decide with a condition', () => {
     expect(sends.find((s) => s.to === 'rita@x.io').subject).toBe('Not approved: New laptop [TP-1234]');
   });
 
+  test('closing without a decision (29 Oct 2026): status closed + reason, siblings superseded, the agent told to carry on, never a refusal', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ conditions: ANSWERED }));
+    const updated = await ticketApprovalService.decideInApp(501, 1, 2, 'closed', 'Rita said she does not need it after all.', { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { closeReason: 'not_needed' });
+    expect(updated.status).toBe('closed');
+    const data = prismaMock.ticketApproval.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({ status: 'closed', closeReason: 'not_needed', conditionNote: null });
+    expect(prismaMock.ticketApproval.updateMany.mock.calls[0][0].data.decisionNote).toBe('Superseded — closed by Neville');
+    const entry = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(entry.bodyText).toMatch(/^Approval CLOSED \(no longer needed\) by Neville — "Rita said/);
+    expect(entry.rawPayload).toMatchObject({ event: 'closed', parts: { verdict: 'closed', closeReason: 'not_needed', closeReasonLabel: 'No longer needed' } });
+    const decision = prismaMock.approvalMessage.create.mock.calls.find((c) => c[0].data.kind === 'decision');
+    expect(decision[0].data.bodyText).toBe('Closed: no longer needed\nRita said she does not need it after all.');
+    const sends = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]);
+    expect(sends.map((s) => s.to).sort()).toEqual(['req@x.io', 'vahid@x.io']);
+    const agent = sends.find((s) => s.to === 'req@x.io');
+    expect(agent.subject).toMatch(/^Closed: no longer needed: your approval request/);
+    expect(agent.html).toContain('Approval closed: no longer needed.');
+    expect(agent.html).toContain('it is not a refusal');
+    expect(agent.html).toContain('The ticket stays open. You can carry on with the requester');
+    expect(agent.html).not.toContain('Not approved');
+    expect(sends.find((s) => s.to === 'vahid@x.io').html).toContain('Mehdi can carry on with the requester');
+  });
+
+  test('closing needs a reason, and "Other" needs words', async () => {
+    const actor = { email: 'neville@x.io', name: 'Neville', role: 'admin' };
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
+    await expect(ticketApprovalService.decideInApp(501, 1, 2, 'closed', 'x', actor, null, {})).rejects.toThrow(/Pick why/);
+    await expect(ticketApprovalService.decideInApp(501, 1, 2, 'closed', null, actor, null, { closeReason: 'other' })).rejects.toThrow(/Say why/);
+    await expect(ticketApprovalService.decideInApp(501, 1, 2, 'closed', null, actor, null, { closeReason: 'bogus' })).rejects.toThrow(/Pick why/);
+    expect(prismaMock.ticketApproval.update).not.toHaveBeenCalled();
+  });
+
+  test('the requester hears a closed approval only when the box is ticked, worded for them', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(row());
+    await ticketApprovalService.decideInApp(501, 1, 2, 'closed', null, { email: 'neville@x.io', name: 'Neville', role: 'admin' }, null, { closeReason: 'handled_otherwise', notifyRequester: true });
+    const rita = mailMock.sendTransactionalEmail.mock.calls.map((c) => c[0]).find((s) => s.to === 'rita@x.io');
+    expect(rita.subject).toBe('Closed: handled another way: New laptop [TP-1234]');
+    expect(rita.html).toContain('<b>Approval closed.</b>');
+    expect(rita.html).not.toContain('/tickets/501');
+    expect(rita.html).not.toContain('carry on');
+  });
+
   test('the ticket assignee and whoever escalated the request hear the verdict too (QA 09-18 #1)', async () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(row({ escalationLog: [{ kind: 'escalated', fromTier: 1, toTier: 2, byEmail: 'agent2@x.io', byName: 'Agent Two', at: new Date().toISOString() }] }));
     const ticketFind = prismaMock.ticket.findUnique.getMockImplementation?.() || null;

@@ -8,6 +8,7 @@ export const STATUS_CHIP = {
   info_requested: { label: 'Question sent', className: 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200' },
   approved: { label: 'Approved', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200' },
   rejected: { label: 'Not approved', className: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200' },
+  closed: { label: 'Closed', className: 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200' },
   cancelled: { label: 'Cancelled', className: 'bg-muted text-muted-foreground' },
   expired: { label: 'Expired', className: 'bg-muted text-muted-foreground' },
   escalated: { label: 'Escalated', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' },
@@ -40,6 +41,11 @@ export const STATUS_BADGE = {
     badge: 'bg-red-100 text-red-900 border-red-300 dark:bg-red-500/20 dark:text-red-100 dark:border-red-500/40',
     stripe: 'border-t-red-500',
   },
+  closed: {
+    label: 'Closed',
+    badge: 'bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-500/20 dark:text-sky-100 dark:border-sky-500/40',
+    stripe: 'border-t-sky-500',
+  },
   cancelled: {
     label: 'Cancelled',
     badge: 'bg-orange-100 text-orange-900 border-orange-300 dark:bg-orange-500/20 dark:text-orange-100 dark:border-orange-500/40',
@@ -66,6 +72,7 @@ export const APPROVER_DOT = {
   pending: 'bg-amber-500',
   approved: 'bg-emerald-500',
   rejected: 'bg-red-500',
+  closed: 'bg-sky-500',
   cancelled: 'bg-muted-foreground/40',
   superseded: 'bg-muted-foreground/40',
   escalated: 'bg-amber-500',
@@ -76,6 +83,7 @@ export function approverStatusLabel(approver, supersededBy) {
   switch (approver?.status) {
   case 'approved': return 'approved';
   case 'rejected': return 'rejected';
+  case 'closed': return 'closed';
   case 'cancelled': return 'cancelled';
   case 'escalated': return 'escalated';
   case 'forwarded': return 'forwarded';

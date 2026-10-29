@@ -45,7 +45,7 @@ describe('who may decide an approval row', () => {
     expect(await screen.findByTestId('approval-waiting-on')).toHaveTextContent(/Waiting on Neville Vyland to decide\s*Only they can decide\./);
     expect(screen.queryByRole('tab', { name: /^Approve$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Not approved/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /Ask a question/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Ask or reply/ })).not.toBeInTheDocument();
     // 23 Sep 2026: Forward stays folded — nothing opens or takes focus on arrival.
     expect(screen.queryByRole('tab', { name: /Forward/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
