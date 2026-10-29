@@ -27,7 +27,7 @@ export function parseMentionIds(raw) {
     if (!text) return [];
     try { list = text.startsWith('[') ? JSON.parse(text) : text.split(','); } catch { list = text.split(','); }
   }
-  if (!Array.isArray(list)) list = raw == null ? [] : [raw];
+  if (!Array.isArray(list)) list = raw === null || raw === undefined ? [] : [raw];
   const ids = [];
   for (const value of list) {
     const n = Number(value);

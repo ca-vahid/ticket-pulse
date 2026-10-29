@@ -1727,7 +1727,7 @@ class TicketService {
     }
     // Mentions view (29 Oct 2026): tickets where the signed-in agent was
     // @mentioned in the last 30 days. The route sets the id from the session.
-    if (query.mentionedTechnicianId != null) {
+    if (query.mentionedTechnicianId !== undefined && query.mentionedTechnicianId !== null) {
       const techId = Number(query.mentionedTechnicianId);
       where.mentions = {
         some: {
@@ -5746,7 +5746,7 @@ class TicketService {
     // @mentions (29 Oct 2026): a person's internal note may name colleagues,
     // who are told. Never on replies (the requester reads those) or system notes.
     let mentioned = [];
-    if (isPrivate && !systemNote && input?.mentions != null) {
+    if (isPrivate && !systemNote && input?.mentions !== undefined && input?.mentions !== null) {
       const { default: ticketMentionService } = await import('./ticketMentionService.js');
       mentioned = await ticketMentionService.recordForNote({
         ticket, entry, actor, ids: input.mentions, bodyText, bodyHtml,

@@ -285,7 +285,8 @@ router.get('/filter-relief', asyncHandler(async (req, res) => {
 router.get('/', asyncHandler(async (req, res) => {
   // Up to 200 a page (17 Oct 2026: the Tickets pager offers 25 / 50 / 100 / 200).
   // Mentions view: always the signed-in agent's own mentions, never an id from the URL.
-  const { mentionedTechnicianId: _ignored, ...query } = req.query || {};
+  const query = { ...(req.query || {}) };
+  delete query.mentionedTechnicianId;
   if (query.mentioned === 'me') query.mentionedTechnicianId = req.ticketActor?.technicianId || -1;
   const result = await ticketService.listTickets(req.workspaceId, query, { actor: req.ticketActor, maxPageSize: 200 });
   res.json({ success: true, data: result });
