@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.35-preview';
+export const APP_VERSION = '4.3.36-preview';
 
 export const changelog = [
+  {
+    version: '4.3.36-preview',
+    date: 'October 29, 2026',
+    entries: [
+      { type: 'new', html: '<strong>@mention a colleague in an internal note</strong> &mdash; type <code>@</code> in a note and pick a name from the agents of this workspace. They get an e-mail with your note and a link to the ticket (and a Teams message if they use the Ticket Pulse app in Teams). When they open the ticket, a line at the top says who mentioned them, with <em>Show the note</em>. <em>Mentions</em> in the filter rail lists the tickets where you were mentioned in the last 30 days, with how many you have not opened yet. Mentions work in internal notes only, never in replies, because the requester reads a reply word for word.' },
+    ],
+  },
   {
     version: '4.3.35-preview',
     date: 'October 28, 2026',

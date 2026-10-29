@@ -375,6 +375,8 @@ export default function Tickets() {
   const solution = searchParams.get('solution') || '';
   // Re-opened view (QA 09-25 #1): ?reopened=1
   const reopenedFilter = searchParams.get('reopened') || '';
+  // Mentions view (29 Oct 2026): ?mentioned=me; the server knows who "me" is.
+  const mentionedFilter = searchParams.get('mentioned') === 'me' ? 'me' : '';
   // Parked filter (plans/PARKED_BUILD_PLAN.md): any|none|until_date|waiting_on|eta|waking7
   const parkedFilter = searchParams.get('parked') || '';
   // "Auto-help waiting" view: ?parkKind=auto_help (active auto_help parks).
@@ -713,6 +715,7 @@ export default function Tickets() {
     noise: ['noise'],
     parked: ['parked', 'parkKind'],
     reopened: ['reopened'],
+    mentioned: ['mentioned'],
   };
 
   // FR 09-09: drop one filter group, keeping the typed text. For Status we ADD
@@ -784,6 +787,7 @@ export default function Tickets() {
     if (parkedFilter) params.parked = parkedFilter;
     if (parkKindFilter) params.parkKind = parkKindFilter;
     if (reopenedFilter) params.reopened = reopenedFilter;
+    if (mentionedFilter) params.mentioned = mentionedFilter;
     if (tag) {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
@@ -798,7 +802,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, boardMode, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, mentionedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,

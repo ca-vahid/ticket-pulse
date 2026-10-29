@@ -284,8 +284,18 @@ router.get('/filter-relief', asyncHandler(async (req, res) => {
 
 router.get('/', asyncHandler(async (req, res) => {
   // Up to 200 a page (17 Oct 2026: the Tickets pager offers 25 / 50 / 100 / 200).
-  const result = await ticketService.listTickets(req.workspaceId, req.query, { actor: req.ticketActor, maxPageSize: 200 });
+  // Mentions view: always the signed-in agent's own mentions, never an id from the URL.
+  const { mentionedTechnicianId: _ignored, ...query } = req.query || {};
+  if (query.mentioned === 'me') query.mentionedTechnicianId = req.ticketActor?.technicianId || -1;
+  const result = await ticketService.listTickets(req.workspaceId, query, { actor: req.ticketActor, maxPageSize: 200 });
   res.json({ success: true, data: result });
+}));
+
+// How many tickets have a mention of the signed-in agent they have not opened yet.
+router.get('/mentions/unseen-count', asyncHandler(async (req, res) => {
+  const { default: ticketMentionService } = await import('../services/ticketMentionService.js');
+  const count = await ticketMentionService.unseenTicketCount(req.workspaceId, req.ticketActor?.technicianId || null);
+  res.json({ success: true, data: { count } });
 }));
 
 router.get('/meta', asyncHandler(async (req, res) => {
@@ -1757,6 +1767,13 @@ router.get('/:id', asyncHandler(async (req, res) => {
         .then(() => ticketParkService.wakeZoneFor(ticketId, req.workspaceId))
         .catch(() => null);
       if (zone) ticket.parkZone = zone;
+    }
+    // @mentions: the ones of the signed-in agent nobody had seen, marked seen
+    // now. The peek preview (?reconcile=0) leaves them for the full page.
+    if (ticket && reconcile && req.ticketActor?.technicianId) {
+      const { default: ticketMentionService } = await import('../services/ticketMentionService.js');
+      const mine = await ticketMentionService.takeUnseen(ticketId, req.workspaceId, req.ticketActor.technicianId);
+      if (mine.length) ticket.mentionsForMe = mine;
     }
     // Urgent response (plans/URGENT_RESPONSE_PLAN.md): the running clock rides
     // on the ticket. Only High / Urgent tickets with an owner can have one, so

@@ -315,8 +315,16 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   // the editor grows to fill it and shows the toggle when onToggleExpand is given.
   expanded = false,
   onToggleExpand = null,
+  // @mentions (29 Oct 2026): people offered after "@" ({ id, name }), and the
+  // host's callback when one is picked. Without them "@" is just a character.
+  mentionPeople = null,
+  onMention = null,
 }, ref) {
   const editorRef = useRef(null);
+  const frameRef = useRef(null);
+  // The open "@" menu: the typed query, where it sits, and the highlighted row.
+  const [mention, setMention] = useState(null);
+  const mentionCtxRef = useRef(null);
   const lastEmittedRef = useRef(null);
   const savedRangeRef = useRef(null);
   const [isEmpty, setIsEmpty] = useState(true);
@@ -402,6 +410,81 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     lastEmittedRef.current = html;
     setIsEmpty(!el.textContent.trim() && !el.querySelector('img[data-tp-img]'));
     onChange?.({ html, text });
+  };
+
+  // ── @mentions (29 Oct 2026) ──
+  const mentionsOn = Array.isArray(mentionPeople) && mentionPeople.length > 0 && typeof onMention === 'function';
+  const mentionMatches = (() => {
+    if (!mention || !mentionsOn) return [];
+    const q = mention.query.toLowerCase();
+    return mentionPeople
+      .filter((p) => p?.name && (!q || String(p.name).toLowerCase().split(/\s+/).some((word) => word.startsWith(q)) || String(p.name).toLowerCase().startsWith(q)))
+      .slice(0, 6);
+  })();
+  // After each keystroke: is the caret right after "@word"? Then show the menu.
+  const updateMention = () => {
+    if (!mentionsOn) return;
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0 || !sel.isCollapsed) { setMention(null); return; }
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== 3 || !el.contains(node) || node.parentElement?.closest('pre, code, .tp-mention')) { setMention(null); return; }
+    const before = node.nodeValue.slice(0, sel.anchorOffset);
+    const m = before.match(/(?:^|[\s(])@([^\s@]{0,30})$/);
+    if (!m) { setMention(null); return; }
+    mentionCtxRef.current = { node, offset: sel.anchorOffset, query: m[1] };
+    let top = 0;
+    let left = 0;
+    try {
+      const caret = sel.getRangeAt(0).getBoundingClientRect();
+      const frame = frameRef.current?.getBoundingClientRect();
+      if (frame && caret && (caret.top || caret.left)) {
+        top = caret.bottom - frame.top + 4;
+        left = Math.max(0, Math.min(caret.left - frame.left, frame.width - 240));
+      }
+    } catch { /* jsdom and odd selections: the menu sits at the top left */ }
+    setMention((prev) => ({ query: m[1], top, left, index: prev && prev.query === m[1] ? prev.index : 0 }));
+  };
+  const pickMention = (person) => {
+    const ctx = mentionCtxRef.current;
+    const el = editorRef.current;
+    setMention(null);
+    if (!ctx || !el || !person || !ctx.node.isConnected) return;
+    const start = ctx.offset - ctx.query.length - 1;
+    if (start < 0 || ctx.node.nodeValue.slice(start, start + 1) !== '@') return;
+    el.focus();
+    const range = document.createRange();
+    range.setStart(ctx.node, start);
+    range.setEnd(ctx.node, ctx.offset);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('insertHTML', false, `<strong class="tp-mention">@${escapeText(person.name)}</strong>&nbsp;`);
+    mentionCtxRef.current = null;
+    emit();
+    onMention(person);
+  };
+  // Arrow keys, Enter/Tab and Esc drive the open menu. True when the key was used.
+  const onMentionKey = (e) => {
+    if (!mention || !mentionMatches.length) return false;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setMention((prev) => (prev ? { ...prev, index: (prev.index + step + mentionMatches.length) % mentionMatches.length } : prev));
+      return true;
+    }
+    if ((e.key === 'Enter' || e.key === 'Tab') && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      pickMention(mentionMatches[Math.min(mention.index, mentionMatches.length - 1)]);
+      return true;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      setMention(null);
+      return true;
+    }
+    return false;
   };
 
   const exec = (command, arg = null) => {
@@ -700,7 +783,30 @@ const RichTextEditor = forwardRef(function RichTextEditor({
         )}
       </div>
 
-      <div className={expanded ? 'relative flex flex-col flex-1 min-h-0' : 'relative'}>
+      <div ref={frameRef} className={expanded ? 'relative flex flex-col flex-1 min-h-0' : 'relative'}>
+        {mention && mentionMatches.length > 0 && (
+          <div
+            role="listbox"
+            aria-label="Mention a colleague"
+            data-testid="mention-menu"
+            className="absolute z-30 w-60 tp-card rounded-lg shadow-soft py-1"
+            style={{ top: mention.top, left: mention.left }}
+          >
+            {mentionMatches.map((person, i) => (
+              <button
+                key={person.id}
+                type="button"
+                role="option"
+                aria-selected={i === mention.index}
+                onMouseDown={(e) => { e.preventDefault(); pickMention(person); }}
+                className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm ${i === mention.index ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-100' : 'text-foreground hover:bg-muted'}`}
+              >
+                <span className="truncate">{person.name}</span>
+              </button>
+            ))}
+            <p className="px-3 pt-1 pb-0.5 text-[11px] text-muted-foreground">They get an e-mail with this note.</p>
+          </div>
+        )}
         {isEmpty && (
           <span aria-hidden="true" className="absolute left-3 top-2.5 text-sm text-muted-foreground/75 pointer-events-none select-none">
             {placeholder}
@@ -727,9 +833,10 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             role="textbox"
             aria-multiline="true"
             aria-label={ariaLabel}
-            onInput={emit}
-            onBlur={emit}
+            onInput={() => { emit(); updateMention(); }}
+            onBlur={() => { emit(); setMention(null); }}
             onKeyDown={(e) => {
+              if (onMentionKey(e)) return;
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); return; }
               const pre = caretWithin('PRE');
               if (pre) onCodeKey(e, pre);
@@ -793,7 +900,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
               ensureTrailingParagraph();
               emit();
             }}
-            className={`tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 outline-none ${footer ? 'min-h-[5.5rem] only:flex-1' : `rounded-b-lg overflow-y-auto settings-scrollbar${expanded ? ' flex-1' : ''}`} [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0`}
+            className={`tp-rich-editor w-full text-sm text-foreground px-3 py-2.5 outline-none ${footer ? 'min-h-[5.5rem] only:flex-1' : `rounded-b-lg overflow-y-auto settings-scrollbar${expanded ? ' flex-1' : ''}`} [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:font-medium [&>:first-child]:mt-0 [&_.tp-mention]:text-blue-700 dark:[&_.tp-mention]:text-blue-300`}
             style={footer ? undefined : { minHeight, maxHeight: expanded ? 'none' : 460 }}
           />
           {footer}

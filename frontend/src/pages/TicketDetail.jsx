@@ -53,6 +53,7 @@ import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
 import GroupedBanner, { isGroupedCopy as isGroupedCopyOf } from '../components/tickets/GroupedBanner';
+import MentionNotice from '../components/tickets/MentionNotice';
 import {
   BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, LinkedText, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
@@ -945,6 +946,10 @@ export default function TicketDetail() {
   const [composerText, setComposerText] = useState(''); // plain-text mirror for guards/sending
   const [composerCc, setComposerCc] = useState([]);
   const [composerFiles, setComposerFiles] = useState([]);
+  // @mentions picked in a note (29 Oct 2026): sent only if the name is still in the text.
+  const [composerMentions, setComposerMentions] = useState([]);
+  // "You were mentioned": kept from the first load, until dismissed.
+  const [mentionNotice, setMentionNotice] = useState(null);
   // Reply subject override (Phase SN5, QA 08-27 #8): '' = use the server's
   // default (`ticket.replySubjectDefault`); the row is collapsed until the
   // agent opens it. TP-born only — FreshService composes FS-born subjects.
@@ -1452,6 +1457,15 @@ export default function TicketDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setters are stable; setPageTab is defined above
   }, []);
   useEffect(() => { setShowFolded(false); }, [ticketId, conversationTab]);
+  // @mentions: the server hands unseen ones over once (and marks them seen).
+  useEffect(() => { setMentionNotice(null); setComposerMentions([]); }, [ticketId]);
+  useEffect(() => {
+    if (Array.isArray(ticket?.mentionsForMe) && ticket.mentionsForMe.length) setMentionNotice(ticket.mentionsForMe);
+  }, [ticket?.mentionsForMe]);
+  // Who a note can mention: the workspace's active agents, not the author.
+  const mentionPeople = useMemo(() => (meta?.technicians || [])
+    .filter((t) => t?.id && t.name && !t.assignableOnly && t.id !== meta?.actor?.technicianId)
+    .map((t) => ({ id: t.id, name: t.name })), [meta?.technicians, meta?.actor?.technicianId]);
   const FOLD_THRESHOLD = 8;
   const KEEP_TAIL = 5;
   const folded = !showFolded && timeline.length > FOLD_THRESHOLD;
@@ -2254,7 +2268,12 @@ export default function TicketDetail() {
           ...(subjectOverride ? { subject: subjectOverride } : {}),
         });
       } else {
-        await ticketsAPI.note(ticketId, payload);
+        const lower = body.toLowerCase();
+        const mentions = composerMentions
+          .filter((p) => lower.includes(`@${String(p.name).toLowerCase()}`))
+          .map((p) => p.id);
+        await ticketsAPI.note(ticketId, { ...payload, ...(mentions.length ? { mentions } : {}) });
+        setComposerMentions([]);
       }
       idemKeyRef.current = newIdempotencyKey();
       setComposerBody('');
@@ -2782,6 +2801,7 @@ export default function TicketDetail() {
                   {/* QA 10-28 #4: a grouped copy is kept out of the totals the way
                       noise is, but it is not noise. Say where it went. */}
                   <GroupedBanner ticket={ticket} onOpen={(id) => navigate(`/tickets/${id}`)} />
+                  <MentionNotice mentions={mentionNotice} onJump={jumpToEntry} onDismiss={() => setMentionNotice(null)} />
                   {ticket.isNoise && !isGroupedCopy && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg text-xs text-violet-800 dark:text-violet-200">
                       <VolumeX className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
@@ -3602,7 +3622,10 @@ export default function TicketDetail() {
                             ? 'Write a reply to the requester… (Ctrl+Enter to send)'
                             : composerMode === 'forward'
                               ? 'Optional note to include above the forwarded thread…'
-                              : 'Add context for the team (never emailed)…'}
+                              : 'Add context for the team (never emailed) · type @ to tell a colleague…'}
+                          // @mentions: internal notes only — a reply goes to the requester word for word.
+                          mentionPeople={composerMode === 'note' ? mentionPeople : null}
+                          onMention={(person) => setComposerMentions((list) => (list.some((p) => p.id === person.id) ? list : [...list, person]))}
                           ariaLabel={composerMode === 'reply' ? 'Reply body' : composerMode === 'forward' ? 'Forward note' : 'Internal note body'}
                           minHeight={280}
                           className={composerMode === 'note' ? 'bg-amber-50/25 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : composerMode === 'forward' ? 'bg-violet-50/30 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : 'bg-card border-input'}

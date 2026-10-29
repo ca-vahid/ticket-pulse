@@ -753,7 +753,8 @@ export const syncAPI = {
  * `subject` (Phase SN4) is the agent's reply-subject override (TP-born only).
  */
 export function buildThreadPayload(body = {}) {
-  const { files, cc, ccRemoved, idempotencyKey, subject, ...rest } = body;
+  const { files, cc, ccRemoved, idempotencyKey, subject, mentions, ...rest } = body;
+  const mentionIds = Array.isArray(mentions) ? mentions.filter((id) => Number.isInteger(id) && id > 0) : [];
   const headers = idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {};
   const subjectField = typeof subject === 'string' && subject.trim() ? { subject: subject.trim() } : {};
   if (files && files.length > 0) {
@@ -766,6 +767,8 @@ export function buildThreadPayload(body = {}) {
     // reply happens to carry an attachment (QA 09-09 #6).
     if (ccRemoved && ccRemoved.length) form.append('ccRemoved', ccRemoved.join(','));
     if (subjectField.subject) form.append('subject', subjectField.subject);
+    // @mentions: named explicitly too, or a note with a picture would lose them.
+    if (mentionIds.length) form.append('mentions', mentionIds.join(','));
     for (const file of files) form.append('files', file);
     return [form, { headers: { 'Content-Type': undefined, ...headers }, timeout: 120000 }];
   }
@@ -774,6 +777,7 @@ export function buildThreadPayload(body = {}) {
       ...rest,
       ...(cc && cc.length ? { cc } : {}),
       ...(ccRemoved && ccRemoved.length ? { ccRemoved } : {}),
+      ...(mentionIds.length ? { mentions: mentionIds } : {}),
       ...subjectField,
     },
     Object.keys(headers).length ? { headers } : undefined,
@@ -895,6 +899,11 @@ export const ticketsAPI = {
   reply: async (id, body) => {
     const [payload, config] = buildThreadPayload(body);
     return await api.post(`/tickets/${id}/replies`, payload, config);
+  },
+
+  // @mentions (29 Oct 2026): tickets with a mention of me I have not opened yet.
+  mentionsUnseenCount: async () => {
+    return await api.get('/tickets/mentions/unseen-count');
   },
 
   note: async (id, body) => {
