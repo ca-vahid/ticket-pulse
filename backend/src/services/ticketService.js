@@ -1724,7 +1724,19 @@ class TicketService {
       where.id = { in: awaitingIds.length ? awaitingIds : [-1] };
     } else if (query.segment === 'deleted') {
       where.status = { in: ['Deleted', 'Spam'] };
-    } else if (query.segment === 'noise') {
+    }
+    // Mentions view (29 Oct 2026): tickets where the signed-in agent was
+    // @mentioned in the last 30 days. The route sets the id from the session.
+    if (query.mentionedTechnicianId != null) {
+      const techId = Number(query.mentionedTechnicianId);
+      where.mentions = {
+        some: {
+          technicianId: Number.isInteger(techId) && techId > 0 ? techId : -1,
+          createdAt: { gte: new Date(now.getTime() - 30 * 24 * 3600 * 1000) },
+        },
+      };
+    }
+    if (query.segment === 'noise') {
       // Opt-in "Noise" card (Phase FC): everything the noise rules flagged,
       // any status — matching the stats `noise` count exactly. Overrides the
       // default isNoise:false exclusion set above. Grouped copies are not
@@ -5731,6 +5743,16 @@ class TicketService {
       email = { sent: true, via: 'freshservice' };
     }
 
+    // @mentions (29 Oct 2026): a person's internal note may name colleagues,
+    // who are told. Never on replies (the requester reads those) or system notes.
+    let mentioned = [];
+    if (isPrivate && !systemNote && input?.mentions != null) {
+      const { default: ticketMentionService } = await import('./ticketMentionService.js');
+      mentioned = await ticketMentionService.recordForNote({
+        ticket, entry, actor, ids: input.mentions, bodyText, bodyHtml,
+      });
+    }
+
     // Workflow events fire for BOTH origins — the entry exists locally either
     // way, and workflows keying on notes/replies must not care where the
     // ticket was born. Stable per-entry stamps keep retries idempotent.
@@ -5760,7 +5782,10 @@ class TicketService {
     ).catch?.(() => {});
 
     this._broadcast(workspaceId, isPrivate ? 'note' : 'reply', ticket, { entryId: entry.id });
-    return { entry, email, attachments: storedAttachments.map((s) => s.attachment) };
+    return {
+      entry, email, attachments: storedAttachments.map((s) => s.attachment),
+      ...(mentioned.length ? { mentioned } : {}),
+    };
   }
 
   /**

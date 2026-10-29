@@ -488,6 +488,27 @@ model TicketWatchSubscription {
   @@map("ticket_watch_subscriptions")
 }
 
+// @mentions in internal notes (29 Oct 2026): who was named on which note, by
+// whom, when they were told and when they saw it. Workspace agents only.
+model TicketMention {
+  id                      Int       @id @default(autoincrement())
+  workspaceId             Int       @map("workspace_id")
+  ticketId                Int       @map("ticket_id")
+  ticket                  Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  threadEntryId           Int?      @map("thread_entry_id")
+  technicianId            Int       @map("technician_id")
+  mentionedByTechnicianId Int?      @map("mentioned_by_technician_id")
+  mentionedByName         String?   @map("mentioned_by_name") @db.VarChar(255)
+  createdAt               DateTime  @default(now()) @map("created_at")
+  notifiedAt              DateTime? @map("notified_at")
+  notifiedVia             String?   @map("notified_via") @db.VarChar(40)
+  seenAt                  DateTime? @map("seen_at")
+
+  @@index([workspaceId, technicianId, seenAt])
+  @@index([ticketId, technicianId])
+  @@map("ticket_mentions")
+}
+
 // Canned reply snippets, insertable from the composer. Optionally scoped to a
 // category (the mockup's category quick notes, generalized per workspace).
 model ReplyTemplate {
@@ -1543,6 +1564,7 @@ model Ticket {
   priorityEvents           TicketPriorityEvent[]
   mirrorJobs               MirrorJob[]
   approvals                TicketApproval[]
+  mentions                 TicketMention[]
   attachments              TicketAttachment[]
   proposedReplies          TicketProposedReply[]
   linksFrom                TicketLink[]              @relation("linkSource")

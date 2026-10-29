@@ -7,7 +7,7 @@ import {
   endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks,
 } from 'date-fns';
 import {
-  BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, ChevronsUp,
+  AtSign, BadgeCheck, CalendarClock, Layers, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, ChevronsUp,
   GripVertical, Hourglass, LayoutList, ListFilter, PauseCircle, Pin, PinOff, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
@@ -412,6 +412,17 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     try { const res = await ticketsAPI.listSavedViews(); setSavedViews(res.data || []); } catch { /* rail just hides them */ }
   };
   useEffect(() => { loadSavedViews(); }, [wsId]);
+  // Mentions not opened yet (29 Oct 2026): refreshed with the stat cards.
+  const [unseenMentions, setUnseenMentions] = useState(0);
+  const hasActorTech = Boolean(meta?.actor?.technicianId);
+  useEffect(() => {
+    if (!hasActorTech || typeof ticketsAPI.mentionsUnseenCount !== 'function') return undefined;
+    let live = true;
+    ticketsAPI.mentionsUnseenCount()
+      .then((res) => { if (live) setUnseenMentions(Number(res?.data?.count) || 0); })
+      .catch(() => { /* the view still works without the number */ });
+    return () => { live = false; };
+  }, [wsId, hasActorTech, stats]);
 
   // Workspace custom-field definitions drive the "Custom fields" facet
   // (defs-driven typed inputs — same source ConditionGroupBuilder uses).
@@ -563,6 +574,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     get('reopened'), // Re-opened view (QA 09-25 #1)
     get('parkKind'), // Auto-help waiting view
     get('requesterId'), // Requester (QA 10-27 #5)
+    get('mentioned'), // Mentions view (29 Oct 2026)
     ...cfActiveKeys, // each cf_ param counts like the URL param it is
   ].filter(Boolean).length;
   // What the badge and "Clear all" SHOW (17 Oct 2026): the same number as the
@@ -719,6 +731,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     ...(meta?.actor?.technicianId ? [
       { key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: openBaseStatuses.join(',') } },
       { key: 'my_tickets', label: 'My tickets', params: { assignee: String(meta.actor.technicianId), status: [...openStatuses, PARKED_STATUS].join(',') } },
+      // @mentions (29 Oct 2026): notes that named me in the last 30 days, any status.
+      { key: 'mentions', label: 'Mentions', params: { mentioned: 'me', status: 'any' }, icon: AtSign },
     ] : []),
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
     { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
@@ -761,7 +775,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'mentioned', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -876,6 +890,11 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                   {v.icon && <v.icon className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
                   <span className="flex-1 min-w-0 truncate">{v.label}</span>
                   {count != null && <span className="text-xs font-medium text-muted-foreground/80 tabular-nums flex-shrink-0 pl-1">{count.toLocaleString()}</span>}
+                  {v.key === 'mentions' && unseenMentions > 0 && (
+                    <span data-testid="mentions-unseen" title={`${unseenMentions} not opened yet`} className="text-xs font-semibold text-blue-600 dark:text-blue-300 tabular-nums flex-shrink-0 pl-1">
+                      {unseenMentions} new
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -1707,6 +1726,7 @@ export function ActiveFilterBar({ meta }) {
   const origin = get('origin');
   if (origin) chips.push({ label: origin === 'ticketpulse' ? 'Born in Ticket Pulse' : 'From FreshService', onRemove: () => patch({ origin: null }) });
   if (get('noise') === 'only') chips.push({ label: 'Noise & spam', onRemove: () => patch({ noise: null }) });
+  if (get('mentioned') === 'me') chips.push({ label: 'Mentions of me', onRemove: () => patch({ mentioned: null }) });
   if (get('view') === 'scheduled') chips.push({ label: 'Scheduled view', onRemove: () => patch({ view: null }) });
   if (get('view') === 'grouped') chips.push({ label: 'Grouped view', onRemove: () => patch({ view: null }) });
   if (get('aiState') === 'suggested') chips.push({ label: 'Awaiting AI approval', onRemove: () => patch({ aiState: null }) });
