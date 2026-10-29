@@ -1,9 +1,19 @@
-export const APP_VERSION = '4.3.34-preview';
+export const APP_VERSION = '4.3.35-preview';
 
 export const changelog = [
   {
+    version: '4.3.35-preview',
+    date: 'October 28, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Approvals in the ticket list</strong> &mdash; a ticket with an approval shows a small mark beside its subject: an hourglass while it waits for the approver, a question bubble while it is on hold for an answer, a green badge when approved, a red one when not approved, and a sky-blue circle when it was closed without a decision. Hover it to see who it is with or who decided. To list only those tickets, use <em>Approvals</em> in the filter rail (Has an approval, Waiting for approval, Approved, Not approved, Approval closed, No approval).' },
+      { type: 'fixed', html: '<strong>Grouped tickets are no longer shown as noise</strong> &mdash; when two tickets are the same request (for example the same Darktrace alert sent twice seconds apart), the copy is closed into the first one and kept out of the totals. It was also listed under <em>Noise &amp; spam</em> and labelled Noise. It now shows <em>Grouped</em>, says which ticket it was closed into, and stays out of Noise &amp; spam and its count. Undo stays under Tickets &rarr; Grouped.' },
+      { type: 'fixed', html: '<strong>Phone check: Save waits for the code</strong> &mdash; after <em>Send code</em>, Save waits until you confirm the code or cancel the check, so a half-finished check never reads as saved. Sending a code for a number that is already verified no longer switches SMS off, and a new number that is not verified yet saves with SMS and phone call off instead of failing.' },
+      { type: 'improved', html: '<strong>Columns in Focus view</strong> &mdash; Focus keeps its five columns, but the Columns button is back there: it names the five, and keeps Column map, Scroll arrows, Keep Subject in place and Reset widths.' },
+    ],
+  },
+  {
     version: '4.3.34-preview',
-    date: 'October 29, 2026',
+    date: 'October 28, 2026',
     entries: [
       { type: 'new', html: '<strong>Close an approval without a decision</strong> &mdash; when a request is neither a yes nor a no (the requester says they no longer need it, or it is handled another way), the approver picks <em>Close the approval</em> with a reason: No longer needed, Handled another way, Duplicate request or Other, and a note. The approval ends as <em>Closed</em>, never as a refusal. The ticket stays open, and the agent who asked is e-mailed to carry on with the requester. The requester is told only if the box is ticked. Closed approvals have their own status and filter on the Approvals page and in the ticket filters.' },
       { type: 'improved', html: '<strong>Reply without waiting for an answer</strong> &mdash; the <em>Ask a question</em> tab is now <em>Ask or reply</em>. Untick <em>Wait for an answer</em> to send a plain reply, such as thanks or an update; the request is not put on hold.' },

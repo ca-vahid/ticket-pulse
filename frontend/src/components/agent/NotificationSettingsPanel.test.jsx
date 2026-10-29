@@ -115,4 +115,41 @@ describe('NotificationSettingsPanel', () => {
     // The quiet reload keeps the panel on screen (no spinner swap).
     expect(screen.getByText('Priority threshold')).toBeInTheDocument();
   });
+
+  test('QA 10-28 #1: Save waits while a code is pending; cancelling the check frees it', async () => {
+    const verified = { ...preferences, phoneVerified: true, phoneOverride: '+16045550101', channels: { ...preferences.channels, sms: true } };
+    agentAPI.getNotificationPreferences.mockResolvedValue({ success: true, data: { preferences: verified } });
+    agentAPI.saveNotificationPreferences.mockResolvedValue({ success: true, data: verified });
+    agentAPI.requestPhoneVerification.mockResolvedValue({ success: true, sent: true });
+    render(<NotificationSettingsPanel workspaceId={1} />);
+
+    expect(await screen.findByText('Verified')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Send code'));
+    expect(await screen.findByLabelText('Verification code')).toBeInTheDocument();
+
+    // Re-checking a verified number keeps its SMS channel on (it used to switch it off).
+    expect(agentAPI.saveNotificationPreferences).toHaveBeenCalledWith(expect.objectContaining({
+      channels: expect.objectContaining({ sms: true }),
+    }));
+    const saveBtn = screen.getByRole('button', { name: 'Save' });
+    expect(saveBtn).toBeDisabled();
+    expect(screen.getByTestId('code-pending-note')).toHaveTextContent('already verified');
+
+    fireEvent.click(screen.getByText('cancel the check'));
+    expect(screen.queryByLabelText('Verification code')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+  });
+
+  test('QA 10-28 #1: a new, unverified number saves with the phone channels off instead of failing', async () => {
+    render(<NotificationSettingsPanel workspaceId={1} />);
+    expect(await screen.findByText('Priority threshold')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Override phone'), { target: { value: '+16045550199' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(agentAPI.saveNotificationPreferences).toHaveBeenCalledWith(expect.objectContaining({
+        channels: { email: false, sms: false, whatsapp: false, phone_call: false },
+        phoneOverride: '+16045550199',
+      }));
+    });
+  });
 });
