@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ApprovalLaptop from './ApprovalLaptop';
 import {
-  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronDown, ChevronRight, Clock, Forward, Hourglass, MessageCircleQuestion, Minimize2, RefreshCw, Reply, Trash2, XCircle,
+  Activity, ArrowUpRight, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleMinus, Clock, Forward, Hourglass, MessageCircleQuestion, Minimize2, RefreshCw, Reply, Trash2, XCircle,
 } from 'lucide-react';
+import { closedWords } from '../../utils/approvalCloseReasons';
 import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 import { AmountChip, TierChip } from './ApprovalHandoff';
 import ApprovalComposer from './ApprovalComposer';
@@ -124,6 +125,7 @@ const STATUS = {
   approved: { label: 'Approved', verb: 'Approved', Icon: CheckCircle2, dot: 'bg-emerald-500', chip: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30', text: 'text-emerald-700 dark:text-emerald-200', head: 'bg-emerald-50/70 dark:bg-emerald-500/10 border-emerald-100 dark:border-emerald-500/20' },
   rejected: { label: 'Not approved', verb: 'Not approved', Icon: XCircle, dot: 'bg-red-500', chip: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', text: 'text-red-700 dark:text-red-200', head: 'bg-red-50/70 dark:bg-red-500/10 border-red-100 dark:border-red-500/20' },
   info_requested: { label: 'Needs info', verb: 'Clarification requested', Icon: MessageCircleQuestion, dot: 'bg-violet-500', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30', text: 'text-violet-700 dark:text-violet-200', head: 'bg-violet-50/70 dark:bg-violet-500/10 border-violet-100 dark:border-violet-500/20' },
+  closed: { label: 'Closed', verb: 'Closed', Icon: CircleMinus, dot: 'bg-sky-500', chip: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30', text: 'text-sky-700 dark:text-sky-200', head: 'bg-sky-50/60 dark:bg-sky-500/10 border-sky-100 dark:border-sky-500/20' },
   cancelled: { label: 'Cancelled', verb: 'Cancelled', Icon: Ban, dot: 'bg-muted-foreground/40', chip: 'bg-muted text-muted-foreground border-border', text: 'text-muted-foreground', head: 'bg-muted/50 border-border/60' },
   escalated: { label: 'Escalated', verb: 'Escalated', Icon: ArrowUpRight, dot: 'bg-amber-500', chip: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', text: 'text-amber-700 dark:text-amber-200', head: 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-100 dark:border-amber-500/20' },
   forwarded: { label: 'Forwarded', verb: 'Forwarded', Icon: Forward, dot: 'bg-blue-500', chip: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30', text: 'text-blue-700 dark:text-blue-200', head: 'bg-blue-50/60 dark:bg-blue-500/10 border-blue-100 dark:border-blue-500/20' },
@@ -132,10 +134,10 @@ const STATUS = {
 const statusMeta = (s) => STATUS[s] || STATUS.pending;
 
 // Any-one-approves: the group verdict is the strongest outcome present.
-const VERDICT_ORDER = ['approved', 'rejected', 'info_requested', 'pending', 'escalated', 'forwarded', 'cancelled'];
+const VERDICT_ORDER = ['approved', 'rejected', 'closed', 'info_requested', 'pending', 'escalated', 'forwarded', 'cancelled'];
 const groupVerdict = (rows) => VERDICT_ORDER.find((s) => rows.some((r) => r.status === s)) || 'pending';
 // A decided group needs no interaction — collapse it to a one-line summary.
-const TERMINAL = new Set(['approved', 'rejected', 'cancelled']);
+const TERMINAL = new Set(['approved', 'rejected', 'closed', 'cancelled']);
 
 // A cancelled row that was auto-cancelled by a sibling decision reads as
 // "Superseded"; a requester-cancelled one stays "Cancelled".
@@ -366,7 +368,7 @@ export default function ApprovalTimeline({
           const summary = decided
             ? (verdict === 'cancelled' || !decider
               ? `Cancelled · requested by ${agentName}`
-              : `${vMeta.verb} by ${decider.approverName || decider.approverEmail}${decider.decidedAt ? ` ${formatDayTime(decider.decidedAt)}` : ''} · requested by ${agentName}`)
+              : `${verdict === 'closed' ? closedWords(decider.closeReason) : vMeta.verb} by ${decider.approverName || decider.approverEmail}${decider.decidedAt ? ` ${formatDayTime(decider.decidedAt)}` : ''} · requested by ${agentName}`)
             : `${waiting ? waiting.line : 'Open'} · requested by ${agentName}`;
           return (
             <li key={groupId} className={`border-t border-border/70 first:border-t-0 ${isOpen ? 'bg-muted/30' : ''}`} data-testid="ticket-approval" data-status={verdict} data-open={isOpen ? 'true' : 'false'}>

@@ -23,6 +23,7 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { isOnCallNow } from './urgentResponse/onCallNow.js';
 import { findNoteImages, noteImagePath, noteTextForPreview, noteTextWithoutMarkers, tokenFromDecisionUrl } from './approvalNoteImages.js';
+import { closeReasonLabel } from '../utils/approvalCloseReasons.js';
 
 /** What an agent can choose from. mode: 'teams' | 'digest' | 'off'. */
 export const EVENTS = [
@@ -1205,6 +1206,9 @@ export function approvalClosedStage(ap, email) {
     const last = log[log.length - 1] || {};
     const to = Array.isArray(last.toEmails) && last.toEmails.length ? last.toEmails.join(', ') : 'the next approver';
     return { done: 'closed', word: 'Handed on', headline: 'Handed on', detail: `${ap.status === 'forwarded' ? 'Forwarded' : 'Escalated'} to ${to}${last.byName ? ` by ${last.byName}` : ''}. Nothing is needed from you.` };
+  }
+  if (ap.status === 'closed') {
+    return { done: 'closed', word: 'Closed', headline: mine ? 'You closed this approval' : 'Approval closed', detail: [closeReasonLabel(ap.closeReason), ap.decisionNote].filter(Boolean).join('. ') };
   }
   return { done: 'closed', word: 'Closed', headline: 'No longer needed', detail: ap.decisionNote || 'The request was cancelled.' };
 }

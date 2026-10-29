@@ -1,4 +1,5 @@
-import { CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleMinus, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
+import { closedWords } from '../../utils/approvalCloseReasons';
 import { ConditionsReview } from './ApprovalConditions';
 import { PersonAvatar, SafeHtml, timeAgo } from './ticketUi';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
@@ -22,6 +23,7 @@ import { cleanNoteText } from '../../utils/noteText';
 const TONES = {
   approved: { Icon: CheckCircle2, text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500', rule: 'bg-emerald-500' },
   rejected: { Icon: XCircle, text: 'text-red-700 dark:text-red-300', dot: 'bg-red-500', rule: 'bg-red-500' },
+  closed: { Icon: CircleMinus, text: 'text-sky-700 dark:text-sky-300', dot: 'bg-sky-500', rule: 'bg-sky-500' },
   clarification: { Icon: MessageCircleQuestion, text: 'text-violet-700 dark:text-violet-300', dot: 'bg-violet-500', rule: 'bg-violet-500' },
   requested: { Icon: ShieldCheck, text: 'text-blue-700 dark:text-blue-300', dot: 'bg-blue-500', rule: 'bg-blue-500' },
 };
@@ -31,7 +33,7 @@ const unquote = (s) => String(s || '').trim().replace(/^["“]/, '').replace(/["
 /** "Approval APPROVED WITH CONDITION ✔ by Name — "note" · Condition: "…" · Requested by x: "…"" → parts. */
 export function parseApprovalSentence(text) {
   const t = String(text || '').trim();
-  const m = t.match(/^Approval (CHANGED to )?(APPROVED WITH CONDITIONS?|APPROVED|NOT APPROVED|REJECTED)\s*[✔✓✘✗]?\s*by\s+([\s\S]+)$/i);
+  const m = t.match(/^Approval (CHANGED to )?(APPROVED WITH CONDITIONS?|APPROVED|NOT APPROVED|REJECTED|CLOSED(?: \([^)]*\))?)\s*[✔✓✘✗]?\s*by\s+([\s\S]+)$/i);
   if (!m) return null;
   let rest = m[3];
   const take = (re) => {
@@ -45,7 +47,7 @@ export function parseApprovalSentence(text) {
   const condition = take(/\s·\s(?:Agreed conditions|Condition):\s*([\s\S]+)$/);
   const note = take(/\s—\s([\s\S]+)$/);
   return {
-    verdict: /REJECTED|NOT APPROVED/i.test(m[2]) ? 'rejected' : 'approved',
+    verdict: /^CLOSED/i.test(m[2]) ? 'closed' : /REJECTED|NOT APPROVED/i.test(m[2]) ? 'rejected' : 'approved',
     changed: Boolean(m[1]),
     actorName: rest.trim(),
     note: note ? unquote(note[1]) : null,
@@ -112,7 +114,7 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
   } : null;
   const toneKey = structured?.verdict
     // "Not approved" contains "approv" — test the negative FIRST or it reads as approved.
-    || (/reject|not approved/i.test(meta?.label || '') ? 'rejected' : /clarif/i.test(meta?.label || '') ? 'clarification' : /approv/i.test(meta?.label || '') ? 'approved' : 'requested');
+    || (/^closed/i.test(meta?.label || '') ? 'closed' : /reject|not approved/i.test(meta?.label || '') ? 'rejected' : /clarif/i.test(meta?.label || '') ? 'clarification' : /approv/i.test(meta?.label || '') ? 'approved' : 'requested');
   const tone = TONES[toneKey] || TONES.requested;
   const photo = useRequesterPhoto(structured || request ? entry?.actorEmail : null);
   const personName = (email) => (typeof nameForEmail === 'function' && nameForEmail(email)) || prettyFromEmail(email);
@@ -181,9 +183,11 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
     );
   }
 
-  const verdictWords = structured.verdict === 'rejected'
-    ? 'Not approved'
-    : Array.isArray(structured.conditions) && structured.conditions.length ? 'Approved with the agreed conditions' : structured.condition ? 'Approved with a condition' : 'Approved';
+  const verdictWords = structured.verdict === 'closed'
+    ? (structured.closeReason ? closedWords(structured.closeReason) : 'Closed')
+    : structured.verdict === 'rejected'
+      ? 'Not approved'
+      : Array.isArray(structured.conditions) && structured.conditions.length ? 'Approved with the agreed conditions' : structured.condition ? 'Approved with a condition' : 'Approved';
   const askedBy = structured.requestedByName || prettyFromEmail(structured.requestedBy) || 'the agent';
   return (
     <li className="flex justify-center">
@@ -205,7 +209,7 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
               </p>
               {when}
             </div>
-            <p className="text-xs text-muted-foreground/75 mt-0.5">Approval decision</p>
+            <p className="text-xs text-muted-foreground/75 mt-0.5">{structured.verdict === 'closed' ? 'Approval closed without a decision · the ticket stays open' : 'Approval decision'}</p>
 
             {Array.isArray(structured.conditions) && structured.conditions.length ? (
               <ConditionsReview conditions={{ items: structured.conditions }} variant="agreed" className="mt-3.5" />
@@ -215,7 +219,7 @@ export default function ApprovalEventCard({ entry, meta, body, nameForEmail = nu
               </Block>
             )}
             {structured.note && (
-              <Block label="Decision note">
+              <Block label={structured.verdict === 'closed' ? 'What happened' : 'Decision note'}>
                 {structured.noteHtml ? <SafeHtml html={structured.noteHtml} className="!text-[15px] text-foreground/85" /> : structured.note}
               </Block>
             )}

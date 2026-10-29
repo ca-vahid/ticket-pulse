@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.33-preview';
+export const APP_VERSION = '4.3.34-preview';
 
 export const changelog = [
+  {
+    version: '4.3.34-preview',
+    date: 'October 29, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Close an approval without a decision</strong> &mdash; when a request is neither a yes nor a no (the requester says they no longer need it, or it is handled another way), the approver picks <em>Close the approval</em> with a reason: No longer needed, Handled another way, Duplicate request or Other, and a note. The approval ends as <em>Closed</em>, never as a refusal. The ticket stays open, and the agent who asked is e-mailed to carry on with the requester. The requester is told only if the box is ticked. Closed approvals have their own status and filter on the Approvals page and in the ticket filters.' },
+      { type: 'improved', html: '<strong>Reply without waiting for an answer</strong> &mdash; the <em>Ask a question</em> tab is now <em>Ask or reply</em>. Untick <em>Wait for an answer</em> to send a plain reply, such as thanks or an update; the request is not put on hold.' },
+    ],
+  },
   {
     version: '4.3.33-preview',
     date: 'October 27, 2026',

@@ -10,6 +10,7 @@ import {
   ALL_COLS, AllRow, FOR_YOU_COLS, ForYouRow, GroupRow, RequestConversation, STATUS_LOOK, TableHead,
 } from '../components/approvals/ApprovalRows';
 import { groupApprovals } from '../utils/approvalBrief';
+import { closedWords } from '../utils/approvalCloseReasons';
 import AppHeader from '../components/AppHeader';
 import PullToRefresh from '../components/common/PullToRefresh';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -46,6 +47,7 @@ const STATUS_META = {
   info_requested: { label: 'Needs info', art: 'approval-question', dot: 'bg-violet-500' },
   approved: { label: 'Approved', art: 'approval-stamp', dot: 'bg-emerald-500' },
   rejected: { label: 'Not approved', art: 'approval-rejected', dot: 'bg-red-500' },
+  closed: { label: 'Closed', art: 'approval-cancelled', dot: 'bg-sky-500' },
   cancelled: { label: 'Cancelled', art: 'approval-cancelled', dot: 'bg-muted-foreground/50' },
   escalated: { label: 'Escalated', art: 'approval-escalate', dot: 'bg-amber-500' },
   forwarded: { label: 'Forwarded', art: 'approval-forward', dot: 'bg-blue-500' },
@@ -165,6 +167,7 @@ const STAT_TILES = [
   { key: 'info_requested', label: 'Needs info', color: 'text-violet-600 dark:text-violet-300' },
   { key: 'approved', label: 'Approved', color: 'text-emerald-600 dark:text-emerald-300' },
   { key: 'rejected', label: 'Not approved', color: 'text-red-600 dark:text-red-300' },
+  { key: 'closed', label: 'Closed', color: 'text-sky-600 dark:text-sky-300' },
   { key: 'cancelled', label: 'Cancelled', color: 'text-muted-foreground' },
 ];
 const splitStatuses = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -287,7 +290,7 @@ function Collapse({ open, children }) {
 function DecisionRecord({ a, members = null }) {
   const others = (members || []).filter((m) => m.id !== a.id);
   const m = STATUS_LOOK[a.status] || STATUS_LOOK.cancelled;
-  const label = STATUS_META[a.status]?.label || a.status;
+  const label = a.status === 'closed' ? closedWords(a.closeReason) : STATUS_META[a.status]?.label || a.status;
   const note = cleanNoteText(a.decisionNote || '');
   const condition = cleanNoteText(a.conditionNote || '');
   return (
@@ -295,7 +298,7 @@ function DecisionRecord({ a, members = null }) {
       <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Decision</div>
       <p className={`text-[14px] font-semibold ${m.text}`}>{label}</p>
       <p className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
-        {a.status === 'pending' || a.status === 'info_requested' ? 'Waiting on' : 'Decided by'}
+        {a.status === 'pending' || a.status === 'info_requested' ? 'Waiting on' : a.status === 'closed' ? 'Closed by' : 'Decided by'}
         <InlinePerson name={a.approverName} email={a.approverEmail} />
         {(a.status === 'pending' || a.status === 'info_requested') && others.filter((m) => m.status === a.status).map((m) => (
           <span key={m.id} className="inline-flex items-center gap-1.5"><span className="text-muted-foreground/60">or</span><InlinePerson name={m.approverName} email={m.approverEmail} /></span>

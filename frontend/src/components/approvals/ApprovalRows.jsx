@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowUpRight, Ban, CheckCircle2, ChevronDown, Clock, Forward, Loader2, MessageCircleQuestion, XCircle,
+  ArrowUpRight, Ban, CheckCircle2, ChevronDown, CircleMinus, Clock, Forward, Loader2, MessageCircleQuestion, XCircle,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
@@ -26,6 +26,8 @@ export const STATUS_LOOK = {
   info_requested: { label: 'Needs info', Icon: MessageCircleQuestion, text: 'text-violet-700 dark:text-violet-300' },
   approved: { label: 'Approved', Icon: CheckCircle2, text: 'text-emerald-700 dark:text-emerald-300' },
   rejected: { label: 'Not approved', Icon: XCircle, text: 'text-red-700 dark:text-red-300' },
+  // 29 Oct 2026: closed without a decision (no longer needed, handled another way).
+  closed: { label: 'Closed', Icon: CircleMinus, text: 'text-sky-700 dark:text-sky-300' },
   cancelled: { label: 'Cancelled', Icon: Ban, text: 'text-muted-foreground' },
   escalated: { label: 'Escalated', Icon: ArrowUpRight, text: 'text-amber-700 dark:text-amber-300' },
   forwarded: { label: 'Forwarded', Icon: Forward, text: 'text-blue-700 dark:text-blue-300' },

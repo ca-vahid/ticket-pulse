@@ -715,8 +715,11 @@ model TicketApproval {
   workspace          Workspace         @relation(fields: [workspaceId], references: [id])
   ticketId           Int               @map("ticket_id")
   ticket             Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  // pending | approved | rejected | cancelled | info_requested
+  // pending | approved | rejected | cancelled | info_requested | closed
   status             String            @default("pending") @db.VarChar(20)
+  // 29 Oct 2026: why an approver closed it without a decision (status closed):
+  // not_needed | handled_otherwise | duplicate | other. See utils/approvalCloseReasons.js.
+  closeReason        String?           @map("close_reason") @db.VarChar(40)
   approvalCategoryId Int?              @map("approval_category_id")
   approvalCategory   ApprovalCategory? @relation(fields: [approvalCategoryId], references: [id], onDelete: SetNull)
   // Ties the sibling approvals created from one request together (any-one-approves).

@@ -457,6 +457,7 @@ export function renderApproverRequestEmail(ctx) {
 export function renderRequesterDecisionEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
+  if (ctx.closed) return closedEmail(ctx, { role: 'agent' });
   const verdict = verdictWordOf(approved, ctx.conditionNote);
   const body = [];
   const what = ctx.categoryName ? escapeHtml(ctx.categoryName) : 'Your request';
@@ -472,6 +473,42 @@ export function renderRequesterDecisionEmail(ctx) {
   else if (approved) hint = ctx.conditionNote ? 'You can carry on with the ticket, within the conditions.' : 'You can carry on with the ticket.';
   else hint = 'The decision and the reason are on the ticket.';
   if (t.appUrl) hint += ` ${inlineLink('Open the ticket', t.appUrl)}`;
+  body.push(replyHint(hint));
+  return replyDocument(body, ctx.quoteHtml);
+}
+
+/**
+ * Closed without a decision (29 Oct 2026): neither approved nor not approved
+ * (the requester no longer needs it, or it is handled another way). The
+ * approval ends; the ticket stays open with the agent. role: 'agent' (who
+ * asked), 'party' (other approvers / agents) or 'requester' (only when the
+ * approver ticked "also e-mail the requester").
+ */
+function closedEmail(ctx, { role }) {
+  const t = ctx.ticket || {};
+  const body = [];
+  const reason = ctx.closeReason || 'Closed without a decision';
+  const approver = escapeHtml(ctx.approverName || 'The approver');
+  if (role === 'requester') {
+    const ref = refHtml(t, null);
+    const what = ctx.categoryName ? `${escapeHtml(ctx.categoryName)} request` : 'request';
+    body.push(replyPara(`<b>Approval closed.</b> Your ${what}${ref ? `, ${ref}` : ''}: ${escapeHtml(reason.toLowerCase())}.`));
+  } else {
+    const what = ctx.categoryName ? escapeHtml(ctx.categoryName) : 'The request';
+    const forWhom = ctx.requester?.name ? ` for ${escapeHtml(ctx.requester.name)}` : '';
+    const ref = refHtml(t);
+    body.push(replyPara(`<b>Approval closed: ${escapeHtml(reason.toLowerCase())}.</b> ${what}${forWhom}${ref ? `, ${ref}` : ''}. ${approver} closed the approval without a decision; it is not a refusal.`));
+  }
+  if (ctx.note) body.push(replyText(ctx.note));
+  body.push(replySignature(ctx.signatureHtml));
+  let hint;
+  if (role === 'requester') hint = 'If you have a question about this, reply to this e-mail.';
+  else if (ctx.isSelf) hint = 'You closed your own request; this is your copy.';
+  else {
+    const agent = role === 'agent' ? 'You' : escapeHtml(firstNameOf(ctx.requestedByName) || 'The agent');
+    hint = `The ticket stays open. ${agent} can carry on with the requester${role === 'agent' ? ', or close the ticket when it is done' : ''}.`;
+    if (t.appUrl) hint += ` ${inlineLink('Open the ticket', t.appUrl)}`;
+  }
   body.push(replyHint(hint));
   return replyDocument(body, ctx.quoteHtml);
 }
@@ -556,6 +593,7 @@ export function renderApprovalMessageEmail(ctx) {
 export function renderDecisionThreadEmail(ctx) {
   const t = ctx.ticket || {};
   const approved = !!ctx.approved;
+  if (ctx.closed) return closedEmail(ctx, { role: ctx.recipient?.role === 'requester' ? 'requester' : 'party' });
   const verdict = verdictWordOf(approved, ctx.conditionNote);
   const toRequester = ctx.recipient?.role === 'requester';
   const body = [];

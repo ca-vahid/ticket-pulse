@@ -2409,7 +2409,7 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
     req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
-    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true },
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true, closeReason: req.body?.closeReason || null },
   );
   res.json({ success: true, data: approval });
 }));
@@ -2696,12 +2696,12 @@ ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) 
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideByToken(
     req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
-    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true },
+    { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true, closeReason: req.body?.closeReason || null },
   );
   const { readConditions } = await import('../services/approvalConditions.js');
   res.json({
     success: true,
-    data: { status: approval.status, decidedAt: approval.decidedAt || null, approverName: approval.approverName || null, conditions: readConditions(approval.conditions), conditionNote: approval.conditionNote || null },
+    data: { status: approval.status, decidedAt: approval.decidedAt || null, approverName: approval.approverName || null, conditions: readConditions(approval.conditions), conditionNote: approval.conditionNote || null, closeReason: approval.closeReason || null },
   });
 }));
 

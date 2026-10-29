@@ -53,6 +53,8 @@ const STATE_BY_STATUS = Object.freeze({
   info_requested: 'INFO_REQUESTED',
   rejected: 'REJECTED',
   cancelled: 'CANCELLED',
+  // 29 Oct 2026: closed without a decision (no longer needed) — withdrawn.
+  closed: 'CANCELLED',
   // Approvals v2: a handed-off row is closed; the live rows in the same group
   // carry PENDING, so the group verdict stays honest.
   escalated: 'CANCELLED',

@@ -17,7 +17,9 @@ import {
   Moon,
   Sun,
   XCircle,
+  CircleMinus,
 } from 'lucide-react';
+import { closeReasonLabel } from '../utils/approvalCloseReasons';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer from '../components/tickets/ApprovalComposer';
 import ApprovalThread from '../components/tickets/ApprovalThread';
@@ -238,6 +240,25 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
         : `Escalated to ${to} by ${last.byName}${when ? ` on ${when}` : ''}`;
       body = <p className="mt-1 text-sm opacity-80">The decision is theirs now; your note went with the request. The requester has been told.</p>;
     }
+  } else if (status === 'closed') {
+    // 29 Oct 2026: closed without a decision — not a refusal; the ticket stays open.
+    tone = 'bg-sky-50 text-sky-900 border-sky-200 dark:bg-sky-500/10 dark:text-sky-100 dark:border-sky-500/25';
+    disc = 'bg-sky-200/70 text-sky-900 dark:bg-sky-500/25 dark:text-sky-100';
+    Icon = CircleMinus;
+    const reason = closeReasonLabel(approval.closeReason).toLowerCase();
+    title = decidedInApp
+      ? `Closed by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''}: ${reason}`
+      : `You closed this approval${when ? ` on ${when}` : ''}: ${reason}`;
+    body = (
+      <div className="mt-2 space-y-2">
+        {(approval.decisionNoteHtml || approval.decisionNote) && (
+          <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-sm text-foreground/85">
+            {approval.decisionNoteHtml ? <SafeHtml html={approval.decisionNoteHtml} isDark={isDark} preferThemed /> : <p className="whitespace-pre-wrap">{approval.decisionNote}</p>}
+          </div>
+        )}
+        <p className="text-sm opacity-80">No decision was made. The ticket stays open and the agent has been told to carry on.</p>
+      </div>
+    );
   } else if (status === 'cancelled') {
     tone = 'bg-orange-50 text-orange-950 border-orange-200 dark:bg-orange-500/10 dark:text-orange-50 dark:border-orange-500/30';
     disc = 'bg-orange-200/70 text-orange-900 dark:bg-orange-500/25 dark:text-orange-100';
@@ -428,7 +449,7 @@ export default function PublicApprovalDecision() {
 
   const onDecide = useCallback(async (decision, note, noteHtml, extra = {}) => {
     const conditionNote = extra?.conditionNote || null;
-    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, ...(Array.isArray(extra?.conditions) ? { conditions: extra.conditions } : {}), notifyRequester: extra?.notifyRequester === true })) || {};
+    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, ...(Array.isArray(extra?.conditions) ? { conditions: extra.conditions } : {}), notifyRequester: extra?.notifyRequester === true, ...(extra?.closeReason ? { closeReason: extra.closeReason } : {}) })) || {};
     focusBannerRef.current = true;
     setDecidedByYou(true);
     setData((prev) => {
@@ -448,6 +469,7 @@ export default function PublicApprovalDecision() {
           status,
           decidedAt: now,
           decidedVia: 'link',
+          closeReason: body.closeReason || extra?.closeReason || null,
           decisionNote: status === 'info_requested' ? null : note,
           decisionNoteHtml: status === 'info_requested' ? null : noteHtml,
           conditionNote: body.conditionNote !== undefined ? body.conditionNote : conditionNote,

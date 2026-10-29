@@ -49,6 +49,17 @@ describe('ApprovalEventCard', () => {
     expect(screen.getByText('Approved')).toBeInTheDocument();
   });
 
+  test('closed without a decision (29 Oct 2026): the reason, in the sky tone, never "Not approved"', () => {
+    const body = 'Approval CLOSED (no longer needed) by Vahid Haeri — "Jack does not need it"';
+    expect(parseApprovalSentence(body)).toMatchObject({ verdict: 'closed', actorName: 'Vahid Haeri', note: 'Jack does not need it' });
+    const closed = { ...entry, bodyText: body, rawPayload: { kind: 'approval_event', v: 2, event: 'closed', parts: { verdict: 'closed', closeReason: 'not_needed', actorName: 'Vahid Haeri', note: 'Jack does not need it' } } };
+    render(<ul><ApprovalEventCard entry={closed} meta={{ label: 'Closed' }} body="x" /></ul>);
+    expect(screen.getByText('Closed: no longer needed').className).toMatch(/text-sky-/);
+    expect(screen.getByText(/the ticket stays open/)).toBeInTheDocument();
+    expect(screen.getByText('What happened')).toBeInTheDocument();
+    expect(screen.queryByText('Not approved')).not.toBeInTheDocument();
+  });
+
   // Vahid, 18 Sep 2026: soften the word a requester reads. The status VALUE stays
   // 'rejected'; only the label changes — and it must still read red, even though
   // "Not approved" contains "approv".

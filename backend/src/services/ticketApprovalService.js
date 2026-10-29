@@ -15,6 +15,7 @@ import {
   approvalHistory, requestNoteEntry, savedSignatureHtml, plainTextOf, viaTicketPulse,
 } from './approvalReplyMail.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
+import { normalizeCloseReason, closeReasonLabel, closedVerdictWord } from '../utils/approvalCloseReasons.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -132,7 +133,7 @@ export function prettifyLocalPart(email) {
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
 // 'not approved' is today's wording; 'rejected' stays for rows written before 18 Sep 2026.
-const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|not approved|rejected|escalated|forwarded)\s+by\s+(.+)$/i;
+const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|not approved|rejected|closed|escalated|forwarded)\s+by\s+(.+)$/i;
 
 // Open rows: the only ones a decision / hand-off can act on.
 const OPEN_STATUSES = ['pending', 'info_requested'];
@@ -184,7 +185,7 @@ class TicketApprovalService {
         requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
         decidedAt: true, decidedVia: true, expiresAt: true, createdAt: true,
         tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
-        conditionNote: true, conditionNoteHtml: true, conditions: true,
+        conditionNote: true, conditionNoteHtml: true, conditions: true, closeReason: true,
       },
     });
     return this._fillApproverNames(rows).then((list) => this._withEarlierConditions(list.map((r) => ({ ...r, ticketId }))));
@@ -614,7 +615,7 @@ class TicketApprovalService {
     let cancelledReason = null;
     if (approval.status === 'cancelled') {
       const m = SUPERSEDED_RE.exec(String(approval.decisionNote || '').trim());
-      const decidedSibling = siblings.find((s) => s.id !== approval.id && ['approved', 'rejected'].includes(s.status));
+      const decidedSibling = siblings.find((s) => s.id !== approval.id && ['approved', 'rejected', 'closed'].includes(s.status));
       if (m) {
         supersededBy = {
           name: looksLikeEmail(m[2]) ? (await nameFor(m[2]) || prettifyLocalPart(m[2])) : m[2].trim(),
@@ -722,6 +723,7 @@ class TicketApprovalService {
         // Approvals v3
         conditionNote: approval.conditionNote || null,
         conditionNoteHtml: approval.conditionNoteHtml || null,
+        closeReason: approval.closeReason || null,
         // 26 Oct 2026: approve with conditions is a conversation — the items, IT's answers, and who it waits on.
         conditions: readConditions(approval.conditions),
         conditionsWaitingOn: waitingOn(readConditions(approval.conditions), approval.status),
@@ -1022,6 +1024,7 @@ class TicketApprovalService {
       conditionNoteHtml: extra?.conditionNoteHtml || null,
       conditions: Array.isArray(extra?.conditions) ? extra.conditions : null,
       notifyRequester: extra?.notifyRequester === true,
+      closeReason: extra?.closeReason || null,
     });
   }
 
@@ -1045,6 +1048,7 @@ class TicketApprovalService {
       conditionNoteHtml: extra?.conditionNoteHtml || null,
       conditions: Array.isArray(extra?.conditions) ? extra.conditions : null,
       notifyRequester: extra?.notifyRequester === true,
+      closeReason: extra?.closeReason || null,
     });
   }
 
@@ -1590,6 +1594,7 @@ class TicketApprovalService {
       requestedBy: a.requestedBy,
       requestNote: a.requestNote,
       decisionNote: a.decisionNote,
+      closeReason: a.closeReason || null,
       conditionNote: a.conditionNote || null,
       conditions: readConditions(a.conditions),
       earlierConditions: a.earlierConditions || null,
@@ -1656,7 +1661,7 @@ class TicketApprovalService {
       }),
       prisma.ticketApproval.groupBy({ by: ['status'], where: { workspaceId }, _count: { _all: true } }),
     ]);
-    const stats = { pending: 0, info_requested: 0, approved: 0, rejected: 0, cancelled: 0, escalated: 0, forwarded: 0 };
+    const stats = { pending: 0, info_requested: 0, approved: 0, rejected: 0, closed: 0, cancelled: 0, escalated: 0, forwarded: 0 };
     for (const g of grouped) stats[g.status] = g._count._all;
     stats.total = Object.values(stats).reduce((a, b) => a + b, 0);
     // Same name pass as the inbox lists. Without it "Requested by" reached the
@@ -1865,13 +1870,22 @@ class TicketApprovalService {
   // QA 09-18 #1: the ticket requester is NOT on the verdict e-mail unless the
   // approver ticks "also e-mail the requester" - an approver's rejection note
   // written for the agents reached the end user (ticket 242909, 18 Sep 2026).
-  async _decide(approval, decision, rawNote, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote: rawCondition = null, conditionNoteHtml = null, conditions: rawConditions = null, notifyRequester = false }) {
+  async _decide(approval, decision, rawNote, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null, conditionNote: rawCondition = null, conditionNoteHtml = null, conditions: rawConditions = null, notifyRequester = false, closeReason: rawCloseReason = null }) {
     const note = cleanPlainNote(rawNote);
     let conditionNote = cleanPlainNote(rawCondition);
     notifyRequester = notifyRequester === true;
     const normalized = String(decision || '').toLowerCase();
-    if (!['approved', 'rejected'].includes(normalized)) {
-      throw new ValidationError('Decision must be "approved" or "rejected"');
+    if (!['approved', 'rejected', 'closed'].includes(normalized)) {
+      throw new ValidationError('Decision must be "approved", "rejected" or "closed"');
+    }
+    // 29 Oct 2026 (Vahid): closing without a decision. Neither a yes nor a
+    // no: the requester no longer needs it, or IT handles it another way. The
+    // approval ends, the ticket stays open, and the agent is told to carry on.
+    const closeReason = normalized === 'closed' ? normalizeCloseReason(rawCloseReason) : null;
+    if (normalized === 'closed') {
+      if (!closeReason) throw new ValidationError('Pick why the approval is closed');
+      if (closeReason === 'other' && !note) throw new ValidationError('Say why the approval is closed');
+      if (changedFrom) throw new ValidationError('A decided approval cannot be closed');
     }
     // Self-approval is prohibited (Sep 2026): the person who filed the request
     // never decides it — even when they are one of the category's approvers,
@@ -1915,7 +1929,7 @@ class TicketApprovalService {
         });
       }
       if (priorConditions) conditionNote = agreedSummary(priorConditions);
-    } else if (normalized === 'rejected') {
+    } else if (normalized === 'rejected' || normalized === 'closed') {
       priorConditions = null;
     }
 
@@ -1957,6 +1971,7 @@ class TicketApprovalService {
         conditionNote: cleanCondition,
         conditionNoteHtml: cleanConditionHtml,
         signatureHtml,
+        ...(closeReason ? { closeReason } : {}),
       },
     });
 
@@ -1988,13 +2003,15 @@ class TicketApprovalService {
       activityType: changedFrom ? 'approval_decision_changed' : `approval_${normalized}`,
       performedBy: actorLabel,
       performedAt: new Date(),
-      details: { approvalId: approval.id, via, note: note || null, requesterNotified: notifyRequester, ...(changedFrom ? { changedFrom, to: normalized } : {}) },
+      details: { approvalId: approval.id, via, note: note || null, requesterNotified: notifyRequester, ...(closeReason ? { closeReason } : {}), ...(changedFrom ? { changedFrom, to: normalized } : {}) },
     }).catch(() => {});
 
     // Audit trail on the conversation only. Approvals are TP-only, so the note
     // is NEVER mirrored to the FreshService fallback copy (mirrorState: null).
     if (ticket) {
-      const verdict = normalized === 'approved' ? (cleanCondition ? (priorConditions ? 'APPROVED WITH CONDITIONS ✔' : 'APPROVED WITH CONDITION ✔') : 'APPROVED ✔') : 'NOT APPROVED ✘';
+      const verdict = normalized === 'approved'
+        ? (cleanCondition ? (priorConditions ? 'APPROVED WITH CONDITIONS ✔' : 'APPROVED WITH CONDITION ✔') : 'APPROVED ✔')
+        : normalized === 'closed' ? `CLOSED (${closeReasonLabel(closeReason).toLowerCase()})` : 'NOT APPROVED ✘';
       // The verdict card quotes what was asked for, so "Approved by X" is never
       // read without the requester's own words (long notes are trimmed).
       const askedFor = String(approval.requestNote || '').trim();
@@ -2030,6 +2047,7 @@ class TicketApprovalService {
             kind: 'approval_event', v: 2, event: changedFrom ? 'changed' : normalized,
             parts: {
               verdict: normalized,
+              ...(closeReason ? { closeReason, closeReasonLabel: closeReasonLabel(closeReason) } : {}),
               changed: Boolean(changedFrom),
               actorName: actorLabel,
               note: note ? note.trim() : null,
@@ -2055,14 +2073,14 @@ class TicketApprovalService {
       await emitApprovalEvent('approval.decided', ticket.id, {
         // requestedBy lets workflows target the requester (approval_requester token).
         approvalId: approval.id, status: normalized, approverEmail: approval.approverEmail,
-        requestedBy: approval.requestedBy, requesterNotified: notifyRequester,
+        requestedBy: approval.requestedBy, requesterNotified: notifyRequester, ...(closeReason ? { closeReason } : {}),
       });
       this._broadcast(ticket, 'approval');
 
       // QA 08-11 #5: the agent who asked hears about the verdict by email.
       // Non-fatal — the decision is already persisted.
       try {
-        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, threadEntryId: decisionNote?.id || null });
+        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, threadEntryId: decisionNote?.id || null, closeReason });
       } catch (err) {
         logger.warn(`Approval decision email failed (non-fatal): ${err.message}`);
       }
@@ -2071,7 +2089,7 @@ class TicketApprovalService {
       // reply-style, with the condition, the signature and the history each
       // of them is allowed to see.
       try {
-        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, notifyRequester, threadEntryId: decisionNote?.id || null });
+        await this._emailDecisionToParties(ticket, { ...approval, ...updated }, { decision: normalized, note, actorLabel, actorEmail, changedFrom, conditionNote: cleanCondition, signatureHtml, notifyRequester, threadEntryId: decisionNote?.id || null, closeReason });
       } catch (err) {
         logger.warn(`Approval decision thread e-mails failed (non-fatal): ${err.message}`);
       }
@@ -2322,7 +2340,7 @@ class TicketApprovalService {
    * `actorEmail` is the DECIDING actor, not approval.approverEmail — an admin
    * deciding on the approver's behalf must not read as a self-decision.
    */
-  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, threadEntryId = null } = {}) {
+  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, threadEntryId = null, closeReason = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] decision email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
       return { sent: false, reason: 'suppressed' };
@@ -2331,7 +2349,8 @@ class TicketApprovalService {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
     const isSelf = to.toLowerCase() === String(actorEmail || '').trim().toLowerCase();
     const approved = decision === 'approved';
-    const verdictLabel = approved ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
+    const closed = decision === 'closed';
+    const verdictLabel = closed ? closedVerdictWord(closeReason) : approved ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     // Subject prefix stays identical for the self variant — inbox filters and
@@ -2351,6 +2370,8 @@ class TicketApprovalService {
       categoryName: await this._approvalCategoryName(approval),
       ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
       approved,
+      closed,
+      closeReason: closed ? closeReasonLabel(closeReason) : null,
       approverName,
       isSelf,
       changedFrom: changedFrom || null,
@@ -2375,7 +2396,7 @@ class TicketApprovalService {
    * "also e-mail the requester" (`notifyRequester`): by default the verdict
    * and its note stay between the agents.
    */
-  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, notifyRequester = false, threadEntryId = null } = {}) {
+  async _emailDecisionToParties(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null, conditionNote = null, signatureHtml = null, notifyRequester = false, threadEntryId = null, closeReason = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return { sent: false, reason: 'suppressed' };
     const { default: conversation } = await import('./approvalConversationService.js');
     const { renderDecisionThreadEmail } = await import('./approvalEmailTemplate.js');
@@ -2393,7 +2414,7 @@ class TicketApprovalService {
         workspaceId: approval.workspaceId, ticketId: approval.ticketId, approvalId: approval.id, requestGroupId: groupId,
         kind: 'decision', audience: includeRequester ? 'requester' : 'internal', authorEmail: deciderEmail,
         authorName: actorLabel || approval.approverName || null, authorRole: 'approver',
-        bodyText: [decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved', conditionNote ? `${/\n/.test(conditionNote) ? 'Agreed conditions:\n' : 'Condition: '}${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
+        bodyText: [decision === 'closed' ? closedVerdictWord(closeReason) : decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved', conditionNote ? `${/\n/.test(conditionNote) ? 'Agreed conditions:\n' : 'Condition: '}${conditionNote}` : null, note?.trim() || null].filter(Boolean).join('\n'),
         bodyHtml: null, via: 'app',
         toEmails: [...new Set([includeRequester ? parts.requester?.email : null, parts.agent?.email, ...parts.approvers.map((a) => a.email), ...involved.map((a) => a.email)].filter(Boolean))],
       },
@@ -2410,7 +2431,7 @@ class TicketApprovalService {
     const ticketUrl = `${ticketLinkUrl(publicBaseUrl(), ticket)}`;
     const category = approval.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    const verdictLabel = decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
+    const verdictLabel = decision === 'closed' ? closedVerdictWord(closeReason) : decision === 'approved' ? (conditionNote ? withConditionWords(conditionNote) : 'Approved') : 'Not approved';
     const approverName = actorLabel || approval.approverName || approval.approverEmail;
     // The approver's message in the reply format (26 Oct 2026). The history
     // follows today's audience rule: the requester's copy quotes only
@@ -2435,6 +2456,7 @@ class TicketApprovalService {
         categoryName: category?.name || null,
         ticket: { ref, subject: ticket.subject || null, appUrl: r.role === 'requester' ? null : ticketUrl },
         approved: decision === 'approved', changedFrom: changedFrom || null,
+        closed: decision === 'closed', closeReason: decision === 'closed' ? closeReasonLabel(closeReason) : null,
         approverName,
         note: note?.trim() || null, conditionNote: conditionNote || null, signatureHtml: signatureHtml || null,
         recipient: r, requester: { name: parts.requester?.name || ticket.requester?.name || null },

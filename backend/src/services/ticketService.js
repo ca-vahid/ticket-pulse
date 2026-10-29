@@ -1645,7 +1645,7 @@ class TicketService {
     {
       const mode = String(query.approval || '').toLowerCase();
       const catIds = asList(query.approvalCategory).map(Number).filter((n) => Number.isFinite(n) && n > 0);
-      const statusFor = { any: { notIn: ['cancelled'] }, pending: { in: ['pending', 'info_requested'] }, approved: 'approved', rejected: 'rejected' }[mode] || null;
+      const statusFor = { any: { notIn: ['cancelled'] }, pending: { in: ['pending', 'info_requested'] }, approved: 'approved', rejected: 'rejected', closed: 'closed' }[mode] || null;
       if (mode === 'none') {
         where.approvals = catIds.length ? { none: { approvalCategoryId: { in: catIds }, status: { notIn: ['cancelled'] } } } : { none: { status: { notIn: ['cancelled'] } } };
       } else if (statusFor || catIds.length) {
@@ -2678,7 +2678,7 @@ class TicketService {
           decidedAt: true, decidedVia: true, createdAt: true,
           requestGroupId: true,
           tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
-          conditionNote: true, conditionNoteHtml: true, conditions: true,
+          conditionNote: true, conditionNoteHtml: true, conditions: true, closeReason: true,
           approvalCategory: { select: { id: true, name: true, tiers: true, hasAmount: true, amountCurrency: true, managerEmails: true } },
         },
       }),
