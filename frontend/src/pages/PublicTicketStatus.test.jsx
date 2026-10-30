@@ -287,23 +287,23 @@ describe('PublicTicketStatus', () => {
     expect(screen.queryByText('How we estimate this')).not.toBeInTheDocument();
   });
 
-  test('parked: On hold with the day it comes back', async () => {
+  test('parked: Pending with the day it comes back', async () => {
     renderPage(basePayload({
       progress: serverProgress({
         stage: 'waiting',
         tone: 'waiting',
-        headline: 'On hold',
+        headline: 'Pending',
         current: 1,
         assigned: true,
         resumeAt: '2026-10-20T16:00:00.000Z',
         steps: [
           { key: 'received', label: 'Received', state: 'complete' },
-          { key: 'waiting', label: 'On hold', state: 'current' },
+          { key: 'waiting', label: 'Pending', state: 'current' },
           { key: 'resolved', label: 'Resolved', state: 'upcoming' },
         ],
       }),
     }));
-    expect(await screen.findByTestId('status-headline')).toHaveTextContent('On hold');
+    expect(await screen.findByTestId('status-headline')).toHaveTextContent('Pending');
     expect(screen.getByText(/We plan to pick it up again by/)).toBeInTheDocument();
   });
 

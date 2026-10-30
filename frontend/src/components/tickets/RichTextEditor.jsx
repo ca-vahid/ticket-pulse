@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Bold, Code, Heading2, Heading3, Italic, Link2, List, ListOrdered, Maximize2, Minimize2, Pilcrow, RemoveFormatting, SquareCode, TextQuote, Underline } from 'lucide-react';
+import { PersonAvatar } from './ticketUi';
 
 const ALLOWED = {
   ALLOWED_TAGS: [
@@ -419,8 +420,59 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     const q = mention.query.toLowerCase();
     return mentionPeople
       .filter((p) => p?.name && (!q || String(p.name).toLowerCase().split(/\s+/).some((word) => word.startsWith(q)) || String(p.name).toLowerCase().startsWith(q)))
-      .slice(0, 6);
+      // The menu scrolls, so everyone who matches is offered (Vahid, 29 Oct).
+      .slice(0, 100);
   })();
+  const mentionMenuRef = useRef(null);
+  // Keep the highlighted name in view while the arrow keys walk the list.
+  useEffect(() => {
+    const menu = mentionMenuRef.current;
+    if (!menu || !mention) return;
+    menu.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [mention]);
+  // A picked name is bold; the text typed after it is not. The browser carries
+  // the bold into what follows (the next word, a new line), and a mark whose
+  // text is no longer "@<a colleague>" would read as a mention that is not one.
+  // So after each keystroke: keep "@Name" bold, move anything else out of it.
+  const tidyMentionMarks = () => {
+    const el = editorRef.current;
+    if (!el || !mentionsOn) return;
+    const names = mentionPeople.map((p) => `@${String(p?.name || '')}`).filter((n) => n.length > 1)
+      .sort((a, b) => b.length - a.length);
+    const sel = window.getSelection();
+    for (const mark of [...el.querySelectorAll('.tp-mention')]) {
+      const text = mark.textContent || '';
+      const keep = names.find((n) => text.startsWith(n)) || '';
+      if (keep && text === keep) continue;
+      const caretInside = sel && sel.rangeCount > 0 && sel.isCollapsed && mark.contains(sel.anchorNode);
+      let caretAt = null;
+      if (caretInside) {
+        const probe = document.createRange();
+        probe.selectNodeContents(mark);
+        probe.setEnd(sel.anchorNode, sel.anchorOffset);
+        caretAt = probe.toString().length;
+      }
+      const rest = text.slice(keep.length);
+      const parent = mark.parentNode;
+      const restNode = rest ? document.createTextNode(rest) : null;
+      if (keep) {
+        mark.textContent = keep;
+        if (restNode) parent.insertBefore(restNode, mark.nextSibling);
+      } else {
+        if (restNode) parent.insertBefore(restNode, mark);
+        parent.removeChild(mark);
+      }
+      if (caretAt !== null) {
+        const r = document.createRange();
+        if (restNode && caretAt >= keep.length) r.setStart(restNode, Math.min(rest.length, caretAt - keep.length));
+        else if (keep && mark.firstChild) r.setStart(mark.firstChild, Math.min(keep.length, caretAt));
+        else continue;
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }
+  };
   // After each keystroke: is the caret right after "@word"? Then show the menu.
   const updateMention = () => {
     if (!mentionsOn) return;
@@ -459,7 +511,20 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
-    document.execCommand('insertHTML', false, `<strong class="tp-mention">@${escapeText(person.name)}</strong>&nbsp;`);
+    // Built by hand rather than with insertHTML: the browser would leave the
+    // caret inside the bold, so the next words came out bold too.
+    range.deleteContents();
+    const mark = document.createElement('strong');
+    mark.className = 'tp-mention';
+    mark.textContent = `@${person.name}`;
+    const gap = document.createTextNode('\u00a0');
+    range.insertNode(gap);
+    range.insertNode(mark);
+    const after = document.createRange();
+    after.setStart(gap, 1);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
     mentionCtxRef.current = null;
     emit();
     onMention(person);
@@ -789,22 +854,25 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             role="listbox"
             aria-label="Mention a colleague"
             data-testid="mention-menu"
-            className="absolute z-30 w-60 tp-card rounded-lg shadow-soft py-1"
+            className="absolute z-30 w-64 tp-card rounded-lg shadow-soft py-1"
             style={{ top: mention.top, left: mention.left }}
           >
-            {mentionMatches.map((person, i) => (
-              <button
-                key={person.id}
-                type="button"
-                role="option"
-                aria-selected={i === mention.index}
-                onMouseDown={(e) => { e.preventDefault(); pickMention(person); }}
-                className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm ${i === mention.index ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-100' : 'text-foreground hover:bg-muted'}`}
-              >
-                <span className="truncate">{person.name}</span>
-              </button>
-            ))}
-            <p className="px-3 pt-1 pb-0.5 text-[11px] text-muted-foreground">They get an e-mail with this note.</p>
+            <div ref={mentionMenuRef} className="max-h-72 overflow-y-auto overscroll-contain settings-scrollbar">
+              {mentionMatches.map((person, i) => (
+                <button
+                  key={person.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === mention.index}
+                  onMouseDown={(e) => { e.preventDefault(); pickMention(person); }}
+                  className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm ${i === mention.index ? 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-100' : 'text-foreground hover:bg-muted'}`}
+                >
+                  <span aria-hidden="true" className="inline-flex shrink-0"><PersonAvatar name={person.name} photoUrl={person.photoUrl || null} size="h-6 w-6" /></span>
+                  <span className="truncate">{person.name}</span>
+                </button>
+              ))}
+            </div>
+            <p className="px-3 pt-1 pb-0.5 border-t border-border text-[11px] text-muted-foreground">They get an e-mail with this note.</p>
           </div>
         )}
         {isEmpty && (
@@ -833,7 +901,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             role="textbox"
             aria-multiline="true"
             aria-label={ariaLabel}
-            onInput={() => { emit(); updateMention(); }}
+            onInput={() => { tidyMentionMarks(); emit(); updateMention(); }}
             onBlur={() => { emit(); setMention(null); }}
             onKeyDown={(e) => {
               if (onMentionKey(e)) return;

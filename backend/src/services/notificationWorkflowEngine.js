@@ -1108,7 +1108,7 @@ function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null
 const ROW_STYLE = {
   publicStatus: { badge: EMAIL_BADGE_STATUS, title: 'Check status', subtitle: 'Live SLA timer, assignee & latest note', color: '#143f9c', tint: '#f4f7fe' },
   raiseUrgency: { badge: EMAIL_BADGE_URGENCY, title: 'Raise urgency', subtitle: 'Bumps priority and tells your agent', color: '#d8392c', tint: '#fdf4f3' },
-  afterHoursSupport: { badge: EMAIL_BADGE_REQUEST, title: 'Request support', subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fdf0ef' },
+  afterHoursSupport: { badge: EMAIL_BADGE_REQUEST, title: 'Request support', subtitle: 'Pages the on-call team right now', color: '#c0392f', tint: '#fdf0ef' },
   feedback: { badge: EMAIL_BADGE_FEEDBACK, title: 'Rate your support', subtitle: 'Takes ten seconds — it helps the team', color: '#0f766e', tint: '#f0fdfa' },
 };
 
@@ -1281,7 +1281,8 @@ function feedbackRocksHtml(url, theme) {
   }).join('');
   const inner = [
     '<div style="font-size:15px;line-height:20px;font-weight:700;color:#334155;margin:0 0 3px;">How did we do?</div>',
-    '<div style="font-size:12.5px;line-height:17px;color:#64748b;margin:0 0 14px;">Tap a rock to rate &mdash; it takes ten seconds.</div>',
+    // QA 10-29 #2: plain words; the rocks below are the buttons.
+    '<div style="font-size:12.5px;line-height:17px;color:#64748b;margin:0 0 14px;">Click below to give us your feedback!</div>',
     `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:collapse;"><tr>${cells}</tr></table>`,
   ].join('');
   return FEEDBACK_STYLE + actionCardHtml('#ffffff', '#eef1f6', '16px', '18px 16px', inner) + ACTION_FOOTER_GAP;
@@ -1302,7 +1303,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
   // Primary: "Request immediate support" as a bordered red row (pages on-call).
   const requestRow = actionRowHtml({
     url: action.url, badge: EMAIL_BADGE_REQUEST, title: 'Request immediate support',
-    subtitle: 'Pages the on-call engineer right now', color: '#c0392f', tint: '#fff6f5', border: '#f0c7c2', mb: Boolean(phone),
+    subtitle: 'Pages the on-call team right now', color: '#c0392f', tint: '#fff6f5', border: '#f0c7c2', mb: Boolean(phone),
   });
 
   // The on-call number as a full-width row (tap to call). No embedded button.
@@ -1318,7 +1319,7 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
       emailGlyphCell('&#9742;&#xFE0E;', '10px 0 10px 14px'),
       // QA 10-23 #2: same paddings as the row above plus a right cell as wide as its arrow,
       // so the number centres under "Request immediate support" instead of 21px to the right.
-      `<td valign="middle" align="center" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;text-align:center;"><div style="font-size:19px;line-height:23px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
+      `<td valign="middle" align="center" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;text-align:center;"><div style="font-size:17px;line-height:20px;font-weight:800;color:#c0392f;letter-spacing:.01em;"><a href="tel:${escapeHtml(phoneHref)}" style="color:#c0392f;text-decoration:none;">${escapeHtml(phoneDisplay)}</a></div><div style="font-size:12px;line-height:16px;color:#7c5d5d;margin-top:1px;">Emergency number &middot; on-call now</div></td>`,
       '<td width="42" style="width:42px;padding-right:16px;font-size:1px;line-height:1px;">&nbsp;</td>',
       '</tr></table>',
     ].join('');
@@ -1331,7 +1332,10 @@ function afterHoursEmergencyHtml(action, publicAction = null) {
     ? `<div style="text-align:center;margin-top:14px;font-family:Arial,Helvetica,sans-serif;"><a href="${escapeHtml(statusUrl)}" target="_blank" rel="noopener noreferrer" style="font-size:13px;line-height:18px;font-weight:700;color:#c0392f;text-decoration:none;border-bottom:1px solid #e3b1aa;padding-bottom:1px;">Check your ticket status &rarr;</a></div>`
     : '';
 
-  return actionCardHtml('transparent', '#f1cfca', '16px', '16px', heading + requestRow + phoneRow + statusLink)
+  // QA 10-29 #3: the same 496px card and 14px inset as the business-hours band, so these two
+  // rows are as wide as the other link rows and line up with the feedback card below; the
+  // number is 17px so the phone row is no taller than the row above it.
+  return actionCardHtml('transparent', '#f1cfca', '16px', '14px', heading + requestRow + phoneRow + statusLink)
     + ACTION_FOOTER_GAP;
 }
 

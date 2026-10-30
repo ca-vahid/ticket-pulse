@@ -1465,7 +1465,7 @@ export default function TicketDetail() {
   // Who a note can mention: the workspace's active agents, not the author.
   const mentionPeople = useMemo(() => (meta?.technicians || [])
     .filter((t) => t?.id && t.name && !t.assignableOnly && t.id !== meta?.actor?.technicianId)
-    .map((t) => ({ id: t.id, name: t.name })), [meta?.technicians, meta?.actor?.technicianId]);
+    .map((t) => ({ id: t.id, name: t.name, photoUrl: t.photoUrl || null })), [meta?.technicians, meta?.actor?.technicianId]);
   const FOLD_THRESHOLD = 8;
   const KEEP_TAIL = 5;
   const folded = !showFolded && timeline.length > FOLD_THRESHOLD;

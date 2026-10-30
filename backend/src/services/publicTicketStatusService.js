@@ -337,7 +337,8 @@ export function publicProgress(ticket = {}, { mergedInto = null, now = new Date(
   const done = STAGE_INDEX[stage] === 3;
   const reopened = Boolean(reopenedAt) && !done;
   const current = STAGE_INDEX[stage];
-  const waitingLabel = waitingOnRequester ? 'Waiting on you' : 'On hold';
+  // QA 10-29 #1: "Pending", the word requesters see in our e-mails, not "On hold".
+  const waitingLabel = waitingOnRequester ? 'Waiting on you' : 'Pending';
 
   let headline;
   if (stage === 'merged') headline = 'Merged';
