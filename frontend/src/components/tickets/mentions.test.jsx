@@ -130,6 +130,12 @@ describe('"You were mentioned" on the ticket', () => {
     expect(onJump).toHaveBeenCalledWith(900);
   });
 
+  it('one full stop, even when the time ends in "p.m."', () => {
+    const text = mentionNoticeText([{ by: 'Alexey Lavrenyuk', at: '2026-10-29T22:28:35Z' }]);
+    expect(text).not.toMatch(/\.\.$/);
+    expect(text).toMatch(/\.$/);
+  });
+
   it('several notes and people read naturally; none renders nothing', () => {
     expect(mentionNoticeText([{ by: 'Alexey Lavrenyuk' }, { by: 'Soheil Nasiri' }])).toBe('Alexey Lavrenyuk and Soheil Nasiri mentioned you in 2 notes.');
     const { container } = render(<MentionNotice mentions={null} />);
