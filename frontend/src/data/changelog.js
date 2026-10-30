@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.36-preview';
+export const APP_VERSION = '4.3.37-preview';
 
 export const changelog = [
+  {
+    version: '4.3.37-preview',
+    date: 'October 29, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>&ldquo;Pending&rdquo; on the public status page</strong> &mdash; a ticket that is waiting on something now reads <em>Pending</em> instead of <em>On hold</em>, in the headline and on the progress bar. <em>Waiting on you</em> is unchanged.' },
+      { type: 'improved', html: '<strong>Plainer feedback line in e-mails</strong> &mdash; the rating card now says <em>Click below to give us your feedback!</em> above the rocks.' },
+      { type: 'improved', html: '<strong>After-hours card</strong> &mdash; <em>Request immediate support</em> now says it pages the on-call <em>team</em>, not the on-call engineer. Its two rows are now the same width and height as the other link rows in the e-mail, and the phone number is a little smaller.' },
+      { type: 'fix', html: '<strong>@mentions: only the name is bold</strong> &mdash; after you picked a colleague, the words you typed next (and a new line) could come out bold too, so they looked like mentions. Now only the picked <em>@Name</em> is bold. The list of names shows each person&rsquo;s picture and scrolls to everyone who matches, not just the first six.' },
+    ],
+  },
   {
     version: '4.3.36-preview',
     date: 'October 29, 2026',

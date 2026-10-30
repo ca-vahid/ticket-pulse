@@ -84,6 +84,41 @@ describe('the @ menu in the note editor', () => {
     typeInto(screen.getByRole('textbox', { name: 'Body' }), 'Hi @ga');
     expect(screen.queryByTestId('mention-menu')).toBeNull();
   });
+
+  it('the caret lands after the bold name, outside it', () => {
+    render(<RichTextEditor ariaLabel="Body" mentionPeople={people} onMention={() => {}} />);
+    const editor = screen.getByRole('textbox', { name: 'Body' });
+    typeInto(editor, '@ga');
+    fireEvent.mouseDown(screen.getByRole('option', { name: 'Gaby Tonnova' }));
+    const sel = window.getSelection();
+    expect(editor.querySelector('.tp-mention').contains(sel.anchorNode)).toBe(false);
+  });
+
+  it('text typed into a bold name moves out of it, and a mark that is no name is unbolded', () => {
+    render(<RichTextEditor ariaLabel="Body" mentionPeople={people} onMention={() => {}} />);
+    const editor = screen.getByRole('textbox', { name: 'Body' });
+    editor.innerHTML = '<strong class="tp-mention">@Gaby Tonnova and more</strong><div><strong class="tp-mention">@Nobody</strong></div>';
+    const tail = editor.querySelector('.tp-mention').firstChild;
+    const range = document.createRange();
+    range.setStart(tail, tail.nodeValue.length);
+    range.collapse(true);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    fireEvent.input(editor);
+    const marks = editor.querySelectorAll('.tp-mention');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('@Gaby Tonnova');
+    expect(editor.textContent).toBe('@Gaby Tonnova and more@Nobody');
+    expect(window.getSelection().anchorNode.nodeValue).toBe(' and more');
+  });
+
+  it('lists everyone who matches (not six), with their pictures', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, name: `Person ${String.fromCharCode(65 + i)}`, photoUrl: i === 0 ? 'https://example.test/a.jpg' : null }));
+    render(<RichTextEditor ariaLabel="Body" mentionPeople={many} onMention={() => {}} />);
+    typeInto(screen.getByRole('textbox', { name: 'Body' }), '@');
+    expect(screen.getAllByRole('option')).toHaveLength(12);
+    expect(screen.getByRole('option', { name: 'Person A' }).querySelector('img')).toHaveAttribute('src', 'https://example.test/a.jpg');
+  });
 });
 
 describe('"You were mentioned" on the ticket', () => {

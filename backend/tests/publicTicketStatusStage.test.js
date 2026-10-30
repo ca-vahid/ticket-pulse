@@ -244,10 +244,10 @@ describe('public status stage: merged', () => {
 describe('public status stage: pending, on hold and parked', () => {
   beforeEach(resetMocks);
 
-  test('Pending with an agent is On hold at the middle step', () => {
+  test('Pending with an agent reads Pending at the middle step', () => {
     const progress = publicProgress(ticketRow({ ...assignee, status: 'Pending' }));
     expect(progress.stage).toBe('waiting');
-    expect(progress.headline).toBe('On hold');
+    expect(progress.headline).toBe('Pending');
     expect(progress.tone).toBe('waiting');
     expect(states(progress)).toEqual(['complete', 'current', 'upcoming']);
   });
@@ -260,11 +260,11 @@ describe('public status stage: pending, on hold and parked', () => {
     expect(states(progress)).toEqual(['complete', 'current', 'upcoming']);
   });
 
-  test('a parked open ticket is On hold with the date it comes back', () => {
+  test('a parked open ticket reads Pending with the date it comes back', () => {
     const until = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     const progress = publicProgress(ticketRow({ ...assignee, parkedUntil: until, parkKind: 'waiting_on' }));
     expect(progress.stage).toBe('waiting');
-    expect(progress.headline).toBe('On hold');
+    expect(progress.headline).toBe('Pending');
     expect(progress.resumeAt).toBe(until.toISOString());
   });
 

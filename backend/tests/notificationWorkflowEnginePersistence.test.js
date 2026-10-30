@@ -889,7 +889,7 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).toContain(publicStatusUrl);
     expect(result.state.email.html).toContain(raiseUrgencyUrl);
     expect(result.state.email.html).toContain(immediateSupportUrl);
-    expect(result.state.email.html).toContain('Pages the on-call engineer right now');
+    expect(result.state.email.html).toContain('Pages the on-call team right now');
     expect(result.state.email.html).not.toContain("Can't wait until morning?");
   });
 

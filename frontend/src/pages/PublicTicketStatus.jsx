@@ -229,7 +229,7 @@ function legacyProgress(data) {
     current = 3;
   } else if (waiting) {
     stage = 'waiting';
-    headline = waitingOnYou ? 'Waiting on you' : 'On hold';
+    headline = waitingOnYou ? 'Waiting on you' : 'Pending';
     current = 1;
   } else if (assigned) {
     stage = 'in_progress';
@@ -244,7 +244,7 @@ function legacyProgress(data) {
   const keys = ['received', waiting ? 'waiting' : 'in_progress', closed ? 'closed' : 'resolved'];
   const steps = [
     'Received',
-    waiting ? (waitingOnYou ? 'Waiting on you' : 'On hold') : 'In progress',
+    waiting ? (waitingOnYou ? 'Waiting on you' : 'Pending') : 'In progress',
     closed ? 'Closed' : 'Resolved',
   ].map((label, index) => {
     let state = index < current ? 'complete' : index === current ? 'current' : 'upcoming';
