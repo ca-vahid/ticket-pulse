@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.37-preview';
+export const APP_VERSION = '4.3.38-preview';
 
 export const changelog = [
+  {
+    version: '4.3.38-preview',
+    date: 'October 29, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>One full stop after the mention time</strong> &mdash; the &ldquo;mentioned you in a note&rdquo; line on a ticket ended in &ldquo;p.m..&rdquo;. It now ends in one full stop.' },
+    ],
+  },
   {
     version: '4.3.37-preview',
     date: 'October 29, 2026',

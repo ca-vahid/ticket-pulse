@@ -19,7 +19,9 @@ export function mentionNoticeText(mentions = []) {
   const who = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names[0]} and ${names.length - 1} others`;
   const what = list.length === 1 ? 'a note' : `${list.length} notes`;
   const when = list.length === 1 && whenLabel(list[0].at) ? ` · ${whenLabel(list[0].at)}` : '';
-  return `${who} mentioned you in ${what}${when}.`;
+  const line = `${who} mentioned you in ${what}${when}`;
+  // en-CA times end in "p.m.", which already closes the sentence.
+  return line.endsWith('.') ? line : `${line}.`;
 }
 
 export default function MentionNotice({ mentions, onJump, onDismiss }) {
