@@ -3,6 +3,7 @@ import { Client } from '@microsoft/microsoft-graph-client';
 import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
+import { paragraphSpacing, prepareOutboundEmail } from '../utils/emailHtmlHardening.js';
 
 class GraphMailClient {
   constructor() {
@@ -244,7 +245,8 @@ class GraphMailClient {
       const when = new Date(sentAt).toISOString();
       const created = await client.api(`/users/${mailbox}/mailFolders/sentitems/messages`).post({
         subject: String(subject || '(no subject)').slice(0, 255),
-        body: { contentType: 'HTML', content: String(html || '') },
+        // Spacing only: the record keeps no attachments, so pictures stay as they were.
+        body: { contentType: 'HTML', content: paragraphSpacing(String(html || '')) },
         from: addr(mailbox),
         sender: addr(mailbox),
         toRecipients: (Array.isArray(to) ? to : [to]).filter(Boolean).map(addr),
@@ -267,6 +269,8 @@ class GraphMailClient {
     to, cc = [], subject, html, attachments = [], fromName = null,
     replyTo = null, inReplyTo = null, references = [],
   }) {
+    // Paragraph spacing + data: pictures as cid attachments, so the new Outlook reading pane shows both (31 Oct 2026).
+    ({ html, attachments } = prepareOutboundEmail({ html, attachments }));
     const client = this._getClient();
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
       .map((address) => ({ emailAddress: { address } }));

@@ -172,3 +172,29 @@ describe('FR 09-11 #3 (review): a quoted text-only original is not double-spaced
     expect(quote.html).not.toContain('ignored');
   });
 });
+
+describe('a signature logo written in as data (31 Oct 2026)', () => {
+  test('the length cap never cuts through the picture, and the rest of the signature survives', async () => {
+    const logo = `data:image/png;base64,${'A'.repeat(52 * 1024)}`;
+    const signature = `<table><tr><td><img src="${logo}" width="100" /></td><td><p style="margin:0">Vahid Haeri</p><p style="margin:0">IT Manager</p></td></tr></table>`;
+    findMany.mockResolvedValue([
+      entry({
+        source: 'ticketpulse_user', bodyHtml: '<p>BST is back up.</p>', bodyText: 'BST is back up.',
+        rawPayload: { sentSignature: { html: signature, text: 'Vahid Haeri' } },
+      }),
+    ]);
+    const quote = await ticketService._lastInboundQuote(1);
+    expect(quote.html).toContain(`src="${logo}"`);
+    expect(quote.html).toContain('IT Manager');
+    expect(quote.html).not.toContain('[…]');
+    expect(quote.html).not.toContain('tp-data-picture');
+  });
+
+  test('a long message is still cut, but never inside a tag', async () => {
+    const long = Array.from({ length: 900 }, (_, i) => `<p style="margin:0">line ${i} of a long message</p>`).join('');
+    findMany.mockResolvedValue([entry({ bodyHtml: long, bodyText: 'long' })]);
+    const quote = await ticketService._lastInboundQuote(1);
+    expect(quote.html).toContain('<p>[…]</p>');
+    expect(quote.html).not.toMatch(/<[^>]*<p>\[…\]/);
+  });
+});
