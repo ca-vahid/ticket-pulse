@@ -49,6 +49,14 @@ describe('inlineDataImages', () => {
     expect(out.attachments).toEqual([{ name: 'image1.png', contentType: 'image/png', contentBytes: PNG, contentId: 'tp-img-1' }]);
   });
 
+  test('past the 1 MB total the rest stay as they were (Graph request size)', () => {
+    const big = (fill) => `data:image/png;base64,${fill.repeat(Math.floor((600 * 1024) / 0.75))}`;
+    const out = inlineDataImages(`<img src="${big('A')}"><img src="${big('B')}">`);
+    expect(out.attachments).toHaveLength(1);
+    expect(out.html).toContain('src="cid:tp-img-1"');
+    expect(out.html).toContain(`src="${big('B')}"`);
+  });
+
   test('ordinary pictures and text are untouched', () => {
     const html = '<img src="cid:tp-face-1"><img src="https://example.com/a.png"><p>data:image/png;base64,abc</p>';
     expect(inlineDataImages(html)).toEqual({ html, attachments: [] });

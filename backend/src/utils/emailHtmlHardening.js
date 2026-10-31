@@ -142,6 +142,9 @@ export function paragraphSpacing(html) {
  */
 export const MAX_INLINE_DATA_IMAGE_BYTES = Math.floor(1.5 * 1024 * 1024);
 export const MAX_INLINE_DATA_IMAGES = 12;
+// All of them together: Graph's one-call sendMail takes ~4 MB per request, and a reply's own
+// pictures and photos (replyEmailPictures, up to 2.5 MB) ride the same request.
+export const MAX_INLINE_DATA_TOTAL_BYTES = 1024 * 1024;
 const DATA_IMG_RE = /(<img\b[^>]*?\ssrc\s*=\s*)(["'])data:(image\/(?:png|jpe?g|gif|webp|bmp));base64,([A-Za-z0-9+/=\s]+)\2/gi;
 
 export function inlineDataImages(html) {
@@ -149,12 +152,15 @@ export function inlineDataImages(html) {
   if (!/<img\b[^>]*data:image\//i.test(input)) return { html: input, attachments: [] };
   const byData = new Map();
   const attachments = [];
+  let total = 0;
   const out = input.replace(DATA_IMG_RE, (whole, head, quote, contentType, data) => {
     const contentBytes = data.replace(/\s+/g, '');
-    if (Math.floor(contentBytes.length * 0.75) > MAX_INLINE_DATA_IMAGE_BYTES) return whole;
+    const bytes = Math.floor(contentBytes.length * 0.75);
+    if (bytes > MAX_INLINE_DATA_IMAGE_BYTES) return whole;
     let cid = byData.get(contentBytes);
     if (!cid) {
-      if (attachments.length >= MAX_INLINE_DATA_IMAGES) return whole;
+      if (attachments.length >= MAX_INLINE_DATA_IMAGES || total + bytes > MAX_INLINE_DATA_TOTAL_BYTES) return whole;
+      total += bytes;
       cid = `tp-img-${attachments.length + 1}`;
       byData.set(contentBytes, cid);
       const ext = contentType.split('/')[1].replace('jpeg', 'jpg');
