@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.39-preview';
+export const APP_VERSION = '4.3.40-preview';
 
 export const changelog = [
+  {
+    version: '4.3.40-preview',
+    date: 'October 31, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Noise and repeats counted apart</strong> &mdash; in Analytics, the same alert arriving again (a copy grouped into the first ticket) was counted as noise. It is now its own count: under the Created vs Closed chart in Demand &amp; Flow you see <em>Noise</em> and <em>Repeats</em> side by side, both out of the tickets created in the range. The <em>Noise &amp; spam</em> report leaves repeats out and gives their number on its own line.' },
+    ],
+  },
   {
     version: '4.3.39-preview',
     date: 'October 31, 2026',

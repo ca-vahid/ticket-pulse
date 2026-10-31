@@ -10,6 +10,7 @@
 // Snapshots are immutable rows — regenerate for fresh numbers.
 import prisma from './prisma.js';
 import { isAutoHelpResolved } from '../utils/autoHelpMetrics.js';
+import { GROUPED_COPY_WHERE, NOT_GROUPED_COPY_WHERE } from '../utils/groupedCopy.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { toZonedTime, fromZonedTime, formatInTimeZone } from 'date-fns-tz';
@@ -86,7 +87,9 @@ class ReportService {
     let scopeWhere = {};
     let label = 'All tickets';
     if (scope.kind === 'noise') {
-      scopeWhere = { isNoise: true };
+      // Grouped copies (the same alert again) are repeats, not junk: left out here and
+      // reported on their own line (totals.repeats).
+      scopeWhere = { isNoise: true, AND: [NOT_GROUPED_COPY_WHERE] };
       label = 'Noise & spam';
     } else if (scope.kind === 'category' || scope.kind === 'subcategory') {
       const cat = await prisma.competencyCategory.findFirst({ where: { id: Number(scope.id), workspaceId } });
@@ -105,7 +108,13 @@ class ReportService {
     const inWindow = { ...base, createdAt: { gte: rangeStart, lt: rangeEnd } };
     const inPrev = { ...base, createdAt: { gte: prevStart, lt: rangeStart } };
 
-    const [total, prevTotal, byStatusRaw, byPriorityRaw, rows] = await Promise.all([
+    // Repeats in the window, for the all-tickets and noise scopes (a category or tag
+    // scope keeps its grouped copies in its own counts). Never fails the report.
+    const repeatsWhere = { workspaceId, ...GROUPED_COPY_WHERE, status: { notIn: ['Deleted'] }, createdAt: { gte: rangeStart, lt: rangeEnd } };
+    const repeatsPromise = scope.kind === 'all' || scope.kind === 'noise'
+      ? Promise.resolve().then(() => prisma.ticket.count({ where: repeatsWhere })).catch(() => null)
+      : Promise.resolve(undefined);
+    const [total, prevTotal, byStatusRaw, byPriorityRaw, rows, repeats] = await Promise.all([
       prisma.ticket.count({ where: inWindow }),
       prisma.ticket.count({ where: inPrev }),
       prisma.ticket.groupBy({ by: ['status'], where: inWindow, _count: true }),
@@ -122,6 +131,7 @@ class ReportService {
         orderBy: { createdAt: 'desc' },
         take: 2000,
       }),
+      repeatsPromise,
     ]);
 
     const byDay = {};
@@ -168,6 +178,9 @@ class ReportService {
         // Of those, resolved by Auto-help (team line; utils/autoHelpMetrics.js).
         resolvedByAutoHelp,
         avgResolutionHours: resolvedCount ? Math.round(resolutionMsSum / resolvedCount / 3600000 * 10) / 10 : null,
+        // Grouped copies created in the window (same alert or request again). In the
+        // all-tickets scope they are part of created; the noise scope leaves them out.
+        ...(repeats === undefined ? {} : { repeats }),
       },
       byDay: days_,
       byStatus: byStatusRaw.map((r) => ({ name: r.status, count: r._count })),
