@@ -5,6 +5,7 @@ import emailHealthService from './emailHealthService.js';
 import logger from '../utils/logger.js';
 import { ExternalAPIError, ValidationError } from '../utils/errors.js';
 import { formatSender, sanitizeFromName } from '../utils/emailSender.js';
+import { prepareOutboundEmail } from '../utils/emailHtmlHardening.js';
 import { buildOutboundMessageId, domainOfAddress, normalizeMessageId } from './emailThreadingService.js';
 
 function trim(value) {
@@ -318,12 +319,14 @@ export async function sendEmail({
   // and SMTP would deliver the same message twice.
   const ccRecipients = withoutAddresses(normalizeEmailList(cc), toRecipients);
   const bccRecipients = withoutAddresses(normalizeEmailList(bcc), [...toRecipients, ...ccRecipients]);
-  const { attachments, dropped: droppedAttachments } = normalizeAttachments(rawAttachments);
+  // Paragraph spacing + data: pictures as cid attachments, so the new Outlook reading pane shows both (31 Oct 2026).
+  const prepared = prepareOutboundEmail({ html: trim(html), attachments: rawAttachments });
+  const { attachments, dropped: droppedAttachments } = normalizeAttachments(prepared.attachments);
   if (droppedAttachments.length > 0) {
     logger.warn(`sendEmail: ${droppedAttachments.length} attachment(s) not sent (${droppedAttachments.map((d) => `${d.filename}: ${d.reason}`).join(', ')})`);
   }
   const textBody = trim(text);
-  const htmlBody = trim(html);
+  const htmlBody = trim(prepared.html);
   const emailSubject = trim(subject) || 'Ticket Pulse notification';
 
   if (toRecipients.length === 0) throw new ValidationError('Email recipient is required');

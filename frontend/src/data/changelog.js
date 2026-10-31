@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.38-preview';
+export const APP_VERSION = '4.3.39-preview';
 
 export const changelog = [
+  {
+    version: '4.3.39-preview',
+    date: 'October 31, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>E-mails look right in the new Outlook</strong> &mdash; in the reading pane of the new Outlook (and Outlook on the web), the paragraphs of a reply ran together, and a signature logo was missing so the signature looked shifted to the right. The same e-mail opened in its own window was fine. Every e-mail Ticket Pulse sends now carries its paragraph spacing itself, and pictures pasted into a signature travel inside the e-mail, so the reading pane shows both.' },
+      { type: 'fix', html: '<strong>Your signature in the quoted conversation</strong> &mdash; when an earlier reply of yours was quoted under a later e-mail, its signature logo could show as a broken picture and the rest of the signature went missing. It now shows whole.' },
+    ],
+  },
   {
     version: '4.3.38-preview',
     date: 'October 29, 2026',

@@ -124,7 +124,8 @@ describe('sendgridNotificationService', () => {
       to: ['requester@example.com'],
       cc: ['agent@example.com'],
       subject: 'Ticket assigned',
-      html: '<p>Hello</p>',
+      // Paragraph spacing is written inline at the transport (new Outlook reading pane, 31 Oct 2026).
+      html: '<p style="margin-top:1em;margin-bottom:1em">Hello</p>',
       headers: {
         'X-Ticket-Pulse-workflowRunId': '12',
       },

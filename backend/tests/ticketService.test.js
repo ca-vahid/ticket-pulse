@@ -2084,7 +2084,8 @@ describe('ticketService per-user signatures on reply sends (Mega 08-15 Phase D)'
 
     expect(fsClientMock.createReply).toHaveBeenCalledWith(
       9,
-      '<p style="margin-bottom:0">Fixed it!</p><br><p style="margin: 0"><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+      // FS sends this itself, so the reading-pane paragraph spacing is added before it goes (31 Oct 2026).
+      '<p style="margin-bottom:0;margin-top:1em">Fixed it!</p><br><p style="margin: 0"><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
       { ccEmails: [], attachments: [] },
     );
     expect(entry.bodyHtml).toBe('<p>Fixed it!</p>');

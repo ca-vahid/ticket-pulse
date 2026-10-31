@@ -102,4 +102,80 @@ export function withBaseFont(html) {
   return `<div ${BASE_FONT_MARK}="1" style="font-family:${EMAIL_BASE_FONT};">${input}</div>`;
 }
 
-export default { bulletproofButtons, withBaseFont };
+/**
+ * A paragraph that does not set its own margin gets the client's default: about
+ * a line above and below in a browser, classic Outlook and a message opened in its
+ * own window, but NONE in the new Outlook / Outlook on the web reading pane — the
+ * lines of a reply ran together there (Vahid, 31 Oct 2026). Each <p> is given the
+ * browser default inline for the sides it leaves unset, so every client agrees. A
+ * `margin:` shorthand (signatures, templates) and Word's MsoNormal paragraphs
+ * (quoted Outlook mail, margin 0 by design) are left alone. Idempotent.
+ */
+const PARAGRAPH_RE = /<p(?=[\s>/])([^>]*)>/gi;
+const STYLE_ATTR_RE = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+export function paragraphSpacing(html) {
+  const input = String(html || '');
+  if (!/<p[\s>/]/i.test(input)) return input;
+  return input.replace(PARAGRAPH_RE, (whole, attrs) => {
+    if (/\bclass\s*=\s*["']?[^"'>]*\bMso/i.test(attrs)) return whole;
+    const styleMatch = STYLE_ATTR_RE.exec(attrs);
+    const style = styleMatch ? (styleMatch[1] ?? styleMatch[2] ?? '') : '';
+    const props = style.split(';').map((d) => d.split(':')[0].trim().toLowerCase()).filter(Boolean);
+    if (props.includes('margin')) return whole;
+    const add = ['margin-top', 'margin-bottom'].filter((p) => !props.includes(p)).map((p) => `${p}:1em`);
+    if (!add.length) return whole;
+    const merged = [style.trim().replace(/;\s*$/, ''), ...add].filter(Boolean).join(';');
+    const rest = styleMatch ? attrs.replace(styleMatch[0], '') : attrs;
+    return `<p${rest.replace(/\s*\/?$/, '')} style="${escapeAttr(merged)}">`;
+  });
+}
+
+/**
+ * A picture written into the HTML as data (`src="data:image/png;base64,…"`) — a
+ * signature logo pasted into Settings → Signatures — shows in a browser and in a
+ * message opened in its own window, but the new Outlook reading pane and Gmail
+ * block it, leaving an empty column (the signature looked shifted right, 31 Oct
+ * 2026). Each one becomes an inline attachment referenced by cid:, which every
+ * client shows. Identical pictures share one attachment; a picture over the cap,
+ * or past the count, stays as it was.
+ */
+export const MAX_INLINE_DATA_IMAGE_BYTES = Math.floor(1.5 * 1024 * 1024);
+export const MAX_INLINE_DATA_IMAGES = 12;
+const DATA_IMG_RE = /(<img\b[^>]*?\ssrc\s*=\s*)(["'])data:(image\/(?:png|jpe?g|gif|webp|bmp));base64,([A-Za-z0-9+/=\s]+)\2/gi;
+
+export function inlineDataImages(html) {
+  const input = String(html || '');
+  if (!/<img\b[^>]*data:image\//i.test(input)) return { html: input, attachments: [] };
+  const byData = new Map();
+  const attachments = [];
+  const out = input.replace(DATA_IMG_RE, (whole, head, quote, contentType, data) => {
+    const contentBytes = data.replace(/\s+/g, '');
+    if (Math.floor(contentBytes.length * 0.75) > MAX_INLINE_DATA_IMAGE_BYTES) return whole;
+    let cid = byData.get(contentBytes);
+    if (!cid) {
+      if (attachments.length >= MAX_INLINE_DATA_IMAGES) return whole;
+      cid = `tp-img-${attachments.length + 1}`;
+      byData.set(contentBytes, cid);
+      const ext = contentType.split('/')[1].replace('jpeg', 'jpg');
+      attachments.push({ name: `image${attachments.length + 1}.${ext}`, contentType, contentBytes, contentId: cid });
+    }
+    return `${head}${quote}cid:${cid}${quote}`;
+  });
+  return { html: out, attachments };
+}
+
+/**
+ * Every outgoing e-mail passes through this at the transport (Graph and SendGrid/SMTP),
+ * whatever wrote it: replies, signatures, workflows, approvals, mentions.
+ */
+export function prepareOutboundEmail({ html, attachments = [] } = {}) {
+  if (!html) return { html, attachments };
+  const inlined = inlineDataImages(paragraphSpacing(html));
+  return {
+    html: inlined.html,
+    attachments: [...(Array.isArray(attachments) ? attachments : []), ...inlined.attachments],
+  };
+}
+
+export default { bulletproofButtons, withBaseFont, paragraphSpacing, inlineDataImages, prepareOutboundEmail };

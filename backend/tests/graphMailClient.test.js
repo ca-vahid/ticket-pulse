@@ -113,7 +113,7 @@ describe('sendMailAsMailbox threading (MB-1b)', () => {
     const patch = calls[2].body;
     expect(patch).toEqual({
       subject: 'Re: Invoice question [TP-1042]',
-      body: { contentType: 'HTML', content: '<p>Hello</p>' },
+      body: { contentType: 'HTML', content: '<p style="margin-top:1em;margin-bottom:1em">Hello</p>' },
       toRecipients: [{ emailAddress: { address: 'rita@example.com' } }],
       ccRecipients: [{ emailAddress: { address: 'boss@example.com' } }],
       from: { emailAddress: { address: MAILBOX, name: 'Susan Xu' } },
@@ -163,7 +163,7 @@ describe('sendMailAsMailbox threading (MB-1b)', () => {
     const { internetMessageId, ...message } = calls[0].body.message;
     expect(message).toEqual({
       subject: 'FW: Ticket [TP-1042]',
-      body: { contentType: 'HTML', content: '<p>fw</p>' },
+      body: { contentType: 'HTML', content: '<p style="margin-top:1em;margin-bottom:1em">fw</p>' },
       toRecipients: [{ emailAddress: { address: 'rita@example.com' } }],
       ccRecipients: [],
     });

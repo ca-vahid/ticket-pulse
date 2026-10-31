@@ -6,6 +6,7 @@ import { categoryTiers } from '../utils/approvalTiers.js';
 import { earlierConditionsFor } from './approvalConditions.js';
 import logger from '../utils/logger.js';
 import { textToHtml } from '../utils/forwardedMailParser.js';
+import { paragraphSpacing } from '../utils/emailHtmlHardening.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
 import { AuthorizationError, AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
@@ -5601,7 +5602,9 @@ class TicketService {
       const html = bodyHtml || textToReplyHtml(bodyText);
       // FS-born replies: FS emails the requester with the body we send it, so
       // the signature rides the createReply payload (notes stay unsigned).
-      const outboundHtml = signature ? appendSignatureToEmail({ html }, signature).html : html;
+      // FreshService sends this one itself, so it skips our transports: the paragraph spacing
+      // the new Outlook reading pane needs is added here (31 Oct 2026).
+      const outboundHtml = paragraphSpacing(signature ? appendSignatureToEmail({ html }, signature).html : html);
       // Internal notes carry the TP marker so FS automation rules can exclude
       // them (FR 08-07 #9); requester-facing replies go unmarked.
       const fsNoteBody = `${tpNoteMarkerHtml(actor?.name || actor?.email)}${html}`;
@@ -6406,10 +6409,25 @@ class TicketService {
       if (signature) {
         rawHtml = `${closeLastParagraphTight(trimTrailingBlankHtml(rawHtml.trim()))}<br>${signature.html || textToHtml(signature.text)}`;
       }
-      let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
-      if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
+      // A picture written in as data (a signature logo, ~50 KB of text) is set aside
+      // while the message is measured and cut: the 20 KB cut used to land inside it,
+      // so the logo came out broken and the rest of the signature was lost
+      // (Vahid, 31 Oct 2026). The transport sends it as a cid attachment. A cut never
+      // ends inside a tag either.
+      const dataPictures = [];
+      let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim()
+        .replace(/(["'])data:image\/[a-z+.-]+;base64,[A-Za-z0-9+/=\s]+\1/gi, (match) => {
+          dataPictures.push(match);
+          return `"tp-data-picture-${dataPictures.length - 1}"`;
+        });
+      if (quotedHtml.length > QUOTE_CAP) {
+        let cut = quotedHtml.slice(0, QUOTE_CAP);
+        if (cut.lastIndexOf('<') > cut.lastIndexOf('>')) cut = cut.slice(0, cut.lastIndexOf('<'));
+        quotedHtml = `${cut}<p>[…]</p>`;
+      }
       if (capped && used + quotedHtml.length > TOTAL_CAP) { blocks.push(OMITTED_MARKER_HTML); textBlocks.push(OMITTED_MARKER_TEXT); return false; }
       used += quotedHtml.length;
+      if (dataPictures.length) quotedHtml = quotedHtml.replace(/"tp-data-picture-(\d+)"/g, (match, i) => dataPictures[Number(i)] ?? match);
 
       const who = escapeHtml(row.actorName || row.actorEmail || 'the requester');
       const when = row.occurredAt
