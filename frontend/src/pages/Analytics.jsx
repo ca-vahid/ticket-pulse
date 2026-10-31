@@ -31,6 +31,7 @@ import AnalyticsReports from '../components/analytics/AnalyticsReports';
 import UrgentResponseOps from '../components/analytics/UrgentResponseOps';
 import AiPickAccuracy from '../components/analytics/AiPickAccuracy';
 import MetricHint from '../components/analytics/MetricHint';
+import NoiseRepeatsLine from '../components/analytics/NoiseRepeatsLine';
 import { metricHintText } from '../utils/metricsGlossary';
 import { Link, useLocation } from 'react-router-dom';
 import Highcharts from 'highcharts';
@@ -2689,6 +2690,7 @@ export default function Analytics({ view = 'standard' }) {
         <div className="h-64 sm:h-80">
           <HighchartsBlock options={demandTrendOptions} height="100%" />
         </div>
+        <NoiseRepeatsLine breakdowns={demand?.breakdowns} excludeNoise={excludeNoise} />
       </Panel>
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title={<span className="inline-flex items-center gap-1.5">Requester Hotspots <MetricHint metric="requesterHotspots" /></span>}>

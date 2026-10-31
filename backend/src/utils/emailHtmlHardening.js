@@ -140,7 +140,7 @@ export function paragraphSpacing(html) {
  * client shows. Identical pictures share one attachment; a picture over the cap,
  * or past the count, stays as it was.
  */
-export const MAX_INLINE_DATA_IMAGE_BYTES = Math.floor(1.5 * 1024 * 1024);
+export const MAX_INLINE_DATA_IMAGE_BYTES = 1024 * 1024;
 export const MAX_INLINE_DATA_IMAGES = 12;
 // All of them together: Graph's one-call sendMail takes ~4 MB per request, and a reply's own
 // pictures and photos (replyEmailPictures, up to 2.5 MB) ride the same request.

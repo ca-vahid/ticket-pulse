@@ -8,6 +8,7 @@ import { ticketSourceLabel, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
 import { computePickAccuracy, fetchPickInputs, pickAccuracyExportRows } from './aiPickAccuracy.js';
 import { assignerKind } from '../utils/assignerKind.js';
+import { isGroupedCopy, shareOf } from '../utils/groupedCopy.js';
 
 const DEFAULT_TIMEZONE = 'America/Vancouver';
 // Canonical fallbacks. Since Phase 8b every per-workspace site resolves the
@@ -1527,6 +1528,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
           internalSubcategoryFit: true,
           taxonomyReviewNeeded: true,
           isNoise: true,
+          noiseRuleMatched: true,
           requester: { select: { name: true, email: true } },
           assignedTech: { select: { name: true } },
         },
@@ -1539,7 +1541,10 @@ export async function getDemandFlow(workspaceId, query = {}) {
     const sourceMap = new Map();
     const requesterMap = new Map();
     const heatmap = new Map();
-    const noiseCount = createdTickets.filter((t) => t.isNoise).length;
+    // Each ticket lands in one bucket: a grouped copy is stored as noise but is a repeat
+    // (utils/groupedCopy.js), so it counts under Repeats only and Noise means junk.
+    const repeatCount = createdTickets.filter((t) => t.isNoise && isGroupedCopy(t)).length;
+    const noiseCount = createdTickets.filter((t) => t.isNoise && !isGroupedCopy(t)).length;
 
     for (const ticket of createdTickets) {
       const key = groupKey(ticket.createdAt, rangeInfo);
@@ -1589,10 +1594,10 @@ export async function getDemandFlow(workspaceId, query = {}) {
         requester: topFromMap(requesterMap),
         // QA 09-18 #2: how tickets actually arrived, not the source an agent picked.
         intake,
-        noiseShare: {
-          count: noiseCount,
-          pct: createdTickets.length ? Number(((noiseCount / createdTickets.length) * 100).toFixed(1)) : 0,
-        },
+        // Both shares are of the tickets created in range (the chart's created count).
+        noiseShare: shareOf(noiseCount, createdTickets.length),
+        repeatShare: shareOf(repeatCount, createdTickets.length),
+        createdInRange: createdTickets.length,
       },
       drilldown: createdTickets.slice(0, 100).map((ticket) => compactTicket(ticket, workspaceId)),
     };
