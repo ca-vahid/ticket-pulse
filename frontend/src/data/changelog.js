@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.41-preview';
+export const APP_VERSION = '4.3.42-preview';
 
 export const changelog = [
+  {
+    version: '4.3.42-preview',
+    date: 'October 31, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Book time away pulses four times, then stops</strong> &mdash; the glow around the button kept going and made the page grow, so a scroll bar flickered. It now pulses four times when the page opens and stays still after that, and the page no longer moves.' },
+    ],
+  },
   {
     version: '4.3.41-preview',
     date: 'October 31, 2026',

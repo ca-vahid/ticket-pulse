@@ -47,8 +47,9 @@ function focusBookingForm(tries = 12) {
 /**
  * QA 10-30 #1: "Book time away" is the main thing people come here for, and as
  * a small link in the My time card it was easy to miss. It is now the one solid
- * button at the top right of every tab, with a soft halo that pulses three
- * times when the page opens (only when the app's motion setting is on).
+ * button at the top right of every tab. A soft ring pulses four times when the
+ * page opens and then stops (Vahid, 31 Oct 2026: a ping that kept going and
+ * grew the page was too much); none when the app's motion setting is off.
  */
 export function BookTimeButton({ onClick, className = '' }) {
   return (
@@ -56,11 +57,10 @@ export function BookTimeButton({ onClick, className = '' }) {
       type="button"
       onClick={onClick}
       data-testid="book-time-away"
-      className={`tp-focus-ring relative inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-soft ring-4 ring-primary/15 hover:bg-blue-700 ${className}`}
+      className={`tp-focus-ring tp-book-pulse inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-soft hover:bg-blue-700 ${className}`}
     >
-      <span className="pointer-events-none absolute inset-0 rounded-xl bg-primary/40 motion-on:animate-ping [animation-iteration-count:3]" aria-hidden="true" />
-      <CalendarPlus className="relative h-4 w-4" aria-hidden="true" />
-      <span className="relative">Book time away</span>
+      <CalendarPlus className="h-4 w-4" aria-hidden="true" />
+      <span>Book time away</span>
     </button>
   );
 }
