@@ -161,7 +161,6 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
         setReasons({ byEpisode, byTicket });
       })
       .catch(() => setReasons({ byEpisode: new Map(), byTicket: new Map() }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [technician?.id, range?.start, range?.end]);
 
   useEffect(() => {

@@ -546,6 +546,9 @@ class MailboxIngestService {
     // Dedupe: has this exact message already been ingested (or held)?
     if (await this._alreadyIngested(connection, email.internetMessageId)) return 'skipped';
 
+    // QA 10-30 #7: mail sent on someone's behalf is credited to the person who wrote it.
+    email = await this._creditTheWriter(connection, email);
+
     // Approvals v3 (16 Sep 2026): a reply to an approval question comes back
     // on `<mailbox>+ap<key>@…` — it belongs to the approval conversation, not
     // to the ticket thread. Handled before any ticket matching.
@@ -1076,6 +1079,43 @@ class MailboxIngestService {
    * are named on tickets too, and on their own ticket they are the customer.
    * Compared on the address, which is what the mail actually carries.
    */
+  /**
+   * QA 10-30 #7: Alex Delegate wrote to it@ from Pat Manager's mailbox
+   * as his delegate. Exchange puts Pat in From and Alex in Sender; we read only
+   * From, so Pat became the requester of a mail he never wrote. When the two
+   * differ, the Sender is who wrote it: they become `from` (requester, reply
+   * author) and the person it was sent for is kept as `onBehalfOf` (Cc'd on a
+   * new ticket, and still recognised as the requester on a reply).
+   * Left as it was when the mail was sent for one of our own mailboxes, or by an
+   * agent of this workspace (an agent acting for someone keeps today's path).
+   */
+  async _creditTheWriter(connection, email) {
+    const from = String(email?.from || '').trim().toLowerCase();
+    const sender = String(email?.sender || '').trim().toLowerCase();
+    if (!from || !sender || from === sender) return email;
+    const local = (a) => a.replace(/\+[^@]*@/, '@');
+    const mailbox = String(connection?.address || '').trim().toLowerCase();
+    if (local(from) === mailbox || local(sender) === mailbox) return email;
+    const ownMailbox = await Promise.resolve()
+      .then(() => prisma.mailboxConnection.findFirst({
+        where: { OR: [local(from), local(sender)].map((address) => ({ address: { equals: address, mode: 'insensitive' } })) },
+        select: { id: true },
+      }))
+      .catch(() => null);
+    if (ownMailbox) return email;
+    const senderIsAgent = await Promise.resolve()
+      .then(() => agentIntake.resolveAgentSender(connection.workspaceId, sender))
+      .catch(() => null);
+    if (senderIsAgent) return email;
+    logger.info(`Mailbox ingest: "${email.subject}" was sent by ${sender} on behalf of ${from}; ${sender} is credited as the writer`);
+    return {
+      ...email,
+      from: email.sender,
+      fromName: email.senderName || '',
+      onBehalfOf: { email: email.from, name: email.fromName || null },
+    };
+  }
+
   async _senderIsTicketRequester(ticket, fromAddress) {
     const from = String(fromAddress || '').trim().toLowerCase();
     if (!from || !ticket?.requesterId) return false;
@@ -1115,7 +1155,8 @@ class MailboxIngestService {
     // Forwards are deliberately untouched: forwarding is an agent action
     // whoever does it, and the content belongs to the original sender.
     const senderIsRequester = !isForward
-      && await this._senderIsTicketRequester(ticket, email.from);
+      && (await this._senderIsTicketRequester(ticket, email.from)
+        || (email.onBehalfOf?.email ? await this._senderIsTicketRequester(ticket, email.onBehalfOf.email) : false));
     const agent = senderIsRequester ? null : resolvedAgent;
     const isAgentReply = Boolean(agent && !isForward);
     const forwardedMeta = isForward ? this._forwardedMeta(agent, email, ctx.parsed, { sliced: false }) : null;
@@ -1126,6 +1167,7 @@ class MailboxIngestService {
       ...(recipients || {}),
       ...(isAgentReply ? { deliveryState: 'external', agentIntake: { kind: 'agent_reply_email', technicianId: agent.id, via } } : {}),
       ...(forwardedMeta ? { forwarded: forwardedMeta } : {}),
+      ...(email.onBehalfOf ? { onBehalfOf: email.onBehalfOf } : {}),
     };
     const entry = await prisma.ticketThreadEntry.create({
       data: {
@@ -1495,7 +1537,8 @@ class MailboxIngestService {
       if (helpdesk) {
         const agents = await prisma.technician.findMany({ where: { workspaceId: connection.workspaceId, isActive: true, email: { not: null } }, select: { email: true } })
           .then((rows) => rows.map((r) => String(r.email || '').toLowerCase())).catch(() => []);
-        ccEmails = mergeInboundCc([], { cc: recipients.cc_emails }, { mailboxAddress: connection.address, exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
+        const onBehalf = email.onBehalfOf?.email ? [email.onBehalfOf.email] : [];
+        ccEmails = mergeInboundCc([], { cc: [...(recipients.cc_emails || []), ...onBehalf] }, { mailboxAddress: connection.address, exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
       }
       await prisma.ticket.update({
         where: { id: ticket.id },
@@ -1531,7 +1574,7 @@ class MailboxIngestService {
           occurredAt: email.receivedAt || new Date(),
           emailMessageId: email.internetMessageId,
           title: 'Original email',
-          ...(recipients || heldReply ? { rawPayload: { ...(recipients || {}), ...(heldReply ? { heldReply } : {}) } } : {}),
+          ...(recipients || heldReply || email.onBehalfOf ? { rawPayload: { ...(recipients || {}), ...(heldReply ? { heldReply } : {}), ...(email.onBehalfOf ? { onBehalfOf: email.onBehalfOf } : {}) } } : {}),
         },
       }).catch(() => {});
     }

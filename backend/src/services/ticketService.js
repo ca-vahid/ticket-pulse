@@ -4319,7 +4319,11 @@ class TicketService {
       // allowlist). Custom labels map to FS through their BASE status; a
       // label whose base can't resolve is rejected rather than shipped to FS
       // as the old silent Open(2) fallback.
-      const normalized = await statusService.assertValidStatus(workspaceId, input.status);
+      const valid = await statusService.assertValidStatus(workspaceId, input.status);
+      // QA 10-30 #2: where Resolved is retired, FreshService gets Closed.
+      const normalized = await import('./autoCloseResolvedService.js')
+        .then(({ default: svc }) => svc.closedInsteadOfResolved(workspaceId, valid))
+        .catch(() => valid);
       // Idempotency: re-applying the current status is a no-op, not another FS
       // write. (QA 231648: a timed-out-then-retried resolve wrote to FS twice,
       // and each FS transition emailed the requester.)
@@ -5026,6 +5030,13 @@ class TicketService {
     // Per-workspace registry validation (Phase 8a) — replaces the hardcoded
     // NATIVE_TICKET_STATUSES allowlist. Returns the canonical-cased label.
     status = await statusService.assertValidStatus(workspaceId, status);
+    // QA 10-30 #2: where Resolved is retired, Resolved becomes Closed — and a
+    // Resolved that came from the FreshService copy is written back as Closed.
+    const asked = status;
+    status = await import('./autoCloseResolvedService.js')
+      .then(({ default: svc }) => svc.closedInsteadOfResolved(workspaceId, status))
+      .catch(() => asked);
+    const retiredSwap = status !== asked;
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     if (ticket.status === status) {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), changed: false };
@@ -5040,7 +5051,7 @@ class TicketService {
     const newBase = await statusService.baseStatusOf(workspaceId, status);
 
     const now = new Date();
-    const patch = { status, mirrorState: fromFreshService ? 'mirrored' : 'pending' };
+    const patch = { status, mirrorState: fromFreshService && !retiredSwap ? 'mirrored' : 'pending' };
     const wasTerminal = TERMINAL_STATUSES.includes(oldBase);
     const isTerminal = TERMINAL_STATUSES.includes(newBase);
 

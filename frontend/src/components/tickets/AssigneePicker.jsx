@@ -4,6 +4,8 @@ import { Check, ChevronDown, Loader2, Search, Sparkles, UserRound, X } from 'luc
 import { AgentFirstName, PersonAvatar, UnassignedBadge } from './ticketUi';
 import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
 import HandBackReasonDialog from './HandBackReasonDialog';
+import AwayAssignConfirm from './AwayAssignConfirm';
+import { awayTag } from '../../utils/away';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { useCurrentIdentity } from '../../utils/currentIdentity';
 import { asksChangeReason, isSignedInAs, splitTeams } from '../../utils/handBack';
@@ -67,6 +69,8 @@ export default function AssigneePicker({
   const me = useCurrentIdentity();
   const [handBack, setHandBack] = useState(null); // null | { mode: 'unassign'|'reassign', toId?, toName?, error }
   const [handBackBusy, setHandBackBusy] = useState(false);
+  // 31 Oct 2026 (Vahid): picking someone who is off asks first ({ techId, tech }).
+  const [awayAsk, setAwayAsk] = useState(null);
   const selfHandBack = isSignedInAs(me, current);
 
   const placePanel = () => {
@@ -172,7 +176,18 @@ export default function AssigneePicker({
     setHandBackBusy(false);
   };
 
-  const assign = async (techId) => {
+  const assign = (techId) => {
+    if (busy) return;
+    const toTech = technicians.find((t) => t.id === techId) || null;
+    if (toTech?.away && techId !== value) {
+      setOpen(false);
+      setAwayAsk({ techId, tech: toTech });
+      return;
+    }
+    assignNow(techId);
+  };
+
+  const assignNow = async (techId) => {
     if (busy) return;
     // QA 10-16 item 1: a change from one person to another asks the same
     // question as an unassign (not a first assignment, not picking it up yourself).
@@ -479,6 +494,9 @@ export default function AssigneePicker({
                 >
                   <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
                   <span className="text-sm text-foreground/85 truncate">{t.name}</span>
+                  {t.away && (
+                    <span className="ml-auto whitespace-nowrap text-[10px] font-medium text-amber-700 dark:text-amber-300 flex-shrink-0" title="Off at the next working moment">{awayTag(t.away)}</span>
+                  )}
                   {t.origin === 'local' && (
                     <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
                   )}
@@ -528,6 +546,13 @@ export default function AssigneePicker({
         returnFocusRef={triggerRef}
         onSubmit={submitHandBack}
         onCancel={() => { if (!handBackBusy) setHandBack(null); }}
+      />
+
+      <AwayAssignConfirm
+        open={Boolean(awayAsk)}
+        people={awayAsk ? [{ name: awayAsk.tech.name, away: awayAsk.tech.away }] : []}
+        onConfirm={() => { const id = awayAsk?.techId; setAwayAsk(null); assignNow(id); }}
+        onCancel={() => { setAwayAsk(null); setOpen(true); }}
       />
 
       <OverridePromptToast

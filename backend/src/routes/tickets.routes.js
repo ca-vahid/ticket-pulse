@@ -306,7 +306,22 @@ router.get('/meta', asyncHandler(async (req, res) => {
   const replyGreeting = await import('../services/replyGreetingService.js')
     .then(({ getReplyGreetingSettings }) => getReplyGreetingSettings(req.workspaceId))
     .catch(() => null);
-  res.json({ success: true, data: { ...meta, actor: req.ticketActor, ...(replyGreeting ? { replyGreeting } : {}) } });
+  // 31 Oct 2026 (Vahid): who is away at the next working moment, for the
+  // assignee and @mention pickers ("Away · back Mon 16 Nov").
+  const away = await import('../services/assigneeAwayService.js')
+    .then(({ default: svc }) => svc.forWorkspace(req.workspaceId))
+    .catch(() => new Map());
+  const technicians = Array.isArray(meta?.technicians) && away.size
+    ? meta.technicians.map((t) => (away.has(t.id) ? { ...t, away: away.get(t.id) } : t))
+    : meta?.technicians;
+  // QA 10-30 #2: a workspace that retired Resolved does not offer it.
+  const resolvedRetired = await import('../services/autoCloseResolvedService.js')
+    .then(({ default: svc }) => svc.isResolvedRetired(req.workspaceId))
+    .catch(() => false);
+  const statuses = resolvedRetired && Array.isArray(meta?.statuses)
+    ? meta.statuses.filter((s) => s.baseStatus !== 'Resolved')
+    : meta?.statuses;
+  res.json({ success: true, data: { ...meta, ...(technicians ? { technicians } : {}), ...(statuses ? { statuses } : {}), resolvedRetired, actor: req.ticketActor, ...(replyGreeting ? { replyGreeting } : {}) } });
 }));
 
 // Stat cards: several tabs (and the page + its refresh) asked at the same
@@ -1334,13 +1349,17 @@ router.put('/auto-close-settings', asyncHandler(async (req, res) => {
     if (typeof req.body.enabled !== 'boolean') throw new ValidationError('enabled must be true or false');
     patch.enabled = req.body.enabled;
   }
+  if (req.body?.retireResolved !== undefined) {
+    if (typeof req.body.retireResolved !== 'boolean') throw new ValidationError('retireResolved must be true or false');
+    patch.retireResolved = req.body.retireResolved;
+  }
   if (req.body?.afterHours !== undefined) {
     if (!AFTER_HOURS_CHOICES.includes(Number(req.body.afterHours))) throw new ValidationError('Choose one of the offered times');
     patch.afterHours = Number(req.body.afterHours);
   }
   if (!Object.keys(patch).length) throw new ValidationError('Nothing to change');
   const saved = await autoClose.setSettings(req.workspaceId, patch, actor);
-  logger.info(`Auto-close of resolved tickets for workspace ${req.workspaceId} set to ${JSON.stringify({ enabled: saved.enabled, afterHours: saved.afterHours })} by ${actor?.email || 'unknown'}`);
+  logger.info(`Auto-close of resolved tickets for workspace ${req.workspaceId} set to ${JSON.stringify({ enabled: saved.enabled, afterHours: saved.afterHours, retireResolved: saved.retireResolved })} by ${actor?.email || 'unknown'}`);
   res.json({ success: true, data: await autoClose.pageContext(req.workspaceId) });
 }));
 
@@ -2429,6 +2448,15 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
     req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
     { conditionNote: req.body?.conditionNote || null, conditionNoteHtml: req.body?.conditionNoteHtml || null, ...(Array.isArray(req.body?.conditions) ? { conditions: req.body.conditions } : {}), notifyRequester: req.body?.notifyRequester === true, closeReason: req.body?.closeReason || null },
   );
+  // QA 10-30 #8: @mentions in the approval note tell the colleagues named.
+  if (req.body?.mentions) {
+    await import('../services/ticketMentionService.js')
+      .then(({ default: mentions }) => mentions.recordForApproval({
+        ticketId: parseTicketId(req), workspaceId: req.workspaceId, actor: req.ticketActor,
+        ids: req.body.mentions, bodyText: req.body?.note || '', bodyHtml: req.body?.noteHtml || null,
+      }))
+      .catch(() => {});
+  }
   res.json({ success: true, data: approval });
 }));
 
@@ -2471,6 +2499,15 @@ router.post('/:id/approvals/:approvalId/messages', asyncHandler(async (req, res)
     kind: req.body?.kind || 'question', mode: req.body?.mode || 'requester', to: req.body?.to, cc: req.body?.cc,
     bodyText: req.body?.bodyText || null, bodyHtml: req.body?.bodyHtml || null, via: 'app', author: { email: a?.email, name: a?.name },
   });
+  // QA 10-30 #8: @mentions in an approval question or reply.
+  if (req.body?.mentions) {
+    await import('../services/ticketMentionService.js')
+      .then(({ default: mentions }) => mentions.recordForApproval({
+        ticketId: parseTicketId(req), workspaceId: req.workspaceId, actor: a,
+        ids: req.body.mentions, bodyText: req.body?.bodyText || '', bodyHtml: req.body?.bodyHtml || null,
+      }))
+      .catch(() => {});
+  }
   res.status(201).json({ success: true, data });
 }));
 

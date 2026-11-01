@@ -1266,9 +1266,9 @@ export const ticketsAPI = {
     return await api.get(`/tickets/${id}/approvals/messages`);
   },
 
-  askApproval: async (id, approvalId, { kind = 'question', mode = 'requester', to, cc, bodyText, bodyHtml }) => {
+  askApproval: async (id, approvalId, { kind = 'question', mode = 'requester', to, cc, bodyText, bodyHtml, mentions }) => {
     try {
-      return await api.post(`/tickets/${id}/approvals/${approvalId}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
+      return await api.post(`/tickets/${id}/approvals/${approvalId}/messages`, { kind, mode, to, cc, bodyText, bodyHtml, ...(mentions?.length ? { mentions } : {}) });
     } catch (err) {
       // Until the v3 backend is live, a question to the requester still goes out the v2 way.
       if (err?.status === 404 && mode === 'requester' && bodyText) return await api.post(`/tickets/${id}/approvals/${approvalId}/clarify`, { note: bodyText });

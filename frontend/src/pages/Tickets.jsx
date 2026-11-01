@@ -28,6 +28,7 @@ import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
 import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
 import HandBackReasonDialog from '../components/tickets/HandBackReasonDialog';
+import AwayAssignConfirm from '../components/tickets/AwayAssignConfirm';
 import BulkSelectionPanel from '../components/tickets/BulkSelectionPanel';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import { mergeSurvivorBlockedReason } from '../components/tickets/mergeRules';
@@ -1470,9 +1471,16 @@ export default function Tickets() {
 
   // Bulk release asks for ONE hand-back reason for all (QA 09-25 item 3).
   const [bulkHandBackOpen, setBulkHandBackOpen] = useState(false);
+  // 31 Oct 2026 (Vahid): assigning to someone who is off asks first, once per pick.
+  const [bulkAwayAsk, setBulkAwayAsk] = useState(null); // { tech, handBackArg }
+  const bulkAwayOk = useRef(null); // the technician id already confirmed
   const runBulk = async (handBackArg = null) => {
     if (!bulkAction || bulkBusy) return;
     if (!queryScope && editableSelected.length === 0) return;
+    if (bulkAction.type === 'assign' && bulkAction.value != null && bulkAwayOk.current !== Number(bulkAction.value)) {
+      const tech = (meta?.technicians || []).find((t) => Number(t.id) === Number(bulkAction.value));
+      if (tech?.away) { setBulkAwayAsk({ tech, handBackArg }); return; }
+    }
     const handBack = handBackArg && typeof handBackArg.code === 'string' ? handBackArg : null; // onConfirm passes the click event
     const releasing = bulkAction.type === 'assign' && bulkAction.value == null;
     const releasesSomeone = Boolean(queryScope) || editableSelected.some((t) => t.assignedTechId);
@@ -3011,6 +3019,13 @@ export default function Tickets() {
         </div>
       )}
 
+      <AwayAssignConfirm
+        open={Boolean(bulkAwayAsk)}
+        people={bulkAwayAsk ? [{ name: bulkAwayAsk.tech.name, away: bulkAwayAsk.tech.away }] : []}
+        ticketCount={queryScope?.editable || editableSelected.length || 1}
+        onConfirm={() => { const ctx = bulkAwayAsk; bulkAwayOk.current = Number(ctx?.tech?.id); setBulkAwayAsk(null); runBulk(ctx?.handBackArg || null); }}
+        onCancel={() => setBulkAwayAsk(null)}
+      />
       {/* Aggregated "why the override?" toast after a bulk assign (QA 08-04 #9) */}
       <OverridePromptToast
         prompt={bulkOverride.prompt}

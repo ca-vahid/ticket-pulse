@@ -737,7 +737,7 @@ class GraphMailClient {
 }
 
 /** Ingest projection shared by the poller, the delta lane and the webhook worker. */
-export const INGEST_MESSAGE_SELECT = 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,conversationId,internetMessageId,internetMessageHeaders,hasAttachments';
+export const INGEST_MESSAGE_SELECT = 'id,subject,from,sender,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,conversationId,internetMessageId,internetMessageHeaders,hasAttachments';
 
 /** Graph message → the flat email shape mailboxIngestService consumes. */
 export function mapGraphMessageForIngest(e) {
@@ -750,6 +750,10 @@ export function mapGraphMessageForIngest(e) {
     subject: e.subject || '',
     from: e.from?.emailAddress?.address || '',
     fromName: e.from?.emailAddress?.name || '',
+    // Who actually sent it (QA 10-30 #7): differs from `from` when a delegate
+    // sends on someone's behalf ("Alex Delegate on behalf of Pat Manager").
+    sender: e.sender?.emailAddress?.address || '',
+    senderName: e.sender?.emailAddress?.name || '',
     to: (e.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
     cc: (e.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
     receivedAt: new Date(e.receivedDateTime),

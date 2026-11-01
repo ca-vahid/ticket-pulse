@@ -4,6 +4,8 @@ import { Check, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
 import { PersonAvatar, TagChip, ticketCategoryLabels } from './ticketUi';
 import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
 import HandBackReasonDialog from './HandBackReasonDialog';
+import AwayAssignConfirm from './AwayAssignConfirm';
+import { awayTag } from '../../utils/away';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { useCurrentIdentity } from '../../utils/currentIdentity';
 import { asksChangeReason, isSignedInAs, splitTeams } from '../../utils/handBack';
@@ -51,6 +53,8 @@ export default function MobileAssignSheet({
   // QA 10-16 item 1: moving it to another person asks the same question.
   const [handBack, setHandBack] = useState(null); // { mode, toId, toName, ticketId, assignFn, onAssigned, current, requireReason, categoryLabel, error }
   const [handBackBusy, setHandBackBusy] = useState(false);
+  // 31 Oct 2026 (Vahid): picking someone who is off asks first.
+  const [awayAsk, setAwayAsk] = useState(null); // { techId, tech }
 
   const aiCandidates = useMemo(() => {
     if (ai?.state !== 'suggested') return [];
@@ -113,7 +117,18 @@ export default function MobileAssignSheet({
     setHandBackBusy(false);
   };
 
-  const assign = async (techId) => {
+  const assign = (techId) => {
+    if (busy) return;
+    const toTech = technicians.find((t) => t.id === techId) || null;
+    if (toTech?.away && techId !== value) {
+      setAwayAsk({ techId, tech: toTech });
+      onClose?.();
+      return;
+    }
+    assignNow(techId);
+  };
+
+  const assignNow = async (techId) => {
     if (busy) return;
     const toTech = technicians.find((t) => t.id === techId) || null;
     if (ticketId != null && asksChangeReason({ fromId: value, toId: techId, toTech, me })) {
@@ -162,6 +177,12 @@ export default function MobileAssignSheet({
     <>
       {/* Outside the drawer portal so the toast survives the sheet closing
           right after a successful assign (the component stays mounted). */}
+      <AwayAssignConfirm
+        open={Boolean(awayAsk)}
+        people={awayAsk ? [{ name: awayAsk.tech.name, away: awayAsk.tech.away }] : []}
+        onConfirm={() => { const id = awayAsk?.techId; setAwayAsk(null); assignNow(id); }}
+        onCancel={() => setAwayAsk(null)}
+      />
       <HandBackReasonDialog
         open={Boolean(handBack)}
         mode={handBack?.mode || 'unassign'}
@@ -374,6 +395,7 @@ export default function MobileAssignSheet({
                     >
                       <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-8 w-8" textSize="text-[10px]" />
                       <span className="text-sm text-foreground/85 truncate flex-1">{t.name}</span>
+                      {t.away && <span className="whitespace-nowrap text-[11px] font-medium text-amber-700 dark:text-amber-300 flex-shrink-0">{awayTag(t.away)}</span>}
                       {t.origin === 'local' && (
                         <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
                       )}

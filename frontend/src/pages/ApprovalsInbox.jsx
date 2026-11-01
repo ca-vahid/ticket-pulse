@@ -511,6 +511,11 @@ export default function ApprovalsInbox() {
     return [...map.values()].sort((x, y) => x.name.localeCompare(y.name));
   }, [meta, overview, pending, needsInfo]);
 
+  // QA 10-30 #8: @mention an agent of this workspace in the decision note.
+  const mentionPeople = useMemo(() => (meta?.technicians || [])
+    .filter((t) => t?.id && t.name && !t.assignableOnly && t.id !== meta?.actor?.technicianId)
+    .map((t) => ({ id: t.id, name: t.name, photoUrl: t.photoUrl || null, away: t.away || null })), [meta]);
+
   const chosenStatuses = splitStatuses(filters.status);
   const groups = useMemo(() => groupApprovals(overview?.items || []), [overview]);
 
@@ -530,6 +535,7 @@ export default function ApprovalsInbox() {
           participants={null}
           selfEmail={a.approverEmail}
           forwardCandidates={(people || []).filter((p) => p.email !== String(a.approverEmail || '').toLowerCase() && p.email !== String(a.requestedBy || '').toLowerCase())}
+          mentionPeople={mentionPeople}
           onDecide={(decision, note, noteHtml, extra) => act(() => ticketsAPI.decideApproval(a.ticketId, a.id, decision, note, { noteHtml, ...extra }), a.id)}
           onAsk={(payload) => act(() => ticketsAPI.askApproval(a.ticketId, a.id, payload), a.id)}
           onHandoff={({ mode, note, toEmail }) => act(async () => {

@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import DOMPurify from 'dompurify';
 import { Bold, Code, Heading2, Heading3, Italic, Link2, List, ListOrdered, Maximize2, Minimize2, Pilcrow, RemoveFormatting, SquareCode, TextQuote, Underline } from 'lucide-react';
 import { PersonAvatar } from './ticketUi';
+import { awayTag } from '../../utils/away';
 
 const ALLOWED = {
   ALLOWED_TAGS: [
@@ -869,6 +870,10 @@ const RichTextEditor = forwardRef(function RichTextEditor({
                 >
                   <span aria-hidden="true" className="inline-flex shrink-0"><PersonAvatar name={person.name} photoUrl={person.photoUrl || null} size="h-6 w-6" /></span>
                   <span className="truncate">{person.name}</span>
+                  {/* 31 Oct 2026: off at the next working moment. Still pickable; they get the e-mail. */}
+                  {person.away && (
+                    <span className="ml-auto whitespace-nowrap pl-1 text-[10px] font-medium text-amber-700 dark:text-amber-300" data-testid="mention-away">{awayTag(person.away)}</span>
+                  )}
                 </button>
               ))}
             </div>

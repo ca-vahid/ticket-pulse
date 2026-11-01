@@ -22,6 +22,13 @@ import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
  * requester reply before the time is up reopens the ticket as usual, which
  * clears resolvedAt, so it is not closed.
  *
+ * QA 10-30 #2 (IT and Project Accounting): "Resolved" can be retired. With
+ * `retireResolved` on, nobody can pick Resolved any more (it leaves the status
+ * lists), anything that would set it gets Closed instead (a person, a workflow,
+ * an alert pair, the FreshService copy of a Ticket Pulse ticket), and the sweep
+ * closes every ticket still Resolved straight away, FreshService-born ones
+ * included (their status is written to FreshService as Closed).
+ *
  * Storage: one workspace-scoped key in app_settings (no migration), read
  * through a short cache; a settings read that fails counts as OFF, so a
  * hiccup never closes anything.
@@ -29,6 +36,7 @@ import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 export const AFTER_HOURS_CHOICES = Object.freeze([1, 4, 24, 48, 72, 168]);
 export const DEFAULT_AFTER_HOURS = 48;
 export const ACTOR = Object.freeze({ email: 'autoclose@ticketpulse.internal', name: 'Ticket Pulse (closed after resolving)', role: 'system', technicianId: null });
+export const RETIRED_ACTOR = Object.freeze({ email: 'autoclose@ticketpulse.internal', name: 'Ticket Pulse (Resolved is retired here)', role: 'system', technicianId: null });
 
 const SANDBOX_WORKSPACES = [6, 7, 8, 9];
 const SWEEP_INTERVAL_MS = Number(process.env.AUTO_CLOSE_RESOLVED_INTERVAL_MS) || 5 * 60 * 1000;
@@ -43,7 +51,7 @@ const cache = new Map(); // workspaceId -> { value, at }
 export const settingKey = (workspaceId) => `auto_close_resolved_ws${Number(workspaceId) || 0}`;
 
 export function defaultSettings() {
-  return { enabled: false, afterHours: DEFAULT_AFTER_HOURS, changedBy: null, changedAt: null };
+  return { enabled: false, afterHours: DEFAULT_AFTER_HOURS, retireResolved: false, changedBy: null, changedAt: null };
 }
 
 export function parseSettings(raw) {
@@ -54,6 +62,7 @@ export function parseSettings(raw) {
   }
   if (!obj || typeof obj !== 'object') return out;
   if (typeof obj.enabled === 'boolean') out.enabled = obj.enabled;
+  if (typeof obj.retireResolved === 'boolean') out.retireResolved = obj.retireResolved;
   if (AFTER_HOURS_CHOICES.includes(Number(obj.afterHours))) out.afterHours = Number(obj.afterHours);
   if (typeof obj.changedBy === 'string') out.changedBy = obj.changedBy.slice(0, 255);
   if (typeof obj.changedAt === 'string') out.changedAt = obj.changedAt;
@@ -103,6 +112,7 @@ class AutoCloseResolvedService {
     }
     const next = { ...current };
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
+    if (typeof patch.retireResolved === 'boolean') next.retireResolved = patch.retireResolved;
     if (patch.afterHours !== undefined) {
       if (!AFTER_HOURS_CHOICES.includes(Number(patch.afterHours))) {
         throw new Error(`Choose one of ${AFTER_HOURS_CHOICES.map(afterLabel).join(', ')}`);
@@ -116,6 +126,23 @@ class AutoCloseResolvedService {
     return { ...next };
   }
 
+  /** Whether this workspace has retired Resolved. A failed read counts as no. */
+  async isResolvedRetired(workspaceId) {
+    return (await this.getSettings(workspaceId)).retireResolved === true;
+  }
+
+  /**
+   * The status to store: Closed in place of a Resolved-base status when the
+   * workspace has retired Resolved, otherwise `status` unchanged.
+   */
+  async closedInsteadOfResolved(workspaceId, status) {
+    if (!status || !(await this.isResolvedRetired(workspaceId))) return status;
+    const base = await statusService.baseStatusOf(workspaceId, status).catch(() => null);
+    if (base !== 'Resolved') return status;
+    const { closedName } = await this._statuses(workspaceId);
+    return closedName;
+  }
+
   /** The Resolved-base status names and the Closed status to move to. */
   async _statuses(workspaceId) {
     const resolved = await statusService.statusNamesForBase(workspaceId, ['Resolved']);
@@ -124,11 +151,12 @@ class AutoCloseResolvedService {
     return { resolved, closedName };
   }
 
-  _dueWhere(workspaceId, resolvedNames, afterHours, now) {
-    const cutoff = new Date(now.getTime() - afterHours * 3600e3);
+  _dueWhere(workspaceId, resolvedNames, afterHours, now, { retired = false } = {}) {
+    // Retired: no waiting, and FreshService-born tickets too.
+    const cutoff = new Date(now.getTime() - (retired ? 0 : afterHours) * 3600e3);
     return {
       workspaceId,
-      origin: TICKET_ORIGIN.TICKETPULSE,
+      ...(retired ? {} : { origin: TICKET_ORIGIN.TICKETPULSE }),
       status: { in: resolvedNames },
       OR: [{ resolvedAt: { lte: cutoff } }, { resolvedAt: null, updatedAt: { lte: cutoff } }],
     };
@@ -142,8 +170,11 @@ class AutoCloseResolvedService {
     const dueByChoice = {};
     for (const hours of AFTER_HOURS_CHOICES) dueByChoice[hours] = await count(hours);
     const resolvedNow = await prisma.ticket.count({ where: { workspaceId, origin: TICKET_ORIGIN.TICKETPULSE, status: { in: resolved } } }).catch(() => null);
+    // Retiring Resolved closes these at once, FreshService-born ones included.
+    const resolvedAllNow = await prisma.ticket.count({ where: { workspaceId, status: { in: resolved } } }).catch(() => null);
     return {
       ...settings,
+      resolvedAllNow,
       choices: AFTER_HOURS_CHOICES.map((hours) => ({ hours, label: afterLabel(hours) })),
       resolvedNow,
       dueByChoice,
@@ -153,11 +184,12 @@ class AutoCloseResolvedService {
   /** One workspace: close up to SWEEP_BATCH tickets that have been Resolved long enough. */
   async closeDue(workspaceId, now = new Date()) {
     const settings = await this.getSettings(workspaceId);
-    if (!settings.enabled) return { closed: 0, failed: 0 };
+    const retired = settings.retireResolved === true;
+    if (!settings.enabled && !retired) return { closed: 0, failed: 0 };
     const { resolved, closedName } = await this._statuses(workspaceId);
     if (!resolved.length) return { closed: 0, failed: 0 };
     const due = await prisma.ticket.findMany({
-      where: this._dueWhere(workspaceId, resolved, settings.afterHours, now),
+      where: this._dueWhere(workspaceId, resolved, settings.afterHours, now, { retired }),
       select: { id: true, nativeNumber: true, origin: true, freshserviceTicketId: true },
       orderBy: [{ resolvedAt: 'asc' }, { id: 'asc' }],
       take: SWEEP_BATCH * 2,
@@ -170,7 +202,9 @@ class AutoCloseResolvedService {
       const lastFail = this._failedAt.get(t.id);
       if (lastFail && now.getTime() - lastFail < RETRY_AFTER_MS) continue;
       try {
-        const out = await ticketService.changeStatus(t.id, workspaceId, closedName, ACTOR);
+        const out = t.origin === TICKET_ORIGIN.TICKETPULSE || !t.freshserviceTicketId
+          ? await ticketService.changeStatus(t.id, workspaceId, closedName, ACTOR)
+          : await ticketService.updateFsTicket(t.id, workspaceId, { status: closedName }, RETIRED_ACTOR);
         if (out?.changed !== false) closed += 1;
         this._failedAt.delete(t.id);
       } catch (err) {
@@ -180,7 +214,7 @@ class AutoCloseResolvedService {
       }
     }
     if (closed || failed) {
-      logger.info(`Auto-close: workspace ${workspaceId} closed ${closed} ticket(s) resolved for ${afterLabel(settings.afterHours)} or more${failed ? `, ${failed} could not close yet` : ''}`);
+      logger.info(`Auto-close: workspace ${workspaceId} closed ${closed} ticket(s) ${retired ? 'left Resolved (Resolved is retired here)' : `resolved for ${afterLabel(settings.afterHours)} or more`}${failed ? `, ${failed} could not close yet` : ''}`);
     }
     return { closed, failed };
   }
@@ -194,7 +228,7 @@ class AutoCloseResolvedService {
       const workspaces = await prisma.workspace.findMany({ where: { isActive: true, id: { notIn: SANDBOX_WORKSPACES } }, select: { id: true } });
       for (const { id } of workspaces) {
         const settings = await this.getSettings(id);
-        if (!settings.enabled) continue;
+        if (!settings.enabled && !settings.retireResolved) continue;
         out.workspaces += 1;
         const r = await this.closeDue(id, now).catch((err) => {
           logger.warn(`Auto-close sweep failed for workspace ${id} (non-fatal): ${err.message}`);
