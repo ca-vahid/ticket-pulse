@@ -222,6 +222,10 @@ export default function ApprovalTimeline({
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [meta?.technicians, meta?.members]);
+  // QA 10-30 #8: @mention an agent in an approval note, as in an internal note.
+  const mentionPeople = useMemo(() => (meta?.technicians || [])
+    .filter((t) => t?.id && t.name && !t.assignableOnly && t.id !== meta?.actor?.technicianId)
+    .map((t) => ({ id: t.id, name: t.name, photoUrl: t.photoUrl || null, away: t.away || null })), [meta?.technicians, meta?.actor?.technicianId]);
   const groups = useMemo(() => {
     const map = new Map();
     for (const ap of approvals) {
@@ -628,6 +632,7 @@ export default function ApprovalTimeline({
                                           participants={participantsFor(ap)}
                                           selfEmail={ap.approverEmail}
                                           forwardCandidates={people.filter((p) => p.email !== String(ap.approverEmail).toLowerCase() && p.email !== agentEmail)}
+                                          mentionPeople={mentionPeople}
                                           onDecide={(decision, note, noteHtml, extra) => onDecide(ap.id, decision, note, { noteHtml, ...extra })}
                                           onAsk={onAsk ? async (payload) => { await onAsk(ap.id, payload); await loadMessages(); } : undefined}
                                           onHandoff={(onEscalate || onForward) ? async ({ mode: m, note, toEmail }) => {

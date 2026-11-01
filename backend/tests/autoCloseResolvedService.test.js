@@ -12,6 +12,7 @@ const prismaMock = {
   workspace: { findMany: jest.fn() },
 };
 const changeStatus = jest.fn();
+const updateFsTicket = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
@@ -19,11 +20,14 @@ jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
   default: { get: jest.fn(async (k) => store.get(k) ?? null), set: jest.fn(async (k, v) => { store.set(k, v); }) },
 }));
 jest.unstable_mockModule('../src/services/statusService.js', () => ({
-  default: { statusNamesForBase: jest.fn(async (_ws, bases) => (bases.includes('Resolved') ? ['Resolved', 'Fixed'] : ['Closed'])) },
+  default: {
+    statusNamesForBase: jest.fn(async (_ws, bases) => (bases.includes('Resolved') ? ['Resolved', 'Fixed'] : ['Closed'])),
+    baseStatusOf: jest.fn(async (_ws, name) => ({ Resolved: 'Resolved', Fixed: 'Resolved', Closed: 'Closed', Open: 'Open' }[name] || null)),
+  },
 }));
-jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { changeStatus } }));
+jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { changeStatus, updateFsTicket } }));
 
-const { default: service, parseSettings, afterLabel, settingKey, ACTOR } = await import('../src/services/autoCloseResolvedService.js');
+const { default: service, parseSettings, afterLabel, settingKey, ACTOR, RETIRED_ACTOR } = await import('../src/services/autoCloseResolvedService.js');
 const settingsRepository = (await import('../src/services/settingsRepository.js')).default;
 
 const NOW = new Date('2026-10-17T19:00:00Z');
@@ -98,5 +102,38 @@ describe('sweep', () => {
     const out = await service.sweep(NOW);
     expect(out).toEqual({ workspaces: 1, closed: 1, failed: 0 });
     expect(prismaMock.workspace.findMany.mock.calls[0][0].where.id.notIn).toEqual([6, 7, 8, 9]);
+  });
+});
+
+describe('QA 10-30 #2: Resolved retired (IT, Project Accounting)', () => {
+  test('off by default; the switch is saved', async () => {
+    expect(parseSettings(null).retireResolved).toBe(false);
+    const saved = await service.setSettings(51, { retireResolved: true }, { email: 'admin@example.com' });
+    expect(saved.retireResolved).toBe(true);
+    expect(await service.isResolvedRetired(51)).toBe(true);
+  });
+
+  test('Resolved (and a Resolved-base label) becomes Closed only where it is retired', async () => {
+    store.set(settingKey(52), JSON.stringify({ retireResolved: true }));
+    expect(await service.closedInsteadOfResolved(52, 'Resolved')).toBe('Closed');
+    expect(await service.closedInsteadOfResolved(52, 'Fixed')).toBe('Closed');
+    expect(await service.closedInsteadOfResolved(52, 'Open')).toBe('Open');
+    expect(await service.closedInsteadOfResolved(53, 'Resolved')).toBe('Resolved');
+  });
+
+  test('the sweep closes every Resolved ticket at once, FreshService-born ones through FreshService', async () => {
+    store.set(settingKey(54), JSON.stringify({ enabled: false, retireResolved: true }));
+    prismaMock.ticket.findMany.mockResolvedValueOnce([
+      { id: 1, nativeNumber: 11, origin: 'ticketpulse', freshserviceTicketId: null },
+      { id: 2, nativeNumber: null, origin: 'freshservice', freshserviceTicketId: 249001n },
+    ]);
+    updateFsTicket.mockResolvedValue({});
+    const out = await service.closeDue(54, NOW);
+    expect(out).toEqual({ closed: 2, failed: 0 });
+    const where = prismaMock.ticket.findMany.mock.calls[0][0].where;
+    expect(where.origin).toBeUndefined();
+    expect(where.OR[0].resolvedAt.lte.getTime()).toBe(NOW.getTime());
+    expect(changeStatus).toHaveBeenCalledWith(1, 54, 'Closed', ACTOR);
+    expect(updateFsTicket).toHaveBeenCalledWith(2, 54, { status: 'Closed' }, RETIRED_ACTOR);
   });
 });

@@ -11,8 +11,14 @@ import FancySelect from '../common/FancySelect';
  * on (or picking a shorter time) closes the tickets already past that time, so
  * the block works as a draft with its own Save and says how many will close.
  * Plain words only — no codes, no JSON.
+ *
+ * QA 10-30 #2: "Retire Resolved" (IT and Project Accounting decided Resolved
+ * vs Closed is useless): Resolved leaves the status lists, anything set to
+ * Resolved — here or in FreshService — becomes Closed, and the tickets still
+ * Resolved close within minutes, FreshService ones included.
  */
 const LABEL = 'Close resolved tickets automatically';
+const RETIRE_LABEL = 'Retire Resolved';
 const FALLBACK_CHOICES = [1, 4, 24, 48, 72, 168].map((hours) => ({ hours, label: hours < 24 ? `${hours} hour${hours === 1 ? '' : 's'}` : hours === 168 ? '1 week' : `${hours / 24} day${hours === 24 ? '' : 's'}` }));
 
 function Switch({ checked, disabled, label, onClick }) {
@@ -53,15 +59,18 @@ export default function ResolvedTicketsSection() {
   const choices = Array.isArray(ctx?.choices) && ctx.choices.length ? ctx.choices : FALLBACK_CHOICES;
   const savedOn = ctx?.enabled === true;
   const savedHours = Number(ctx?.afterHours) || 48;
+  const savedRetire = ctx?.retireResolved === true;
+  const retire = draft ? draft.retire : savedRetire;
   const on = draft ? draft.on : savedOn;
   const hours = draft ? draft.afterHours : savedHours;
   const labelFor = (h) => choices.find((c) => Number(c.hours) === Number(h))?.label || `${h} hours`;
   const due = ctx?.dueByChoice?.[hours];
-  const dirty = draft && (draft.on !== savedOn || (draft.on && draft.afterHours !== savedHours));
+  const dirty = draft && (draft.retire !== savedRetire || draft.on !== savedOn || (draft.on && draft.afterHours !== savedHours));
+  const resolvedAll = Number(ctx?.resolvedAllNow);
 
   const edit = (over) => {
     if (loading || busy) return;
-    setDraft({ on: savedOn, afterHours: savedHours, ...(draft || {}), ...over });
+    setDraft({ on: savedOn, afterHours: savedHours, retire: savedRetire, ...(draft || {}), ...over });
     setSaved(null);
     setError(null);
   };
@@ -71,11 +80,18 @@ export default function ResolvedTicketsSection() {
     setBusy(true);
     setError(null);
     try {
-      const res = await ticketsAPI.updateAutoCloseSettings(draft.on ? { enabled: true, afterHours: draft.afterHours } : { enabled: false });
+      const res = await ticketsAPI.updateAutoCloseSettings({
+        ...(draft.on ? { enabled: true, afterHours: draft.afterHours } : { enabled: false }),
+        retireResolved: draft.retire === true,
+      });
       setCtx((res?.data?.data ?? res?.data) || {});
-      setSaved(draft.on
-        ? `Saved. Resolved tickets close after ${labelFor(draft.afterHours)}${Number(due) > 0 ? `; the ${ticketsWord(Number(due))} already past that close within the next few minutes` : ''}.`
-        : 'Saved. Ticket Pulse no longer closes resolved tickets on its own.');
+      setSaved(draft.retire !== savedRetire
+        ? (draft.retire
+          ? `Saved. Resolved is retired: it is no longer offered, anything set to Resolved is closed instead${resolvedAll > 0 ? `, and the ${ticketsWord(resolvedAll)} still Resolved close within the next few minutes` : ''}.`
+          : 'Saved. Resolved is offered again.')
+        : draft.on
+          ? `Saved. Resolved tickets close after ${labelFor(draft.afterHours)}${Number(due) > 0 ? `; the ${ticketsWord(Number(due))} already past that close within the next few minutes` : ''}.`
+          : 'Saved. Ticket Pulse no longer closes resolved tickets on its own.');
       setDraft(null);
     } catch (e) {
       setError(e.response?.data?.message || e.message);
@@ -102,7 +118,7 @@ export default function ResolvedTicketsSection() {
         <Switch checked={on} disabled={loading || busy} label={LABEL} onClick={() => edit({ on: !on })} />
       </div>
 
-      {on && (
+      {!retire && on && (
         <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="text-xs font-semibold text-foreground/85">Close after</span>
           <div className="w-28">
@@ -121,10 +137,27 @@ export default function ResolvedTicketsSection() {
         </div>
       )}
 
-      {dirty && on && Number(due) > 0 && (
+      {dirty && on && !retire && Number(due) > 0 && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-200" data-testid="auto-close-due">
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
           <span>{ticketsWord(Number(due))} {Number(due) === 1 ? 'has' : 'have'} been resolved for longer than {labelFor(hours)} and will close within a few minutes of saving.</span>
+        </p>
+      )}
+
+      <div className="mt-4 flex items-start justify-between gap-3 border-t border-border/60 pt-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground/85">{RETIRE_LABEL}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            For teams that only use Closed. Resolved is no longer offered, and anything set to Resolved (by a person, a workflow, or in FreshService) is closed instead, FreshService tickets included.
+          </p>
+        </div>
+        <Switch checked={retire} disabled={loading || busy} label={RETIRE_LABEL} onClick={() => edit({ retire: !retire })} />
+      </div>
+
+      {dirty && retire && !savedRetire && resolvedAll > 0 && (
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-200" data-testid="retire-resolved-due">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+          <span>{ticketsWord(resolvedAll)} {resolvedAll === 1 ? 'is' : 'are'} Resolved now and will close within a few minutes of saving. Requesters get the usual closed e-mail where one is set up.</span>
         </p>
       )}
 

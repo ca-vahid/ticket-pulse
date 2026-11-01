@@ -46,13 +46,15 @@ export function noteNamesPerson(bodyText, name) {
 }
 
 /** The e-mail body: the note as written, then one grey line saying why. */
-export function renderMentionEmail({ authorName, ref, subject, appUrl, bodyHtml }) {
+export function renderMentionEmail({ authorName, ref, subject, appUrl, bodyHtml, where = 'note' }) {
   const first = escapeHtml(String(authorName || 'A colleague').trim().split(/\s+/)[0]);
   const link = appUrl ? ` <a href="${escapeHtml(appUrl)}" target="_blank" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Open the ticket&nbsp;&rarr;</a>` : '';
   const about = subject ? ` (${escapeHtml(String(subject).slice(0, 160))})` : '';
   const body = bodyHtml || '<p style="font-family:Calibri,\'Segoe UI\',Arial,sans-serif;font-size:14.5px;line-height:21px;color:#6b7280;margin:0;">(no message)</p>';
   return `<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:14.5px;line-height:21px;color:#111827;">${body}</div>`
-    + replyHint(`${first} mentioned you in an internal note on ${escapeHtml(ref)}${about}. Only agents can see it.${link}`);
+    + replyHint(where === 'approval'
+      ? `${first} mentioned you in an approval note on ${escapeHtml(ref)}${about}. The requester does not see it.${link}`
+      : `${first} mentioned you in an internal note on ${escapeHtml(ref)}${about}. Only agents can see it.${link}`);
 }
 
 function plainParagraphs(text) {
@@ -67,10 +69,11 @@ class TicketMentionService {
    * other than the author, whose name is still in the note, are kept.
    * Returns the technician ids recorded. Never throws.
    */
-  async recordForNote({ ticket, entry, actor, ids, bodyText, bodyHtml = null }) {
+  async recordForNote({ ticket, entry, actor, ids, bodyText, bodyHtml = null, where = 'note' }) {
     try {
       const wanted = parseMentionIds(ids).filter((id) => id !== actor?.technicianId);
-      if (!wanted.length || !ticket?.id || !entry?.id) return [];
+      // An approval note has no thread entry: the mention points at the ticket.
+      if (!wanted.length || !ticket?.id || (where === 'note' && !entry?.id)) return [];
       const people = await prisma.technician.findMany({
         where: { id: { in: wanted }, workspaceId: ticket.workspaceId, isActive: true },
         select: { id: true, name: true, email: true },
@@ -93,7 +96,7 @@ class TicketMentionService {
           data: {
             workspaceId: ticket.workspaceId,
             ticketId: ticket.id,
-            threadEntryId: entry.id,
+            threadEntryId: entry?.id || null,
             technicianId: person.id,
             mentionedByTechnicianId: actor?.technicianId || null,
             mentionedByName: String(actor?.name || actor?.email || 'Ticket Pulse').slice(0, 255),
@@ -104,10 +107,10 @@ class TicketMentionService {
       // Telling people happens after the note is saved and never holds it up.
       const toTell = rows.filter(({ person }) => !recentlyTold.has(person.id));
       if (toTell.length) {
-        this._notify({ ticket, entry, actor, bodyText, bodyHtml, rows: toTell })
+        this._notify({ ticket, entry, actor, bodyText, bodyHtml, rows: toTell, where })
           .catch((err) => logger.warn(`Mention notifications for ticket ${ticket.id} failed (non-fatal): ${err.message}`));
       }
-      logger.info(`Ticket ${ticket.id}: note ${entry.id} mentions ${rows.length} agent(s)${toTell.length < rows.length ? ` (${rows.length - toTell.length} told a moment ago)` : ''}`);
+      logger.info(`Ticket ${ticket.id}: ${where === 'approval' ? 'approval note' : `note ${entry.id}`} mentions ${rows.length} agent(s)${toTell.length < rows.length ? ` (${rows.length - toTell.length} told a moment ago)` : ''}`);
       return rows.map(({ person }) => person.id);
     } catch (err) {
       logger.warn(`Mentions not recorded for ticket ${ticket?.id} (non-fatal): ${err.message}`);
@@ -115,7 +118,24 @@ class TicketMentionService {
     }
   }
 
-  async _notify({ ticket, entry, actor, bodyText, bodyHtml, rows }) {
+  /**
+   * QA 10-30 #8: @mentions in an approval decision, question or reply. Same
+   * rules as a note (active agents of the workspace, not the author, name still
+   * in the text); the e-mail says it was an approval note. Never throws.
+   */
+  async recordForApproval({ ticketId, workspaceId, actor, ids, bodyText, bodyHtml = null }) {
+    if (!parseMentionIds(ids).length) return [];
+    const ticket = await Promise.resolve()
+      .then(() => prisma.ticket.findFirst({
+        where: { id: Number(ticketId), workspaceId },
+        select: { id: true, workspaceId: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+      }))
+      .catch(() => null);
+    if (!ticket) return [];
+    return this.recordForNote({ ticket, entry: null, actor, ids, bodyText, bodyHtml, where: 'approval' });
+  }
+
+  async _notify({ ticket, entry, actor, bodyText, bodyHtml, rows, where = 'note' }) {
     const ref = ticketDisplayRef(ticket);
     const base = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')
       || resolvePublicBaseUrl({ warn: () => {} });
@@ -129,7 +149,7 @@ class TicketMentionService {
       const { createInlineBudget, inlinePictures, inlineAttachments } = await import('./replyEmailPictures.js');
       const budget = createInlineBudget();
       html = bodyHtml
-        ? await inlinePictures(bodyHtml, { budget, ticketId: ticket.id, entryId: entry.id, at: entry.occurredAt || null, maxWidth: 600 })
+        ? await inlinePictures(bodyHtml, { budget, ticketId: ticket.id, entryId: entry?.id || null, at: entry?.occurredAt || null, maxWidth: 600 })
         : plainParagraphs(bodyText);
       attachments = inlineAttachments(budget);
     } catch (err) {
@@ -149,7 +169,7 @@ class TicketMentionService {
           workspaceId: ticket.workspaceId,
           to: [person.email],
           subject,
-          html: renderMentionEmail({ authorName, ref, subject: ticket.subject, appUrl, bodyHtml: html }),
+          html: renderMentionEmail({ authorName, ref, subject: ticket.subject, appUrl, bodyHtml: html, where }),
           attachments,
           fromName: `${authorName} via Ticket Pulse`,
           label: 'mention',

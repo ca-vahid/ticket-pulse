@@ -188,3 +188,27 @@ describe('the e-mail', () => {
     expect(html).toContain('href="https://app.example/tickets/65146"');
   });
 });
+
+describe('@mentions in an approval note (QA 10-30 #8)', () => {
+  test('the colleague named is recorded against the ticket and e-mailed that it was an approval note', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(ticket);
+    prismaMock.technician.findMany.mockResolvedValueOnce([gaby]);
+    const ids = await mentions.recordForApproval({ ticketId: ticket.id, workspaceId: 1, actor: alexey, ids: [20], bodyText: `Approved. @${gaby.name} please buy the licence.` });
+    await flush();
+    expect(ids).toEqual([20]);
+    expect(prismaMock.ticketMention.create.mock.calls[0][0].data).toMatchObject({ ticketId: ticket.id, technicianId: 20, threadEntryId: null });
+    expect(sendTransactionalEmail).toHaveBeenCalledTimes(1);
+    expect(sendTransactionalEmail.mock.calls[0][0].html).toMatch(/mentioned you in an approval note on TP-10682/);
+  });
+
+  test('another workspace\'s ticket, or no ids: nothing happens', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(null);
+    expect(await mentions.recordForApproval({ ticketId: 1, workspaceId: 2, actor: alexey, ids: [20], bodyText: `@${gaby.name}` })).toEqual([]);
+    expect(await mentions.recordForApproval({ ticketId: ticket.id, workspaceId: 1, actor: alexey, ids: [], bodyText: `@${gaby.name}` })).toEqual([]);
+    expect(prismaMock.ticketMention.create).not.toHaveBeenCalled();
+  });
+
+  test('the internal-note wording is unchanged', () => {
+    expect(renderMentionEmail({ authorName: 'Lee P', ref: 'TP-1', subject: 's', appUrl: null, bodyHtml: '<p>x</p>' })).toMatch(/in an internal note on TP-1/);
+  });
+});

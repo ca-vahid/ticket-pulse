@@ -20,6 +20,7 @@ const page = (over = {}) => ({
   afterHours: 48,
   choices: CHOICES,
   resolvedNow: 61,
+  resolvedAllNow: 74,
   dueByChoice: { 1: 60, 4: 59, 24: 57, 48: 55, 72: 54, 168: 40 },
   ...over,
 });
@@ -50,7 +51,7 @@ describe('ResolvedTicketsSection', () => {
     expect(screen.getByTestId('auto-close-due')).toHaveTextContent('55 tickets have been resolved for longer than 2 days and will close within a few minutes of saving.');
     expect(screen.getByTestId('auto-close-now')).toHaveTextContent('61 tickets resolved now.');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(api.updateAutoCloseSettings).toHaveBeenCalledWith({ enabled: true, afterHours: 48 }));
+    await waitFor(() => expect(api.updateAutoCloseSettings).toHaveBeenCalledWith({ enabled: true, afterHours: 48, retireResolved: false }));
     expect(await screen.findByRole('status')).toHaveTextContent('Saved. Resolved tickets close after 2 days; the 55 tickets already past that close within the next few minutes.');
     expect(sw()).toHaveAttribute('aria-checked', 'true');
   });
@@ -64,7 +65,19 @@ describe('ResolvedTicketsSection', () => {
     expect(sw()).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(sw());
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(api.updateAutoCloseSettings).toHaveBeenCalledWith({ enabled: false }));
+    await waitFor(() => expect(api.updateAutoCloseSettings).toHaveBeenCalledWith({ enabled: false, retireResolved: false }));
     expect(await screen.findByRole('status')).toHaveTextContent('no longer closes resolved tickets');
+  });
+
+  test('QA 10-30 #2: Retire Resolved says how many close (FreshService ones too) and saves on Save', async () => {
+    render(<ResolvedTicketsSection />);
+    const retire = () => screen.getByRole('switch', { name: /Retire Resolved/ });
+    await waitFor(() => expect(retire()).not.toBeDisabled());
+    expect(retire()).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(retire());
+    expect(screen.getByTestId('retire-resolved-due')).toHaveTextContent('74 tickets are Resolved now and will close within a few minutes of saving.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.updateAutoCloseSettings).toHaveBeenCalledWith({ enabled: false, retireResolved: true }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Resolved is retired');
   });
 });

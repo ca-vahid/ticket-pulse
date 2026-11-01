@@ -209,7 +209,7 @@ export default function LaptopPicker({ recipient, onRecipient, value, onChange, 
   };
   const excluded = useMemo(() => new Set((excludeIds || []).filter(Boolean)), [excludeIds]);
   const pool = useMemo(() => devices.filter((d) => !excluded.has(d.id)), [devices, excluded]);
-  const filtered = useMemo(() => pool.filter((d) => matches(d)), // eslint-disable-line react-hooks/exhaustive-deps
+  const filtered = useMemo(() => pool.filter((d) => matches(d)),
     [pool, sel, touch, q]);
   const sorted = useMemo(() => {
     const k = sort.key;

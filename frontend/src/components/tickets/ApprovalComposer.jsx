@@ -238,6 +238,8 @@ export default function ApprovalComposer({
   canDecide = true,
   // The choice the approver already made in the e-mail (?intent=), e.g. 'rejected'.
   initialTab = null,
+  // QA 10-30 #8: agents who can be @mentioned in the note ({ id, name, photoUrl, away }).
+  mentionPeople = null,
   // 'choices' (Approvals page option A, 7 Oct 2026): the four decisions as a
   // 2x2 grid of buttons and Forward / Escalate as quiet links, no outer card —
   // the row it sits in is the card. 'tabs' is the ticket page's tab bar.
@@ -269,6 +271,11 @@ export default function ApprovalComposer({
   // 29 Oct 2026: off = a plain reply (thanks, an update) that waits for nothing.
   const [expectAnswer, setExpectAnswer] = useState(true);
   const [showSignature, setShowSignature] = useState(false);
+  // @mentions picked in the note; sent only if the name is still in the text.
+  const [mentions, setMentions] = useState([]);
+  const mentionIds = (body) => mentions
+    .filter((p) => String(body || '').toLowerCase().includes(`@${String(p.name || '').toLowerCase().split(/\s+/)[0]}`))
+    .map((p) => p.id);
   // 26 Oct 2026: conditions are a list. Changing them starts from the current ones.
   const currentConditions = readConditions(approval?.conditions);
   const answersIn = conditionsWaitingOn(approval?.conditions, approval?.status) === 'approver';
@@ -313,7 +320,7 @@ export default function ApprovalComposer({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
   }, []);
 
-  const clear = () => { setNote(''); setNoteHtml(''); setExpanded(false); };
+  const clear = () => { setNote(''); setNoteHtml(''); setExpanded(false); setMentions([]); };
   const rich = () => (text && isRichContent(noteHtml) ? noteHtml : null);
 
   const stage = useCallback((decision) => {
@@ -346,7 +353,8 @@ export default function ApprovalComposer({
   const runDecision = useCallback(async (p) => {
     setSubmitting(p.decision);
     try {
-      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, ...(p.conditions ? { conditions: p.conditions } : {}), notifyRequester: p.notifyRequester === true, ...(p.closeReason ? { closeReason: p.closeReason } : {}) });
+      const ids = mentionIds(p.note);
+      await onDecide(p.decision, p.note || null, p.noteHtml || null, { conditionNote: p.conditionNote || null, conditionNoteHtml: p.conditionNoteHtml || null, ...(p.conditions ? { conditions: p.conditions } : {}), notifyRequester: p.notifyRequester === true, ...(p.closeReason ? { closeReason: p.closeReason } : {}), ...(ids.length ? { mentions: ids } : {}) });
       setPending(null);
       clear();
     } catch (err) {
@@ -355,7 +363,7 @@ export default function ApprovalComposer({
     } finally {
       setSubmitting(null);
     }
-  }, [onDecide]);
+  }, [onDecide, mentions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ask = useCallback(async () => {
     if (busy) return;
@@ -373,7 +381,8 @@ export default function ApprovalComposer({
         ? { to: [participants?.requester], cc: [participants?.agent, ...chain] }
         : { to: [participants?.agent, ...chain], cc: [] };
       const emails = (list) => [...new Set(list.filter((p) => p?.email).map((p) => p.email.toLowerCase()).filter((e) => e !== self && picked[e] !== false))];
-      const payload = { kind: expectAnswer ? 'question' : 'comment', mode: askMode, bodyText: text, bodyHtml: rich() };
+      const ids = mentionIds(text);
+      const payload = { kind: expectAnswer ? 'question' : 'comment', mode: askMode, bodyText: text, bodyHtml: rich(), ...(ids.length ? { mentions: ids } : {}) };
       if (participants) { payload.to = emails(all.to); payload.cc = emails(all.cc).filter((e) => !payload.to.includes(e)); }
       if (participants && payload.to.length === 0 && payload.cc.length === 0) {
         setError('Pick at least one person to send the question to.');
@@ -387,7 +396,7 @@ export default function ApprovalComposer({
     } finally {
       setSubmitting(null);
     }
-  }, [busy, text, noteHtml, askMode, picked, participants, selfEmail, onAsk, expectAnswer]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [busy, text, noteHtml, askMode, picked, participants, selfEmail, onAsk, expectAnswer, mentions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const confirm = useCallback(async () => {
     if (!pending) return;
@@ -637,6 +646,8 @@ export default function ApprovalComposer({
                 className={`border-input bg-card shadow-subtle ${expanded ? 'min-h-[45vh]' : ''}`}
                 expanded={expanded}
                 onToggleExpand={toggleExpanded}
+                mentionPeople={Array.isArray(mentionPeople) && mentionPeople.length ? mentionPeople : null}
+                onMention={(person) => setMentions((list) => (list.some((x) => x.id === person.id) ? list : [...list, person]))}
               />
 
               {isDecision && signatureHtml && (
