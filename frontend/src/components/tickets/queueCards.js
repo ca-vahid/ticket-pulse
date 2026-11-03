@@ -38,8 +38,9 @@ export const QUEUE_CARD_REGISTRY = {
   // left out of Open / Overdue / Awaiting, counted here.
   parked: { label: 'Parked', Icon: PauseCircle, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'parked' },
   // QA 11-02 #1: Closed on its own (Resolved counts Resolved + Closed), for
-  // workspaces that retired Resolved.
-  closed: { label: 'Closed', Icon: CheckCheck, tile: 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-300', num: 'text-foreground', countKey: 'closed', windowed: true },
+  // workspaces that retired Resolved. Neutral like the other quiet end
+  // states, so it never reads as Open's green beside it (UI Design, 2 Nov).
+  closed: { label: 'Closed', Icon: CheckCheck, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'closed', windowed: true },
 };
 
 /** Registry order — drives the admin slot dropdowns. */
