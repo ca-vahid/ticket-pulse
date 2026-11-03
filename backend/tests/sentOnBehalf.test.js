@@ -2,7 +2,7 @@ import { jest, describe, expect, test, beforeEach } from '@jest/globals';
 
 /**
  * QA 10-30 #7 — a delegate's mail "FW: Office roundtable" was
- * written by Alex Delegate from Pat Manager's mailbox as his delegate:
+ * written by Alex Delegate from Pat Manager's mailbox as their delegate:
  *
  *   From:   "Pat Manager" <pmanager@example.com>
  *   Sender: "Alex Delegate" <adelegate@example.com>
@@ -53,7 +53,7 @@ describe('mail sent on someone\'s behalf', () => {
     expect(email).toMatchObject({ from: 'pmanager@example.com', sender: 'adelegate@example.com', senderName: 'Alex Delegate' });
   });
 
-  test('a delegate's mail: Alex wrote it, Pat is who it was sent for', async () => {
+  test("a delegate's mail: Alex wrote it, Pat is who it was sent for", async () => {
     const email = await svc._creditTheWriter(connection, delegateMail);
     expect(email.from).toBe('adelegate@example.com');
     expect(email.fromName).toBe('Alex Delegate');

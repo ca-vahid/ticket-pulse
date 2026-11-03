@@ -32,6 +32,7 @@ const SEGMENT_BUCKETS = {
   due_today: ['open'],
   overdue: ['open'],
   resolved: ['closed'],
+  closed: ['closed'],
   parked: ['pending'],
   deleted: [],
 };

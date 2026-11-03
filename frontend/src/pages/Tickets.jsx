@@ -1665,6 +1665,7 @@ export default function Tickets() {
     if (['open', 'unassigned', 'awaiting'].includes(segment)) return ['Open', 'Pending'].includes(base);
     if (['due_today', 'overdue'].includes(segment)) return base === 'Open';
     if (segment === 'resolved') return ['Resolved', 'Closed'].includes(base);
+    if (segment === 'closed') return base === 'Closed';
     return true; // deleted / noise / created_* — status-agnostic
   }, [segment, statuses, statusDefs]);
   const onBoardStatusDrop = useCallback(async (ticket, nextStatus) => {

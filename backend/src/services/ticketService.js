@@ -1719,6 +1719,9 @@ class TicketService {
       }];
     } else if (query.segment === 'resolved') {
       where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']) };
+    } else if (query.segment === 'closed') {
+      // QA 11-02 #1: Closed alone (IT and Project Accounting retired Resolved).
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, 'Closed') };
     } else if (query.segment === 'awaiting') {
       where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
       const awaitingIds = await this._awaitingReplyTicketIds(workspaceId);
@@ -2465,10 +2468,11 @@ class TicketService {
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
     // Registry-resolved scopes (Phase 8b) so custom statuses count where their
     // base counts — one lookup for the whole stat batch, not one per count.
-    const [openNames, openBaseNames, resolvedNames, timezone] = await Promise.all([
+    const [openNames, openBaseNames, resolvedNames, closedNames, timezone] = await Promise.all([
       statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']),
       statusService.statusNamesForBase(workspaceId, 'Open'),
       statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']),
+      statusService.statusNamesForBase(workspaceId, 'Closed'),
       workspaceTimezone(workspaceId),
     ]);
     // Parked tickets are not open work (plans/PARKED_BUILD_PLAN.md) — every
@@ -2489,10 +2493,10 @@ class TicketService {
     // Tickets page cards took 2.5–7 s at the morning peak. They are one
     // FILTERed scan now; on any error the per-count queries below still run.
     const [counts, awaitingIds, awaitingApproval, technicianOpen] = await Promise.all([
-      this._queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart })
+      this._queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, closedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart })
         .catch((err) => {
           logger.warn(`Queue stats single scan failed (ws ${workspaceId}), using per-count queries: ${err.message}`);
-          return this._queueCountsSeparate(workspaceId, { open, visible, openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart });
+          return this._queueCountsSeparate(workspaceId, { open, visible, openNames, openBaseNames, resolvedNames, closedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart });
         }),
       this._awaitingReplyTicketIds(workspaceId),
       // "Awaiting AI approval": unassigned Open/Pending tickets with a pending
@@ -2510,7 +2514,7 @@ class TicketService {
       }),
     ]);
     const {
-      all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
+      all, openCount, unassigned, dueToday, overdue, resolved, closed = 0, deleted, noise,
       createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek,
     } = counts;
 
@@ -2558,6 +2562,7 @@ class TicketService {
       dueToday,
       overdue,
       resolved,
+      closed,
       deleted,
       noise,
       createdThisWeek,
@@ -2574,7 +2579,7 @@ class TicketService {
   }
 
   /** The plain queue counts in ONE scan of the workspace's tickets (FILTER per count). */
-  async _queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
+  async _queueCountsOneScan(workspaceId, { openNames, openBaseNames, resolvedNames, closedNames = [], now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
     const ws = Number(workspaceId);
     // Date window (QA 10-16 #7): finished tickets created before it are left
     // out; tickets still being worked always count (same rule as the list).
@@ -2590,6 +2595,7 @@ class TicketService {
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND status = ANY(${openBaseNames})
           AND (due_by < ${now} OR (fr_due_by < ${now} AND first_public_agent_reply_at IS NULL)))::int AS "overdue",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${resolvedNames}) AND ${win})::int AS "resolved",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${closedNames}) AND ${win})::int AS "closed",
         count(*) FILTER (WHERE status IN ('Deleted', 'Spam') AND ${win})::int AS "deleted",
         count(*) FILTER (WHERE is_noise AND ${win})::int AS "noise",
         count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND created_at >= ${weekStart})::int AS "createdThisWeek",
@@ -2605,9 +2611,9 @@ class TicketService {
   }
 
   /** The same counts as separate queries — the fallback (and the reference the scan is checked against). */
-  async _queueCountsSeparate(workspaceId, { open, visible, openNames = [], openBaseNames, resolvedNames, now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
+  async _queueCountsSeparate(workspaceId, { open, visible, openNames = [], openBaseNames, resolvedNames, closedNames = [], now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
     const win = windowStart ? { OR: [{ createdAt: { gte: windowStart } }, { status: { in: openNames } }] } : {};
-    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
+    const [all, openCount, unassigned, dueToday, overdue, resolved, closed, deleted, noise,
       createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek] = await Promise.all([
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] }, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: open }),
@@ -2635,6 +2641,7 @@ class TicketService {
         },
       }),
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: resolvedNames }, ...(windowStart ? { AND: [win] } : {}) } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: closedNames }, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] }, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: { workspaceId, isNoise: true, ...NOT_GROUPED_COPY, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: weekStart } } }),
@@ -2644,7 +2651,7 @@ class TicketService {
       prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null, lte: weekAhead } } }).catch(() => 0),
     ]);
     return {
-      all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise,
+      all, openCount, unassigned, dueToday, overdue, resolved, closed, deleted, noise,
       createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek,
     };
   }
