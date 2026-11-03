@@ -1,12 +1,19 @@
-export const APP_VERSION = '4.3.43-preview';
+export const APP_VERSION = '4.3.44-preview';
 
 export const changelog = [
+  {
+    version: '4.3.44-preview',
+    date: 'November 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The Closed card is grey</strong> &mdash; it was green, the same family as <em>Open</em>, so the two ends of a ticket&rsquo;s life looked alike side by side. It is now the quiet grey of the other finished-ticket cards.' },
+    ],
+  },
   {
     version: '4.3.43-preview',
     date: 'November 2, 2026',
     entries: [
       { type: 'new', html: '<strong>A Closed quick filter card</strong> &mdash; Settings &rarr; Ticket Ops &rarr; Quick filter cards now offers <em>Closed</em>, which shows closed tickets only. The <em>Resolved</em> card counts Resolved and Closed together, which reads oddly in a workspace that retired Resolved; swap it for Closed there.' },
-      { type: 'improved', html: '<strong>Readable times in workflow e-mails</strong> &mdash; <code>{{ ticket.createdAt }}</code> and every other time in a workflow e-mail, Teams message or note used to print as <em>2026-10-28T19:34:41.799Z</em>. It now prints <em>Wed 28 Oct 2026, 12:34 PM PT</em>, on the workspace&rsquo;s own clock. For another zone write <code>{{ ticket.createdAt | local_time: &quot;America/Edmonton&quot; }}</code> (MT); <code>| raw</code> keeps the old form. Custom-field values and conditions are unchanged.' },
+      { type: 'improved', html: '<strong>Readable times in workflow e-mails</strong> &mdash; <code>{{ ticket.createdAt }}</code> and every other time in a workflow e-mail, Teams message or note used to print as <em>2026-10-28T19:34:41.799Z</em>. It now prints <em>Wed 28 Oct 2026, 12:34 PM PT</em>, on the workspace&rsquo;s own clock. For another zone write <code>{{ ticket.createdAt | local_time: &quot;America/Edmonton&quot; }}</code> (MT); <code>| raw</code> keeps the old form. Only a value that is a time and nothing else changes: a subject or alert title with a time inside it prints as it is. Custom-field values, conditions and webhook payloads are unchanged; a workflow note read back through the API shows the readable time too.' },
     ],
   },
   {
