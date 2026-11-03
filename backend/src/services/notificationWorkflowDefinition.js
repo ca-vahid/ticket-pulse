@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ValidationError } from '../utils/errors.js';
+import { formatHumanTime, isIsoTimestamp } from '../utils/humanTime.js';
 
 /**
  * Registered workflow trigger events and WHERE each one is emitted. Keep this
@@ -2041,13 +2042,17 @@ function formatVariable(path) {
 }
 
 function variable(path, label, group, description, example = '') {
+  // QA 11-02 #2: timestamps print readably, so the editor shows them that way.
+  const isTime = isIsoTimestamp(example);
   return {
     path,
     token: formatVariable(path),
     label,
     group,
-    description,
-    example,
+    description: isTime
+      ? `${description} Prints as a readable time on the workspace clock; add | local_time: "America/Edmonton" for another zone, or | raw for the machine form.`
+      : description,
+    example: isTime ? formatHumanTime(example, 'America/Vancouver') : example,
   };
 }
 

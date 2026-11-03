@@ -19,6 +19,8 @@ export const QUEUE_CARD_KEYS = [
   'unassigned', 'deleted', 'noise',
   // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date.
   'parked',
+  // QA 11-02 #1: Closed on its own, for workspaces that retired Resolved.
+  'closed',
 ];
 
 export const DEFAULT_QUEUE_CARDS = ['all', 'open', 'awaiting', 'due_today', 'overdue', 'resolved'];

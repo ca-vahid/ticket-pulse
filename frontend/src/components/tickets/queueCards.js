@@ -1,5 +1,5 @@
 import {
-  AlertCircle, Calendar, CalendarClock, CalendarDays, CalendarRange, CheckCircle2,
+  AlertCircle, Calendar, CalendarClock, CalendarDays, CalendarRange, CheckCheck, CheckCircle2,
   Inbox, MessageSquare, PauseCircle, Ticket, Trash2, UserRound, VolumeX,
 } from 'lucide-react';
 
@@ -37,6 +37,9 @@ export const QUEUE_CARD_REGISTRY = {
   // Parked (plans/PARKED_BUILD_PLAN.md): waiting on purpose until a date —
   // left out of Open / Overdue / Awaiting, counted here.
   parked: { label: 'Parked', Icon: PauseCircle, tile: 'bg-muted text-muted-foreground', num: 'text-foreground', countKey: 'parked' },
+  // QA 11-02 #1: Closed on its own (Resolved counts Resolved + Closed), for
+  // workspaces that retired Resolved.
+  closed: { label: 'Closed', Icon: CheckCheck, tile: 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-300', num: 'text-foreground', countKey: 'closed', windowed: true },
 };
 
 /** Registry order — drives the admin slot dropdowns. */

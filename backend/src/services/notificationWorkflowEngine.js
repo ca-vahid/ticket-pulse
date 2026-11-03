@@ -72,11 +72,35 @@ import {
 } from './notificationConditionModel.js';
 import { AUTO_HELP_THANKS_VERDICTS, conditionSwitchStop } from './conditionRuleShared.js';
 import { bulletproofButtons, withBaseFont } from '../utils/emailHtmlHardening.js';
+import { DEFAULT_ZONE, formatHumanTime, isIsoTimestamp } from '../utils/humanTime.js';
 
+// QA 11-02 #2: a timestamp printed into text people read ({{ ticket.createdAt }})
+// comes out as "Wed 28 Oct 2026, 12:34 PM PT" on the workspace clock.
+// `| local_time: "America/Edmonton"` picks another zone; `| raw` keeps ISO.
+// Only the printed output changes - the run scope keeps ISO values.
+function workspaceZone(context) {
+  return context?.get?.(['workspace', 'timezone']) || DEFAULT_ZONE;
+}
 const liquid = new Liquid({
   strictFilters: false,
   strictVariables: false,
+  outputEscape(value) {
+    if (value instanceof Date || isIsoTimestamp(value)) {
+      return formatHumanTime(value, workspaceZone(this?.context)) ?? value;
+    }
+    return value;
+  },
 });
+// Custom-field values keep the machine form: a date field needs ISO.
+const machineLiquid = new Liquid({
+  strictFilters: false,
+  strictVariables: false,
+});
+for (const engine of [liquid, machineLiquid]) {
+  engine.registerFilter('local_time', function localTime(value, zone) {
+    return formatHumanTime(value, zone || workspaceZone(this?.context)) ?? value;
+  });
+}
 
 // The custom json-logic ops compiled conditions use: regex_match (json-logic
 // has no regex), list_has_any / list_has_all for array fields (ticket.tags,
@@ -1992,9 +2016,9 @@ function recordLlmOutput(state, node, llm, email = null) {
   return key;
 }
 
-async function renderLiquid(template, context) {
+async function renderLiquid(template, context, { machine = false } = {}) {
   if (!template) return null;
-  return liquid.parseAndRender(String(template), context);
+  return (machine ? machineLiquid : liquid).parseAndRender(String(template), context);
 }
 
 function nodeById(definition) {
@@ -4110,7 +4134,7 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
   if (setCustomFields && scope) {
     const rendered = {};
     for (const [key, value] of Object.entries(setCustomFields)) {
-      rendered[key] = typeof value === 'string' ? await renderLiquid(value, scope) : value;
+      rendered[key] = typeof value === 'string' ? await renderLiquid(value, scope, { machine: true }) : value;
     }
     setCustomFields = rendered;
   }

@@ -228,8 +228,8 @@ describe('getQueueStats — date window (QA 10-16 #7)', () => {
 
     const wheres = prismaMock.ticket.count.mock.calls.map((c) => c[0].where);
     const windowed = wheres.filter((w) => (w.AND || []).some((c) => Array.isArray(c.OR) && c.OR.some((o) => o.createdAt?.gte)));
-    // all, resolved, deleted, noise
-    expect(windowed).toHaveLength(4);
+    // all, resolved, closed (QA 11-02 #1), deleted, noise
+    expect(windowed).toHaveLength(5);
     const start = windowed[0].AND[0].OR[0].createdAt.gte;
     const expected = new Date(); expected.setHours(0, 0, 0, 0); expected.setDate(expected.getDate() - 30);
     expect(start.getTime()).toBe(expected.getTime());

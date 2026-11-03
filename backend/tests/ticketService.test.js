@@ -1577,6 +1577,22 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
     expect(where.status).toEqual({ in: ['Resolved', 'Closed', 'Fixed'] });
   });
 
+  // QA 11-02 #1: a Closed card for workspaces that retired Resolved.
+  test('closed segment scope is Closed-BASE only', async () => {
+    const where = await ticketService.buildListWhere(1, { segment: 'closed' });
+    expect(where.status).toEqual({ in: ['Closed'] });
+  });
+
+  test('getQueueStats counts closed with the same Closed-base scope as the segment', async () => {
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    const stats = await ticketService.getQueueStats(1);
+    const countWheres = prismaMock.ticket.count.mock.calls.map((c) => c[0].where);
+    expect(countWheres).toContainEqual(expect.objectContaining({ status: { in: ['Closed'] }, isNoise: false, workspaceId: 1 }));
+    expect(stats.closed).toBe(0);
+  });
+
   test('due/overdue segments stay Open-BASE only (Pending-base pauses the clock)', async () => {
     const where = await ticketService.buildListWhere(1, { segment: 'overdue' });
     expect(where.status).toEqual({ in: ['Open', 'In Triage'] });
@@ -1618,7 +1634,7 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
     prismaMock.ticket.count.mockResolvedValue(7);
     prismaMock.ticket.groupBy.mockResolvedValue([{ assignedTechId: 5, _count: { _all: 2 } }]);
     const scanRow = {
-      all: 30, openCount: 12, unassigned: 3, dueToday: 1, overdue: 2, resolved: 9, deleted: 1, noise: 4,
+      all: 30, openCount: 12, unassigned: 3, dueToday: 1, overdue: 2, resolved: 9, closed: 8, deleted: 1, noise: 4,
       createdThisWeek: 5, createdThisMonth: 6, createdThisYear: 20, parked: 2, parkedWakingWeek: 1,
     };
     prismaMock.$queryRaw.mockImplementation(async (strings) => (
@@ -1628,7 +1644,7 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
     const stats = await ticketService.getQueueStats(1);
 
     expect(stats).toMatchObject({
-      all: 30, open: 12, unassigned: 3, dueToday: 1, overdue: 2, resolved: 9, deleted: 1, noise: 4,
+      all: 30, open: 12, unassigned: 3, dueToday: 1, overdue: 2, resolved: 9, closed: 8, deleted: 1, noise: 4,
       createdThisWeek: 5, createdThisMonth: 6, createdThisYear: 20, parked: 2, parkedWakingWeek: 1, byTechnician: { 5: 2 },
     });
     // Only the relation count (awaiting AI approval) still uses ticket.count.
@@ -1639,6 +1655,7 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
       ['Open', 'Pending', 'Needs Rework', 'In Triage'],
       ['Open', 'In Triage'],
       ['Resolved', 'Closed', 'Fixed'],
+      ['Closed'],
       1,
     ]));
   });

@@ -598,3 +598,59 @@ describe('installable templates (Phase 1 updates)', () => {
     }
   });
 });
+
+// ------------------------------------------- QA 11-02 #2: readable timestamps
+
+describe('timestamps print readably (QA 11-02 #2)', () => {
+  const CREATED = '2026-10-28T19:34:41.799Z';
+  const withCreated = (over = {}) => eventContext({
+    ticket: { ...eventContext().ticket, createdAt: CREATED },
+    ...over,
+  });
+
+  test('{{ ticket.createdAt }} prints on the workspace clock; local_time and raw opt out', async () => {
+    await executeDefinition({
+      workflow: WORKFLOW,
+      definition: noteDefinition({
+        mode: 'text',
+        bodyTemplate: '<p>A {{ ticket.createdAt }} | B {{ ticket.createdAt | local_time: "America/Edmonton" }} | C {{ ticket.createdAt | raw }} | D {{ ticket.createdAt | date: "%Y" }}</p>',
+      }),
+      eventContext: withCreated(),
+      executionMode: 'live',
+    });
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.bodyText).toContain('A Wed 28 Oct 2026, 12:34 PM PT');
+    expect(data.bodyText).toContain('B Wed 28 Oct 2026, 1:34 PM MT');
+    expect(data.bodyText).toContain(`C ${CREATED}`);
+    expect(data.bodyText).toContain('D 2026');
+  });
+
+  test('a workspace on another zone prints its own clock', async () => {
+    await executeDefinition({
+      workflow: WORKFLOW,
+      definition: noteDefinition({ mode: 'text', bodyTemplate: '<p>{{ ticket.createdAt }}</p>' }),
+      eventContext: withCreated({ workspace: { id: 1, name: 'IT', timezone: 'America/Toronto' } }),
+      executionMode: 'live',
+    });
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.bodyText).toContain('Wed 28 Oct 2026, 3:34 PM ET');
+  });
+
+  test('custom-field values keep the machine form', async () => {
+    const definition = {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'stamp', type: 'update_ticket', data: { setCustomFields: { received_at: '{{ ticket.createdAt }}' } } },
+        { id: 'end', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'stamp' },
+        { id: 'e2', source: 'stamp', target: 'end' },
+      ],
+    };
+    await executeDefinition({ workflow: WORKFLOW, definition, eventContext: withCreated(), executionMode: 'live' });
+    expect(setValuesMock.mock.calls[0][2]).toEqual({ received_at: CREATED });
+  });
+});
