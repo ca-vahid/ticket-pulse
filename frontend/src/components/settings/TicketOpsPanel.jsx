@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, Hand, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, Hand, LayoutGrid, Layers, Loader2, Mail, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
 import { GREETING_PLACEHOLDERS, fillGreetingPlaceholders } from '../../utils/replyGreeting';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
@@ -1078,6 +1078,72 @@ export function ReplyGreetingSection() {
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground/75">Names come from the ticket and the signed-in agent. The e-mail signature (Settings → Signatures) still goes under the sign-off.</p>
         </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+/**
+ * Ticket number in e-mail subjects (3 Nov 2026): Outlook groups a
+ * conversation by its subject, so the number goes first and every mail on a
+ * ticket (replies, approvals, workflows using {{ ticket.mailSubject }}) can
+ * share one subject.
+ */
+const SUBJECT_CHOICES = [
+  { value: 'before', label: 'Before the subject', sample: 'Re: [TP-1560] Adding Aissa to Rental Vehicle Queries', hint: 'Always visible in the mail list, and mail about one ticket groups together in Outlook.' },
+  { value: 'after', label: 'After the subject', sample: 'Re: Adding Aissa to Rental Vehicle Queries [TP-1560]', hint: 'How Ticket Pulse has always written it. A long subject can hide the number.' },
+];
+
+export function MailSubjectSection() {
+  const [position, setPosition] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [savedAt, setSavedAt] = useState(null);
+
+  useEffect(() => {
+    settingsAPI.getMailSubject()
+      .then((res) => setPosition((res.data?.data || res.data)?.refPosition || 'after'))
+      .catch(() => setPosition('after'));
+  }, []);
+
+  const save = async (value) => {
+    if (value === position) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await settingsAPI.updateMailSubject({ refPosition: value });
+      setPosition((res.data?.data || res.data)?.refPosition || value);
+      setSavedAt(Date.now());
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  if (!position) return null;
+  return (
+    <SectionCard icon={Mail} title="Ticket number in e-mail subjects" hint="Where the ticket number goes in the subject of replies and approval e-mails. In a workflow e-mail, use {{ ticket.mailSubject }} as the subject to get the same subject, so Outlook groups it with the replies. Replies find their ticket either way.">
+      <fieldset className="divide-y divide-border rounded-lg border border-border" data-testid="mail-subject-position">
+        <legend className="sr-only">Ticket number in e-mail subjects</legend>
+        {SUBJECT_CHOICES.map((c) => (
+          <label key={c.value} className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 ${busy ? 'opacity-60' : ''}`}>
+            <input
+              type="radio"
+              name="mail-subject-position"
+              value={c.value}
+              checked={position === c.value}
+              disabled={busy}
+              onChange={() => save(c.value)}
+              className="tp-focus-ring mt-1"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-foreground">{c.label}</span>
+              <span className="block font-mono text-xs text-foreground/85 mt-0.5 break-words">{c.sample}</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">{c.hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div className="mt-2 min-h-[16px] text-[11px]">
+        {savedAt && !error && <span className="text-emerald-700 dark:text-emerald-300">Saved. New mail uses it from now on.</span>}
+        {error && <span className="text-red-600 dark:text-red-300" role="alert">{error}</span>}
       </div>
     </SectionCard>
   );
@@ -2415,6 +2481,7 @@ export default function TicketOpsPanel() {
       <CategoryGroupSection />
       <MacrosSection />
       <ReplyGreetingSection />
+      <MailSubjectSection />
       <QuickNotesSection />
       {/* New-ticket form ABOVE Custom fields: the two lists read as one
           FreshService-style Ticket Fields editor (built-ins, then customs). */}

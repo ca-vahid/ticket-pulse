@@ -135,6 +135,24 @@ describe('subject-token round trip (MB-1e)', () => {
     expect(outcome).toBe('reply');
   });
 
+  // 3 Nov 2026: a workspace can put the number first. Replies to the new
+  // shape and to mail still in flight in the old shape both find the ticket.
+  test('number-first subjects and old number-last subjects both match', async () => {
+    const before = replySubjectDefault(ticket, 'before');
+    expect(before).toBe('Re: [TP-1042] Invoice 4471 not paid');
+    for (const subject of [
+      before, // the requester's client adds "Re: " -> "Re: Re: [TP-1042] …"
+      `RE: ${before}`, // Outlook's own RE: stacked on ours
+      effectiveReplySubject(ticket, 'Quick follow-up', 'before'),
+      replySubjectDefault(ticket), // mail sent before the switch
+    ]) {
+      resetIo();
+      const { outcome, lookups } = await ingest(requesterReply(subject));
+      expect(outcome).toBe('reply');
+      expect(lookups[0]).toMatchObject({ nativeNumber: 1042 });
+    }
+  });
+
   test('CR/LF-injected or blank overrides are cleaned and still tokenized', () => {
     expect(effectiveReplySubject(ticket, 'Line one\r\nBcc: attacker@example.com')).toBe('Line one Bcc: attacker@example.com [TP-1042]');
     expect(effectiveReplySubject(ticket, '   ')).toBe('Re: Invoice 4471 not paid [TP-1042]');

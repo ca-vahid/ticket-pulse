@@ -546,10 +546,11 @@ class ApprovalConversationService {
         requesterName: parts.requester?.name || null, internalNote: true, copied,
       });
       const { replySubject, plainTextOf, viaTicketPulse } = await import('./approvalReplyMail.js');
+      const { refPositionFor } = await import('./mailSubjectService.js');
       const { deliverTransactionalEmail } = await import('./transactionalEmailService.js');
       await deliverTransactionalEmail({
         workspaceId: approval.workspaceId, to: [person.email],
-        subject: replySubject(ticket.subject, ticketDisplayRef(ticket)),
+        subject: replySubject(ticket.subject, ticketDisplayRef(ticket), await refPositionFor(ticket.workspaceId)),
         html: `${body}${history?.html || ''}`, text: `${plainTextOf(body)}${history?.text || ''}`, attachments: history?.attachments || [],
         label: message.kind === 'answer' ? 'approval answer' : 'approval question',
         // `ticket` threads the mail under the ticket's conversation; only with

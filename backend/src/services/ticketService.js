@@ -10,6 +10,7 @@ import { paragraphSpacing } from '../utils/emailHtmlHardening.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
 import { AuthorizationError, AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService, { heuristicBaseStatus } from './statusService.js';
@@ -449,26 +450,25 @@ export function cleanReplySubject(value) {
 
 /**
  * The subject a TP-born requester reply goes out with when the agent does
- * not override it: `Re: <ticket subject> [TP-n]`. Exposed on the ticket
- * detail payload (`replySubjectDefault`) so the client never recomputes the
- * format. Null for FS-born tickets — FreshService composes those.
+ * not override it: `Re: <ticket subject> [TP-n]`, or `Re: [TP-n] <subject>`
+ * where the workspace puts the number first (mailSubjectService, 3 Nov 2026).
+ * Exposed on the ticket detail payload (`replySubjectDefault`) so the client
+ * never recomputes the format. Null for FS-born tickets — FreshService
+ * composes those.
  */
-export function replySubjectDefault(ticket) {
+export function replySubjectDefault(ticket, position = 'after') {
   if (!ticket || ticket.origin !== TICKET_ORIGIN.TICKETPULSE) return null;
-  return `Re: ${cleanReplySubject(ticket.subject) || 'Your ticket'} [${ticketDisplayRef(ticket)}]`;
+  return replyMailSubject(ticket.subject, ticketDisplayRef(ticket), position);
 }
 
 /**
  * Effective outbound subject for a TP-born reply: the agent's override when
- * given, else the default — and ALWAYS carrying the `[TP-n]` token, which is
- * the inbound threading signal (no In-Reply-To/References are set).
+ * given, else the default — and ALWAYS carrying the `[TP-n]` token, one of
+ * the inbound threading signals (with In-Reply-To/References and the
+ * plus-address).
  */
-export function effectiveReplySubject(ticket, override = null) {
-  const ref = ticketDisplayRef(ticket);
-  const token = `[${ref}]`;
-  const cleaned = cleanReplySubject(override);
-  if (!cleaned) return `Re: ${cleanReplySubject(ticket?.subject) || 'Your ticket'} ${token}`;
-  return cleaned.includes(token) ? cleaned : `${cleaned} ${token}`;
+export function effectiveReplySubject(ticket, override = null, position = 'after') {
+  return replyMailSubject(ticket?.subject, ticketDisplayRef(ticket), position, override);
 }
 
 /** Idempotency fingerprint of a reply/note body (Phase DR3). */
@@ -2821,7 +2821,7 @@ class TicketService {
       isExternal: isExternalRequester(ticket.requester?.email, await workspaceInternalDomains(workspaceId)),
       // Default outbound reply subject (Phase SN4) — null for FS-born
       // tickets, where FreshService composes it.
-      replySubjectDefault: replySubjectDefault(ticket),
+      replySubjectDefault: replySubjectDefault(ticket, await refPositionFor(workspaceId)),
       // Which system mails requester replies on this ticket (17 Sep 2026): the
       // composer says so instead of guessing from the origin.
       replyLane: ticket.origin === TICKET_ORIGIN.TICKETPULSE || (await isFsBornRepliesViaTicketPulseEnabled(workspaceId)) ? 'ticketpulse' : 'freshservice',
@@ -5656,7 +5656,9 @@ class TicketService {
     // The effective outbound subject rides along when the agent overrode it
     // (SN4) and the composer's session key when one was sent (DR3) — both
     // merged into the same object, never replacing to/cc.
-    const outboundSubject = !isPrivate && isNative && subjectOverride ? effectiveReplySubject(ticket, subjectOverride) : null;
+    const outboundSubject = !isPrivate && isNative && subjectOverride
+      ? effectiveReplySubject(ticket, subjectOverride, await refPositionFor(ticket.workspaceId))
+      : null;
     const recipientsBase = !isPrivate && (cc.length || requesterEmail)
       ? {
         ...(requesterEmail ? { to_emails: [requesterEmail] } : {}),
@@ -6520,7 +6522,7 @@ class TicketService {
     if (unattended) logger.info(`Reply to ${ref}: requester ${ticket.requester.email} is unattended — sent to the Cc list (${ccPeople.length})`);
     // Agent-edited subject (Phase SN4) or the default — either way the
     // `[TP-n]` token stays on: it is the inbound threading signal.
-    const subject = effectiveReplySubject(ticket, subjectOverride);
+    const subject = effectiveReplySubject(ticket, subjectOverride, await refPositionFor(ticket.workspaceId));
     // The acting agent's signature (Phase D) joins the OUTBOUND email only —
     // entry.bodyHtml (the stored thread entry) intentionally stays clean.
     let html = entry.bodyHtml || textToReplyHtml(entry.bodyText);

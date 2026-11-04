@@ -516,6 +516,15 @@ export const settingsAPI = {
     return await api.put('/settings/reply-greeting', data);
   },
 
+  // Where the ticket number sits in mail subjects (3 Nov 2026), per workspace.
+  getMailSubject: async () => {
+    return await api.get('/settings/mail-subject');
+  },
+
+  updateMailSubject: async (data) => {
+    return await api.put('/settings/mail-subject', data);
+  },
+
   initialize: async () => {
     return await api.post('/settings/initialize');
   },

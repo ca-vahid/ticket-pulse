@@ -654,3 +654,18 @@ describe('timestamps print readably (QA 11-02 #2)', () => {
     expect(setValuesMock.mock.calls[0][2]).toEqual({ received_at: CREATED });
   });
 });
+
+// ------------------------------- 3 Nov 2026: {{ ticket.mailSubject }} variable
+
+describe('{{ ticket.mailSubject }}', () => {
+  test('prints the subject every mail on the ticket shares (number after by default)', async () => {
+    await executeDefinition({
+      workflow: WORKFLOW,
+      definition: noteDefinition({ mode: 'text', bodyTemplate: '<p>S: {{ ticket.mailSubject }}</p>' }),
+      eventContext: eventContext({ ticket: { ...eventContext().ticket, displayRef: 'TP-1070' } }),
+      executionMode: 'live',
+    });
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.bodyText).toContain('S: VPN access problem [TP-1070]');
+  });
+});

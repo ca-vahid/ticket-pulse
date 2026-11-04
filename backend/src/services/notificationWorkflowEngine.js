@@ -73,6 +73,7 @@ import {
 import { AUTO_HELP_THANKS_VERDICTS, conditionSwitchStop } from './conditionRuleShared.js';
 import { bulletproofButtons, withBaseFont } from '../utils/emailHtmlHardening.js';
 import { DEFAULT_ZONE, formatHumanTime, isIsoTimestamp } from '../utils/humanTime.js';
+import { refPositionFor, ticketMailSubject } from './mailSubjectService.js';
 
 // QA 11-02 #2: a timestamp printed into text people read ({{ ticket.createdAt }})
 // comes out as "Wed 28 Oct 2026, 12:34 PM PT" on the workspace clock.
@@ -2870,11 +2871,17 @@ async function executeNode({
       builtinFallbackUsed = true;
     }
     const useLlm = contentSource === 'llm_only' || contentSource === 'llm_with_template_fallback';
+    // A subject built on {{ ticket.mailSubject }} is the ticket's shared mail
+    // subject (3 Nov 2026): it wins over a subject the AI wrote, so the mail
+    // still groups with the replies in Outlook. The AI keeps the body.
+    const pinnedSubject = /\{\{\s*ticket\.mailSubject\b/.test(String(node.data?.subject || ''))
+      ? String((subject ?? await renderLiquid(node.data.subject, scope)) || '').trim()
+      : '';
     state.email = {
       ...(state.email || {}),
-      subject: useLlm
+      subject: pinnedSubject || (useLlm
         ? (llmEmail.subject || String(subject || '').trim() || 'Ticket Pulse notification')
-        : (String(subject || '').trim() || 'Ticket Pulse notification'),
+        : (String(subject || '').trim() || 'Ticket Pulse notification')),
       html: useLlm ? (llmEmail.html || html) : html,
       text: useLlm ? (llmEmail.text || text) : text,
     };
@@ -3573,6 +3580,13 @@ export async function executeDefinition({
   if (normalizedContext?.ticket && !normalizedContext.ticket.displayRef
     && (normalizedContext.ticket.id || normalizedContext.ticket.freshserviceTicketId)) {
     normalizedContext.ticket.displayRef = ticketDisplayRef(normalizedContext.ticket);
+  }
+  // {{ ticket.mailSubject }} (3 Nov 2026): the subject every mail on the ticket
+  // shares - "[TP-11013] Laptop broken" where the number goes first - so a
+  // workflow e-mail groups with the replies in Outlook.
+  if (normalizedContext?.ticket && normalizedContext.ticket.displayRef && normalizedContext.ticket.mailSubject === undefined) {
+    const position = await refPositionFor(workflow?.workspaceId || normalizedContext.workspace?.id);
+    normalizedContext.ticket.mailSubject = ticketMailSubject(normalizedContext.ticket.subject, normalizedContext.ticket.displayRef, position);
   }
   normalizedContext = await enrichEventContextWithRequesterProfile(normalizedContext);
   normalizedContext = await enrichEventContextWithPublicStatusUrl(normalizedContext);
