@@ -325,6 +325,36 @@ router.put(
 );
 
 /**
+ * GET/PUT /api/settings/mail-subject (3 Nov 2026)
+ * Where the ticket number sits in the subject of mail Ticket Pulse sends:
+ * "after" (Re: Laptop broken [TP-1]) or "before" (Re: [TP-1] Laptop broken).
+ */
+router.get(
+  '/mail-subject',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { getMailSubjectSettings } = await import('../services/mailSubjectService.js');
+    res.json({ success: true, data: await getMailSubjectSettings(req.workspaceId) });
+  }),
+);
+
+router.put(
+  '/mail-subject',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { REF_POSITIONS, setMailSubjectSettings } = await import('../services/mailSubjectService.js');
+    if (!REF_POSITIONS.includes(req.body?.refPosition)) throw new ValidationError('refPosition must be "before" or "after"');
+    const data = await setMailSubjectSettings(req.workspaceId, { refPosition: req.body.refPosition });
+    logger.info(`Mail subject for workspace ${req.workspaceId}: ticket number ${data.refPosition} the subject, set by ${req.session?.user?.email || req.user?.email || 'unknown'}`);
+    res.json({ success: true, data });
+  }),
+);
+
+/**
  * GET /api/settings/sender-identity
  * Workspace-scoped outbound sender identity (Phase EB): the From display
  * name override, the inherited global default, and the addresses it rides on.

@@ -2091,6 +2091,7 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('ticket.origin', 'Ticket origin', 'Ticket', 'Where the ticket was born: ticketpulse or freshservice.', 'ticketpulse'),
     variable('ticket.createdVia', 'Created via', 'Ticket', 'How the ticket came to exist: app, email, api, freshservice_sync, held_reply (resolved from the mailbox hold queue), agent_cc (agent reply-all with the mailbox in Cc) or forward.', 'email'),
     variable('ticket.subject', 'Subject', 'Ticket', 'Ticket subject line.', 'VPN access problem'),
+    variable('ticket.mailSubject', 'E-mail subject (groups in Outlook)', 'Ticket', 'The subject every mail on this ticket shares, with the ticket number where Settings → Ticket Ops puts it. Use it as an e-mail subject so the mail groups with the replies in Outlook.', '[TP-1070] VPN access problem'),
     variable('ticket.descriptionText', 'Description', 'Ticket', 'Plain-text ticket description.', 'User cannot connect to VPN from home.'),
     variable('ticket.status', 'Status', 'Ticket', 'Ticket status label.', 'Open'),
     variable('ticket.statusBase', 'Status base', 'Ticket', 'Canonical base (Open/Pending/Resolved/Closed) behind the status label — custom statuses map to one of the four.', 'Pending'),

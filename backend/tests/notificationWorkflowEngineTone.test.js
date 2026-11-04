@@ -255,3 +255,25 @@ describe('event context enrichment', () => {
     expect(await enrichEventContextWithTone(eventContext, [])).toBe(eventContext);
   });
 });
+
+// 3 Nov 2026: a template subject built on {{ ticket.mailSubject }} is the
+// ticket's shared mail subject and wins over the subject the AI wrote.
+describe('pinned mail subject', () => {
+  async function runWithSubject(subjectTemplate) {
+    const definition = definitionWithLlm('friendly');
+    definition.nodes.find((n) => n.type === 'template_render').data.subject = subjectTemplate;
+    const ctx = { ...eventContext, ticket: { ...eventContext.ticket, displayRef: 'TP-501' } };
+    return executeDefinition({ workflow, definition, eventContext: ctx, dryRun: true, executeLlm: true, triggerSource: 'test' });
+  }
+
+  test('{{ ticket.mailSubject }} beats the AI subject; the AI keeps the body', async () => {
+    const result = await runWithSubject('{{ ticket.mailSubject }}');
+    expect(result.state.email.subject).toBe('VPN access problem [TP-501]');
+    expect(result.state.email.html).toContain('we are on it');
+  });
+
+  test('any other template subject still gives way to the AI subject', async () => {
+    const result = await runWithSubject('{{ ticket.subject }}');
+    expect(result.state.email.subject).toBe('We got it 🎉');
+  });
+});

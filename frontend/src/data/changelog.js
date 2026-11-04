@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.44-preview';
+export const APP_VERSION = '4.3.45-preview';
 
 export const changelog = [
+  {
+    version: '4.3.45-preview',
+    date: 'November 3, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Ticket number first in e-mail subjects</strong> &mdash; Settings &rarr; Ticket Ops &rarr; <em>Ticket number in e-mail subjects</em> chooses where the number goes: <em>Re: [TP-1560] Adding Aissa to Rental Vehicle Queries</em> or, as before, at the end. Outlook groups a conversation by its subject, so with the number first every mail about one ticket can sit together, and a long subject no longer hides the number. Replies and approval e-mails follow the setting; replies still find their ticket either way. IT uses <em>Before</em>.' },
+      { type: 'new', html: '<strong>One subject for workflow e-mails</strong> &mdash; a new workflow variable, <code>{{ ticket.mailSubject }}</code>, gives the same subject the replies use (<em>[TP-1560] Adding Aissa&hellip;</em>). Used as a workflow e-mail&rsquo;s subject, it is kept even when the AI writes the e-mail, so the mail groups with the replies. IT&rsquo;s e-mail workflows now use it.' },
+    ],
+  },
   {
     version: '4.3.44-preview',
     date: 'November 2, 2026',

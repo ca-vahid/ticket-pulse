@@ -11,6 +11,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { textExcerpt } from './approvalEmailTemplate.js';
+import { replyMailSubject } from './mailSubjectService.js';
 
 const lc = (v) => String(v || '').trim().toLowerCase();
 const EMPTY = Object.freeze({ html: '', text: '', attachments: [] });
@@ -100,8 +101,12 @@ export async function savedSignatureHtml(workspaceId, email) {
   }
 }
 
-/** "Re: <subject> [<ref>]" — the subject the ticket's own mail carries, so it threads. */
-export function replySubject(subject, ref) {
+/**
+ * "Re: <subject> [<ref>]" — the subject the ticket's own mail carries, so it
+ * threads. "Re: [<ref>] <subject>" where the workspace puts the number first.
+ */
+export function replySubject(subject, ref, position = 'after') {
+  if (position === 'before') return replyMailSubject(subject, ref, 'before');
   const clean = String(subject || 'Your ticket').replace(/[\r\n]+/g, ' ').replace(/^\s*(re|fw|fwd)\s*:\s*/i, '').trim();
   return `Re: ${clean}${ref ? ` [${ref}]` : ''}`;
 }
