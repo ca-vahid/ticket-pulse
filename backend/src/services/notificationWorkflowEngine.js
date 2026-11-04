@@ -4180,7 +4180,12 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
     if (!normalized) {
       return { skipped: true, reason: `Unsupported status "${setStatus}"` };
     }
-    setStatus = normalized;
+    // Retire Resolved (4 Nov 2026): a workflow asking for Resolved in a
+    // workspace that retired it closes at once, like a person or the API,
+    // instead of waiting for the sweep (one status change, not two).
+    setStatus = await import('./autoCloseResolvedService.js')
+      .then(({ default: svc }) => svc.closedInsteadOfResolved(Number(eventContext.ticket?.workspaceId) || 0, normalized))
+      .catch(() => normalized);
   }
 
   // Resolve category NAMES → workspace taxonomy IDs (Phase-1a resolver).

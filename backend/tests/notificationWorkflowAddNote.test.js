@@ -65,6 +65,11 @@ jest.unstable_mockModule('../src/services/customFieldService.js', () => ({
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
+// Retire Resolved: pass-through unless a test retires it.
+const closedInsteadOfResolvedMock = jest.fn(async (_ws, status) => status);
+jest.unstable_mockModule('../src/services/autoCloseResolvedService.js', () => ({
+  default: { closedInsteadOfResolved: closedInsteadOfResolvedMock, isResolvedRetired: jest.fn(async () => false) },
+}));
 
 const {
   NOTIFICATION_NODE_REGISTRY,
@@ -667,5 +672,37 @@ describe('{{ ticket.mailSubject }}', () => {
     });
     const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
     expect(data.bodyText).toContain('S: VPN access problem [TP-1070]');
+  });
+});
+
+// ------------------------- 4 Nov 2026: Retire Resolved covers workflow steps
+
+describe('update_ticket setStatus with Resolved retired', () => {
+  const statusDefinition = (status) => ({
+    version: 2,
+    metadata: {},
+    nodes: [
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      { id: 'set', type: 'update_ticket', data: { setStatus: status } },
+      { id: 'end', type: 'stop', data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 'trigger', target: 'set' },
+      { id: 'e2', source: 'set', target: 'end' },
+    ],
+  });
+  const storedStatus = () => prismaMock.ticket.update.mock.calls.map((c) => c[0]?.data?.status).find(Boolean);
+
+  test('a workflow asking for Resolved stores Closed at once where Resolved is retired', async () => {
+    closedInsteadOfResolvedMock.mockImplementation(async (_ws, status) => (status === 'Resolved' ? 'Closed' : status));
+    await executeDefinition({ workflow: WORKFLOW, definition: statusDefinition('Resolved'), eventContext: eventContext(), executionMode: 'live' });
+    expect(closedInsteadOfResolvedMock).toHaveBeenCalledWith(1, 'Resolved');
+    expect(storedStatus()).toBe('Closed');
+  });
+
+  test('elsewhere Resolved stays Resolved', async () => {
+    closedInsteadOfResolvedMock.mockImplementation(async (_ws, status) => status);
+    await executeDefinition({ workflow: WORKFLOW, definition: statusDefinition('Resolved'), eventContext: eventContext(), executionMode: 'live' });
+    expect(storedStatus()).toBe('Resolved');
   });
 });
