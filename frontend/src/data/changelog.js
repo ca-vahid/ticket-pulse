@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.45-preview';
+export const APP_VERSION = '4.3.46-preview';
 
 export const changelog = [
+  {
+    version: '4.3.46-preview',
+    date: 'November 4, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Retire Resolved covers workflows too</strong> &mdash; in a workspace that retired Resolved, a workflow step that sets Resolved now closes the ticket straight away, as a person, the API or FreshService already did. Before, the ticket sat in Resolved for a few minutes until the clean-up closed it, so its status changed twice. Tools that send Resolved through the API (Simorgh, the BST watchdog, ContinuIT) need no change: their tickets are stored as Closed.' },
+    ],
+  },
   {
     version: '4.3.45-preview',
     date: 'November 3, 2026',
