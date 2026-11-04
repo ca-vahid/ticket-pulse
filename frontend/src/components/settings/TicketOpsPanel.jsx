@@ -1120,7 +1120,8 @@ export function MailSubjectSection() {
   if (!position) return null;
   return (
     <SectionCard icon={Mail} title="Ticket number in e-mail subjects" hint="Where the ticket number goes in the subject of replies and approval e-mails. In a workflow e-mail, use {{ ticket.mailSubject }} as the subject to get the same subject, so Outlook groups it with the replies. Replies find their ticket either way.">
-      <div role="radiogroup" aria-label="Ticket number in e-mail subjects" className="divide-y divide-border rounded-lg border border-border" data-testid="mail-subject-position">
+      <fieldset className="divide-y divide-border rounded-lg border border-border" data-testid="mail-subject-position">
+        <legend className="sr-only">Ticket number in e-mail subjects</legend>
         {SUBJECT_CHOICES.map((c) => (
           <label key={c.value} className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 ${busy ? 'opacity-60' : ''}`}>
             <input
@@ -1139,7 +1140,7 @@ export function MailSubjectSection() {
             </span>
           </label>
         ))}
-      </div>
+      </fieldset>
       <div className="mt-2 min-h-[16px] text-[11px]">
         {savedAt && !error && <span className="text-emerald-700 dark:text-emerald-300">Saved. New mail uses it from now on.</span>}
         {error && <span className="text-red-600 dark:text-red-300" role="alert">{error}</span>}
