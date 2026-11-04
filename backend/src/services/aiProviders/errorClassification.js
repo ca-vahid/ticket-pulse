@@ -26,6 +26,11 @@ export function classifyProviderError(error) {
   const message = sanitizeProviderErrorMessage(error);
   const lower = message.toLowerCase();
   let errorClass = 'unknown';
+  const abortLike = error?.name === 'AbortError'
+    || error?.name === 'APIUserAbortError'
+    || error?.code === 'ABORT_ERR'
+    || lower.includes('request was aborted')
+    || lower.includes('aborted');
 
   if (
     lower.includes('api key')
@@ -41,6 +46,7 @@ export function classifyProviderError(error) {
     statusCode === 408
     || error?.name === 'TimeoutError'
     || error?.code === 'ETIMEDOUT'
+    || abortLike
     || lower.includes('timeout')
   ) {
     errorClass = 'api_timeout';
