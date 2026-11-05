@@ -6,7 +6,10 @@
  * are its own layer (TicketTag / TicketTagLink, never written back), so the
  * sync copies them over:
  *  - a tag name is matched to the workspace's tag of the same name (any case);
- *    a missing one is created (slate, created by "freshservice");
+ *    a name the workspace does not have is skipped, not created (4 Nov 2026:
+ *    creating every FreshService tag gave Field Equipment 255 new tags, 202 of
+ *    them on one or two tickets). FS_TAG_SYNC_CREATE_TAGS=true creates them
+ *    again (slate, created by "freshservice");
  *  - a tag an admin retired (isActive false) is not linked again;
  *  - a link the sync made carries createdBy "freshservice" and goes when the
  *    tag leaves the FreshService ticket; a link a person added stays.
@@ -29,6 +32,11 @@ export function fsTagSyncWorkspaceIds() {
 
 export function isFsTagSyncWorkspace(workspaceId) {
   return fsTagSyncWorkspaceIds().has(Number(workspaceId));
+}
+
+/** Whether a FreshService tag name the workspace lacks becomes a new tag (default no). */
+export function fsTagSyncCreatesTags() {
+  return String(process.env.FS_TAG_SYNC_CREATE_TAGS ?? '').trim().toLowerCase() === 'true';
 }
 
 /**
@@ -81,8 +89,10 @@ export async function reconcileFsTags(ticket, fsTags) {
       select: { id: true, name: true, isActive: true },
     });
     const byKey = new Map(existing.map((t) => [t.name.toLowerCase(), t]));
+    const mayCreate = fsTagSyncCreatesTags();
     for (const name of toAdd) {
       let tag = byKey.get(name.toLowerCase());
+      if (!tag && !mayCreate) continue;
       if (!tag) {
         try {
           tag = await prisma.ticketTag.create({ data: { workspaceId, name, color: 'slate', createdBy: FS_TAG_SOURCE }, select: { id: true, name: true, isActive: true } });
