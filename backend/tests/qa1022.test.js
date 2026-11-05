@@ -16,6 +16,7 @@ const { transformTicket } = await import('../src/integrations/freshserviceTransf
 beforeEach(() => {
   jest.clearAllMocks();
   delete process.env.FS_TAG_SYNC_WORKSPACE_IDS;
+  delete process.env.FS_TAG_SYNC_CREATE_TAGS;
 });
 
 describe('hrWakeDate lead (QA 10-22 #6/#7)', () => {
@@ -103,7 +104,21 @@ describe('FreshService tags (QA 10-22 #2)', () => {
     expect(isFsTagSyncWorkspace(1)).toBe(true);
   });
 
-  test('adds missing tags (existing by any case, new created), removes only its own links', async () => {
+  // 4 Nov 2026: by default a FreshService tag the workspace lacks is skipped,
+  // not created (Field Equipment got 255 new tags, 202 on one or two tickets).
+  test('by default links only tags the workspace already has; never creates one', async () => {
+    prismaMock.ticketTagLink.findMany.mockResolvedValue([]);
+    prismaMock.ticketTag.findMany.mockResolvedValue([{ id: 20, name: 'acme instruments', isActive: true }]);
+    const r = await reconcileFsTags({ id: 9, workspaceId: 4 }, ['Acme Instruments', 'Brand New Vendor']);
+    expect(r).toEqual({ added: 1, removed: 0, created: 0 });
+    expect(prismaMock.ticketTag.create).not.toHaveBeenCalled();
+    expect(prismaMock.ticketTagLink.create.mock.calls.map((c) => c[0].data)).toEqual([
+      { ticketId: 9, tagId: 20, createdBy: FS_TAG_SOURCE },
+    ]);
+  });
+
+  test('FS_TAG_SYNC_CREATE_TAGS=true: adds missing tags (existing by any case, new created), removes only its own links', async () => {
+    process.env.FS_TAG_SYNC_CREATE_TAGS = 'true';
     prismaMock.ticketTagLink.findMany.mockResolvedValue([
       { id: 1, tagId: 10, createdBy: FS_TAG_SOURCE, tag: { name: 'Old Vendor' } },
       { id: 2, tagId: 11, createdBy: 'someone@example.com', tag: { name: 'Hand Added' } },

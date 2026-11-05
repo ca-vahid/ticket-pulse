@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.46-preview';
+export const APP_VERSION = '4.3.47-preview';
 
 export const changelog = [
+  {
+    version: '4.3.47-preview',
+    date: 'November 4, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>FreshService tags no longer flood your tag list</strong> &mdash; in Field Equipment, every tag on a FreshService ticket used to become a new Ticket Pulse tag, so the list grew by 255, most used once or twice. Now a FreshService tag is copied onto a ticket only when your workspace already has a tag of that name. To bring a FreshService tag across, create a tag with the same name in Settings &rarr; Tags and the tickets pick it up as they sync. Nothing changes in FreshService.' },
+    ],
+  },
   {
     version: '4.3.46-preview',
     date: 'November 4, 2026',
